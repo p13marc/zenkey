@@ -97,6 +97,14 @@ INTERIM_VOCABULARY = {
 #: interim one (Appendix D, 0.21)".
 VOCABULARY = {**INTERIM_VOCABULARY, **PUBLISHED_VOCABULARY}
 
+#: A major whose published table is not its profile's first one, by the
+#: ``uses`` name a contract lists (core §10: "A key names its profile
+#: without a major, so a contract uses one major of a profile"):
+#: ``telemetry.v2`` §4 (text 0.1, #983), "v1 §4's four keys, and this one",
+#: ``series``; "W105 reads this table for a contract that uses
+#: telemetry.v2" (its §1).
+VOCABULARY_BY_MAJOR = {"telemetry.v2": {"kind", "unit", "buckets", "semantic", "series"}}
+
 # -- §2.4 / §9.3: built-in defaults -----------------------------------------
 
 #: §2.4's QoS table, by kind token.
@@ -342,6 +350,9 @@ class _Loader:
                 # W105: the profile's published table, else its interim
                 # one (0.21); a profile with neither has none (§10).
                 vocab = VOCABULARY.get(profile)
+                for u in self.uses:
+                    if u.name == profile and f"{u.name}.v{u.major}" in VOCABULARY_BY_MAJOR:
+                        vocab = VOCABULARY_BY_MAJOR[f"{u.name}.v{u.major}"]
                 if vocab is not None and key not in vocab:
                     which = "published" if profile in PUBLISHED_VOCABULARY else "interim"
                     self.diag("W105", f"{where}: {k!r} is outside the {which} vocabulary", resource)

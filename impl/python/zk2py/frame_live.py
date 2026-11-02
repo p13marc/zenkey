@@ -58,13 +58,20 @@ class FrameSubscriber:
                 self.subs.append(session.declare_subscriber(key, zenoh.handlers.Callback(self._heard)))
 
     def _heard(self, sample: Any) -> None:
+        """One put, read inside zenoh's callback. Any exception reading it
+        is recorded ``{"undecodable": why}``, so no reading is lost
+        silently (review-bot on round 97)."""
         key = str(sample.key_expr)
-        read = zk2c.read_sample(sample)
+        try:
+            read = zk2c.read_sample(sample)
+            with self.lock:
+                r = self.readers.get(key)
+                if r is None:
+                    return
+                got = r.read_put(read, self.epoch)
+        except Exception as e:  # noqa: BLE001 - recorded, never lost inside the callback
+            got = {"undecodable": f"{type(e).__name__}: {e}", "envelope": None}
         with self.lock:
-            r = self.readers.get(key)
-            if r is None:
-                return
-            got = r.read_put(read, self.epoch)
             self.heard.append((time.monotonic_ns(), key, got))
 
     def readings(self, key: str) -> list[dict[str, Any]]:

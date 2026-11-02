@@ -372,6 +372,11 @@ def _walk_contracts(root: Path, ex: Path, history: Path, label: str, skip: tuple
     return out
 
 
+#: The one review a published revision's bundle accepts (F-456's reading,
+#: narrowed after review-bot on round 97): a move of ``uses``.
+REVIEW_BY_PUBLICATION = "review uses_changed"
+
+
 def _example_against_history(root: Path, rel: str, c, built: bytes) -> list[Result]:
     """An example must be published in its tree's history root
     (``examples/zk2/.history``, or ``spec/profiles/.history`` for a
@@ -386,7 +391,9 @@ def _example_against_history(root: Path, rel: str, c, built: bytes) -> list[Resu
       publication" (§9.8), so its bundle in the history root is that
       acceptance. ``health.v1``'s, ``alarms.v1``'s and ``config.v1``'s
       revisions 1.1 are such reviews against their 1.0, ``uses_changed``
-      (#978 F4, round 97)."""
+      (#978 F4, round 97), and so are the adopters' contracts and
+      ``nav.v2`` moved onto ``freshness.v2`` (F5, round 98). Narrowed in
+      round 98: only a review whose every reason is ``uses_changed``."""
     from . import bundle, compat
 
     hist = root / c.interface
@@ -400,7 +407,14 @@ def _example_against_history(root: Path, rel: str, c, built: bytes) -> list[Resu
                  for p in sorted(hist.glob("*.bundle.json"))]
     candidate = compat.Revision(c.canonical, {a.id: a.data for a in c.schemas.artifacts()})
     total, _ = compat.full_transitive(revisions, candidate, compat.contract_compare)
-    ok = total.cls == compat.COMPATIBLE or (total.cls == compat.REVIEW and published.is_file())
+    # review-bot on round 97 (PR #1037): narrowed. A review is accepted by
+    # its publication only where every reason is ``uses_changed``, the
+    # profile moves of #978's F4 and F5, each stated by its text's
+    # changelog; any other review fails here until the text says how an
+    # acceptance is recorded (F-456).
+    reviewed = [r.split(":", 1)[0] for r in total.reasons]
+    ok = total.cls == compat.COMPATIBLE or (total.cls == compat.REVIEW and published.is_file()
+                                            and bool(reviewed) and all(r == REVIEW_BY_PUBLICATION for r in reviewed))
     said = "" if total.cls == compat.COMPATIBLE else f", a review accepted by its publication: {total.reasons}"
     out.append((f"{rel} (compatible with {len(revisions)} published{said if ok else ''})", ok,
                 "" if ok else f"{total.cls}: {total.reasons}"))
@@ -837,17 +851,105 @@ def _link_v2(path: Path) -> list[Result]:
     return out
 
 
-def _telemetry_v2_not_read(path: Path) -> list[Result]:
-    """``telemetry.v2`` 0.1 (#983 T1, main 7597efb8): its fixtures under
-    ``conformance/v2/`` and the contracts they load under ``contracts/``.
-    Keyed as present and not read this round: round 97 reads #981's frames
-    and #978's F4, and #983's own round reads ``telemetry.v2`` after its
-    owner chunk lands. So each entry is named, never failed as unknown, and
-    never counted as read."""
-    print(f"NOTE telemetry: {path.name}/ is telemetry.v2 0.1's (#983 T1): present, not read this round",
-          file=sys.stderr)
-    return [(f"{path.name}/ (telemetry.v2 0.1, #983 T1): present, not read this round, for #983's own round", True,
-             "")]
+def _telemetry_v2_layouts(data: dict[str, Any]) -> dict[str, tuple[Any, Any]]:
+    """``readings.json``'s and ``continuity.json``'s layouts: each a record
+    type of the case file's packed ``schema``, its ``frame`` table and its
+    ``telemetry.series``, declared against its ``resources`` -> (layout, its
+    declaration)."""
+    from . import frame, packed, telemetry_v2 as t2
+
+    lt = packed.lint(data["schema"])
+    others = t2.others_of(data.get("resources", []))
+    out = {}
+    for lo in data["layouts"]:
+        layout = frame.Layout(lt.types[lo["record"]], frame.declaration(lo["frame"]))
+        out[lo["name"]] = (layout, t2.declare_frame(layout.fields, {t2.SERIES: lo["series"]}, others))
+    return out
+
+
+def _telemetry_v2(path: Path) -> list[Result]:
+    """``telemetry.v2`` 0.1 (#983 T1; round 98): ``conformance/v2/``.
+    - ``declarations.json`` (§2.16): a resource -> its declaration, a frame
+      resource's through :func:`zk2py.telemetry_v2.declare_frame` over the
+      schema's record type and the file's other resources, any other's as
+      ``telemetry.v1`` reads it; and each contract's resources by template;
+    - ``readings.json`` (§2.18): one key's frames, each body read from its
+      ``hex`` under the layout's tag and checked against its ``value``, then
+      read in arrival order by one :class:`zk2py.telemetry_v2.SeriesReader`
+      -> what it follows and each record's series fields;
+    - ``continuity.json`` (§2.19 to §2.21): the same reader -> every pair,
+      in order."""
+    from . import frame, packed, telemetry as tm, telemetry_v2 as t2
+    from .contract import load_contract
+
+    out: list[Result] = []
+    for f in sorted(path.iterdir()):
+        data = _load_json(f)
+        if f.name == "declarations.json":
+            lt = packed.lint(data["schema"])
+            others = t2.others_of(data["resources"])
+            out.append(_check("v2 declarations: the schema's record types lint clean",
+                              [lt.findings, sorted(lt.types)], [[], sorted(data["schema"]["types"])]))
+            for i, c in enumerate(data["cases"]):
+                r = c["resource"]
+                ann = r["annotations"] if "annotations" in r else tm.resolve(r["layers"])
+                if r["frame"]:
+                    fields = frame.Layout(lt.types[r["record"]], frame.declaration({})).fields
+                    got = t2.declare_frame(fields, ann, others).expect()
+                else:
+                    got = tm.declare(r["kind"], ann, r["type"], r.get("attachment")).expect()
+                out.append(_check(f"v2 declarations #{i}: {c['note']}", got, c["expect"]))
+            for c in data["contracts"]:
+                k = load_contract(path.parent / c["contract"], check_file_name=True)
+                decls = t2.contract_declarations(k)
+                out.append(_check(f"v2 declarations, {c['contract']}: loads with no finding, and {c['note']}",
+                                  [k.codes, {t: decls[t].expect() for t in c["expect"]}], [[], c["expect"]]))
+        elif f.name in ("readings.json", "continuity.json"):
+            layouts = _telemetry_v2_layouts(data)
+            for i, c in enumerate(data["cases"]):
+                layout, decl = layouts[c["layout"]]
+                rd = t2.SeriesReader(layout, decl)
+                got_r, want_r, bodies = [], [], []
+                for fr_ in c["frames"]:
+                    try:
+                        read = layout.read(layout.tag, bytes.fromhex(fr_["hex"]))
+                    except (frame.Refused, packed.Refused) as e:
+                        read = {"refused": str(e)}
+                    bodies.append(read == fr_["value"])
+                    g = rd.read(fr_["run"], fr_["seq"], fr_["value"], fr_.get("arrival_ns", 0))
+                    g.pop("pairs")
+                    got_r.append(g)
+                    want_r.append(fr_.get("expect"))
+                name = f"v2 {f.stem} #{i}: {c['note']}"
+                if f.name == "readings.json":
+                    out.append(_check(name, [all(bodies), got_r], [True, want_r]))
+                else:
+                    out.append(_check(name, [all(bodies), [p.expect() for p in rd.pairs]], [True, c["expect"]]))
+        else:
+            out.append((f"v2/{f.name}", False, "an unknown fixture file: the runner does not read it"))
+    return out
+
+
+def _telemetry_contracts(path: Path) -> list[Result]:
+    """``conformance/contracts/`` (telemetry.v2 0.1): ``meterframe.v1``, the
+    scenarios' contract, beside ``meter.json`` and its packed file
+    ``meterframe.json``. The contract loads with no finding, under
+    ``telemetry.v2``'s vocabulary (§4: ``series`` beside v1's four keys, so
+    no W105). ``v2/declarations.json`` reads its resources, and zk2py's
+    owner and readers load it from here."""
+    from .contract import load_contract
+
+    out: list[Result] = []
+    for f in sorted(path.iterdir()):
+        if f.suffix == ".toml":
+            k = load_contract(f, check_file_name=True)
+            out.append(_check(f"contracts/{f.name}: loads with no finding (telemetry.v2's vocabulary, §4)",
+                              [k.valid, k.codes], [True, []]))
+        elif f.suffix == ".json":
+            out.append(_check(f"contracts/{f.name}: strict JSON", isinstance(_load_json(f), dict), True))
+        else:
+            out.append((f"contracts/{f.name}", False, "an unknown file: the runner does not read it"))
+    return out
 
 
 def _alarms_keys(path: Path) -> list[Result]:
@@ -1446,7 +1548,7 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
                "transitions.json": _alarms_transitions, "conclusions.json": _alarms_conclusions},
     "telemetry": {"schema.json": _telemetry_schema, "declarations.json": _telemetry_declarations,
                   "samples.json": _telemetry_samples, "continuity.json": _telemetry_continuity,
-                  "v2": _telemetry_v2_not_read, "contracts": _telemetry_v2_not_read},
+                  "v2": _telemetry_v2, "contracts": _telemetry_contracts},
     "desired": {"schema.json": _desired_schema, "declarations.json": _desired_declarations,
                 "bindings.json": _desired_bindings, "order.json": _desired_order, "reports.json": _desired_reports,
                 "conclusions.json": _desired_conclusions, "slices.json": _desired_slices},
@@ -3903,6 +4005,159 @@ def _round98_readings(root: Path) -> list[tuple[str, Any, Any]]:
                                                               "owner": type("W", (), {"hb_layouts": {"health.v1": hlo}})()})())],
                 [["heartbeat"], ("no", "confirmed"), ["heartbeat", "heartbeat_held"], ("unobservable", "time_unknown"),
                  ("no", "confirmed"), 28.5]))
+    return out + _round98_t2_readings(root) + _round98_mend_readings(root)
+
+
+def _round98_t2_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """telemetry.v2 0.1 (#983; #609, round 98), offline: its text at its
+    version; W105 under its vocabulary; §2.16's linter warning; the owner's
+    meter (§2.19, §2.20); and zk2py's R surviving a put it cannot read."""
+    from . import frame, packed, telemetry_v2 as t2, zk2c
+    from .contract import load_contract
+    from .telemetry_v2_live import SeriesSubscriber
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    v2 = flat("profiles/telemetry/v2.md")
+    mf = spec / "profiles" / "telemetry" / "conformance" / "contracts" / "meterframe.v1.toml"
+    text = mf.read_text(encoding="utf-8")
+    as_v1 = load_contract(mf.parent / "zk2py-meterframe-v1.toml",
+                          text=text.replace('uses  = ["telemetry.v2", "link.v1"]', 'uses  = ["telemetry.v1", "link.v1"]'))
+    bad = load_contract(mf.parent / "zk2py-meterframe-bad.toml",
+                        text=text.replace('rx = { kind = "counter", unit = "By" }', 'rx = { kind = "gauge", unit = "By" }'))
+    out: list[tuple[str, Any, Any]] = [
+        ("telemetry.v2 0.1 with its entry, experimental, written against core 0.87",
+         missing(v2, "| **Text version** | 0.1", "| **Status** | experimental |", "core 0.87")
+         + missing(flat("profiles/telemetry/CHANGELOG.md"), "## telemetry.v2 0.1"), []),
+        ("telemetry.v2 §1, §4: W105 reads its table, series beside v1's four keys; the same contract under "
+         "telemetry.v1 draws W105 for each telemetry.series (v1 §4's four keys), and v1 reads no frame resource as "
+         "a metric resource",
+         missing(v2, "W105 reads this table for a contract that uses `telemetry.v2`.")
+         + [load_contract(mf).codes, as_v1.codes,
+            [t2.contract_declarations(as_v1)[t].declaration for t in ("frames/link", "frames/bytes")]],
+         [[], ["W105", "W105", "W105"], ["not_this_profiles", "not_this_profiles"]]),
+        ("telemetry.v2 §2.16: \"A contract linter SHOULD warn of one\": zk2py's warning names the resource and its "
+         "entry's reason, no core code",
+         missing(v2, "A contract linter SHOULD warn of one.")
+         + [bad.codes, t2.lint(bad), t2.lint(load_contract(mf))],
+         [[], ["frames/bytes: telemetry.series is invalid (telemetry.v2 §2.16): rx not_a_carrier"], []]),
+    ]
+    # §2.19, §2.20: the meter.
+    decl = t2.contract_declarations(load_contract(mf))["frames/totals"]
+    bdecl = t2.contract_declarations(load_contract(mf))["frames/bytes"]
+    m, got = t2.Meter(decl), []
+    for run, v in (((16, 1), 100), ((16, 1), 140), ((16, 1), 90), ((16, 2), 3), ((16, 2), 9)):
+        try:
+            m.check(run, {"frames_total": v})
+            m.accept(run, {"frames_total": v})
+            got.append(v)
+        except t2.Decreased as e:
+            got.append(f"refused {e.before}->{e.after}")
+    mb = t2.Meter(bdecl)
+    for v in (16_777_000, 16_777_316, 25_777_316):
+        mb.check((16, 1), {"rx": v})
+        mb.accept((16, 1), {"rx": v})
+    rx = next(f for f in frame.layout_of(load_contract(mf), next(
+        r for r in load_contract(mf).canonical["resources"] if r["template"] == "frames/bytes")).fields)
+    out.append(("telemetry.v2 §2.19, §2.20: zk2py's owner refuses a count below one it wrote within the run, before "
+                "the reduction, takes the count again from 0 under a new run, writes each count modulo 2^w, and "
+                "names an increase past 2^(w-1) (the SHOULD)",
+                missing(v2, "Within one run, an owner MUST NOT write a counter field's count below one it wrote "
+                            "before on that key.",
+                        "An owner SHOULD declare each counter field wide enough that its increase between two "
+                        "samples of its series stays below 2^(w−1).")
+                + [got, [packed.encode(rx, v, None) for v in (16_777_000, 16_777_316, 25_777_316)], len(mb.warnings)],
+                [[100, 140, "refused 140->90", 3, 9], [16_777_000, 100, 9_000_100], 1]))
+
+    # zk2py's R: a put that raises inside the callback is recorded, never lost.
+    class Fake:
+        def declare_subscriber(self, *a: Any, **k: Any) -> Any:
+            return None
+
+    class Smp:
+        key_expr = "zk2/lab/meterframe/meterframe.v1/stream/frames/link"
+        encoding = zk2c.ENCODING
+        kind = __import__("zenoh").SampleKind.PUT
+
+        @property
+        def payload(self) -> Any:
+            raise RuntimeError("a payload that cannot be read")
+
+    sub = SeriesSubscriber(Fake(), "lab/meterframe", load_contract(mf))
+    sub._heard(Smp())
+    out.append(("zk2py's R (round 98): a put whose reading raises inside zenoh's callback is recorded undecodable, "
+                "named", sub.undecodable(), ["RuntimeError: a payload that cannot be read"]))
+    return out
+
+
+def _round98_mend_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Review-bot's notes on round 97 (PR #1037), round 98's mend:
+    :class:`zk2py.frame_live.FrameSubscriber` records a put it cannot read;
+    a ``within`` field's ``since`` across full records cannot drift from the
+    owner's count (:class:`zk2py.frame.Reader` beside
+    :class:`zk2py.frame.Framer`, every frame written and read back)."""
+    from . import frame, packed, zk2c
+    from .contract import load_contract
+    from .frame_live import FrameSubscriber
+
+    spec = root.parent
+    out: list[tuple[str, Any, Any]] = []
+    lf = load_contract(spec.parent / "impl" / "python" / "interop" / "frames" / "linkframes.v1.toml")
+
+    class Fake:
+        def declare_subscriber(self, *a: Any, **k: Any) -> Any:
+            return None
+
+    class Smp:
+        key_expr = "zk2/lab/modem/linkframes.v1/stream/frames/link"
+        encoding = zk2c.ENCODING
+        kind = __import__("zenoh").SampleKind.PUT
+
+        @property
+        def payload(self) -> Any:
+            raise ValueError("unreadable")
+
+    fs = FrameSubscriber(Fake(), ["lab/modem"], lf)
+    fs._heard(Smp())
+    out.append(("frame_live (review of round 97): a put whose reading raises inside the callback is recorded "
+                "{undecodable: why}, never lost", [g for _, _, g in fs.heard],
+                [{"undecodable": "ValueError: unreadable", "envelope": None}]))
+    # since across full records: keyframe_every 4, a deadband of max_records 3.
+    doc = _load_json(spec / "profiles" / "telemetry" / "conformance" / "contracts" / "meterframe.json")
+    lo = frame.Layout(packed.lint(doc).types["Totals"], frame.declaration(
+        {"keyframe_every": 4, "deadband": {"temperature": {"delta": "1", "max_records": 3}}}))
+    fw, rd = frame.Framer(lo), frame.Reader(lo)
+    temps = ["20", "20.5", "20.5", "20", "20.5", "21", "20.5", "20", "20", "20.5", "21", "20.5", "20"]
+    rows = []
+    for i, t in enumerate(temps):
+        for ready in fw.record({"frames_total": i, "temperature": t}, i * 10**9, {"s": 100 + i, "ms": 0}):
+            val = fw.seal(ready, (16, 1))
+            back = lo.read(lo.tag, lo.write(val))
+            got = rd.read("0001", i, back)
+            st = rd.fields["temperature"]
+            rows.append((val["records"][0]["full"], "temperature" in val["records"][0]["values"],
+                         got["records"][0]["fields"]["temperature"]["state"], st.since,
+                         fw.included["temperature"][1]))
+    # A full record's value that leaves a field out of both values and absent:
+    # the field reads absent (a full record writes every field), its since 0.
+    rd2 = frame.Reader(lo)
+    rd2.read("0001", 0, {"time": None, "records": [{"full": True, "values": {"frames_total": 1, "temperature": "20"},
+                                                    "absent": []}]})
+    rd2.read("0001", 1, {"time": None, "records": [{"full": False, "values": {"frames_total": 2}, "absent": []}]})
+    within_since = rd2.fields["temperature"].since
+    rd2.read("0001", 2, {"time": None, "records": [{"full": True, "values": {"frames_total": 3}, "absent": []}]})
+    out.append(("frame.Reader (review of round 97): a within field's since resets at every full record and at "
+                "every inclusion, as the owner's count does, so it cannot drift: the reader's since is the owner's "
+                "at every record, never unknown (deadband) while the owner keeps the rule; a full record leaving a "
+                "field out reads it absent, its since 0",
+                [all(r[3] == r[4] for r in rows), [r[2] for r in rows if r[0]] == ["known"] * sum(r[0] for r in rows),
+                 any(r[2] == "unknown" for r in rows), within_since,
+                 (rd2.fields["temperature"].state, rd2.fields["temperature"].since)],
+                [True, True, False, 1, ("absent", 0)]))
     return out
 
 

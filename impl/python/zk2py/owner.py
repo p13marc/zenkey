@@ -709,6 +709,10 @@ class Owner:
         self._framers: dict[str, Any] = {}
         self._frames_lost: set[str] = set()
         self._frames_lock = threading.RLock()
+        #: telemetry.v2's meters (§2.19), by frame key: None where none applies
+        self._meters: dict[str, Any] = {}
+        #: the wall clock less the monotonic one, read at the first frame
+        self._wall_less_mono: int | None = None
         self.frames_put: list[tuple[str, dict[str, Any]]] = []
         #: False holds every heartbeat back: a test rig's owner that breaks
         #: §2.4's MUST on purpose
@@ -2009,13 +2013,42 @@ class Owner:
         self._refuse_standby_write(key)
         fr_ = self._framer(key)
         mono = time.monotonic_ns() if at_ns is None else at_ns
-        wall = None
-        if self.frame_clock_known:
-            wall_ms = (time.time_ns() - (time.monotonic_ns() - mono)) // 1_000_000 - self.writing_epoch() * 1000
-            wall = {"s": wall_ms // 1000, "ms": wall_ms % 1000} if wall_ms >= 0 else None
+        wall = self._frame_wall(mono)
         with self._frames_lock:
+            meter = self._meter(key)
+            run = None
+            if meter is not None:
+                # telemetry.v2 §2.19: "Within one run, an owner MUST NOT write
+                # a counter field's count below one it wrote before on that
+                # key", the count before §2.20's reduction, under the run the
+                # record is put in (an open frame is put before a new run).
+                with self._seq_lock:
+                    if self.run is None:
+                        self.take_run()
+                    run = self.run
+                meter.check(run, values)
             ready = fr_.record(values, mono, wall)
+            if meter is not None:
+                meter.accept(run, values)
             return [self._put_frame(key, fr_, r) for r in ready]
+
+    def _meter(self, key: str) -> Any:
+        """``telemetry.v2``'s meter of a frame key (§2.19), or None where its
+        contract does not use telemetry.v2 or its ``telemetry.series`` is not
+        declared. A counter field's count is written modulo its width by
+        :func:`zk2py.packed.encode` (§2.20, core §7.6)."""
+        from . import telemetry as tm, telemetry_v2 as t2
+
+        if key in self._meters:
+            return self._meters[key]
+        c, r = self._resource_of[key]
+        meter = None
+        if t2.uses_v2(c.canonical):
+            d = t2.contract_declarations(c).get(r["template"])
+            if isinstance(d, t2.FrameDeclaration) and d.declaration == tm.DECLARED:
+                meter = t2.Meter(d)
+        self._meters[key] = meter
+        return meter
 
     def end_frame(self, key: str) -> dict[str, Any] | None:
         """Core §7.7's MAY (0.87): "An owner MAY end a frame before it holds
@@ -2025,6 +2058,47 @@ class Owner:
         with self._frames_lock:
             ready = fr_.end()
             return None if ready is None else self._put_frame(key, fr_, ready)
+
+    def _frame_wall(self, mono: int) -> dict[str, int] | None:
+        """A record's wall time (core §7.7 "Times") for its instant ``mono``
+        on the monotonic clock: the wall clock less the monotonic one, read
+        once at the owner's first frame, so that two records' instants
+        differ by their monotonic interval to the millisecond; None while
+        the clock is unknown (:attr:`frame_clock_known`)."""
+        if not self.frame_clock_known:
+            return None
+        if self._wall_less_mono is None:
+            self._wall_less_mono = time.time_ns() - time.monotonic_ns()
+        wall_ms = (mono + self._wall_less_mono) // 1_000_000 - self.writing_epoch() * 1000
+        return {"s": wall_ms // 1000, "ms": wall_ms % 1000} if wall_ms >= 0 else None
+
+    def raw_frame(self, key: str, values: dict[str, Any]) -> dict[str, Any]:
+        """``scenarios-v2.md``'s *raw* step: "puts a frame on the owner's key
+        from the owner's session, under its run and its next seq. It
+        bypasses any check the owner's runtime makes": one full record, its
+        time now, each count reduced to its field's width (core §7.6), and
+        no meter (telemetry.v2 §2.19). The framer's own record before is
+        left as it was."""
+        fr_ = self._framer(key)
+        lo = fr_.layout
+        with self._frames_lock, self._seq_lock:
+            if self.run is None:
+                self.take_run()
+            run = self.run
+            assert run is not None
+            seq = self._stream_seq.get(key, 0)
+            self._stream_seq[key] = (seq + 1) % 2**24
+        value = {"time": self._frame_wall(time.monotonic_ns()),
+                 "records": [{"full": True, "values": dict(values),
+                              "absent": [f.name for f in lo.fields if f.name not in values]}]}
+        payload = zk2c.write("frame", run[0], run[1], seq, lo.tag, lo.write(value, self.writing_epoch()))
+        if key not in self._publishers:
+            self._member_publisher(key)
+        self._publishers[key].put(payload, encoding=zk2c.ENCODING)
+        out = {"run": zk2c.InBand(run[0], run[1], 0).run_hex(), "seq": seq, "records": value,
+               "bytes": len(payload), "lost": False, "raw": True}
+        self.frames_put.append((key, out))
+        return out
 
     def lose_frame(self, key: str) -> None:
         """``frames.md``'s lost frame, a test hook: "O takes the frame's seqs
