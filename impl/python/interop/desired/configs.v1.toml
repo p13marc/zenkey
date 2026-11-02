@@ -5,11 +5,15 @@
 # (config.v1 section 3, copied into ../config/schemas/desired.json, as
 # zk2py_author.v1 copies it), desired.target_param = ["system", "service"]
 # and freshness.ttl_s = 0. It must load with no finding at all.
+# Revision 1.1 (#609, round 98; #978 F5): onto freshness.v2, as the
+# reference's zenkey/tests/contracts/configs.v1.toml moved. Its one state
+# has no horizon, so it forms no collection, and its owner sends no
+# heartbeat (freshness.v2 §2.4: "and has a collection").
 [interface]
 name    = "configs"
 major   = 1
-minor   = 0
-uses    = ["desired.v1", "freshness.v1"]
+minor   = 1
+uses    = ["desired.v1", "freshness.v2"]
 summary = "a config.v1 server's desired configuration, one document per target"
 
 [schemas]

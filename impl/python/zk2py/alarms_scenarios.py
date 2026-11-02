@@ -587,6 +587,13 @@ def section3(report: Report, mode: Any, ctx: dict[str, Any], reraise: bool = Fal
                          f"delete in-band {dele and dele.inband}")
             f1 = g.answers()[k][0] if k in g.readings else None
             report.check(sec, "2. G judges no, deleted", f1 is not None and _pair(f1) == "no, deleted", f1 and _pair(f1))
+            # 0.13 (core 0.89 S2, F-460's answer): "and its last confirmation,
+            # the timestamp the owner minted at the delete"
+            report.check(sec, "2. the reply_del carries its last confirmation, a Zenoh timestamp of the owner's "
+                              "minted at the delete (core 0.89 S2)",
+                         rg.stamp_id is not None and _zid_eq(rg.stamp_id, g.meta_zid) and rg.stamp_ns is not None
+                         and fired is not None and rg.stamp_ns // 1_000_000 >= fired.timestamp,
+                         f"reply_del stamp {rg.stamp}, meta.zid {g.meta_zid}")
             if ctx.get("quick"):
                 report.cannot(sec, "3. the 65 s wait for the tombstone window: skipped by --quick")
             else:
@@ -735,10 +742,11 @@ def section5(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
             if seen and not (k in rep_at and rep_at[k].deleted):
                 problems.append(f"no reply_del for {name}'s key")
             elif seen and not (rep_at[k].inband is not None and rep_at[k].inband.run_hex() == new_run
-                               and (rep_at[k].stamp_id is None or _zid_eq(rep_at[k].stamp_id, g.meta_zid))):
-                # 0.11 (F-459): "stamped by it" read in band, the delete's
-                # attachment under the new instance's run; a Zenoh timestamp,
-                # where one comes (zk2py's, F-460), the owner's
+                               and _zid_eq(rep_at[k].stamp_id, g.meta_zid)):
+                # 0.13 (F-459, F-460's answers): "stamped in band by it, each
+                # under the timestamp it minted at the delete": the delete's
+                # attachment under the new instance's run, and the owner's
+                # Zenoh timestamp (core 0.89 S2)
                 problems.append(f"{name}'s reply_del not stamped by the new instance: in-band {rep_at[k].inband} "
                                 f"(run {new_run}), Zenoh {rep_at[k].stamp_id}")
         report.check(sec, "3. before the new instance token appears (a SHOULD): a GET made the moment S sees it "

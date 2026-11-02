@@ -372,11 +372,6 @@ def _walk_contracts(root: Path, ex: Path, history: Path, label: str, skip: tuple
     return out
 
 
-#: The one review a published revision's bundle accepts (F-456's reading,
-#: narrowed after review-bot on round 97): a move of ``uses``.
-REVIEW_BY_PUBLICATION = "review uses_changed"
-
-
 def _example_against_history(root: Path, rel: str, c, built: bytes) -> list[Result]:
     """An example must be published in its tree's history root
     (``examples/zk2/.history``, or ``spec/profiles/.history`` for a
@@ -392,8 +387,11 @@ def _example_against_history(root: Path, rel: str, c, built: bytes) -> list[Resu
       acceptance. ``health.v1``'s, ``alarms.v1``'s and ``config.v1``'s
       revisions 1.1 are such reviews against their 1.0, ``uses_changed``
       (#978 F4, round 97), and so are the adopters' contracts and
-      ``nav.v2`` moved onto ``freshness.v2`` (F5, round 98). Narrowed in
-      round 98: only a review whose every reason is ``uses_changed``."""
+      ``nav.v2`` moved onto ``freshness.v2`` (F5, round 98). Since core
+      0.89 §9.7 (F-456's answer) the text says so: "A published revision
+      was accepted". Only the revision's own bundle, byte-identical,
+      accepts its review, and a breaking change fails whatever is
+      published."""
     from . import bundle, compat
 
     hist = root / c.interface
@@ -407,15 +405,16 @@ def _example_against_history(root: Path, rel: str, c, built: bytes) -> list[Resu
                  for p in sorted(hist.glob("*.bundle.json"))]
     candidate = compat.Revision(c.canonical, {a.id: a.data for a in c.schemas.artifacts()})
     total, _ = compat.full_transitive(revisions, candidate, compat.contract_compare)
-    # review-bot on round 97 (PR #1037): narrowed. A review is accepted by
-    # its publication only where every reason is ``uses_changed``, the
-    # profile moves of #978's F4 and F5, each stated by its text's
-    # changelog; any other review fails here until the text says how an
-    # acceptance is recorded (F-456).
-    reviewed = [r.split(":", 1)[0] for r in total.reasons]
-    ok = total.cls == compat.COMPATIBLE or (total.cls == compat.REVIEW and published.is_file()
-                                            and bool(reviewed) and all(r == REVIEW_BY_PUBLICATION for r in reviewed))
-    said = "" if total.cls == compat.COMPATIBLE else f", a review accepted by its publication: {total.reasons}"
+    # Tied to core 0.89 §9.7 (F-456's answer; review-bot on round 97): "A
+    # revision in the history root passed §9.8's review when it was
+    # published … So a check of it against the root does not refuse it for
+    # a review. It reports the review as accepted … It still refuses a
+    # breaking change". Only this revision's own bundle in the root, byte
+    # for byte the one zk2py builds, is that acceptance: never another
+    # revision's, and never a breaking change.
+    ok = total.cls == compat.COMPATIBLE or (total.cls == compat.REVIEW and published.is_file() and same)
+    said = "" if total.cls == compat.COMPATIBLE else \
+        f", a review accepted: the revision is published (core §9.7): {total.reasons}"
     out.append((f"{rel} (compatible with {len(revisions)} published{said if ok else ''})", ok,
                 "" if ok else f"{total.cls}: {total.reasons}"))
     return out
@@ -3809,8 +3808,10 @@ annotations = { "timing.period_ms" = 60000, "freshness.ttl_s" = 100 }
                 [{"time": "scheduled", "after_ms": 10000, "jitter_ms": 500}, None,
                  {"form": "frame", "run": "0001", "seq": 0}, None]))
     out.append(("F-458: observer §7.6 reads a frame alone as one reply of a GET; no rule has an owner answer a GET on "
-                "a frame resource's key, and a history cache answers under @adv",
-                missing(obs, "That is one reply of a GET, or one row of a recording read alone.")
+                "a frame resource's key, and a history cache answers under @adv (answered by observer 0.22: an "
+                "archive's or a history cache's reply)",
+                missing(obs, "That is one reply of a GET, an archive's or a history cache's, or one row of a "
+                             "recording read alone.")
                 + missing(core, "declares its own queryable and token under `<key>/@adv/…`"), []))
     # Part B's bits, offline (the owner's refusal of a mutation on a frame
     # key is frames_scenarios §1 step 4's, live).
@@ -3878,10 +3879,12 @@ annotations = { "timing.period_ms" = 60000, "freshness.ttl_s" = 100 }
                 [["60a43745", "e9dbcdcb"]]))
     # F-459: alarms scenarios §1 and §5 under freshness.v2.
     sc = flat("profiles/alarms/scenarios.md")
-    out.append(("F-459: alarms.v1 scenarios §1 and §5, unchanged at 0.11, expect S's deliveries under the owner's "
-                "stamp id, which a freshness.v2 alarm's put does not carry (core §4.3's table, §2.14 step 5)",
-                missing(sc, "S receives one put on `…/state/alarms/a659f813308ad1da`, stamped by the owner (core S1)",
-                        "A firing, unchanged, `timestamp` *t₀* kept, under the new instance's stamp id.")
+    out.append(("F-459: alarms.v1 scenarios §1 and §5, unchanged at 0.11, expected S's deliveries under the owner's "
+                "stamp id, which a freshness.v2 alarm's put does not carry (core §4.3's table, §2.14 step 5); "
+                "answered by alarms.v1 0.13: stamped in band",
+                missing(sc, "S receives one put on `…/state/alarms/a659f813308ad1da`, stamped in band by the owner "
+                            "(core S1)",
+                        "A firing, unchanged, `timestamp` *t₀* kept, under the new instance's run.")
                 + missing(core, "on its replies alone, never on a put")
                 + missing(al_, "Under `freshness.v2` an alarm's put carries none (core §4.3's table)"), []))
     return out
@@ -4005,7 +4008,56 @@ def _round98_readings(root: Path) -> list[tuple[str, Any, Any]]:
                                                               "owner": type("W", (), {"hb_layouts": {"health.v1": hlo}})()})())],
                 [["heartbeat"], ("no", "confirmed"), ["heartbeat", "heartbeat_held"], ("unobservable", "time_unknown"),
                  ("no", "confirmed"), 28.5]))
-    return out + _round98_t2_readings(root) + _round98_mend_readings(root)
+    return out + _round98_t2_readings(root) + _round98_mend_readings(root) + _round98_answers(root)
+
+
+def _round98_answers(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.89, observer 0.22, link.v1 0.14 and alarms.v1 0.13: round 97's
+    F-455 to F-460 answered (main f42e9742, round 98). Each answer's text,
+    and its entry; zk2py's readings of each are the families' (link's
+    plan.json, contracts' w108-frame-horizon, examples' published reviews,
+    the frame family) and the readings above."""
+    import re
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, obs, l1 = flat("core.md"), flat("observer.md"), flat("profiles/link/v1.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    return [
+        ("core 0.89 or later, observer 0.22, link.v1 0.14 and alarms.v1 0.13, each with its entry (round 97 "
+         "answered)",
+         [core_v >= (0, 89)] + entry("CHANGELOG.md", "0.89", "round 97")
+         + entry("observer-CHANGELOG.md", "0.22", "GET answers a frame")
+         + entry("profiles/link/CHANGELOG.md", "0.14", "round 97")
+         + entry("profiles/alarms/CHANGELOG.md", "0.13", "in band"), [True]),
+        ("F-455 answered (link.v1 0.14 §2.9): freshness.v2 a listed interface of each service implementing an "
+         "interface with a heartbeat, named or not; zk2py's reading since round 97, unchanged",
+         missing(l1, "An interface with a heartbeat makes `freshness.v2` a listed interface of each service that "
+                     "implements it (`freshness.v2` §3). That holds where the deployment does not name it."), []),
+        ("F-456 answered (core 0.89 §9.7): a published revision was accepted; zk2py's examples family accepts the "
+         "review of a revision whose own bundle is in the root, and still refuses a breaking change",
+         missing(core, "A revision in the history root passed §9.8's review when it was published.",
+                 "So a check of it against the root does not refuse it for a review.",
+                 "It still refuses a breaking change, which §9.8 forbids publishing."), []),
+        ("F-457 answered (core 0.89 §7.7): the interval is the period of a declaration timing.v1 §2.2 reads "
+         "valid; zk2py read it so in round 97",
+         missing(core, "Otherwise it is the `timing.period_ms` of a declaration that "
+                       "[`timing.v1`](profiles/timing/v1.md) §2.2 reads valid (§2.3)."), []),
+        ("F-460 answered (core 0.89 S2): a deleted member's reply_del carries the timestamp minted at its delete; "
+         "zk2py's owner did so since round 97 (Owner.delete_state's confirm)",
+         missing(core, "A key of such a state deleted within the window is a member too. Its `reply_del` carries "
+                       "the timestamp minted at the delete."), []),
+    ]
 
 
 def _round98_t2_readings(root: Path) -> list[tuple[str, Any, Any]]:
@@ -4325,9 +4377,10 @@ def _round96_readings(root: Path) -> list[tuple[str, Any, Any]]:
                        "a heartbeat vouched for the member since its last mutation.",
                  "on its replies alone, never on a put: the later of the timestamps the owner minted at its last "
                  "mutation and at the last heartbeat that vouched for it",
-                 "An owner mints one at each mutation of such a member, though its put carries none. It mints one "
-                 "as it writes each heartbeat (§7.5). That heartbeat's time is the timestamp's instant, to the "
-                 "millisecond")
+                 # core 0.89 (F-460's answer, round 98): "a delete among them"
+                 "An owner mints one at each mutation of such a member, a delete among them, though the mutation "
+                 "carries none. It mints one as it writes each heartbeat (§7.5). That heartbeat's time is the "
+                 "timestamp's instant, to the millisecond")
          + kept(core, "The owner's reply of a member a `freshness.v2` heartbeat confirms MUST carry instead")
          + [keeps_timestamp(beacon, next(r for r in beacon.canonical["resources"] if r["template"] == "status")),
             keeps_timestamp(old, next(r for r in old.canonical["resources"] if r["template"] == "status"))],
@@ -6186,7 +6239,8 @@ def _round88_readings(root: Path) -> list[tuple[str, Any, Any]]:
 
     # §12's contracts, written from its setup: no finding at all, and the
     # reference CLI's fingerprints (zk2 contract lint, round 88).
-    fps = {"configs.v1.toml": "sha256:daee2c9d7434152c15adef1c3fae78dbf5697c8db28e1e39fb0aa9f4e17166eb",
+    # configs.v1 1.1 (round 98, #978 F5): onto freshness.v2, as the reference's copy moved
+    fps = {"configs.v1.toml": "sha256:3abc840f982b862796d47fb0996c503970e1d80580f6e75cdfead4296d2519cf",
            "zk2py_configured.v1.toml": "sha256:89872483fa68bcd829b1e814d120dd799ef6a7b0145561d6e814b0cda0e87890"}
     here = Path(__file__).resolve().parents[1] / "interop" / "desired"
     got = {}
