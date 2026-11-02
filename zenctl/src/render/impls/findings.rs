@@ -146,7 +146,8 @@ impl Render for DoctorReport {
         if let Some(c) = self.scope.config.as_option() {
             notes.push(
                 Note::coverage(format!(
-                    "read config.v1 through `{}`, {} reading(s): {} service(s) list it; {}",
+                    "read config.v1 through `{}`, {} reading(s), and each config.v2 owner's \
+                     record by its contract: {} service(s) list either; {}",
                     c.selector,
                     c.readings,
                     c.services,

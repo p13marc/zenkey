@@ -7730,6 +7730,810 @@ async fn the_doctor_and_check_conform_judge_a_config_owner() {
     bus.keep(rf.svc);
 }
 
+// ─── config.v2 (#985 G3) ─────────────────────────────────────────────────────
+//
+// The owner is `scenarios-v2.md`'s: `lab/rf0` on the spec's test contract
+// `rfcfg.v1`, through `ServiceBuilder::config_v2`, on the owner example's
+// simulated device and startup (`rfcfg_startup`, as its `--config-v2`
+// runs it). zenctl finds it by its descriptor's `profiles`, reads its
+// record through the contract it retrieves (or `--contracts` across a
+// face), and acts on it as a script would; each case cites the section it
+// runs.
+
+/// The spec's `rfcfg.v1`, as zenctl's `--contracts` names it.
+const RFCFG: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../spec/profiles/config/conformance/contracts/rfcfg.v1.toml"
+);
+
+/// One running `config.v2` owner, and what restarts it.
+struct Rf2 {
+    address: String,
+    svc: Service,
+    cfg: zenkey::config_v2::Configuration,
+    device: Arc<sim::SimDevice>,
+    startup: zenkey::config_v2::Startup,
+}
+
+impl Rf2 {
+    async fn up(
+        session: &zenoh::Session,
+        address: &str,
+        startup: zenkey::config_v2::Startup,
+        device: Arc<sim::SimDevice>,
+    ) -> Rf2 {
+        let mut b = ServiceBuilder::new(
+            session,
+            ServiceConfig::new(address.parse().expect("an address")),
+        );
+        let l = load_path(Path::new(RFCFG));
+        let contract = l
+            .contract
+            .unwrap_or_else(|| panic!("rfcfg.v1 does not load:\n{}", l.report));
+        b.implement(Implementation::new(contract))
+            .expect("rfcfg.v1 implemented");
+        let cfg = b
+            .config_v2(
+                startup.clone(),
+                Arc::clone(&device) as Arc<dyn zenkey::config_v2::Device>,
+            )
+            .await
+            .expect("config.v2 declared");
+        let svc = b.start().await.expect("the owner starts");
+        Rf2 {
+            address: address.to_owned(),
+            svc,
+            cfg,
+            device,
+            startup,
+        }
+    }
+
+    /// `lab/rf0` on `lifecycle.json`'s startup, a persisted layer, the
+    /// floor and the delay its device states for a reach `apply_at`.
+    async fn fresh(session: &zenoh::Session, address: &str, floor_s: u16, apply_ms: u64) -> Rf2 {
+        let startup = sim::rfcfg_startup(floor_s, Duration::from_millis(apply_ms), true);
+        let device = Arc::new(sim::SimDevice::new_v2(&startup));
+        Rf2::up(session, address, startup, device).await
+    }
+
+    /// A restart (v2 §2.12): the old instance goes, the device runs its
+    /// startup values again, a new instance starts from them.
+    async fn restart(self, session: &zenoh::Session) -> Rf2 {
+        let events = self.cfg.published().await;
+        self.svc.close().await.expect("the old instance closes");
+        self.device.restart_v2(&self.startup);
+        let next = self.device.next_startup_v2(&self.startup, events);
+        Rf2::up(session, &self.address, next, self.device).await
+    }
+}
+
+/// The verbs end to end against a `config.v2` owner (v2 §2.1–§2.15): found
+/// by its descriptor's `profiles`, its record read through the contract
+/// retrieved by fingerprint, §5's answers from it; a hot set answered with
+/// the record; the owner's own refusals made here, nothing sent, a contract
+/// group's `set` among them (§2.4); a sensitive value from standard input,
+/// echoed nowhere; a reach change that asks first, answered with the record
+/// pending, confirmed, persisted, and confirmed again `not_found`; and
+/// `--status`, `config.v1`'s, refused.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn config_v2_verbs_read_change_and_end_a_change() {
+    let mut bus = Bus::bare(None).await;
+    let rf = Rf2::fresh(&bus.owners, "lab/rf0", 2, 500).await;
+    let get = [
+        "config",
+        "get",
+        "lab/rf0",
+        "--clocks-synced",
+        "--format",
+        "json",
+    ];
+    let run = bus.until(&get, |r| r.code == 0).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["profile"], "config.v2", "{run}");
+    assert_eq!(doc["premise"], "listed", "{run}");
+    assert_eq!(doc["record"]["iface"], "rfcfg.v1", "{run}");
+    assert_eq!(doc["record"]["key"], "zk2/lab/rf0/rfcfg.v1/state/config");
+    assert_eq!(doc["record"]["record"]["revision"], 0);
+    assert!(doc.get("status").is_none(), "one record, no status: {run}");
+    assert_eq!(doc["view"]["freshness"]["verdict"], "fresh", "{run}");
+    assert_eq!(doc["projection"]["reason"], "one_record", "{run}");
+    assert_eq!(doc["pending"]["answer"], "no", "{run}");
+    assert_eq!(row_of(&doc, "group", "group", "queue")["answer"], "no");
+    assert_eq!(row_of(&doc, "group", "group", "radio")["reason"], "reach");
+    assert_eq!(
+        row_of(&doc, "group", "group", "modulation")["reason"],
+        "contract"
+    );
+    assert_eq!(
+        row_of(&doc, "parameter", "parameter", "fraction_ppm")["answer"],
+        "yes"
+    );
+    assert_eq!(
+        row_of(&doc, "parameter", "parameter", "pin")["reason"],
+        "sensitive"
+    );
+
+    // A hot set: the record after the apply, in the value form (§2.9).
+    let run = bus
+        .zenctl(&[
+            "config",
+            "set",
+            "lab/rf0",
+            "duty",
+            "fraction_ppm=20000",
+            "--actor",
+            "ops",
+            "--request-id",
+            "r-1",
+            "--format",
+            "json",
+        ])
+        .await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["profile"], "config.v2", "{run}");
+    assert_eq!(doc["answer"], "record", "{run}");
+    assert_eq!(doc["record"]["revision"], 1);
+    assert_eq!(doc["record"]["last"]["groups"], json!(["duty"]));
+    assert_eq!(doc["view"]["groups"][0]["parameters"][0]["value"], 20000);
+    assert_eq!(doc["checked"]["read"], "record");
+    assert_eq!(doc["checked"]["class"], "hot");
+    assert!(doc["mark"]["seq"].is_u64(), "the as-of mark: {run}");
+    assert!(
+        doc["request_bytes"].as_u64().is_some_and(|n| n <= 16),
+        "{run}"
+    );
+    let run = bus.zenctl(&get).await;
+    let doc = run.json();
+    let p = row_of(&doc, "parameter", "parameter", "fraction_ppm");
+    assert_eq!(p["answer"], "no", "its differs bit is set: {run}");
+    assert_eq!(p["reason"], "startup_differs");
+
+    // The owner's own refusals, made here against the record just read,
+    // and a contract group, which has no set (§2.4): nothing is sent.
+    let run = bus
+        .zenctl(&["config", "set", "lab/rf0", "queue", "tx_queue_len=5"])
+        .await;
+    exits(&run, 2);
+    assert!(
+        run.stderr.contains("refused here, nothing sent") && run.stderr.contains("unavailable"),
+        "{run}"
+    );
+    let run = bus
+        .zenctl(&[
+            "config",
+            "set",
+            "lab/rf0",
+            "modulation",
+            "spreading_factor=8",
+        ])
+        .await;
+    exits(&run, 2);
+    assert!(
+        run.stderr.contains("contract") && run.stderr.contains("no queryable"),
+        "{run}"
+    );
+    let run = bus
+        .zenctl(&["config", "set", "lab/rf0", "duty", "fraction_ppm=lots"])
+        .await;
+    exits(&run, 2);
+    assert!(run.stderr.contains("fraction_ppm"), "{run}");
+
+    // A sensitive value: never inline; from standard input, applied, and
+    // echoed nowhere; the record carries no bits for it (§2.15).
+    let run = bus
+        .zenctl(&["config", "set", "lab/rf0", "sim", "pin=1234"])
+        .await;
+    exits(&run, 2);
+    assert!(
+        run.stderr.contains("pin=@-") && !run.stderr.contains("1234"),
+        "{run}"
+    );
+    let run = bus
+        .zenctl_stdin(
+            &[
+                "config", "set", "lab/rf0", "sim", "pin=@-", "--format", "json",
+            ],
+            "4321\n",
+        )
+        .await;
+    exits(&run, 0);
+    assert!(
+        !run.stdout.contains("4321") && !run.stderr.contains("4321"),
+        "{run}"
+    );
+    assert_eq!(run.json()["request"]["values"]["pin"], "<redacted>");
+    assert_eq!(
+        rf.device.holds("sim", "pin"),
+        Some(zenkey::config_v1::Value::Integer(4321))
+    );
+
+    // A reach change asks first (§2.4): from a script, --i-know.
+    let reach = [
+        "config",
+        "set",
+        "lab/rf0",
+        "radio",
+        "frequency_hz=869525000",
+        "--confirm-s",
+        "30",
+        "--format",
+        "json",
+    ];
+    let run = bus.zenctl(&reach).await;
+    exits(&run, 2);
+    assert!(
+        run.stderr.contains("--i-know") && run.stderr.contains("not sent"),
+        "{run}"
+    );
+    let mut sent = reach.to_vec();
+    sent.push("--i-know");
+    let run = bus.zenctl(&sent).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["answer"], "record", "{run}");
+    assert!(
+        doc["record"]["pending"]["apply_at"].is_i64(),
+        "a reach set answers before its apply (§2.9): {run}"
+    );
+    let token = doc["record"]["pending"]["token"]
+        .as_u64()
+        .expect("a token")
+        .to_string();
+    assert_eq!(doc["view"]["pending"]["token"], token.as_str());
+    assert!(
+        run.stderr.contains(&format!("--token {token}")),
+        "the hint names how to ask whether it landed: {run}"
+    );
+    // Not yet landed, then applied: confirmed, its record the answer.
+    let run = bus
+        .until(
+            &[
+                "config",
+                "get",
+                "lab/rf0",
+                "--clocks-synced",
+                "--token",
+                &token,
+                "--format",
+                "json",
+            ],
+            |r| r.code == 0 && parsed(r)["pending_change"]["applied"] == true,
+        )
+        .await;
+    let doc = run.json();
+    assert_eq!(doc["change"]["landed"]["answer"], "not_yet", "{run}");
+    let run = bus
+        .zenctl(&[
+            "config", "confirm", "lab/rf0", &token, "--status", "--format", "json",
+        ])
+        .await;
+    exits(&run, 2);
+    assert!(run.stderr.contains("answer = \"status\""), "{run}");
+    let run = bus
+        .zenctl(&["config", "confirm", "lab/rf0", &token, "--format", "json"])
+        .await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["answer"], "record", "{run}");
+    assert_eq!(doc["record"]["last"]["token"].to_string(), token);
+    assert!(doc["record"]["pending"].is_null(), "{run}");
+    // Persisted: the record after it, at source overlay (§2.13).
+    let run = bus
+        .zenctl(&["config", "persist", "lab/rf0", &token, "--format", "json"])
+        .await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(
+        doc["record"]["groups"]["radio"]["params"]["frequency_hz"]["source"], "overlay",
+        "{run}"
+    );
+    // A confirm retried finds nothing pending: refused in the error form.
+    let run = bus
+        .zenctl(&["config", "confirm", "lab/rf0", &token, "--format", "json"])
+        .await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["refusal"]["code"], "not_found", "{run}");
+    assert!(doc["refusal"]["mark"]["seq"].is_u64(), "{run}");
+    // A token that is no number is no config.v2 token: refused here.
+    let run = bus
+        .zenctl(&["config", "extend", "lab/rf0", "nope", "--confirm-s", "5"])
+        .await;
+    exits(&run, 2);
+    bus.keep(rf.svc);
+}
+
+/// `scenarios-v2.md` §13, the record across a constrained face (v2 §2.12,
+/// §2.19, §2.21): the caller is a client of R1 with the face's `@zk` deny
+/// on it, so it binds statically (`--across-face --contracts`) and reads no
+/// presence. It sizes its window from the record's floor, sends a reach
+/// set of at most 16 bytes and gets the record pending in at most 64, sees
+/// the applied record arrive by the push with no GET, confirms with a reply
+/// of at most 64 bytes, and learns of a restart from the record's
+/// `instance` alone.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn config_v2_scenario_13_the_record_across_a_constrained_face() {
+    static NTH: AtomicU64 = AtomicU64::new(0);
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "live-zk2-face-v2-{}-{}",
+        std::process::id(),
+        NTH.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&scratch).unwrap();
+    let dict = scratch.join("usrpwd.txt");
+    std::fs::write(&dict, "router:router-pw\nowner:owner-pw\nfar:far-pw\n").unwrap();
+    // The face, on the far principal's policy: the `@zk` deny (core §8.5).
+    let acl = r#"access_control: {
+    enabled: true,
+    default_permission: "allow",
+    rules: [
+      { id: "face-zk", permission: "deny", flows: ["ingress", "egress"],
+        messages: ["put", "delete", "declare_subscriber", "query", "reply", "liveliness_token",
+                   "declare_liveliness_subscriber", "liveliness_query"],
+        key_exprs: ["zk2/*/*/@zk/**"] },
+    ],
+    subjects: [{ id: "far", usernames: ["far"] }],
+    policies: [{ id: "far", rules: ["face-zk"], subjects: ["far"] }],
+  },"#;
+    let text = format!(
+        "{{\n  mode: \"router\",\n  scouting: {{ multicast: {{ enabled: false }}, gossip: {{ enabled: false }} }},\n  \
+         listen: {{ endpoints: [\"tcp/127.0.0.1:0\"] }},\n  adminspace: {{ enabled: false }},\n  \
+         transport: {{ auth: {{ usrpwd: {{ user: \"router\", password: \"router-pw\", dictionary_file: {:?} }} }} }},\n  {acl}\n}}\n",
+        dict.display().to_string()
+    );
+    let router = zenoh::open(zenoh::Config::from_json5(&text).expect("the router config"))
+        .await
+        .expect("a router with the face");
+    let endpoint = router
+        .info()
+        .locators()
+        .await
+        .into_iter()
+        .map(|l| l.to_string())
+        .find(|l| l.starts_with("tcp/127.0.0.1:"))
+        .expect("the router listens on loopback");
+    let session_as = |user: &str, pw: &str| {
+        let mut c = base_config();
+        c.insert_json5("mode", "\"client\"").unwrap();
+        c.insert_json5("connect/endpoints", &format!("[\"{endpoint}\"]"))
+            .unwrap();
+        c.insert_json5(
+            "transport/auth/usrpwd",
+            &format!("{{ user: \"{user}\", password: \"{pw}\" }}"),
+        )
+        .unwrap();
+        c
+    };
+    let owners = zenoh::open(session_as("owner", "owner-pw"))
+        .await
+        .expect("the owner's session");
+    // C's own subscription to Cfg, across the face: what the push brings.
+    let far_session = zenoh::open(session_as("far", "far-pw"))
+        .await
+        .expect("C's session");
+    let pushed: Arc<std::sync::Mutex<Vec<Vec<u8>>>> = Arc::default();
+    let p = Arc::clone(&pushed);
+    let _sub = far_session
+        .declare_subscriber("zk2/lab/rf0/rfcfg.v1/state/config")
+        .callback(move |s: zenoh::sample::Sample| {
+            p.lock().unwrap().push(s.payload().to_bytes().into_owned());
+        })
+        .await
+        .expect("C subscribes to Cfg");
+    let mut bus = Bus::with_owners(router, endpoint, owners);
+    let far = scratch.join("far.json5");
+    std::fs::write(
+        &far,
+        r#"{ transport: { auth: { usrpwd: { user: "far", password: "far-pw" } } } }"#,
+    )
+    .unwrap();
+    let far = far.display().to_string();
+    let rf = Rf2::fresh(&bus.owners, "lab/rf0", 10, 1000).await;
+    let face = [
+        "--across-face",
+        "--contracts",
+        RFCFG,
+        "--zenoh-config",
+        far.as_str(),
+    ];
+    let with = |args: &[&str]| -> Vec<String> {
+        args.iter()
+            .chain(face.iter())
+            .map(|s| s.to_string())
+            .collect()
+    };
+    let iface = zenkey::model::config::v2::Interface::of(
+        &load_path(Path::new(RFCFG)).contract.expect("rfcfg.v1"),
+    )
+    .expect("its declaration");
+    let records = |from: usize| -> Vec<zenkey::model::config::v2::State> {
+        pushed.lock().unwrap()[from..]
+            .iter()
+            .filter_map(|b| {
+                let e = zenkey::model::wire::Envelope::parse(b).ok()?;
+                iface.read_record(e.tag.get(), e.record, 0).ok()
+            })
+            .collect()
+    };
+
+    // 1. C GETs Cfg: the floor it sizes its window from, and nothing of `@zk`.
+    let get = with(&["config", "get", "lab/rf0", "--format", "json"]);
+    let get: Vec<&str> = get.iter().map(String::as_str).collect();
+    let run = bus.until(&get, |r| r.code == 0).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["profile"], "config.v2", "{run}");
+    assert_eq!(doc["premise"], "across_face", "{run}");
+    assert!(
+        doc.get("presence").is_none(),
+        "no presence read across a face"
+    );
+    assert_eq!(doc["record"]["record"]["floor_s"], 10, "{run}");
+    assert!(
+        doc["asked"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|a| !a.as_str().unwrap().contains("@zk")),
+        "{run}"
+    );
+    let first = doc["record"]["record"]["instance"].as_u64().unwrap();
+    let run = bus
+        .zenctl(&[
+            "service",
+            "list",
+            "--zenoh-config",
+            &far,
+            "--format",
+            "json",
+        ])
+        .await;
+    assert!(
+        !run.stdout.contains("lab/rf0"),
+        "no @zk delivery crosses the face: {run}"
+    );
+
+    // 2. A reach set with a window, an expected revision and a key: at
+    //    most 16 bytes; the reply at most 64, the record pending.
+    let set = with(&[
+        "config",
+        "set",
+        "lab/rf0",
+        "radio",
+        "frequency_hz=869525000",
+        "--confirm-s",
+        "120",
+        "--expected-revision",
+        "0",
+        "--idempotency-key",
+        "4242",
+        "--i-know",
+        "--format",
+        "json",
+    ]);
+    let set: Vec<&str> = set.iter().map(String::as_str).collect();
+    let heard_before = pushed.lock().unwrap().len();
+    let run = bus.zenctl(&set).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["answer"], "record", "{run}");
+    assert_eq!(doc["checked"]["read"], "record", "the record read first");
+    let request = doc["request_bytes"].as_u64().unwrap();
+    assert!(request <= 16, "the request is {request} bytes: {run}");
+    let reply = doc["size"].as_u64().unwrap();
+    assert!(reply <= 64, "the reply is {reply} bytes: {run}");
+    assert_eq!(doc["record"]["pending"]["applied"], false, "{run}");
+    let token = doc["record"]["pending"]["token"].as_u64().unwrap();
+
+    // 3. The applied record arrives by the push, no GET made; C confirms:
+    //    at most 64 bytes, nothing pending, the last token the change's.
+    let deadline = Instant::now() + SETTLE;
+    while !records(heard_before).iter().any(|r| {
+        r.pending
+            .as_ref()
+            .is_some_and(|p| p.token == token && p.applied)
+    }) {
+        assert!(
+            Instant::now() < deadline,
+            "the applied record never crossed by the push"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let token_text = token.to_string();
+    let confirm = with(&[
+        "config",
+        "confirm",
+        "lab/rf0",
+        &token_text,
+        "--format",
+        "json",
+    ]);
+    let confirm: Vec<&str> = confirm.iter().map(String::as_str).collect();
+    let run = bus.zenctl(&confirm).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["answer"], "record", "{run}");
+    assert!(doc["size"].as_u64().unwrap() <= 64, "{run}");
+    assert!(doc["record"]["pending"].is_null(), "{run}");
+    assert_eq!(doc["record"]["last"]["token"], token, "{run}");
+
+    // 4. The owner restarts: the record's instance differs, which C learns
+    //    from the push without presence (§2.12).
+    let heard_before = pushed.lock().unwrap().len();
+    let rf = rf.restart(&bus.owners).await;
+    let deadline = Instant::now() + SETTLE;
+    while !records(heard_before)
+        .iter()
+        .any(|r| u64::from(r.instance) != first)
+    {
+        assert!(Instant::now() < deadline, "no push showed the restart");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let run = bus
+        .until(&get, |r| {
+            r.code == 0 && parsed(r)["record"]["record"]["instance"] != first
+        })
+        .await;
+    exits(&run, 0);
+    assert_eq!(run.json()["record"]["record"]["revision"], 0, "{run}");
+    bus.keep(rf.svc);
+    bus.keep(_sub);
+    bus.keep(far_session);
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+/// `scenarios-v2.md` §14, a tool's answers (v2 §5): "is a change pending?"
+/// no of an idle owner and not asked of a service whose descriptor lists no
+/// `config.v2`; yes of an armed reach change, not yet landed; once it rolls
+/// back at its deadline, it did not land and its undo was clean; a value set
+/// without a window will not survive a restart, its `differs` set; queue is
+/// not writable, though the contract declares it hot; and after the owner
+/// stops, not asked on presence's word, and, for a reader that reads no
+/// presence, unobservable, the record stale — never no.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn config_v2_scenario_14_a_tools_answers() {
+    let mut bus = Bus::bare(None).await;
+    let rf = Rf2::fresh(&bus.owners, "lab/rf0", 2, 500).await;
+    let plain = bring_up(
+        &bus.owners,
+        ServiceConfig::new("lab/plain".parse().unwrap()),
+        &["tcgui/tc.netif.v1"],
+    )
+    .await;
+    let get = |addr: &'static str| -> Vec<&'static str> {
+        vec!["config", "get", addr, "--clocks-synced", "--format", "json"]
+    };
+
+    // 1. Idle: no; lab/plain: not asked, its descriptor not listing config.v2.
+    let run = bus.until(&get("lab/rf0"), |r| r.code == 0).await;
+    assert_eq!(run.json()["pending"]["answer"], "no", "{run}");
+    let run = bus
+        .until(&get("lab/plain"), |r| parsed(r)["premise"] == "not_listed")
+        .await;
+    let doc = run.json();
+    assert_eq!(doc["pending"]["answer"], "not_asked", "{run}");
+    assert_eq!(doc["pending"]["reason"], "not_listed");
+    exits(&run, 2);
+
+    // 2. A reach change armed: pending yes, with the token and the
+    //    deadline; did it land: not yet.
+    let run = bus
+        .zenctl(&[
+            "config",
+            "set",
+            "lab/rf0",
+            "radio",
+            "frequency_hz=869525000",
+            "--confirm-s",
+            "3",
+            "--i-know",
+            "--format",
+            "json",
+        ])
+        .await;
+    exits(&run, 0);
+    let doc = run.json();
+    let token = doc["record"]["pending"]["token"]
+        .as_u64()
+        .unwrap()
+        .to_string();
+    let instance = doc["record"]["instance"].as_u64().unwrap().to_string();
+    let asked = [
+        "config",
+        "get",
+        "lab/rf0",
+        "--clocks-synced",
+        "--token",
+        token.as_str(),
+        "--instance",
+        instance.as_str(),
+        "--format",
+        "json",
+    ];
+    let run = bus.zenctl(&asked).await;
+    let doc = run.json();
+    assert_eq!(doc["pending"]["answer"], "yes", "{run}");
+    assert_eq!(doc["pending_change"]["token"], token.as_str());
+    assert!(doc["pending_change"]["deadline"].is_string());
+    assert_eq!(doc["change"]["landed"]["answer"], "not_yet", "{run}");
+
+    // 3. It rolls back at its deadline: a window across it hears the event.
+    let mut window = asked.to_vec();
+    window.extend(["--for", "5"]);
+    let run = bus.zenctl(&window).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["change"]["landed"]["answer"], "no", "{run}");
+    assert_eq!(doc["change"]["landed"]["reason"], "rolled-back", "{run}");
+    assert_eq!(doc["change"]["undo_clean"]["answer"], "yes", "{run}");
+    assert_eq!(doc["change"]["event"]["outcome"], "rolled-back");
+
+    // 4. duty set without a window: will fraction_ppm survive a restart?
+    //    No, its differs bit set; and queue is not writable.
+    let run = bus
+        .zenctl(&["config", "set", "lab/rf0", "duty", "fraction_ppm=20000"])
+        .await;
+    exits(&run, 0);
+    let run = bus.zenctl(&get("lab/rf0")).await;
+    let doc = run.json();
+    let p = row_of(&doc, "parameter", "parameter", "fraction_ppm");
+    assert_eq!(p["answer"], "no", "{run}");
+    assert_eq!(p["reason"], "startup_differs", "{run}");
+    let q = row_of(&doc, "group", "group", "queue");
+    assert_eq!(
+        (q["answer"].as_str(), q["reason"].as_str()),
+        (Some("no"), Some("outside_allowlist")),
+        "{run}"
+    );
+
+    // 5. A reader that reads no presence holds the record it last heard:
+    //    its window hears a put, then the owner stops; at the window's end
+    //    the record is stale.
+    let held = bus.spawn_within(
+        &[
+            "config",
+            "get",
+            "lab/rf0",
+            "--across-face",
+            "--contracts",
+            RFCFG,
+            "--for",
+            "72",
+            "--format",
+            "json",
+        ],
+        Duration::from_secs(150),
+    );
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let run = bus
+        .zenctl(&["config", "set", "lab/rf0", "duty", "fraction_ppm=30000"])
+        .await;
+    exits(&run, 0);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    rf.svc.close().await.expect("the owner stops");
+    // Within 60 s: not asked, the owner absent (presence's word).
+    let run = bus
+        .until(&get("lab/rf0"), |r| parsed(r)["premise"] == "absent")
+        .await;
+    let doc = run.json();
+    assert_eq!(doc["pending"]["answer"], "not_asked", "{run}");
+    assert_eq!(doc["pending"]["reason"], "absent");
+    // After it: unobservable, the record stale — never no.
+    let run = held.await.expect("the held reading");
+    let doc = run.json();
+    assert_eq!(doc["profile"], "config.v2", "{run}");
+    assert_eq!(doc["view"]["freshness"]["verdict"], "stale", "{run}");
+    assert_eq!(doc["pending"]["answer"], "unobservable", "{run}");
+    exits(&run, 0);
+    bus.keep(plain);
+}
+
+/// The doctor's and `check conform`'s config checks against a `config.v2`
+/// owner (#985 G3): asked of its config interface, the projection not
+/// asked (one record), the record fresh and read by its contract, the
+/// suite's probes refused as the text names them (an undeclared group and
+/// the wildcard not made: config.v2 has no key for either), a dry run of
+/// `duty`'s running value; and, after a hot set, the doctor's
+/// `config-unpersisted` naming the value whose startup value differs.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_doctor_and_check_conform_judge_a_config_v2_owner() {
+    let mut bus = Bus::bare(None).await;
+    let rf = Rf2::fresh(&bus.owners, "lab/rf0", 2, 500).await;
+    bus.until(
+        &[
+            "config",
+            "get",
+            "lab/rf0",
+            "--clocks-synced",
+            "--format",
+            "json",
+        ],
+        |r| r.code == 0,
+    )
+    .await;
+    let run = bus
+        .zenctl(&[
+            "check",
+            "conform",
+            "lab/rf0",
+            "rfcfg.v1",
+            "--for",
+            "2",
+            "--timeout",
+            "2",
+            "--clocks-synced",
+            "--calls-granted",
+            "--format",
+            "json",
+        ])
+        .await;
+    let doc = run.json();
+    let case = |id: &str, subject: &str| -> Value {
+        rows_of(&doc, "case")
+            .into_iter()
+            .find(|c| c["case"] == id && c["subject"] == subject)
+            .cloned()
+            .unwrap_or_else(|| panic!("{id} {subject}: {run}"))
+    };
+    let answered = |id: &str, subject: &str, answer: &str| {
+        let c = case(id, subject);
+        assert_eq!(c["verdict"]["answer"], answer, "{id} {subject}: {c}\n{run}");
+    };
+    answered("config-projection", "service", "not_asked");
+    answered("config-fresh", "state/config", "not_established");
+    answered("config-view", "state/config", "not_established");
+    for probe in [
+        "@op/set/queue",
+        "@op/confirm",
+        "@op/cancel",
+        "@op/extend",
+        "@op/persist",
+    ] {
+        answered("config-refusal", probe, "not_established");
+    }
+    for probe in ["@op/set/zk2-conform-none", "@op/set/*"] {
+        answered("config-refusal", probe, "not_asked");
+    }
+    answered("config-dry-run", "@op/set/duty", "not_established");
+    // The probes changed nothing: the revision is still 0.
+    assert_eq!(rf.cfg.state().await.revision, 0);
+
+    let run = bus
+        .zenctl(&["config", "set", "lab/rf0", "duty", "fraction_ppm=20000"])
+        .await;
+    exits(&run, 0);
+    let mut args = doctor_args(&["--clocks-synced", "--format", "json"]);
+    for c in [
+        "config-projection",
+        "config-overdue",
+        "config-unpersisted",
+        "config-desired",
+    ] {
+        args.extend(["--check", c]);
+    }
+    let run = bus.zenctl(&args).await;
+    let doc = run.json();
+    let f = &check_row(&doc, "config-unpersisted")["findings"][0];
+    assert_eq!(
+        (f["subject"].as_str(), f["severity"].as_str()),
+        (Some("lab/rf0 duty.fraction_ppm"), Some("info")),
+        "{run}"
+    );
+    for id in ["config-projection", "config-overdue", "config-desired"] {
+        assert_eq!(
+            check_row(&doc, id)["verdict"]["answer"],
+            "not_established",
+            "{id}: {run}"
+        );
+    }
+    assert_eq!(doc["scope"]["config"]["services"], 1, "{run}");
+    exits(&run, 0);
+    bus.keep(rf.svc);
+}
+
 // ─── alarms.v1: scenarios.md §8–§10, the tool's sections (#800, AC) ────────
 //
 // Common setup, the text's: R1 a router with timestamping on, owners and the

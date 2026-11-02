@@ -6,6 +6,26 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `config` reads and drives a `config.v2` owner (#985 G3)
+
+`config.v2` 0.1 (`spec/profiles/config/v2.md`) moves the schema into each
+owner's own config contract and answers every operation with one packed
+record. The `config` verbs read and drive it beside `config.v1`, under the
+same exits.
+
+| Before | Now | Notes |
+|---|---|---|
+| `config get\|set\|confirm\|cancel\|extend\|persist` read `config.v1` alone; a service whose descriptor lists no `config.v1` `not_listed` | a service whose descriptor's `profiles` lists `config.v2` is read through its config interface, the revision its descriptor names that uses `config.v2` (retrieved, or held by `--contracts`); the report says `"profile": "config.v2"` and carries `record` (the interface, the revision, the key, the epoch, the record as the fixtures spell it) | v2 §2.1; `not_listed` now says neither profile is listed |
+| `config get`'s `status` always present | absent for `config.v2`, whose one record replaces the view and the status: `view` is the record read as the view (tokens and the instance number in decimal), `projection` not asked (`one_record`) | v2 §2.3, §5 |
+| "will this value survive a restart?" from the view's `startup` | for `config.v2`, from the record's `differs` bit: `startup_differs` without the startup value | v2 §2.3 |
+| an act's answer `applied`, `pending`, `view` or `status` | for `config.v2`, `record`: the record after the act as the view reads it and as it is (`record`), its payload's `size` and as-of `mark`; the act report's `request_bytes` is `CH · record` | v2 §2.9; a dry run's `record.would_be` is set |
+| `config set` on a contract group: refused by the owner, `app` `restart-required` | for `config.v2`, refused here, nothing sent: its contract serves no `set` for it | v2 §2.4 |
+| a refusal: no mark | `refusal.mark`, the error form's as-of mark | core §5.2 |
+| `--status` on a control operation | refused for `config.v2`, exit 2: every reply is the record | v2 §2.10 |
+| tokens, revisions, windows and keys as `config.v1` spells them | for `config.v2` a token is a 48-bit integer, an idempotency key a 32-bit nonce, a window at most 65,535 s: anything else refused here, exit 2 | v2 §2.6, §2.8, §2.14 |
+| — | `--contracts`, `--catalog` on every `config` verb; `--iface` across a face among several `config.v2` contracts in hand; `--face-policy F --face NAME` there, the face's `reply_timeout_ms` the default `--timeout` | core §8.6, §8.1 (#988 L4) |
+| `doctor`'s `config-*` and `check conform`'s config cases read `config.v1` | also each `config.v2` owner's record (`config-projection` not asked of one); `check conform <addr> <config iface>` probes it, the undeclared group and the wildcard not made | v2 §2.2–§2.16 |
+
 ## Unreleased (`main`, zk2) — zk2py round 101's bugs: packed requests, CBOR forms (#609, #985)
 
 Core 0.95 answers zk2py's round 101 (F-472 to F-479).

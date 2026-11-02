@@ -618,7 +618,7 @@ pub(crate) enum Command {
     /// No session is opened. Verbatim chunks' footguns (core §1.3), diagnosed.
     #[command(subcommand)]
     Key(KeyCmd),
-    /// A running service's configuration, through config.v1.
+    /// A running service's configuration, through config.v1 or config.v2.
     ///
     /// config.v1 (spec/profiles/config/v1.md), through a session in the
     /// deployment's namespace: `get` reads a service's view (the served schema
@@ -628,7 +628,10 @@ pub(crate) enum Command {
     /// against the served schema before anything is sent; `confirm`,
     /// `cancel`, `extend` and `persist` drive a pending change to its end.
     /// Each act is its own key, so a deployment grants each separately
-    /// (§2.21).
+    /// (§2.21). A service whose descriptor's profiles list config.v2
+    /// (spec/profiles/config/v2.md) is read through its own config contract,
+    /// held (--contracts) or retrieved: its one record stands for the view,
+    /// its schema is the contract's, and every act answers the record.
     #[command(subcommand)]
     Config(ConfigCmd),
     /// This host's system, as hostid.v1 mints it from the machine id.
@@ -3443,11 +3446,37 @@ pub(crate) struct ConfigGetArgs {
     pub(crate) clocks_synced: bool,
     /// The service sits across a constrained face (spec §8.5), where
     /// presence and descriptors do not cross: the deployment's word that it
-    /// implements config.v1 (§2.19, R7).
+    /// implements config.v1, or, with a revision in --contracts that uses
+    /// config.v2, that config interface (§2.19, R7).
     #[arg(long)]
     pub(crate) across_face: bool,
     #[command(flatten)]
+    pub(crate) v2: ConfigV2Args,
+    #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
+}
+
+/// `config.v2`'s flags on every `config` verb (#985 G3): the contracts a
+/// `config.v2` owner's record and requests are read by, the catalog its
+/// times count from, and across a face which interface and which face.
+#[derive(Args, Clone)]
+pub(crate) struct ConfigV2Args {
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
+    /// Across a face, the config interface (`<name>.v<major>`) among the
+    /// revisions in hand that use config.v2: the deployment's word for the
+    /// service's, since no descriptor crosses (config.v2 §2.1).
+    #[arg(long, value_name = "IFACE", requires = "across_face")]
+    pub(crate) iface: Option<String>,
+    /// With --face, the `link.v2` face policy the service sits across: the
+    /// default --timeout is the face's `reply_timeout_ms` (core §8.1), and
+    /// the session runs its `[transport]` (#988 L4). A `link.v1` policy is
+    /// refused, exit 2.
+    #[arg(long = "face-policy", value_name = "FILE", requires_all = ["across_face", "face"])]
+    pub(crate) face_policy: Option<PathBuf>,
+    /// The face of --face-policy, by its name (`[face.<name>]`).
+    #[arg(long = "face", value_name = "NAME", requires = "face_policy")]
+    pub(crate) face: Option<String>,
 }
 
 /// The call metadata an act claims (core O7): never authentication.
@@ -3519,6 +3548,8 @@ pub(crate) struct ConfigSetArgs {
     #[command(flatten)]
     pub(crate) claim: ClaimArgs,
     #[command(flatten)]
+    pub(crate) v2: ConfigV2Args,
+    #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
 }
 
@@ -3544,6 +3575,8 @@ pub(crate) struct ConfigTokenArgs {
     pub(crate) across_face: bool,
     #[command(flatten)]
     pub(crate) claim: ClaimArgs,
+    #[command(flatten)]
+    pub(crate) v2: ConfigV2Args,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
 }
