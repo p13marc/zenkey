@@ -8,10 +8,11 @@
 //!    any revision of the major reads the interface). It confirms a status
 //!    on this host's monotonic clock, by its puts and, since `health.v1`
 //!    0.8, by the owner's heartbeats that vouch for it (`freshness.v2`
-//!    §2.5; #978's F4), each one a confirmation §5's clock question
-//!    reads, as a put is. It measures each
-//!    stamping clock on live puts (§2.6, ground 2), and records the order
-//!    of status puts and faults that §5's clock question reads;
+//!    §2.5; #978's F4). It measures each stamping clock on live puts (§2.6,
+//!    ground 2), and records, in order, the status's puts and deletes, the
+//!    faults, and each heartbeat read in step with whether its time is
+//!    known: §5's clock question reads that time, since `health.v1` 0.9
+//!    (#978's F6), never a put, which the guard no longer holds;
 //! 2. presence and every instance's descriptor (core §8.1, §3.3): a service
 //!    implements `health.v1` when its descriptor lists it, token or not
 //!    (§2.7). Across a constrained face neither crosses, and the
@@ -55,8 +56,9 @@ use crate::model::catalog::{Catalog, Observed};
 const ARCHIVE: &str = "archive.v1";
 
 /// How many deliveries of one service a window keeps in order; past it the
-/// oldest go. Only the order of the last status put and the last
-/// `clock_ahead` fault is read, and repeats collapse, so this is generous.
+/// oldest go. Only the order of the last heartbeat of each kind and the
+/// last `clock_ahead` fault is read, and repeats collapse, so this is
+/// generous.
 pub const SEQUENCE_CAP: usize = 64;
 
 /// Which services a reading covers.
@@ -677,22 +679,26 @@ impl Window {
                         s.push(Heard::StatusDeleted);
                         return;
                     }
-                    s.push(Heard::Status);
+                    s.push(Heard::StatusPut);
                     s.last = Some(Replied {
                         value: Some(StatusValue::decode(&d.sample.payload().to_bytes())),
                         stamp: Stamped::of(&d.sample),
                     });
                 },
-                // A heartbeat that vouched for the status confirms it, as a
-                // put does (`freshness.v2` §2.5): §5's clock question reads
-                // it so, and a status the heartbeat confirms after a
-                // `clock_ahead` fault says the guard released.
+                // A heartbeat read in step, its bit set or clear: §5's clock
+                // question reads its time, unknown while the owner's guard
+                // holds (`freshness.v2` §2.10), so one whose time is known
+                // after a `clock_ahead` fault says the guard released.
                 move |c: zenkey::consumer::Confirmation| {
-                    if c.keys.is_empty() {
-                        return;
-                    }
+                    let known = c
+                        .owner_time
+                        .is_some_and(|t| t != zenkey::model::heartbeat::Time::Unknown);
                     let mut all = confirmed.lock().expect("not poisoned");
-                    all.entry(c.provider).or_default().push(Heard::Status);
+                    all.entry(c.provider).or_default().push(if known {
+                        Heard::Heartbeat
+                    } else {
+                        Heard::HeartbeatHeld
+                    });
                 },
             )
             .await
@@ -916,16 +922,16 @@ mod tests {
         assert_eq!(StatusValue::decode(&[0xff, 0xff]).level, Read::Undecodable);
         let mut h = ServiceHeard::default();
         for x in [
-            Heard::Status,
-            Heard::Status,
+            Heard::Heartbeat,
+            Heard::Heartbeat,
             Heard::ClockAhead,
-            Heard::Status,
+            Heard::Heartbeat,
         ] {
             h.push(x);
         }
         assert_eq!(
             h.sequence,
-            [Heard::Status, Heard::ClockAhead, Heard::Status],
+            [Heard::Heartbeat, Heard::ClockAhead, Heard::Heartbeat],
             "repeats collapse, the order stays"
         );
     }

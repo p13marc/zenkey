@@ -923,7 +923,7 @@ questions:
 |---|---|---|
 | is it healthy? | `unhealthy` at its level (its status, or a current check worse than it), and `stale` — its own verdict, never FAILED, never down | `unobservable` (a reply's age with no trusted clock, a silent GET, an unknown level); `not_asked` (absent: presence's word, not a level; not listing `health.v1`) |
 | does its status agree with its checks? | a check worse than a fresh status in **both** readings: the owner breaks §2.2 | one reading's break; a status not fresh |
-| is its clock ahead? | a `clock_ahead` fault no confirmation followed | nothing heard in the window |
+| is its clock ahead? | a `clock_ahead` fault no heartbeat with its time known followed | nothing heard in the window, or the last heartbeat's time unknown |
 | how healthy are they? | the roll-up: the worst established level, every verdict counted apart | no established verdict, no worst level |
 
 A reply's stamp is aged only against a trusted clock: the window (`--for`,

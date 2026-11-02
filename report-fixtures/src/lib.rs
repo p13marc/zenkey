@@ -614,7 +614,7 @@ pub fn health_report() -> HealthReport {
         clock_ahead: answer(
             HealthAnswerToken::No,
             "confirmed",
-            "its status was confirmed after its last clock_ahead fault, or with none heard",
+            "its last heartbeat had its time known, after its last clock_ahead fault or with none heard",
         ),
         status: None,
         checks: vec![],
@@ -676,7 +676,7 @@ pub fn health_report() -> HealthReport {
     ahead.clock_ahead = answer(
         HealthAnswerToken::Yes,
         "clock_ahead",
-        "a clock_ahead fault was heard, and no confirmation of its status since",
+        "a clock_ahead fault was heard, and no heartbeat with its time known since",
     );
     ahead.faults = 2;
     ahead.last_fault = Some(FaultSeen {
