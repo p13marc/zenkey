@@ -1,0 +1,69 @@
+# zenoh-modem's access control (spec §11), as each of its radio routers
+# sees it, for the link.v2 face policies beside this file (#988 L5). One
+# router per medium, each on its own node: rf0 on h-3fa9c2d41b7e, lora0 on
+# h-c2a95e41d7f0, sat0 on h-71c0e2a9d4b3. Each device service implements
+# modem.v3, config.v1 and health.v1, as the README's "Shape" says.
+#
+# One tool, three principals: `local` on the node, `ground` across the RF
+# and LoRa faces, and `ground-gateway` across SBD, the gateway's router. A
+# face policy names one of them its far principal; that principal's policy
+# alone carries the face's denies, and every other principal's subject is
+# kept off the face's link protocols (link.v1 §2.4). Every grant a resource
+# could need is here, so that what a face denies is the face's.
+
+[[principal]]
+user     = "rf-node"
+services = ["h-3fa9c2d41b7e/rf0"]
+
+[[principal]]
+user     = "lora-node"
+services = ["h-c2a95e41d7f0/lora0"]
+
+[[principal]]
+user     = "sat-node"
+services = ["h-71c0e2a9d4b3/sat0"]
+
+[[principal]]
+user  = "local"
+tools = ["console"]
+
+[[principal]]
+user  = "ground"
+tools = ["console"]
+
+[[principal]]
+user  = "ground-gateway"
+tools = ["console"]
+
+[[service]]
+address    = "h-3fa9c2d41b7e/rf0"
+implements = ["modem.v3", "config.v1", "health.v1"]
+
+[[service]]
+address    = "h-c2a95e41d7f0/lora0"
+implements = ["modem.v3", "config.v1", "health.v1"]
+
+[[service]]
+address    = "h-71c0e2a9d4b3/sat0"
+implements = ["modem.v3", "config.v1", "health.v1"]
+
+# Every stream, state and event (the default resources) of each device, and
+# every config.v1 call: GETs and calls cross a face by grant (link.v1 §2.9).
+[[tool]]
+name = "console"
+
+[tool.bindings.modem]
+interface = "modem.v3"
+providers = ["h-3fa9c2d41b7e/rf0", "h-c2a95e41d7f0/lora0", "h-71c0e2a9d4b3/sat0"]
+
+[tool.bindings.config]
+interface = "config.v1"
+providers = ["h-3fa9c2d41b7e/rf0", "h-c2a95e41d7f0/lora0", "h-71c0e2a9d4b3/sat0"]
+
+[tool.bindings.health]
+interface = "health.v1"
+providers = ["h-3fa9c2d41b7e/rf0", "h-c2a95e41d7f0/lora0", "h-71c0e2a9d4b3/sat0"]
+
+[[tool.calls]]
+interface = "config.v1"
+providers = ["h-3fa9c2d41b7e/rf0", "h-c2a95e41d7f0/lora0", "h-71c0e2a9d4b3/sat0"]
