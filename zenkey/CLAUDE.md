@@ -151,11 +151,34 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   `Answer` reads its value form (`Answer::new(addr, sample, op.encoding)`,
   `form()` → `ReplyForm::{Bare, Value, Refused}`, `mark`, `tag`,
   `record`, `record_encoding`, `value` on the contract's encoding), and
-  `typed::call` decodes the record by CH's tag. Owners still read a
-  request bare (C4c). `tests/common/forms_owner.rs` is a raw owner
-  answering in the forms, which `operations.rs`'s
+  `typed::call` decodes the record by CH's tag. `tests/common/forms_owner.rs`
+  is a raw owner answering in the forms, which `operations.rs`'s
   `a_caller_reads_the_forms_and_the_bare_wire_alike`, the fleet's
   `zk2_core.rs` and zenctl's `live_zk2.rs` include.
+  The flip (#985 C4c, core 0.94): an `OpSpec` holds the operation's
+  `zenkey_model::forms::Forms`, the service's `Minter` and deployment
+  epoch; `Call::reply`/`summary` write the value form (tag the
+  `response`/`summary` type's) and `refuse` the error form (tag the
+  `error` type's or 0, `operation::error_form`: code and cause by number,
+  an empty message none, an `app` detail in the type's own bytes, a JSON
+  Schema value as JSON or CBOR, bytes only when they parse so, a protobuf
+  or raw detail its bytes, a packed value by its layout under the epoch;
+  anything else `internal`), every one under `zenoh/bytes` with
+  `Call::mark` (`Minter::mark`: the run, the last state or event seq
+  minted, 0 for none; a reply mints none). `value_form`, `error_form`,
+  `reply_form`, `refuse_form` send bytes made earlier: config.v1 keeps
+  each idempotency key's first answer's bytes while the model
+  `holds_key`, and answers a retry the model `replays` with them, its mark
+  the first's. A request is read before the handler (`invalid_request`
+  on §7.5's refusal or a packed record refused under CH's tag); one under
+  another `Encoding` is the bare wire's (§5.1's MAY, until C4d);
+  `Call::record`, `request_tag`, `record_encoding`, `deployment_epoch`.
+  `Client`/`Fleet` write `CH · record` under `zenoh/bytes`, and carry a
+  deployment epoch (`with_deployment_epoch`, a role's client the
+  service's), the typed calls and serving encoding and decoding packed
+  records under it (`Sink::new_in`). `Raw::detail` and `Packed::detail`
+  changed for the form (bytes; the JSON reading). `operations.rs`'s
+  `s9_a_calls_forms` is `operations.md` §9.
   Everything session-free stays in `zenkey-model`, including `decode`, the
   bundle-only decoder tools use (§7.2).
   Codegen's runtime half (#611, FI): `codec` (a Rust type and how it is

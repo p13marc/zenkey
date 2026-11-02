@@ -350,6 +350,17 @@ struct Core {
     /// the last revert, refused ones aside: what a delete reverts
     /// (`desired.v1` §2.16).
     named: std::collections::BTreeSet<(String, String)>,
+    /// The bytes each idempotency key's first answer went out as, for as
+    /// long as the owner holds it (§2.14): a retry gets them again, its
+    /// as-of mark the first answer's (core §5.1, "An answer sent again").
+    first: BTreeMap<String, Sent>,
+}
+
+/// An answer's bytes as they went out: a value form, or an error form.
+#[derive(Debug, Clone)]
+struct Sent {
+    form: Vec<u8>,
+    error: bool,
 }
 
 impl Core {
@@ -441,6 +452,7 @@ impl Configuration {
                 desired: None,
                 acted: None,
                 named: std::collections::BTreeSet::new(),
+                first: BTreeMap::new(),
             }),
             published: tokio::sync::Mutex::new(None),
             view,
@@ -817,13 +829,14 @@ impl Inner {
         }
     }
 
-    /// The reply a call is owed, or its refusal.
-    async fn answer(&self, call: &Call, done: Done) -> std::result::Result<(), OpError> {
-        match done.reply {
-            Some(Ok(reply)) => call
-                .reply_value(&reply.to_json())
-                .await
-                .map_err(OpError::from),
+    /// The reply a call is owed, or its refusal, in its form now: a value
+    /// form or an error form under the instance's as-of mark.
+    fn answer_form(&self, call: &Call, done: Done) -> Sent {
+        let refusal = match done.reply {
+            Some(Ok(reply)) => match call.value_form_of(&reply.to_json()) {
+                Ok(form) => return Sent { form, error: false },
+                Err(e) => OpError::internal(format!("config.v1: the reply does not encode: {e}")),
+            },
             Some(Err(r)) => {
                 tracing::info!(
                     service = %self.service, instance = %self.instance,
@@ -831,10 +844,30 @@ impl Inner {
                     why = %r.message,
                     "config.v1: refused"
                 );
-                Err(envelope(r))
+                envelope(r)
             }
-            None => Err(OpError::internal("config.v1: the owner answered nothing")),
+            None => OpError::internal("config.v1: the owner answered nothing"),
+        };
+        Sent {
+            form: call.error_form(&refusal),
+            error: true,
         }
+    }
+
+    /// Sends an answer's bytes as they are.
+    async fn send(call: &Call, sent: Sent) -> std::result::Result<(), OpError> {
+        let out = if sent.error {
+            call.refuse_form(sent.form).await
+        } else {
+            call.reply_form(sent.form).await
+        };
+        out.map_err(OpError::from)
+    }
+
+    /// The reply a call is owed, or its refusal.
+    async fn answer(&self, call: &Call, done: Done) -> std::result::Result<(), OpError> {
+        let sent = self.answer_form(call, done);
+        Self::send(call, sent).await
     }
 
     /// `@op/set/{group}` (§2.5).
@@ -855,16 +888,39 @@ impl Inner {
             request_id = who.request_id.as_deref().unwrap_or("-"),
             "config.v1: set"
         );
-        let step = {
+        // §2.14: a retry within 300 s gets the first answer, the bytes it
+        // went out as (core §5.1, "An answer sent again").
+        let (step, replay) = {
             let mut c = self.core.lock().await;
-            let s = c.owner.set(self.now(), &group, &req, &who);
+            let now = self.now();
+            let replay = if c.owner.replays(now, &group, &req) {
+                req.idempotency_key
+                    .as_ref()
+                    .and_then(|k| c.first.get(k).cloned())
+            } else {
+                None
+            };
+            let s = c.owner.set(now, &group, &req, &who);
             c.after(&s);
-            s
+            (s, replay)
         };
         let done = self.drive(step).await;
         self.flush().await;
         self.wake.notify_one();
-        self.answer(&call, done).await
+        if let Some(first) = replay {
+            return Self::send(&call, first).await;
+        }
+        let sent = self.answer_form(&call, done);
+        if let Some(k) = &req.idempotency_key {
+            let mut c = self.core.lock().await;
+            let now = self.now();
+            let Core { owner, first, .. } = &mut *c;
+            first.retain(|key, _| owner.holds_key(now, key));
+            if owner.holds_key(now, k) && !first.contains_key(k) {
+                first.insert(k.clone(), sent.clone());
+            }
+        }
+        Self::send(&call, sent).await
     }
 
     /// `confirm`, `cancel` and `extend` (§2.10).

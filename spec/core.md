@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.93** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.94** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -1008,8 +1008,8 @@ time a profile reads (the table below).
   - **Explicit streams.** An `@stream` sample carries no envelope at this
     version. Its frames would be copied into one, or out of one, which
     loses the zero-copy path §7.4 serves.
-  - **What keeps its wire.** Operations, the descriptor and bundles carry
-    no envelope.
+  - **What keeps its wire.** The descriptor and bundles carry no
+    envelope. A call carries §7.5's forms instead (§5.1).
 - **The run** is an instance's ordering epoch, of 16 or 32 bits, as
   §7.5's width bit says. Two runs of different widths are two runs,
   whatever their values.
@@ -1280,7 +1280,7 @@ written. This section is what the core requires of it.
 |---|---|---|
 | O1 | **Owner:** an operation's queryable MUST be declared on its concrete key (or its template), and MUST be `complete`. A concrete call with `BestMatching` then executes on at most one instance **while one instance serves the operation**. `BestMatching` reaches one `complete` queryable on each router, so a split-brain across routers runs a call on each side. Exclusivity beyond that is `redundancy.v1`'s. **Caller:** a concrete call MUST use target `BestMatching` and consolidation `None`, both set explicitly. | `[Sc: operations.md §1]` |
 | O2 | **Owner:** a call whose key expression is not concrete MUST be refused with `fanout_forbidden`, unless the operation declares `fanout = "allowed"`, whatever the access control allows. **Caller:** a call to a fan-out operation MUST use target `All` and consolidation `None`. | `[Sc: operations.md §2]` |
-| O3 | **Owner:** a reply MUST go on the operation's own concrete key, a member's for a call over a template (below). Success is a value reply; failure is a `reply_err` carrying the error envelope (§5.2). Every call that reaches an owner's queryable MUST get one or the other, never silence (below). The active instance of a service MUST answer a call to an optional operation it does not expose with `unavailable` and its cause. A standby declares no operation queryable (§6), so it cannot intercept calls. | `[Sc: operations.md §3]`; `[F: errors/cases.json]` |
+| O3 | **Owner:** a reply MUST go on the operation's own concrete key, a member's for a call over a template (below). Success is a reply in §7.5's value form; failure is a `reply_err` in its error form (§5.2). Every call that reaches an owner's queryable MUST get one or the other, never silence (below). The active instance of a service MUST answer a call to an optional operation it does not expose with `unavailable` and its cause. A standby declares no operation queryable (§6), so it cannot intercept calls. | `[Sc: operations.md §3, §9]`; `[F: errors/forms.json]` |
 | O4 | **Caller:** MUST NOT retry an operation that is not declared `idempotent`, and retries one that is only after silence (below). | `[Sc: operations.md §4]` |
 | O5 | **Caller and tool:** MUST NOT treat an empty reply set as a verdict. Access-control refusals return empty since zenoh 1.3. A tool attributes silence through presence, which a refusal can empty too (observer.md §3.4). | `[Sc: operations.md §5]` |
 | O6 | **Owner:** an operation declared `replies = "many"` gives zero or more value replies, then completion. With a declared `summary`, each replier MUST end with exactly one summary reply, whose attachment is the ASCII bytes `summary`; value replies carry none. **Caller:** MUST use consolidation `None`, since `Latest` and `Auto` drop replies (spike S6, Appendix B). A replier without exactly one summary is possibly partial (below). | `[Sc: operations.md §6]`; `[F: contracts/e033-summary]` |
@@ -1296,21 +1296,23 @@ SHOULD NOT repeat a template parameter (W102). `[F: contracts/w102-repeat]`
   zenoh's default is `Latest` (§4.1): it holds the reply until the query
   completes, and keeps one reply per key. So the second execution of a
   split-brain would arrive unseen. A one-reply caller takes the first value
-  or envelope on the call's key, without waiting for the query to
+  on the call's key, or the first error, without waiting for the query to
   complete. `[Sc: operations.md §1]`
 - **The timeout** is the caller's (§8.1). A caller that sets none waits
   the operation's `timeout_ms`, the contract's recommendation, and with
   neither, 10 s, zenoh's default query timeout (Appendix B). Across a
   constrained face, it waits at least the face's reply timeout (§8.1). A
-  call that ends there with no value and no envelope is silent (O5).
+  call that ends there with no value and no error is silent (O5).
 - **Retries (O4)** are opt-in: a caller makes one attempt unless it is
   configured for more, and calls an operation that is not `idempotent` once,
   whatever the configuration.
-  - A retry follows silence only: no value and no envelope before the
-    timeout, the transport's own error reply included (§5.2).
-  - An envelope is an answer, `busy` included, and so is a malformed one.
-    Calling again after `busy` is a new call, which the application
-    decides, never a retry.
+  - A retry follows silence only: no value and no error before the
+    timeout. A `reply_err` that is the transport's is silence too, a
+    malformed error among them (§5.2).
+  - An error is an answer, `busy` included. Calling again after `busy` is
+    a new call, which the application decides, never a retry.
+  - A value is an answer, and so is a reply that does not parse as one:
+    it came on the call's key.
   - The reference retries no fan-out: every service that answered would
     run it again.
 
@@ -1318,7 +1320,7 @@ SHOULD NOT repeat a template parameter (W102). `[F: contracts/w102-repeat]`
 
 **Answering.**
 - **Every call is answered (O3).** A call that reaches an owner's
-  queryable gets a value or an envelope. How a tool judges O3 from
+  queryable gets a value or an error. How a tool judges O3 from
   outside, **Where a tool learns its grants** and what it holds when
   **Told so**: [`observer.md`](observer.md) §7.2.
 
@@ -1352,9 +1354,10 @@ SHOULD NOT repeat a template parameter (W102). `[F: contracts/w102-repeat]`
   chunk is not a canonical slug (§1.4, §2.2), is refused with
   `invalid_request`: the key is malformed. `not_found` is for a well-formed
   member the owner does not have. `[Sc: operations.md §3]`
-- **The request.** A request that does not decode as the operation's
-  `request` type, by its `Encoding` and then the contract's (§7.2), is
-  refused with `invalid_request`.
+- **The request.** A request that §7.5's parse refuses, or whose record
+  does not decode as the operation's `request` type, is refused with
+  `invalid_request`. The record is read on the contract's `encoding`
+  (§7.2), and a packed one under its CH's tag (§7.6).
   - That decode is the check the core requires. An owner MAY decode into a
     type generated from the schema, or checked against it, and need not
     evaluate the JSON Schema itself; the reference does not.
@@ -1422,7 +1425,7 @@ SHOULD NOT repeat a template parameter (W102). `[F: contracts/w102-repeat]`
 - **Attribution (O3, O5).** A value reply is attributed by its key. A
   refusal cannot be: in zenoh 1.10.1, a `reply_err` carries no key
   expression, and the replier's id is unstable API (Appendix B), which the
-  core does not use (§0). A caller reports a fan-out's envelopes
+  core does not use (§0). A caller reports a fan-out's errors
   unattributed. Which selected services sent no value it learns from
   presence (§8.1): each of them refused or was silent, and the caller
   cannot tell which. `[Sc: operations.md §2]`
@@ -1444,15 +1447,35 @@ Anything else is no metadata: bytes that are not JSON, a value that is not
 an object, or a member of another type, `null` included. A call is never
 refused for its attachment. `[Sc: operations.md §7]`
 
-**The forms.** §7.5 defines a call's three forms: its request, a value
-and an error. No rule at this version has a caller or an owner write
-them. A call's request, its values and its errors keep the wire this
-section and §5.2 describe.
+**The forms.** A call travels in §7.5's forms, whatever its types'
+kind: a JSON Schema, protobuf, raw or packed record is carried alike. A
+form's record is encoded as its type says, on the contract's `encoding`
+(§7.2).
+- **Caller:** a caller MUST write its request as §7.5's request,
+  `CH · record`, under the `Encoding` `zenoh/bytes`. CH's width bit is 0,
+  and its tag is the `request` type's.
+  `[F: envelope/calls.json, vectors.json]` `[Sc: operations.md §9]`
+- **Owner:** an owner MUST write each value reply in §7.5's value form,
+  under the `Encoding` `zenoh/bytes`, with its as-of mark (below). CH's
+  tag is the `response` type's, or the `summary` type's on a summary
+  reply (O6). `[F: envelope/calls.json, vectors.json]`
+  `[Sc: operations.md §1, §9]`
+- **Reading a value.** A caller reads a reply by §7.5's parse, and its
+  record as the `response` type, or the `summary` type on a summary
+  reply. A reply the parse or the type refuses is malformed, and an
+  answer all the same (above). `[F: envelope/calls.json]`
+- **Its errors** travel in the error form (§5.2).
 - **The as-of mark.** A value's and an error's run and seq are the
   replying instance's **as-of mark**. The run is the one it writes under
   when it replies (§4.3). The seq is the last it minted for state and
   events under that run, or 0 when it has minted none. A reply mints no
-  seq.
+  seq. `[Sc: operations.md §9]`
+- **An answer sent again.** A profile can have an owner answer a call
+  with an answer it sent before, as `config.v1` answers a retried `set`
+  (its §2.14). The owner MUST then send that answer's bytes unchanged,
+  its mark included. `[Sc: profiles/config/scenarios.md §10]`
+  - The mark dates the first answer, not the repeat. A later mark would
+    let a caller order the state it carries above a newer put.
 - **What it tells a caller.** It learns which run answered, without
   presence. A run that changes is a new instance, or one that took a new
   run (§4.3). Within one run, it can order the reply against the state it
@@ -1461,17 +1484,25 @@ section and §5.2 describe.
 - **An error's run** attributes nothing. A `reply_err` still carries no
   key, so a fan-out's errors stay unattributed (above). A tool that holds
   descriptors may map the run to the instance that states it (§3.3).
+- **The bare wire.** An earlier version of this text had a call carry no
+  form. Its request and its value travelled bare, under their type's
+  `Encoding` (§7.2), and its error in §5.2's envelope.
+  - An implementation MAY read a call's sample whose `Encoding` is not
+    `zenoh/bytes` as the bare wire. It tells the two wires apart by the
+    `Encoding` alone: a bare record can parse as a form (§7.5).
+  - None writes the bare wire: the rules above say what each writes.
 
-### 5.2 The error envelope
+### 5.2 Errors
 
-A failed call replies with `reply_err` and an envelope with these fields:
+A failed call replies with `reply_err`, carrying an **error** with these
+fields:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `code` | string | One of `invalid_request`, `not_found`, `unavailable`, `forbidden`, `fanout_forbidden`, `busy`, `internal`, `app` |
-| `message` | string | For a human, never parsed |
-| `cause` | string or null | With `unavailable` only, and then required: `build`, `config` or `capability` (§2.3) |
-| `detail` | a value, bytes, or null | With `app` only, and optional: a value of the operation's declared `error` type, inline (JSON, CBOR), as its encoded message (protobuf), or as base64 text of its bytes (raw, below) |
+| `code` | one of eight | `invalid_request`, `not_found`, `unavailable`, `forbidden`, `fanout_forbidden`, `busy`, `internal`, `app` |
+| `message` | text, optional | For a human, never parsed: at most 255 bytes of UTF-8 |
+| `cause` | one of three | With `unavailable` only, and then required: `build`, `config` or `capability` (§2.3) |
+| `detail` | bytes, optional | With `app` only: a value of the operation's declared `error` type, encoded as that type says |
 
 **The codes.** Each says what failed, for a caller that reads no
 message:
@@ -1500,28 +1531,83 @@ something for a program to read leaves it in the owner's state, which a
 program can GET, and names it for a person in the message, as
 `config.v1`'s `busy` names the pending change's token.
 
-**Encoding.** The envelope's kind follows the operation's `error` type when
-it declares one, else its `response` type:
-- **A JSON Schema type:** the envelope is encoded in the operation's
-  `encoding`, JSON or CBOR.
-- **A protobuf type:** the envelope is the message `zk2.core.v1.Error`.
-- **A raw type:** the envelope is JSON. A raw `error` type's detail is its
-  bytes as base64 text (RFC 4648 §4, padded), the JSON form of bytes
-  (§7.2). `[F: errors/cases.json]`
-- **The `Encoding` of the owner's reply** MUST say which:
-  - `application/json` or `application/cbor`;
-  - or `application/protobuf` with the schema suffix `zk2.core.v1.Error`.
+**The error form.** An owner MUST answer a failed call in §7.5's error
+form, under the `Encoding` `zenoh/bytes`, with its as-of mark (§5.1).
+`[F: errors/forms.json, envelope/calls.json]` `[Sc: operations.md §3, §9]`
+- **CH's tag** is the operation's `error` type's, or 0 when it declares
+  none (§7.5).
+- **The code and the cause** are numbers, in the order of the code table
+  above and of `build`, `config` and `capability`.
+- **The message** is optional. A writer cuts one longer than 255 bytes
+  (§7.5).
+- **The detail** is the bytes of a value of the operation's `error` type,
+  encoded as that type says. A JSON Schema type's are JSON or CBOR, on
+  the operation's `encoding`. A protobuf type's are its encoded message,
+  a raw type's are themselves, never base64, and a packed type's are its
+  record (§7.6).
+- **Its refusals.** §7.5's parse refuses a cause on a code other than
+  `unavailable`, `unavailable` without one (`cause`), and a detail on a
+  code other than `app` (`detail`). No code is unknown: three bits hold
+  eight.
 
 **`app`** is the operation's own failure, and any operation MAY refuse
 with it.
 - **The detail** is optional. An operation that declares no `error` type
-  has none to send: its envelope follows the `response` type, and an owner
-  MUST NOT put a detail in it. With an `error` type, an owner MAY send a
-  detail, and then it is a value of that type, in the form above.
-- **A detail that does not fit** its envelope, such as bytes in a JSON or
-  CBOR envelope other than a raw type's base64 text, or a value in a
-  protobuf one, MUST NOT be sent by an owner. The reference sends
-  `internal` instead.
+  has none to send, and an owner MUST NOT put a detail in its error.
+  `[F: envelope/calls.json]` With an `error` type, an owner MAY send a
+  detail, and then it is a value of that type.
+- **A detail its type cannot encode,** such as bytes for a JSON Schema
+  type, a value for a protobuf or raw one, or a packed value with no code
+  (§7.6), MUST NOT be sent by an owner. The reference sends `internal`
+  instead. `[Sc: operations.md §3]`
+- **Reading one.** A caller holding the contract decodes a detail as the
+  `error` type, a packed one under CH's tag (§7.6). A detail the type
+  refuses leaves the error the owner's, its detail undecodable. A tool
+  without the contract shows the detail's bytes. `[F: envelope/calls.json]`
+
+**Reading an error.** A caller or a tool MUST read a `reply_err` under
+the `Encoding` `zenoh/bytes` by §7.5's parse. It holds an error the parse
+accepts as the owner's. A caller or a tool MUST read every other
+`reply_err` as the transport's: one the parse refuses, and one under
+another `Encoding`. `[F: errors/forms.json]` `[Sc: operations.md §9]`
+- **No contract is needed.** The parse reads the code, the cause and the
+  message without one, as a key is read (§1.1). Only a detail needs the
+  `error` type.
+- **The bare wire.** A reader of the bare wire (§5.1) reads a `reply_err`
+  under one of the envelope's three encodings as that envelope (below),
+  not as the transport's.
+
+**Transport errors.** Zenoh answers some calls with a reply error of its
+own (Appendix B).
+- **A querier's own,** at its timeout: `Timeout`, under `zenoh/string`.
+- **A router's,** when its timeout ends a query it routed: the 7 bytes
+  `Timeout`, under `zenoh/bytes`. Its first byte, `T`, is `0x54`: a
+  value's CH, which a `reply_err` does not carry (`sample_kind`, §7.5).
+- **Neither is an owner's error,** so a caller reads each as silence
+  (§5.1, "Retries"). `[F: errors/forms.json]` `[Sc: operations.md §9]`
+- **A malformed error** is the transport's too. A `reply_err` carries no
+  key, so its bytes alone tell an owner's error from a router's. A
+  caller may retry after one (O4).
+- **What it rests on.** zenoh 1.10.1 sends that one payload of its own
+  under `zenoh/bytes` (Appendix B). A later Zenoh's own error that parsed
+  as an error form would read as an owner's.
+
+**The envelope, on the bare wire.** An earlier version of this text had
+an owner answer a failed call with an **envelope**: the fields above,
+encoded as JSON, CBOR or protobuf. A reader of the bare wire (§5.1) reads
+one so.
+- **Its kind** follows the operation's `error` type when it declares
+  one, else its `response` type:
+  - **a JSON Schema type:** the envelope is JSON or CBOR, on the
+    operation's `encoding`;
+  - **a protobuf type:** the envelope is the message `zk2.core.v1.Error`;
+  - **a raw type:** the envelope is JSON. A raw `error` type's detail is
+    its bytes as base64 text (RFC 4648 §4, padded), the JSON form of bytes
+    (§7.2). `[F: errors/cases.json]`
+- **Its `Encoding`** is `application/json` or `application/cbor`, or
+  `application/protobuf` with the schema suffix `zk2.core.v1.Error`.
+- **Its fields.** `message` is required. A JSON or CBOR detail is the
+  `error` type's value inline, and a protobuf one its encoded message.
 - **Reading one.** A tool decodes the envelope without the contract, so a
   raw detail reads as a string, and a caller holding the contract decodes
   it as base64. A protobuf detail is absent only when its field is not
@@ -1530,8 +1616,8 @@ with it.
 The two definitions are [`core/error.proto`](core/error.proto) and
 [`core/error.schema.json`](core/error.schema.json).
 
-**Decoding.** A tool decodes an envelope by its reply's `Encoding`, without
-the contract. It MUST refuse:
+**Decoding.** A caller or a tool that reads the bare wire decodes an
+envelope by its reply's `Encoding`, without the contract. It MUST refuse:
 - an unknown encoding (`encoding`);
 - malformed bytes, a duplicate or unknown member, or a missing `code` or
   `message` (`decode`);
@@ -1561,34 +1647,6 @@ The decoding edges, each pinned by a case `[F: errors/cases.json]`:
 - **Protobuf:** a known field with the wrong wire type is `decode`. A missing
   `message` decodes as `""` and is accepted, since protobuf cannot tell the
   two apart. A `cause` present but empty is not a valid cause (`cause`).
-
-**The error form.** §7.5's error carries the same fields in bytes, under
-the `Encoding` `zenoh/bytes`. No rule at this version has an owner answer
-in it: a failed call's `reply_err` carries the envelope above (§5.1, "The
-forms").
-- **The code and the cause** are numbers, in the order of the code table
-  above and of `build`, `config` and `capability`.
-- **The message** is optional, and at most 255 bytes of UTF-8.
-- **The detail** is the bytes of a value of the operation's `error` type,
-  encoded as that type says. A JSON Schema type's are JSON or CBOR, on
-  the operation's `encoding`. A protobuf type's are its encoded message,
-  and a raw type's are themselves, never base64.
-- **Its refusals.** §7.5's parse refuses a cause or a detail where the
-  envelope's decoding does, with the same tokens, `cause` and `detail`.
-  No code is unknown: three bits hold eight.
-
-`[F: errors/forms.json]`
-
-**Transport errors.** Zenoh reports some failures locally, such as a query
-timeout, as a reply error with encoding `zenoh/string`. A tool tells the two
-apart by encoding: only the three encodings above carry an envelope, and
-any other reply error is the transport's.
-- **A router's own.** A router answers a query its timeout ends with a
-  reply error of its own: the 7 bytes `Timeout`, under `zenoh/bytes`
-  (Appendix B). It is the transport's by the rule above.
-- **It is no error form either.** Its first byte, `T`, is `0x54`: a
-  value's CH, which a `reply_err` does not carry (`sample_kind`, §7.5).
-  `[F: errors/forms.json]`
 
 ---
 
@@ -1692,11 +1750,11 @@ stream that is not explicit, a state or an event, or an operation's
 - **The sample's `Encoding`.** An owner MUST set Zenoh's predefined
   `Encoding` for every sample whose type has one (protobuf, JSON, CBOR, or
   a predefined media type), except a sample that carries §7.5's envelope
-  (§4.3). It MUST NOT add a schema suffix to it, except on the error
-  envelope (§5.2). `[Sc: types.md §1]`
-  - **An envelope's sample** has the `Encoding` `zenoh/bytes`, and its
-    record is encoded as its type says, on the contract's `encoding`
-    (below).
+  (§4.3) or a call's form (§5.1). It MUST NOT add a schema suffix to it.
+  `[Sc: types.md §1]`
+  - **An envelope's sample,** and a form's, has the `Encoding`
+    `zenoh/bytes`. Its record is encoded as its type says, on the
+    contract's `encoding` (below).
   - **A raw media type** that Zenoh does not predefine travels, outside an
     envelope, as Zenoh's custom encoding, the media type in the suffix, as
     Zenoh does by itself. A suffix is sent with every put, and is capped at
@@ -1706,8 +1764,8 @@ stream that is not explicit, a state or an event, or an operation's
   attachment declares its own `attachment_encoding` by the same rule.
   Protobuf is always binary, and `encoding` on a protobuf, packed or raw
   type is ignored, with a warning. `[F: contracts/w103-encoding]`
-- **A packed record** always travels in an envelope, under the
-  `Encoding` `zenoh/bytes`, which costs no byte (§7.5, §7.6).
+- **A packed record** always travels in an envelope or a call's form,
+  under the `Encoding` `zenoh/bytes`, which costs no byte (§7.5, §7.6).
 - **Decode order** for a tool, and **Honest rendering**: [`observer.md`](observer.md) §7.3.
 
 ### 7.3 The JSON Schema subset
@@ -1795,9 +1853,10 @@ it: which samples carry one, what a run names and how a seq counts. §7.2
 says the `Encoding` of a sample that carries one.
 
 An operation's call has **forms** of the same shape: its request, its
-value and its error. This section defines their bytes too. §5.1 says what
-a value's and an error's run and seq name, and §5.2 what an error holds.
-No rule at this version has a caller or an owner write them (§5).
+value and its error. This section defines their bytes too. §5.1 adopts
+them: a caller writes its request in one, and an owner its values and
+its errors (§5.2). §5.1 also says what a value's and an error's run and
+seq name, and §5.2 what an error holds.
 
 **The layouts.** A put carries an envelope as its payload, and a delete as
 its attachment. A call's query, reply and reply error carry a form as
@@ -2067,8 +2126,8 @@ Every body an implementation accepts MUST write back to the same bytes.
 
 A **packed** type's record is a run of bit fields, each as wide as its
 declared codes need. So a record carries little more than its
-information. A packed record always travels in §7.5's envelope, and its
-type defines CH's tag.
+information. A packed record always travels in §7.5's envelope or a
+call's form, and its type defines CH's tag.
 
 **The schema file.** A packed type is declared in a file that
 `[schemas] packed` lists (§9.1, §9.4). The file is strict JSON.
@@ -4948,13 +5007,13 @@ section each was written against, whose pointer leads on.
 | `conformance/descriptors/` | §3.3 |
 | `conformance/budget/` | §2.7, `lossless.json` and the reader's stall included |
 | `conformance/seed/` | §4.2 a late joiner's merge: `merge.json` the Zenoh timestamps' order, unstamped samples, and a tool's across two ids; `inband.json` §4.3's in-band stamps, plain and serial order, and a tool's and a consumer's across two runs |
-| `conformance/errors/` | §5.2: `cases.json` the envelope, `forms.json` §7.5's error form and a router's `Timeout` |
-| `conformance/envelope/` | §7.5, a call's forms included |
+| `conformance/errors/` | §5.2: `forms.json` §7.5's error form, a router's `Timeout` and a querier's read as the transport's; `cases.json` the bare wire's envelope |
+| `conformance/envelope/` | §7.5, a call's forms included; `calls.json` §5.1's and §5.2's forms by an operation's types |
 | `conformance/frame/` | §7.7 |
 | `conformance/catalog/` | §8.6 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
 | `scenarios/state.md` | §4; §1 in-band stamps through a router that stamps nothing and one that stamps, and §8.2's session posture; §7 runs, a record's and a random draw's, the run before the seq wraps, and a consumer's and a tool's late joiner across two runs, after their seed and inside it; §9 an archive within a run and across two; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node; §13 a stream key's seq wrapping, and kept across a takeover |
-| `scenarios/operations.md` | §5, §6 |
+| `scenarios/operations.md` | §5, §6; §9 a call's forms for each kind of type, the as-of mark, and an owner's error beside a router's `Timeout`, a querier's and a malformed one |
 | `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip; §7–§9 what a complete presence read is: a session cut off, before a read or while it runs, a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict; §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout; a watch session in no namespace on the wire keys, a round trip through a watch session cut off, and a move unconfirming what a reader holds; a reopen telling every token, the round trip after it waiting for them, and one round trip and one read at a time; step 10's counts, the reader's own sessions'; what a black box is judged on there, at what period its output is sampled, and one that prints nothing while its link is cut; Appendix B |
 | `scenarios/bindings.md` | §3.2; §6 a binding's order kept by the descriptor |
 | `scenarios/retrieval.md` | §8.4 |
@@ -5086,7 +5145,9 @@ brief:
     and its stamp → the payload's bytes, or the writer's refusal
     (`writes`). A reply error's `Encoding` and payload → the error it
     carries, or the refusal (`reads`). Its tokens are §7.5's, and
-    `encoding` for a payload under another `Encoding`.
+    `encoding` for a payload under another `Encoding`. A reply error the
+    read refuses is the transport's (§5.2).
+  - **`errors/cases.json`** holds the bare wire's envelope (§5.2).
 - **`budget/`**: a bound from the contract's `cardinality` and
   each instance's stated one (`bounds.json`); a population's verdict and
   reason class from a kind, a bound and one reading (`population.json`);
@@ -5123,6 +5184,12 @@ brief:
   - **An error's parse** adds `error`: its code, its cause, its message
     and its detail in hex, each absent one `null`.
   - Every header and every accepted case writes back to its bytes.
+  - **`calls.json`:** the operations of
+    `contracts/ok-packed-operation.toml`, each form's CH by its types'
+    tags (`forms`). An operation, a form, its stamp and its record or its
+    error → the payload's bytes, or the writer's refusal (`writes`). An
+    operation, a sample and a payload → the form and its record read as
+    the operation's type, or the refusal (`reads`).
   - **`carries.json`:** a key, as a session hears it, and the sample's
     `Encoding` → whether the sample carries an envelope (`cases`, read by
     [`observer.md`](observer.md) §7.3). A key and a put's payload under

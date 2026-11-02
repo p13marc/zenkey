@@ -78,9 +78,10 @@ fn answer(q: &Query, tail: &str, diagnostics: &AtomicU64) -> zenoh::Result<()> {
             .wait(),
         "diagnostics" => {
             diagnostics.fetch_add(1, Ordering::SeqCst);
+            // The request form (core §5.1): CH, then the record.
             let verbose = q
                 .payload()
-                .is_some_and(|p| p.to_bytes().as_ref() == br#"{"verbose":true}"#);
+                .is_some_and(|p| p.to_bytes().get(1..) == Some(&br#"{"verbose":true}"#[..]));
             if verbose {
                 q.reply_err(BUSY_WITH_CAUSE.to_vec()).wait()
             } else {

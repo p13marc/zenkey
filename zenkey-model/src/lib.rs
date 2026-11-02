@@ -138,6 +138,10 @@
 //!   attachment, parsed without a contract with §7.5's refusals and written
 //!   back byte for byte. Defined ahead of its use: no rule adopts it yet,
 //!   and nothing else in the workspace reads or writes one.
+//! - [`forms`]: a call's forms by its operation's types (core §5.1, §5.2,
+//!   0.94; #985's C4c): each type's tag and a packed type's layout, the
+//!   request, value, summary and error written, and an owner's read of a
+//!   request, refused `invalid_request`.
 //! - [`heartbeat`]: the zk2c envelope's form 6 (core §7.5, 0.81; #978's
 //!   F1): a revision's collections (its `state` and `@state` resources with
 //!   a horizon above 0) as a [`heartbeat::Layout`] with its tag, a body
@@ -164,6 +168,7 @@ pub mod descriptor;
 pub mod desired;
 pub mod diag;
 pub mod envelope;
+pub mod forms;
 pub mod frame;
 pub mod freshness;
 pub mod grammar;

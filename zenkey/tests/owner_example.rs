@@ -57,6 +57,37 @@ async fn get(
     out
 }
 
+/// A call of an operation key, raw: `record` in the request form, CH
+/// `0x40` (tag 0) under `zenoh/bytes` (core §5.1).
+async fn call_raw(
+    s: &zenoh::Session,
+    key: &str,
+    record: &[u8],
+    target: QueryTarget,
+    c: ConsolidationMode,
+) -> Vec<Reply> {
+    let mut request = vec![0x40];
+    request.extend_from_slice(record);
+    get(s, key, &request, target, c).await
+}
+
+/// A value reply's record, after its value form's CH and as-of mark.
+fn record_of(sample: &zenoh::sample::Sample) -> Vec<u8> {
+    let bytes = sample.payload().to_bytes();
+    zenkey::model::wire::read_reply(&bytes)
+        .expect("a value form")
+        .record
+        .to_vec()
+}
+
+/// An error reply read as the error form: its code and its detail.
+fn error_of(e: &zenoh::query::ReplyError) -> (String, Option<Vec<u8>>) {
+    assert_eq!(e.encoding().to_string(), "zenoh/bytes");
+    let bytes = e.payload().to_bytes();
+    let f = envelope::ErrorForm::read("zenoh/bytes", &bytes).expect("an error form");
+    (f.code.as_str().to_owned(), f.detail.map(<[u8]>::to_vec))
+}
+
 /// `--connect <R1>`: the owner is a client of R1, with the two output lines
 /// (`connected`, `ready`). Its state value was put before its tokens, so a
 /// GET made the moment the interface token appears finds it (presence.md
@@ -170,7 +201,7 @@ async fn the_owner_example_as_a_client_of_a_separate_router() {
     );
 
     // The operations: an echo, and `app` without a detail.
-    let echo = get(
+    let echo = call_raw(
         &tool,
         "zk2/ex/owner/interop.v1/@op/echo",
         b"ping",
@@ -179,8 +210,8 @@ async fn the_owner_example_as_a_client_of_a_separate_router() {
     )
     .await;
     let value = echo.iter().find_map(|r| r.result().ok()).expect("a value");
-    assert_eq!(&*value.payload().to_bytes(), b"ping");
-    let typed = get(
+    assert_eq!(record_of(value), b"ping");
+    let typed = call_raw(
         &tool,
         "zk2/ex/owner/interop.v1/@op/typed",
         br#"{"up": true}"#,
@@ -192,16 +223,14 @@ async fn the_owner_example_as_a_client_of_a_separate_router() {
         .iter()
         .find_map(|r| r.result().err())
         .expect("a refusal");
-    assert_eq!(err.encoding().to_string(), envelope::JSON);
-    let env = envelope::decode(envelope::JSON, &err.payload().to_bytes()).unwrap();
-    assert_eq!((env.code.as_str(), env.detail), ("app", None));
+    assert_eq!(error_of(err), ("app".to_owned(), None));
 
     // A templated operation is served too (#670, §8.2 "Exposed"): a call
     // whose key binds the parameter is echoed on that member's key; a
     // fan-out that leaves it unbound names no member, so it is refused
     // `internal`, never silent (§5.1).
     let member = "zk2/ex/owner/interop.v1/@op/ports/p1/echo";
-    let one = get(
+    let one = call_raw(
         &tool,
         member,
         b"pong",
@@ -211,8 +240,8 @@ async fn the_owner_example_as_a_client_of_a_separate_router() {
     .await;
     let value = one.iter().find_map(|r| r.result().ok()).expect("a value");
     assert_eq!(value.key_expr().as_str(), member);
-    assert_eq!(&*value.payload().to_bytes(), b"pong");
-    let fan = get(
+    assert_eq!(record_of(value), b"pong");
+    let fan = call_raw(
         &tool,
         "zk2/ex/owner/interop.v1/@op/ports/*/echo",
         b"pong",
@@ -221,8 +250,7 @@ async fn the_owner_example_as_a_client_of_a_separate_router() {
     )
     .await;
     let err = fan.iter().find_map(|r| r.result().err()).expect("answered");
-    let env = envelope::decode(&err.encoding().to_string(), &err.payload().to_bytes()).unwrap();
-    assert_eq!(env.code, "internal", "{env:?}");
+    assert_eq!(error_of(err).0, "internal");
 
     stop.send(()).unwrap();
     running.await.unwrap().unwrap();
@@ -723,10 +751,8 @@ async fn the_owner_example_implements_config() {
     let e = refusal(&r);
     assert_eq!(e.code, "app");
     assert_eq!(
-        e.detail,
-        Some(envelope::Detail::Value(
-            serde_json::json!({"code": "restart-required"})
-        ))
+        e.detail_as::<zenkey::codec::Json<serde_json::Value>>(None),
+        Some(Ok(serde_json::json!({"code": "restart-required"})))
     );
 
     // The device told to refuse its next apply, in its words.
@@ -742,8 +768,8 @@ async fn the_owner_example_implements_config() {
     .await;
     let e = refusal(&r);
     assert_eq!(
-        e.detail,
-        Some(envelope::Detail::Value(
+        e.detail_as::<zenkey::codec::Json<serde_json::Value>>(None),
+        Some(Ok(
             serde_json::json!({"code": "device-refused", "detail": "no carrier"})
         ))
     );
@@ -1656,7 +1682,7 @@ async fn the_owner_example_stands_by_and_takes_over() {
     let call = |s: &zenoh::Session| {
         let s = s.clone();
         async move {
-            get(
+            call_raw(
                 &s,
                 "zk2/lab/ledger/ledger.v1/@op/append",
                 b"x",
@@ -1666,7 +1692,7 @@ async fn the_owner_example_stands_by_and_takes_over() {
             .await
             .into_iter()
             .filter_map(|r| r.into_result().ok())
-            .map(|s| String::from_utf8_lossy(&s.payload().to_bytes()).into_owned())
+            .map(|s| String::from_utf8_lossy(&record_of(&s)).into_owned())
             .collect::<Vec<_>>()
         }
     };

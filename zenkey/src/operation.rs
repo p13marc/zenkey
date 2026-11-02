@@ -4,11 +4,14 @@
 //! ```text
 //! a call ─► O2: not concrete, and fanout forbidden?  ─ reply_err fanout_forbidden
 //!        ─► O3: optional, and not exposed here?      ─ reply_err unavailable + cause
+//!        ─► a key that names no member?              ─ reply_err invalid_request
+//!        ─► the request: §7.5's form, a packed record
+//!           under CH's tag, or the bare wire's?       ─ reply_err invalid_request
 //!        ─► the handler, on the server's tokio runtime:
 //!             reply / reply_value      one value ("one"), any number ("many")
 //!             summary / summary_value  O6: the replier's last reply,
 //!                                      attachment `summary`
-//!             refuse(OpError)          O3: the error envelope (§5.2)
+//!             refuse(OpError)          O3: the error form (§5.2)
 //!        ─► the handler returned: an error is refused for it, and a call
 //!           left without its reply gets `internal`, never silence
 //! ```
@@ -22,9 +25,15 @@
 //! - **`serving = "replicated"`** changes nothing here. Any number of
 //!   instances may serve, at one execution per router per call, which is why
 //!   the contract requires `idempotent` (E018).
-//! - **O3:** a value reply goes on the operation's own concrete key, and a
-//!   failure is a `reply_err` carrying the envelope, encoded as §5.2 says;
-//!   a refusal that does not fit its envelope goes out as `internal`.
+//! - **O3, the forms** (core §5.1, §5.2, #985's C4c): a value reply goes on
+//!   the operation's own concrete key in §7.5's value form, its tag the
+//!   `response` (or `summary`) type's, and a failure is a `reply_err` in the
+//!   error form, its tag the `error` type's or 0, its detail that type's own
+//!   bytes; both under `zenoh/bytes`, with the instance's as-of mark, its
+//!   run and the last state or event seq it minted ([`Call::mark`]). A
+//!   refusal its error type cannot carry goes out as `internal`. A request
+//!   comes as `CH · record`, and one under another `Encoding` is read as
+//!   the bare wire's (§5.1's MAY, until C4d).
 //!   The active instance answers `unavailable`, with its cause, for every
 //!   optional operation it does not expose; a standby declares nothing, and
 //!   a replica nothing on an exclusive operation (§5.1, "Beside replicas").
@@ -48,11 +57,13 @@ use serde::de::DeserializeOwned;
 use zenkey_model::authoring::{Encoding as WireEncoding, Kind, Serving};
 use zenkey_model::contract::{Body, Contract, Fanout, Operation, Replies, Resource};
 use zenkey_model::descriptor::Cause;
-use zenkey_model::envelope::{self, Detail, Envelope};
+use zenkey_model::envelope::{Cause as FormCause, Code, Detail};
+use zenkey_model::forms::Forms;
 use zenkey_model::grammar::{Addr, IfaceId, KindToken, ZkKey, parse};
 use zenkey_model::schema::TypeId;
 use zenkey_model::slug::chunk_unslug;
 use zenkey_model::template::{Bindings, Segment, Template};
+use zenkey_model::wire::{self, Stamp, Tag};
 use zenoh::Wait;
 use zenoh::bytes::{Encoding, ZBytes};
 use zenoh::key_expr::{KeyExpr, OwnedKeyExpr};
@@ -64,13 +75,11 @@ use crate::error::{Error, Result, zenoh};
 use crate::gate::{Gate, QSlot};
 use crate::implementation::{missing_capability, resource_name};
 use crate::service::{ImplState, Service, ServiceBuilder, exposes_any};
-use crate::writer::{encode_value, wire_encoding};
+use crate::state::Minter;
+use crate::writer::encode_value;
 
 /// The attachment that marks a summary reply (O6).
 pub const SUMMARY: &[u8] = b"summary";
-
-/// The schema suffix of a protobuf envelope (§5.2).
-const PROTOBUF_ERROR: &str = "zk2.core.v1.Error";
 
 /// The operation body of a resource.
 pub(crate) fn operation(iface: &IfaceId, r: &Resource) -> Result<Operation> {
@@ -93,85 +102,86 @@ pub(crate) fn find_resource<'c>(contract: &'c Contract, name: &str) -> Result<&'
         })
 }
 
-/// The envelope's encoding for `op` (§5.2): its `error` type's kind when it
-/// declares one, else its `response` type's.
-#[must_use]
-pub fn envelope_encoding(op: &Operation) -> &'static str {
-    match op.error.as_ref().unwrap_or(&op.response) {
-        TypeId::JsonSchema { .. } => match op.encoding {
-            Some(WireEncoding::Cbor) => envelope::CBOR,
-            _ => envelope::JSON,
-        },
-        TypeId::Protobuf { .. } => envelope::PROTOBUF,
-        // A packed operation type lints since core 0.92 (§7.1), and travels
-        // in §7.5's forms, which no owner writes before C4c: until then its
-        // envelope is JSON, as a raw type's.
-        TypeId::Raw { .. } | TypeId::Packed { .. } => envelope::JSON,
-    }
-}
-
-/// The reply `Encoding` an envelope encoding travels with (§5.2).
-fn envelope_zenoh_encoding(e: &str) -> Encoding {
-    match e {
-        envelope::CBOR => Encoding::APPLICATION_CBOR,
-        envelope::PROTOBUF => Encoding::APPLICATION_PROTOBUF.with_schema(PROTOBUF_ERROR),
-        _ => Encoding::APPLICATION_JSON,
-    }
-}
-
-/// The envelope as `op`'s envelope carries it (§5.2), or `None` for a
-/// detail that does not fit, which is never sent:
+/// The bytes of an `app` error's detail as its operation's `error` type
+/// encodes it (core §5.2, "The error form"), or `None` for a detail its type
+/// cannot encode, which is never sent:
 /// - any detail on an operation that declares no `error` type;
-/// - a raw `error` type's detail that is not its bytes: bytes go as base64
-///   text, and a value only when it is that text;
-/// - bytes in a JSON or CBOR envelope, or a value in a protobuf one, which
-///   [`envelope::encode`] refuses.
-fn fit(op: &Operation, env: &Envelope) -> Option<Envelope> {
-    let detail = match (&env.detail, &op.error) {
+/// - a JSON Schema type's: a value, as JSON or CBOR on the operation's
+///   `encoding`, never bytes (a relayed error form's detail is a value
+///   again, [`crate::call::Refusal::relay`]);
+/// - a protobuf or raw type's: its bytes, never a value;
+/// - a packed type's: a value, written by its layout under the deployment
+///   epoch `epoch` (§7.6, §8.6), or a record its layout reads under the
+///   type's tag, never one it refuses.
+fn detail_bytes(op: &Operation, forms: &Forms, epoch: i64, detail: &Detail) -> Option<Vec<u8>> {
+    match (&op.error, detail) {
         (None, _) => None,
-        (Some(_), None) => return None,
-        (Some(Detail::Bytes(b)), Some(TypeId::Raw { .. })) => Some(Detail::raw(b)),
-        (Some(d), Some(TypeId::Raw { .. })) => Some(d.clone()).filter(|d| d.raw_bytes().is_some()),
-        (Some(d), Some(_)) => Some(d.clone()),
-    };
-    if env.detail.is_some() && detail.is_none() {
-        return None;
+        (Some(TypeId::JsonSchema { .. }), Detail::Value(v)) => {
+            crate::codec::encode_json(v, op.encoding).ok()
+        }
+        (Some(TypeId::JsonSchema { .. }), Detail::Bytes(_)) => None,
+        (Some(TypeId::Protobuf { .. } | TypeId::Raw { .. }), Detail::Bytes(b)) => Some(b.clone()),
+        (Some(TypeId::Protobuf { .. } | TypeId::Raw { .. }), Detail::Value(_)) => None,
+        (Some(TypeId::Packed { .. }), d) => {
+            let t = forms.error.as_ref()?;
+            let layout = t.layout()?;
+            match d {
+                Detail::Value(v) => layout.write(v, Some(epoch)).ok().map(|r| r.bytes),
+                Detail::Bytes(b) => t.check(t.tag(), b).ok().map(|()| b.clone()),
+            }
+        }
     }
-    Some(Envelope {
-        detail,
-        ..env.clone()
-    })
 }
 
-/// The envelope's bytes and `Encoding` for `op` (§5.2).
+/// The error form's bytes for `e` on `op` (core §5.2, "The error form"),
+/// under the as-of mark `mark`: its code and cause as numbers, its message
+/// when it has one, cut at 255 bytes, and an `app` detail in its type's own
+/// bytes ([`detail_bytes`]). CH's tag is the `error` type's, 0 when it
+/// declares none.
 ///
 /// A refusal the reference cannot send as given goes out as `internal`
-/// instead, never as a malformed envelope (§5.2, 0.7, F-65):
-/// - a detail that does not fit ([`fit`]): on an operation with no `error`
-///   type, bytes in a JSON or CBOR envelope other than a raw type's, a value
-///   in a protobuf one;
-/// - an envelope a tool's decoder would refuse (§5.2, "Decoding"): an
-///   unknown code, `unavailable` without a valid cause or a cause on
-///   another code, a detail on a code but `app`. Only an envelope relayed
-///   with `From<Envelope>` can be one.
-pub(crate) fn encode_envelope(op: &Operation, e: &OpError) -> (Vec<u8>, Encoding) {
-    let enc = envelope_encoding(op);
-    let sent = fit(op, e.envelope())
-        .and_then(|env| envelope::encode(&env, enc))
-        .filter(|bytes| envelope::decode(enc, bytes).is_ok());
-    let bytes = sent.unwrap_or_else(|| {
+/// instead, never as a malformed error (§5.2, "`app`"):
+/// - a detail its type cannot encode, or on an operation with no `error`
+///   type;
+/// - an error §7.5's writer refuses: an unknown code, `unavailable` without
+///   a valid cause or a cause on another code, a detail on a code but
+///   `app`. Only an envelope relayed with `From<Envelope>` can be one.
+pub(crate) fn error_form(
+    op: &Operation,
+    forms: &Forms,
+    epoch: i64,
+    mark: Stamp,
+    e: &OpError,
+) -> Vec<u8> {
+    let env = e.envelope();
+    let message = Some(env.message.as_str()).filter(|m| !m.is_empty());
+    let cause = match env.cause.as_deref() {
+        None => Some(None),
+        Some(c) => FormCause::from_name(c).map(Some),
+    };
+    let detail = match &env.detail {
+        None => Some(None),
+        Some(d) => detail_bytes(op, forms, epoch, d).map(Some),
+    };
+    let sent = match (Code::from_name(&env.code), cause, detail) {
+        (Some(code), Some(cause), Some(detail)) => forms
+            .error(mark, code, cause, message, detail.as_deref())
+            .ok(),
+        _ => None,
+    };
+    sent.unwrap_or_else(|| {
         tracing::warn!(
-            code = e.envelope().code,
-            encoding = enc,
-            "a refusal does not fit the operation's envelope; sent as internal (spec §5.2)"
+            code = env.code,
+            "a refusal its operation's error type cannot carry; sent as internal (spec §5.2)"
         );
-        let fallback = OpError::internal(format!(
-            "the {} refusal does not fit this operation's envelope (§5.2)",
-            e.envelope().code
-        ));
-        envelope::encode(fallback.envelope(), enc).expect("an envelope without a detail encodes")
-    });
-    (bytes, envelope_zenoh_encoding(enc))
+        let why = format!(
+            "the {} refusal does not fit this operation's error form (§5.2)",
+            env.code
+        );
+        forms
+            .error(mark, Code::Internal, None, Some(&why), None)
+            .expect("internal with a message and no detail writes")
+    })
 }
 
 /// Decodes a JSON Schema value by its sample's `Encoding`, else by the
@@ -270,7 +280,6 @@ struct Member {
 }
 
 /// One served operation: what the runtime needs to answer its calls.
-#[derive(Debug)]
 struct OpSpec {
     addr: Addr,
     iface: IfaceId,
@@ -278,17 +287,81 @@ struct OpSpec {
     name: String,
     resource: Resource,
     op: Operation,
+    /// Its types as its forms carry them (core §5.1, §5.2).
+    forms: Forms,
+    /// The service's minter, whose run and last seq are every reply's as-of
+    /// mark (§5.1).
+    minter: Arc<Minter>,
+    /// The service's deployment epoch, which a packed record's `time`
+    /// fields count from (core §7.6, §8.6).
+    epoch: i64,
+}
+
+/// What an operation server takes of its service.
+pub(crate) struct ServedBy<'a> {
+    pub(crate) contract: &'a Contract,
+    pub(crate) minter: &'a Arc<Minter>,
+    pub(crate) epoch: i64,
+}
+
+/// A request as its owner read it (core §5.1, "The request"): in the
+/// request form, CH's tag and the record after it; or on the bare wire,
+/// the payload under its `Encoding` (§5.1, "The bare wire").
+#[derive(Debug, Clone)]
+enum RequestWire {
+    Form { tag: Tag },
+    Bare { encoding: Encoding },
 }
 
 impl OpSpec {
-    fn new(addr: &Addr, iface: &IfaceId, r: &Resource) -> Result<Self> {
+    fn new(addr: &Addr, iface: &IfaceId, r: &Resource, serving: &ServedBy<'_>) -> Result<Self> {
+        let op = operation(iface, r)?;
+        let forms = Forms::of(serving.contract, &op)
+            .map_err(|e| Error::Contract(format!("{iface} {:?}: {e}", resource_name(r))))?;
         Ok(Self {
             addr: addr.clone(),
             iface: iface.clone(),
             name: resource_name(r),
             resource: r.clone(),
-            op: operation(iface, r)?,
+            op,
+            forms,
+            minter: Arc::clone(serving.minter),
+            epoch: serving.epoch,
         })
+    }
+
+    /// An error's bytes now, under the instance's as-of mark.
+    fn error_form(&self, e: &OpError) -> Vec<u8> {
+        error_form(&self.op, &self.forms, self.epoch, self.minter.mark(), e)
+    }
+
+    /// A query's request, read as its owner reads it (§5.1, "The
+    /// request"): under `zenoh/bytes`, §7.5's request form, a packed record
+    /// checked under CH's tag; under any other `Encoding`, the bare wire's
+    /// request, its payload the record. The record after CH, and how it
+    /// came; `Err` is `invalid_request`, before any handler runs.
+    fn read_request(&self, q: &Query) -> std::result::Result<(Vec<u8>, RequestWire), OpError> {
+        let bytes = q
+            .payload()
+            .map(|p| p.to_bytes().into_owned())
+            .unwrap_or_default();
+        match q.encoding() {
+            Some(e) if e.to_string() != wire::ENCODING => Ok((
+                bytes,
+                RequestWire::Bare {
+                    encoding: e.clone(),
+                },
+            )),
+            _ => match self.forms.read_request(&bytes) {
+                Ok(req) => {
+                    let tag = req.tag;
+                    Ok((bytes[1..].to_vec(), RequestWire::Form { tag }))
+                }
+                Err(r) => Err(OpError::invalid_request(format!(
+                    "the request is refused: {r} (core §5.1, §7.5)"
+                ))),
+            },
+        }
     }
 
     /// The concrete key of this server's member with `values`.
@@ -333,10 +406,10 @@ impl OpSpec {
         })
     }
 
-    /// Answers `q` with an envelope, from inside a queryable callback.
+    /// Answers `q` with an error form, from inside a queryable callback.
     fn refuse_now(&self, q: &Query, e: &OpError) {
-        let (bytes, encoding) = encode_envelope(&self.op, e);
-        if let Err(err) = q.reply_err(bytes).encoding(encoding).wait() {
+        let bytes = self.error_form(e);
+        if let Err(err) = q.reply_err(bytes).encoding(Encoding::ZENOH_BYTES).wait() {
             tracing::warn!(%err, key = %q.key_expr(), "an operation refusal was not sent");
         }
     }
@@ -461,7 +534,12 @@ impl Ops {
                 {
                     continue;
                 }
-                let spec = Arc::new(OpSpec::new(b.address()?, s.imp.iface(), r)?);
+                let serving = ServedBy {
+                    contract: s.imp.contract(),
+                    minter: b.minter(),
+                    epoch: b.deployment_epoch(),
+                };
+                let spec = Arc::new(OpSpec::new(b.address()?, s.imp.iface(), r, &serving)?);
                 let avail = Arc::clone(&availability);
                 let ke = pattern_of(b.address()?, s.imp.iface(), r)?;
                 let callback = move |q: Query| {
@@ -569,10 +647,18 @@ pub struct Call {
     member: Arc<OnceLock<Member>>,
     metadata: Option<CallMetadata>,
     sent: Arc<Mutex<Sent>>,
+    /// The request's record, and how it came (§5.1, "The request").
+    request: Arc<(Vec<u8>, RequestWire)>,
 }
 
 impl Call {
-    fn new(query: Query, spec: Arc<OpSpec>, bound: Bindings, member: Option<Member>) -> Self {
+    fn new(
+        query: Query,
+        spec: Arc<OpSpec>,
+        bound: Bindings,
+        member: Option<Member>,
+        request: (Vec<u8>, RequestWire),
+    ) -> Self {
         let metadata = query
             .attachment()
             .and_then(|a| CallMetadata::from_bytes(&a.to_bytes()));
@@ -583,6 +669,7 @@ impl Call {
             member: Arc::new(member.map(OnceLock::from).unwrap_or_default()),
             metadata,
             sent: Arc::default(),
+            request: Arc::new(request),
         }
     }
 
@@ -629,13 +716,50 @@ impl Call {
         self.metadata.as_ref()
     }
 
-    /// The request's encoded bytes, as sent.
+    /// The query's payload as it arrived: a request form's CH included
+    /// ([`Call::record`] is what the `request` type reads).
     #[must_use]
     pub fn payload(&self) -> Option<&ZBytes> {
         self.query.payload()
     }
 
-    /// The request, decoded as its JSON Schema type: by the request's
+    /// The request's record (core §5.1, §7.5): the bytes after a request
+    /// form's CH, or the bare wire's payload. A packed one was read under
+    /// CH's tag before the handler ran.
+    #[must_use]
+    pub fn record(&self) -> &[u8] {
+        &self.request.0
+    }
+
+    /// CH's tag, when the request came in its form; `None` on the bare
+    /// wire (§5.1, "The bare wire").
+    #[must_use]
+    pub fn request_tag(&self) -> Option<Tag> {
+        match &self.request.1 {
+            RequestWire::Form { tag } => Some(*tag),
+            RequestWire::Bare { .. } => None,
+        }
+    }
+
+    /// The `Encoding` [`Call::record`] is read on: a bare request's own;
+    /// `None` for a form's, read on the contract's `encoding` (§7.2:
+    /// `zenoh/bytes` picks no wire).
+    #[must_use]
+    pub fn record_encoding(&self) -> Option<&Encoding> {
+        match &self.request.1 {
+            RequestWire::Form { .. } => None,
+            RequestWire::Bare { encoding } => Some(encoding),
+        }
+    }
+
+    /// The service's deployment epoch, which a packed record's `time`
+    /// fields count from (core §7.6, §8.6).
+    #[must_use]
+    pub fn deployment_epoch(&self) -> i64 {
+        self.spec.epoch
+    }
+
+    /// The request, decoded as its JSON Schema type: on a bare request's
     /// `Encoding`, else the contract's `encoding` (§7.2). A request that
     /// does not decode is `invalid_request` (O3). The Rust type is the
     /// validator: the runtime does not evaluate the schema itself.
@@ -645,12 +769,7 @@ impl Call {
                 "request() decodes JSON Schema types; this operation's request is not one",
             ));
         }
-        let bytes = self
-            .query
-            .payload()
-            .map(|p| p.to_bytes().into_owned())
-            .unwrap_or_default();
-        decode_value(&bytes, self.query.encoding(), self.spec.op.encoding)
+        decode_value(self.record(), self.record_encoding(), self.spec.op.encoding)
             .map_err(|e| OpError::invalid_request(format!("the request does not decode: {e}")))
     }
 
@@ -716,19 +835,48 @@ impl Call {
         })
     }
 
-    fn encoding_of(&self, ty: &TypeId) -> Encoding {
-        let none = Bindings::new();
-        wire_encoding(ty, self.spec.op.encoding, self.values().unwrap_or(&none))
+    /// The as-of mark a reply carries now (core §5.1): the instance's run,
+    /// and the last state or event seq it minted under it, 0 when none.
+    #[must_use]
+    pub fn mark(&self) -> Stamp {
+        self.spec.minter.mark()
+    }
+
+    /// A value reply's bytes now: `record`, already encoded as the
+    /// `response` type, in §7.5's value form under [`Call::mark`] (core
+    /// §5.1). What [`Call::reply`] sends; a profile that answers a retry
+    /// with its first answer keeps them ([`Call::reply_form`]).
+    #[must_use]
+    pub fn value_form(&self, record: &[u8]) -> Vec<u8> {
+        self.spec.forms.value(self.mark(), record)
+    }
+
+    /// An error's bytes now: §7.5's error form under [`Call::mark`] (core
+    /// §5.2), or `internal` for a refusal its operation's error type cannot
+    /// carry. What [`Call::refuse`] sends.
+    #[must_use]
+    pub fn error_form(&self, error: &OpError) -> Vec<u8> {
+        self.spec.error_form(error)
     }
 
     /// A value reply, already encoded as the `response` type, on the
-    /// operation's concrete key with its `Encoding` (O3, §7.2).
+    /// operation's concrete key (O3), in §7.5's value form under
+    /// `zenoh/bytes`, with the instance's as-of mark (core §5.1).
     pub async fn reply(&self, payload: impl Into<ZBytes>) -> Result<()> {
+        let payload: ZBytes = payload.into();
+        let form = self.value_form(&payload.to_bytes());
+        self.reply_form(form).await
+    }
+
+    /// A value reply whose bytes are a value form already: an answer sent
+    /// again, its bytes and its mark unchanged (core §5.1, "An answer sent
+    /// again"). [`Call::value_form`] made them.
+    pub async fn reply_form(&self, form: Vec<u8>) -> Result<()> {
         let key = self.reply_key()?;
         self.claim(Reply::Value)?;
         self.query
-            .reply(key, payload)
-            .encoding(self.encoding_of(&self.spec.op.response))
+            .reply(key, form)
+            .encoding(Encoding::ZENOH_BYTES)
             .await
             .map_err(zenoh)
     }
@@ -743,6 +891,13 @@ impl Call {
             )));
         }
         encode_value(value, self.spec.op.encoding)
+    }
+
+    /// [`Call::value_form`] of a value of a JSON Schema `response` type,
+    /// encoded as the contract says (§7.2).
+    pub fn value_form_of<T: Serialize>(&self, value: &T) -> Result<Vec<u8>> {
+        let record = self.encode_json(Some(&self.spec.op.response), value)?;
+        Ok(self.value_form(&record))
     }
 
     /// A value reply of a JSON Schema `response` type, encoded as the
@@ -760,10 +915,15 @@ impl Call {
     pub async fn summary(&self, payload: impl Into<ZBytes>) -> Result<()> {
         let key = self.reply_key()?;
         self.claim(Reply::Summary)?;
-        let ty = self.spec.op.summary.as_ref().expect("claimed");
+        let payload: ZBytes = payload.into();
+        let form = self
+            .spec
+            .forms
+            .summary(self.mark(), &payload.to_bytes())
+            .expect("claimed: a summary is declared");
         self.query
-            .reply(key, payload)
-            .encoding(self.encoding_of(ty))
+            .reply(key, form)
+            .encoding(Encoding::ZENOH_BYTES)
             .attachment(SUMMARY)
             .await
             .map_err(zenoh)
@@ -778,14 +938,22 @@ impl Call {
         async move { self.summary(bytes?).await }
     }
 
-    /// Refuses the call with the error envelope (O3, §5.2), in the
-    /// encoding the operation's types give it.
+    /// Refuses the call (O3, §5.2): §7.5's error form under
+    /// `zenoh/bytes`, with the instance's as-of mark, its detail in the
+    /// `error` type's own bytes.
     pub async fn refuse(&self, error: OpError) -> Result<()> {
+        let form = self.error_form(&error);
+        self.refuse_form(form).await
+    }
+
+    /// Refuses the call with bytes that are an error form already: an
+    /// answer sent again, its bytes and its mark unchanged (core §5.1, "An
+    /// answer sent again"). [`Call::error_form`] made them.
+    pub async fn refuse_form(&self, form: Vec<u8>) -> Result<()> {
         self.claim(Reply::Refusal)?;
-        let (bytes, encoding) = encode_envelope(&self.spec.op, &error);
         self.query
-            .reply_err(bytes)
-            .encoding(encoding)
+            .reply_err(form)
+            .encoding(Encoding::ZENOH_BYTES)
             .await
             .map_err(zenoh)
     }
@@ -885,7 +1053,17 @@ where
                 }
             }
         };
-        let call = Call::new(q, Arc::clone(&spec), bound, member);
+        // The request, after the refusals that come before any decode
+        // (§5.1, "The order of refusals"): one §7.5 or a packed record's
+        // reader refuses is `invalid_request`, and no handler runs.
+        let request = match spec.read_request(&q) {
+            Ok(r) => r,
+            Err(e) => {
+                spec.refuse_now(&q, &e);
+                return;
+            }
+        };
+        let call = Call::new(q, Arc::clone(&spec), bound, member, request);
         let h = Arc::clone(&handler);
         rt.spawn(async move {
             let outcome = h(call.clone()).await;
@@ -934,6 +1112,14 @@ fn check_typed(iface: &IfaceId, r: &Resource) -> Result<()> {
     Ok(())
 }
 
+/// The implementation of `iface` among `impls`.
+fn impl_of<'a>(impls: &'a [ImplState], iface: &IfaceId) -> Result<&'a ImplState> {
+    impls
+        .iter()
+        .find(|s| s.imp.iface() == iface)
+        .ok_or_else(|| Error::NotImplemented(iface.clone()))
+}
+
 impl ServiceBuilder {
     /// Serves an operation (O1): a `complete` queryable on a member's
     /// concrete key, or on every member when `values` is `None`, and exposes
@@ -954,7 +1140,13 @@ impl ServiceBuilder {
         Fut: Future<Output = Result<(), OpError>> + Send + 'static,
     {
         let r = self.resource_of(iface, resource)?;
-        let spec = OpSpec::new(self.address()?, iface, &r)?;
+        let s = impl_of(self.impls(), iface)?;
+        let serving = ServedBy {
+            contract: s.imp.contract(),
+            minter: self.minter(),
+            epoch: self.deployment_epoch(),
+        };
+        let spec = OpSpec::new(self.address()?, iface, &r, &serving)?;
         let ke = match values {
             Some(v) => self.key(iface, resource, v)?.into_keyexpr(),
             None => pattern_of(self.address()?, iface, &r)?,
@@ -1019,7 +1211,13 @@ impl Service {
         Fut: Future<Output = Result<(), OpError>> + Send + 'static,
     {
         let r = self.exposed_op(iface, resource)?;
-        let spec = OpSpec::new(self.address(), iface, &r)?;
+        let s = impl_of(self.impls(), iface)?;
+        let serving = ServedBy {
+            contract: s.imp.contract(),
+            minter: self.minter(),
+            epoch: self.deployment_epoch(),
+        };
+        let spec = OpSpec::new(self.address(), iface, &r, &serving)?;
         let ke = match values {
             Some(v) => self.key(iface, resource, v)?.into_keyexpr(),
             None => pattern_of(self.address(), iface, &r)?,
@@ -1076,14 +1274,15 @@ impl Service {
             .get(role)
             .cloned()
             .unwrap_or_default();
-        Client::for_role(
+        Ok(Client::for_role(
             self.session(),
             self.address(),
             role,
             contract,
             &b.providers,
             &b.params,
-        )
+        )?
+        .with_deployment_epoch(self.deployment_epoch()))
     }
 
     /// The `unavailable` queryables this instance declared at start (O3):
@@ -1113,14 +1312,17 @@ impl Service {
 
 #[cfg(test)]
 mod tests {
-    use super::{OpError, bound_by, envelope_encoding};
-    use crate::codec::Raw;
+    use super::{OpError, bound_by};
+    use crate::codec::{Codec, Raw};
     use serde_json::json;
-    use zenkey_model::envelope::{self, Detail, Envelope};
+    use zenkey_model::envelope::{Code, Envelope, ErrorForm};
+    use zenkey_model::forms::Forms;
     use zenkey_model::template::{Bindings, Template};
+    use zenkey_model::wire::{Run, Seq, Stamp, read_reply_err};
 
-    /// An operation `op` of raw request and response, with `error` if given.
-    fn op(error: Option<&str>) -> zenkey_model::contract::Operation {
+    /// An operation `op` of raw request and response, with `error` if given,
+    /// and its forms.
+    fn op(error: Option<&str>) -> (zenkey_model::contract::Operation, Forms) {
         let toml = format!(
             "[interface]\nname = \"t\"\nmajor = 1\nminor = 0\n\
              [schemas]\njsonschema = [\"t.json\"]\n\
@@ -1137,69 +1339,136 @@ mod tests {
         .unwrap();
         let l = zenkey_model::contract::load_str(&toml, &dir, None);
         let c = l.contract.unwrap_or_else(|| panic!("{}", l.report));
-        super::operation(&c.iface, &c.resources[0]).unwrap()
+        let op = super::operation(&c.iface, &c.resources[0]).unwrap();
+        let forms = Forms::of(&c, &op).unwrap();
+        (op, forms)
     }
 
-    /// What goes on the wire for `e`, decoded.
-    fn sent(op: &zenkey_model::contract::Operation, e: &OpError) -> Envelope {
-        let (bytes, enc) = super::encode_envelope(op, e);
-        envelope::decode(&enc.to_string(), &bytes).unwrap()
+    fn mark() -> Stamp {
+        Stamp {
+            run: Run::U16(1),
+            seq: Seq::new(7).unwrap(),
+        }
     }
 
-    /// Spec §5.2 (0.7, F-65): `app` for any operation; no detail without an
-    /// `error` type; a raw type's detail as base64 text in JSON; a detail
-    /// that does not fit goes out as `internal`, never malformed.
+    /// What goes on the wire for `e`: its error form's bytes.
+    fn bytes(of: &(zenkey_model::contract::Operation, Forms), e: &OpError) -> Vec<u8> {
+        super::error_form(&of.0, &of.1, 0, mark(), e)
+    }
+
+    /// What goes on the wire for `e`, read back: its code and its detail.
+    fn sent(
+        of: &(zenkey_model::contract::Operation, Forms),
+        e: &OpError,
+    ) -> (Code, Option<Vec<u8>>) {
+        let b = bytes(of, e);
+        let f: ErrorForm<'_> = read_reply_err(&b).unwrap();
+        assert_eq!(f.stamp, mark(), "the as-of mark");
+        (f.code, f.detail.map(<[u8]>::to_vec))
+    }
+
+    /// Core §5.2 "The error form", "`app`": `app` for any operation; no
+    /// detail without an `error` type; a raw type's detail its own bytes,
+    /// never base64; a JSON Schema type's its JSON; a detail its type
+    /// cannot encode goes out as `internal`, never malformed.
     #[test]
-    fn an_app_detail_that_does_not_fit_goes_out_as_internal() {
+    fn an_app_detail_its_type_cannot_encode_goes_out_as_internal() {
         let none = op(None);
-        assert_eq!(envelope_encoding(&none), envelope::JSON);
-        let bare = sent(&none, &OpError::app_without_detail("x"));
-        assert_eq!((bare.code.as_str(), bare.detail), ("app", None));
+        assert_eq!(
+            bytes(&none, &OpError::busy("")),
+            [0x60, 0, 1, 0, 0, 7, 0xa0]
+        );
+        assert_eq!(
+            sent(&none, &OpError::app_without_detail("x")),
+            (Code::App, None)
+        );
         for detail in [
             OpError::app_bytes("x", vec![1]),
             OpError::app("x", &json!({})),
         ] {
             assert_eq!(
-                sent(&none, &detail).code,
-                "internal",
+                sent(&none, &detail).0,
+                Code::Internal,
                 "no error type, no detail"
             );
         }
 
         let raw = op(Some("{ raw = \"image/jpeg\" }"));
-        assert_eq!(envelope_encoding(&raw), envelope::JSON);
         let jpeg = vec![0xff, 0xd8, 0xff, 0xe0];
         for e in [
             OpError::app_bytes("camera fault", jpeg.clone()),
             OpError::app_as::<Raw>("camera fault", &jpeg),
         ] {
-            let got = sent(&raw, &e);
-            assert_eq!(got.code, "app");
-            assert_eq!(got.detail, Some(Detail::Value(json!("/9j/4A=="))));
-            assert_eq!(got.detail.unwrap().raw_bytes(), Some(jpeg.clone()));
+            assert_eq!(
+                sent(&raw, &e),
+                (Code::App, Some(jpeg.clone())),
+                "its own bytes"
+            );
         }
         assert_eq!(
-            sent(&raw, &OpError::app("x", &json!("not base64!"))).code,
-            "internal"
+            sent(&raw, &OpError::app("x", &json!("/9j/4A=="))).0,
+            Code::Internal,
+            "a value for a raw type"
         );
-        assert_eq!(sent(&raw, &OpError::app_without_detail("x")).detail, None);
+        assert_eq!(sent(&raw, &OpError::app_without_detail("x")).1, None);
+        assert_eq!(
+            Raw::detail(&jpeg).unwrap(),
+            zenkey_model::envelope::Detail::Bytes(jpeg.clone())
+        );
 
         let json_error = op(Some("\"json:E\""));
         assert_eq!(
-            sent(&json_error, &OpError::app_bytes("x", vec![1])).code,
-            "internal"
+            sent(&json_error, &OpError::app_bytes("x", vec![1])).0,
+            Code::Internal,
+            "bytes that are no JSON"
         );
         let ok = sent(&json_error, &OpError::app("x", &json!({"k": "v"})));
-        assert_eq!(ok.detail, Some(Detail::Value(json!({"k": "v"}))));
+        assert_eq!(ok, (Code::App, Some(br#"{"k":"v"}"#.to_vec())));
+        assert_eq!(
+            sent(
+                &json_error,
+                &OpError::app_bytes("x", br#"{"k":"v"}"#.to_vec())
+            )
+            .0,
+            Code::Internal,
+            "bytes for a JSON Schema type"
+        );
+        // A form's refusal relayed: its JSON detail a value again.
+        let b = bytes(&json_error, &OpError::app("x", &json!({"k": "v"})));
+        let form = read_reply_err(&b).unwrap();
+        let relayed = crate::call::Refusal::of_form(&form).relay(&json_error.0);
+        assert_eq!(sent(&json_error, &relayed), ok, "a relayed form's detail");
+        let r = crate::call::Refusal::of_form(
+            &read_reply_err(&bytes(&raw, &OpError::app_bytes("x", jpeg.clone()))).unwrap(),
+        );
+        assert_eq!(
+            sent(&raw, &r.relay(&raw.0)),
+            (Code::App, Some(jpeg.clone()))
+        );
 
-        // A relayed envelope a decoder would refuse is not sent as given.
-        let relayed = OpError::from(Envelope {
-            code: "busy".into(),
-            message: "x".into(),
-            cause: None,
-            detail: Some(Detail::Value(json!(1))),
-        });
-        assert_eq!(sent(&json_error, &relayed).code, "internal");
+        // A relayed envelope §7.5's writer would refuse is not sent as given.
+        for env in [
+            Envelope {
+                code: "busy".into(),
+                message: "x".into(),
+                cause: None,
+                detail: Some(zenkey_model::envelope::Detail::Value(json!(1))),
+            },
+            Envelope {
+                code: "busy".into(),
+                message: "x".into(),
+                cause: Some("config".into()),
+                detail: None,
+            },
+            Envelope {
+                code: "nope".into(),
+                message: "x".into(),
+                cause: None,
+                detail: None,
+            },
+        ] {
+            assert_eq!(sent(&json_error, &OpError::from(env)).0, Code::Internal);
+        }
     }
 
     /// Spec §5.1 "Over a template" (0.7): a key binds each parameter at a

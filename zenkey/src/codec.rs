@@ -17,7 +17,7 @@ use std::marker::PhantomData;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use zenkey_model::authoring::Encoding as WireEncoding;
-use zenkey_model::catalog::EPOCH_WITHOUT_CATALOG;
+pub use zenkey_model::catalog::EPOCH_WITHOUT_CATALOG;
 use zenkey_model::envelope::Detail;
 use zenkey_model::schema::TypeId;
 use zenkey_model::wire::Tag;
@@ -109,7 +109,9 @@ pub trait Codec: Send + Sync + 'static {
     fn tag() -> Option<Tag> {
         None
     }
-    /// The `detail` of an `app` error envelope carrying this value (§5.2).
+    /// The `detail` of an `app` error carrying this value (§5.2): its
+    /// bytes, as the error form carries them, unless the codec says
+    /// otherwise.
     fn detail(value: &Self::Value) -> Result<Detail, String> {
         Self::encode(value, None).map(Detail::Bytes)
     }
@@ -225,6 +227,12 @@ impl<T: PackedRecord> Codec for Packed<T> {
     fn json_reading(value: &T) -> Option<serde_json::Value> {
         Some(value.to_json())
     }
+    /// Its JSON reading (§7.6), which the runtime writes by the `error`
+    /// type's layout under the service's deployment epoch: the epoch is the
+    /// writer's, not the value's.
+    fn detail(value: &T) -> Result<Detail, String> {
+        Ok(Detail::Value(value.to_json()))
+    }
 }
 
 /// The bytes of a raw media type, as they are. The typed writers keep the
@@ -240,11 +248,10 @@ impl Codec for Raw {
     fn decode(bytes: &[u8], _: Option<WireEncoding>) -> Result<Vec<u8>, String> {
         Ok(bytes.to_vec())
     }
-    /// A raw `error` type's detail is its bytes as base64 text (RFC 4648
-    /// §4, padded) in the JSON envelope a raw type takes (§5.2, 0.7, F-65):
-    /// bytes would not fit it, and would go out as `internal`.
+    /// A raw `error` type's detail is its bytes, the error form's detail
+    /// as they are, never base64 (§5.2).
     fn detail(value: &Vec<u8>) -> Result<Detail, String> {
-        Ok(Detail::raw(value))
+        Ok(Detail::Bytes(value.clone()))
     }
 }
 
@@ -329,14 +336,14 @@ mod tests {
         assert_eq!(Raw::decode(&[1, 2], None).unwrap(), [1, 2]);
     }
 
-    /// Spec §5.2 (0.7, F-65): each codec's `app` detail has the form its
-    /// envelope takes: a raw type's is base64 text, never bytes.
+    /// Core §5.2 "The error form": each codec's `app` detail is what the
+    /// runtime writes as the detail: a raw type's and a protobuf message's
+    /// bytes, never base64, and a JSON Schema value as a value.
     #[test]
-    fn a_raw_detail_is_base64_text() {
+    fn a_raw_detail_is_its_bytes() {
         use zenkey_model::envelope::Detail;
         let d = Raw::detail(&vec![0xff, 0xd8, 0xff, 0xe0]).unwrap();
-        assert_eq!(d, Detail::Value(serde_json::json!("/9j/4A==")));
-        assert_eq!(d.raw_bytes(), Some(vec![0xff, 0xd8, 0xff, 0xe0]));
+        assert_eq!(d, Detail::Bytes(vec![0xff, 0xd8, 0xff, 0xe0]));
         assert_eq!(
             Protobuf::<()>::detail(&()).unwrap(),
             Detail::Bytes(Vec::new())

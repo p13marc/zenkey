@@ -4,6 +4,16 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — the Send tool writes the request form (#985 C4c, for #980)
+
+Core 0.94: a caller writes its request as `CH · record` under
+`zenoh/bytes`, and owners answer in the value and error forms.
+
+| Before | Now | Notes |
+|---|---|---|
+| Send's call: the request bare, under its type's `Encoding` | `CH · record` under `zenoh/bytes`, through the fleet's `call_operation` and the runtime's client | core §5.1 |
+| a reference owner's reply card: no mark | its as-of mark, since every reference owner answers in the forms | no scene moves: the scenes' replies are the `World`'s |
+
 ## Unreleased (`main`, zk2) — the Send tool reads both wires (#985 C4b, for #980)
 
 A call's reply is read by its `Encoding` alone, through the fleet's

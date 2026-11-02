@@ -505,7 +505,7 @@ fn op_doc(o: &Op<'_>) -> String {
 
 fn emit_handlers(s: &mut String, iface: &str, ops: &[Op<'_>]) {
     s.push_str(
-        "    /// The owner's side of the operations (spec §5): one method per operation,\n    /// taking the decoded request and what is known of the call, returning the\n    /// response or the error envelope (§5.2). A required operation is a required\n    /// method; an optional one answers `unavailable` (cause `build`) unless\n    /// overridden, or is listed unavailable before `Server::declare`. A\n    /// `replies = \"many\"` operation sends through a `Sink`: values, then its\n    /// summary (O6).\n    pub trait Handlers: Send + Sync + 'static {\n",
+        "    /// The owner's side of the operations (spec §5): one method per operation,\n    /// taking the decoded request and what is known of the call, returning the\n    /// response or the error (§5.2), which the runtime answers in its form. A required operation is a required\n    /// method; an optional one answers `unavailable` (cause `build`) unless\n    /// overridden, or is listed unavailable before `Server::declare`. A\n    /// `replies = \"many\"` operation sends through a `Sink`: values, then its\n    /// summary (O6).\n    pub trait Handlers: Send + Sync + 'static {\n",
     );
     for o in ops {
         s.push_str(&doc("        ", &op_doc(o)));

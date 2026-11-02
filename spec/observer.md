@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.23 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.24 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.91 ([`core.md`](core.md)) |
+| **Written against** | core 0.94 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
@@ -161,7 +161,7 @@ Unattributable silence is Unestablished, never Established(no).
 Its instances, each normative where it lives:
 - **The reply set** (core O5). An empty reply set is not "no such
   operation". A caller attributes silence through presence: the service
-  was present and silent, or absent. Envelopes in a fan-out carry no key,
+  was present and silent, or absent. Errors in a fan-out carry no key,
   so they are reported unattributed (core §5.1).
 - **Presence** (§3). A read that ended at its timeout, or at its
   session's interests timeout, is possibly incomplete (§3.3); a refused
@@ -1010,7 +1010,7 @@ tool's `self.system`.
 ### 7.2 Judging O3 from outside
 
 This is core §5.1's "Every call is answered (O3)", judged by a tool. A call
-that reaches an owner's queryable gets a value or an envelope.
+that reaches an owner's queryable gets a value or an error.
 
 - A tool judging O3 from outside, as a conformance suite does, holds a
   silence as a finding only under grants that let it call: an
@@ -1068,6 +1068,28 @@ This is core §7.1's and §7.2's tool half; type identity and the sample's
     under `zenoh/bytes` without an envelope.
   - **Every other sample** is read as the steps below say.
   `[F: envelope/carries.json]`
+- **A call's forms first.** A tool that shows or judges a call's reply
+  MUST read a reply under `zenoh/bytes` as core §7.5's value form, and a
+  reply error as core §5.2 reads it. It needs no contract to do so. The
+  value's record is the payload every later step decodes, renders or
+  judges, as the operation's `response` type, or its `summary` type on a
+  summary reply. `[F: envelope/vectors.json, errors/forms.json]`
+  `[Sc: operations.md §9]`
+  - **A refused value** is undecodable, and the tool names the refusal.
+    The tool MUST NOT decode or sniff a refused value's bytes as a bare
+    record. `[F: envelope/vectors.json]`
+  - **An error** is shown by its code, its cause and its message. Its
+    detail is decoded as the operation's `error` type where the tool
+    holds it, a packed one under CH's tag, and shown as its bytes
+    otherwise. `[F: envelope/calls.json]` `[Sc: operations.md §9]`
+  - **The transport's.** A reply error that core §5.2 reads as the
+    transport's is shown so, with its `Encoding` and its bytes, never as
+    an owner's error. `[Sc: operations.md §9]`
+  - **The as-of mark.** A tool may show a reply's run and seq beside it.
+    The run names an instance only through the descriptor that states it
+    (core §5.1).
+  - **The bare wire.** A tool that reads it (core §5.1) reads a bare
+    value by the decode order below, and an envelope as core §5.2 says.
 - **Decode order** for a tool: a payload whose declared type the tool
   holds is decoded by that type, on the wire its sample's `Encoding`
   names (below). Any other payload is sniffed.
@@ -1077,9 +1099,9 @@ This is core §7.1's and §7.2's tool half; type identity and the sample's
   - **An `Encoding` that names neither JSON nor CBOR**, zenoh's default
     `zenoh/bytes` or another type's, does not pick a JSON Schema type's
     wire. The type is then read on its contract's `encoding` (core §7.2).
-    That covers an envelope's record. It no longer covers a stream, state
-    or event sample under `zenoh/bytes` with no envelope: the envelope
-    step above reads that sample as an envelope.
+    That covers an envelope's record, and a form's. It no longer covers a
+    stream, state or event sample under `zenoh/bytes` with no envelope:
+    the envelope step above reads that sample as an envelope.
   - **A packed record** is read through its type's layout, under the tag
     its envelope's CH carried (core §7.6). One its layout refuses is
     undecodable, and the tool names the refusal. One that came in no
@@ -1303,7 +1325,7 @@ tooling guide's rules that carry evidence were promoted with text 0.1.
 | §6.2 | core §6, "Reading the mark" | |
 | §7.1 | core §3.2: R3's and R7's tool halves, "A tool has no system of its own" | |
 | §7.2 | core §5.1, "Every call is answered (O3)": a tool judging O3 from outside | |
-| §7.3 | core §7.1's "Generic tools" column and its plugin; core §7.2, "Decode order" and "Honest rendering" | |
+| §7.3 | core §7.1's "Generic tools" column and its plugin; core §7.2, "Decode order" and "Honest rendering" | a call's forms read first, after core §5.1 and §5.2 |
 | §7.4 | core §7.4: a tool checks the memlock limit | |
 | §8.1 | tooling guide O1 | |
 | §8.2 | tooling guide O5, and its "Everything is three selectors" | |
@@ -1317,13 +1339,14 @@ tooling guide's rules that carry evidence were promoted with text 0.1.
 | `conformance/keys.json` | §8.1 |
 | `conformance/heartbeat/bodies.json` | §7.3, a heartbeat's body |
 | `conformance/envelope/carries.json` | §7.3, the envelope first |
+| `conformance/envelope/vectors.json`, `calls.json`, `conformance/errors/forms.json` | §7.3, a call's forms first |
 | `conformance/frame/apply.json` | §7.6 |
 | `scenarios/presence.md` §4, §6–§10 | §1, §2, §3 |
 | `conformance/seed/` (`inband.json`, `merge.json`) | §4.1 |
 | `scenarios/state.md` §1, §7, §11, §12, §13 | §4.1 (§7 steps 4 and 5: a tool's merge across two runs, after its seed and inside it; §13 a stream key's serial order), §4.3, §4.4 (§1), §8.1, §8.3 |
 | `scenarios/security.md` §3 | §4.2 |
 | `scenarios/budget.md` §1–§3 | §5.2, §5.3 |
-| `scenarios/operations.md` §3, §5, §8 | §2, §3.2 (§8 step 6), §6.1, §7.2 (§5 step 2) |
+| `scenarios/operations.md` §3, §5, §8, §9 | §2, §3.2 (§8 step 6), §6.1, §7.2 (§5 step 2), §7.3 (§9) |
 | `scenarios/bindings.md` §3, §5 | §7.1 |
 | `scenarios/constrained.md` §3, §7, §9 | §7.1 (§3), §7.5 (§7, §9) |
 | `scenarios/types.md` §2 | §7.3 |

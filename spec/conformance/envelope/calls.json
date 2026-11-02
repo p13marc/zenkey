@@ -1,0 +1,680 @@
+{
+  "description": "core §5.1 and §5.2, a call's forms by its operation's types, over the operations of `contracts/ok-packed-operation.toml` (`calibrate`, `scan`, `reset`) and its packed files, the deployment epoch 0. Written by an independent reading of core 0.94's text (Python, standard library), checked by a second reader, never blessed. `types`: each packed type an operation names → its layout form's sha256 and its tag (core §7.6). `forms`: an operation, its types, → each form's CH with a 16-bit run, in hex: the request's (width bit 0, the `request` type's tag), a value's (the `response` type's), a summary reply's (the `summary` type's) and an error's (the `error` type's, 0 when it declares none). Only `packed` defines a tag, so a JSON Schema type's is 0. A 32-bit run adds 0x10 to a value's and an error's CH. `writes`: an operation, a `form` (`request`, `value`, `summary` or `error`), the stamp (`run_width`, `run`, `seq`; none for a request), and the record → the payload in hex, or `{\"refused\": token}`. A packed record is given as its `value`, written by core §7.6, and a JSON Schema record as its bytes in hex (`record`). An error is `code`, `cause`, `message` and `detail`, the detail a value of the `error` type (packed) or its bytes in hex. The refusals: core §7.6's writer's (`missing`, `value`, `range`), §7.5's (`cause`, `detail`), and `detail` for a detail on an operation that declares no `error` type (§5.2). `reads`: an operation, a `sample` (`query`, `reply`, `reply_err`), `summary` true for a summary reply, and the payload in hex → the stamp (`null` on a request), the tag, and `value`, the record read as the request, response or summary type, or `error` with its detail read as the `error` type; or `{\"refused\": token}`, the first of §7.5's refusals, then §7.6's reading of the record (`tag`, `length`, `code`, `extension`, `pad`). A detail the `error` type refuses is `{\"refused\": token}` in its place: the error is still the owner's (§5.2), its detail undecodable. A packed record is read under CH's tag. An error with no detail reads no record, so its tag is not checked. A JSON Schema record is read on the contract's `encoding`, JSON here. A query the read refuses is refused `invalid_request` by its owner (§5.1). A reply error the read refuses is the transport's (§5.2). A packed value is written and read as `packed/vectors.json`'s are: a fixed-point field as its decimal string, a time in milliseconds from the Unix epoch.",
+  "contract": "contracts/ok-packed-operation.toml",
+  "epoch": 0,
+  "types": {
+    "sensor#Sensor": {
+      "tag": 6,
+      "sha256": "0d7ff7315d9f8c5dfce51e7e953220a19c54c46e4d15a114bb8a8120ea3391f6"
+    },
+    "sensor#Status": {
+      "tag": 14,
+      "sha256": "ec19d33d52f51fae609ef7efcd5b09f43b17cae822ca4274c78cf50aaaa2467e"
+    },
+    "events#Change": {
+      "tag": 2,
+      "sha256": "75c8ebf15b66b6224e1495ecb9b4f353dca3f7ced3bd1e2ceec78f79c7a48142"
+    }
+  },
+  "forms": [
+    {
+      "operation": "calibrate",
+      "types": {
+        "request": "sensor#Sensor",
+        "response": "sensor#Status",
+        "error": "events#Change"
+      },
+      "expect": {
+        "request": "46",
+        "value": "4e",
+        "error": "62"
+      }
+    },
+    {
+      "operation": "scan",
+      "types": {
+        "request": "json:Empty",
+        "response": "sensor#Sensor",
+        "summary": "sensor#Status"
+      },
+      "expect": {
+        "request": "40",
+        "value": "46",
+        "summary": "4e",
+        "error": "60"
+      }
+    },
+    {
+      "operation": "reset",
+      "types": {
+        "request": "sensor#Status",
+        "response": "json:Ack"
+      },
+      "expect": {
+        "request": "4e",
+        "value": "40",
+        "error": "60"
+      }
+    }
+  ],
+  "writes": [
+    {
+      "note": "calibrate's request: a Sensor record under Sensor's tag",
+      "operation": "calibrate",
+      "form": "request",
+      "value": {
+        "temperature": "21.5",
+        "humidity": "40",
+        "pressure": "1013.2",
+        "battery": "3.7"
+      },
+      "expect": {
+        "hex": "464cea1bdcaa"
+      }
+    },
+    {
+      "note": "calibrate's value: a Status record under Status's tag, a 16-bit run",
+      "operation": "calibrate",
+      "form": "value",
+      "stamp": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7
+      },
+      "value": {
+        "duty_available": "12.5",
+        "signal_bars": 3,
+        "oper": "up",
+        "admin": true
+      },
+      "expect": {
+        "hex": "4e00010000071f5900"
+      }
+    },
+    {
+      "note": "the same with a 32-bit run: the width bit adds 0x10",
+      "operation": "calibrate",
+      "form": "value",
+      "stamp": {
+        "run_width": 32,
+        "run": 3735928559,
+        "seq": 42
+      },
+      "value": {
+        "duty_available": "12.5",
+        "signal_bars": 3,
+        "oper": "up",
+        "admin": true
+      },
+      "expect": {
+        "hex": "5edeadbeef00002a1f5900"
+      }
+    },
+    {
+      "note": "a Status record past its first marker: rssi present",
+      "operation": "calibrate",
+      "form": "value",
+      "stamp": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7
+      },
+      "value": {
+        "duty_available": "12.5",
+        "signal_bars": 3,
+        "oper": "up",
+        "admin": true,
+        "rssi": -70
+      },
+      "expect": {
+        "hex": "4e00010000071f59d400"
+      }
+    },
+    {
+      "note": "calibrate's app error, its detail a Change record under Change's tag",
+      "operation": "calibrate",
+      "form": "error",
+      "stamp": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7
+      },
+      "error": {
+        "code": "app",
+        "detail": {
+          "at": 1730000000123,
+          "mode": "on",
+          "count": 5
+        }
+      },
+      "expect": {
+        "hex": "620001000007e4671db4801ec8000028"
+      }
+    },
+    {
+      "note": "app with a message, then the Change record",
+      "operation": "calibrate",
+      "form": "error",
+      "stamp": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7
+      },
+      "error": {
+        "code": "app",
+        "message": "device refused",
+        "detail": {
+          "at": 1730000000123,
+          "mode": "on",
+          "count": 5
+        }
+      },
+      "expect": {
+        "hex": "620001000007e60e6465766963652072656675736564671db4801ec8000028"
+      }
+    },
+    {
+      "note": "busy on calibrate: no detail, and still Change's tag, the operation's error type's",
+      "operation": "calibrate",
+      "form": "error",
+      "stamp": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7
+      },
+      "error": {
+        "code": "busy"
+      },
+      "expect": {
+        "hex": "620001000007a0"
+      }
+    },
+    {
+      "note": "unavailable for config on calibrate, a 32-bit run",
+      "operation": "calibrate",
+      "form": "error",
+      "stamp": {
+        "run_width": 32,
+        "run": 3735928559,
+        "seq": 42
+      },
+      "error": {
+        "code": "unavailable",
+        "cause": "config"
+      },
+      "expect": {
+        "hex": "72deadbeef00002a50"
+      }
+    },
+    {
+      "note": "scan's request: a JSON Schema record, tag 0",
+      "operation": "scan",
+      "form": "request",
+      "record": "7b7d",
+      "expect": {
+        "hex": "407b7d"
+      }
+    },
+    {
+      "note": "scan's value: a Sensor record",
+      "operation": "scan",
+      "form": "value",
+      "stamp": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7
+      },
+      "value": {
+        "temperature": "21.5",
+        "humidity": "40",
+        "pressure": "1013.2",
+        "battery": "3.7"
+      },
+      "expect": {
+        "hex": "4600010000074cea1bdcaa"
+      }
+    },
+    {
+      "note": "scan's summary: a Status record under Status's tag, the summary type's",
+      "operation": "scan",
+      "form": "summary",
+      "stamp": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7
+      },
+      "value": {
+        "duty_available": "12.5",
+        "signal_bars": 3,
+        "oper": "up",
+        "admin": true
+      },
+      "expect": {
+        "hex": "4e00010000071f5900"
+      }
+    },
+    {
+      "note": "internal on scan, which declares no error type: tag 0",
+      "operation": "scan",
+      "form": "error",
+      "stamp": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7
+      },
+      "error": {
+        "code": "internal"
+      },
+      "expect": {
+        "hex": "600001000007c0"
+      }
+    },
+    {
+      "note": "reset's request: a Status record",
+      "operation": "reset",
+      "form": "request",
+      "value": {
+        "duty_available": "12.5",
+        "signal_bars": 3,
+        "oper": "up",
+        "admin": true
+      },
+      "expect": {
+        "hex": "4e1f5900"
+      }
+    },
+    {
+      "note": "reset's value: a JSON Schema record, tag 0",
+      "operation": "reset",
+      "form": "value",
+      "stamp": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7
+      },
+      "record": "7b226f6b223a747275657d",
+      "expect": {
+        "hex": "4000010000077b226f6b223a747275657d"
+      }
+    },
+    {
+      "note": "busy on reset, which declares no error type: tag 0",
+      "operation": "reset",
+      "form": "error",
+      "stamp": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7
+      },
+      "error": {
+        "code": "busy"
+      },
+      "expect": {
+        "hex": "600001000007a0"
+      }
+    },
+    {
+      "note": "app on reset, with no detail",
+      "operation": "reset",
+      "form": "error",
+      "stamp": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7
+      },
+      "error": {
+        "code": "app",
+        "message": "no"
+      },
+      "expect": {
+        "hex": "600001000007e2026e6f"
+      }
+    },
+    {
+      "note": "app on reset with a detail: an operation with no error type has none to send",
+      "operation": "reset",
+      "form": "error",
+      "stamp": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7
+      },
+      "error": {
+        "code": "app",
+        "detail": "00"
+      },
+      "expect": {
+        "refused": "detail"
+      }
+    },
+    {
+      "note": "a Change detail with a mode its type does not declare: the writer's `value`",
+      "operation": "calibrate",
+      "form": "error",
+      "stamp": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7
+      },
+      "error": {
+        "code": "app",
+        "detail": {
+          "at": 1730000000123,
+          "mode": "dim",
+          "count": 5
+        }
+      },
+      "expect": {
+        "refused": "value"
+      }
+    },
+    {
+      "note": "a Status value with no code: signal_bars 6 is out of 0 to 5",
+      "operation": "calibrate",
+      "form": "value",
+      "stamp": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7
+      },
+      "value": {
+        "duty_available": "12.5",
+        "signal_bars": 6,
+        "oper": "up",
+        "admin": true
+      },
+      "expect": {
+        "refused": "range"
+      }
+    },
+    {
+      "note": "a Sensor request without battery: the writer's `missing`",
+      "operation": "calibrate",
+      "form": "request",
+      "value": {
+        "temperature": "21.5",
+        "humidity": "40",
+        "pressure": "1013.2"
+      },
+      "expect": {
+        "refused": "missing"
+      }
+    },
+    {
+      "note": "a cause on busy: §7.5's writer refuses it",
+      "operation": "calibrate",
+      "form": "error",
+      "stamp": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7
+      },
+      "error": {
+        "code": "busy",
+        "cause": "config"
+      },
+      "expect": {
+        "refused": "cause"
+      }
+    }
+  ],
+  "reads": [
+    {
+      "note": "calibrate's request, read as a Sensor",
+      "operation": "calibrate",
+      "sample": "query",
+      "hex": "464cea1bdcaa",
+      "expect": {
+        "run_width": null,
+        "run": null,
+        "seq": null,
+        "tag": 6,
+        "value": {
+          "temperature": "21.5",
+          "humidity": "40",
+          "pressure": "1013.2",
+          "battery": "3.7"
+        }
+      }
+    },
+    {
+      "note": "calibrate's request under tag 0: not Sensor's (§7.6), so the owner refuses it invalid_request",
+      "operation": "calibrate",
+      "sample": "query",
+      "hex": "404cea1bdcaa",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "calibrate's request with its width bit set: §7.5 first",
+      "operation": "calibrate",
+      "sample": "query",
+      "hex": "564cea1bdcaa",
+      "expect": {
+        "refused": "request_run"
+      }
+    },
+    {
+      "note": "calibrate's request a byte short: the Sensor record ends early",
+      "operation": "calibrate",
+      "sample": "query",
+      "hex": "464cea1bdc",
+      "expect": {
+        "refused": "length"
+      }
+    },
+    {
+      "note": "calibrate's value, read as a Status",
+      "operation": "calibrate",
+      "sample": "reply",
+      "hex": "4e00010000071f5900",
+      "expect": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 14,
+        "value": {
+          "duty_available": "12.5",
+          "signal_bars": 3,
+          "oper": "up",
+          "admin": true
+        }
+      }
+    },
+    {
+      "note": "calibrate's value under Sensor's tag: not the response type's",
+      "operation": "calibrate",
+      "sample": "reply",
+      "hex": "4600010000071f5900",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "calibrate's value with a pad bit set",
+      "operation": "calibrate",
+      "sample": "reply",
+      "hex": "4e00010000071f5901",
+      "expect": {
+        "refused": "pad"
+      }
+    },
+    {
+      "note": "calibrate's app error, its detail read as a Change",
+      "operation": "calibrate",
+      "sample": "reply_err",
+      "hex": "620001000007e4671db4801ec8000028",
+      "expect": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 2,
+        "error": {
+          "code": "app",
+          "cause": null,
+          "message": null,
+          "detail": {
+            "at": 1730000000123,
+            "mode": "on",
+            "count": 5
+          }
+        }
+      }
+    },
+    {
+      "note": "an app error under tag 0 on calibrate: its detail is read under CH's tag, not Change's",
+      "operation": "calibrate",
+      "sample": "reply_err",
+      "hex": "600001000007e4671db4801ec8000028",
+      "expect": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "error": {
+          "code": "app",
+          "cause": null,
+          "message": null,
+          "detail": {
+            "refused": "tag"
+          }
+        }
+      }
+    },
+    {
+      "note": "busy on calibrate under Change's tag",
+      "operation": "calibrate",
+      "sample": "reply_err",
+      "hex": "620001000007a0",
+      "expect": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 2,
+        "error": {
+          "code": "busy",
+          "cause": null,
+          "message": null,
+          "detail": null
+        }
+      }
+    },
+    {
+      "note": "busy on calibrate under tag 0: no detail follows, so no record is read and no tag checked",
+      "operation": "calibrate",
+      "sample": "reply_err",
+      "hex": "600001000007a0",
+      "expect": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "error": {
+          "code": "busy",
+          "cause": null,
+          "message": null,
+          "detail": null
+        }
+      }
+    },
+    {
+      "note": "a router's Timeout on calibrate's reply_err: no error form, so the transport's (§5.2)",
+      "operation": "calibrate",
+      "sample": "reply_err",
+      "hex": "54696d656f7574",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "scan's summary, read as a Status",
+      "operation": "scan",
+      "sample": "reply",
+      "summary": true,
+      "hex": "4e00010000071f5900",
+      "expect": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 14,
+        "value": {
+          "duty_available": "12.5",
+          "signal_bars": 3,
+          "oper": "up",
+          "admin": true
+        }
+      }
+    },
+    {
+      "note": "scan's summary under Sensor's tag: the value type's, not the summary type's",
+      "operation": "scan",
+      "sample": "reply",
+      "summary": true,
+      "hex": "4600010000071f5900",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "reset's request, read as a Status",
+      "operation": "reset",
+      "sample": "query",
+      "hex": "4e1f5900",
+      "expect": {
+        "run_width": null,
+        "run": null,
+        "seq": null,
+        "tag": 14,
+        "value": {
+          "duty_available": "12.5",
+          "signal_bars": 3,
+          "oper": "up",
+          "admin": true
+        }
+      }
+    },
+    {
+      "note": "reset's request under tag 0",
+      "operation": "reset",
+      "sample": "query",
+      "hex": "401f5900",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "reset's value, a JSON Schema record read on the contract's encoding",
+      "operation": "reset",
+      "sample": "reply",
+      "hex": "4000010000077b226f6b223a747275657d",
+      "expect": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "value": {
+          "ok": true
+        }
+      }
+    },
+    {
+      "note": "app on reset, with a message and no detail",
+      "operation": "reset",
+      "sample": "reply_err",
+      "hex": "600001000007e2026e6f",
+      "expect": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "error": {
+          "code": "app",
+          "cause": null,
+          "message": "no",
+          "detail": null
+        }
+      }
+    }
+  ]
+}

@@ -1046,9 +1046,17 @@ async fn call(
         Some(_) if !probing => Some(Err(
             "not made: the fanout-refused case is skipped".to_owned()
         )),
-        Some((iface, bytes)) => {
-            Some(fanout_probe(session, addr, &iface, r, bytes, spec.timeout).await)
-        }
+        Some((iface, bytes)) => Some(
+            fanout_probe(
+                session,
+                addr,
+                &iface,
+                (rev.contract(), r),
+                bytes,
+                spec.timeout,
+            )
+            .await,
+        ),
         None => None,
     };
     OpObserved::Called { call, fanout }
@@ -1057,15 +1065,21 @@ async fn call(
 /// A call over the template's wildcard (O2): target `All`, consolidation
 /// `None`, every reply kept apart — a value (the operation ran), an
 /// owner's error from either wire (§5.2, the runtime's
-/// [`zenkey::client::classify`]), the transport's own error.
+/// [`zenkey::client::classify`]), the transport's own error. Its request is
+/// `record` in the request form, as every caller writes it (core §5.1),
+/// under `zenoh/bytes`.
 async fn fanout_probe(
     session: &Session,
     addr: &Addr,
     iface: &IfaceId,
-    r: &Resource,
-    request: Vec<u8>,
+    (contract, r): (&zenkey_model::contract::Contract, &Resource),
+    record: Vec<u8>,
     timeout: Duration,
 ) -> std::result::Result<FanoutSeen, String> {
+    let Body::Operation(op) = &r.body else {
+        return Err(format!("{}/{} is no operation", r.token, r.template));
+    };
+    let request = zenkey_model::forms::Forms::of(contract, op)?.request(&record);
     let mut chunks: Vec<String> = vec![
         GRAMMAR.to_owned(),
         addr.system.to_string(),
@@ -1083,6 +1097,7 @@ async fn fanout_probe(
     let replies = session
         .get(&selector)
         .payload(request)
+        .encoding(zenoh::bytes::Encoding::ZENOH_BYTES)
         .target(QueryTarget::All)
         .consolidation(ConsolidationMode::None)
         .timeout(timeout)
@@ -1468,7 +1483,8 @@ async fn config_probes(
             }
         }
     }
-    let set = zenkey::config_v1::implementation()
+    let config = zenkey::config_v1::implementation();
+    let set = config
         .contract()
         .resources
         .iter()
@@ -1485,7 +1501,7 @@ async fn config_probes(
                 session,
                 address,
                 &crate::bus::config::iface(),
-                &set,
+                (config.contract(), &set),
                 bytes,
                 t,
             )

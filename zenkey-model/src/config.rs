@@ -2585,6 +2585,35 @@ impl Owner {
         }
     }
 
+    /// Whether a `set` of `group` with `req` would be answered now with the
+    /// first answer its idempotency key holds (§2.14): what [`Owner::set`]
+    /// replays, read without a change. A runtime that keeps the bytes it
+    /// sent then sends them again, the first answer's as-of mark included
+    /// (core §5.1, "An answer sent again").
+    #[must_use]
+    pub fn replays(&self, now: Time, group: &str, req: &SetRequest) -> bool {
+        if check_set_shape(req).is_err() || self.flight.is_some() {
+            return false;
+        }
+        req.idempotency_key.as_ref().is_some_and(|k| {
+            self.held(now, k)
+                .is_some_and(|h| h.group == group && h.request == *req)
+        })
+    }
+
+    /// Whether the owner holds a first answer for idempotency key `key` at
+    /// `now` (§2.14): within 300 s of it.
+    #[must_use]
+    pub fn holds_key(&self, now: Time, key: &str) -> bool {
+        self.held(now, key).is_some()
+    }
+
+    fn held(&self, now: Time, key: &str) -> Option<&Held> {
+        self.keys
+            .iter()
+            .find(|h| h.key == key && now.within(h.at, KEY_HELD))
+    }
+
     /// A `set` (§2.5, §2.9): answered now, or an [`Act::Apply`] for a hot
     /// group, whose reply comes with [`Owner::finish`].
     pub fn set(&mut self, now: Time, group: &str, req: &SetRequest, call: &Call) -> Step {

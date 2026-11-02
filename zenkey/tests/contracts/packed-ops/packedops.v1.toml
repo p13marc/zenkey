@@ -1,0 +1,26 @@
+# core §5.1, §5.2, §7.6 (#985 C4c): packed operation types, each carried in
+# the request, value and error forms behind a CH holding its tag, over the
+# types of ../packed/vectors.json. zenkey-build's codegen-test serves and
+# calls them through the generated Server and Client, a `time` field under
+# the deployment catalog's epoch.
+[interface]
+name    = "packedops"
+major   = 1
+minor   = 0
+summary = "Packed operations: the forms' tags"
+
+[schemas]
+packed = ["../packed/vectors.json"]
+
+[resources.calibrate]
+kind     = "operation"
+request  = "packed:Sensor"
+response = "packed:Clock"
+error    = "packed:Mode"
+
+[resources.scan]
+kind     = "operation"
+request  = "packed:Status"
+response = "packed:Sensor"
+replies  = "many"
+summary  = "packed:Clock"

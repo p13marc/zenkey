@@ -420,7 +420,20 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   `cause`, `detail`, `extension`, `utf8`), adopted by no rule until C4c;
   §5.1's as-of mark, §5.2's error form and a router's `Timeout`; E044
   no longer reads an operation's types (`ok-packed-operation`);
-  `errors/forms.json`; 232 rules.
+  `errors/forms.json`; 232 rules. Core 0.94 and observer text 0.24 (#985
+  C4c) adopt them: §5.1, a caller MUST write `CH · record` (width bit 0,
+  the `request` type's tag) and an owner each value in the value form
+  (the `response` or `summary` type's tag) with its as-of mark, and an
+  answer sent again keeps its first bytes, mark included; §5.2 "Errors",
+  an owner MUST answer in the error form (the `error` type's tag or 0,
+  the detail its type's own bytes, never base64), a caller or tool MUST
+  read a `reply_err` under `zenoh/bytes` by §7.5's parse and every other,
+  a malformed one included, as the transport's; the bare wire (no form) a
+  MAY to read until C4d, the envelope's `Encoding` MUST gone; observer
+  §7.3 "A call's forms first" (a refused value never sniffed);
+  `envelope/calls.json` (`zenkey-model/tests/conformance.rs`'s
+  `call_forms`) and `scenarios/operations.md` §9 (`zenkey/tests/
+  operations.rs`'s `s9_a_calls_forms`); 239 rules.
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`

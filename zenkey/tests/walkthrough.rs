@@ -450,9 +450,11 @@ async fn tcgui_set_and_diagnostics() {
         .unwrap();
     let env = out.refusal().expect("refused");
     assert_eq!(env.code, "app");
-    let Some(Detail::Value(detail)) = &env.detail else {
-        panic!("an inline detail: {env:?}")
+    // The error form's detail: the TcError's JSON (core §5.2).
+    let Some(Detail::Bytes(detail)) = &env.detail else {
+        panic!("a detail in the type's own bytes: {env:?}")
     };
+    let detail: Value = serde_json::from_slice(detail).unwrap();
     assert_eq!(detail["kind"], "kernel");
     let plug = netem
         .call_value(

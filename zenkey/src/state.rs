@@ -293,6 +293,20 @@ impl Minter {
         self.ensure(&mut r)
     }
 
+    /// The as-of mark a reply carries now (core §5.1, "The as-of mark"):
+    /// the run written under, and the last state or event seq minted under
+    /// it, 0 when none was. A reply mints no seq, so two replies with no
+    /// write between them carry one mark.
+    pub fn mark(&self) -> wire::Stamp {
+        let mut r = self.runs.lock().expect("not poisoned");
+        let run = self.ensure(&mut r);
+        let last = r.seq.saturating_sub(1).min(wire::Seq::MAX.get());
+        wire::Stamp {
+            run,
+            seq: wire::Seq::new(last).expect("at most 2^24 - 1"),
+        }
+    }
+
     /// A run never used by this instance: the store's next counter, else a
     /// random 32-bit draw (§4.3).
     fn draw(&self, used: &[wire::Run]) -> wire::Run {
