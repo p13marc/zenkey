@@ -47,6 +47,7 @@ They hold 200 tokens instead of 400, where it said 300.
   collection (`freshness.v2` §2.5), which Consume already holds.
 - **Call and Tool** follow Consume, as before: a tool holds the heartbeat
   of what it binds.
+
 ## 0.85 — 2026-11-01: zk2py round 96's findings answered (#978, #981)
 
 zk2py's round 96 read core 0.81 to 0.83, `freshness.v2` 0.1, `link.v1`
