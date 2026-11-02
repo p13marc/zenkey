@@ -386,3 +386,17 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   `transport_differs`, `wait_under_lease`, `peer_differs`,
   `catalog_mismatch`). §2.17, §2.20 and §2.21 are left for #988's L3 and
   L4. Appendix B's four media are `examples/zk2/link/media/*.face.toml`.
+- **`telemetry.v2`** (#983 T1, text 0.1, `experimental` until modem.v3
+  uses it) sits beside `telemetry.v1` in `spec/profiles/telemetry/`:
+  `v2.md`, `scenarios-v2.md`,
+  `conformance/v2/{declarations,readings,continuity}.json` (blessed and
+  read by hand, continuity cross-checked by a Python reading kept out of
+  the repo), `conformance/contracts/meterframe.v1.toml` (the scenarios'
+  contract, beside `meterframe.json` and `meter.json`), and the one
+  `CHANGELOG.md`, its entries headed `telemetry.v2 0.N`. It restates v1
+  §2.1–§2.15 by reference on every resource that is no frame resource,
+  and adds §2.16 (`telemetry.series`, mirrors and inline series), §2.17
+  (the series is the frame key and the field), §2.18 (a sample is an
+  included value; no value is never 0), §2.19 (the epoch is the run, a
+  rewind a reset), §2.20 (a counter's width, its serial window) and
+  §2.21 (the time base and its basis). No core or observer amendment.
