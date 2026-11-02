@@ -33,6 +33,9 @@ Its seam crates are on crates.io for out-of-tree backends.
   `link.md`'s first note gives each face's transport, the frames that cross it and its plan's
   warnings.
 - What `modem-contract` becomes is in [`contract-crate.md`](contract-crate.md).
+- How to move zenoh-modem onto zk2c, step by step, against what zenkey's `main` provides today,
+  is [`MIGRATION.md`](MIGRATION.md): what is landed, drafted and missing, the order, the
+  routers, the ground side, and what is still to decide.
 - [`catalog.json`](catalog.json) is the deployment catalog ([core §8.6](../../../spec/core.md#86-the-deployment-catalog)),
   provisioned to rf0's host and to the ground. It indexes `modem.v3`, `config.v1` and
   `health.v1` at their current revisions (`modem.v3` 3.2 at index 6, catalog `ab76ec37`), and
