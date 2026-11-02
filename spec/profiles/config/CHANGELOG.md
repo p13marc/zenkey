@@ -7,6 +7,31 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `config.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## config.v2 draft — 2026-11-02: used by zenoh-modem (#985, G4)
+
+The text's status moves from `experimental` to `draft`, the status of a
+profile an adopter's mapping uses ([`../README.md`](../README.md), "The
+process"). #985's G4 gives zenoh-modem's SX1262 a config contract of its
+own, `sx1262_config.v1` in `examples/zk2/zenoh-modem/config/`, bound in
+its `config.v2-binding.md`. It lists `config.v2`, `freshness.v2` and
+`link.v2`, and is published in `examples/zk2/.history` and listed in
+zenoh-modem's catalog.
+
+**Changed: the status and Appendix B.**
+- The index lists `config.v2` in its first table, used by zenoh-modem,
+  and the header's status reads `draft`.
+- Appendix B, which said no adopter's contract used the text, names the
+  SX1262's, and that its runtime schema states no upper bound for
+  `period_s`, which the contract's `int` needs.
+
+**Deliberately not changed.**
+- **No rule.** The text stays 0.1, written against core 0.94, and its
+  fixtures and scenarios are as they were.
+- **The sizes.** The SX1262's record is 30 bytes idle with a last change
+  and 44 with a reach change pending, as §3 says, and 24 at start.
+- **`config.v1` stays draft,** used by zenoh-modem's backends whose
+  configuration holds text.
+
 ## config.v2 0.1 — 2026-11-02: the schema in the contract, one packed record (#985, G1)
 
 Epic #975 makes the wire bandwidth-first. After #978's F4, `config.v1`
