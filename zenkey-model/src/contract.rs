@@ -1142,7 +1142,37 @@ fn resolve_frame(
     }
     let params = params?;
     check_frame_timing(at, &params, annotations, cx.report);
+    check_frame_horizon(at, &params, annotations, cx.report);
     Some(params)
+}
+
+/// W108 (core §7.7, `freshness.v1` §2.4): a frame resource whose interval
+/// is above half its horizon. Its owner puts a frame at least every
+/// ttl/2, so a cadence it states above that is one it cannot keep. An
+/// unstated interval, and a horizon that does not read, give none.
+fn check_frame_horizon(
+    at: &str,
+    params: &crate::frame::FrameParams,
+    annotations: &BTreeMap<String, Value>,
+    report: &mut Report,
+) {
+    let (Some(ttl), Some(interval)) = (
+        crate::freshness::horizon(Kind::Stream, annotations).ttl(),
+        params.interval_ms(annotations),
+    ) else {
+        return;
+    };
+    if u128::from(interval) * 2 > ttl.as_millis() {
+        report.push(Diagnostic::warning(
+            "W108",
+            at,
+            format!(
+                "the frame's interval, {interval} ms, is above half its `freshness.ttl_s` = {}: \
+                 its owner puts a frame at least every ttl/2",
+                ttl.as_secs()
+            ),
+        ));
+    }
 }
 
 /// E050 (core §7.7, `timing.v1` §2.3): a deadline below the span, each

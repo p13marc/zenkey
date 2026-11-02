@@ -35,7 +35,11 @@
 //!   `spec/conformance/frame/apply.json` does, which observer §7.6's tools
 //!   show.
 //!
-//! The owner's writer is K3.
+//! - **A key's writer** is a [`Framer`] (#981's K3): the records an owner
+//!   measured ([`Measured`]) gathered into frames ([`Batch`]), each written
+//!   under its run ([`Framer::encode`]) as §7.7's "The owner's frames"
+//!   says, full where the run is new or `keyframe_every` asks, each delta
+//!   field included where it changed or passed its deadband.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -1349,6 +1353,400 @@ impl Reader {
     }
 }
 
+// ── The owner's frames (core §7.7, "The owner's frames"; #981's K3) ─────
+
+impl Time {
+    /// The time of an instant `t`, in milliseconds since the Unix epoch,
+    /// under the deployment epoch `epoch` in seconds: `None` for one before
+    /// the epoch or 2^32 seconds after it, which the owner writes as
+    /// unknown.
+    #[must_use]
+    pub fn from_unix_ms(t: i128, epoch: i64) -> Option<Time> {
+        let delta = t - 1000 * i128::from(epoch);
+        let (s, ms) = (delta.div_euclid(1000), delta.rem_euclid(1000));
+        Some(Time {
+            s: u32::try_from(s).ok()?,
+            ms: u16::try_from(ms).expect("below 1000"),
+        })
+    }
+
+    /// The instant in milliseconds since the Unix epoch, under `epoch`.
+    #[must_use]
+    pub fn unix_ms(self, epoch: i64) -> i128 {
+        1000 * (i128::from(epoch) + i128::from(self.s)) + i128::from(self.ms)
+    }
+}
+
+impl Layout {
+    /// A §7.6 record of the frame's record type read into a full record's
+    /// slots: each field absent or its code. The record's own tag is not
+    /// asked: its bytes are the type's.
+    ///
+    /// # Errors
+    /// [`ReadRefusal::Length`], [`ReadRefusal::Code`] or
+    /// [`ReadRefusal::Pad`], as §7.6's reader refuses the record.
+    pub fn slots_of(&self, record: &[u8]) -> Result<Vec<Slot>, ReadRefusal> {
+        let mut r = BitReader::new(record);
+        let mut slots = Vec::with_capacity(self.fields.len());
+        for f in &self.fields {
+            if f.optional && !r.bit()? {
+                slots.push(Slot::Absent);
+                continue;
+            }
+            let code = r.take(f.width)?;
+            f.check_code(code)?;
+            slots.push(Slot::Code(code));
+        }
+        r.end()?;
+        Ok(slots)
+    }
+
+    /// A record in §7.6's JSON reading, a field's name to its value, read
+    /// into a full record's slots: an optional field left out or `null` is
+    /// absent. A `time` field counts from `epoch`.
+    ///
+    /// # Errors
+    /// [`WriteRefusal`]: `value` for a value that is no object, `unknown`
+    /// for a name the type does not have, `missing` for a field that is not
+    /// optional left out, and §7.6's refusals of a value.
+    pub fn slots_of_json(&self, v: &Value, epoch: Option<i64>) -> Result<Vec<Slot>, WriteRefusal> {
+        let m = v.as_object().ok_or(WriteRefusal::Value)?;
+        if m.keys().any(|k| !self.fields.iter().any(|f| &f.name == k)) {
+            return Err(WriteRefusal::Unknown);
+        }
+        self.fields
+            .iter()
+            .map(|f| match m.get(&f.name) {
+                None | Some(Value::Null) if f.optional => Ok(Slot::Absent),
+                None => Err(WriteRefusal::Missing),
+                Some(x) => Ok(Slot::Code(f.code(x, epoch)? & packed::top_code(f.width))),
+            })
+            .collect()
+    }
+
+    /// The bits of the largest frame an owner writes: `records` full
+    /// records, every optional field present, and every record after
+    /// record 0 measured, with its offset (link.v1 §2.3's
+    /// `frame_over_batch`).
+    #[must_use]
+    pub fn largest_body_bits(&self) -> u64 {
+        let record: u64 = 1 + self
+            .fields
+            .iter()
+            .map(|f| u64::from(f.width) + u64::from(f.optional))
+            .sum::<u64>();
+        let n = u64::from(self.params.records);
+        let later = n.saturating_sub(1) * (1 + u64::from(self.offset_bits().unwrap_or(0)));
+        42 + u64::from(self.count_bits()) + n * record + later
+    }
+
+    /// The payload of that largest frame, in bytes: its body after an
+    /// envelope of a 32-bit run, 8 bytes (core §7.5).
+    #[must_use]
+    pub fn largest_payload_bytes(&self) -> u64 {
+        8 + self.largest_body_bits().div_ceil(8)
+    }
+
+    /// The value of a field's code a deadband weighs: an `int`'s integer,
+    /// a `fixed`'s decimal, a `counter`'s count. `None` for a reserved code,
+    /// which holds no value, and for a field that takes no deadband.
+    fn weighed(&self, index: usize, code: u64) -> Option<Decimal> {
+        let f = &self.fields[index];
+        if f.reserved_name(code).is_some() {
+            return None;
+        }
+        match &f.kind {
+            FieldKind::Int {
+                minimum, maximum, ..
+            } => packed::int_value(code, *minimum, *maximum)
+                .ok()
+                .map(Decimal::of_i128),
+            FieldKind::Fixed {
+                minimum,
+                resolution,
+                values,
+                ..
+            } => packed::fixed_value(code, minimum, resolution, *values).ok(),
+            FieldKind::Counter => Some(Decimal::of_i128(i128::from(code))),
+            _ => None,
+        }
+    }
+}
+
+/// One record an owner measured: each field absent or its code
+/// ([`Slot::Absent`], [`Slot::Code`]), when it measured it on its
+/// monotonic clock (`at`), and its wall clock's time then, `None` while
+/// its clock is unknown. Only record 0's wall time is written: a later
+/// record's time is its offset on the monotonic clock (core §7.7,
+/// "Times").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Measured {
+    pub slots: Vec<Slot>,
+    pub at: crate::timing::Mono,
+    pub wall: Option<Time>,
+}
+
+/// The records of one frame, in the order they were measured: what a
+/// [`Framer`] hands its owner to write ([`Framer::encode`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Batch(Vec<Measured>);
+
+impl Batch {
+    /// How many records it holds, and so how many seqs its frame takes
+    /// (core §4.3).
+    #[must_use]
+    #[allow(clippy::len_without_is_empty)]
+    pub fn len(&self) -> u32 {
+        u32::try_from(self.0.len()).expect("at most 256")
+    }
+
+    /// Its records.
+    #[must_use]
+    pub fn records(&self) -> &[Measured] {
+        &self.0
+    }
+}
+
+/// What the key's readers hold after the last frame an owner sent, in the
+/// run it was sent under: what the next delta record is written against.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Sent {
+    run: Run,
+    /// The last record sent, every field absent or a code.
+    prev: Vec<Slot>,
+    /// Each field as the last record that included it held it.
+    included: Vec<Slot>,
+    /// Records since each field was last included.
+    since: Vec<u32>,
+    /// Records since the last full record.
+    since_full: u32,
+}
+
+/// A batch written as a frame under a run ([`Framer::encode`]), and what
+/// the key's readers hold once it is sent: [`Framer::sent`] keeps that.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Encoded {
+    pub frame: Frame,
+    next: Sent,
+}
+
+/// One frame key's writer (core §7.7, "The owner's frames"): a pure state
+/// machine an owner hands each record it measures, in the order it
+/// measured them ([`Framer::push`]), which says when a frame is complete
+/// and writes it ([`Framer::encode`]). The owner takes the frame's seqs,
+/// one per record (§4.3), puts it, and tells the framer it was sent
+/// ([`Framer::sent`]). A frame never sent leaves nothing behind: the
+/// next is written against the last one sent.
+///
+/// - **Frames.** A frame holds up to `records` records. A record that
+///   would lie at or past the open frame's span ends it, and opens the
+///   next as its record 0. [`Framer::flush`] ends the open frame early.
+/// - **Full records.** Record 0 of the first frame written under a run is
+///   full, and so is a record `keyframe_every` records after the last full
+///   one. A delta record that would include every field is written full.
+/// - **Delta records** include each field with no deadband whose code or
+///   presence differs from the record before. A field with a deadband is
+///   omitted while it holds a value within `delta` of the value last
+///   included, as that inclusion did, and fewer than `max_records`
+///   records passed since; else it is included.
+/// - **Times.** Record 0 carries its wall time. A later record is
+///   scheduled when its offset from record 0, on the monotonic clock, lies
+///   within `jitter_ms` of `step_ms` × its index, and carries its offset,
+///   in whole milliseconds, otherwise.
+#[derive(Debug, Clone)]
+pub struct Framer {
+    layout: Layout,
+    open: Vec<Measured>,
+    last_at: Option<crate::timing::Mono>,
+    sent: Option<Sent>,
+}
+
+impl Framer {
+    /// A framer of `layout`'s frames that has sent none.
+    #[must_use]
+    pub fn new(layout: Layout) -> Self {
+        Self {
+            layout,
+            open: Vec::new(),
+            last_at: None,
+            sent: None,
+        }
+    }
+
+    /// Its layout.
+    #[must_use]
+    pub fn layout(&self) -> &Layout {
+        &self.layout
+    }
+
+    /// How many records the open frame holds.
+    #[must_use]
+    pub fn open(&self) -> usize {
+        self.open.len()
+    }
+
+    /// The run the last frame sent was written under.
+    #[must_use]
+    pub fn run(&self) -> Option<Run> {
+        self.sent.as_ref().map(|s| s.run)
+    }
+
+    /// Takes a measured record, refused before anything is kept: a slot
+    /// omitted, one per field missing, a field that is not optional
+    /// written absent, a code its field does not use, or a record measured
+    /// before the last one.
+    ///
+    /// Returns the frame now complete, if one is: the open frame, when
+    /// this record lies at or past its span (this record then opens the
+    /// next frame), or the open frame with this record, when that holds
+    /// `records` records. A one-record frame is complete at once.
+    ///
+    /// # Errors
+    /// [`WriteRefusal`]: `value` for a slot omitted or the wrong count,
+    /// `missing`, `range`, `order`.
+    pub fn push(&mut self, m: Measured) -> Result<Option<Batch>, WriteRefusal> {
+        if m.slots.len() != self.layout.fields.len() {
+            return Err(WriteRefusal::Value);
+        }
+        for (f, s) in self.layout.fields.iter().zip(&m.slots) {
+            match s {
+                Slot::Omitted => return Err(WriteRefusal::Value),
+                Slot::Absent if !f.optional => return Err(WriteRefusal::Missing),
+                Slot::Absent => {}
+                Slot::Code(c) => {
+                    if (f.width < 64 && *c >> f.width != 0) || f.check_code(*c).is_err() {
+                        return Err(WriteRefusal::Range);
+                    }
+                }
+            }
+        }
+        if self.last_at.is_some_and(|l| m.at < l) {
+            return Err(WriteRefusal::Order);
+        }
+        self.last_at = Some(m.at);
+        let past_span = match (self.open.first(), self.layout.params.span_ms()) {
+            (Some(first), Some(span)) => {
+                m.at.since_origin().saturating_sub(first.at.since_origin())
+                    >= Duration::from_millis(span)
+            }
+            _ => false,
+        };
+        let ended = if past_span {
+            Some(Batch(std::mem::take(&mut self.open)))
+        } else {
+            None
+        };
+        self.open.push(m);
+        if ended.is_some() {
+            return Ok(ended);
+        }
+        if self.open.len() >= usize::from(self.layout.params.records) {
+            return Ok(Some(Batch(std::mem::take(&mut self.open))));
+        }
+        Ok(None)
+    }
+
+    /// Ends the open frame now, if it holds a record: an owner that puts
+    /// what it measured so far, or stops.
+    pub fn flush(&mut self) -> Option<Batch> {
+        (!self.open.is_empty()).then(|| Batch(std::mem::take(&mut self.open)))
+    }
+
+    /// `batch` written as a frame under `run`: record 0 full when the last
+    /// frame sent was another run's, or none was; each later record's time
+    /// and fields as [`Framer`] says.
+    #[must_use]
+    pub fn encode(&self, batch: &Batch, run: Run) -> Encoded {
+        let l = &self.layout;
+        let n = l.fields.len();
+        let mut state = self.sent.clone().filter(|s| s.run == run);
+        let origin = batch.0[0].at.since_origin();
+        let mut records = Vec::with_capacity(batch.0.len());
+        for (i, m) in batch.0.iter().enumerate() {
+            let at = (i > 0).then(|| {
+                let off = m.at.since_origin().saturating_sub(origin);
+                let scheduled = l.params.step_ms.is_some_and(|step| {
+                    let instant = Duration::from_millis(u64::from(step) * i as u64);
+                    let jitter = Duration::from_millis(u64::from(l.params.jitter_ms.unwrap_or(0)));
+                    off.abs_diff(instant) <= jitter
+                });
+                if scheduled {
+                    At::Scheduled
+                } else {
+                    At::Offset(u64::try_from(off.as_millis()).unwrap_or(u64::MAX))
+                }
+            });
+            let (full, slots, next) = match state {
+                None => (true, m.slots.clone(), None),
+                Some(ref s) => {
+                    let include: Vec<bool> =
+                        (0..n).map(|k| self.includes(s, k, m.slots[k])).collect();
+                    let full =
+                        s.since_full + 1 >= l.params.keyframe_every || include.iter().all(|x| *x);
+                    let slots = if full {
+                        m.slots.clone()
+                    } else {
+                        m.slots
+                            .iter()
+                            .zip(&include)
+                            .map(|(slot, inc)| if *inc { *slot } else { Slot::Omitted })
+                            .collect()
+                    };
+                    (full, slots, Some(s))
+                }
+            };
+            let mut s = next.cloned().unwrap_or(Sent {
+                run,
+                prev: m.slots.clone(),
+                included: m.slots.clone(),
+                since: vec![0; n],
+                since_full: 0,
+            });
+            for (k, slot) in slots.iter().enumerate() {
+                if matches!(slot, Slot::Omitted) {
+                    s.since[k] = s.since[k].saturating_add(1);
+                } else {
+                    s.included[k] = *slot;
+                    s.since[k] = 0;
+                }
+            }
+            s.since_full = if full { 0 } else { s.since_full + 1 };
+            s.prev = m.slots.clone();
+            state = Some(s);
+            records.push(Record { full, at, slots });
+        }
+        Encoded {
+            frame: Frame {
+                time: batch.0[0].wall,
+                records,
+            },
+            next: state.expect("a record at least"),
+        }
+    }
+
+    /// Whether a delta record after `s` includes field `k`, now `slot`.
+    fn includes(&self, s: &Sent, k: usize, slot: Slot) -> bool {
+        let Some(d) = self.layout.deadband(k) else {
+            return slot != s.prev[k];
+        };
+        let (Slot::Code(now), Slot::Code(then)) = (slot, s.included[k]) else {
+            return true;
+        };
+        if s.since[k] + 1 >= d.max_records {
+            return true;
+        }
+        match (self.layout.weighed(k, now), self.layout.weighed(k, then)) {
+            (Some(a), Some(b)) => a.distance(&b) > d.delta,
+            _ => true,
+        }
+    }
+
+    /// `e` was sent: the next frame is written against it.
+    pub fn sent(&mut self, e: Encoded) {
+        self.sent = Some(e.next);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1460,6 +1858,252 @@ mod tests {
             seq: Seq::new(0).unwrap(),
         });
         assert!(r.apply(&l, stamp(14), &full).refused.is_empty());
+    }
+
+    fn sample() -> packed::Layout {
+        let doc = json!({"types": {"Sample": {"fields": [
+            {"name": "temperature", "type": "fixed", "minimum": "-40", "maximum": "85",
+             "resolution": "0.5"},
+            {"name": "rssi", "type": "int", "minimum": -140, "maximum": -20,
+             "reserved": ["not_available"]},
+            {"name": "link_up", "type": "bool"},
+            {"name": "mode", "type": "enum", "values": ["idle", "rx", "tx"], "escape": true,
+             "optional": true}
+        ]}}});
+        packed::layout_in(&doc, "Sample").expect("a layout")
+    }
+
+    fn params(spec: FrameSpec) -> FrameParams {
+        FrameParams::resolve(&spec).expect("a table")
+    }
+
+    fn measured(l: &Layout, v: Value, ms: u64) -> Measured {
+        Measured {
+            slots: l.slots_of_json(&v, None).expect("slots"),
+            at: crate::timing::Mono::after(Duration::from_millis(ms)),
+            wall: Some(Time { s: 100, ms: 0 }),
+        }
+    }
+
+    fn base(queue: u64) -> Value {
+        json!({"dropped": 7, "queue_depth": queue, "duty_available": 1, "duty_wait_ms": "1500"})
+    }
+
+    /// Writes each batch under `run` from seq `next`, as an owner would,
+    /// and reads it back through a reader.
+    fn send(f: &mut Framer, r: &mut Reader, batch: &Batch, run: Run, next: &mut u32) -> Applied {
+        let e = f.encode(batch, run);
+        let l = f.layout().clone();
+        let stamp = Stamp {
+            run,
+            seq: Seq::new(*next).unwrap(),
+        };
+        let put = e.frame.envelope(&l, stamp).expect("written");
+        let env = Envelope::parse(&put).unwrap();
+        let back = Frame::parse(env.tag, env.record, &l).expect("read back");
+        assert_eq!(back, e.frame);
+        *next += batch.len();
+        f.sent(e);
+        r.apply(&l, stamp, &back)
+    }
+
+    /// The owner's rules (core §7.7): its first frame in a run full, a full
+    /// record every `keyframe_every`, a delta record including what
+    /// changed, a deadband omitted within `delta` and included every
+    /// `max_records`, and a new run full again; a reader of its frames
+    /// reads every field known or within.
+    #[test]
+    fn a_framer_writes_the_owners_frames() {
+        let p = params(FrameSpec {
+            keyframe_every: Some(4),
+            deadband: [(
+                "queue_depth".to_owned(),
+                crate::authoring::DeadbandSpec {
+                    delta: "4".to_owned(),
+                    max_records: 3,
+                },
+            )]
+            .into(),
+            ..FrameSpec::default()
+        });
+        let l = Layout::of(&link(), &p).unwrap();
+        let mut f = Framer::new(l.clone());
+        let mut r = Reader::new();
+        let (run, mut next) = (Run::U16(1), 0);
+        let one = |f: &mut Framer, r: &mut Reader, v: Value, ms: u64, run: Run, next: &mut u32| {
+            let b = f
+                .push(measured(&l, v, ms))
+                .unwrap()
+                .expect("one record a frame");
+            send(f, r, &b, run, next)
+        };
+        let a = one(&mut f, &mut r, base(12), 0, run, &mut next);
+        assert!(
+            a.records[0]
+                .fields
+                .iter()
+                .all(|s| matches!(s, FieldState::Known(_)))
+        );
+        // Within 4 of 12, the rest unchanged: nothing included.
+        let a = one(&mut f, &mut r, base(15), 1000, run, &mut next);
+        assert_eq!(a.follows, Follows::Continues);
+        assert_eq!(a.records[0].fields[1], FieldState::Within(12));
+        let a = one(&mut f, &mut r, base(9), 2000, run, &mut next);
+        assert_eq!(a.records[0].fields[1], FieldState::Within(12));
+        // Three records after its inclusion: included, 13.
+        let a = one(&mut f, &mut r, base(13), 3000, run, &mut next);
+        assert_eq!(a.records[0].fields[1], FieldState::Known(13));
+        // Four records after the full one: full again.
+        let mut v = base(13);
+        v["duty_wait_ms"] = json!("2500");
+        let e = f.encode(
+            &f.clone()
+                .push(measured(&l, v.clone(), 4000))
+                .unwrap()
+                .unwrap(),
+            run,
+        );
+        assert!(e.frame.records[0].full);
+        let a = one(&mut f, &mut r, v, 4000, run, &mut next);
+        assert_eq!(a.records[0].fields[3], FieldState::Known(25));
+        // A delta: the wait changed alone.
+        let mut v = base(13);
+        v["duty_wait_ms"] = json!("1500");
+        let e = f.encode(
+            &f.clone()
+                .push(measured(&l, v.clone(), 5000))
+                .unwrap()
+                .unwrap(),
+            run,
+        );
+        assert!(!e.frame.records[0].full);
+        assert_eq!(
+            e.frame.records[0].slots,
+            vec![Slot::Omitted, Slot::Omitted, Slot::Omitted, Slot::Code(15)]
+        );
+        // A field turned absent is included, its presence bit 0.
+        let a = one(&mut f, &mut r, v, 5000, run, &mut next);
+        let mut v = base(13);
+        v.as_object_mut().unwrap().remove("dropped");
+        let a2 = one(&mut f, &mut r, v, 6000, run, &mut next);
+        assert_eq!(a.records[0].fields[0], FieldState::Known(7));
+        assert_eq!(a2.records[0].fields[0], FieldState::Absent);
+        // A new run: full, whatever changed.
+        let b = f.push(measured(&l, base(13), 7000)).unwrap().unwrap();
+        let e = f.encode(&b, Run::U16(2));
+        assert!(e.frame.records[0].full);
+        // A frame never sent leaves nothing: the next is written against
+        // the last one sent, `dropped` present again, and the queue three
+        // records after its inclusion.
+        let e = f.encode(&b, run);
+        assert_eq!(
+            e.frame.records[0].slots,
+            vec![Slot::Code(7), Slot::Code(13), Slot::Omitted, Slot::Omitted]
+        );
+    }
+
+    /// Times (core §7.7): a record within the jitter of its instant is
+    /// scheduled, another measured; a record at or past the span ends the
+    /// frame and opens the next; a record measured before the last is
+    /// refused.
+    #[test]
+    fn a_framer_schedules_and_ends_frames() {
+        let p = params(FrameSpec {
+            records: Some(3),
+            step_ms: Some(10_000),
+            jitter_ms: Some(500),
+            keyframe_every: Some(3),
+            ..FrameSpec::default()
+        });
+        let l = Layout::of(&sample(), &p).unwrap();
+        let mut f = Framer::new(l.clone());
+        let v = |t: &str, rssi: i64, mode: &str| json!({"temperature": t, "rssi": rssi, "link_up": true, "mode": mode});
+        assert_eq!(f.push(measured(&l, v("21.5", -80, "rx"), 0)).unwrap(), None);
+        assert_eq!(
+            f.push(measured(&l, v("21.5", -82, "rx"), 10_200)).unwrap(),
+            None
+        );
+        let b = f
+            .push(measured(&l, v("22", -82, "tx"), 20_700))
+            .unwrap()
+            .expect("three records");
+        let e = f.encode(&b, Run::U16(1));
+        let at: Vec<_> = e.frame.records.iter().map(|r| r.at).collect();
+        assert_eq!(
+            at,
+            vec![None, Some(At::Scheduled), Some(At::Offset(20_700))]
+        );
+        assert_eq!(e.frame.records[1].slots[1], Slot::Code(58));
+        assert!(matches!(e.frame.records[1].slots[0], Slot::Omitted));
+        f.sent(e);
+        assert_eq!(
+            f.push(measured(&l, v("22", -82, "tx"), 30_100)).unwrap(),
+            None
+        );
+        assert_eq!(
+            f.push(measured(&l, v("22", -82, "tx"), 39_700)).unwrap(),
+            None
+        );
+        let b = f
+            .push(measured(&l, v("22", -82, "tx"), 65_100))
+            .unwrap()
+            .expect("past the span");
+        assert_eq!(b.len(), 2);
+        let e = f.encode(&b, Run::U16(1));
+        assert!(e.frame.records[0].full, "three records after the last full");
+        assert_eq!(e.frame.records[1].at, Some(At::Scheduled));
+        assert_eq!(f.open(), 1);
+        assert_eq!(
+            f.push(measured(&l, v("22", -82, "tx"), 65_000)),
+            Err(WriteRefusal::Order)
+        );
+        assert_eq!(f.flush().map(|b| b.len()), Some(1));
+        assert_eq!(f.flush(), None);
+        // A slot omitted, or a code its field does not use, is refused.
+        let mut m = measured(&l, v("22", -82, "tx"), 70_000);
+        m.slots[0] = Slot::Omitted;
+        assert_eq!(f.push(m), Err(WriteRefusal::Value));
+        let mut m = measured(&l, v("22", -82, "tx"), 70_000);
+        m.slots[0] = Slot::Code(251);
+        assert_eq!(f.push(m), Err(WriteRefusal::Range));
+    }
+
+    /// The largest frame (link.v1 §2.8): `records` full records with every
+    /// optional field and every offset.
+    #[test]
+    fn the_largest_frame() {
+        let l = Layout::of(&link(), &one()).unwrap();
+        assert_eq!(
+            (l.largest_body_bits(), l.largest_payload_bytes()),
+            (106, 22)
+        );
+        let p = params(FrameSpec {
+            records: Some(3),
+            step_ms: Some(10_000),
+            ..FrameSpec::default()
+        });
+        let l = Layout::of(&sample(), &p).unwrap();
+        // 42 + 2 + 3 × (1 + 19) + 2 × (1 + 15).
+        assert_eq!(l.largest_body_bits(), 136);
+        let all = json!({"temperature": "85", "rssi": -20, "link_up": true, "mode": "tx"});
+        let slots = l.slots_of_json(&all, None).unwrap();
+        let frame = Frame {
+            time: Some(Time { s: 1, ms: 2 }),
+            records: (0..3)
+                .map(|i| Record {
+                    full: true,
+                    at: (i > 0).then_some(At::Offset(29_999)),
+                    slots: slots.clone(),
+                })
+                .collect(),
+        };
+        assert_eq!(frame.write(&l).unwrap().bits, l.largest_body_bits());
+        // A record's bytes read into its slots as its JSON does.
+        let record = sample().write(&all, None).unwrap();
+        assert_eq!(l.slots_of(&record.bytes).unwrap(), slots);
+        assert_eq!(Time::from_unix_ms(1_500, 1), Some(Time { s: 0, ms: 500 }));
+        assert_eq!(Time::from_unix_ms(500, 1), None);
+        assert_eq!(Time { s: 0, ms: 500 }.unix_ms(1), 1_500);
     }
 
     #[test]
