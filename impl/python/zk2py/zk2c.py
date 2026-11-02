@@ -404,6 +404,15 @@ def read_reply_err(encoding: str, payload: bytes) -> Envelope:
     return parse(payload, "reply_err")
 
 
+def read_reply_err_token(encoding: str, payload: bytes) -> str | None:
+    """:func:`read_reply_err`'s refusal token, or None for an error form."""
+    try:
+        read_reply_err(encoding, payload)
+    except Refused as e:
+        return e.token
+    return None
+
+
 def mutation(stamp: InBand, record: bytes, tag: int = 0) -> bytes:
     """A put's payload: ``CH · run · seq · record``."""
     return write("mutation", stamp.width, stamp.run, stamp.seq, tag, record)

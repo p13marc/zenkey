@@ -3741,7 +3741,7 @@ def family_readings(root: Path) -> list[Result]:
         + _round91_readings(root) + _round92_readings(root) + _mend93_readings(root) + _round93_readings(root) \
         + _mend_after_round93_readings(root) + _round94_readings(root) + _mend_after_round94_readings(root) \
         + _round95_readings(root) + _round96_readings(root) + _round96_k1_readings(root) + _round97_readings(root) \
-        + _round98_readings(root) + _round99_readings(root)
+        + _round98_readings(root) + _round99_readings(root) + _round100_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -4381,6 +4381,128 @@ annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "1" }
                 "a put that raised, and accepts it once its frame's put goes through (Meter.gather, put, unsent; "
                 "Owner._put_metered gives a failed frame's seqs back)",
                 got, ["90 refused while 100 pends", {}, {"frames_total": 90}]))
+    return out
+
+
+def _round100_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.92 (#985 C4a, a call's forms) and core 0.93, link.v1 0.16 and
+    link.v2 0.6 (round 99's F-465 to F-470 answered), read at main 037fce56
+    (#609, round 100): each entry; 0.92's fixture counts against its words;
+    what no rule adopts yet; each answer as its text now reads, and zk2py's
+    reading of it offline; F-471. The live halves are
+    ``freshness_v2_scenarios`` §2 step 6 (F-467) and ``forms_live``."""
+    import re
+
+    from . import envelope, link, zk2c
+    from .contract import load_contract
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, l1, l2 = flat("core.md"), flat("profiles/link/v1.md"), flat("profiles/link/v2.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.93 or later, link.v1 0.16 and link.v2 0.6, each with its entry, and 0.92's (#985 C4a; round 99 "
+         "answered)",
+         [core_v >= (0, 93)] + entry("CHANGELOG.md", "0.92", "value and error forms")
+         + entry("CHANGELOG.md", "0.93", "round 99") + entry("profiles/link/CHANGELOG.md", "0.16", "round 99")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 0.6", "round 99"),
+         [True]),
+    ]
+    # 0.92's evidence, as its entry counts it.
+    vec = _load_json(root / "envelope" / "vectors.json")
+    forms = _load_json(root / "errors" / "forms.json")
+    exp = _load_json(root / "contracts" / "expect.json")["cases"]
+    out.append(("core 0.92's entry: vectors.json's 20 headers and 147 cases, 91 of them on query, reply and "
+                "reply_err; forms.json's 256 error bytes, 22 writes and 17 reads; e044-packed-place lists two E044",
+                [len(vec["headers"]), len(vec["cases"]),
+                 sum(1 for c in vec["cases"] if c["sample"] in ("query", "reply", "reply_err")),
+                 len(forms["bytes"]), len(forms["writes"]), len(forms["reads"]),
+                 exp["e044-packed-place"]["codes"]],
+                [20, 147, 91, 256, 22, 17, ["E044", "E044"]]))
+    # What no rule adopts yet (core §5.1 "The forms", §5.2 "The error form").
+    out.append(("core §5.1 and §5.2 (0.92): no rule has a caller or an owner write a form; every failed call still "
+                "answers in §5.2's envelope, and a reply error under any other Encoding is the transport's, a "
+                "router's Timeout under zenoh/bytes too: zk2c reads it sample_kind, the querier's encoding",
+                missing(core, "No rule at this version has a caller or an owner write them.",
+                        "No rule at this version has an owner answer in it",
+                        "It is the transport's by the rule above.")
+                + [zk2c.read_reply_err_token("zenoh/bytes", b"Timeout"),
+                   zk2c.read_reply_err_token("zenoh/string", b"Timeout")],
+                ["sample_kind", "encoding"]))
+    # §7.5's sizes, as zk2py writes them.
+    st16, st32 = zk2c.InBand(16, 1, 7), zk2c.InBand(32, 1, 7)
+    out.append(("core §7.5 \"Sizes\" (0.92): a request is 1 byte over its record, a value 6 or 8, an error 7 or 9, "
+                "a message its length and a byte more, a detail its own bytes",
+                missing(core, "A request** is 1 byte over its record, and a value 6 or 8.",
+                        "An error** is 7 bytes, or 9 with a 32-bit run.")
+                + [len(zk2c.request(b"ab")) - 2, len(zk2c.value(st16, b"ab")) - 2, len(zk2c.value(st32, b"ab")) - 2,
+                   len(zk2c.write_error(st16, "busy")), len(zk2c.write_error(st32, "busy")),
+                   len(zk2c.write_error(st16, "busy", message="no")),
+                   len(zk2c.write_error(st16, "app", detail=b"\x00\x01"))],
+                [1, 6, 8, 7, 9, 10, 9]))
+    # E044 narrowed (§7.1, §9.2).
+    op = load_contract(root / "contracts" / "ok-packed-operation.toml")
+    out.append(("core §7.1 and §9.2 E044 (0.92): an operation's request, response, error and summary may be "
+                "packed; zk2py lints ok-packed-operation clean, its fingerprint the reference's",
+                missing(core, "or an operation's `request`, `response`, `error` or `summary` (E044).",
+                        "a packed type with no CH to carry its tag: an explicit stream's type, or an attachment")
+                + [op.codes, op.fingerprint],
+                [[], exp["ok-packed-operation"]["fingerprint"]]))
+    # F-471: §5.2's Encoding names no packed kind, where E044 now lets an
+    # operation's error and response be packed and every failed call still
+    # answers in the envelope. zk2py answers JSON, as the reference does
+    # (forms_live).
+    s52 = core[core.index("### 5.2 The error envelope"):core.index("## 6. Ownership and serving")]
+    by = {r["template"]: r for r in op.canonical["resources"]}
+    out.append(("F-471 (open): §5.2's \"Encoding\" names a JSON Schema, a protobuf and a raw type, and no packed "
+                "one; ok-packed-operation's calibrate (a packed error) and scan (a packed response, no error type) "
+                "have no envelope kind by the text, and zk2py answers both in JSON, as for a raw type",
+                missing(s52, "**A JSON Schema type:**", "**A protobuf type:**", "**A raw type:**")
+                + [("**A packed type" in s52), envelope.envelope_encoding(by["calibrate"]),
+                   envelope.envelope_encoding(by["scan"])],
+                [False, "application/json", "application/json"]))
+    # Round 99's answers, as the texts now read, and zk2py's reading.
+    out.append(("F-465 answered (link.v2 0.6 §2.3, §2.7): an empty frames lists no frame, every exposed frame denied "
+                "by name; F-466 (link.v1 0.16 §2.7, §2.9): an implied freshness.v2 is listed for stream alone; "
+                "F-468 (link.v1 0.16 §2.3, link.v2 0.6): a refused deployment lists its errors alone",
+                missing(l2, "An empty `frames`**, `frames = {}`, is a face with `frames` that lists none",
+                        "and empty for an empty `frames` (§2.7)",
+                        "A refusal lists the deployment's errors alone")
+                + missing(l1, "An implied `freshness.v2` is listed for `stream` alone (§2.9)",
+                          "A refused deployment lists its errors alone"), []))
+    rows = [{"token": "state", "template": "c", "type": "packed", "longest_bytes": 300},
+            {"token": "state", "template": "c"}]
+    drop_then_block = [{"token": "state", "template": "c", "type": "packed", "longest_bytes": 300,
+                        "congestion": "drop"},
+                       {"token": "state", "template": "c", "type": "packed", "longest_bytes": 100}]
+    a = link.merge_revisions("t.v1", [[rows[0]], [rows[1]]])[0]
+    b = link.merge_revisions("t.v1", [[drop_then_block[0]], [drop_then_block[1]]])[0]
+    out.append(("F-469 answered (link.v2 0.6 §2.3): each revision judged alone: packed only where every one is, a "
+                "longest put weighed in each revision that declares it block, so a drop revision's 300-byte put "
+                "draws nothing where the block one's is 100",
+                missing(l2, "What this text weighs of a resource is judged revision by revision",
+                        "**Its longest put** is weighed in each revision that declares it `block`.")
+                + [(a.packed, a.block, a.longest_put), (b.packed, b.block, b.longest_put)],
+                [(False, True, 300), (True, True, 100)]))
+    out.append(("F-467 answered (core 0.93 §8.2 \"Whatever its clock\"): a candidate's session stamps every write "
+                "while its clock is ahead too; the owner example's candidate now does (freshness_v2_scenarios §2 step "
+                "6, live: every put of status S hears carries the candidate's zid)",
+                missing(core, "A candidate's session stamps every write while its clock is ahead too",
+                        "The reference** refuses a candidate whose session runs without timestamping"), []))
+    out.append(("F-470 answered (link.v1 0.16 §2.8, §2.3): the largest frame holds records − ⌊records / "
+                "keyframe_every⌋ delta records that include every field, the largest any revision writes",
+                missing(l1, "so the largest frame holds `records` − ⌊`records` / `keyframe_every`⌋ such delta records",
+                        "is the largest that any revision declaring it writes"), []))
     return out
 
 
