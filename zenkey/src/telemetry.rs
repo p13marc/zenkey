@@ -787,9 +787,9 @@ mod meter {
                 if s.kind != MetricKind::Counter {
                     // §2.18: a code its field reads, a value of its kind or
                     // a reserved code it declares; an escape is a code too.
-                    if (field.width < 64 && code >> field.width != 0)
-                        || field.check_code(code).is_err()
-                    {
+                    // A code past the field's width is the framer's `range`,
+                    // its one width guard (`Framer::push`).
+                    if field.check_code(code).is_err() {
                         return Err(Reason::FieldCode {
                             field: s.field.clone(),
                             code,
