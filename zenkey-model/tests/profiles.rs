@@ -364,14 +364,22 @@ fn profile_texts() -> BTreeMap<String, PathBuf> {
     out
 }
 
-/// The `uses` of every contract directly in `dir` (a `*.toml` that is not
-/// a deployment file, as `tests/examples.rs` reads them), and how many
-/// contracts there were.
+/// The `uses` of every contract in `dir` or a directory below it (a
+/// `*.toml` that is not a deployment file, as `tests/examples.rs` reads
+/// them; zenoh-modem's `config/sx1262_config.v1.toml`, #985 G4), and how
+/// many contracts there were. A directory whose name starts with `.`, a
+/// history, is not read.
 fn uses_in(dir: &Path) -> (BTreeSet<String>, usize) {
     let mut uses = BTreeSet::new();
     let mut contracts = 0;
     for p in sorted_entries(dir) {
         let n = p.file_name().unwrap().to_string_lossy().into_owned();
+        if p.is_dir() && !n.starts_with('.') {
+            let (more, k) = uses_in(&p);
+            uses.extend(more);
+            contracts += k;
+            continue;
+        }
         if !p.is_file()
             || !n.ends_with(".toml")
             || n.ends_with(".bindings.toml")

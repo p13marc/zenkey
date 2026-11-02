@@ -7,6 +7,26 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 draft — 2026-11-02: used by zenoh-modem (#985, G4)
+
+The text's status moves from `experimental` to `draft`, the status of a
+profile an adopter's mapping uses ([`../README.md`](../README.md), "The
+process"). #985's G4 gives zenoh-modem's SX1262 a config contract,
+`sx1262_config.v1` in `examples/zk2/zenoh-modem/config/`, which lists
+`config.v2`, `freshness.v2` and `link.v2`. Its record is exposed `link`
+and packed, as §2.17 asks, and crosses RF and LoRa as a push.
+`zenkey-model/tests/profiles.rs` now reads an adopter's contracts in its
+subdirectories too, so the index counts it.
+
+**Changed: the status.** The index lists `link.v2` in its first table,
+used by zenoh-modem, and the header's status reads `draft`.
+
+**Deliberately not changed.**
+- **No rule.** The text stays 0.6, written against core 0.91, and its
+  fixtures, scenarios and tools are as they were.
+- **`link.v1` stays draft,** listed by `modem.v3`, and zenoh-modem's five
+  faces are `link.v2` policies as before.
+
 ## link.v2 0.6 — 2026-11-02: zk2py round 99's findings answered (#609, #988)
 
 zk2py's round 99 read this text's 0.3 to 0.5 and `link.v1` 0.15 cold.
