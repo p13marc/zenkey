@@ -9,7 +9,7 @@
 //!     [--cardinality <iface>:<resource>=<n>]...
 //!     [--config] [--config-floor <s>] [--config-apply-after-ms <ms>] [--config-no-persist]
 //!     [--alarms] [--alarms-record <file>] [--alarms-archive <system>/<service>]
-//!     [--alarms-rules <rule>[,<rule>...]] [--telemetry]
+//!     [--alarms-rules <rule>[,<rule>...]] [--telemetry] [--telemetry-v2]
 //!     [--desired-author] [--desired-record <file>] [--desired-window <s>]
 //!     [--desired-target <system>/<service>] [--desired-unbound] [--desired-archive <system>/<service>]
 //!     [--desired-watch] [--desired-reread-ms <ms>] [--desired-hold]
@@ -317,6 +317,26 @@
 //! tokens are withdrawn: a Point put after it carries the new id. `instance`
 //! is answered `telemetry instance <id>`.
 //!
+//! **`telemetry.v2`** (`spec/profiles/telemetry/v2.md`, #983 T3) is the
+//! runtime's frame writers' ([`zenkey::telemetry`], [`zenkey::frame`]): a
+//! frame resource whose series its contract declares is metered record by
+//! record, each counter field taken as counted, unwrapped, refused below its
+//! last count within the run and written modulo its width. `--telemetry-v2`
+//! implements `meterframe.v1`, its scenarios' contract
+//! (`spec/profiles/telemetry/scenarios-v2.md`, "Conventions"), embedded byte
+//! for byte as the spec keeps it
+//! (`spec/profiles/telemetry/conformance/contracts/`), unless a contract
+//! file given implements it, and writes its frame resources through a
+//! frame writer each, from `telemetry frame` lines: `record`, `flush`,
+//! `lose`, `mutation` and `new-epoch` as `frame`'s (below), and `raw
+//! <resource> <json>`, a frame of one full record put from the owner's
+//! session under the writer's run at its key's next seq, unchecked, as an
+//! owner the text does not allow would. Its bare counter
+//! `sdu/dropped_total` is a `telemetry put` resource. A metered refusal is
+//! `refused <line>: telemetry.v2 decreased field=<f> before=<n> after=<n>:
+//! <words>` or `telemetry.v2 code field=<f> code=<n>: <words>`
+//! (`owner/frames.rs`).
+//!
 //! **`desired.v1`** (`spec/profiles/desired/v1.md`, #840) is the runtime's
 //! ([`zenkey::desired`]), on the scenarios' contracts
 //! (`spec/profiles/desired/scenarios.md`, "The contracts"), embedded byte
@@ -618,6 +638,10 @@ pub struct Options {
     /// `--telemetry`: `meter.v1`, the scenarios' contract, implemented
     /// (telemetry.v1), unless a contract file implements it.
     pub telemetry: bool,
+    /// `--telemetry-v2`: `meterframe.v1`, `telemetry.v2`'s scenarios'
+    /// contract, implemented and its frame resources driven (#983 T3),
+    /// unless a contract file implements it.
+    pub telemetry_v2: bool,
     /// `--desired-author`, or implied by `--desired-record`: the
     /// scenarios' `tasking.v1` implemented, its tasks authored (desired.v1
     /// §2.11).
@@ -746,7 +770,7 @@ usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
     [--cardinality <iface>:<resource>=<n>]...
     [--config] [--config-floor <s>] [--config-apply-after-ms <ms>] [--config-no-persist]
     [--alarms] [--alarms-record <file>] [--alarms-archive <system>/<service>]
-    [--alarms-rules <rule>[,<rule>...]] [--telemetry]
+    [--alarms-rules <rule>[,<rule>...]] [--telemetry] [--telemetry-v2]
     [--desired-author] [--desired-record <file>] [--desired-window <s>]
     [--desired-target <system>/<service>] [--desired-unbound]
     [--desired-archive <system>/<service>] [--desired-watch] [--desired-reread-ms <ms>]
@@ -779,7 +803,8 @@ Command words:
                                           heartbeat (freshness.v2 §2.4)
   config ...                              config.v1 (--config)
   alarm ...                               alarms.v1 (--alarms), below
-  telemetry ...                           telemetry.v1's writers, below
+  telemetry ...                           telemetry.v1's writers and telemetry.v2's
+                                          frames (--telemetry-v2), below
   desired ...                             desired.v1 (--desired-*), below
   redundancy ...                          redundancy.v1 (--standby), below
   timing ...                              timing.v1 (--timing), below
@@ -871,6 +896,44 @@ telemetry.v1 (spec/profiles/telemetry/v1.md)
                                   §2.6's tokens), undecodable,
                                   epoch given=<json> current=<id>, decreased epoch=<id>;
                                   nothing is published
+
+telemetry.v2 (spec/profiles/telemetry/v2.md)
+  A frame resource whose contract uses telemetry.v2 and declares its series is
+  metered by its FrameWriter, record by record: each counter field is given as
+  counted, unwrapped, refused below its last count within the run, and written
+  modulo its width; a series field's code its type does not read is refused.
+  A restarted counter takes a new run: flush the open frame, then new-epoch.
+
+  --telemetry-v2                  implement meterframe.v1, the scenarios'
+                                  contract (scenarios-v2.md, Conventions),
+                                  embedded as spec/profiles/telemetry/conformance/
+                                  contracts/ has it; a meterframe.v1 contract file
+                                  given is used instead. Its frame resources:
+                                  frames/link (one record a frame), frames/totals
+                                  (one record, a full record every 4) and
+                                  frames/bytes (three records, 1 s apart, within
+                                  100 ms); sdu/dropped_total is a telemetry put
+                                  resource.
+  telemetry frame record <resource> <json> [at=<ms>]
+                                  one record through the metered FrameWriter, as
+                                  frame record (below): a counter field's value is
+                                  its count, unwrapped
+  telemetry frame flush <resource>
+  telemetry frame lose <resource>
+  telemetry frame mutation <resource>
+  telemetry frame new-epoch       as frame's (below), on meterframe.v1
+  telemetry frame raw <resource> <json>
+                                  a frame of one full record, its time this
+                                  host's clock now, from the owner's session
+                                  under the writer's run at its key's next seq,
+                                  unchecked (counts reduced to their widths)
+
+  Answers, one JSON line each, as frame's (below); raw:
+    {\"frame\": \"raw\", \"resource\", \"put\": {\"run\", \"seq\", \"records\": 1}}
+    refused <line>: telemetry.v2 <why>: <words>
+                                  <why>: decreased field=<f> before=<n> after=<n>
+                                  (v2.md §2.19), code field=<f> code=<n> (§2.18);
+                                  the record joins no frame
 
 desired.v1 (spec/profiles/desired/v1.md)
   On the scenarios' contracts (scenarios.md, The contracts), embedded as
@@ -1232,6 +1295,7 @@ impl Options {
             alarms_archive: None,
             alarms_rules: None,
             telemetry: false,
+            telemetry_v2: false,
             desired_author: false,
             desired_record: None,
             desired_window_s: None,
@@ -1396,6 +1460,10 @@ impl Options {
                 }
                 [flag, tail @ ..] if flag == "--telemetry" => {
                     o.telemetry = true;
+                    rest = tail;
+                }
+                [flag, tail @ ..] if flag == "--telemetry-v2" => {
+                    o.telemetry_v2 = true;
                     rest = tail;
                 }
                 [flag, tail @ ..] if flag == "--desired-author" => {
@@ -1788,6 +1856,15 @@ pub async fn run_with(
     if opts.frames && !imps.iter().any(|i| i.iface() == &frames_drive::iface()) {
         imps.push(Implementation::new(frames_drive::contract()?));
     }
+    // telemetry.v2 (#983 T3): scenarios-v2.md's meterframe.v1, unless a
+    // file has it.
+    if opts.telemetry_v2
+        && !imps
+            .iter()
+            .any(|i| i.iface() == &frames_drive::meterframe_iface())
+    {
+        imps.push(Implementation::new(frames_drive::meterframe()?));
+    }
     // arbitration.v1 (#909): the scenarios' rudder.v1 and steer.v1, unless
     // a file has them.
     if opts.commander && !imps.iter().any(|i| i.iface() == &arbitrate::steer_iface()) {
@@ -2123,6 +2200,8 @@ struct Up {
     timing: Option<timing_drive::Drive>,
     /// The frame writers' drive, with `--frames`.
     frames: Option<frames_drive::Drive>,
+    /// `meterframe.v1`'s frame writers' drive, with `--telemetry-v2`.
+    meterframe: Option<frames_drive::Drive>,
     /// arbitration.v1's actuator, with `--arbitrate`.
     actuator: Option<arbitrate::Actuator>,
     /// arbitration.v1's commander, with `--commander`.
@@ -2135,6 +2214,7 @@ impl Up {
         drop(self.commander);
         drop(self.timing);
         drop(self.frames);
+        drop(self.meterframe);
         drop(self.members);
         self.svc.close().await?;
         drop(self.servers);
@@ -2146,6 +2226,21 @@ impl Ctx<'_> {
     /// Answers one command line (the module doc's): `config restart` here,
     /// since it replaces the instance; every other one by [`command`].
     async fn command(&self, line: &str, mut up: Up) -> Result<(String, Up), BoxError> {
+        if line.split_whitespace().take(2).eq(["telemetry", "frame"]) {
+            let answer = match &up.meterframe {
+                Some(_) => {
+                    let Up {
+                        svc, meterframe, ..
+                    } = &mut up;
+                    let d = meterframe.as_ref().expect("checked");
+                    frames_drive::telemetry_command(line, svc, d, self.session).await
+                }
+                None => format!(
+                    "refused {line}: no telemetry.v2 frame resource is driven here (--telemetry-v2)"
+                ),
+            };
+            return Ok((answer, up));
+        }
         if line.split_whitespace().next() == Some("telemetry") {
             let words: Vec<&str> = line.split_whitespace().collect();
             let answer = telemetry_command(line, &mut up, self.session)
@@ -2545,6 +2640,12 @@ impl Ctx<'_> {
         } else {
             None
         };
+        let meterframe = if opts.telemetry_v2 {
+            let c = frames_drive::meterframe()?;
+            Some(frames_drive::Drive::start(&svc, &c).await?)
+        } else {
+            None
+        };
         let timing = if opts.timing {
             Some(timing_drive::Drive::start(&svc, self.session).await?)
         } else {
@@ -2596,6 +2697,7 @@ impl Ctx<'_> {
             drive: drive_,
             timing,
             frames,
+            meterframe,
             actuator,
             commander,
         })
@@ -3095,8 +3197,14 @@ fn telemetry_refusal(e: &zenkey::Error) -> String {
             serde_json::to_string(given).unwrap_or_default()
         ),
         Reason::Decreased { epoch, .. } => format!("decreased epoch={epoch}"),
+        Reason::FieldDecreased {
+            field,
+            before,
+            after,
+        } => format!("decreased field={field} before={before} after={after}"),
+        Reason::FieldCode { field, code } => format!("code field={field} code={code}"),
     };
-    format!("telemetry.v1 {why}: {e}")
+    format!("{} {why}: {e}", reason.profile())
 }
 
 /// Answers a `telemetry` command (the module doc's).
