@@ -56,8 +56,12 @@ pub enum Error {
     /// published (`spec/profiles/telemetry/v1.md` §2.6–§2.9, #819): one
     /// that does not conform, a counter or histogram below the last value
     /// the writer put in the same epoch, or an in-band epoch other than the
-    /// owner's. It names the member's key, and the reason.
-    #[error("telemetry.v1: {member}: {reason}: refused, nothing published")]
+    /// owner's. Or a frame's record `telemetry.v2` forbids (`v2.md` §2.18,
+    /// §2.19, #983 T3): a counter field below its last count within the
+    /// run, or a series field's code its field does not read; the record
+    /// joins no frame. It names the member's key, and the reason, after the
+    /// profile whose rule it is.
+    #[error("{}: {member}: {reason}: refused, nothing published", .reason.profile())]
     Telemetry {
         member: String,
         reason: Box<crate::telemetry::Reason>,

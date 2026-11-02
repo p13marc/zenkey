@@ -5,7 +5,9 @@ the core's scenarios ([`../../scenarios/README.md`](../../scenarios/README.md)):
 a setup, steps, and expected observations. What R computes from each
 section's frames is also a case of [`conformance/v2/`](conformance/v2/),
 which `zenkey-model` runs. The owner's half needs a runtime that writes a
-frame resource's series, and the reference's is `zenkey`'s.
+frame resource's series, and the reference's is `zenkey`'s. Its tests run
+§1 to §7, one per section. Each is named after its section, in
+`zenkey/tests/profile_telemetry_v2.rs`.
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.19) are v2.md's rules. `v1 §n` is

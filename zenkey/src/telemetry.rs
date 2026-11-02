@@ -75,6 +75,53 @@
 //! for every application. The typed writers of generated code
 //! ([`crate::typed`]) put through the same writers, so through the same
 //! checks.
+//!
+//! ## `telemetry.v2`: a frame's series (`spec/profiles/telemetry/v2.md`, #983 T3)
+//!
+//! A frame resource of a contract that uses `telemetry.v2`, whose
+//! `telemetry.series` is declared (v2 §2.16,
+//! [`zenkey_model::telemetry::frames::series_of`]), is metered by each
+//! [`crate::frame::FrameWriter`] of it, record by record, before the
+//! record joins a frame:
+//!
+//! ```text
+//! FrameWriter::record… on a frame resource whose series are declared
+//!   1. each series field's code read as its kind (v2 §2.18)          no code of its field ─▶ refused
+//!   2. each counter field's count below the last taken in its run    field_decreased ─▶ refused
+//!   3. every counter field reduced modulo 2^w (core §7.6, v2 §2.20)
+//!   4. the framer, then the frame's put; each count kept as the last
+//! ```
+//!
+//! | Rule | Here |
+//! |---|---|
+//! | §2.16 an invalid `telemetry.series` | logged as a warning when the service implements it; its writers meter nothing (a reader reads nothing of it) |
+//! | §2.18 a reserved code, an absent field, an enum's escape are no value | written as given: none is refused, the owner said what it knew |
+//! | §2.19 within one run, no counter field's count below one written before on the key, before §2.20's reduction | refused, [`Reason::FieldDecreased`], against the last count the writer took in the run |
+//! | §2.19 a restarted counter written under a new run | the run moves with a new instance ([`crate::Service::new_epoch`], a process's start) or the minter's own (core §4.3); a count taken under another run is compared with nothing |
+//! | §2.20 a counter of width w carries its count modulo 2^w | the writer takes the count unwrapped and reduces it; a §7.6 record's bytes carry only the code, so a narrow counter's count is unwrapped by the least increase from the last |
+//! | §2.20 SHOULD: an increase between two samples below 2^(w−1) | an increase at or past it since the last record is logged as a warning, and written |
+//!
+//! **The count.** [`crate::frame::FrameWriter::record_json`] and
+//! [`crate::frame::FrameWriter::record_slots_at`] take each counter
+//! field's count unwrapped, as the application counts it, and so does a
+//! generated typed writer ([`crate::typed::FrameWriter`], its record's
+//! `u64`). A record's bytes ([`crate::frame::FrameWriter::record`]) carry
+//! a counter of width w below 64 modulo 2^w alone: its count is taken as
+//! the last count plus the code's increase from it modulo 2^w, which no
+//! code can make a decrease. Only a 64-bit counter given as bytes is
+//! refused when it goes down.
+//!
+//! **The run a count is of.** A count is of the run its frame is put
+//! under: the minter's at that put, so a record still in the open frame
+//! is of the run its frame will take. A record is compared with the last
+//! count of its field unless that count was put under a run that is no
+//! longer the minter's. So an owner whose counter restarts flushes its
+//! open frames ([`crate::frame::FrameWriter::flush`]), then takes a new
+//! run ([`crate::Service::new_epoch`]), then records: a record still open
+//! when the run moves is put under the new run, before the restarted
+//! count, and the restarted count is refused. A frame never sent (a put
+//! refused, a frame lost) keeps its counts as the last: a counter only
+//! goes up, so nothing an owner writes next is refused for it.
 
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -83,7 +130,7 @@ pub use zenkey_model::telemetry::wire::{Histogram, Point, Value};
 pub use zenkey_model::telemetry::{Declared, Measure, MetricKind, Problem};
 
 #[cfg(feature = "zenoh")]
-pub(crate) use meter::{Epochs, Meter, Metric, Pending};
+pub(crate) use meter::{Counts, Epochs, FrameMeter, Meter, Metric, Pending, frame_series};
 
 /// This host's clock now, in Unix epoch milliseconds: a Point's
 /// `timestamp` for a value taken now (§2.12).
@@ -131,6 +178,18 @@ pub enum Reason {
         before: Box<Measure>,
         after: Box<Measure>,
     },
+    /// A frame's counter field whose count is below the last one this
+    /// frame writer took in the same run (`telemetry.v2` §2.19), both
+    /// before their reduction modulo the field's width (§2.20).
+    FieldDecreased {
+        field: String,
+        before: u64,
+        after: u64,
+    },
+    /// A frame's series field holding a code its field does not read
+    /// (`telemetry.v2` §2.18, core §7.6): no value of its kind, and no
+    /// reserved code it declares.
+    FieldCode { field: String, code: u64 },
 }
 
 impl Reason {
@@ -140,6 +199,18 @@ impl Reason {
         match self {
             Self::DoesNot(p) => p,
             _ => &[],
+        }
+    }
+
+    /// The profile whose rule refused it: `telemetry.v1` for a sample's,
+    /// `telemetry.v2` for a frame record's.
+    #[must_use]
+    pub const fn profile(&self) -> &'static str {
+        match self {
+            Self::FieldDecreased { .. } | Self::FieldCode { .. } => {
+                zenkey_model::telemetry::PROFILE_V2
+            }
+            _ => zenkey_model::telemetry::PROFILE,
         }
     }
 }
@@ -189,25 +260,43 @@ impl fmt::Display for Reason {
                     measure_words(before)
                 )
             }
+            Self::FieldDecreased {
+                field,
+                before,
+                after,
+            } => write!(
+                f,
+                "the counter field {field} went down within one run: {after} after {before} \
+                 (§2.19); a restarted counter is written under a new run: flush the open frame, \
+                 then take one (Service::new_epoch)"
+            ),
+            Self::FieldCode { field, code } => write!(
+                f,
+                "the series field {field} holds code {code}, which its type does not read (§2.18)"
+            ),
         }
     }
 }
 
 #[cfg(feature = "zenoh")]
 mod meter {
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
     use std::sync::{Arc, Mutex, RwLock};
 
     use zenkey_model::authoring::Encoding as WireEncoding;
     use zenkey_model::contract::{Body, Contract, Resource};
+    use zenkey_model::frame::Slot;
     use zenkey_model::grammar::{IfaceId, InstanceId};
+    use zenkey_model::packed::Field;
     use zenkey_model::schema::TypeId;
     use zenkey_model::slug::chunk_slug;
+    use zenkey_model::telemetry::frames::{FieldSeries, Series, series_of};
     use zenkey_model::telemetry::{
         Carrier, Conformance, Continuity, Datum, Declaration, Declared, EpochIn, Measure,
-        MetricKind, Payload, Sampled, check, declaration_of, pair,
+        MetricKind, Payload, Sampled, check, declaration_of, pair, uses_v2,
     };
     use zenkey_model::template::Bindings;
+    use zenkey_model::wire::Run;
     use zenoh::bytes::ZBytes;
 
     use super::Reason;
@@ -593,6 +682,172 @@ mod meter {
                     measure,
                 },
             ))
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // telemetry.v2: a frame's series (the module doc's second table)
+    // -----------------------------------------------------------------------
+
+    /// The series of `r`, a resource of `c`, that every frame writer of it
+    /// meters (v2 §2.16): `None` when `c` does not use `telemetry.v2`, or
+    /// `r` is no frame resource or declares no series. An invalid
+    /// `telemetry.series` is logged, and meters nothing.
+    pub(crate) fn frame_series(c: &Contract, r: &Resource) -> Option<Arc<[FieldSeries]>> {
+        if !uses_v2(c) {
+            return None;
+        }
+        match series_of(c, r)? {
+            Series::Declared(s) => Some(s.into()),
+            Series::Invalid(problems) => {
+                let why: Vec<String> = problems
+                    .iter()
+                    .map(|p| match &p.entry {
+                        Some(e) => format!("{e}: {}", p.reason),
+                        None => p.reason.to_string(),
+                    })
+                    .collect();
+                tracing::warn!(
+                    interface = %c.iface,
+                    resource = %crate::implementation::resource_name(r),
+                    reasons = %why.join(", "),
+                    "telemetry.v2: this frame resource's telemetry.series is invalid, so no \
+                     reader reads its fields, and its frame writers meter nothing (§2.16)"
+                );
+                None
+            }
+            Series::Ignored | Series::NotThisProfiles => None,
+        }
+    }
+
+    /// How a record hands its counter fields to the meter.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum Counts {
+        /// Each counter field's code is its count, unwrapped: a JSON
+        /// reading's, or slots the application gave.
+        Unwrapped,
+        /// Each is the code a §7.6 record's bytes carry, its count modulo
+        /// 2^w: a narrow one's count is the last plus the code's increase
+        /// from it (the module doc's "The count").
+        Codes,
+    }
+
+    /// A counter field's last count, and the run it is of: `None` while
+    /// its record is in the open frame, which takes its run when it is put.
+    #[derive(Debug, Clone, Copy)]
+    struct Count {
+        count: u64,
+        run: Option<Run>,
+    }
+
+    /// A record's counts, checked: each counter series field's count, kept
+    /// as the last once the framer takes the record ([`FrameMeter::take`]).
+    #[derive(Debug, Default)]
+    pub(crate) struct Checked(Vec<(usize, u64)>);
+
+    /// A frame writer's meter (the module doc's second table): its
+    /// resource's series, and each counter series field's last count.
+    /// Held under the writer's framer lock, so records are checked, framed
+    /// and put in one order.
+    #[derive(Debug)]
+    pub(crate) struct FrameMeter {
+        series: Arc<[FieldSeries]>,
+        last: BTreeMap<usize, Count>,
+    }
+
+    impl FrameMeter {
+        pub(crate) fn new(series: Arc<[FieldSeries]>) -> Self {
+            Self {
+                series,
+                last: BTreeMap::new(),
+            }
+        }
+
+        /// Checks one record's slots (`fields` its record type's), the
+        /// module doc's steps 1 and 2, with `run` the minter's run now,
+        /// asked only when a last count was put. Refused, with nothing
+        /// changed, as [`Reason`] says.
+        pub(crate) fn check(
+            &self,
+            fields: &[Field],
+            slots: &[Slot],
+            counts: Counts,
+            run: &dyn Fn() -> Run,
+        ) -> Result<Checked, Reason> {
+            let mut now: Option<Run> = None;
+            let mut current = || *now.get_or_insert_with(run);
+            let mut checked = Checked::default();
+            for s in self.series.iter() {
+                let (Some(field), Some(Slot::Code(code))) =
+                    (fields.get(s.index), slots.get(s.index))
+                else {
+                    continue;
+                };
+                let code = *code;
+                if s.kind != MetricKind::Counter {
+                    // §2.18: a code its field reads, a value of its kind or
+                    // a reserved code it declares; an escape is a code too.
+                    if (field.width < 64 && code >> field.width != 0)
+                        || field.check_code(code).is_err()
+                    {
+                        return Err(Reason::FieldCode {
+                            field: s.field.clone(),
+                            code,
+                        });
+                    }
+                    continue;
+                }
+                let width = field.width;
+                let last = self
+                    .last
+                    .get(&s.index)
+                    .filter(|l| l.run.is_none_or(|r| r == current()));
+                let mask = zenkey_model::packed::top_code(width);
+                let count = match (counts, last) {
+                    (Counts::Codes, Some(l)) if width < 64 => {
+                        l.count.saturating_add(code.wrapping_sub(l.count) & mask)
+                    }
+                    _ => code,
+                };
+                if let Some(l) = last {
+                    if count < l.count {
+                        return Err(Reason::FieldDecreased {
+                            field: s.field.clone(),
+                            before: l.count,
+                            after: count,
+                        });
+                    }
+                    let increase = count - l.count;
+                    if width < 64 && increase >= 1 << (width - 1) {
+                        tracing::warn!(
+                            field = %s.field,
+                            width,
+                            increase,
+                            "telemetry.v2 §2.20: a counter field's increase since its last record \
+                             is at or past 2^(w-1), which a reader reads as wrap_or_decrease, with \
+                             no rate: declare the field wider"
+                        );
+                    }
+                }
+                checked.0.push((s.index, count));
+            }
+            Ok(checked)
+        }
+
+        /// The framer took the record `c` was checked from: its counts are
+        /// each field's last, in the open frame.
+        pub(crate) fn take(&mut self, c: Checked) {
+            for (index, count) in c.0 {
+                self.last.insert(index, Count { count, run: None });
+            }
+        }
+
+        /// The open frame went to a put under `run`, sent or not: every count
+        /// of its records is of `run`.
+        pub(crate) fn sent(&mut self, run: Run) {
+            for l in self.last.values_mut() {
+                l.run.get_or_insert(run);
+            }
         }
     }
 }

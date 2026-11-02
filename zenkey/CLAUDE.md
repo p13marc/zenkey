@@ -227,6 +227,25 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   publisher or the session is unchecked, which is how a test writes what
   the text refuses. The owner example's `--telemetry` embeds `meter.v1`
   and drives it from stdin (`telemetry put|raw|new-epoch|instance`).
+  `telemetry.v2` (#983 T3): a `FrameWriter` of a frame resource whose
+  contract uses the profile and declares its `telemetry.series`
+  (`telemetry::frame_series`, `ImplState::series`, an invalid one logged)
+  holds a `FrameMeter` under its framer lock: each series field's code
+  read by its field (`Reason::FieldCode`), each counter's count taken
+  unwrapped (`record_json`, `record_slots_at`, a typed record's `u64` via
+  `Codec::json_reading` → `record_counted`; a record's bytes carry a
+  narrow one's code alone, unwrapped by its least increase) and refused
+  below its field's last count of the run (`Reason::FieldDecreased`,
+  `Error::Telemetry` naming `telemetry.v2` by `Reason::profile`), then
+  every counter reduced modulo 2^w (on any frame resource). A count is of
+  the run its frame is put under, a record in the open frame of the run
+  it will take, so a restart flushes, then `new_epoch`; an increase past
+  2^(w−1) is a warning. It builds no `Sampled` and calls no `pair`.
+  `tests/profile_telemetry_v2.rs` is `scenarios-v2.md` §1–§7 over the
+  spec's `meterframe.v1`, R a `telemetry::frames::Fold` per key; the
+  owner example's `--telemetry-v2` embeds that contract and drives it
+  (`telemetry frame record|flush|lose|mutation|raw <resource>`, `telemetry
+  frame new-epoch`; `owner/frames.rs`, its K3 drive generalised).
   `desired` (#840, DC) is `desired.v1`'s runtime over
   `zenkey_model::desired`'s state machine.
   `ServiceBuilder::desired_author(iface, resource, AuthorStartup)` →

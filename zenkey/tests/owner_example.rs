@@ -2749,3 +2749,184 @@ fn the_help_documents_the_frames_surface() {
         assert!(owner::HELP.contains(piece), "--help names {piece:?}");
     }
 }
+
+/// `--telemetry-v2` (#983 T3): `meterframe.v1` implemented, its frame
+/// resources written through the metered frame writers from `telemetry
+/// frame` lines, as `scenarios-v2.md`'s owner steps need: a 64-bit counter
+/// below its last refused within the run and put raw, a 24-bit one written
+/// modulo its width, the open frame flushed, a new run's restarted count
+/// written, and the bare counter a `telemetry put` resource.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_meters_telemetry_frames() {
+    use zenkey::model::frame::{Frame, Layout, Slot};
+    let (_r1, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let data = tool
+        .declare_subscriber("zk2/ex/meterframe/meterframe.v1/stream/frames/*")
+        .with(flume::unbounded::<Sample>())
+        .await
+        .unwrap();
+    let o = spawn_owner(&["--connect", &ep, "--telemetry-v2", "ex/meterframe"]);
+    assert_eq!(line(&o.lines).await, format!("connected {ep}"));
+    line(&o.lines).await;
+    let c = owner::frames_drive::meterframe().unwrap();
+    let layout = |template: &str| {
+        let r = c
+            .resources
+            .iter()
+            .find(|r| r.template.as_str() == template)
+            .unwrap();
+        Layout::of_resource(&c, r).unwrap().unwrap()
+    };
+    let heard = || async {
+        let s = tokio::time::timeout(SETTLE, data.recv_async())
+            .await
+            .expect("a frame")
+            .unwrap();
+        let bytes = s.payload().to_bytes().into_owned();
+        let e = zenkey::model::wire::Envelope::parse(&bytes).unwrap();
+        assert!(e.is_frame());
+        let template = s
+            .key_expr()
+            .as_str()
+            .rsplit_once("/stream/")
+            .unwrap()
+            .1
+            .to_owned();
+        let frame = Frame::parse(e.tag, e.record, &layout(&template)).unwrap();
+        (template, e.stamp, frame)
+    };
+    let totals = |n: u64| format!(r#"{{"frames_total": {n}, "temperature": "21.5"}}"#);
+
+    // 500, until a put reaches the tool's subscriber; the last one put.
+    let first = loop {
+        let a = ask_json(
+            &o,
+            &format!("telemetry frame record frames/totals {}", totals(500)),
+        )
+        .await;
+        assert_eq!(a["put"]["records"], 1, "{a}");
+        if tokio::time::timeout(Duration::from_millis(300), data.recv_async())
+            .await
+            .is_ok()
+        {
+            break a["put"].clone();
+        }
+    };
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    while data.try_recv().is_ok() {}
+    let (run, seq) = (first["run"].clone(), first["seq"].as_u64().unwrap());
+    // 480: refused within the run, then put raw at the next seq.
+    let refused = o
+        .ask(&format!(
+            "telemetry frame record frames/totals {}",
+            totals(480)
+        ))
+        .await;
+    assert!(
+        refused.starts_with(&format!(
+            "refused telemetry frame record frames/totals {}: telemetry.v2 decreased \
+             field=frames_total before=500 after=480: telemetry.v2: ",
+            totals(480)
+        )),
+        "{refused}"
+    );
+    let raw = ask_json(
+        &o,
+        &format!("telemetry frame raw frames/totals {}", totals(480)),
+    )
+    .await;
+    assert_eq!(raw["frame"], "raw");
+    assert_eq!(
+        (&raw["put"]["run"], raw["put"]["seq"].as_u64()),
+        (&run, Some(seq + 1))
+    );
+    let (template, stamp, frame) = heard().await;
+    assert_eq!(
+        (template.as_str(), u64::from(stamp.seq.get())),
+        ("frames/totals", seq + 1)
+    );
+    assert_eq!(frame.records[0].slots[0], Slot::Code(480));
+
+    // A 24-bit counter, its counts unwrapped: one frame of three records.
+    for (at, rx) in [(0, 16_777_000), (1000, 16_777_316)] {
+        let a = ask_json(
+            &o,
+            &format!("telemetry frame record frames/bytes {{\"rx\": {rx}}} at={at}"),
+        )
+        .await;
+        assert_eq!(a["put"], serde_json::Value::Null, "{a}");
+    }
+    let a = ask_json(
+        &o,
+        "telemetry frame record frames/bytes {\"rx\": 25777316} at=2000",
+    )
+    .await;
+    assert_eq!(a["put"]["records"], 3, "{a}");
+    let (template, _, frame) = heard().await;
+    assert_eq!(template, "frames/bytes");
+    let codes: Vec<Slot> = frame.records.iter().map(|r| r.slots[0]).collect();
+    assert_eq!(
+        codes,
+        [
+            Slot::Code(16_777_000),
+            Slot::Code(100),
+            Slot::Code(9_000_100)
+        ]
+    );
+    // The open frame flushed, then a new run: the restarted count written.
+    let a = ask_json(
+        &o,
+        "telemetry frame record frames/bytes {\"rx\": 25777400} at=3000",
+    )
+    .await;
+    assert_eq!(a["open"], 1);
+    let f = ask_json(&o, "telemetry frame flush frames/bytes").await;
+    assert_eq!(f["put"]["records"], 1, "{f}");
+    heard().await;
+    let n = ask_json(&o, "telemetry frame new-epoch").await;
+    assert_eq!(n["frame"], "new-epoch");
+    assert_ne!(n["run"], run);
+    let a = ask_json(
+        &o,
+        &format!("telemetry frame record frames/totals {}", totals(3)),
+    )
+    .await;
+    assert_eq!(a["put"]["run"], n["run"], "{a}");
+    // The bare counter, a telemetry.v1 resource of the same contract.
+    let put = o.ask("telemetry put sdu/dropped_total 7").await;
+    assert!(
+        put.starts_with("telemetry put zk2/ex/meterframe/meterframe.v1/stream/sdu/dropped_total"),
+        "{put}"
+    );
+    // A line of no verb, and a frame resource that is not one.
+    let usage = o.ask("telemetry frame").await;
+    assert!(
+        usage.starts_with("refused telemetry frame: telemetry frame record|"),
+        "{usage}"
+    );
+    let nothing = o.ask("telemetry frame flush frames/nope").await;
+    assert!(
+        nothing.contains("no frame resource \"frames/nope\""),
+        "{nothing}"
+    );
+    o.stop().await;
+}
+
+#[test]
+fn the_help_documents_the_telemetry_v2_surface() {
+    for piece in [
+        "--telemetry-v2",
+        "telemetry frame record <resource> <json> [at=<ms>]",
+        "telemetry frame flush <resource>",
+        "telemetry frame lose <resource>",
+        "telemetry frame mutation <resource>",
+        "telemetry frame new-epoch",
+        "telemetry frame raw <resource> <json>",
+        "refused <line>: telemetry.v2 <why>: <words>",
+        "decreased field=<f> before=<n> after=<n>",
+        "code field=<f> code=<n>",
+    ] {
+        assert!(owner::HELP.contains(piece), "--help names {piece:?}");
+    }
+}
