@@ -3,6 +3,13 @@
 # put every 10 s, and the oper_change event. Its health.v1, alarms.v1,
 # config.v1 and desired.v1 target are the owner example's own interfaces.
 #
+# Revision 1.1 (#983 T4) adds frames/sample, W2's twelve readings as one
+# packed record, three 10-s records a frame (core §7.7), for #989's zk2c run:
+# telemetry.v2's series, each field a mirror of its stream. The W2 runs of
+# this directory's README were measured with revision 1.0, which listed
+# telemetry.v1 and had no frame resource; telemetry.v2 reads its streams as
+# telemetry.v1 did.
+#
 # The streams keep the built-in QoS (data, drop, best_effort), as the report's
 # W2 telemetry assumes: no QoS extension on the wire. Each counter is a bare
 # integer whose epoch rides the telemetry.v1.Epoch attachment, as Appendix A's
@@ -10,12 +17,13 @@
 [interface]
 name    = "gendev"
 major   = 1
-minor   = 0
+minor   = 1
 summary = "W2's generic constrained device: eight gauges, four counters, one event"
-uses    = ["telemetry.v1"]
+uses    = ["telemetry.v2"]
 
 [schemas]
 jsonschema = ["../../../../../spec/profiles/telemetry/telemetry.v1.json", "gendev.json"]
+packed     = ["gendev-frames.json"]
 
 [resources.temperature]
 kind        = "stream"
@@ -80,6 +88,32 @@ kind        = "stream"
 type        = "json:Count"
 attachment  = "json:telemetry.v1.Epoch"
 annotations = { "telemetry.kind" = "counter" }
+
+# W2's frame (#983 T4, for #989's zk2c run): the twelve readings, three 10-s
+# records a frame, a full record at least once every three. Its largest
+# frame, three full records each with its offset, is 95 B of payload (97 B
+# with a 32-bit run), 91 B when the two later records keep their schedule.
+# Optional: an owner that puts the streams alone, as W2's runs did, still
+# implements 1.1.
+[resources."frames/sample"]
+kind     = "stream"
+type     = "packed:gendev-frames#Sample"
+optional = true
+frame    = { records = 3, step_ms = 10000, jitter_ms = 500, keyframe_every = 3 }
+
+[resources."frames/sample".annotations."telemetry.series"]
+temperature     = "temperature"
+humidity        = "humidity"
+pressure        = "pressure"
+battery         = "battery"
+rssi            = "rssi"
+snr             = "snr"
+cpu_load        = "cpu_load"
+mem_free        = "mem_free"
+tx_frames_total = "tx_frames_total"
+rx_frames_total = "rx_frames_total"
+errors_total    = "errors_total"
+resets_total    = "resets_total"
 
 # W2's 15 events a day, at most 60 an hour.
 [resources.oper_change]

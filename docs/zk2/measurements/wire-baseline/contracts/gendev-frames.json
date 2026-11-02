@@ -1,0 +1,22 @@
+{
+  "description": "gendev.v1's frame record (core section 7.6, 7.7; telemetry.v2, #983 T4): W2's eight gauges and four counters as one packed record, for #989's zk2c run. The ranges hold w2-drive.py's random walks for a run's length; the counters are 32 bits, as the report's W2 frame (constrained-overhead-review.md section 5.11).",
+  "types": {
+    "Sample": {
+      "description": "frames/sample: temperature to mem_free, then the four counters, in the contract's order (209 bits)",
+      "fields": [
+        {"name": "temperature", "type": "fixed", "minimum": "-40", "maximum": "85", "resolution": "0.01"},
+        {"name": "humidity", "type": "fixed", "minimum": "0", "maximum": "100", "resolution": "0.1"},
+        {"name": "pressure", "type": "fixed", "minimum": "900", "maximum": "1100", "resolution": "0.1"},
+        {"name": "battery", "type": "fixed", "minimum": "2.5", "maximum": "4.5", "resolution": "0.001"},
+        {"name": "rssi", "type": "fixed", "minimum": "-140", "maximum": "-20", "resolution": "0.5"},
+        {"name": "snr", "type": "fixed", "minimum": "-20", "maximum": "20", "resolution": "0.25"},
+        {"name": "cpu_load", "type": "fixed", "minimum": "0", "maximum": "100", "resolution": "0.5"},
+        {"name": "mem_free", "type": "fixed", "minimum": "0", "maximum": "131008", "resolution": "64"},
+        {"name": "tx_frames_total", "type": "counter", "width": 32},
+        {"name": "rx_frames_total", "type": "counter", "width": 32},
+        {"name": "errors_total", "type": "counter", "width": 32},
+        {"name": "resets_total", "type": "counter", "width": 32}
+      ]
+    }
+  }
+}
