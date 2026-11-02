@@ -17,6 +17,7 @@
 //! | [`telemetry`]: a metric's writer refuses what `telemetry.v1` forbids, and writes the epoch: the instance's, or a member's | `telemetry.v1` §2.6–§2.9; §1.5, §8.1 |
 //! | [`qos`]: the contract's QoS as zenoh spells it | §2.4 |
 //! | [`consumer`]: data through a role's bindings | §3.2 R1–R7 |
+//! | [`redeclare`]: across a face whose medium repairs no lost frame, a subscription silent for two horizons declared again, its transport up | §8.5, `link.v2` §2.21 |
 //! | [`inband`]: a received sample read as §4.3 writes it: an envelope stripped, its in-band stamp what orders it; a sample with no envelope by its Zenoh timestamp | §4.2–§4.3, §7.5 |
 //! | [`operation`]: serving calls; [`client`]: calling them, one address or a fleet; [`ownership`]: the split-brain diagnosis | §5.1 O1–O7, §5.2, §6 |
 //! | [`call`]: what a handler receives and a caller gets back, without a session | §5.1 O3, O5–O7, §5.2 |
@@ -146,6 +147,8 @@ pub mod packed;
 pub mod presence;
 #[cfg(feature = "zenoh")]
 pub mod qos;
+#[cfg(feature = "zenoh")]
+pub mod redeclare;
 #[cfg(feature = "zenoh")]
 pub mod redundancy;
 #[cfg(feature = "zenoh")]

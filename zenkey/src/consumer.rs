@@ -340,6 +340,9 @@ pub struct Consumer {
     /// The deployment epoch its typed reads count packed `time` fields
     /// from, in seconds (core §7.6, §8.6): its service's catalog's, else 0.
     epoch: i64,
+    /// The face its providers sit across (core §8.1, §8.5;
+    /// [`Consumer::across`]). `None`: no face.
+    far: Option<zenkey_model::link::FarSide>,
 }
 
 /// How long a re-read waits unless [`Consumer::with_reread_timeout`] says
@@ -352,6 +355,10 @@ pub struct Subscription {
     _subs: Vec<Subscriber<()>>,
     /// Each bound provider's heartbeat subscriber, for a collection.
     _heartbeats: Vec<Subscriber<()>>,
+    /// Across a face whose medium repairs no lost frame, the subscribers
+    /// declared again after silence (core §8.5), in place of the two
+    /// above for those with a horizon.
+    redeclaring: Option<crate::redeclare::Redeclaring>,
     /// The collection it follows by heartbeats, if any.
     followed: Option<Arc<Followed>>,
     seen: Arc<Seen>,
@@ -456,15 +463,64 @@ impl Consumer {
             refused: None,
             reread_timeout: REREAD_TIMEOUT,
             epoch: zenkey_model::catalog::EPOCH_WITHOUT_CATALOG,
+            far: None,
         })
+    }
+
+    /// Reads across a constrained face (core §8.1, §8.5; `link.v2` §2.20,
+    /// §2.21), as `far` states it:
+    /// - **every GET waits at least the face's `reply_timeout_ms`**: S4's
+    ///   GET and a seed ([`Consumer::get`], [`Consumer::get_answer`]), an
+    ///   event's replay, and a re-read of a diverged collection. A reply
+    ///   later than the query's timeout is dropped by the router (core
+    ///   Appendix B);
+    /// - **where the medium repairs no lost frame** (`arq = false`), each
+    ///   subscription with a horizon is declared again after two horizons
+    ///   of silence while the session's transport stayed up
+    ///   ([`crate::redeclare`], [`Subscription::redeclared`]): a resource's
+    ///   `freshness.ttl_s`, or a heartbeat's, the shortest of its
+    ///   collections' ([`zenkey_model::link::redeclare_horizon`]).
+    ///
+    /// The session is the application's, opened with the face's transport
+    /// ([`zenkey_model::link::FarSide::session_keys`]); presence across the
+    /// face is [`Consumer::with_presence`]'s to say.
+    #[must_use]
+    pub fn across(mut self, far: &zenkey_model::link::FarSide) -> Self {
+        self.reread_timeout = far.at_least(self.reread_timeout);
+        self.far = Some(far.clone());
+        self
+    }
+
+    /// The face [`Consumer::across`] named, if any.
+    #[must_use]
+    pub fn far_side(&self) -> Option<&zenkey_model::link::FarSide> {
+        self.far.as_ref()
+    }
+
+    /// `timeout`, at least the face's reply timeout across a face (core
+    /// §8.1).
+    fn reply_wait(&self, timeout: Duration) -> Duration {
+        self.far.as_ref().map_or(timeout, |f| f.at_least(timeout))
+    }
+
+    /// Where this consumer's subscriptions re-declare after silence: a face
+    /// whose medium repairs no lost frame.
+    async fn redeclaring(&self) -> Result<Option<crate::redeclare::Redeclaring>> {
+        match &self.far {
+            Some(f) if f.redeclares() => Ok(Some(
+                crate::redeclare::Redeclaring::start(&self.session).await?,
+            )),
+            _ => Ok(None),
+        }
     }
 
     /// How long a subscription's re-read of a diverged collection waits
     /// for its replies (`freshness.v2` §2.5): across a slow face, at least
-    /// its round trip. [`REREAD_TIMEOUT`] unless set.
+    /// its round trip. [`REREAD_TIMEOUT`] unless set, and at least the
+    /// face's reply timeout across one ([`Consumer::across`]).
     #[must_use]
     pub fn with_reread_timeout(mut self, timeout: Duration) -> Self {
-        self.reread_timeout = timeout;
+        self.reread_timeout = self.reply_wait(timeout);
         self
     }
 
@@ -791,8 +847,17 @@ impl Consumer {
         let engine = prepared.as_ref().map(|p| Arc::clone(&p.engine));
         let callback = Arc::new(callback);
         let followed = self.followed(&r).map(Arc::new);
+        // Core §8.5: across a face whose medium repairs no lost frame, a
+        // subscription with a horizon is declared again after silence.
+        let redeclaring = self.redeclaring().await?;
+        let horizon = redeclaring
+            .as_ref()
+            .and(zenkey_model::link::redeclare_horizon(&self.contract, &r));
         let heartbeats = match &followed {
-            Some(f) => self.heartbeat_subscribers(f, &seen, on_confirm).await?,
+            Some(f) => {
+                self.heartbeat_subscribers(f, &seen, on_confirm, redeclaring.as_ref())
+                    .await?
+            }
             None => Vec::new(),
         };
         let mut subs = Vec::new();
@@ -810,166 +875,172 @@ impl Consumer {
             let iface = self.contract.iface.clone();
             let providers = self.providers.clone();
             let on_refused = self.refused.clone();
-            subs.push(
-                self.session
-                    .declare_subscriber(ke)
-                    .callback(move |sample: Sample| {
-                        // timing.v1 §2.5, §2.6: its arrival, on both clocks,
-                        // read here, before anything else.
-                        let arrival = Instant::now();
-                        let wall = SystemTime::now();
-                        let key = sample.key_expr().as_str();
-                        if key.contains('*') {
-                            seen.discarded.fetch_add(1, Ordering::Relaxed);
-                            return;
-                        }
-                        let Ok(ZkKey::Data {
-                            addr,
-                            iface: got,
-                            resource: mut chunks,
-                            ..
-                        }) = parse(key)
-                        else {
-                            seen.unresolved.fetch_add(1, Ordering::Relaxed);
-                            return;
-                        };
-                        if got != iface || !providers.iter().any(|p| p.matches(&addr)) {
-                            seen.unresolved.fetch_add(1, Ordering::Relaxed);
-                            return;
-                        }
-                        if r.kind == Kind::Event {
-                            chunks.pop();
-                        }
-                        let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
-                        let Some(values) = r.template.matches(&refs) else {
-                            seen.unresolved.fetch_add(1, Ordering::Relaxed);
-                            return;
-                        };
-                        // Core §7.5, §7.6: a refused envelope, or a packed
-                        // record its layout refuses, is undecodable, never
-                        // delivered, never an arrival.
-                        let read = crate::inband::read(sample);
-                        let (inband, tag) = (read.stamp(), read.tag());
-                        // Core §7.7: a frame resource's put is a frame, read
-                        // with its layout by the key's reader.
-                        let admitted = match &frame_layout {
-                            Some(fl) => crate::inband::admit_frame(&read, fl).map(|f| {
-                                f.zip(inband).map(|(frame, stamp)| {
-                                    let key = read.sample().key_expr().as_str().to_owned();
-                                    let applied = seen
-                                        .frames
-                                        .lock()
-                                        .expect("not poisoned")
-                                        .entry(key)
-                                        .or_default()
-                                        .apply(fl, stamp, &frame);
-                                    FrameRead {
-                                        layout: Arc::clone(fl),
-                                        applied,
-                                        epoch,
-                                    }
-                                })
-                            }),
-                            None => crate::inband::admit(&read, layout.as_deref()).map(|()| None),
-                        };
-                        let frame = match admitted {
-                            Ok(frame) => frame,
-                            Err(why) => {
-                                seen.undecodable.fetch_add(1, Ordering::Relaxed);
-                                // A frame its layout refused is never applied:
-                                // its key's reader notes it, so the next frame
-                                // follows a gap that counts and names it.
-                                if let (Some(_), crate::inband::Read::Framed { stamp, .. }) =
-                                    (&frame_layout, &read)
-                                {
-                                    let key = read.sample().key_expr().as_str().to_owned();
-                                    seen.frames
-                                        .lock()
-                                        .expect("not poisoned")
-                                        .entry(key)
-                                        .or_default()
-                                        .refuse(*stamp);
-                                }
-                                tracing::debug!(
-                                    key = %read.sample().key_expr(),
-                                    reason = %why.reason(),
-                                    "an undecodable sample"
-                                );
-                                if let Some(f) = &on_refused {
-                                    f(Refused {
-                                        provider: addr,
-                                        resource: name.clone(),
-                                        values,
-                                        read,
-                                        why,
-                                        arrival,
-                                    });
-                                }
-                                return;
-                            }
-                        };
-                        let sample = read.into_sample();
-                        let key = sample.key_expr().as_str();
-                        let lifespan = match &engine {
-                            Some(e) => match timing::lock(e)
-                                .arrive(&addr, key, &chunks, &sample, arrival, wall)
-                            {
-                                Some(l) => l,
-                                // Expired: discarded, counted, no arrival.
-                                None => return,
-                            },
-                            None => premise,
-                        };
-                        let now = arrival;
-                        seen.last
-                            .lock()
-                            .expect("not poisoned")
-                            .insert(addr.clone(), now);
-                        let deleted = sample.kind() == zenoh::sample::SampleKind::Delete;
-                        seen.members
-                            .lock()
-                            .expect("not poisoned")
-                            .insert(key.to_owned(), (now, deleted));
-                        if let Some(f) = &followed {
-                            let mut views = seen.views.lock().expect("not poisoned");
-                            let view = views.entry(addr.clone()).or_insert_with(|| {
-                                let mut v = View::new(f.layout.clone());
-                                v.follow(f.index);
-                                v
-                            });
-                            if deleted {
-                                view.delete(key, inband, now);
-                            } else {
-                                view.put(key, inband, now);
-                            }
-                        }
-                        if let Some(t) = sample.timestamp() {
-                            let offset =
-                                StampAge::between(t.get_time().to_system_time(), SystemTime::now());
-                            seen.clocks
+            let on_sample: crate::redeclare::Callback = Arc::new(move |sample: Sample| {
+                // timing.v1 §2.5, §2.6: its arrival, on both clocks,
+                // read here, before anything else.
+                let arrival = Instant::now();
+                let wall = SystemTime::now();
+                let key = sample.key_expr().as_str();
+                if key.contains('*') {
+                    seen.discarded.fetch_add(1, Ordering::Relaxed);
+                    return;
+                }
+                let Ok(ZkKey::Data {
+                    addr,
+                    iface: got,
+                    resource: mut chunks,
+                    ..
+                }) = parse(key)
+                else {
+                    seen.unresolved.fetch_add(1, Ordering::Relaxed);
+                    return;
+                };
+                if got != iface || !providers.iter().any(|p| p.matches(&addr)) {
+                    seen.unresolved.fetch_add(1, Ordering::Relaxed);
+                    return;
+                }
+                if r.kind == Kind::Event {
+                    chunks.pop();
+                }
+                let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
+                let Some(values) = r.template.matches(&refs) else {
+                    seen.unresolved.fetch_add(1, Ordering::Relaxed);
+                    return;
+                };
+                // Core §7.5, §7.6: a refused envelope, or a packed
+                // record its layout refuses, is undecodable, never
+                // delivered, never an arrival.
+                let read = crate::inband::read(sample);
+                let (inband, tag) = (read.stamp(), read.tag());
+                // Core §7.7: a frame resource's put is a frame, read
+                // with its layout by the key's reader.
+                let admitted = match &frame_layout {
+                    Some(fl) => crate::inband::admit_frame(&read, fl).map(|f| {
+                        f.zip(inband).map(|(frame, stamp)| {
+                            let key = read.sample().key_expr().as_str().to_owned();
+                            let applied = seen
+                                .frames
                                 .lock()
                                 .expect("not poisoned")
-                                .entry(t.get_id().to_string())
-                                .and_modify(|m| m.record(offset))
-                                .or_insert(ClockMeasure::new(offset));
+                                .entry(key)
+                                .or_default()
+                                .apply(fl, stamp, &frame);
+                            FrameRead {
+                                layout: Arc::clone(fl),
+                                applied,
+                                epoch,
+                            }
+                        })
+                    }),
+                    None => crate::inband::admit(&read, layout.as_deref()).map(|()| None),
+                };
+                let frame = match admitted {
+                    Ok(frame) => frame,
+                    Err(why) => {
+                        seen.undecodable.fetch_add(1, Ordering::Relaxed);
+                        // A frame its layout refused is never applied:
+                        // its key's reader notes it, so the next frame
+                        // follows a gap that counts and names it.
+                        if let (Some(_), crate::inband::Read::Framed { stamp, .. }) =
+                            (&frame_layout, &read)
+                        {
+                            let key = read.sample().key_expr().as_str().to_owned();
+                            seen.frames
+                                .lock()
+                                .expect("not poisoned")
+                                .entry(key)
+                                .or_default()
+                                .refuse(*stamp);
                         }
-                        let stamp = sample.timestamp().copied();
-                        callback(Delivery {
-                            provider: addr,
-                            resource: name.clone(),
-                            values,
-                            sample,
-                            arrival,
-                            stamp,
-                            inband,
-                            tag,
-                            lifespan,
-                            frame,
-                        });
-                    })
-                    .await
-                    .map_err(zenoh)?,
-            );
+                        tracing::debug!(
+                            key = %read.sample().key_expr(),
+                            reason = %why.reason(),
+                            "an undecodable sample"
+                        );
+                        if let Some(f) = &on_refused {
+                            f(Refused {
+                                provider: addr,
+                                resource: name.clone(),
+                                values,
+                                read,
+                                why,
+                                arrival,
+                            });
+                        }
+                        return;
+                    }
+                };
+                let sample = read.into_sample();
+                let key = sample.key_expr().as_str();
+                let lifespan = match &engine {
+                    Some(e) => {
+                        match timing::lock(e).arrive(&addr, key, &chunks, &sample, arrival, wall) {
+                            Some(l) => l,
+                            // Expired: discarded, counted, no arrival.
+                            None => return,
+                        }
+                    }
+                    None => premise,
+                };
+                let now = arrival;
+                seen.last
+                    .lock()
+                    .expect("not poisoned")
+                    .insert(addr.clone(), now);
+                let deleted = sample.kind() == zenoh::sample::SampleKind::Delete;
+                seen.members
+                    .lock()
+                    .expect("not poisoned")
+                    .insert(key.to_owned(), (now, deleted));
+                if let Some(f) = &followed {
+                    let mut views = seen.views.lock().expect("not poisoned");
+                    let view = views.entry(addr.clone()).or_insert_with(|| {
+                        let mut v = View::new(f.layout.clone());
+                        v.follow(f.index);
+                        v
+                    });
+                    if deleted {
+                        view.delete(key, inband, now);
+                    } else {
+                        view.put(key, inband, now);
+                    }
+                }
+                if let Some(t) = sample.timestamp() {
+                    let offset =
+                        StampAge::between(t.get_time().to_system_time(), SystemTime::now());
+                    seen.clocks
+                        .lock()
+                        .expect("not poisoned")
+                        .entry(t.get_id().to_string())
+                        .and_modify(|m| m.record(offset))
+                        .or_insert(ClockMeasure::new(offset));
+                }
+                let stamp = sample.timestamp().copied();
+                callback(Delivery {
+                    provider: addr,
+                    resource: name.clone(),
+                    values,
+                    sample,
+                    arrival,
+                    stamp,
+                    inband,
+                    tag,
+                    lifespan,
+                    frame,
+                });
+            });
+            match (&redeclaring, horizon) {
+                (Some(rd), Some(h)) => {
+                    rd.declare(ke, h, on_sample).await?;
+                }
+                _ => subs.push(
+                    self.session
+                        .declare_subscriber(ke)
+                        .callback(move |sample: Sample| on_sample(sample))
+                        .await
+                        .map_err(zenoh)?,
+                ),
+            }
         }
         let timing = match prepared {
             Some(p) => Some(
@@ -988,6 +1059,7 @@ impl Consumer {
         Ok(Subscription {
             _subs: subs,
             _heartbeats: heartbeats,
+            redeclaring,
             followed,
             seen,
             since,
@@ -998,15 +1070,23 @@ impl Consumer {
     /// One heartbeat subscriber per bound provider, on the key of its
     /// heartbeat covering this interface: each heartbeat folded into the
     /// provider's view, what it confirmed handed to `on_confirm`.
+    ///
+    /// Through `redeclaring` across a face (core §8.5), each is declared
+    /// again after two of the heartbeat's horizons of silence, where the
+    /// contract uses `freshness.v2`, and is not among those returned.
     async fn heartbeat_subscribers<F>(
         &self,
         f: &Arc<Followed>,
         seen: &Arc<Seen>,
         on_confirm: F,
+        redeclaring: Option<&crate::redeclare::Redeclaring>,
     ) -> Result<Vec<Subscriber<()>>>
     where
         F: Fn(Confirmation) + Send + Sync + 'static,
     {
+        let horizon = redeclaring.and(zenkey_model::link::redeclare_heartbeat_horizon(
+            &self.contract,
+        ));
         let on_confirm = Arc::new(on_confirm);
         let rt = tokio::runtime::Handle::try_current().ok();
         let mut out = Vec::new();
@@ -1026,84 +1106,90 @@ impl Consumer {
             );
             let iface = self.contract.iface.clone();
             let (session, timeout, rt) = (self.session.clone(), self.reread_timeout, rt.clone());
-            out.push(
-                self.session
-                    .declare_subscriber(ke)
-                    .callback(move |sample: Sample| {
-                        let arrival = Instant::now();
-                        let unread = || seen.heartbeats_unread.fetch_add(1, Ordering::Relaxed);
-                        let Some((addr, covered)) =
-                            zenkey_model::heartbeat::covered(sample.key_expr().as_str())
-                        else {
-                            unread();
-                            return;
-                        };
-                        if covered != iface || !providers.iter().any(|p| p.matches(&addr)) {
-                            unread();
-                            return;
-                        }
-                        let crate::inband::Read::Heartbeat { sample, stamp, tag } =
-                            crate::inband::read(sample)
-                        else {
-                            unread();
-                            return;
-                        };
-                        let body = sample.payload().to_bytes();
-                        let (applied, owner_time, due) = {
-                            let mut views = seen.views.lock().expect("not poisoned");
-                            let view = views.entry(addr.clone()).or_insert_with(|| {
-                                let mut v = View::new(f.layout.clone());
-                                v.follow(f.index);
-                                v
-                            });
-                            let applied = view.apply(tag, stamp, &body, arrival);
-                            (
-                                applied,
-                                view.owner_time(),
-                                view.reread_due().contains(&f.index),
-                            )
-                        };
-                        // freshness.v2 §2.5: two divergences in a row, a
-                        // re-read of the provider's collection, one at a
-                        // time.
-                        if due
-                            && let Some(rt) = &rt
-                            && seen
-                                .rereading
-                                .lock()
-                                .expect("not poisoned")
-                                .insert(addr.clone())
-                        {
-                            rt.spawn(reread(
-                                session.clone(),
-                                Arc::clone(&f),
-                                Arc::clone(&seen),
-                                addr.clone(),
-                                timeout,
-                            ));
-                        }
-                        let sections = match applied {
-                            Applied::Read { sections, .. } => sections,
-                            Applied::Older => return,
-                            Applied::Revision | Applied::Refused(_) => {
-                                unread();
-                                return;
-                            }
-                        };
-                        seen.heartbeats.fetch_add(1, Ordering::Relaxed);
-                        if let Some(SectionRead::Confirmed(keys)) = sections.get(f.index) {
-                            on_confirm(Confirmation {
-                                provider: addr,
-                                keys: keys.clone(),
-                                heartbeat: stamp,
-                                arrival,
-                                owner_time,
-                            });
-                        }
-                    })
-                    .await
-                    .map_err(zenoh)?,
-            );
+            let on_sample: crate::redeclare::Callback = Arc::new(move |sample: Sample| {
+                let arrival = Instant::now();
+                let unread = || seen.heartbeats_unread.fetch_add(1, Ordering::Relaxed);
+                let Some((addr, covered)) =
+                    zenkey_model::heartbeat::covered(sample.key_expr().as_str())
+                else {
+                    unread();
+                    return;
+                };
+                if covered != iface || !providers.iter().any(|p| p.matches(&addr)) {
+                    unread();
+                    return;
+                }
+                let crate::inband::Read::Heartbeat { sample, stamp, tag } =
+                    crate::inband::read(sample)
+                else {
+                    unread();
+                    return;
+                };
+                let body = sample.payload().to_bytes();
+                let (applied, owner_time, due) = {
+                    let mut views = seen.views.lock().expect("not poisoned");
+                    let view = views.entry(addr.clone()).or_insert_with(|| {
+                        let mut v = View::new(f.layout.clone());
+                        v.follow(f.index);
+                        v
+                    });
+                    let applied = view.apply(tag, stamp, &body, arrival);
+                    (
+                        applied,
+                        view.owner_time(),
+                        view.reread_due().contains(&f.index),
+                    )
+                };
+                // freshness.v2 §2.5: two divergences in a row, a
+                // re-read of the provider's collection, one at a
+                // time.
+                if due
+                    && let Some(rt) = &rt
+                    && seen
+                        .rereading
+                        .lock()
+                        .expect("not poisoned")
+                        .insert(addr.clone())
+                {
+                    rt.spawn(reread(
+                        session.clone(),
+                        Arc::clone(&f),
+                        Arc::clone(&seen),
+                        addr.clone(),
+                        timeout,
+                    ));
+                }
+                let sections = match applied {
+                    Applied::Read { sections, .. } => sections,
+                    Applied::Older => return,
+                    Applied::Revision | Applied::Refused(_) => {
+                        unread();
+                        return;
+                    }
+                };
+                seen.heartbeats.fetch_add(1, Ordering::Relaxed);
+                if let Some(SectionRead::Confirmed(keys)) = sections.get(f.index) {
+                    on_confirm(Confirmation {
+                        provider: addr,
+                        keys: keys.clone(),
+                        heartbeat: stamp,
+                        arrival,
+                        owner_time,
+                    });
+                }
+            });
+            match (redeclaring, horizon) {
+                (Some(rd), Some(h)) => {
+                    rd.declare(ke, h, on_sample).await?;
+                }
+                _ => out.push(
+                    self.session
+                        .declare_subscriber(ke)
+                        .callback(move |sample: Sample| on_sample(sample))
+                        .await
+                        .map_err(zenoh)?,
+                ),
+            }
         }
         Ok(out)
     }
@@ -1130,6 +1216,7 @@ impl Consumer {
         let premise =
             timing::Plan::new(&r, &self.contract.iface, &[], &self.params, self.epsilon).premise();
         let mut out = Vec::new();
+        let timeout = self.reply_wait(timeout);
         for ke in self.selectors(resource)? {
             let rx = self
                 .session
@@ -1254,6 +1341,7 @@ impl Consumer {
         let mut tags = BTreeMap::new();
         let mut undecodable = BTreeMap::new();
         let mut complete = true;
+        let timeout = self.reply_wait(timeout);
         for ke in selectors {
             let rx = self
                 .session
@@ -1460,6 +1548,15 @@ impl Consumer {
 }
 
 impl Subscription {
+    /// How many times one of its subscribers was declared again after two
+    /// horizons of silence across a face (core §8.5, [`Consumer::across`]).
+    #[must_use]
+    pub fn redeclared(&self) -> u64 {
+        self.redeclaring
+            .as_ref()
+            .map_or(0, crate::redeclare::Redeclaring::redeclared)
+    }
+
     /// Samples discarded as expired (`timing.v1` §2.6): older than their
     /// lifespan on a stated ε, never delivered, and no arrival.
     #[must_use]
