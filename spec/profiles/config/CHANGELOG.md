@@ -4,6 +4,29 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.10 — 2026-11-02: `config.v1` tokenless on a first hop (#982 H1)
+
+Core 0.95 asks an owner on a first hop to put every interface it
+implements in its tokenless set. §2.1 said a deployment SHOULD NOT put
+`config.v1` there, so a first-hop owner could not follow both.
+
+**Changed: §2.1's SHOULD NOT.** It gains the first hop as its exception.
+There each token would cross the hop at every reconnect, and a tool
+finds the owner's `config.v1` by its descriptor (core §8.1, observer
+§3.6).
+
+**Changed: §2.19, wording that states no rule.** "Across a face,
+presence and descriptors do not cross" names its exception: a first-hop
+owner's instance token and descriptor cross toward the near side, where
+its face lets them (`link.v2` §2.6).
+
+**Written against core 0.95,** where it said 0.82.
+
+**Deliberately not changed.**
+- **No fixture and no scenario.** Neither reads the tokenless set.
+- **The SHOULD NOT** stands everywhere else: off a first hop, the token
+  says what the instance token does not.
+
 ## 0.9 — 2026-11-01: the view and the status confirmed by `freshness.v2`'s heartbeat, never re-put (#978)
 
 Epic #975 makes the wire bandwidth-first. Under `freshness.v1` an owner
