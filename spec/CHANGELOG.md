@@ -3,6 +3,110 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.95 — 2026-11-02: zk2py round 101's findings answered (#609, #985)
+
+zk2py's round 101 read C4c, core 0.94 and observer 0.24, cold, and ran
+`operations.md` §9 in three pairings. It filed F-472 to F-479, none a
+blocker. This version answers the five on the texts, and the reference
+fixes its three bugs. `observer.md` moves to text 0.25 beside it
+([`observer-CHANGELOG.md`](observer-CHANGELOG.md)).
+
+**F-472: the index's, no text changed.** §5.2's "Decoding" MUST is a
+pronoun's, whose antecedent leads the sentence before it: "A caller or a
+tool that reads the bare wire". `scripts/gen-rules-index.py` read only
+the first role a leading subject names, so `RULES.md` listed it under the
+caller alone. It reads every role a coordination joins now, and its
+self-test holds such a case.
+
+**Stated: §5.2, a malformed envelope is the transport's (F-473).** "The
+bare wire" read an envelope under its three encodings as the owner's,
+and "Transport errors" said a malformed error is the transport's. An
+envelope its decoding refuses now reads as the second says: a malformed
+error, the transport's, silence after which an idempotent call is
+retried. 0.94 made a malformed error form the transport's, and the
+bare wire follows it.
+- **The reference** read one as an answer, `Outcome::Malformed`. Its
+  client reads it as the transport's, so a caller retries an idempotent
+  call after it.
+- **The evidence:** `operations.md` §9 step 7 answers `ping` with an
+  envelope with no `message`, and both callers call twice.
+- **It survives C4d.** "A malformed error is the transport's too" is
+  stated for every `reply_err`, and C4d removes only the bare-wire half.
+
+**Stated: `operations.md` §9's state (F-474).** Step 4 put "its state",
+and no setup declared one. The setup now gives `h1/tc` a parameterless
+state, `status`, declared by `tc.v1` or by another interface `h1/tc`
+implements. An instance's mark counts every state and event seq it
+mints, so either serves. zk2py's `tc.v1` declares it, and the
+reference's test puts `probe.v1`'s.
+
+**Stated: §5.1, a value is read only under `zenoh/bytes` (F-475).**
+"Reading a value" read every reply by §7.5's parse, so a caller that
+does not read the bare wire would parse an older owner's bare value as a
+form, as `vectors.json`'s `[1,2,3,4]` parses.
+- **Now** the parse reads a reply under `zenoh/bytes`. One under another
+  `Encoding` is no value form, and is malformed, unless the caller reads
+  the bare wire.
+- **"Only the `Encoding` tells them apart"** moves from the bare wire's
+  MAY to "Reading a value", and `vectors.json`'s note cites §5.1 where it
+  cited §5.2.
+- **Observer §7.3** says the same of a tool, at text 0.25.
+- **It survives C4d,** which removes "unless the caller reads the bare
+  wire" and nothing else of it.
+
+**Stated: §5.1, the as-of mark's order (F-476).** A mark of seq n, once
+its run has minted n, is at or after the write of seq n, and before
+n + 1. An instance that has minted no seq answers seq 0 too, before
+every write of its run. A caller cannot tell the two apart, so it orders a mark of seq
+0 before the write of seq 1, and not against the write of seq 0.
+- **Not taken: "the next it would mint".** zk2py offered a mark of the
+  next seq, under which every mark orders. It changes every owner's
+  mark, `operations.md` §9 step 4's expectation and `config.v2`'s
+  replay. Past the last seq of a run, at 2^24 − 1, the next one does not
+  fit the field.
+- **The default taken,** as this version states it: the two cases of seq
+  0 named, the caller's order said.
+
+**The reference's three bugs.**
+- **F-477: `zenctl call` refused a packed request.** It writes one now:
+  core §7.6's record of the JSON given, which the runtime's client puts
+  under CH with the type's tag. Its `time` fields are written under the
+  `--catalog`'s epoch, or under 0, assumed. The report then says so
+  (`request_epoch_assumed`), and the replies are read under the same
+  epoch. An epoch the catalogs refuse refuses a request holding a `time`
+  field, before anything is sent. `bench call` writes one too, and
+  `serve --reply` writes a packed reply under its catalog's epoch.
+- **F-478: a CBOR operation's form read as JSON.** The fleet read a
+  form's record on the `encoding` of the first resource holding its type.
+  `set` and `set-cbor` share their types, so `set-cbor` read as JSON. A
+  value, a request and an `error` detail are now read on their own
+  operation's `encoding`. A data sample with no `Encoding` of its own is
+  read on its own resource's too.
+- **F-479: the `consume` example printed a raw value with its form.** It
+  prints the value form's record alone, and a reply the parse refuses as
+  `call malformed` with its refusal.
+
+**Deliberately not changed.**
+- **No rule.** F-473 and F-475 to F-476 state what follows from 0.94's
+  rules. None adds a keyword, and `RULES.md` lists 239 rules, the
+  observer class 70.
+- **The bare wire stays a MAY.** C4d, its removal, is not in this
+  version. It reaches past §5.1 and §5.2: `telemetry.v1` §2.6 reads a
+  CBOR map "as the envelope's are read (core §5.2)", and `config.v1`
+  §2.5 and observer §7.3 cite the envelope. Each needs its words first.
+- **`errors/cases.json`, `core/error.proto` and `core/error.schema.json`**
+  stay, as 0.94 left them.
+
+**The evidence.**
+- `operations.md` §9: its setup's `status`, and step 7's malformed
+  envelope (`zenkey/tests/operations.rs`'s `s9_a_calls_forms`).
+- `envelope/vectors.json`: a note. No case changes.
+- The bugs' tests: `zenkey-fleet`'s `a_packed_request_is_its_record`,
+  `a_packed_requests_time_is_written_under_the_epoch_in_force` and
+  `a_form_is_read_on_its_own_operations_encoding`, and
+  `owner_example.rs`, which runs the `consume` example against the owner
+  example.
+
 ## 0.94 — 2026-11-02: every call in the value and error forms (#980, #985)
 
 0.92 defined a call's forms, and no rule adopted them. This version is

@@ -197,6 +197,9 @@ ROLE_RX = [(re.compile(r"(?<![\w-])" + p + r"(?![\w-])", re.I), roles) for p, ro
 # A sentence's subject that leads it: a determiner, at most two words, and a
 # role word ("A tool decodes", "The owner's state queryables").
 LEADING = re.compile(r"^(?:a|an|the|every|each|its|their)\s+(?:[\w’'-]+\s+){0,2}?", re.I)
+# A further role word joined to a leading one: "A caller or a tool", "An
+# owner, a consumer and a caller".
+COORDINATED = re.compile(r"^(?:\s*,)?\s+(?:(?:or|and)\s+)?(?:a|an|the|every|each)\s+", re.I)
 
 # The sentences the reading cannot parse and the text should not change:
 # {(file, a phrase of the sentence): (roles, reason)}. None today: each
@@ -249,6 +252,7 @@ ANTECEDENTS = {
     ("text.md", "One that does not, or whose binding"): [("One", "an owner"), ("does not", "opt in")],
     ("text.md", "it MUST stop writing state"): ("it", "an owner"),
     ("text.md", "Every instance MUST hold one"): ("hold one", "an instance token"),
+    ("text.md", "It MUST refuse an unknown encoding"): ("It", "a caller or a tool decoding an error"),
 }
 # The MAYs that except a listed rule, shown in that rule's entry after it
 # (F-386): {(file, a phrase of the rule's sentence): a phrase of the MAY's
@@ -366,18 +370,29 @@ def roles_in(text: str) -> list:
 
 def leading_roles(sentence: str) -> list:
     """The roles of the subject that leads a sentence stating no rule: "A
-    tool decodes …" names a tool, and "Zenoh delivers a put … with the
-    publisher's key" no one."""
+    tool decodes …" names a tool, "A caller or a tool that reads …" both
+    (zk2py round 101's F-472: a coordination names every role joined), and
+    "Zenoh delivers a put … with the publisher's key" no one."""
     text = plain(LABEL.sub(" ", sentence)).strip()
     m = LEADING.match(text)
     if not m:
         return []
     head = text[m.end():]
-    for rx, roles in ROLE_RX:
-        hit = rx.match(head)
-        if hit:
-            return [r for r in ROLES + [READER] if r in roles]
-    return []
+    found = set()
+    while True:
+        hit = None
+        for rx, roles in ROLE_RX:
+            hit = rx.match(head)
+            if hit:
+                found.update(roles)
+                break
+        if not hit:
+            break
+        joined = COORDINATED.match(head[hit.end():])
+        if not joined:
+            break
+        head = head[hit.end() + joined.end():]
+    return [r for r in ROLES + [READER] if r in found]
 
 
 def subject_of(before: str) -> str:

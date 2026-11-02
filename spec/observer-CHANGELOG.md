@@ -13,6 +13,26 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.25 — 2026-11-02: §7.3, a reply under another `Encoding` (#609, #985)
+
+zk2py's round 101 read core 0.94 and this text's 0.24 cold, and filed
+F-472 to F-479. Core 0.95 answers them
+([`CHANGELOG.md`](CHANGELOG.md)). This text takes F-475's tool half, and
+is written against core 0.95.
+
+**Stated: §7.3, a reply under another `Encoding` (F-475).** "A call's
+forms first" bound a tool under `zenoh/bytes` alone. A reply under any
+other `Encoding` is no value form, and is undecodable as a refused one
+is, unless the tool reads the bare wire. Core §5.1's "Reading a value"
+says the same of a caller.
+
+**Deliberately not changed.**
+- **No rule.** The sentence states no keyword: it is what §7.3's MUST
+  and MUST NOT already ask, read by core 0.95's bound.
+- **The reference's tools** read the bare wire, so they read such a reply
+  as before.
+- **The header** is written against core 0.95.
+
 ## 0.24 — 2026-11-02: §7.3, a call's forms read first (#980, #985)
 
 Core 0.94 moves every call onto core §7.5's forms, #985's C4c: a request,

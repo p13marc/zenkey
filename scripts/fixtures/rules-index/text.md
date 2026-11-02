@@ -80,6 +80,9 @@ them is checked too. `[F: contracts/e030-list]`
 The seconds MUST fit an unsigned 64-bit integer (E026).
 `[F: contracts/e026-retention]`
 
+A caller or a tool that reads the old wire decodes its error without the
+contract. It MUST refuse an unknown encoding. `[F: errors/cases.json]`
+
 ## 9. Contracts
 
 - **A `$ref`** is split at its `#`. Each failure below is E032.

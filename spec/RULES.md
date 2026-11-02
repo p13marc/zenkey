@@ -55,7 +55,7 @@ The owner, consumer and caller sections each point to them.
 | [Consumer](#consumer) | 22 |
 | [Caller](#caller) | 18 |
 | [Deployment](#deployment) | 17 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 69, 25 of them a reader's |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 70, 25 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 63 |
 | Every rule, once | 239 |
 | [Rule ids](#rule-ids) | 85 |
@@ -467,6 +467,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 |---|---|---|
 | [§5.2](core.md#52-errors) | A caller or a tool MUST read a `reply_err` under the `Encoding` `zenoh/bytes` by §7.5's parse. | `[F: errors/forms.json]` `[Sc: operations.md §9]` |
 | [§5.2](core.md#52-errors) | **Reading an error.** … A caller or a tool MUST read every other `reply_err` as the transport's: one the parse refuses, and one under another `Encoding`. *Except:* An implementation MAY read a call's sample whose `Encoding` is not `zenoh/bytes` as the bare wire. | `[F: errors/forms.json]` `[Sc: operations.md §9]` |
+| [§5.2](core.md#52-errors) | **Decoding.** … It [a caller or a tool decoding an envelope] MUST refuse: (5 items) | `[F: errors/cases.json]` |
 
 ### [core §7.7 Frames](core.md#77-frames)
 

@@ -218,6 +218,11 @@ Schema `error` type and `encoding = "json"`. It serves three variants of
 and one with raw types (`application/octet-stream`). `tc.v1` also
 declares `@op/ping`, `idempotent = true`.
 
+`h1/tc` exposes a parameterless state too, `status`, which step 4 puts.
+`tc.v1` may declare it, or another interface `h1/tc` implements: an
+instance's as-of mark counts every state and event seq it mints (core
+§5.1).
+
 `h1/tc` implements `seed.v1` beside it, the contract of
 `conformance/contracts/ok-packed-operation.toml`:
 - `calibrate`: its request, response and error types are packed;
@@ -237,7 +242,7 @@ receives it.
    sends two values and its summary. It calls `reset`, refused `busy`.
 3. **The wrong tag.** A session of the test's own sends `calibrate` a
    `Sensor` record under CH `0x40`, tag 0.
-4. **The as-of mark.** `h1/tc` puts its state twice, and the caller calls
+4. **The as-of mark.** `h1/tc` puts `status` twice, and the caller calls
    `set`. Then `h1/tc` puts once more. A second instance then replaces
    it, and the caller calls `set` before that instance's first put.
 5. **Errors that are no owner's.** The caller has two attempts
@@ -254,7 +259,9 @@ receives it.
    freezes, and the caller calls it.
 7. **The bare wire.** A session of the test's own answers `set` with the
    JSON envelope `{"code":"busy","message":""}`, under
-   `application/json`.
+   `application/json`. Then it answers `ping` with `{"code":"busy"}`
+   under `application/json`, an envelope with no `message`, and the
+   caller has two attempts configured.
 
 **Expected.**
 1. Every query arrives under `zenoh/bytes`, as `0x40` then the request's
@@ -292,3 +299,6 @@ receives it.
    caller calls twice.
 7. A caller that reads the bare wire reports `busy`. One that does not
    reports the transport's, and calls `set` once: it is not idempotent.
+   - The `ping` envelope is malformed, so it is the transport's to both
+     callers (core §5.2, `decode`). Each calls `ping` twice, then reports
+     silence.
