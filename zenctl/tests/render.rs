@@ -3706,6 +3706,7 @@ mod actfx {
             selectors: vec![format!("zk2/{address}/tc.netif.v1/@op/diagnostics")],
             mode,
             timeout_s: 5.0,
+            request_epoch_assumed: None,
             answer,
         }
     }

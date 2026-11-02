@@ -228,7 +228,7 @@ async fn serve_answers_logs_and_leaves_no_operation_silent() {
     let tool = client(&ep).await;
     let netif = revision("tcgui/tc.netif.v1");
     let diag = netif.resource("diagnostics", &[Kind::Operation]).unwrap();
-    let reply = zenkey_fleet::encode_response(&netif, diag, br#"{"ok": true}"#).unwrap();
+    let reply = zenkey_fleet::encode_response(&netif, diag, br#"{"ok": true}"#, None).unwrap();
     let mut served = serve_operation(
         &owners,
         ServeSpec {
@@ -322,7 +322,7 @@ async fn a_bench_attributes_replies_by_key_and_keeps_refusals_apart() {
     let tool = client(&ep).await;
     let netif = revision("tcgui/tc.netif.v1");
     let diag = netif.resource("diagnostics", &[Kind::Operation]).unwrap();
-    let reply = zenkey_fleet::encode_response(&netif, diag, br#"{"ok": true}"#).unwrap();
+    let reply = zenkey_fleet::encode_response(&netif, diag, br#"{"ok": true}"#, None).unwrap();
     let mut mocks = Vec::new();
     for (host, answer) in [
         (

@@ -1029,6 +1029,7 @@ async fn call(
                     revision: rev,
                     plan: &plan,
                     request: bytes.clone(),
+                    epoch: crate::model::deployment::Epoch::Assumed,
                     timeout: spec.timeout,
                     retries: 0,
                 },

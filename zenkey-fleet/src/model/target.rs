@@ -23,6 +23,7 @@ use zenkey_model::schema::{ArtifactData, TypeId};
 use zenkey_model::template::Bindings;
 
 use crate::model::catalog::Revision;
+use crate::model::deployment::Epoch;
 use crate::{Error, Result};
 
 /// An address as a resolved verb takes it: `<system>/<service>`, either
@@ -248,8 +249,11 @@ pub fn plan_call(
 /// The request's bytes, encoded as the operation's `request` type (§7.2):
 /// JSON or CBOR for a JSON Schema type, as the contract's `encoding` says;
 /// a protobuf message built from its JSON form through the bundle's
-/// descriptor set; a raw type's bytes as given. `input` is what the caller
-/// typed: JSON text, except for a raw type.
+/// descriptor set; a packed record written from its JSON reading through
+/// the contract's layout (§7.6), its `time` fields under the epoch assumed
+/// (0); a raw type's bytes as given. `input` is what the caller typed: JSON
+/// text, except for a raw type. The runtime's client puts the record in
+/// §7.5's request form, under CH with the type's tag (core §5.1).
 ///
 /// A JSON Schema request is checked against its type first, with
 /// `zenkey_model::validate` (#671; the §7.3 subset), and refused with every
@@ -257,6 +261,20 @@ pub fn plan_call(
 /// owner's refusal of what the schema refuses (§5.1, "The request"), and a
 /// writer sends only what its schema declares (§9.8).
 pub fn encode_request(revision: &Revision, plan: &CallPlan, input: &[u8]) -> Result<Vec<u8>> {
+    encode_request_in(revision, plan, input, Epoch::Assumed)
+}
+
+/// [`encode_request`], a packed request's `time` fields written under
+/// `epoch` (core §7.6, §8.6): a `--catalog`'s, the deployment's word, or
+/// [`Epoch::Assumed`], which [`request_epoch_assumed`] says. An epoch the
+/// catalogs refuse ([`Epoch::refusal`]) refuses a request holding a `time`
+/// field, before anything is sent: such a field would be dated by a guess.
+pub fn encode_request_in(
+    revision: &Revision,
+    plan: &CallPlan,
+    input: &[u8],
+    epoch: Epoch,
+) -> Result<Vec<u8>> {
     if let TypeId::JsonSchema { .. } = &plan.operation.request
         && let Ok(value) = serde_json::from_slice::<serde_json::Value>(input)
         && let Some(ty) = zenkey_model::decode::type_of(
@@ -280,21 +298,73 @@ pub fn encode_request(revision: &Revision, plan: &CallPlan, input: &[u8]) -> Res
             ),
         ));
     }
+    let what = format!("the request for {}", plan.name);
+    if let Some(why) = epoch.refusal()
+        && holds_time(revision, &plan.operation.request)
+    {
+        return Err(Error::unaskable(
+            &what,
+            format!("holds a time field: {why}; nothing was sent"),
+        ));
+    }
     encode_as(
         revision,
         &plan.operation.request,
         plan.operation.encoding,
-        &format!("the request for {}", plan.name),
+        &what,
         "request",
         input,
+        epoch.given(),
     )
+}
+
+/// The epoch a call's packed request was written under because nothing
+/// stated one ([`zenkey_model::decode::epoch_assumed`]): 0 for a `request`
+/// type holding a `time` field under [`Epoch::Assumed`], `None` for any
+/// other request, and under an epoch given. A tool says it beside the call
+/// (core §8.6).
+pub fn request_epoch_assumed(revision: &Revision, plan: &CallPlan, epoch: Epoch) -> Option<i64> {
+    if epoch.given().is_some() {
+        return None;
+    }
+    let ty = zenkey_model::decode::type_of(
+        revision.bundle(),
+        plan.resource.token.as_str(),
+        plan.resource.template.as_str(),
+        "request",
+    )?;
+    zenkey_model::decode::epoch_assumed(
+        revision.bundle(),
+        ty,
+        zenkey_model::decode::Context::default(),
+    )
+}
+
+/// Whether `ty` is a packed type whose layout holds a `time` field.
+fn holds_time(revision: &Revision, ty: &TypeId) -> bool {
+    revision
+        .contract()
+        .packed_layout(ty)
+        .ok()
+        .flatten()
+        .is_some_and(|l| {
+            l.fields()
+                .any(|f| matches!(f.kind, zenkey_model::packed::FieldKind::Time { .. }))
+        })
 }
 
 /// A reply of operation `r`'s `response` type, from what the operator
 /// typed, encoded as [`encode_request`] encodes a request: `zenctl serve`'s
-/// fixed reply (#612, FJ8a). Not checked against its JSON Schema either: a
-/// mock that answers what its schema refuses is the operator's to mean.
-pub fn encode_response(revision: &Revision, r: &Resource, input: &[u8]) -> Result<Vec<u8>> {
+/// fixed reply (#612, FJ8a), a packed one's `time` fields under `epoch`,
+/// the owner's own (its catalog's, `None` for none: 0). Not checked against
+/// its JSON Schema either: a mock that answers what its schema refuses is
+/// the operator's to mean.
+pub fn encode_response(
+    revision: &Revision,
+    r: &Resource,
+    input: &[u8],
+    epoch: Option<i64>,
+) -> Result<Vec<u8>> {
     let name = zenkey::implementation::resource_name(r);
     let Body::Operation(op) = &r.body else {
         return Err(Error::unaskable(&name, "not an operation"));
@@ -306,12 +376,14 @@ pub fn encode_response(revision: &Revision, r: &Resource, input: &[u8]) -> Resul
         &format!("the reply of {name}"),
         "reply",
         input,
+        epoch,
     )
 }
 
 /// A value of type `ty`, from JSON text (or a raw type's bytes as given),
-/// in the wire form §7.2 gives it; `what` names it in a refusal, and
-/// `noun` says what it is.
+/// in the wire form §7.2 gives it, a packed record's `time` fields under
+/// `epoch` (`None`: 0); `what` names it in a refusal, and `noun` says what
+/// it is.
 fn encode_as(
     revision: &Revision,
     ty: &TypeId,
@@ -319,6 +391,7 @@ fn encode_as(
     what: &str,
     noun: &str,
     input: &[u8],
+    epoch: Option<i64>,
 ) -> Result<Vec<u8>> {
     let json = || -> Result<serde_json::Value> {
         serde_json::from_slice(input).map_err(|e| {
@@ -333,15 +406,37 @@ fn encode_as(
     };
     match ty {
         TypeId::Raw { .. } => Ok(input.to_vec()),
-        // A packed operation type lints since core 0.92 (§7.1): its record
-        // travels in §7.5's forms, behind a CH that holds its tag, and no
-        // caller writes them before C4c.
-        TypeId::Packed { name, .. } => Err(Error::unaskable(
-            what,
-            format!(
-                "packed:{name} is a packed type, whose call travels in core §7.5's forms, which no caller writes yet"
-            ),
-        )),
+        // Core §7.6's writer over the record's JSON reading. Its tag rides
+        // CH, which the runtime's client writes (§5.1, zk2py round 101's
+        // F-477).
+        TypeId::Packed { name, .. } => {
+            let value = json()?;
+            let layout = revision
+                .contract()
+                .packed_layout(ty)
+                .map_err(|e| {
+                    Error::malformed(
+                        format!("{}@{}", revision.iface(), revision.fingerprint()),
+                        format!("declares packed:{name}, whose layout does not read: {e}"),
+                    )
+                })?
+                .ok_or_else(|| {
+                    Error::malformed(
+                        format!("{}@{}", revision.iface(), revision.fingerprint()),
+                        format!("declares packed:{name}, which it does not carry"),
+                    )
+                })?;
+            layout.write(&value, epoch).map(|r| r.bytes).map_err(|r| {
+                Error::unaskable(
+                    what,
+                    format!(
+                        "not a packed:{name} record in its JSON reading ({}, core §7.6); \
+                         nothing was sent",
+                        r.reason()
+                    ),
+                )
+            })
+        }
         TypeId::JsonSchema { .. } => {
             use zenkey::codec::Codec as _;
             zenkey::codec::Json::<serde_json::Value>::encode(&json()?, encoding)
@@ -507,5 +602,116 @@ mod tests {
             encode_request(&rev, &blob, &[0x89, b'P']).unwrap(),
             [0x89, b'P']
         );
+    }
+
+    /// A packed request is core §7.6's record of its JSON reading, which
+    /// the runtime's client puts under CH with the type's tag (§5.1; zk2py
+    /// round 101's F-477, `operations.md` §9 step 2): `calibrate`'s and
+    /// `reset`'s records are `envelope/calls.json`'s, after CH.
+    #[test]
+    fn a_packed_request_is_its_record() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../spec/conformance/contracts/ok-packed-operation.toml");
+        let l = zenkey_model::contract::load_path(&path);
+        let rev = Revision::from_contract(
+            l.contract.unwrap_or_else(|| panic!("{}", l.report)),
+            ContractSource::File,
+        );
+        let t = Target::parse("h1/seed").unwrap();
+        let calibrate = plan_call(&rev, t.clone(), "calibrate", Bindings::new()).unwrap();
+        let sensor =
+            br#"{"temperature": "21.5", "humidity": "40", "pressure": "1013.2", "battery": "3.7"}"#;
+        assert_eq!(
+            encode_request(&rev, &calibrate, sensor).unwrap(),
+            [0x4c, 0xea, 0x1b, 0xdc, 0xaa]
+        );
+        assert_eq!(
+            request_epoch_assumed(&rev, &calibrate, Epoch::Assumed),
+            None
+        );
+        let e = encode_request(
+            &rev,
+            &calibrate,
+            br#"{"temperature": "21.5", "humidity": "40", "pressure": "1013.2"}"#,
+        )
+        .unwrap_err();
+        assert!(e.is_unaskable(), "{e}");
+        assert!(e.to_string().contains("missing"), "{e}");
+        assert!(e.to_string().contains("nothing was sent"), "{e}");
+        // Sensor holds no time field: no epoch matters, a refused one
+        // neither.
+        let unknown = Epoch::Unknown("0a0b0c0d".parse().unwrap());
+        assert!(encode_request_in(&rev, &calibrate, sensor, unknown).is_ok());
+
+        let reset = plan_call(&rev, t, "reset", Bindings::new()).unwrap();
+        let status =
+            br#"{"duty_available": "12.5", "signal_bars": 3, "oper": "up", "admin": true}"#;
+        assert_eq!(
+            encode_request(&rev, &reset, status).unwrap(),
+            [0x1f, 0x59, 0x00]
+        );
+    }
+
+    /// A packed request's `time` fields are written under the epoch given,
+    /// a catalog's, or under 0 assumed, which the report says; an epoch the
+    /// catalogs refuse refuses the request before anything is sent (core
+    /// §7.6, §8.6).
+    #[test]
+    fn a_packed_requests_time_is_written_under_the_epoch_in_force() {
+        let dir =
+            std::env::temp_dir().join(format!("zenkey-fleet-target-packed-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let events = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../spec/conformance/contracts/schemas/packed/events.json"),
+        )
+        .unwrap();
+        std::fs::write(dir.join("events.json"), events).unwrap();
+        let toml = "[interface]\nname = \"log\"\nmajor = 1\nminor = 0\n\
+             [schemas]\npacked = [\"events.json\"]\n\
+             [resources.mark]\nkind = \"operation\"\nrequest = \"packed:Change\"\n\
+             response = \"packed:Change\"\n";
+        let l = zenkey_model::contract::load_str(toml, &dir, None);
+        std::fs::remove_dir_all(&dir).unwrap();
+        let rev = Revision::from_contract(
+            l.contract.unwrap_or_else(|| panic!("{}", l.report)),
+            ContractSource::File,
+        );
+        let plan = plan_call(
+            &rev,
+            Target::parse("h1/log").unwrap(),
+            "mark",
+            Bindings::new(),
+        )
+        .unwrap();
+        let change = br#"{"at": 1730000000123, "mode": "on", "count": 5}"#;
+        let layout = rev
+            .contract()
+            .packed_layout(&plan.operation.request)
+            .unwrap()
+            .unwrap();
+        let epoch = 1_700_000_000;
+        let under = encode_request_in(&rev, &plan, change, Epoch::Deployment(epoch)).unwrap();
+        let assumed = encode_request(&rev, &plan, change).unwrap();
+        assert_ne!(under, assumed, "the time field counts from the epoch");
+        for (bytes, e) in [(&under, Some(epoch)), (&assumed, None)] {
+            assert_eq!(
+                layout.read(layout.tag(), bytes, e).unwrap(),
+                serde_json::json!({"at": 1730000000123_u64, "mode": "on", "count": 5}),
+            );
+        }
+        assert_eq!(request_epoch_assumed(&rev, &plan, Epoch::Assumed), Some(0));
+        assert_eq!(
+            request_epoch_assumed(&rev, &plan, Epoch::Deployment(epoch)),
+            None
+        );
+        for refused in [
+            Epoch::Unknown("0a0b0c0d".parse().unwrap()),
+            Epoch::Ambiguous,
+        ] {
+            let e = encode_request_in(&rev, &plan, change, refused).unwrap_err();
+            assert!(e.is_unaskable(), "{e}");
+            assert!(e.to_string().contains("holds a time field"), "{e}");
+        }
     }
 }

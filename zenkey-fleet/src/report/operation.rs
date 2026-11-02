@@ -44,6 +44,12 @@ pub struct OperationReport {
     pub mode: CallMode,
     /// How long the call waited for replies, seconds.
     pub timeout_s: f64,
+    /// The deployment epoch, in seconds, the request's packed `time` fields
+    /// were written under because no catalog stated one (core §7.6, §8.6):
+    /// the owner reads them under its own, so they are right only where it
+    /// is this one. Absent for every other request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_epoch_assumed: Option<i64>,
     /// What came back. Tagged `answer`.
     #[serde(flatten)]
     pub answer: OperationAnswer,
@@ -264,6 +270,7 @@ mod tests {
             selectors: vec!["zk2/host-a/tc/tc.netif.v1/@op/diagnostics".into()],
             mode,
             timeout_s: 5.0,
+            request_epoch_assumed: None,
             answer,
         }
     }

@@ -454,8 +454,8 @@ pub use bus::consume::{
 };
 pub use bus::operation::{OperationCall, call as call_operation};
 pub use model::target::{
-    CallPlan, OwnedKey, Target as ResolvedTarget, check_values, encode_request, encode_response,
-    owned_key, plan_call, resource as resolve_resource,
+    CallPlan, OwnedKey, Target as ResolvedTarget, check_values, encode_request, encode_request_in,
+    encode_response, owned_key, plan_call, request_epoch_assumed, resource as resolve_resource,
 };
 pub use tape::record::{rfc3339_from_unix, rfc3339_now};
 // The judging vocabulary a caller can drive directly (#349's evidence
