@@ -495,8 +495,6 @@
     "e044-packed-place": {
       "codes": [
         "E044",
-        "E044",
-        "E044",
         "E044"
       ],
       "fingerprint": null
@@ -609,6 +607,10 @@
     "ok-packed": {
       "codes": [],
       "fingerprint": "sha256:ce1e8463ea4c5750fcb4ab75c311261e52699de538b0a5759b69ab1b3a6a75c2"
+    },
+    "ok-packed-operation": {
+      "codes": [],
+      "fingerprint": "to bless"
     },
     "ok-profile-without-vocabulary": {
       "codes": [],
