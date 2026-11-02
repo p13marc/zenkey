@@ -1462,6 +1462,238 @@ fn error_forms() {
     }
 }
 
+/// A stamp as the fixtures spell it: `run_width`, `run` and `seq`.
+fn stamp_of(v: &Value, note: &Value) -> zenkey_model::wire::Stamp {
+    use zenkey_model::wire::{Run, Seq, Stamp};
+    let run = v["run"].as_u64().expect("run");
+    let run = match v["run_width"].as_u64() {
+        Some(16) => Run::U16(u16::try_from(run).expect("a 16-bit run")),
+        Some(32) => Run::U32(u32::try_from(run).expect("a 32-bit run")),
+        other => panic!("{note}: run_width {other:?}"),
+    };
+    let seq = Seq::new(u32::try_from(v["seq"].as_u64().expect("seq")).unwrap()).expect("seq");
+    Stamp { run, seq }
+}
+
+/// `spec/conformance/envelope/calls.json` (core 0.94 §5.1, §5.2; #985's
+/// C4c): the operations of `contracts/ok-packed-operation.toml`, each
+/// form's CH by its operation's types' tags (`types`, `forms`); a record
+/// and a stamp → a request's, a value's, a summary's or an error's bytes,
+/// or the writer's refusal (`writes`); a query's, a reply's or a reply
+/// error's bytes → its stamp, its tag and its record read as its type under
+/// CH's tag, or the first refusal (`reads`), through
+/// `zenkey_model::forms`. Written by an independent reading of the text,
+/// checked, never blessed.
+#[test]
+fn call_forms() {
+    use zenkey_model::contract::{Body, Operation};
+    use zenkey_model::envelope::{Cause, Code};
+    use zenkey_model::forms::{FormType, Forms};
+    use zenkey_model::wire::{Stamp, Tag, read_reply, read_reply_err};
+    let doc = read_json(&spec().join("conformance/envelope/calls.json"));
+    let path = spec()
+        .join("conformance")
+        .join(doc["contract"].as_str().expect("contract"));
+    let l = zenkey_model::contract::load_path(&path);
+    let contract = l.contract.unwrap_or_else(|| panic!("{}", l.report));
+    let epoch = doc["epoch"].as_i64().expect("epoch");
+    let op = |name: &str| -> Operation {
+        let r = contract
+            .resources
+            .iter()
+            .find(|r| r.template.as_str() == name)
+            .unwrap_or_else(|| panic!("no operation {name}"));
+        match &r.body {
+            Body::Operation(o) => o.clone(),
+            Body::Data(_) => panic!("{name} is no operation"),
+        }
+    };
+    let forms = |name: &str| Forms::of(&contract, &op(name)).expect("its forms");
+    let wide = |s: Stamp| -> Value { json!(if s.run.is_wide() { 32 } else { 16 }) };
+    let mark = Stamp {
+        run: zenkey_model::wire::Run::U16(1),
+        seq: zenkey_model::wire::Seq::new(7).unwrap(),
+    };
+
+    // Each type's tag and layout, and each form's CH with a 16-bit run.
+    let types = doc["types"].as_object().expect("types");
+    for case in doc["forms"].as_array().expect("forms") {
+        let name = case["operation"].as_str().expect("operation");
+        let f = forms(name);
+        let typed = |role: &str| -> Option<&FormType> {
+            match role {
+                "request" => Some(&f.request),
+                "response" => Some(&f.response),
+                "summary" => f.summary.as_ref(),
+                "error" => f.error.as_ref(),
+                other => panic!("{name}: role {other}"),
+            }
+        };
+        for (role, ty) in case["types"].as_object().expect("types") {
+            let t = typed(role).unwrap_or_else(|| panic!("{name} declares no {role}"));
+            let ty = ty.as_str().expect("a type");
+            match types.get(ty) {
+                Some(want) => {
+                    let layout = t
+                        .layout()
+                        .unwrap_or_else(|| panic!("{name} {role}: packed"));
+                    assert_eq!(json!(layout.sha256_hex()), want["sha256"], "{name} {role}");
+                    assert_eq!(json!(t.tag().get()), want["tag"], "{name} {role}");
+                }
+                None => assert_eq!((t.tag(), t.layout()), (Tag::NONE, None), "{name} {role}"),
+            }
+        }
+        let mut got = serde_json::Map::new();
+        got.insert("request".into(), json!(hex(&f.request(&[]))));
+        got.insert("value".into(), json!(hex(&f.value(mark, &[])[..1])));
+        if let Some(s) = f.summary(mark, &[]) {
+            got.insert("summary".into(), json!(hex(&s[..1])));
+        }
+        let e = f.error(mark, Code::Busy, None, None, None).expect("busy");
+        got.insert("error".into(), json!(hex(&e[..1])));
+        assert_eq!(case["expect"], Value::Object(got), "{name}: CH");
+    }
+
+    // A record from a case: a packed value written by its layout, or a
+    // JSON Schema record's bytes.
+    let record = |t: &FormType, case: &Value| -> Result<Vec<u8>, &'static str> {
+        match (&case["value"], case["record"].as_str()) {
+            (Value::Null, Some(h)) => Ok(unhex(h)),
+            (v, None) => t
+                .layout()
+                .expect("a packed value")
+                .write(v, Some(epoch))
+                .map(|r| r.bytes)
+                .map_err(|r| r.token()),
+            _ => panic!("a value or a record"),
+        }
+    };
+    let writes = doc["writes"].as_array().expect("writes");
+    assert!(!writes.is_empty());
+    for case in writes {
+        let note = &case["note"];
+        let f = forms(case["operation"].as_str().expect("operation"));
+        let got = match case["form"].as_str().expect("form") {
+            "request" => record(&f.request, case).map(|r| f.request(&r)),
+            "value" => {
+                let s = stamp_of(&case["stamp"], note);
+                record(&f.response, case).map(|r| f.value(s, &r))
+            }
+            "summary" => {
+                let s = stamp_of(&case["stamp"], note);
+                let t = f.summary.clone().expect("a summary");
+                record(&t, case).map(|r| f.summary(s, &r).expect("declared"))
+            }
+            "error" => {
+                let s = stamp_of(&case["stamp"], note);
+                let e = &case["error"];
+                let code = Code::from_name(e["code"].as_str().expect("code")).expect("a code");
+                let cause = e["cause"]
+                    .as_str()
+                    .map(|c| Cause::from_name(c).expect("a cause"));
+                let detail = match &e["detail"] {
+                    Value::Null => Ok(None),
+                    Value::String(h) => Ok(Some(unhex(h))),
+                    v => f
+                        .error
+                        .as_ref()
+                        .and_then(FormType::layout)
+                        .expect("a packed error type")
+                        .write(v, Some(epoch))
+                        .map(|r| Some(r.bytes))
+                        .map_err(|r| r.token()),
+                };
+                detail.and_then(|d| {
+                    f.error(s, code, cause, e["message"].as_str(), d.as_deref())
+                        .map_err(|r| r.token())
+                })
+            }
+            other => panic!("{note}: form {other}"),
+        };
+        let got = match got {
+            Ok(b) => json!({"hex": hex(&b)}),
+            Err(token) => json!({"refused": token}),
+        };
+        assert_eq!(case["expect"], got, "{note}");
+    }
+
+    // A record read as its type under CH's tag: a packed one by its
+    // layout, a JSON Schema one on the contract's encoding, JSON here.
+    let value = |t: &FormType, tag: Tag, record: &[u8]| -> Result<Value, &'static str> {
+        match t.layout() {
+            Some(l) => l
+                .read(tag.get(), record, Some(epoch))
+                .map_err(|r| r.token()),
+            None => Ok(serde_json::from_slice(record).expect("a JSON record")),
+        }
+    };
+    let or_refused = |v: Result<Value, &'static str>| v.unwrap_or_else(|t| json!({"refused": t}));
+    let reads = doc["reads"].as_array().expect("reads");
+    assert!(!reads.is_empty());
+    for case in reads {
+        let note = &case["note"];
+        let f = forms(case["operation"].as_str().expect("operation"));
+        let bytes = unhex(case["hex"].as_str().expect("hex"));
+        let got = match case["sample"].as_str().expect("sample") {
+            "query" => match f.read_request(&bytes) {
+                Ok(r) => {
+                    assert_eq!(f.request(r.record), bytes, "{note}: writes back");
+                    json!({
+                        "run_width": null, "run": null, "seq": null,
+                        "tag": r.tag.get(),
+                        "value": or_refused(value(&f.request, r.tag, r.record)),
+                    })
+                }
+                Err(r) => json!({"refused": r.token()}),
+            },
+            "reply" => {
+                let summary = case["summary"].as_bool().unwrap_or(false);
+                let t = if summary {
+                    f.summary.clone().expect("a summary")
+                } else {
+                    f.response.clone()
+                };
+                match read_reply(&bytes) {
+                    Ok(e) => match value(&t, e.tag, e.record) {
+                        Err(token) => json!({"refused": token}),
+                        Ok(v) => json!({
+                            "run_width": wide(e.stamp),
+                            "run": e.stamp.run.value(),
+                            "seq": e.stamp.seq.get(),
+                            "tag": e.tag.get(),
+                            "value": v,
+                        }),
+                    },
+                    Err(r) => json!({"refused": r.token()}),
+                }
+            }
+            "reply_err" => match read_reply_err(&bytes) {
+                Ok(e) => {
+                    let detail = e.detail.map(|d| {
+                        let t = f.error.as_ref().expect("an error type");
+                        or_refused(value(t, e.tag, d))
+                    });
+                    json!({
+                        "run_width": wide(e.stamp),
+                        "run": e.stamp.run.value(),
+                        "seq": e.stamp.seq.get(),
+                        "tag": e.tag.get(),
+                        "error": {
+                            "code": e.code.as_str(),
+                            "cause": e.cause.map(|c| c.as_str()),
+                            "message": e.message,
+                            "detail": detail,
+                        },
+                    })
+                }
+                Err(r) => json!({"refused": r.token()}),
+            },
+            other => panic!("{note}: sample {other}"),
+        };
+        assert_eq!(case["expect"], got, "{note}");
+    }
+}
+
 /// The heartbeat fixtures' revisions, from `layouts.json`'s authoring
 /// texts, as layouts by name.
 fn heartbeat_layouts() -> BTreeMap<String, zenkey_model::heartbeat::Layout> {
