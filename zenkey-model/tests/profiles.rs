@@ -1011,7 +1011,9 @@ fn health_clock() {
             .expect("heard")
             .iter()
             .map(|h| match h.as_str().expect("a delivery") {
-                "status" => health::Heard::Status,
+                "heartbeat" => health::Heard::Heartbeat,
+                "heartbeat_held" => health::Heard::HeartbeatHeld,
+                "status_put" => health::Heard::StatusPut,
                 "status_deleted" => health::Heard::StatusDeleted,
                 "clock_ahead" => health::Heard::ClockAhead,
                 "fault" => health::Heard::Fault,
