@@ -156,7 +156,16 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   and under `watchdog` and `record --on` a rule reading presence or the
   doctor refused, through the fleet's `watchdog_across`,
   `TriggerSpec::across_face` and `run_field_over`; `live_zk2.rs`'s
-  `constrained_s7_a_tools_scope_across_a_face`; #980 C1c: `--catalog
+  `constrained_s7_a_tools_scope_across_a_face`; #988 L4: `--face-policy F
+  --face NAME` in `AcrossFaceArgs` (`zk2::far_side`, a `link.v2` face, exit
+  2 otherwise), `FaceScope::deployment` → `Deployment::across` (the face's
+  `reply_timeout_ms` the default `--timeout` below a flag or context, every
+  session on the `_across` openers), `FaceScope::watch` →
+  `Monitor::watch_across` by each selector's horizon (`FaceScope::horizon`)
+  where `arq = false`, in `echo`, `rate`, `record`, `timeline`; `check
+  conform` and `alarms` take `--face-policy` for the routers' lease and
+  `wait_before_close` (`zk2::routers`; `--lease`/`--wait-before-close` are
+  `Option` now, #1011's item 3); #980 C1c: `--catalog
   PATH` in `ContractArgs`, beside `--contracts`, loaded by
   `cmd::zk2::load_catalogs`, the lens's `.catalogs()` in `echo`, `get`,
   `rate`, `field` and `snapshot`, `get state` and `watch` under the

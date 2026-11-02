@@ -110,7 +110,7 @@ pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
     let contracts = zk2::load_contracts(&cli.contracts)?;
     let crate::cli::WatchdogArgs {
         rules,
-        face: crate::cli::AcrossFaceArgs { across_face },
+        face: across_args,
         every,
         count,
         clocks_synced,
@@ -128,11 +128,15 @@ pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
     // Across a face the rules' selectors are narrowed to the scope the
     // contracts give (core §8.5), and watched in their place.
     let face = zk2::FaceScope::of(
-        &across_face,
+        &across_args,
         &contracts,
         dep.namespace(),
         zk2::Reads::Samples,
     )?;
+    let dep = match &face {
+        Some(f) => f.deployment(dep),
+        None => dep,
+    };
     let across = match &face {
         Some(face) => {
             // The rules' selectors are wire keys, as the face's are: both

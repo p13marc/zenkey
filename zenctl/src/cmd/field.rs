@@ -28,13 +28,17 @@ pub async fn run(cli: crate::cli::FieldArgs) -> Result<()> {
         selector,
         for_secs,
         max_paths,
-        face: crate::cli::AcrossFaceArgs { across_face },
+        face: across,
         fail_on,
         contracts: _,
         ns: _,
     } = cli;
     let namespace = dep.namespace().to_owned();
-    let face = zk2::FaceScope::of(&across_face, &contracts, &namespace, zk2::Reads::Samples)?;
+    let face = zk2::FaceScope::of(&across, &contracts, &namespace, zk2::Reads::Samples)?;
+    let dep = match &face {
+        Some(f) => f.deployment(dep),
+        None => dep,
+    };
     let typed = selector.is_some();
     let selector = zk2::wire_selector(selector.as_deref(), &namespace)?;
     // Across a face, the scope the contracts give (core §8.5); the report

@@ -197,6 +197,21 @@ pub(crate) struct AcrossFaceArgs {
     /// alone.
     #[arg(long = "across-face", value_name = "SYSTEM/SERVICE")]
     pub(crate) across_face: Vec<String>,
+    /// With --face, the face policy (TOML, `link.v2` §2.1) whose face the
+    /// tool reads across (#988 L4). Its session runs the face's
+    /// `[transport]` (`link.v2` §2.16), so both ends run one lease and
+    /// keep_alive; the default --timeout is the face's `reply_timeout_ms`
+    /// (core §8.1); and where the face says `arq = false`, each selector
+    /// with a horizon in the contracts in hand is declared again after two
+    /// horizons of silence while the transport stays up, which repairs a
+    /// subscriber's declaration its medium lost; a lost key expression
+    /// stays lost until the transport reopens (core §8.5, observer §7.5).
+    /// A `link.v1` policy states none of that and is refused, exit 2.
+    #[arg(long = "face-policy", value_name = "FILE", requires_all = ["across_face", "face"])]
+    pub(crate) face_policy: Option<PathBuf>,
+    /// The face of --face-policy, by its name (`[face.<name>]`).
+    #[arg(long = "face", value_name = "NAME", requires = "face_policy")]
+    pub(crate) face: Option<String>,
 }
 
 #[derive(Parser)]
@@ -3277,10 +3292,10 @@ pub(crate) struct CheckConformArgs {
     /// `transport/link/tx/lease`): a path gone silent withdraws the owner's
     /// token only when it runs out, so a window that could pass is followed
     /// by this, or --wait-before-close when longer, and --timeout, of
-    /// watching the owner (spec §2.7, 0.25; observer §5.2).
-    #[arg(long, value_name = "SECS",
-          default_value_t = zenkey_model::budget::DEFAULT_LEASE.as_secs_f64())]
-    pub(crate) lease: f64,
+    /// watching the owner (spec §2.7, 0.25; observer §5.2). Default:
+    /// --face-policy's, else zenoh 1.10.1's 10 s.
+    #[arg(long, value_name = "SECS")]
+    pub(crate) lease: Option<f64>,
     /// The routers' wait_before_close, seconds (zenoh's
     /// `transport/link/tx/queue/congestion_control/block/wait_before_close`):
     /// a router waits that long on this run's full queue, then closes the
@@ -3288,11 +3303,17 @@ pub(crate) struct CheckConformArgs {
     /// than it, nor than --lease less one keep-alive (spec §2.7, 0.27). A
     /// router that waits it tells a withdrawal that late, so where it is
     /// longer than --lease, a window's owner is watched for it (observer
-    /// §5.2). The default is zenoh 1.10.1's; a deployment on another
-    /// binding states its own (zm-1.10.2-r1's is 10 s).
-    #[arg(long, value_name = "SECS",
-          default_value_t = zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE.as_secs_f64())]
-    pub(crate) wait_before_close: f64,
+    /// §5.2). Default: --face-policy's, else zenoh 1.10.1's 5 s; a
+    /// deployment on another binding states its own (zm-1.10.2-r1's is 10
+    /// s).
+    #[arg(long, value_name = "SECS")]
+    pub(crate) wait_before_close: Option<f64>,
+    /// The routers' face policy (TOML, `link.v2` §2.1): its `[transport]`
+    /// is what they run, so its lease and wait_before_close are the
+    /// defaults of --lease and --wait-before-close (#1011). A `link.v1`
+    /// policy states no transport and is refused, exit 2.
+    #[arg(long = "face-policy", value_name = "FILE")]
+    pub(crate) face_policy: Option<PathBuf>,
     /// Do not ask this case (repeatable): every row of it reads `not_asked`,
     /// which neither passes nor fails the run, and nothing it alone would
     /// send is sent: no call for `operation`, no fan-out probe for
@@ -3612,19 +3633,24 @@ pub(crate) struct AlarmsArgs {
     pub(crate) for_secs: Option<f64>,
     /// The deployment's link lease, seconds: a window's owner is watched for
     /// this, or --wait-before-close when longer, and --timeout, past the
-    /// window's end (spec §2.7, 0.25; observer §5.2).
-    #[arg(long, value_name = "SECS",
-          default_value_t = zenkey_model::budget::DEFAULT_LEASE.as_secs_f64())]
-    pub(crate) lease: f64,
+    /// window's end (spec §2.7, 0.25; observer §5.2). Default:
+    /// --face-policy's, else zenoh 1.10.1's 10 s.
+    #[arg(long, value_name = "SECS")]
+    pub(crate) lease: Option<f64>,
     /// The routers' wait_before_close, seconds: a window is lossless only if
     /// this reader never stalled longer than it, nor than --lease less one
     /// keep-alive (spec §2.7, 0.27). Where it is longer than --lease, a
-    /// window's owner is watched for it (observer §5.2). The default is
-    /// zenoh 1.10.1's; a deployment on another binding states its own
-    /// (zm-1.10.2-r1's is 10 s).
-    #[arg(long, value_name = "SECS",
-          default_value_t = zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE.as_secs_f64())]
-    pub(crate) wait_before_close: f64,
+    /// window's owner is watched for it (observer §5.2). Default:
+    /// --face-policy's, else zenoh 1.10.1's 5 s; a deployment on another
+    /// binding states its own (zm-1.10.2-r1's is 10 s).
+    #[arg(long, value_name = "SECS")]
+    pub(crate) wait_before_close: Option<f64>,
+    /// The routers' face policy (TOML, `link.v2` §2.1): its `[transport]`
+    /// is what they run, so its lease and wait_before_close are the
+    /// defaults of --lease and --wait-before-close (#1011). A `link.v1`
+    /// policy states no transport and is refused, exit 2.
+    #[arg(long = "face-policy", value_name = "FILE")]
+    pub(crate) face_policy: Option<PathBuf>,
     /// The one owner the selector names sits across a constrained face
     /// (spec §8.5), where presence and descriptors do not cross: the
     /// deployment's word that it implements alarms.v1. `granted` when the

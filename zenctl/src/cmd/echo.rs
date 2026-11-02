@@ -43,7 +43,7 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
     let EchoArgs {
         selector,
         explicit: crate::cli::ExplicitArgs { explicit },
-        face: crate::cli::AcrossFaceArgs { across_face },
+        face: across,
         fmt,
         raw,
         hex: hex_payload,
@@ -54,7 +54,11 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
         ns: _,
     } = cli;
     let namespace = dep.namespace().to_owned();
-    let face = zk2::FaceScope::of(&across_face, &contracts, &namespace, zk2::Reads::Samples)?;
+    let face = zk2::FaceScope::of(&across, &contracts, &namespace, zk2::Reads::Samples)?;
+    let dep = match &face {
+        Some(f) => f.deployment(dep),
+        None => dep,
+    };
     let selectors = zk2::wire_scope(
         selector.as_slice(),
         explicit,
@@ -91,7 +95,10 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
         zenkey_fleet::Monitor::start(&session, zenkey_fleet::MonitorSpec::default()).await?;
     let mut events = monitor.events();
     for s in &selectors {
-        monitor.watch(s).await?;
+        match &face {
+            Some(face) => face.watch(&monitor, s).await?,
+            None => monitor.watch(s).await?,
+        };
     }
 
     if let Some(face) = &face {

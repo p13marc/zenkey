@@ -26,6 +26,7 @@ use zenkey_fleet::{AlarmScope, AlarmSpec, Judgement};
 
 use crate::bus::Deployment;
 use crate::cli::{AlarmsArgs, FaceGrant};
+use crate::cmd::zk2;
 use crate::exit::unaskable;
 
 /// The verdict verb's name, spelled once (#355).
@@ -39,6 +40,7 @@ pub async fn run(cli: AlarmsArgs) -> Result<()> {
         for_secs,
         lease,
         wait_before_close,
+        face_policy,
         across_face,
         ns,
     } = cli;
@@ -57,11 +59,13 @@ pub async fn run(cli: AlarmsArgs) -> Result<()> {
     let mut spec = AlarmSpec::new(dep.timeout());
     spec.window = window;
     spec.clocks_synced = clocks_synced;
-    spec.lease = ASKING.ask(super::positive_secs("--lease", lease));
-    spec.wait_before_close = ASKING.ask(super::positive_secs(
-        "--wait-before-close",
+    let routers = ASKING.ask(zk2::routers(
+        face_policy.as_deref(),
+        lease,
         wait_before_close,
     ));
+    spec.lease = routers.lease;
+    spec.wait_before_close = routers.wait_before_close;
     spec.face = across_face.map(|f| f == FaceGrant::Granted);
     let session = ASKING.ask(dep.session().await);
     // A window follows the owners' instance tokens, on a watch session of

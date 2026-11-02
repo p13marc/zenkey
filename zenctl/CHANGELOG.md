@@ -6,6 +6,22 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — the far side of a face: its timeout, its transport, declaring again (#988, L4)
+
+Core 0.91 §8.1 has a caller across a constrained face wait at least the
+face's `reply_timeout_ms`, and §8.5 (observer 0.23 §7.5) has a reader
+across a face with no ARQ declare a silent subscription again. Observer
+§5.2 reads the routers' lease and `wait_before_close` from their face
+policy (#1011's item 3).
+
+| Before | Now | Notes |
+|---|---|---|
+| — | `--face-policy FILE --face NAME` beside `--across-face` on `echo`, `rate`, `field`, `record`, `timeline`, `snapshot` and `watchdog` | a `link.v2` policy's face; a `link.v1` policy, one the linter refuses or a face it does not name is refused, exit 2 |
+| `--timeout` across a face: 5 s, or the context's | the face's `reply_timeout_ms` by default; `--timeout` and a context's still stand | core §8.1 |
+| a raw observer's session across a face: zenoh's 10 s lease and 4 keep-alives | the face's `[transport]`, every key at zenoh's key, as `acl gen --far-config` writes it; a key `--zenoh-config` states stands, and the interests timeout stays at least the tool's 120 s | `link.v2` §2.16: both ends run one lease. The open's deadline is 10 s past the face's `open_timeout_ms` |
+| a watch whose declaration the medium lost: silent for the transport's life | where the face says `arq = false`, each selector with a horizon in the contracts in hand is undeclared and declared again after two horizons of silence, its transport up: a lost `DeclareSubscriber` heals, a lost `DeclareKeyExpr` does not (core §8.5) | `echo`, `rate`, `record` and `timeline`; `field` and `watchdog` take the timeout and transport and declare as before. The stderr note says so |
+| `check conform`, `alarms`: `--lease` and `--wait-before-close` default to zenoh 1.10.1's | `--face-policy FILE`, the routers' `link.v2` policy: its `[transport]`'s lease and `wait_before_close` are the defaults; a flag still stands | observer §5.2; a `link.v1` policy is refused, exit 2. The help no longer prints `[default: …]`, and says it |
+
 ## Unreleased (`main`, zk2) — `telemetry` reads a frame's series (#983, T2)
 
 `telemetry.v2` 0.1 binds a frame resource's fields to metric series

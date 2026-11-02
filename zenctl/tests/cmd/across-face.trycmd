@@ -59,3 +59,39 @@ $ zenctl watchdog --rule 'rate-below zk2/host-b/** 1' --across-face host-a/tc --
 Error: watchdog --across-face: `rate-below zk2/host-b/** 1` watches zk2/host-b/**, which reaches none of the selectors across the face (zk2/host-a/tc/tc.netif.v1/state/interfaces/*/* + zk2/host-a/tc/tc.netif.v1/state/namespaces + zk2/host-a/tc/tc.netif.v1/stream/bandwidth/*/*)
 
 ```
+
+`--face-policy FILE --face NAME` (#988 L4; core §8.1, §8.5, observer
+§7.5) names the face the tool reads across: its session runs the face's
+`[transport]`, its default `--timeout` is the face's `reply_timeout_ms`,
+and where the face says `arq = false` each scope with a horizon is declared
+again after two horizons of silence. A `link.v1` policy states none of that.
+
+```console
+$ zenctl echo --across-face lab/radio-a --contracts ../examples/zk2/link/radio.v1.toml --face-policy ../examples/zk2/link/radio.face.toml --face radio
+? 2
+Error: --face-policy ../examples/zk2/link/radio.face.toml --face radio: a link.v1 policy states no reply timeout and no transport: a far side reads a link.v2 policy (link.v2 §2.20)
+
+```
+
+The face is one the policy names.
+
+```console
+$ zenctl echo --across-face lab/radio-a --contracts ../examples/zk2/link/radio.v1.toml --face-policy ../examples/zk2/link/media/rf.face.toml --face sbd
+? 2
+Error: --face-policy ../examples/zk2/link/media/rf.face.toml --face sbd: the policy has no face "sbd"; its faces are radio
+
+```
+
+The two come together, and only beside `--across-face`.
+
+```console
+$ zenctl echo --face-policy ../examples/zk2/link/media/rf.face.toml --face radio
+? 2
+error: the following required arguments were not provided:
+  --across-face <SYSTEM/SERVICE>
+
+Usage: zenctl echo --across-face <SYSTEM/SERVICE> --face-policy <FILE> --face <NAME> --namespace <NS> [SELECTOR]
+
+For more information, try '--help'.
+
+```

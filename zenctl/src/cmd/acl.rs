@@ -267,18 +267,20 @@ pub async fn run(cli: crate::cli::AclGenArgs) -> Result<()> {
     )?;
     let dep = ask(check, Deployment::resolve(&ns))?;
     let enrollment = ask(check, load_enrollment(&enrollment))?;
-    let catalog = ask(check, far_catalog(&contracts.catalog))?;
+    let catalogs = contracts.catalog.clone();
     let contracts = ask(check, zk2::load_contracts(&contracts))?;
     let face_policy = match &face_policy {
         None => None,
         Some(p) => Some(ask(check, load_face_policy(p))?),
     };
-    // The far side's catalog is a link.v2 face's (link.v2 §2.18).
+    // The far side's catalog is a link.v2 face's (link.v2 §2.18): asked
+    // before the catalog is read, so a catalog given beside no link.v2
+    // policy is refused for that, whatever its file holds.
     let v2 = face_policy
         .as_ref()
         .and_then(|p| p.policy.as_ref())
         .is_some_and(|p| p.profile == zenkey_model::link::Profile::V2);
-    if catalog.is_some() && !v2 {
+    if !catalogs.is_empty() && !v2 {
         ask(
             check,
             Err::<(), _>(unaskable!(
@@ -287,6 +289,7 @@ pub async fn run(cli: crate::cli::AclGenArgs) -> Result<()> {
             )),
         )?;
     }
+    let catalog = ask(check, far_catalog(&catalogs))?;
     let opts = zenkey_fleet::AclOptions {
         namespace: enrollment
             .namespace
