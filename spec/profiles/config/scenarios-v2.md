@@ -6,7 +6,8 @@ a setup, steps, and expected observations. They are
 [`scenarios.md`](scenarios.md)'s fourteen sections, on `config.v2`'s
 wire. §1 to §12 are the runtime's, and run as tests of `zenkey`, one test
 per section, named after it. §13 and §14 are a deployment's and a tool's,
-and run as tests of the tool that reads `config.v2`.
+and run as tests of the tool that reads `config.v2`. They are `zenctl`'s
+`config_v2_scenario_13_…` and `config_v2_scenario_14_…`.
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.9) are v2.md's rules; `v1 §n`

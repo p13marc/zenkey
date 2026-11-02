@@ -184,7 +184,10 @@ Claude Code loads this file when working in `zengui/`; the root `CLAUDE.md` is t
   the countdown reads the tick's clock, never `SystemTime::now()` in a
   view, so a scene renders the same twice. A sensitive value is a
   `Masked` (`Debug` is `<redacted>`), never echoed or persisted; every
-  act is refused during a replay. Under `view/`, a `pane` returns an `Element`
+  act is refused during a replay. A `config.v2` owner (#985 G3) lands its
+  `V2Target` beside the report (`Reading::v2`): the form is its contract's,
+  its key a 32-bit nonce (`GroupForm::nonce_for`), its answers the record;
+  shots scene `workbench-config-v2` (`World::config_report_v2`). Under `view/`, a `pane` returns an `Element`
   and owns its scroll; a `section` returns a `Column` and is a piece of one; a
   `dock` (`view/activity.rs`, #183) is a region holding the session's parallel
   streams — echo, the publish log, doctor verdicts, replay transport, and
