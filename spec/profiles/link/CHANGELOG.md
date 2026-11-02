@@ -33,8 +33,10 @@ each list one, and two of their routers run a longer lease.
 
 **Deliberately not changed.**
 - **No rule or scenario changed.** `plan.json`'s last five cases take
-  the new policies, and their plans are the reference's again once
-  re-derived. No other case moves.
+  the new policies and `catalog.json`'s `e3a529fe`, which they carry
+  inline. Their plans are re-derived: each lists its one frame and its
+  evidence, denies 3.2's nine and the two others by name, and draws the
+  warnings above. No other case moves.
 - **The status stays `draft`.** zenoh-modem's `sx1262_config.v1` lists
   this text (G4). `modem.v3` 3.3 still lists `link.v1`.
 - **The reference's media examples** (`examples/zk2/link/media/`) are
@@ -58,9 +60,10 @@ Appendix B and its head example described 3.2.
   `frames/link`.
 
 **Deliberately not changed.**
-- **No rule, fixture case or scenario changed.** `plan.json`'s first
-  two cases and `lints.json`'s zenoh-modem cases read the contract from
-  `examples/`, so their outputs follow it once re-derived.
+- **No rule or scenario changed.** `plan.json`'s first two cases and
+  `lints.json`'s zenoh-modem cases read the contract from `examples/`.
+  Re-derived, case 0's plan denies the nine and lists the three as
+  evidence, as Appendix B says. Case 1 and the lints do not move.
 
 ## link.v2 0.7 — 2026-11-02: a device face, its instance subtree carved from `zk` (#982 H1)
 

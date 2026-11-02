@@ -129,6 +129,15 @@
                 "id": "stream:modem.v3",
                 "key_exprs": [
                   "zk2/*/*/modem.v3/stream/air/**",
+                  "zk2/*/*/modem.v3/stream/frames/air/**",
+                  "zk2/*/*/modem.v3/stream/frames/bearer/**",
+                  "zk2/*/*/modem.v3/stream/frames/if/**",
+                  "zk2/*/*/modem.v3/stream/frames/layer/**",
+                  "zk2/*/*/modem.v3/stream/frames/link/**",
+                  "zk2/*/*/modem.v3/stream/frames/message/**",
+                  "zk2/*/*/modem.v3/stream/frames/radio/**",
+                  "zk2/*/*/modem.v3/stream/frames/sched/**",
+                  "zk2/*/*/modem.v3/stream/frames/sdu/**",
                   "zk2/*/*/modem.v3/stream/if/**",
                   "zk2/*/*/modem.v3/stream/layer/**",
                   "zk2/*/*/modem.v3/stream/link/**",
@@ -209,7 +218,9 @@
             "liveness": [
               {
                 "evidence": [
-                  "modem.v3/stream/frames/link"
+                  "modem.v3/stream/frames/fast",
+                  "modem.v3/stream/frames/paid",
+                  "modem.v3/stream/frames/slow"
                 ],
                 "service": "h-3fa9c2d41b7e/rf0"
               }
@@ -231,7 +242,7 @@
           "health.v1"
         ]
       },
-      "note": "zenoh-modem's RF face, modem.v3 3.2: its JSON streams denied in seven subtrees, its nine frame resources crossing whole with no downsampling rule, frames/link the liveness evidence by its 150 s horizon, everything else of the management plane denied, its events under events/ (link.v1 §2.7, §2.8, §2.12, Appendix B; the sketch's defect fixed)",
+      "note": "zenoh-modem's RF face, modem.v3 3.3: its JSON streams denied in seven subtrees and 3.2's nine deprecated frames by name, frames/fast, frames/slow and frames/paid crossing whole with no downsampling rule, each liveness evidence by its horizon, everything else of the management plane denied, its events under events/ (link.v1 §2.7, §2.8, §2.12, Appendix B; the sketch's defect fixed)",
       "policy": "# zenoh-modem's RF node (link.v1 Appendix B)\nsystem   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 60\nmax_outage_s = 3600\nbatch_bytes  = 220\nlink_bps     = 2400\n"
     },
     {
