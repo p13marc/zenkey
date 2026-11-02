@@ -183,7 +183,9 @@ async fn the_daemon_is_a_zk2_service_the_fleet_reads() {
 
     // 1. Through the fleet: present, and its descriptor lists both
     // interfaces at the revisions it serves; the doctor, not configured,
-    // is unavailable for that cause; freshness.v1 is a profile it follows.
+    // is unavailable for that cause; freshness.v2 is a profile it follows,
+    // through zenwatch.v1 1.2 and health.v1 1.1 (#978's F4), whose standard
+    // contract the runtime implements beside them.
     // `start` returns once the tokens are declared, not once the router
     // has carried them to the tool's session: wait for that first (it
     // read no instance once under the gate's load, FL5).
@@ -222,9 +224,18 @@ async fn the_daemon_is_a_zk2_service_the_fleet_reads() {
         format!("sha256:{}", zenkey::health::FINGERPRINT)
     );
     assert!(
-        d.profiles.iter().any(|p| p == "freshness.v1"),
+        d.profiles.iter().any(|p| p == "freshness.v2"),
         "{:?}",
         d.profiles
+    );
+    assert!(
+        !d.profiles.iter().any(|p| p == "freshness.v1"),
+        "no contract it implements uses freshness.v1 any more: {:?}",
+        d.profiles
+    );
+    assert!(
+        iface("freshness.v2").is_some(),
+        "the heartbeat's standard contract, beside them"
     );
     assert!(
         !d.profiles.iter().any(|p| p == "hostid.v1"),
@@ -402,8 +413,9 @@ async fn zenwatch_passes_its_own_conformance() {
         // Every unobservable case is one this reading cannot establish and
         // says why: a state's stamp proved against routers whose admin
         // answers it was not told to trust (S1, §4.2), QoS on a window that
-        // heard no put (state is put on change, and re-put every ttl/2:
-        // longer than the window), and health.v1's faults stream, silent
+        // heard no put (state is put on change, and never re-put: its
+        // owner's heartbeat confirms it, freshness.v2 §2.4), and health.v1's
+        // faults stream, silent
         // as it should be when nothing happened (health.v1 §2.3).
         for (case, subject) in &unobservable {
             let explained = matches!(case, CaseId::StateStamp | CaseId::Qos)
