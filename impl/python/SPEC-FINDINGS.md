@@ -24710,3 +24710,115 @@ changelogs state.**
   half is open in the owner example as F-467.
 - **Open:** F-436 (not re-run), F-437 to F-441, F-465 to F-470. F-365
   stays open as #965's.
+
+## At core 0.93 (#985 C4a, round 99's answers)
+
+Round 100 read, cold, the texts at main 037fce56: core 0.92 and 0.93,
+`link.v1` 0.16 and `link.v2` 0.6, each changelog entry first. Then core
+§5.1 and §5.2 whole, §7.1, §7.5 whole, §9.2's E044, Appendix B's new
+fact, and the four answer entries. Its evidence: `envelope/vectors.json`
+(20 headers, 147 cases), `errors/forms.json` (256 bytes, 22 writes, 17
+reads), `contracts/ok-packed-operation` and `e044-packed-place`, `link`'s
+new `plan.json` and `v2/plan.json` cases, `freshness.v2` scenarios-v2.md
+§2 step 6 against the owner example as the candidate, the adopters'
+frames, and `forms_live` (a router's own `Timeout`, and both owners on a
+packed operation).
+
+**Round 99's answers.**
+- **F-465 holds.** `link.v2` 0.6 §2.7: "An empty `frames`, `frames = {}`,
+  is a face with `frames` that lists none". zk2py read it so, and the new
+  `v2/plan.json` case passes.
+- **F-466 holds.** `link.v1` 0.16 §2.7: "An implied `freshness.v2` is
+  listed for `stream` alone (§2.9)". zk2py and the fixtures read it so
+  already; no plan moved.
+- **F-467 holds.** Core 0.93 §8.2, "Whatever its clock": "A candidate's
+  session stamps every write while its clock is ahead too". With the
+  owner example of 037fce56 as the `--standby --election claim`
+  candidate, 2 s ahead, `scenarios-v2.md` §2 step 6 passes whole, 6 of 6
+  where round 99 had 2 of 5. Every put of `status` S hears carries the
+  candidate's own zid, a check new this round. `--no-hlc` beside
+  `--standby` is refused at start, naming `redundancy.v1` §2.10.
+- **F-468 holds.** `link.v1` 0.16 §2.3: "A refused deployment lists its
+  errors alone". zk2py kept the policy's warnings beside
+  `service_unknown` and `contract_unknown`, and no longer does; both new
+  cases pass.
+- **F-469 holds.** `link.v2` 0.6 §2.3: "What this text weighs of a
+  resource is judged revision by revision". zk2py weighed a longest put
+  from any packed revision, and now weighs it only in the revisions that
+  declare the resource `block`. The new case passes. It gives one
+  interface id by contract and inline, which zk2py's runner now reads as
+  two revisions, the contract's first. Only the case's note says so; the
+  description does not.
+- **F-470 holds.** `link.v1` 0.16 §2.8: "the largest frame holds
+  `records` − ⌊`records` / `keyframe_every`⌋ such delta records". zk2py's
+  `frame_facts` counts them, the largest any revision writes (§2.3). Its
+  own writer puts no frame above that figure, and reaches it where every
+  field changes. Measured: `modem.v3` 3.2's `frames/link` 22 B and
+  `frames/message` 213 B (`keyframe_every = 1`), `sdu` 52, `sched` 33,
+  `air` 50, `layer` 109, `if` 60, `radio` 22 and `bearer` 33, each the
+  size `examples/zk2/zenoh-modem/README.md` now states. `gendev.v1`'s
+  `frames/sample` is 100 B (3 records, `keyframe_every = 3`, 2 deltas).
+
+**The rules changed.** zk2py diffed every keyword sentence of `core.md`,
+`observer.md`, `link.v1`, `link.v2` and the scenarios between 2ed6d968
+(round 99's texts) and 037fce56. New are §7.5's MUST to cut a message to
+whole characters within 255 bytes and its MUST NOT on a cause or a
+detail where the parse refuses one (0.92). Reworded are §7.5's parse MUST
+("an envelope or a form", 9 items) and its write-back MUST ("every
+envelope and form"), and §7.1's E044 MUST, narrowed (0.92). Core 0.93,
+`link.v1` 0.16 and `link.v2` 0.6 state no keyword rule. `observer.md`
+and the scenarios are unchanged. `RULES.md` lists 232, 2 more. **No rule
+changed beyond what the changelogs state.** 0.92's counts hold: 91 new
+cases (15 `query`, 22 `reply`, 54 `reply_err`), 20 headers, and
+`e044-packed-place` lists two E044 where it had four.
+
+**Appendix B, measured.** "This is read from zenoh 1.10.1's source, not
+measured." `forms_live` measured it. A query held unanswered through a
+zenoh-python router drew one reply error, `Timeout`. It came under
+`zenoh/bytes` at 1.00 s, and at 2.50 s once under `zenoh/bytes` and once
+under `zenoh/string`, across two runs: the router's timer and the
+querier's race, and one of them answers. zk2c reads the first
+`sample_kind` and the second `encoding`, and zk2py's caller reads both as
+the transport's.
+
+### F-471 · gap · core §5.2 "Encoding" and §7.1: a packed operation type before a rule adopts the forms
+
+> §7.1 (0.92): "A packed type MUST be the `type` of a stream that is not
+> explicit, a state or an event, or an operation's `request`, `response`,
+> `error` or `summary` (E044). **An operation's types** travel in §7.5's
+> forms, whose CH carries the tag." §5.1: "No rule at this version has a
+> caller or an owner write them. A call's request, its values and its
+> errors keep the wire this section and §5.2 describe." §5.2: "The
+> envelope's kind follows the operation's `error` type when it declares
+> one, else its `response` type: **A JSON Schema type:** … **A protobuf
+> type:** … **A raw type:** the envelope is JSON."
+
+- **The gap.** 0.92 lints a packed `error` and `response` clean, and
+  every failed call still answers in §5.2's envelope. §5.2 names the
+  envelope's kind for three type kinds, and packed is not one of them.
+  Its `detail` row has no packed spelling either: inline, an encoded
+  message, or base64. A packed request or value has no wire at this
+  version. §7.2 and §7.6 say a packed record "always travels in §7.5's
+  envelope", and §4.3 says operations "carry no envelope". The
+  changelog's "nothing serves one before the flip" is in no text.
+- **Measured.** The owner example of 037fce56 and zk2py's owner each
+  start on `ok-packed-operation`. Each answers `calibrate` (packed
+  throughout), `scan` (a packed response and no `error` type) and
+  `reset` with `app` in a JSON envelope, as for a raw type.
+- **What zk2py does:** the same, a packed type's envelope being JSON
+  (`envelope_encoding`). It names the kind in the refusal's message.
+- **Fix:** §5.2: "**A packed type:** the envelope is JSON, and a detail
+  is its record's bytes as base64 text, as a raw type's." Or §5.1: "An
+  owner does not serve an operation whose types are packed until a rule
+  adopts the forms. It answers it `unavailable` for `build`."
+- **Changes:** a packed operation's refusals, and whether it is served,
+  before C4c.
+
+### Counts at core 0.93 (#985 C4a, round 99's answers)
+
+471 entries.
+- **New: F-471,** a gap. It is not a blocker.
+- **Resolved: F-465 to F-470**, as the answers above say. F-467 is
+  resolved in the owner example too.
+- **Open:** F-436 (not re-run), F-437 to F-441, F-471. F-365 stays open
+  as #965's.
