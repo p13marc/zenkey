@@ -727,7 +727,7 @@ doc         = "relative transmit link quality, percent"
 #   every change to its layout is breaking (core §9.8, `bound_changed`, `width_changed`). 3.3
 #   carries the readings at zenoh-modem's own ranges in new frame resources instead (below);
 # - one frame per group spent ~15 B of envelope, time and put on each of eight frames a minute:
-#   401 KB a day on RF for all 73, against the report's ~203 KB for one frame, and 164 % and
+#   401 KB a day on RF for all 73, against the report's 200 KB for one frame, and 164 % and
 #   241 % of LoRa's duty at SF9 and SF12 (README, "Frames");
 # - a deprecated resource stays until the next major (core §9.8). An owner lists them
 #   unavailable, and no face lets them cross: `host` since 3.3 (link.v1 §2.7).
