@@ -1,8 +1,9 @@
 # zenoh-modem's LoRa node at SF7 (link.v2, spec/profiles/link/v2.md;
 # #988 L5): the router of host h-c2a95e41d7f0, which carries lora0, an
 # SX1262 at 5,469 bit/s under EU868's 1 % duty, 864 s of air a day. One
-# router per medium (v2 §2.16). Planned as zenohd-rf0.face.toml says, with
-# this file as --face-policy.
+# router per medium (v2 §2.16), and one of three policies for lora0's, a
+# policy per spreading factor (-sf9, -sf12 beside it). Planned as
+# zenohd-rf0.face.toml says, with this file as --face-policy.
 #
 # The transport: 60 s with 2 keep-alives closed the link at every lost
 # keep-alive (the wire baseline's LoRa runs, 9 of 9), and each reopen cost
