@@ -2242,7 +2242,8 @@ class Owner:
         return [f"zk2/{p}/{iface}/{face.resource_scope(rid, bound)}" for p in self.resolved_bindings.get(role, [])]
 
     def subscribe_role(self, role: str, iface: str, rid: str, sink: Any, discarded: Any = None,
-                       record: Any = None, epoch: int | None = None) -> None:
+                       record: Any = None, epoch: int | None = None, across: Any = None,
+                       horizon_s: float | None = None) -> list[Any]:
         """Subscribe through a role's resolved bindings, handing ``sink``
         each sample's (key, payload). A sample whose key expression is not
         concrete is discarded (R6), and its key handed to ``discarded``.
@@ -2255,8 +2256,16 @@ class Owner:
         handed on. Its ``time`` fields are read under ``epoch``, the
         deployment's, 0 where none is stated. A delete carries no record, so
         it hands ``sink`` (key, None), never bytes; its envelope, in the
-        delete's attachment, is read as every delete's is."""
-        from . import packed
+        delete's attachment, is read as every delete's is.
+
+        ``across``, a :class:`zk2py.far_side.FarSide` (core §8.5, 0.91):
+        where the face's medium repairs no lost frame, each subscription with
+        a horizon, ``horizon_s`` (:func:`zk2py.far_side.resource_horizon_s`
+        of the provider's resource), is declared again after two horizons of
+        silence while the session's transport stayed up
+        (:class:`zk2py.far_side.Redeclaring`). Returns the subscriptions,
+        each undeclared by ``.undeclare()``."""
+        from . import far_side, packed
 
         assert self.session is not None
 
@@ -2284,8 +2293,10 @@ class Owner:
             elif discarded is not None:
                 discarded(key)
 
-        for k in self.role_keys(role, iface, rid):
-            self._entities.append(self.session.declare_subscriber(k, zenoh.handlers.Callback(received)))
+        subs = [far_side.subscribe(self.session, k, received, horizon_s, across)
+                for k in self.role_keys(role, iface, rid)]
+        self._entities += subs
+        return subs
 
     # -- handlers ---------------------------------------------------------
 

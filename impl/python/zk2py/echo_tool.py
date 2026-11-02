@@ -93,6 +93,14 @@ the addresses and their contracts are the deployment's word. The scope says
 what it excludes: operations, control keys, ``@adv``, and every key no held
 contract declares there (observer §8.2).
 
+**Across a face, its far side** (core §8.1, §8.5 at 0.91; observer §7.5 at
+0.23; round 99). ``--face-policy F --face NAME`` beside ``--across-face``:
+the session runs the face's ``[transport]``, and where the face's medium
+repairs no lost frame (``arq = false``) each scope with a horizon is
+declared again after two of its horizons of silence, its transport up
+(:class:`zk2py.far_side.Redeclaring`). Each declaration made again is said
+on stderr and counted in the report's notes; silence stays silence.
+
 **A catalog** (core §8.6, 0.79). ``--catalog FILE`` is the deployment's
 catalog, read as §8.6 reads one; a refused one is refused input, exit 2,
 naming the refusal. Its epoch is the one packed ``time`` fields are read
@@ -425,15 +433,26 @@ def writer(out: TextIO) -> Callable[[dict[str, Any]], None]:
 
 def watch(session: Any, selector: str | list[str], window_s: float, count: int = 0,
           listening: Any = None, each: Any = None, held: Held | None = None,
-          epoch: int | None = None) -> list[dict[str, Any]]:
+          epoch: int | None = None, across: Any = None, horizons: dict[str, float | None] | None = None,
+          redeclared: list[tuple[str, float]] | None = None) -> list[dict[str, Any]]:
     """Every sample the selector delivers within the window, or until
     ``count`` of them, in arrival order; ``listening`` is called once the
     subscriber is declared, the window's start, and ``each`` with every
     row in arrival order, on the caller's thread, never in zenoh's
     callback (:class:`Rows`). What ``each`` raises ends the window and
     reaches the caller. A list of selectors, observer §7.5's scopes, is a
-    subscriber each."""
+    subscriber each.
+
+    ``across``, a :class:`zk2py.far_side.FarSide` (observer §7.5, 0.23):
+    where the face's medium repairs no lost frame, each scope with a
+    horizon in ``horizons`` (:func:`zk2py.far_side.scope_horizons`) is
+    declared again after two of them of silence, its transport up; each
+    declaration made again is appended to ``redeclared`` as (scope, its
+    instant on the monotonic clock). Silence on a scope declared again is
+    still silence: no verdict."""
     import zenoh
+
+    from . import far_side
 
     rows = Rows(count)
 
@@ -443,15 +462,17 @@ def watch(session: Any, selector: str | list[str], window_s: float, count: int =
         rows.offer(row_of(str(s.key_expr), s.kind == zenoh.SampleKind.DELETE, len(payload), str(s.encoding),
                           payload, att, held, epoch))
 
-    subs = [session.declare_subscriber(sel, zenoh.handlers.Callback(received))
+    subs = [(sel, far_side.subscribe(session, sel, received, (horizons or {}).get(sel), across))
             for sel in ([selector] if isinstance(selector, str) else selector)]
     if listening is not None:
         listening()
     try:
         rows.pump(each, time.monotonic() + window_s)
     finally:
-        for sub in subs:
+        for sel, sub in subs:
             sub.undeclare()
+            if redeclared is not None and isinstance(sub, far_side.Redeclaring):
+                redeclared += [(sel, t) for t in sub.redeclared]
     rows.rest(each)
     return rows.rows()
 
@@ -472,11 +493,30 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--across-face", dest="across_face", action="append", default=[],
                     help="an address across a constrained face, subscribed by the scopes of the contracts held "
                          "(observer §7.5; repeatable, needs --contracts, not with a SELECTOR)")
+    ap.add_argument("--face-policy", dest="face_policy", default=None,
+                    help="the routers' link.v2 face policy, with --face: the session runs the face's [transport], "
+                         "and where its medium repairs no lost frame each scope is declared again after two of "
+                         "its horizons of silence (observer §7.5, 0.23; core §8.5)")
+    ap.add_argument("--face", default=None, help="the face of --face-policy the tool is across")
     args = ap.parse_args(argv)
     if args.across_face and (args.selector is not None or not args.contracts):
         print("echo: --across-face needs --contracts and no SELECTOR: its scopes are the contracts' (observer §7.5)",
               file=sys.stderr)
         return 2
+    across = None
+    if (args.face_policy is None) != (args.face is None) or (args.face_policy is not None and not args.across_face):
+        print("echo: --face-policy and --face go together, beside --across-face (observer §7.5)", file=sys.stderr)
+        return 2
+    if args.face_policy is not None:
+        from pathlib import Path
+
+        from . import far_side
+
+        try:
+            across = far_side.far_side(Path(args.face_policy).read_text(encoding="utf-8"), args.face)
+        except (OSError, ValueError) as e:
+            print(f"echo: --face-policy: {e}", file=sys.stderr)
+            return 2
     catalog_epoch: int | None = None
     if args.catalog is not None:
         from pathlib import Path
@@ -515,12 +555,14 @@ def main(argv: list[str] | None = None) -> int:
     # checked: the catalog's, else --epoch, else 0 (core §7.6, §8.6).
     epoch = catalog_epoch if catalog_epoch is not None else args.epoch
     watched: str | list[str] = selector
+    horizons: dict[str, float | None] = {}
     if args.across_face:
-        from . import face
+        from . import face, far_side
 
         assert held is not None
         watched = face.scopes(held.by_iface.values(), args.across_face)
         scope = face_scope(watched, args.across_face)
+        horizons = far_side.scope_horizons(list(held.by_iface.values()), args.across_face)
     else:
         try:
             scope = scope_of(selector)
@@ -528,7 +570,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"echo: {selector!r}: not a key expression: {e}", file=sys.stderr)
             return 2
     try:
-        session = live.open_client(args.connect)
+        session = live.open_client(args.connect, transport=None if across is None else across.config())
     except Exception as e:  # noqa: BLE001 - no session, no watch
         print(f"echo: the session did not open: {e}", file=sys.stderr)
         return 2
@@ -537,13 +579,25 @@ def main(argv: list[str] | None = None) -> int:
     print(f"echo: {live.memlock_said()}", file=sys.stderr, flush=True)
     try:
         start = time.monotonic()
+        again: list[tuple[str, float]] = []
         samples = watch(session, watched, args.window, args.count,
                         lambda: print("echo: listening", file=sys.stderr, flush=True),
-                        writer(sys.stdout) if args.format == "ndjson" else None, held, epoch)
+                        writer(sys.stdout) if args.format == "ndjson" else None, held, epoch,
+                        across=across, horizons=horizons, redeclared=again)
         watched_s = round(time.monotonic() - start, 3)
+        notes = [scope["says"], SNIFFED if held is None else HELD]
+        if across is not None:
+            notes.append(f"across face {across.face}: arq {str(across.arq).lower()}, reply timeout "
+                         f"{across.reply_timeout_ms} ms; " + (
+                             f"{len(again)} scope declarations made again after two horizons of silence (core "
+                             "§8.5): silence on a scope declared again is still silence, no verdict"
+                             if across.redeclares else "its medium repairs lost frames: nothing declared again"))
+        for sel, t in again:
+            print(f"echo: declared {sel} again at {round(t - start, 3)} s, after two horizons of silence (core §8.5)",
+                  file=sys.stderr, flush=True)
         if args.format == "json":
             doc = {"report": "echo", "selector": scope["selector"], "scope": scope, "window_s": watched_s,
-                   "samples": samples, "notes": [scope["says"], SNIFFED if held is None else HELD], "exit": 0}
+                   "samples": samples, "notes": notes, "exit": 0}
             try:
                 sys.stdout.write(json.dumps(doc, indent=2) + "\n")
                 sys.stdout.flush()

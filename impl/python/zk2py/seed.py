@@ -473,7 +473,12 @@ class LateJoiner:
     (round 91)."""
 
     def __init__(self, session: Any, selector: str, *, timeout: float = GET_TIMEOUT_S, consumer: bool = True,
-                 order: str = "subscribe-first", max_keys: int | None = -1):
+                 order: str = "subscribe-first", max_keys: int | None = -1, across: Any = None):
+        # core §8.1 (0.91): across a constrained face (``across``, a
+        # zk2py.far_side.FarSide), a seed's GET waits at least the face's
+        # reply timeout.
+        if across is not None:
+            timeout = across.get_timeout_s(timeout)
         self.session, self.selector, self.timeout = session, selector, timeout
         self.consumer = consumer
         self.order = order
