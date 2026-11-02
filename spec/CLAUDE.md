@@ -383,6 +383,15 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   heartbeat's time, never a put (`clock.json`'s `heartbeat`,
   `heartbeat_held`, `status_put`, reason `time_unknown`, 29 cases).
   `alarms.v1` 0.12 drops the clock as a stale alarm's cause. 227 rules.
+  Core 0.89 and observer text 0.22 answer zk2py round 97's F-455 to
+  F-460: §9.7, a revision in the history root was accepted (`zk2
+  contract compat --history` reports its review accepted, exit 0);
+  §7.7's interval is a period `timing.v1` §2.2 reads valid
+  (`w108-frame-horizon`'s `frames/unread`); S2, a `freshness.v2` key's
+  `reply_del` carries the timestamp minted at its delete; observer §7.6,
+  a frame read alone is an archive's or a history cache's reply.
+  `link.v1` 0.14 lists `freshness.v2` beside any interface with a
+  heartbeat, and `alarms.v1` 0.13's scenarios §1, §3, §5 read in band.
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`

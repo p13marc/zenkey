@@ -4,8 +4,11 @@
 # evidence; frames/sample's span and frames/minute's period are shorter
 # than a face's minute; frames/wide's largest frame passes a 220-byte
 # batch, it declares history, and its span is above half its horizon, as
-# W108 warns too. frames/home stays home, and level, a plain stream, is
-# downsampled.
+# W108 warns too. frames/unread's period would be shorter than a minute,
+# and its horizon below twice it, but its deadline does not read, so
+# timing.v1 §2.2 reads its declaration invalid and its interval is
+# unstated (core §7.7): it draws neither warning, and is liveness evidence.
+# frames/home stays home, and level, a plain stream, is downsampled.
 [interface]
 name  = "sampler"
 major = 1
@@ -39,6 +42,12 @@ type        = "packed:sampler#Wide"
 frame       = { records = 4, step_ms = 60000 }
 history     = true
 annotations = { "link.exposure" = "link", "freshness.ttl_s" = 300 }
+
+[resources."frames/unread"]
+kind        = "stream"
+type        = "packed:sampler#Link"
+frame       = { records = 1 }
+annotations = { "link.exposure" = "link", "timing.period_ms" = 30000, "timing.deadline_ms" = "x", "freshness.ttl_s" = 50 }
 
 [resources."frames/home"]
 kind  = "stream"

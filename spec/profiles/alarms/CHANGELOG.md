@@ -4,6 +4,44 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.13 — 2026-11-02: the scenarios' stamps read in band (#978)
+
+zk2py's round 97 read 0.11 cold, and filed F-459 against its scenarios.
+This version answers it, and carries core 0.89's answer to F-460 into
+§3. Core 0.89, observer 0.22 and `link.v1` 0.14 answer the rest of F-455
+to F-460. It is editorial: no rule changed.
+
+**Changed: the scenarios §1, §3 and §5 (F-459).** 0.11 restated §2, §6
+and §10 over `freshness.v2`. §1 and §5 still expected S's deliveries
+under the owner's stamp, and §3 G's `reply_del` under the delete's. A
+revision 1.1 alarm's put and delete carry no Zenoh timestamp of the
+owner's (core §4.3's table), so read as the Zenoh timestamp those steps
+failed against any owner that keeps the table. zk2py's runner failed them
+so.
+- **§1, Expected 2:** S's put is "stamped in band by the owner (core
+  S1)", and G's reply holds the document "under the same in-band stamp,
+  and its last confirmation (core S2)".
+- **§3, Expected 2:** G's `reply_del` carries "the delete's in-band stamp
+  and its last confirmation, the timestamp the owner minted at the
+  delete" (core 0.89's S2, F-460).
+- **§5, Expected 3:** S's put of A is "under the new instance's run", and
+  G's `reply_del`s of R's and P's keys are "stamped in band by it, each
+  under the timestamp it minted at the delete". G's replies of A and B
+  are under the new instance's stamp id, as before: a reply carries the
+  owner's last confirmation.
+
+**The reference** asserted the in-band stamps already
+(`zenkey/tests/profile_alarms.rs`). Its owner's `reply_del` of a
+`freshness.v2` member carried no Zenoh timestamp. It now carries the one
+minted at the delete, which `s3_resolve_then_delete` and
+`s5_a_restart_mid_incident` assert.
+
+**Deliberately not changed.**
+- **No rule.** v1.md's rules are 0.12's.
+- **§5's G** still reads A's reply under the new instance's stamp id,
+  whose `meta.zid` the descriptor states (§2.14 step 5): a reply's
+  Zenoh timestamp is the owner's.
+
 ## 0.12 — 2026-11-02: a clock ahead is no cause of a stale alarm (#978)
 
 Core 0.88 (#978's F6) narrows its clock guard to the state writes that

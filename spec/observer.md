@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Text version** | 0.21 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.22 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
 | **Written against** | core 0.85 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
@@ -1162,9 +1162,9 @@ states, over the frames of its key in the order they arrived.
   run it did not hold, a rewind, `max_records` passed, or an inclusion
   that was no value.
 - **One frame alone.** A tool that reads a frame with nothing before it
-  reads it as a reader's first frame. That is one reply of a GET, or one
-  row of a recording read alone. Each field its records omit is then
-  `unknown`.
+  reads it as a reader's first frame. That is one reply of a GET, an
+  archive's or a history cache's, or one row of a recording read alone.
+  Each field its records omit is then `unknown`.
 - **A recording** replays its frames through the same reader, in the
   order they were recorded. So a frame read from a file reads as it did
   live.

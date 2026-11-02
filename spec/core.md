@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.88** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.89** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -887,7 +887,7 @@ and reports these codes. `[F: descriptors/]`
 | # | Rule | Evidence |
 |---|---|---|
 | S1 | **Owner:** every state mutation, put **and** delete, MUST carry its in-band stamp (§4.3): a put in its payload's envelope, a delete in its attachment (§7.5). On a resource §4.3's table lists, the owner MUST also set a Zenoh timestamp on each mutation. | `[Sc: state.md §1]` |
-| S2 | **Owner:** a GET reply MUST carry the in-band stamp of the mutation it represents: a reply as the bytes the mutation put, a `reply_del` as the delete's attachment. The owner's reply MUST also carry the mutation's Zenoh timestamp, where the mutation carried one. The owner's reply of a member of a state that §4.3's table lists under `freshness.v2` MUST carry instead that member's last confirmation, as the table says. That holds whether or not a heartbeat vouched for the member since its last mutation. The owner's state queryables cover its interfaces' `state/**` and `@state/**`. It MUST answer a selector over them with every matching live key, plus a `reply_del` for each matching key it deleted within the window. | `[Sc: state.md §1, §2]` `[Sc: profiles/freshness/scenarios-v2.md §3]` |
+| S2 | **Owner:** a GET reply MUST carry the in-band stamp of the mutation it represents: a reply as the bytes the mutation put, a `reply_del` as the delete's attachment. The owner's reply MUST also carry the mutation's Zenoh timestamp, where the mutation carried one. The owner's reply of a member of a state that §4.3's table lists under `freshness.v2` MUST carry instead that member's last confirmation, as the table says. That holds whether or not a heartbeat vouched for the member since its last mutation. A key of such a state deleted within the window is a member too. Its `reply_del` carries the timestamp minted at the delete. The owner's state queryables cover its interfaces' `state/**` and `@state/**`. It MUST answer a selector over them with every matching live key, plus a `reply_del` for each matching key it deleted within the window. | `[Sc: state.md §1, §2]` `[Sc: profiles/freshness/scenarios-v2.md §3]` `[Sc: profiles/alarms/scenarios.md §3]` |
 | S3 | **Owner:** for a key it deleted within the tombstone window, the owner MUST answer a GET with `reply_del` and the deletion's stamps (S2). The window is 60 s, unless the deployment configures the owner with another. A deployment MUST configure it, for state that an archive records, to at least the longest outage it expects between the archive and the owner. Across a constrained face, that is the face's maximum outage (§8.5), and [`link.v1`](profiles/link/v1.md) §2.11 floors the window of every state behind the face at it. | `[Sc: state.md §2, §6]` |
 | S4 | **Consumer:** a state GET MUST be addressed to the owner's keys, with target `All` and consolidation `Latest` set explicitly. **Deployment:** MUST NOT run a storage that answers on an owner's `state/**` or `@state/**` keys. | `[Sc: state.md §3]` |
 | S5 | **Consumer:** last-known state MUST be read from an archive (§4.4), explicitly. **Owner of an archive:** §4.4. | `[Sc: state.md §4–§6, §9]` |
@@ -1111,8 +1111,9 @@ time a profile reads (the table below).
       unit. A larger step keeps the rule, which needs only that each stamp
       exceed the last (Appendix B gives zenoh-python's smallest step).
     - **A last confirmation** (the table's second row) is minted so too.
-      An owner mints one at each mutation of such a member, though its
-      put carries none. It mints one as it writes each heartbeat (§7.5).
+      An owner mints one at each mutation of such a member, a delete
+      among them, though the mutation carries none. It mints one as it
+      writes each heartbeat (§7.5).
       That heartbeat's time is the timestamp's instant, to the
       millisecond, counted from the deployment epoch (§7.6). While the
       clock guard holds ("Ahead", below), the time is unknown.
@@ -2168,9 +2169,9 @@ changed. A frame travels only as a put's payload, on its resource's key.
 - **The span** of a frame with a step is `records` × `step_ms`. Every
   record of the frame lies within it.
 - **The interval** of a frame resource is its span where it has a step.
-  Otherwise it is the `timing.period_ms` its resource declares
-  ([`timing.v1`](profiles/timing/v1.md) §2.3), and with none it is
-  unstated.
+  Otherwise it is the `timing.period_ms` of a declaration that
+  [`timing.v1`](profiles/timing/v1.md) §2.2 reads valid (§2.3). With none,
+  it is unstated.
 - **A deadband** is a field's `delta` and `max_records`. `delta` is a
   decimal string (§7.6) above 0, in the field's own units: a value, not a
   code. `max_records` is from 1 to 65,536. Only an `int`, `fixed` or
@@ -3429,6 +3430,11 @@ The steps' details `[F: bundles/*]`:
 
   Fingerprints may over-detect a change, never under-detect one.
   `[F: compat/expect.json, same_revision]`
+- **A published revision was accepted.** A revision in the history root
+  passed §9.8's review when it was published. The root records no other
+  acceptance. So a check of it against the root does not refuse it for a
+  review. It reports the review as accepted, or says nothing of it. It
+  still refuses a breaking change, which §9.8 forbids publishing.
 
 ### 9.8 Compatibility
 

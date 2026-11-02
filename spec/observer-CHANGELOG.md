@@ -13,6 +13,29 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.22 — 2026-11-02: §7.6, whose GET answers a frame (#981)
+
+zk2py's round 97 read this text's 0.20 and 0.21 cold, and filed F-458
+against §7.6. This version answers it. Core 0.89, `link.v1` 0.14 and
+`alarms.v1` 0.13 answer the rest of F-455 to F-460.
+
+**Changed: §7.6, "One frame alone" (F-458).** It read "one reply of a
+GET". A frame resource is a stream, and no rule has its owner answer a GET
+on its key: `zenctl get` of the owner example's frame key draws no reply.
+A history cache answers under `@adv` (core §2.5), not on the key.
+- **Now:** "one reply of a GET, an archive's or a history cache's, or one
+  row of a recording read alone".
+- **zk2py's runner** answers a GET on the frame key with the frames it
+  captured, one reply each, as an archive would. That reads as the text
+  now says.
+
+**Deliberately not changed.**
+- **No rule.** The sentence says where a frame read alone comes from. A
+  reader reads it as before: its first frame, each omitted field
+  `unknown`.
+- **No owner's GET.** An owner of a frame resource answers none on its
+  key, as of any stream.
+
 ## 0.21 — 2026-11-02: §7.6, frames read (#981)
 
 Core 0.83 adds §7.7, frames: one packed type's records under one envelope
