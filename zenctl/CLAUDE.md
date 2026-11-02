@@ -108,7 +108,11 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   beside its user name, with certificates minted per run by `rcgen`; each
   with what it leaks; §12 the block's text without what zenoh defaults,
   `enabled`, `default_permission` and a rule's `flows`, and §13 two faces
-  of one far principal, 0.7's). A `link.v2` face policy (#988 L2) adds
+  of one far principal, 0.7's). A `link.v2` device face (0.7, #982 H1,
+  `attach = "device"`) plans each device as a listed owner, `zk` carved
+  into three denies, `--far-config` naming each device, `check face`
+  reading the carve there, and the table's attach `device <address>`. A
+  `link.v2` face policy (#988 L2) adds
   the router's transport: `--json5` writes its `transport` and `routing`
   blocks after the access control, `acl gen --far-config` the far end's
   alone (`zenkey_fleet::acl_far_json5`; refused for a `link.v1` policy,

@@ -40,7 +40,16 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   from a complete read, `Liveness::Unobservable` otherwise, a descriptor
   not read in `Present::undescribed` with why in `errors`, and no read
   past `wait_for_provider`'s deadline, a round it cuts short keeping what
-  it found (#1015); tools
+  it found (#1015; observer 0.26 §3.6 binds it). An owner on a first hop
+  (core 0.96 §8.1, #982 H2) is `ServiceConfig::first_hop` (`first_hop:
+  true` in a config file, the owner example's `--first-hop`): `start()`
+  refuses `archive.v1` or a governed interface first, nothing declared,
+  then puts every implemented interface in the tokenless set and declares
+  no contract queryable (§8.4), so it holds its instance token alone;
+  `tests/constrained.rs`'s `s10_*` run `constrained.md` §10 through a
+  proxy that copies what the device sends (`Link::capture_up`) and a
+  router selecting the device's session by zid under `link.v2` §2.6's
+  carve (`zenkey_model::link::zk_carve`); tools
   consume with `Consumer::for_tool` and read presence with
   `presence::liveliness_read`, which flags a GET that ran to its timeout,
   or whose session was cut off while it ran, as possibly incomplete (§8.1;

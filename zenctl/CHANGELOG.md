@@ -6,6 +6,19 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a device face, an owner on a first hop (#982)
+
+Core 0.96 lets an owner on a first hop hold its instance token alone, and
+`link.v2` 0.7 gives its face the device kind (`attach = "device"`,
+`devices`).
+
+| Before | Now | Notes |
+|---|---|---|
+| `acl gen --face-policy` of a policy with `attach = "device"`: refused, `bad_value` at `attach`, `unknown_field` at `devices` | planned: each device a listed owner on every face, keyed in the enrollment by its address; `zk` carved into `zk`, `zk:instance:egress` and `zk:instance:ingress`, so the device's instance token and descriptor cross on its Own grant's pairs alone; no downsampling rule for a device's stream on its own face | link.v2 §2.5, §2.6, §2.8; a device implementing `archive.v1` or a governed interface refuses the plan, `presence_required`, exit 2 |
+| `acl gen --far-config`: "the far router's config, or the gateway client's session config" | on a device face it names each device, whose session runs the block | link.v2 §2.18 |
+| `check face` on a device face: the carve was `zk_not_denied` | the carve passes there, and so does the whole `zk`; the carve on any other face is still `zk_not_denied` | link.v2 §2.15 |
+| the plan's table: attach `client` or `south-region` | also `device <address>, …` | |
+
 ## Unreleased (`main`, zk2) — `config` reads and drives a `config.v2` owner (#985 G3)
 
 `config.v2` 0.1 (`spec/profiles/config/v2.md`) moves the schema into each

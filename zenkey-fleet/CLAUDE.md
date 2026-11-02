@@ -414,3 +414,11 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `tc.netif.v1`'s published revision 1.0 from its bundle
   (`zk2_observe`'s timeline); `tests/link_face.rs`' `v2_s1_the_router_runs_the_block` runs
   link.v2 scenarios §1 over a relay that counts keep-alives.
+  A device face (link.v2 0.7, #982 H1): `plan_faces` names each device
+  in `implements` by its enrollment address, on any system; `face_rule`
+  maps the carve's three ids to `FacePresence` (`CITE_FACE_CARVE`), the
+  far principal's Own grant on its `@zk/**` kept so its instance token and
+  descriptor cross; `check_face` passes `Attach::is_device` to
+  `link::check_block`; `to_json5` and `far_json5` name the devices;
+  `tests/acl_plans.rs` pins `link-v2.device.json5` (the RF medium with
+  `lab/radio-a` a device) and explains its pairs in both postures.
