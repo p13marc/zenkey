@@ -784,13 +784,19 @@ def section7_late(report: Report, pairing: str, impl: str) -> None:
 
 
 def section7_ahead(report: Report, pairing: str, impl: str) -> None:
-    """§7 step 6, "Ahead": the owner's clock 2 s ahead of a router-stamped
-    heartbeat; it detects the drift and stops writing state. The heartbeat
-    is put by a client of R2, whose timestamping is on, so R2 stamps it."""
+    """§7 step 6, "Ahead" (core 0.88, #978 F6, round 98): the owner's clock
+    2 s ahead of a router-stamped heartbeat, serving §1's ``status``, which
+    core §4.3's table lists (``freshness.v1``, ttl 60). It detects the
+    drift, then tries a put and a delete of ``status``, and of a plan:
+    ``status``'s are refused, each would carry a Zenoh timestamp, and the
+    plan's go on under the in-band stamp alone (``plans/{vehicle}`` is on no
+    row of the table). The heartbeat is put by a client of R2, whose
+    timestamping is on, so R2 stamps it, and every unstamped put it routes:
+    a plan's stamp on the tap is R2's, never the owner's."""
     from . import live
 
     sec = f"{pairing} §7 step 6, ahead"
-    r, ep, _ = router(True)
+    r, ep, r2_zid = router(True)
     beat = "lab/clock/beat"
     pub = live.open_client(ep)
     tool = live.open_client(ep)
@@ -804,24 +810,58 @@ def section7_ahead(report: Report, pairing: str, impl: str) -> None:
         threading.Thread(target=beating, daemon=True).start()
         time.sleep(0.5)
         tap = Tap(tool, ["zk2/ground/fleet-mgr/**"])
+        answers: dict[str, str] = {}
         if impl == "zk2py":
             owner = PyOwner(ep, offset_s=2.0, heartbeat=beat, delta_s=0.5)
             ahead = _wait(lambda: owner.o.ahead, 5.0)
-            refused = None
-            try:
-                owner.put("a", b"x")
-            except Exception as e:  # noqa: BLE001
-                refused = type(e).__name__
-            report.check(sec, "it detects the drift and stops writing state, its write refused and reported",
-                         ahead and refused == "ClockAhead" and bool(owner.o.events),
-                         f"ahead {ahead}; refused {refused}; {owner.o.events}")
+            time.sleep(0.3)
+            before = len(tap.of("/state/status"))  # the status put at start, before the detection
+            base = owner.base
+            for name, fn in (("status put", lambda: owner.status(b"up")),
+                             ("status delete", lambda: owner.o.delete_state(f"{base}/state/status")),
+                             ("plan put", lambda: owner.put("a", b"x")),
+                             ("plan delete", lambda: owner.delete("a"))):
+                try:
+                    fn()
+                    answers[name] = "ok"
+                except Exception as e:  # noqa: BLE001
+                    answers[name] = type(e).__name__
+            reported = bool(owner.o.events)
+            owner_zid = owner.zid()
         else:
             owner = RustOwner(ep, offset_s=2.0, flags=["--clock-reference", beat])
             time.sleep(1.5)
-            got = owner.p.command(f"put {IFACE} state/plans/{{vehicle}} a")
-            time.sleep(0.3)
-            report.check(sec, "it detects the drift and stops writing state: the put is refused, nothing put",
-                         (got or "").startswith("refused") and not tap.of("/plans/a"), f"{got!r}")
+            ahead = True
+            before = len(tap.of("/state/status"))  # the status put at start, before the detection
+            for name, line in (("status put", f"put {IFACE} state/status"),
+                               ("status delete", f"delete {IFACE} state/status"),
+                               ("plan put", f"put {IFACE} state/plans/{{vehicle}} a"),
+                               ("plan delete", f"delete {IFACE} state/plans/{{vehicle}} a")):
+                got = owner.p.command(line) or ""
+                answers[name] = "refused" if got.startswith("refused") else "ok"
+                if got.startswith("refused"):
+                    answers[name + " why"] = got[-160:]
+            reported = any("ahead" in x.lower() for x in owner.p.stderr)
+            owner_zid = ""
+        time.sleep(0.5)
+        refused = "ClockAhead" if impl == "zk2py" else "refused"
+        status_rows = tap.of("/state/status")[before:]
+        plan_rows = tap.of("/plans/a")
+        report.check(sec, "it detects the drift; status's put and delete are refused, each would carry a Zenoh "
+                          "timestamp (core §4.3's table), and nothing of status reaches the wire after the detection",
+                     ahead and answers.get("status put") == refused and answers.get("status delete") == refused
+                     and not status_rows,
+                     f"ahead {ahead}; {answers}; status on the wire {len(status_rows)}")
+        stamps = [x["ts"].split("/", 1)[1] if x["ts"] else None for x in plan_rows]
+        report.check(sec, "the plan's put and delete go on, under the in-band stamp alone: plans/{vehicle} is on no "
+                          "row of the table (the stamp the tap sees is R2's, set as it routes, never the owner's)",
+                     answers.get("plan put") == "ok" and answers.get("plan delete") == "ok"
+                     and [x["delete"] for x in plan_rows] == [False, True]
+                     and all(x["read"].stamp is not None for x in plan_rows)
+                     and all(z is None or z != owner_zid for z in stamps),
+                     f"{[(x['delete'], x['read'].stamp, x['ts']) for x in plan_rows]}; R2 {r2_zid}")
+        report.check(sec, "it reports the drift (a SHOULD)", reported,
+                     f"{owner.o.events if impl == 'zk2py' else [x for x in owner.p.stderr if 'ahead' in x.lower()][-1:]}")
         tap.close()
     except Exception as e:  # noqa: BLE001
         report.check(sec, "the step ran", False, f"{type(e).__name__}: {e}")

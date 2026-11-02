@@ -15,8 +15,9 @@ The session-free half, the reader's:
   ``conformance/judgements.json`` writes it, the status's freshness judged
   by :mod:`zk2py.freshness` at the contract's horizon;
 - :func:`rollup` (§2.2, §5) and :func:`code_class` (§2.10);
-- :func:`clock_question` (§5's fourth question, `conformance/clock.json`, 0.3), and
-  :func:`clock_from` over what a subscriber heard;
+- :func:`clock_question` (§5's fourth question, `conformance/clock.json`, 0.9),
+  and :func:`clock_from` over what a subscriber heard: the faults and the
+  time of each heartbeat covering health.v1, never the status (§2.5, 0.9);
 - the payloads, ``health.v1.Status``, ``Check`` and ``Fault``, encoded and
   decoded as proto3 (``proto/health/v1/health.proto``).
 
@@ -26,8 +27,12 @@ The owner half, :class:`HealthOwner`, over :class:`zk2py.owner.Owner`:
 - checks put on change and deleted when retired, with §2.2's rule and the
   order of the puts;
 - faults as occurrences, with codes of §2.10's form;
-- ``clock_ahead`` (§2.5): published when the guard first holds, again every
-  30 s while it holds, and not after it releases.
+- ``clock_ahead`` (§2.5): published when the guard first holds, again once
+  per period of the heartbeat covering health.v1 while it holds (28.5 s in
+  revision 1.1, 30 s at most, 0.9), and not after it releases. The guard
+  holds no status since 0.9 (core §4.3, 0.88): the status carries no Zenoh
+  timestamp, so it is put as at any other time, and its heartbeat goes on
+  vouching for it, its time unknown (freshness.v2 §2.10, 0.4).
 """
 
 from __future__ import annotations
@@ -50,7 +55,8 @@ NAMES = {OK: "ok", DEGRADED: "degraded", FAILED: "failed"}
 RANK = {"ok": 1, "degraded": 2, "failed": 3}
 #: §2.4: the status's horizon, the contract's.
 HORIZON = fr.horizon("state", {"freshness.ttl_s": 60})
-#: §2.5: "once per status interval, 30 s".
+#: §2.5 (0.9): "at least once per period of its heartbeat covering
+#: health.v1 (freshness.v2 §2.4), 30 s at most".
 FAULT_PERIOD_S = 30.0
 #: §2.10.
 CODE_FORM = re.compile(r"[a-z][a-z0-9_]*")
@@ -201,38 +207,58 @@ def code_class(code: str) -> str:
 
 
 def clock_question(presence: str, descriptor: dict[str, Any] | None, heard: list[str]) -> tuple[str, str]:
-    """§5, "Is this service's clock ahead?" (0.3, ``conformance/clock.json``),
+    """§5, "Is this service's clock ahead?" (0.9, ``conformance/clock.json``),
     over what one subscriber heard of one service in arrival order:
-    ``status`` (a confirmation), ``status_deleted`` (no confirmation, §2.3),
-    ``clock_ahead`` (a fault of that code, whatever its level and stamp) and
-    ``fault`` (another code). Not asked as the first question's for an
-    absent service or one whose descriptor does not list health.v1; else
-    yes on a clock_ahead fault with no confirmation after it, no on a
-    confirmation after the last one (or with none heard), and unobservable
-    when neither was heard. A fault heard is the service's own word,
-    whatever else presence says."""
+    ``heartbeat`` (a heartbeat covering health.v1 whose status section it
+    read in step, its time known), ``heartbeat_held`` (the same, its time
+    unknown), ``status_put``, ``status_deleted``, ``clock_ahead`` (a fault of
+    that code, whatever its level and stamp) and ``fault`` (another code).
+    Not asked as the first question's for an absent service or one whose
+    descriptor does not list health.v1. Else yes on a clock_ahead fault with
+    no heartbeat whose time is known after it; no when the last heartbeat
+    heard has its time known (after the last fault, or with none);
+    unobservable ``time_unknown`` when the last heartbeat's time is unknown,
+    and ``nothing_heard`` when no heartbeat and no fault was heard. A put or
+    a delete of the status says nothing of the clock. A fault heard is the
+    service's own word, whatever else presence says."""
     if presence == "absent":
         return NOT_ASKED, "absent"
     if presence == "present" and descriptor is not None and not descriptor.get("lists"):
         return NOT_ASKED, "not_listed"
     last_fault = max((i for i, x in enumerate(heard) if x == "clock_ahead"), default=None)
-    confirmations = [i for i, x in enumerate(heard) if x == "status"]
-    if last_fault is not None and not any(i > last_fault for i in confirmations):
+    known = [i for i, x in enumerate(heard) if x == "heartbeat"]
+    beats = [i for i, x in enumerate(heard) if x in ("heartbeat", "heartbeat_held")]
+    if last_fault is not None and not any(i > last_fault for i in known):
         return "yes", "clock_ahead"
-    if confirmations:
+    if beats and heard[beats[-1]] == "heartbeat":
         return "no", "confirmed"
+    if beats:
+        return UNOBSERVABLE, "time_unknown"
     return UNOBSERVABLE, "nothing_heard"
 
 
 def heard_from(subscriber: Any, address: str) -> list[str]:
     """What one subscriber heard of ``address``'s health, in arrival order,
-    as clock.json writes it: ``status``, ``status_deleted``, ``clock_ahead``
-    or ``fault``."""
+    as clock.json writes it (0.9): ``status_put`` and ``status_deleted``
+    from its deliveries of the status (a heartbeat's confirmation, recorded
+    as a delivery, is none of them); ``heartbeat`` or ``heartbeat_held`` for
+    each heartbeat covering health.v1 the subscriber follows
+    (:meth:`zk2py.freshness.Subscriber.follow`) whose status section it read
+    in step with its view, its bit set or clear (§2.5: "A heartbeat counts
+    where the reader read the status's section in step with its view"), by
+    its time known or unknown; and ``clock_ahead`` or ``fault`` from the
+    faults."""
     status_key = f"zk2/{address}/{IFACE}/state/status"
     faults_key = f"zk2/{address}/{IFACE}/stream/faults"
     out: list[tuple[int, str]] = []
     for x in subscriber.of(status_key):
-        out.append((x.arrival_ns, "status" if x.kind == "put" else "status_deleted"))
+        if getattr(x, "confirmation", False):
+            continue
+        out.append((x.arrival_ns, "status_put" if x.kind == "put" else "status_deleted"))
+    for t, answer in getattr(subscriber, "beats", {}).get((address, IFACE), []):
+        sec = answer.get("read", {}).get("sections", {}).get("state/status")
+        if isinstance(sec, dict):
+            out.append((t, "heartbeat" if answer.get("time") is not None else "heartbeat_held"))
     for x in subscriber.of(faults_key):
         f = decode_fault(x.payload)
         out.append((x.arrival_ns, "clock_ahead" if f is not None and f["code"] == "clock_ahead" else "fault"))
@@ -365,7 +391,7 @@ class HealthOwner:
     others, and the status it holds at start is put before step 4."""
 
     def __init__(self, system: str, service: str, *, contracts: list[Any] | None = None,
-                 level: int = UNSPECIFIED, reason: str = "starting", fault_period_s: float = FAULT_PERIOD_S,
+                 level: int = UNSPECIFIED, reason: str = "starting", fault_period_s: float | None = None,
                  clock_ns: Any = None, **owner_kw: Any):
         from .contract import load_contract
         from .owner import Owner
@@ -456,6 +482,17 @@ class HealthOwner:
         self.faults.append({"code": code, "level": level, "detail": detail, "at_ns": at})
 
     # §2.5
+    def fault_period(self) -> float:
+        """The repeat's period (§2.5, 0.9): the one given, else the period of
+        the owner's heartbeat covering health.v1, 30 s at most."""
+        if self.fault_period_s is not None:
+            return self.fault_period_s
+        from . import freshness_v2
+
+        lo = self.owner.hb_layouts.get(IFACE)
+        p = None if lo is None else freshness_v2.period_ns(lo)
+        return FAULT_PERIOD_S if p is None else min(FAULT_PERIOD_S, p / 1e9)
+
     def _guard(self, held: bool, offset_ns: int) -> None:
         if not held:
             self._stop.set()
@@ -464,10 +501,13 @@ class HealthOwner:
         self.publish_fault("clock_ahead", FAILED, f"the clock is {offset_ns / 1e9:.3f} s ahead of its router")
         stop = self._stop
 
+        period = self.fault_period()
+
         def repeat() -> None:
-            # "While the guard holds, the owner SHOULD publish it again once
-            # per status interval, 30 s".
-            while not stop.wait(self.fault_period_s):
+            # §2.5 (0.9): "While the guard holds, the owner SHOULD publish it
+            # again at least once per period of its heartbeat covering
+            # health.v1 (freshness.v2 §2.4), 30 s at most".
+            while not stop.wait(period):
                 if not self.owner.ahead:
                     return
                 self.publish_fault("clock_ahead", FAILED,

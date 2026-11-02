@@ -386,7 +386,12 @@ def _example_against_history(root: Path, rel: str, c, built: bytes) -> list[Resu
       publication" (§9.8), so its bundle in the history root is that
       acceptance. ``health.v1``'s, ``alarms.v1``'s and ``config.v1``'s
       revisions 1.1 are such reviews against their 1.0, ``uses_changed``
-      (#978 F4, round 97)."""
+      (#978 F4, round 97), and so are the adopters' contracts and
+      ``nav.v2`` moved onto ``freshness.v2`` (F5, round 98). Since core
+      0.89 §9.7 (F-456's answer) the text says so: "A published revision
+      was accepted". Only the revision's own bundle, byte-identical,
+      accepts its review, and a breaking change fails whatever is
+      published."""
     from . import bundle, compat
 
     hist = root / c.interface
@@ -400,8 +405,16 @@ def _example_against_history(root: Path, rel: str, c, built: bytes) -> list[Resu
                  for p in sorted(hist.glob("*.bundle.json"))]
     candidate = compat.Revision(c.canonical, {a.id: a.data for a in c.schemas.artifacts()})
     total, _ = compat.full_transitive(revisions, candidate, compat.contract_compare)
-    ok = total.cls == compat.COMPATIBLE or (total.cls == compat.REVIEW and published.is_file())
-    said = "" if total.cls == compat.COMPATIBLE else f", a review accepted by its publication: {total.reasons}"
+    # Tied to core 0.89 §9.7 (F-456's answer; review-bot on round 97): "A
+    # revision in the history root passed §9.8's review when it was
+    # published … So a check of it against the root does not refuse it for
+    # a review. It reports the review as accepted … It still refuses a
+    # breaking change". Only this revision's own bundle in the root, byte
+    # for byte the one zk2py builds, is that acceptance: never another
+    # revision's, and never a breaking change.
+    ok = total.cls == compat.COMPATIBLE or (total.cls == compat.REVIEW and published.is_file() and same)
+    said = "" if total.cls == compat.COMPATIBLE else \
+        f", a review accepted: the revision is published (core §9.7): {total.reasons}"
     out.append((f"{rel} (compatible with {len(revisions)} published{said if ok else ''})", ok,
                 "" if ok else f"{total.cls}: {total.reasons}"))
     return out
@@ -837,17 +850,105 @@ def _link_v2(path: Path) -> list[Result]:
     return out
 
 
-def _telemetry_v2_not_read(path: Path) -> list[Result]:
-    """``telemetry.v2`` 0.1 (#983 T1, main 7597efb8): its fixtures under
-    ``conformance/v2/`` and the contracts they load under ``contracts/``.
-    Keyed as present and not read this round: round 97 reads #981's frames
-    and #978's F4, and #983's own round reads ``telemetry.v2`` after its
-    owner chunk lands. So each entry is named, never failed as unknown, and
-    never counted as read."""
-    print(f"NOTE telemetry: {path.name}/ is telemetry.v2 0.1's (#983 T1): present, not read this round",
-          file=sys.stderr)
-    return [(f"{path.name}/ (telemetry.v2 0.1, #983 T1): present, not read this round, for #983's own round", True,
-             "")]
+def _telemetry_v2_layouts(data: dict[str, Any]) -> dict[str, tuple[Any, Any]]:
+    """``readings.json``'s and ``continuity.json``'s layouts: each a record
+    type of the case file's packed ``schema``, its ``frame`` table and its
+    ``telemetry.series``, declared against its ``resources`` -> (layout, its
+    declaration)."""
+    from . import frame, packed, telemetry_v2 as t2
+
+    lt = packed.lint(data["schema"])
+    others = t2.others_of(data.get("resources", []))
+    out = {}
+    for lo in data["layouts"]:
+        layout = frame.Layout(lt.types[lo["record"]], frame.declaration(lo["frame"]))
+        out[lo["name"]] = (layout, t2.declare_frame(layout.fields, {t2.SERIES: lo["series"]}, others))
+    return out
+
+
+def _telemetry_v2(path: Path) -> list[Result]:
+    """``telemetry.v2`` 0.1 (#983 T1; round 98): ``conformance/v2/``.
+    - ``declarations.json`` (§2.16): a resource -> its declaration, a frame
+      resource's through :func:`zk2py.telemetry_v2.declare_frame` over the
+      schema's record type and the file's other resources, any other's as
+      ``telemetry.v1`` reads it; and each contract's resources by template;
+    - ``readings.json`` (§2.18): one key's frames, each body read from its
+      ``hex`` under the layout's tag and checked against its ``value``, then
+      read in arrival order by one :class:`zk2py.telemetry_v2.SeriesReader`
+      -> what it follows and each record's series fields;
+    - ``continuity.json`` (§2.19 to §2.21): the same reader -> every pair,
+      in order."""
+    from . import frame, packed, telemetry as tm, telemetry_v2 as t2
+    from .contract import load_contract
+
+    out: list[Result] = []
+    for f in sorted(path.iterdir()):
+        data = _load_json(f)
+        if f.name == "declarations.json":
+            lt = packed.lint(data["schema"])
+            others = t2.others_of(data["resources"])
+            out.append(_check("v2 declarations: the schema's record types lint clean",
+                              [lt.findings, sorted(lt.types)], [[], sorted(data["schema"]["types"])]))
+            for i, c in enumerate(data["cases"]):
+                r = c["resource"]
+                ann = r["annotations"] if "annotations" in r else tm.resolve(r["layers"])
+                if r["frame"]:
+                    fields = frame.Layout(lt.types[r["record"]], frame.declaration({})).fields
+                    got = t2.declare_frame(fields, ann, others).expect()
+                else:
+                    got = tm.declare(r["kind"], ann, r["type"], r.get("attachment")).expect()
+                out.append(_check(f"v2 declarations #{i}: {c['note']}", got, c["expect"]))
+            for c in data["contracts"]:
+                k = load_contract(path.parent / c["contract"], check_file_name=True)
+                decls = t2.contract_declarations(k)
+                out.append(_check(f"v2 declarations, {c['contract']}: loads with no finding, and {c['note']}",
+                                  [k.codes, {t: decls[t].expect() for t in c["expect"]}], [[], c["expect"]]))
+        elif f.name in ("readings.json", "continuity.json"):
+            layouts = _telemetry_v2_layouts(data)
+            for i, c in enumerate(data["cases"]):
+                layout, decl = layouts[c["layout"]]
+                rd = t2.SeriesReader(layout, decl)
+                got_r, want_r, bodies = [], [], []
+                for fr_ in c["frames"]:
+                    try:
+                        read = layout.read(layout.tag, bytes.fromhex(fr_["hex"]))
+                    except (frame.Refused, packed.Refused) as e:
+                        read = {"refused": str(e)}
+                    bodies.append(read == fr_["value"])
+                    g = rd.read(fr_["run"], fr_["seq"], fr_["value"], fr_.get("arrival_ns", 0))
+                    g.pop("pairs")
+                    got_r.append(g)
+                    want_r.append(fr_.get("expect"))
+                name = f"v2 {f.stem} #{i}: {c['note']}"
+                if f.name == "readings.json":
+                    out.append(_check(name, [all(bodies), got_r], [True, want_r]))
+                else:
+                    out.append(_check(name, [all(bodies), [p.expect() for p in rd.pairs]], [True, c["expect"]]))
+        else:
+            out.append((f"v2/{f.name}", False, "an unknown fixture file: the runner does not read it"))
+    return out
+
+
+def _telemetry_contracts(path: Path) -> list[Result]:
+    """``conformance/contracts/`` (telemetry.v2 0.1): ``meterframe.v1``, the
+    scenarios' contract, beside ``meter.json`` and its packed file
+    ``meterframe.json``. The contract loads with no finding, under
+    ``telemetry.v2``'s vocabulary (§4: ``series`` beside v1's four keys, so
+    no W105). ``v2/declarations.json`` reads its resources, and zk2py's
+    owner and readers load it from here."""
+    from .contract import load_contract
+
+    out: list[Result] = []
+    for f in sorted(path.iterdir()):
+        if f.suffix == ".toml":
+            k = load_contract(f, check_file_name=True)
+            out.append(_check(f"contracts/{f.name}: loads with no finding (telemetry.v2's vocabulary, §4)",
+                              [k.valid, k.codes], [True, []]))
+        elif f.suffix == ".json":
+            out.append(_check(f"contracts/{f.name}: strict JSON", isinstance(_load_json(f), dict), True))
+        else:
+            out.append((f"contracts/{f.name}", False, "an unknown file: the runner does not read it"))
+    return out
 
 
 def _alarms_keys(path: Path) -> list[Result]:
@@ -1446,7 +1547,7 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
                "transitions.json": _alarms_transitions, "conclusions.json": _alarms_conclusions},
     "telemetry": {"schema.json": _telemetry_schema, "declarations.json": _telemetry_declarations,
                   "samples.json": _telemetry_samples, "continuity.json": _telemetry_continuity,
-                  "v2": _telemetry_v2_not_read, "contracts": _telemetry_v2_not_read},
+                  "v2": _telemetry_v2, "contracts": _telemetry_contracts},
     "desired": {"schema.json": _desired_schema, "declarations.json": _desired_declarations,
                 "bindings.json": _desired_bindings, "order.json": _desired_order, "reports.json": _desired_reports,
                 "conclusions.json": _desired_conclusions, "slices.json": _desired_slices},
@@ -3554,7 +3655,8 @@ def family_readings(root: Path) -> list[Result]:
         + _round88_readings(root) + _round89_readings(root) + _round90_readings(root) \
         + _round91_readings(root) + _round92_readings(root) + _mend93_readings(root) + _round93_readings(root) \
         + _mend_after_round93_readings(root) + _round94_readings(root) + _mend_after_round94_readings(root) \
-        + _round95_readings(root) + _round96_readings(root) + _round96_k1_readings(root) + _round97_readings(root)
+        + _round95_readings(root) + _round96_readings(root) + _round96_k1_readings(root) + _round97_readings(root) \
+        + _round98_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -3706,8 +3808,10 @@ annotations = { "timing.period_ms" = 60000, "freshness.ttl_s" = 100 }
                 [{"time": "scheduled", "after_ms": 10000, "jitter_ms": 500}, None,
                  {"form": "frame", "run": "0001", "seq": 0}, None]))
     out.append(("F-458: observer §7.6 reads a frame alone as one reply of a GET; no rule has an owner answer a GET on "
-                "a frame resource's key, and a history cache answers under @adv",
-                missing(obs, "That is one reply of a GET, or one row of a recording read alone.")
+                "a frame resource's key, and a history cache answers under @adv (answered by observer 0.22: an "
+                "archive's or a history cache's reply)",
+                missing(obs, "That is one reply of a GET, an archive's or a history cache's, or one row of a "
+                             "recording read alone.")
                 + missing(core, "declares its own queryable and token under `<key>/@adv/…`"), []))
     # Part B's bits, offline (the owner's refusal of a mutation on a frame
     # key is frames_scenarios §1 step 4's, live).
@@ -3775,12 +3879,337 @@ annotations = { "timing.period_ms" = 60000, "freshness.ttl_s" = 100 }
                 [["60a43745", "e9dbcdcb"]]))
     # F-459: alarms scenarios §1 and §5 under freshness.v2.
     sc = flat("profiles/alarms/scenarios.md")
-    out.append(("F-459: alarms.v1 scenarios §1 and §5, unchanged at 0.11, expect S's deliveries under the owner's "
-                "stamp id, which a freshness.v2 alarm's put does not carry (core §4.3's table, §2.14 step 5)",
-                missing(sc, "S receives one put on `…/state/alarms/a659f813308ad1da`, stamped by the owner (core S1)",
-                        "A firing, unchanged, `timestamp` *t₀* kept, under the new instance's stamp id.")
+    out.append(("F-459: alarms.v1 scenarios §1 and §5, unchanged at 0.11, expected S's deliveries under the owner's "
+                "stamp id, which a freshness.v2 alarm's put does not carry (core §4.3's table, §2.14 step 5); "
+                "answered by alarms.v1 0.13: stamped in band",
+                missing(sc, "S receives one put on `…/state/alarms/a659f813308ad1da`, stamped in band by the owner "
+                            "(core S1)",
+                        "A firing, unchanged, `timestamp` *t₀* kept, under the new instance's run.")
                 + missing(core, "on its replies alone, never on a put")
                 + missing(al_, "Under `freshness.v2` an alarm's put carries none (core §4.3's table)"), []))
+    return out
+
+
+def _round98_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.88, freshness.v2 0.4, health.v1 0.9, alarms.v1 0.12 and
+    freshness.v1 experimental (#609, round 98; #978 F5 and F6): each text at
+    its version with its entry; the sentences zk2py now keeps; and what it
+    does, offline: :func:`zk2py.owner.keeps_timestamp` for what the guard
+    holds, :func:`zk2py.freshness_v2.owner_body` under the guard, and
+    :func:`zk2py.health.heard_from` over heartbeats read through
+    :meth:`zk2py.freshness.Subscriber.follow` on a fake session."""
+    import re
+
+    from . import freshness as fr, freshness_v2 as fv2, health as h, heartbeat, zk2c
+    from .contract import load_contract
+    from .owner import keeps_timestamp
+
+    spec = root.parent
+    repo = spec.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def kept(text: str, *quotes: str) -> list[str]:
+        return [f"still: {q}" for q in quotes if q in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, v2, he, al_ = flat("core.md"), flat("profiles/freshness/v2.md"), flat("profiles/health/v1.md"), \
+        flat("profiles/alarms/v1.md")
+    v1, idx, st = flat("profiles/freshness/v1.md"), flat("profiles/README.md"), flat("scenarios/state.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.88 or later, freshness.v2 0.4, health.v1 0.9 and alarms.v1 0.12, each with its entry, and "
+         "freshness.v1 experimental (#978 F5, F6)",
+         [core_v >= (0, 88)] + entry("CHANGELOG.md", "0.88", "Zenoh timestamp")
+         + entry("profiles/freshness/CHANGELOG.md", "`v2.md` 0.4", "clock ahead")
+         + entry("profiles/freshness/CHANGELOG.md", "`v1.md` experimental", "no user left")
+         + entry("profiles/health/CHANGELOG.md", "0.9", "clock ahead")
+         + entry("profiles/alarms/CHANGELOG.md", "0.12", "clock ahead")
+         + missing(v1, "| **Status** | experimental |")
+         + missing(idx, "| [`freshness.v1`](freshness/v1.md) | 0.5 | experimental | none |"),
+         [True]),
+    ]
+    # core §4.3 "Ahead" (0.88): what the guard holds is a write that carries a Zenoh timestamp.
+    ground = load_contract(repo / "impl" / "python" / "interop" / "state" / "zk2py_ground.v1.toml")
+    by = {r["template"]: r for r in ground.canonical["resources"]}
+    hc = load_contract(spec / "profiles" / "health" / "health.v1.toml")
+    hby = {r["template"]: r for r in hc.canonical["resources"]}
+    out.append(("core §4.3 \"Ahead\" (0.88): the guard holds the state writes that carry a Zenoh timestamp, and the "
+                "others go on; zk2py's reading: state.md §1's status (freshness.v1, ttl 60) is on the table, a plan "
+                "and health.v1 1.1's status (freshness.v2) are not",
+                missing(core, "When a detection shows it beyond the delta, the owner MUST stop the state writes that "
+                              "carry a Zenoh timestamp, re-puts included, and SHOULD report it.",
+                        "On a session with timestamping enabled (§8.2), every state write carries one.",
+                        "The owner's other state writes go on, and its events and streams.",
+                        "While the clock guard holds (\"Ahead\", below), the time is unknown.")
+                + kept(core, "the owner MUST stop writing state")
+                + missing(st, "`status`'s put and delete are refused: each would carry a Zenoh timestamp.")
+                + [keeps_timestamp(ground, by["status"]), keeps_timestamp(ground, by["plans/{vehicle}"]),
+                   keeps_timestamp(hc, hby["status"])],
+                [True, False, False]))
+    # freshness.v2 §2.10 (0.4): the bits as at any other time, the time all ones.
+    beacon = load_contract(repo / "impl" / "python" / "interop" / "freshness" / "beacon.v2.toml")
+    blo = heartbeat.layout_of(beacon.canonical, beacon.fingerprint)
+    sk = "zk2/lab/beacon/beacon.v2/state/status"
+    body = fv2.owner_body(blo, {"state/status"}, {sk: fv2.OwnerView(sk, zk2c.InBand(16, 1, 0))}, None)
+    out.append(("freshness.v2 §2.10 (0.4): while the guard holds, the heartbeats vouch as at any other time, their "
+                "time all ones; zk2py's owner body, the same",
+                missing(v2, "An owner MUST write all ones as its heartbeat's time while its guard holds.",
+                        "**When the guard releases,** the next heartbeat's time is known again.")
+                + kept(v2, "an owner MUST NOT vouch for any member")
+                + [body["time"], body["sections"]["state/status"]["vouched"],
+                   heartbeat.read(blo, heartbeat.write(blo, body))["time"]],
+                [None, True, None]))
+
+    # health.v1 §2.5 and §5 (0.9): the clock question over the heartbeats' time, through a subscriber.
+    class Fake:
+        def declare_subscriber(self, *a: Any, **k: Any) -> Any:
+            return None
+
+    class Smp:
+        def __init__(self, payload: bytes) -> None:
+            self.payload = type("P", (), {"to_bytes": lambda _s, b=payload: b})()
+
+    hlo = heartbeat.layout_of(hc.canonical, hc.fingerprint)
+    sub = fr.Subscriber(Fake(), "zk2/lab/svc/health.v1/**")
+    sub.follow("lab/svc", hc.canonical, hc.fingerprint)
+    empty = f"{heartbeat.digest([]):08x}"
+
+    def beat(seq: int, known: bool) -> None:
+        b = heartbeat.write(hlo, {"time": {"s": 100 + seq, "ms": 0} if known else None,
+                                  "sections": {"state/status": {"digest": empty, "vouched": False}}})
+        sub._beat(("lab/svc", "health.v1"), Smp(zk2c.heartbeat(zk2c.InBand(16, 1, seq), b, hlo.tag)))
+
+    beat(0, True)
+    first = h.heard_from(sub, "lab/svc")
+    beat(1, False)
+    held = h.heard_from(sub, "lab/svc")
+    beat(2, True)
+    out.append(("health.v1 §2.5 (0.9): the clock question reads the time of each heartbeat covering health.v1 read in "
+                "step, never the status; zk2py's subscriber: a heartbeat whose time is known, then all ones, then "
+                "known again",
+                missing(he, "§5's clock question reads the faults and the time of each heartbeat covering "
+                            "`health.v1`, never the status.",
+                        "While the guard holds, the owner SHOULD publish it again at least once per period of its "
+                        "heartbeat covering `health.v1` (`freshness.v2` §2.4), 30 s at most.")
+                + kept(he, "The status goes stale, by design.")
+                + missing(al_, "A clock ahead is no cause: the guard holds no alarm")
+                + [first, h.clock_question("present", {"lists": True}, first),
+                   held, h.clock_question("present", {"lists": True}, held),
+                   h.clock_question("present", {"lists": True}, h.heard_from(sub, "lab/svc")),
+                   h.HealthOwner.fault_period(type("O", (), {"fault_period_s": None,
+                                                              "owner": type("W", (), {"hb_layouts": {"health.v1": hlo}})()})())],
+                [["heartbeat"], ("no", "confirmed"), ["heartbeat", "heartbeat_held"], ("unobservable", "time_unknown"),
+                 ("no", "confirmed"), 28.5]))
+    return out + _round98_t2_readings(root) + _round98_mend_readings(root) + _round98_answers(root)
+
+
+def _round98_answers(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.89, observer 0.22, link.v1 0.14 and alarms.v1 0.13: round 97's
+    F-455 to F-460 answered (main f42e9742, round 98). Each answer's text,
+    and its entry; zk2py's readings of each are the families' (link's
+    plan.json, contracts' w108-frame-horizon, examples' published reviews,
+    the frame family) and the readings above."""
+    import re
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, obs, l1 = flat("core.md"), flat("observer.md"), flat("profiles/link/v1.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    return [
+        ("core 0.89 or later, observer 0.22, link.v1 0.14 and alarms.v1 0.13, each with its entry (round 97 "
+         "answered)",
+         [core_v >= (0, 89)] + entry("CHANGELOG.md", "0.89", "round 97")
+         + entry("observer-CHANGELOG.md", "0.22", "GET answers a frame")
+         + entry("profiles/link/CHANGELOG.md", "0.14", "round 97")
+         + entry("profiles/alarms/CHANGELOG.md", "0.13", "in band"), [True]),
+        ("F-455 answered (link.v1 0.14 §2.9): freshness.v2 a listed interface of each service implementing an "
+         "interface with a heartbeat, named or not; zk2py's reading since round 97, unchanged",
+         missing(l1, "An interface with a heartbeat makes `freshness.v2` a listed interface of each service that "
+                     "implements it (`freshness.v2` §3). That holds where the deployment does not name it."), []),
+        ("F-456 answered (core 0.89 §9.7): a published revision was accepted; zk2py's examples family accepts the "
+         "review of a revision whose own bundle is in the root, and still refuses a breaking change",
+         missing(core, "A revision in the history root passed §9.8's review when it was published.",
+                 "So a check of it against the root does not refuse it for a review.",
+                 "It still refuses a breaking change, which §9.8 forbids publishing."), []),
+        ("F-457 answered (core 0.89 §7.7): the interval is the period of a declaration timing.v1 §2.2 reads "
+         "valid; zk2py read it so in round 97",
+         missing(core, "Otherwise it is the `timing.period_ms` of a declaration that "
+                       "[`timing.v1`](profiles/timing/v1.md) §2.2 reads valid (§2.3)."), []),
+        ("F-460 answered (core 0.89 S2): a deleted member's reply_del carries the timestamp minted at its delete; "
+         "zk2py's owner did so since round 97 (Owner.delete_state's confirm)",
+         missing(core, "A key of such a state deleted within the window is a member too. Its `reply_del` carries "
+                       "the timestamp minted at the delete."), []),
+    ]
+
+
+def _round98_t2_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """telemetry.v2 0.1 (#983; #609, round 98), offline: its text at its
+    version; W105 under its vocabulary; §2.16's linter warning; the owner's
+    meter (§2.19, §2.20); and zk2py's R surviving a put it cannot read."""
+    from . import frame, packed, telemetry_v2 as t2, zk2c
+    from .contract import load_contract
+    from .telemetry_v2_live import SeriesSubscriber
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    v2 = flat("profiles/telemetry/v2.md")
+    mf = spec / "profiles" / "telemetry" / "conformance" / "contracts" / "meterframe.v1.toml"
+    text = mf.read_text(encoding="utf-8")
+    as_v1 = load_contract(mf.parent / "zk2py-meterframe-v1.toml",
+                          text=text.replace('uses  = ["telemetry.v2", "link.v1"]', 'uses  = ["telemetry.v1", "link.v1"]'))
+    bad = load_contract(mf.parent / "zk2py-meterframe-bad.toml",
+                        text=text.replace('rx = { kind = "counter", unit = "By" }', 'rx = { kind = "gauge", unit = "By" }'))
+    out: list[tuple[str, Any, Any]] = [
+        ("telemetry.v2 0.1 with its entry, experimental, written against core 0.87",
+         missing(v2, "| **Text version** | 0.1", "| **Status** | experimental |", "core 0.87")
+         + missing(flat("profiles/telemetry/CHANGELOG.md"), "## telemetry.v2 0.1"), []),
+        ("telemetry.v2 §1, §4: W105 reads its table, series beside v1's four keys; the same contract under "
+         "telemetry.v1 draws W105 for each telemetry.series (v1 §4's four keys), and v1 reads no frame resource as "
+         "a metric resource",
+         missing(v2, "W105 reads this table for a contract that uses `telemetry.v2`.")
+         + [load_contract(mf).codes, as_v1.codes,
+            [t2.contract_declarations(as_v1)[t].declaration for t in ("frames/link", "frames/bytes")]],
+         [[], ["W105", "W105", "W105"], ["not_this_profiles", "not_this_profiles"]]),
+        ("telemetry.v2 §2.16: \"A contract linter SHOULD warn of one\": zk2py's warning names the resource and its "
+         "entry's reason, no core code",
+         missing(v2, "A contract linter SHOULD warn of one.")
+         + [bad.codes, t2.lint(bad), t2.lint(load_contract(mf))],
+         [[], ["frames/bytes: telemetry.series is invalid (telemetry.v2 §2.16): rx not_a_carrier"], []]),
+    ]
+    # §2.19, §2.20: the meter.
+    decl = t2.contract_declarations(load_contract(mf))["frames/totals"]
+    bdecl = t2.contract_declarations(load_contract(mf))["frames/bytes"]
+    m, got = t2.Meter(decl), []
+    for run, v in (((16, 1), 100), ((16, 1), 140), ((16, 1), 90), ((16, 2), 3), ((16, 2), 9)):
+        try:
+            m.check(run, {"frames_total": v})
+            m.accept(run, {"frames_total": v})
+            got.append(v)
+        except t2.Decreased as e:
+            got.append(f"refused {e.before}->{e.after}")
+    mb = t2.Meter(bdecl)
+    for v in (16_777_000, 16_777_316, 25_777_316):
+        mb.check((16, 1), {"rx": v})
+        mb.accept((16, 1), {"rx": v})
+    rx = next(f for f in frame.layout_of(load_contract(mf), next(
+        r for r in load_contract(mf).canonical["resources"] if r["template"] == "frames/bytes")).fields)
+    out.append(("telemetry.v2 §2.19, §2.20: zk2py's owner refuses a count below one it wrote within the run, before "
+                "the reduction, takes the count again from 0 under a new run, writes each count modulo 2^w, and "
+                "names an increase past 2^(w-1) (the SHOULD)",
+                missing(v2, "Within one run, an owner MUST NOT write a counter field's count below one it wrote "
+                            "before on that key.",
+                        "An owner SHOULD declare each counter field wide enough that its increase between two "
+                        "samples of its series stays below 2^(w−1).")
+                + [got, [packed.encode(rx, v, None) for v in (16_777_000, 16_777_316, 25_777_316)], len(mb.warnings)],
+                [[100, 140, "refused 140->90", 3, 9], [16_777_000, 100, 9_000_100], 1]))
+
+    # zk2py's R: a put that raises inside the callback is recorded, never lost.
+    class Fake:
+        def declare_subscriber(self, *a: Any, **k: Any) -> Any:
+            return None
+
+    class Smp:
+        key_expr = "zk2/lab/meterframe/meterframe.v1/stream/frames/link"
+        encoding = zk2c.ENCODING
+        kind = __import__("zenoh").SampleKind.PUT
+
+        @property
+        def payload(self) -> Any:
+            raise RuntimeError("a payload that cannot be read")
+
+    sub = SeriesSubscriber(Fake(), "lab/meterframe", load_contract(mf))
+    sub._heard(Smp())
+    out.append(("zk2py's R (round 98): a put whose reading raises inside zenoh's callback is recorded undecodable, "
+                "named", sub.undecodable(), ["RuntimeError: a payload that cannot be read"]))
+    return out
+
+
+def _round98_mend_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Review-bot's notes on round 97 (PR #1037), round 98's mend:
+    :class:`zk2py.frame_live.FrameSubscriber` records a put it cannot read;
+    a ``within`` field's ``since`` across full records cannot drift from the
+    owner's count (:class:`zk2py.frame.Reader` beside
+    :class:`zk2py.frame.Framer`, every frame written and read back)."""
+    from . import frame, packed, zk2c
+    from .contract import load_contract
+    from .frame_live import FrameSubscriber
+
+    spec = root.parent
+    out: list[tuple[str, Any, Any]] = []
+    lf = load_contract(spec.parent / "impl" / "python" / "interop" / "frames" / "linkframes.v1.toml")
+
+    class Fake:
+        def declare_subscriber(self, *a: Any, **k: Any) -> Any:
+            return None
+
+    class Smp:
+        key_expr = "zk2/lab/modem/linkframes.v1/stream/frames/link"
+        encoding = zk2c.ENCODING
+        kind = __import__("zenoh").SampleKind.PUT
+
+        @property
+        def payload(self) -> Any:
+            raise ValueError("unreadable")
+
+    fs = FrameSubscriber(Fake(), ["lab/modem"], lf)
+    fs._heard(Smp())
+    out.append(("frame_live (review of round 97): a put whose reading raises inside the callback is recorded "
+                "{undecodable: why}, never lost", [g for _, _, g in fs.heard],
+                [{"undecodable": "ValueError: unreadable", "envelope": None}]))
+    # since across full records: keyframe_every 4, a deadband of max_records 3.
+    doc = _load_json(spec / "profiles" / "telemetry" / "conformance" / "contracts" / "meterframe.json")
+    lo = frame.Layout(packed.lint(doc).types["Totals"], frame.declaration(
+        {"keyframe_every": 4, "deadband": {"temperature": {"delta": "1", "max_records": 3}}}))
+    fw, rd = frame.Framer(lo), frame.Reader(lo)
+    temps = ["20", "20.5", "20.5", "20", "20.5", "21", "20.5", "20", "20", "20.5", "21", "20.5", "20"]
+    rows = []
+    for i, t in enumerate(temps):
+        for ready in fw.record({"frames_total": i, "temperature": t}, i * 10**9, {"s": 100 + i, "ms": 0}):
+            val = fw.seal(ready, (16, 1))
+            back = lo.read(lo.tag, lo.write(val))
+            got = rd.read("0001", i, back)
+            st = rd.fields["temperature"]
+            rows.append((val["records"][0]["full"], "temperature" in val["records"][0]["values"],
+                         got["records"][0]["fields"]["temperature"]["state"], st.since,
+                         fw.included["temperature"][1]))
+    # A full record's value that leaves a field out of both values and absent:
+    # the field reads absent (a full record writes every field), its since 0.
+    rd2 = frame.Reader(lo)
+    rd2.read("0001", 0, {"time": None, "records": [{"full": True, "values": {"frames_total": 1, "temperature": "20"},
+                                                    "absent": []}]})
+    rd2.read("0001", 1, {"time": None, "records": [{"full": False, "values": {"frames_total": 2}, "absent": []}]})
+    within_since = rd2.fields["temperature"].since
+    rd2.read("0001", 2, {"time": None, "records": [{"full": True, "values": {"frames_total": 3}, "absent": []}]})
+    out.append(("frame.Reader (review of round 97): a within field's since resets at every full record and at "
+                "every inclusion, as the owner's count does, so it cannot drift: the reader's since is the owner's "
+                "at every record, never unknown (deadband) while the owner keeps the rule; a full record leaving a "
+                "field out reads it absent, its since 0",
+                [all(r[3] == r[4] for r in rows), [r[2] for r in rows if r[0]] == ["known"] * sum(r[0] for r in rows),
+                 any(r[2] == "unknown" for r in rows), within_since,
+                 (rd2.fields["temperature"].state, rd2.fields["temperature"].since)],
+                [True, True, False, 1, ("absent", 0)]))
     return out
 
 
@@ -3948,22 +4377,26 @@ def _round96_readings(root: Path) -> list[tuple[str, Any, Any]]:
                        "a heartbeat vouched for the member since its last mutation.",
                  "on its replies alone, never on a put: the later of the timestamps the owner minted at its last "
                  "mutation and at the last heartbeat that vouched for it",
-                 "An owner mints one at each mutation of such a member, though its put carries none. It mints one "
-                 "as it writes each heartbeat (§7.5). That heartbeat's time is the timestamp's instant, to the "
-                 "millisecond")
+                 # core 0.89 (F-460's answer, round 98): "a delete among them"
+                 "An owner mints one at each mutation of such a member, a delete among them, though the mutation "
+                 "carries none. It mints one as it writes each heartbeat (§7.5). That heartbeat's time is the "
+                 "timestamp's instant, to the millisecond")
          + kept(core, "The owner's reply of a member a `freshness.v2` heartbeat confirms MUST carry instead")
          + [keeps_timestamp(beacon, next(r for r in beacon.canonical["resources"] if r["template"] == "status")),
             keeps_timestamp(old, next(r for r in old.canonical["resources"] if r["template"] == "status"))],
          [False, True]),
-        ("F-447 answered (freshness.v2 0.2): every vouched bit clear, the map, the live counts and the digests "
-         "kept; zk2py's reading, the same",
-         missing(v2, "Its heartbeats go on, every vouched bit clear, so its liveness still crosses. Each keeps its "
-                     "map, its live counts and its digests as the owner holds them.")
-         + kept(v2, "Its heartbeats go on, every bit clear, so its liveness still crosses.")
+        # F-447's answer (0.2) stood until freshness.v2 0.4 rewrote §2.10 (core 0.88, #978 F6, round 98): the
+        # heartbeats now vouch as at any other time, their time all ones while the guard holds.
+        ("F-447 answered (freshness.v2 0.2), and §2.10 rewritten by 0.4: the heartbeats go on vouching, the map, "
+         "the live counts and the digests as the owner holds them, the time unknown; zk2py's reading, the same",
+         missing(v2, "**The heartbeats go on,** as at any other time: each sets a member's bit while the owner "
+                     "vouches for it (§2.4).",
+                 "An owner MUST write all ones as its heartbeat's time while its guard holds.")
+         + kept(v2, "Its heartbeats go on, every vouched bit clear, so its liveness still crosses.")
          + [freshness_v2.owner_body(lo, {"state/status"}, {
              "zk2/lab/beacon/beacon.v2/state/status": freshness_v2.OwnerView(
-                 "zk2/lab/beacon/beacon.v2/state/status", zk2c.InBand(16, 1, 0))}, None, vouch=False)],
-         [{"time": None, "sections": {"state/status": {"digest": f"{heartbeat.digest([('zk2/lab/beacon/beacon.v2/state/status', 16, 1, 0)]):08x}", "vouched": False}}}]),
+                 "zk2/lab/beacon/beacon.v2/state/status", zk2c.InBand(16, 1, 0))}, None)],
+         [{"time": None, "sections": {"state/status": {"digest": f"{heartbeat.digest([('zk2/lab/beacon/beacon.v2/state/status', 16, 1, 0)]):08x}", "vouched": True}}}]),
     ]
     # F-448: only a read heartbeat counts (apply.json's new case).
     view = freshness_v2.View(lo, ["state/status"])
@@ -5806,7 +6239,8 @@ def _round88_readings(root: Path) -> list[tuple[str, Any, Any]]:
 
     # §12's contracts, written from its setup: no finding at all, and the
     # reference CLI's fingerprints (zk2 contract lint, round 88).
-    fps = {"configs.v1.toml": "sha256:daee2c9d7434152c15adef1c3fae78dbf5697c8db28e1e39fb0aa9f4e17166eb",
+    # configs.v1 1.1 (round 98, #978 F5): onto freshness.v2, as the reference's copy moved
+    fps = {"configs.v1.toml": "sha256:3abc840f982b862796d47fb0996c503970e1d80580f6e75cdfead4296d2519cf",
            "zk2py_configured.v1.toml": "sha256:89872483fa68bcd829b1e814d120dd799ef6a7b0145561d6e814b0cda0e87890"}
     here = Path(__file__).resolve().parents[1] / "interop" / "desired"
     got = {}
@@ -6012,8 +6446,9 @@ def _round89_readings(root: Path) -> list[tuple[str, Any, Any]]:
         ("The owner's descriptor MUST NOT raise it.", "contract's. It MUST NOT raise it."),
         ("**Size.** An owner's descriptor SHOULD stay within 1 KB.", "**Size.** A descriptor SHOULD"),
         ("- The owner SHOULD detect drift against a reference", "- It SHOULD detect drift"),
-        ("When a detection shows it beyond the delta, the owner MUST stop writing state",
-         "the delta, it MUST stop"),
+        # core 0.88 (round 98, #978 F6): the guard narrowed to the writes that carry a Zenoh timestamp
+        ("When a detection shows it beyond the delta, the owner MUST stop the state writes that carry a Zenoh "
+         "timestamp", "the delta, it MUST stop"),
         ("**An archive's backend MUST NOT accept a put older than a delete it holds.**", "**Its backend MUST NOT"),
         ("A request type SHOULD NOT repeat a template parameter (W102).", "repeat a template parameter. `"),
         ("**The `Encoding` of the owner's reply** MUST say which:", "**The reply's `Encoding`**"),

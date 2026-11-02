@@ -325,7 +325,7 @@ class Wire:
             if r is not None and r.form == "frame":
                 try:
                     row["value"] = lo.read(r.tag, r.record or b"")
-                except (frame.Refused, Exception) as e:  # noqa: BLE001 - named
+                except Exception as e:  # noqa: BLE001 - named
                     row["refused"] = str(e)
             out.append(row)
         return out

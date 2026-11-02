@@ -86,8 +86,10 @@ PROFILES = {
                 "its scenarios' §1, a router over a relay counting keep-alives, is not run"),
     "alarms.v1": ("owner, tool (the reader and §5)", ""),
     "telemetry.v1": ("owner, tool (§5's reader)", ""),
-    "telemetry.v2": ("none yet", "text 0.1 (#983 T1) is present on main and not read by round 97: #983's own round "
-                                 "reads it after its owner chunk lands"),
+    "telemetry.v2": ("owner (frames metered: §2.19's refusal, §2.20's reduction, a new run at a restart), "
+                     "tool (R: §2.16's declaration, §2.18's readings, §2.19 to §2.21's pairs, §5)",
+                     "zk2py's echo tool shows a frame's field states and no series; no histogram field (none at "
+                     "0.1)"),
     "desired.v1": ("owner (author), consumer (target), tool (§2.17)",
                    "no archive's last-known, so §2.9's store-and-forward is not run"),
     "redundancy.v1": ("owner (a candidate), consumer (the follower), tool (§5)", ""),
@@ -202,8 +204,12 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "owner.Owner's heartbeat and clock guard (freshness_scenarios §2, health_scenarios §4)"),
     ("owner", "core §4.3", "The owner SHOULD detect drift against a reference", MET,
      "owner.Owner._beat, a router-stamped heartbeat key (freshness_scenarios §2)"),
-    ("owner", "core §4.3", "When a detection shows it beyond the delta", MET,
-     "owner.ClockAhead stops every state write, re-puts included, and Owner.events reports it (freshness_scenarios §2, health_scenarios §4)"),
+    # core 0.88 (#978 F6, round 98): the guard holds only the state writes that carry a Zenoh timestamp.
+    ("owner", "core §4.3", "When a detection shows it beyond the delta, the owner MUST stop the state writes that carry a Zenoh timestamp", MET,
+     "owner.Owner._stamped: ClockAhead refuses a put or a delete of a key on §4.3's table, or of any key on a session "
+     "that stamps, re-puts included, and every other state write goes on; Owner.events and health.v1's clock_ahead "
+     "report it (state_pairings §7 step 6, freshness_scenarios §2, freshness_v2_scenarios §2 step 4, "
+     "health_scenarios §4) (round 98, core 0.88)"),
     ("owner", "core §4.4", "An archive's backend MUST NOT accept a put", NA,
      "zk2py runs no archive"),
     ("owner", "core §4.4", "When an owner becomes reachable again, the archive", NA,

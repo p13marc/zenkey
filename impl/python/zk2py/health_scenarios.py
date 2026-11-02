@@ -18,7 +18,8 @@ in-process zenoh-python routers: ``python -m zk2py.health_scenarios
   and 200 s (§8's two runs side by side). §4's [moved clock] tier waits
   seconds.
 - **A clock ahead** (§4) is the owner's ``clock``, offset 2 s, in both of
-  0.2's tiers. Without root (``--only 4``), on a session whose HLC runs: the
+  0.2's tiers. ``--only 4r`` (round 98, opt-in) runs §4's steps 1 to 3
+  against the owner example, a black box, S zk2py's. Without root (``--only 4``), on a session whose HLC runs: the
   fault's stamp is not checked. [moved clock] (``--only 4m``): an owner
   client whose session has no HLC (``hlc=False``), stamping its puts and its
   faults from the offset clock, so they reach R1 dated ahead, and step 4
@@ -501,26 +502,43 @@ def section4(report: Report) -> None:
                           "FAILED, its detail naming the offset",
                      len(first) >= 1 and first[0][1]["level"] == h.FAILED and "2." in first[0][1]["detail"],
                      str([f for _, f in faults]))
+        # 0.9 (#978 F6): "The owner then puts status OK with the reason
+        # "ahead"": the guard holds no status, which carries no Zenoh
+        # timestamp (core §4.3, 0.88).
+        put_ok = "ok"
+        try:
+            o.set_status(h.OK, "ahead")
+        except Exception as e:  # noqa: BLE001 - named
+            put_ok = f"{type(e).__name__}: {e}"
+        t_put = time.monotonic_ns()
         # Without root (0.2), "the fault's stamp is the owner's honest one,
         # set or re-stamped by its own session (v1.md §2.5), and is not
         # checked": S judges nothing by it.
         _sleep_until(t_det + 65 * fr.NS)
         puts_after = _puts([r for r in s.of(sk) if r.kind == "put" and r.arrival_ns > t_det])
+        ahead_put = [r for r in puts_after if (_status(r.payload) or {}).get("reason") == "ahead"]
         ahead_faults = [r for r, f in ((r, h.decode_fault(r.payload)) for r in s.of(fk)) if f and f["code"] == "clock_ahead"]
         gap = (ahead_faults[1].arrival_ns - ahead_faults[0].arrival_ns) / fr.NS if len(ahead_faults) > 1 else None
         pres = live.list_presence(bus.t_session, "zk2/lab/ahead/@zk/**")
         r, _ = bus.read("lab/ahead", s, get=False)
         a = h.judge(r)
-        last_fault = ahead_faults[-1].arrival_ns if ahead_faults else None
-        confirmations = [x.arrival_ns for x in s.of(sk) if x.kind == "put"]
         q = h.clock_from(s, "lab/ahead")
-        report.check(sec, "step 2: no status put from the detection on; the fault again within 31 s; the tokens "
-                          "stay present; at 65 s S judges the status stale, never FAILED, and the clock question "
-                          "answers yes",
-                     not puts_after and gap is not None and gap <= 31 and len(pres.instances) == 1
-                     and a.verdict == "stale" and a.level is None and q == "yes",
-                     f"{len(puts_after)} status puts after, fault gap {gap if gap is None else round(gap, 2)} s, "
-                     f"tokens {len(pres.instances)}+{len(pres.alive)}, {_answer(a)}, clock ahead: {q}")
+        # every heartbeat from the detection on (one already on its way excepted)
+        held_beats = _beats(s, "lab/ahead", t_det + 200_000_000)
+        all_held = bool(held_beats) and all(b.get("time") is None and _vouches(b, sk) for _, b in held_beats)
+        report.check(sec, "step 2: the guard does not hold the status: the owner's put succeeds, and S receives it; "
+                          "the fault again within 31 s; the tokens stay present",
+                     put_ok == "ok" and len(ahead_put) == 1 and gap is not None and gap <= 31
+                     and len(pres.instances) == 1,
+                     f"put {put_ok}, {len(ahead_put)} 'ahead' put(s) received of {len(puts_after)} after the "
+                     f"detection, fault gap {gap if gap is None else round(gap, 2)} s, tokens "
+                     f"{len(pres.instances)}+{len(pres.alive)}")
+        report.check(sec, "step 2: every heartbeat from the detection on vouches for the status, its time unknown, "
+                          "all ones (freshness.v2 §2.10); at 65 s S judges healthy, ok; the faults and the heartbeats "
+                          "answer \"is its clock ahead?\" yes",
+                     all_held and a.expect() == {"verdict": "healthy", "reason": "ok", "level": "ok"} and q == "yes",
+                     f"{len(held_beats)} heartbeats, each held and vouching {all_held}; {_answer(a)}, clock ahead: {q}"
+                     f" ({h.heard_from(s, 'lab/ahead')[-4:]})")
         # Step 3.
         off.ns = 0
         t_fix = time.monotonic_ns()
@@ -529,25 +547,122 @@ def section4(report: Report) -> None:
             time.sleep(0.05)
         t_rel = time.monotonic_ns()
         _sleep_until(t_fix + 35 * fr.NS)
-        reput = _puts([x for x in s.of(sk) if x.kind == "put" and x.arrival_ns > t_fix])
+        reput = _puts([x for x in s.of(sk) if x.kind == "put" and x.arrival_ns > t_put + fr.NS])
+        known = [t for t, b in _beats(s, "lab/ahead", t_fix) if b.get("time") is not None and _vouches(b, sk)]
+        first = (known[0] - t_fix) / fr.NS if known else None
         faults_after = [x for x, f in ((x, h.decode_fault(x.payload)) for x in s.of(fk))
-                        if f and f["code"] == "clock_ahead" and x.arrival_ns > t_rel]
+                        if f and f["code"] == "clock_ahead" and known and x.arrival_ns > known[0]]
         r, _ = bus.read("lab/ahead", s, get=False)
         a = h.judge(r)
         q = h.clock_from(s, "lab/ahead")
-        vouch = [t for t, b in _beats(s, "lab/ahead", t_fix) if _vouches(b, sk)]
-        first = (vouch[0] - t_fix) / fr.NS if vouch else None
-        report.check(sec, "step 3: the clock set right, the guard releases; within 30 s S receives a heartbeat that "
-                          "vouches for the status again (freshness.v2 §2.10), no put of the status, and no "
-                          "clock_ahead fault after; S judges healthy, ok, and the clock question answers no",
+        report.check(sec, "step 3: the clock set right, the guard releases; within 30 s S receives a heartbeat whose "
+                          "time is known again (freshness.v2 §2.10), no put of the status after step 2's, and no "
+                          "clock_ahead fault after that heartbeat; S judges healthy, ok, and the clock question "
+                          "answers no",
                      not o.owner.ahead and first is not None and first <= 30 + JITTER_S and not reput
                      and not faults_after and a.expect() == {"verdict": "healthy", "reason": "ok", "level": "ok"}
                      and q == "no",
-                     f"vouched {first if first is None else round(first, 2)} s after the correction, {len(reput)} "
-                     f"puts, {len(faults_after)} faults after, {_answer(a)}, clock ahead: {q}; events "
-                     f"{o.owner.events}")
+                     f"a known time {first if first is None else round(first, 2)} s after the correction "
+                     f"(released at {round((t_rel - t_fix) / fr.NS, 2)} s), {len(reput)} puts, {len(faults_after)} "
+                     f"faults after, {_answer(a)}, clock ahead: {q}; events {o.owner.events}")
     finally:
         stop_beat.set()
+        bus.close()
+
+
+def section4r(report: Report) -> None:
+    """§4 steps 1 to 3 against the owner example, a black box (round 98, core
+    0.88): ``--health --clock-reference <key> --clock-offset-ms 2000``, its
+    ``status`` and ``clock-offset`` commands, S zk2py's subscriber following
+    its heartbeats. The detection is the first ``clock_ahead`` fault S
+    hears (its report, core §4.3)."""
+    from . import live
+    from .live_interop import Owner as Exe
+
+    sec = "§4 clock ahead (the owner example)"
+    exe = Path(os.environ.get("ZK2PY_BLACKBOX", "/srv/dev/scratch/zenkey/bin/current")) / "owner"
+    if not exe.is_file():
+        report.check(sec, "the section ran", False, f"{exe} not found")
+        return
+    bus = Bus()
+    beat = "zk2py/health/heartbeat"
+    stop_beat = threading.Event()
+    p = None
+    try:
+        s = bus.subscriber("lab/ahead")
+        p = Exe(exe, "lab/ahead", [], connect=bus.endpoint,
+                flags=["--health", "--health-status", "OK:serving", "--clock-reference", beat,
+                       "--clock-offset-ms", "2000"])
+        if p.wait_for("ready ", 120) is None:
+            report.check(sec, "the section ran", False, f"the owner example did not start: {p.stderr[-3:]}")
+            return
+        time.sleep(0.5)
+        sk, fk = "zk2/lab/ahead/health.v1/state/status", "zk2/lab/ahead/health.v1/stream/faults"
+        report.check(sec, "step 1: S receives the status put before any heartbeat",
+                     any(r.kind == "put" for r in s.of(sk)), f"{len(s.of(sk))} deliveries")
+
+        def beats() -> None:
+            while not stop_beat.wait(0.3):
+                bus.g_session.put(beat, b"beat")
+
+        threading.Thread(target=beats, daemon=True).start()
+
+        def ahead_faults() -> list[fr.Received]:
+            return [r for r, f in ((r, h.decode_fault(r.payload)) for r in s.of(fk)) if f and f["code"] == "clock_ahead"]
+
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline and not ahead_faults():
+            time.sleep(0.05)
+        if not report.check(sec, "step 2: the owner reports itself ahead: S receives a faults sample, code "
+                                 "clock_ahead, level FAILED", bool(ahead_faults())
+                            and h.decode_fault(ahead_faults()[0].payload)["level"] == h.FAILED,
+                            f"{[h.decode_fault(r.payload) for r in s.of(fk)]}"):
+            return
+        t_det = ahead_faults()[0].arrival_ns
+        got = p.command("status OK ahead") or ""
+        t_put = time.monotonic_ns()
+        _sleep_until(t_det + 65 * fr.NS)
+        puts_after = _puts([r for r in s.of(sk) if r.kind == "put" and r.arrival_ns > t_det])
+        ahead_put = [r for r in puts_after if (_status(r.payload) or {}).get("reason") == "ahead"]
+        af = ahead_faults()
+        gap = (af[1].arrival_ns - af[0].arrival_ns) / fr.NS if len(af) > 1 else None
+        pres = live.list_presence(bus.t_session, "zk2/lab/ahead/@zk/**")
+        r, _ = bus.read("lab/ahead", s, get=False)
+        a = h.judge(r)
+        q = h.clock_from(s, "lab/ahead")
+        held_beats = _beats(s, "lab/ahead", t_det + 200_000_000)
+        all_held = bool(held_beats) and all(b.get("time") is None and _vouches(b, sk) for _, b in held_beats)
+        report.check(sec, "step 2: the guard does not hold the status: the owner's put succeeds, and S receives it; "
+                          "the fault again within 31 s; the tokens stay present",
+                     not got.startswith("refused") and len(ahead_put) == 1 and gap is not None and gap <= 31
+                     and len(pres.instances) == 1,
+                     f"put {got!r}, {len(ahead_put)} 'ahead' put(s) of {len(puts_after)} after the detection, fault "
+                     f"gap {gap if gap is None else round(gap, 2)} s, tokens {len(pres.instances)}+{len(pres.alive)}")
+        report.check(sec, "step 2: every heartbeat from the detection on vouches for the status, its time unknown, "
+                          "all ones; at 65 s S judges healthy, ok; the clock question answers yes",
+                     all_held and a.expect() == {"verdict": "healthy", "reason": "ok", "level": "ok"} and q == "yes",
+                     f"{len(held_beats)} heartbeats, each held and vouching {all_held}; {_answer(a)}, clock ahead: {q}")
+        t_fix = time.monotonic_ns()
+        fixed = p.command("clock-offset 0") or ""
+        _sleep_until(t_fix + 35 * fr.NS)
+        reput = _puts([x for x in s.of(sk) if x.kind == "put" and x.arrival_ns > t_put + fr.NS])
+        known = [t for t, b in _beats(s, "lab/ahead", t_fix) if b.get("time") is not None and _vouches(b, sk)]
+        first = (known[0] - t_fix) / fr.NS if known else None
+        faults_after = [x for x in ahead_faults() if known and x.arrival_ns > known[0]]
+        r, _ = bus.read("lab/ahead", s, get=False)
+        a = h.judge(r)
+        q = h.clock_from(s, "lab/ahead")
+        report.check(sec, "step 3: the clock set right; within 30 s S receives a heartbeat whose time is known again, "
+                          "no put of the status after step 2's, no clock_ahead fault after that heartbeat; S judges "
+                          "healthy, ok, and the clock question answers no",
+                     first is not None and first <= 30 + JITTER_S and not reput and not faults_after
+                     and a.expect() == {"verdict": "healthy", "reason": "ok", "level": "ok"} and q == "no",
+                     f"{fixed!r}; a known time {first if first is None else round(first, 2)} s after the correction, "
+                     f"{len(reput)} puts, {len(faults_after)} faults after, {_answer(a)}, clock ahead: {q}")
+    finally:
+        stop_beat.set()
+        if p is not None:
+            p.close()
         bus.close()
 
 
@@ -565,6 +680,10 @@ def section4m(report: Report) -> None:
         r1, ep, r1_zid = _r1(drop_future=drop)
         s_sess, g_sess = live.open_client(ep), live.open_client(ep)
         s = fr.Subscriber(s_sess, "zk2/lab/ahead/health.v1/**")
+        from .contract import load_contract
+
+        hc = load_contract(h.CONTRACT)
+        s.follow("lab/ahead", hc.canonical, hc.fingerprint)
         time.sleep(0.2)
         off = Offset(2 * fr.NS)
         o = h.HealthOwner("lab", "ahead", connect=ep, level=h.OK, reason="serving", heartbeat=beat, hlc=False,
@@ -585,12 +704,21 @@ def section4m(report: Report) -> None:
             while time.monotonic() < deadline and not o.owner.ahead:
                 time.sleep(0.05)
             t_det = time.monotonic_ns()
+            o.set_status(h.OK, "ahead")  # step 2 (0.9): not held
             time.sleep(1.0 if not drop else 3.0)
+            if drop:
+                # the next heartbeat covering health.v1, its time unknown: the
+                # heartbeat beats at 28.5 s in revision 1.1
+                deadline = time.monotonic() + 31
+                while time.monotonic() < deadline and not _beats(s, "lab/ahead", t_det + 200_000_000):
+                    time.sleep(0.2)
             faults = [(r, h.decode_fault(r.payload)) for r in s.of(o.key("stream/faults"))]
             st = live.get_state(g_sess, o.status_key)
             return dict(ahead=o.owner.ahead, status=got_status, faults=faults, t_det=t_det, r1=r1_zid,
                         owner=str(o.owner.session.zid()), get=st.replies,
-                        puts=[r for r in s.of(o.status_key) if r.kind == "put"])
+                        puts=[r for r in _puts(s.of(o.status_key)) if r.kind == "put"],
+                        clock=h.clock_question("present", {"lists": True}, h.heard_from(s, "lab/ahead")),
+                        heard=h.heard_from(s, "lab/ahead"))
         finally:
             stop.set()
             o.close()
@@ -611,15 +739,17 @@ def section4m(report: Report) -> None:
                  f"{a['faults'][0][0].stamp_id if a['faults'] else None}, R1 {a['r1']}, owner {a['owner']}")
     b = run(drop=True)
     gets = [(x.stamp_id, h.decode_status(x.payload)) for x in b["get"]]
-    report.check(sec, "step 4: under drop_future_timestamp, S receives no fault: R1 dropped it; the status put "
-                      "carries no Zenoh timestamp of the owner's (freshness.v2 §2.4), so R1 stamps it and S receives "
-                      "it; G's reply holds the status under the owner's stamp, since a router never drops or "
-                      "re-stamps a reply (core §4.1)",
-                 b["ahead"] and not b["faults"] and len(b["puts"]) == 1
-                 and _zid(b["puts"][0].stamp_id) == _zid(b["r1"]) and len(gets) == 1
-                 and _zid(gets[0][0]) == _zid(b["owner"]) and gets[0][1] is not None and gets[0][1]["level"] == h.OK,
+    report.check(sec, "step 4: under drop_future_timestamp, S receives no fault: R1 dropped it; the status puts "
+                      "carry no Zenoh timestamp of the owner's (freshness.v2 §2.4), so R1 stamps them and S receives "
+                      "them, step 2's after the detection included; G's reply holds the status under the owner's "
+                      "stamp, since a router never drops or re-stamps a reply (core §4.1); its readers have only "
+                      "the heartbeat's time unknown to go on, which answers no clock question alone (0.9)",
+                 b["ahead"] and not b["faults"] and len(b["puts"]) == 2
+                 and all(_zid(x.stamp_id) == _zid(b["r1"]) for x in b["puts"]) and len(gets) == 1
+                 and _zid(gets[0][0]) == _zid(b["owner"]) and gets[0][1] is not None and gets[0][1]["level"] == h.OK
+                 and b["clock"] == ("unobservable", "time_unknown"),
                  f"ahead {b['ahead']}, {len(b['faults'])} faults, {len(b['puts'])} status puts; GET {gets}; owner "
-                 f"{b['owner']}")
+                 f"{b['owner']}; clock question {b['clock']} over {b['heard'][-4:]}")
 
 
 # -- §5 ------------------------------------------------------------------------------
@@ -924,8 +1054,10 @@ def section8(report: Report, wait_s: float = 65.0) -> None:
         t.join()
 
 
-SECTIONS = {"1": section1, "2": section2, "3": section3, "4": section4, "4m": section4m, "5": section5,
+SECTIONS = {"1": section1, "2": section2, "3": section3, "4": section4, "4r": section4r, "4m": section4m, "5": section5,
             "6": section6, "7": section7, "8": section8}
+#: run only when asked by --only: §4 against the owner example, a black box
+OPT_IN = {"4r"}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -935,6 +1067,8 @@ def main(argv: list[str] | None = None) -> int:
     report = Report()
     for name, fn in SECTIONS.items():
         if args.only and name not in args.only:
+            continue
+        if not args.only and name in OPT_IN:
             continue
         try:
             fn(report)

@@ -18,8 +18,11 @@ Either way:
   memory and never published, as the reference's default run does
   (scenarios.md's conventions, 0.2). Their waits scale with it: §2's 455 s
   are ttl/2 + 5 s of margin … here three confirmation periods; §6's 905 s
-  are ttl + 1.5 s; §10's 905 s are ttl + 1 s. ``--full`` runs them at
-  900 s: §2 then takes about 8 minutes, and §6 and §10 about 15 each.
+  are ttl + 1.5 s; §10's 905 s are ttl + 1 s. The short copy is the
+  default path, and the full horizon is opt-in by ``--full`` alone, never
+  by a ``--ttl`` of 900 (review-bot on round 97): it runs them at 900 s,
+  §2's 905 s wait among them, §2 then taking about 15 minutes, and §6 and
+  §10 about 15 each.
 - **S** subscribes to ``zk2/lab/svc/alarms.v1/**`` and holds a liveliness
   subscriber on the owner's instance tokens before the owner starts, both
   on S's monotonic clock. "Reads" is :class:`zk2py.alarms.Transitions` over
@@ -470,7 +473,7 @@ def section1(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
 def section2(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
     ttl = ctx["ttl"]
     sec = f"§2 (ttl {ttl} s)"
-    contract = al.load(None if ttl == al.TTL_S else ttl)
+    contract = al.load(None if ctx["full"] else ttl)
     bus = Bus(mode)
     try:
         o = bus.owner(contract=contract)
@@ -504,7 +507,7 @@ def section2(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         # 0.11 (#978 F4): "The owner changes nothing for 905 s, and S judges"
         # (here ttl + 1 s on the short copy, as §6 scales its 905 s).
         period = ttl / 2
-        wait = 905.0 if ttl == al.TTL_S else ttl + 1.0
+        wait = 905.0 if ctx["full"] else ttl + 1.0
         mark = time.monotonic_ns()
         time.sleep(wait)
         puts = _puts(bus.deliveries(k, mark))
@@ -536,7 +539,7 @@ def section3(report: Report, mode: Any, ctx: dict[str, Any], reraise: bool = Fal
     sec = f"§4 (ttl {ttl} s)" if reraise else "§3"
     bus = Bus(mode)
     try:
-        o = bus.owner(contract=al.load(None if ttl == al.TTL_S else ttl))
+        o = bus.owner(contract=al.load(None if ttl == al.TTL_S or ctx["full"] else ttl))
         k = key(A)
         # Beyond scenarios.md, for 0.3's §2.14 step 5: a second reader R,
         # whose subscription hears A firing and closes before the resolve.
@@ -584,6 +587,13 @@ def section3(report: Report, mode: Any, ctx: dict[str, Any], reraise: bool = Fal
                          f"delete in-band {dele and dele.inband}")
             f1 = g.answers()[k][0] if k in g.readings else None
             report.check(sec, "2. G judges no, deleted", f1 is not None and _pair(f1) == "no, deleted", f1 and _pair(f1))
+            # 0.13 (core 0.89 S2, F-460's answer): "and its last confirmation,
+            # the timestamp the owner minted at the delete"
+            report.check(sec, "2. the reply_del carries its last confirmation, a Zenoh timestamp of the owner's "
+                              "minted at the delete (core 0.89 S2)",
+                         rg.stamp_id is not None and _zid_eq(rg.stamp_id, g.meta_zid) and rg.stamp_ns is not None
+                         and fired is not None and rg.stamp_ns // 1_000_000 >= fired.timestamp,
+                         f"reply_del stamp {rg.stamp}, meta.zid {g.meta_zid}")
             if ctx.get("quick"):
                 report.cannot(sec, "3. the 65 s wait for the tombstone window: skipped by --quick")
             else:
@@ -732,10 +742,11 @@ def section5(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
             if seen and not (k in rep_at and rep_at[k].deleted):
                 problems.append(f"no reply_del for {name}'s key")
             elif seen and not (rep_at[k].inband is not None and rep_at[k].inband.run_hex() == new_run
-                               and (rep_at[k].stamp_id is None or _zid_eq(rep_at[k].stamp_id, g.meta_zid))):
-                # 0.11 (F-459): "stamped by it" read in band, the delete's
-                # attachment under the new instance's run; a Zenoh timestamp,
-                # where one comes (zk2py's, F-460), the owner's
+                               and _zid_eq(rep_at[k].stamp_id, g.meta_zid)):
+                # 0.13 (F-459, F-460's answers): "stamped in band by it, each
+                # under the timestamp it minted at the delete": the delete's
+                # attachment under the new instance's run, and the owner's
+                # Zenoh timestamp (core 0.89 S2)
                 problems.append(f"{name}'s reply_del not stamped by the new instance: in-band {rep_at[k].inband} "
                                 f"(run {new_run}), Zenoh {rep_at[k].stamp_id}")
         report.check(sec, "3. before the new instance token appears (a SHOULD): a GET made the moment S sees it "
@@ -789,7 +800,7 @@ def section5(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
 def section6(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
     ttl = ctx["ttl"]
     sec = f"§6 (ttl {ttl} s)"
-    contract = al.load(None if ttl == al.TTL_S else ttl)
+    contract = al.load(None if ctx["full"] else ttl)
     h = al.horizon_of(contract)
     bus = Bus(mode)
     try:
@@ -800,7 +811,7 @@ def section6(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         o.stop_confirming(A)
         time.sleep(0.3)
         last = bus.s.of(k)[-1]
-        wait = 905.0 if ttl == al.TTL_S else ttl + 1.5
+        wait = 905.0 if ctx["full"] else ttl + 1.5
         while (time.monotonic_ns() - last.arrival_ns) / fr.NS < wait:
             time.sleep(0.2)
         after = [x for x in bus.s.of(k) if x.arrival_ns > last.arrival_ns]
@@ -1003,7 +1014,7 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
 
     ttl = ctx["ttl"]
     sec = f"§10 (ttl {ttl} s)"
-    contract = al.load(None if ttl == al.TTL_S else ttl)
+    contract = al.load(None if ctx["full"] else ttl)
     h = al.horizon_of(contract)
     bus = Bus(mode, selectors=["zk2/lab/none"])
     try:
@@ -1172,8 +1183,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--only", action="append", choices=sorted(SECTIONS, key=int), help="run only these sections")
     ap.add_argument("--owner", type=Path, default=os.environ.get("ZK2PY_OWNER") or None,
                     help="run against the Rust owner example at this path (--alarms)")
-    ap.add_argument("--ttl", type=int, default=4, help="the short-ttl copy's horizon for §2, §4, §6 and §10")
-    ap.add_argument("--full", action="store_true", help="run §2, §4, §6 and §10 at the contract's 900 s")
+    ap.add_argument("--ttl", type=int, default=4,
+                    help="the short-ttl copy's horizon for §2, §4, §6 and §10, below 900 s (the default path)")
+    ap.add_argument("--full", action="store_true",
+                    help="opt in: run §2, §4, §6 and §10 at the contract's 900 s, §2's 905 s wait included")
     ap.add_argument("--quick", action="store_true", help="skip §3 step 3's 65 s wait")
     args = ap.parse_args(argv)
     mode: Any = "zk2py"
@@ -1183,7 +1196,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {exe} not found", file=sys.stderr)
             return 2
         mode = exe
-    ctx = {"ttl": al.TTL_S if args.full else args.ttl, "quick": args.quick}
+    if not args.full and not 0 < args.ttl < al.TTL_S:
+        # review-bot on round 97 (PR #1037): the full horizon is opt-in by
+        # --full alone, never by a --ttl that happens to be the contract's.
+        print(f"error: --ttl {args.ttl}: the short copy's horizon is below {al.TTL_S} s; --full runs the "
+              "contract's own", file=sys.stderr)
+        return 2
+    ctx = {"ttl": al.TTL_S if args.full else args.ttl, "full": args.full, "quick": args.quick}
     report = Report()
     run(report, mode, args.only, ctx)
     passed = sum(1 for r in report.rows if r[2])

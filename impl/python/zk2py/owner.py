@@ -185,8 +185,9 @@ class BudgetExceeded(RuntimeError):
 
 
 class ClockAhead(RuntimeError):
-    """Core §4.3 "Ahead": a detection shows the owner's clock beyond its
-    router's delta, so it "MUST stop writing state, re-puts included"."""
+    """Core §4.3 "Ahead" (0.88): a detection shows the owner's clock beyond
+    its router's delta, so it "MUST stop the state writes that carry a Zenoh
+    timestamp, re-puts included". A write that carries none goes on."""
 
 
 def free_loopback_port() -> int:
@@ -476,9 +477,13 @@ class Owner:
         - ``heartbeat``: a router-stamped key the owner subscribes to as its
           clock reference (core §4.3 "Ahead"), with ``delta_s`` the
           router's HLC delta. While its clock reads beyond the delta ahead
-          of a heartbeat's stamp, it writes no state: :meth:`set_state`
-          raises :class:`ClockAhead`, and no re-put is made
-          (freshness.v1 §2.10).
+          of a heartbeat's stamp, it writes no state that carries a Zenoh
+          timestamp (core §4.3, 0.88): :meth:`set_state` and
+          :meth:`delete_state` raise :class:`ClockAhead` for a key on §4.3's
+          table, or for any key on a session that stamps, and no re-put is
+          made (freshness.v1 §2.10). Every other state write goes on, and a
+          ``freshness.v2`` heartbeat goes on vouching, its time all ones
+          (freshness.v2 §2.10, 0.4).
 
         - ``cardinality``: per interface, ``<kind token>/<template>`` -> the
           bound this instance states in its descriptor (§3.3), lowering the
@@ -609,7 +614,8 @@ class Owner:
         #: every re-put made, (key, stamp)
         self.reputs: list[tuple[str, zenoh.Timestamp]] = []
         self.heartbeat, self.delta_ns = heartbeat, int(delta_s * 1e9)
-        #: core §4.3 "Ahead": the guard holds every state write
+        #: core §4.3 "Ahead" (0.88): the guard holds the state writes that
+        #: carry a Zenoh timestamp (:meth:`_stamped`)
         self.ahead = False
         #: what the owner reports: the guard's transitions (core §4.3: it
         #: "SHOULD report it")
@@ -703,6 +709,12 @@ class Owner:
         self._framers: dict[str, Any] = {}
         self._frames_lost: set[str] = set()
         self._frames_lock = threading.RLock()
+        #: covered members whose write the clock guard held (F-461's reading)
+        self._guard_unvouched: set[str] = set()
+        #: telemetry.v2's meters (§2.19), by frame key: None where none applies
+        self._meters: dict[str, Any] = {}
+        #: the wall clock less the monotonic one, read at the first frame
+        self._wall_less_mono: int | None = None
         self.frames_put: list[tuple[str, dict[str, Any]]] = []
         #: False holds every heartbeat back: a test rig's owner that breaks
         #: §2.4's MUST on purpose
@@ -962,6 +974,13 @@ class Owner:
         if rec is None:
             raise OwnerRefused(f"{key}: its type is not packed")
         return rec.write(value, self.writing_epoch())
+
+    def _stamped(self, key: str) -> bool:
+        """Whether a state write of ``key`` carries a Zenoh timestamp (core
+        §4.3 "What it holds", 0.88): "where the table lists its resource",
+        and "On a session with timestamping enabled (§8.2), every state
+        write carries one"."""
+        return self.hlc or self._table(key)
 
     def _table(self, key: str) -> bool:
         """Whether ``key``'s resource carries a Zenoh timestamp the owner
@@ -1532,9 +1551,11 @@ class Owner:
         after :meth:`close_writer` is a new writer's."""
         with self._writes:
             self._refuse_standby_write(key)
-            if self.ahead:
-                raise ClockAhead(f"{key}: the clock guard holds state writes (core §4.3)")
             self._member_publisher(key)
+            if self.ahead and self._stamped(key):
+                self._unvouch_held(key)
+                raise ClockAhead(f"{key}: the clock guard holds the state writes that carry a Zenoh timestamp "
+                                 "(core §4.3)")
             held = self._held.get(key)
             if key in self._member_of and (held is None or held.payload is None):
                 # §2.7: a new live member. A key with a value is live.
@@ -1558,11 +1579,25 @@ class Owner:
                 # vouches for it later.
                 held.confirm = self.mint()
             self._held[key] = held
-            if key in self.closed_writers:
-                # a new writer's put: a writer closed had cleared its bit
+            if key in self.closed_writers or key in self._guard_unvouched:
+                # a new writer's put: a writer closed had cleared its bit; or
+                # the first put the guard lets through after holding one
                 self.unvouched.discard(key)
             self.closed_writers.discard(key)
+            self._guard_unvouched.discard(key)
             return stamp if stamp is not None else ib
+
+    def _unvouch_held(self, key: str) -> None:
+        """F-461's reading (round 98): a ``freshness.v2`` member whose write
+        the guard holds, on a session that stamps every write (a
+        ``redundancy.v1`` candidate's, core §8.2), holds a value it can no
+        longer keep current. Its bit is cleared until a put of it goes
+        through (``freshness.v2`` §2.4, "Only a value it holds current"),
+        so the heartbeat that goes on (§2.10) never vouches for the value
+        the application asked to replace."""
+        if self._covered(key) is not None and self._held.get(key) is not None:
+            self.unvouched.add(key)
+            self._guard_unvouched.add(key)
 
     def delete_state(self, key: str, elapsed_s: float = 0.0) -> Any:
         """Delete a state key, stamped (S1); answered with ``reply_del`` within
@@ -1573,9 +1608,11 @@ class Owner:
         (desired.v1 §2.11, 0.3, "not a window more")."""
         with self._writes:
             self._refuse_standby_write(key)
-            if self.ahead:
-                raise ClockAhead(f"{key}: the clock guard holds state writes (core §4.3)")
             self._member_publisher(key)
+            if self.ahead and self._stamped(key):
+                self._unvouch_held(key)
+                raise ClockAhead(f"{key}: the clock guard holds the state writes that carry a Zenoh timestamp "
+                                 "(core §4.3)")
             # S1 (0.73): a delete's in-band stamp is its attachment.
             stamp = self.mint() if self._table(key) else None
             ib, att = None, None
@@ -1804,7 +1841,7 @@ class Owner:
         with self._writes:
             if off > self.delta_ns and not self.ahead:
                 self.ahead = changed = True
-                self.events.append(f"ahead by {off / 1e9:.3f} s, beyond the delta: state writes held (core §4.3)")
+                self.events.append(f"ahead by {off / 1e9:.3f} s, beyond the delta: the state writes that carry a Zenoh timestamp held (core §4.3)")
             elif off <= self.delta_ns and self.ahead:
                 self.ahead, changed = False, False
                 self.events.append(f"within the delta again ({off / 1e9:.3f} s): state writes released")
@@ -1848,8 +1885,9 @@ class Owner:
     def heartbeat_body(self, iface: str, now: zenoh.Timestamp | None) -> dict[str, Any]:
         """The value of ``iface``'s next body (§2.4): each exposed
         collection's map bit, its digest over the members held live, a bit
-        for each it vouches for; under the clock guard (§2.10) none vouched
-        and the time unknown."""
+        for each it vouches for; under the clock guard (§2.10, 0.4) the bits
+        as at any other time, and the time unknown: "An owner MUST write all
+        ones as its heartbeat's time while its guard holds"."""
         lo = self.hb_layouts[iface]
         exposed = {f"{r['token']}/{r['template']}" for r, status in self._plan_made.get(iface, [])
                    if status == "exposed"}
@@ -1858,7 +1896,7 @@ class Owner:
                    for k, h in self._held.items() if k.startswith(prefix) and h.payload is not None}
         known = None if now is None or self.ahead else hbeat.time_of(
             now.get_time_as_ntp64().as_nanos(), self.writing_epoch())
-        return freshness_v2.owner_body(lo, exposed, members, known, vouch=known is not None)
+        return freshness_v2.owner_body(lo, exposed, members, known)
 
     def _put_heartbeat(self, iface: str) -> None:
         """One heartbeat covering ``iface``: a put on its heartbeat key (§3),
@@ -1879,8 +1917,11 @@ class Owner:
             self._publishers[key].put(zk2c.heartbeat(ib, hbeat.write(lo, value), lo.tag),
                                       encoding=zk2c.ENCODING)
             self.heartbeats_sent.append((iface, ib, value))
-            if value["time"] is None:
-                return
+            # core §4.3 "Minting" (0.88): "The heartbeat still mints that
+            # timestamp" while the guard holds, so each member it vouches
+            # for is confirmed at it, from the clock ahead (freshness.v2
+            # §2.10: "Its replies carry a last confirmation minted from the
+            # clock ahead").
             prefix = f"zk2/{self.system}/{self.service}/{iface}/"
             for k, h in self._held.items():
                 if k.startswith(prefix) and h.payload is not None and k not in self.unvouched \
@@ -1913,7 +1954,8 @@ class Owner:
         since its last put, less a margin for the scheduler (a fifth of
         ttl/2, at most 200 ms), so that two puts are never more than ttl/2
         apart. A deleted member, one whose writer closed, and every member
-        while the clock guard holds, are not re-put (§2.10). When the guard
+        whose re-put carries a Zenoh timestamp while the clock guard holds,
+        are not re-put (§2.10; core §4.3, 0.88). When the guard
         releases, the members whose interval ran out are re-put at the next
         tick."""
         def horizons() -> list[tuple[str, freshness.Horizon]]:
@@ -1932,7 +1974,7 @@ class Owner:
                 with self._writes:
                     held = self._held.get(key)
                     if self._stop.is_set() or self.session is None or held is None or held.payload is None \
-                            or key in self.closed_writers or self.ahead:
+                            or key in self.closed_writers or (self.ahead and self._stamped(key)):
                         continue
                     if (time.monotonic() - held.at) * 1e9 < due:
                         continue
@@ -1989,13 +2031,42 @@ class Owner:
         self._refuse_standby_write(key)
         fr_ = self._framer(key)
         mono = time.monotonic_ns() if at_ns is None else at_ns
-        wall = None
-        if self.frame_clock_known:
-            wall_ms = (time.time_ns() - (time.monotonic_ns() - mono)) // 1_000_000 - self.writing_epoch() * 1000
-            wall = {"s": wall_ms // 1000, "ms": wall_ms % 1000} if wall_ms >= 0 else None
+        wall = self._frame_wall(mono)
         with self._frames_lock:
+            meter = self._meter(key)
+            run = None
+            if meter is not None:
+                # telemetry.v2 §2.19: "Within one run, an owner MUST NOT write
+                # a counter field's count below one it wrote before on that
+                # key", the count before §2.20's reduction, under the run the
+                # record is put in (an open frame is put before a new run).
+                with self._seq_lock:
+                    if self.run is None:
+                        self.take_run()
+                    run = self.run
+                meter.check(run, values)
             ready = fr_.record(values, mono, wall)
+            if meter is not None:
+                meter.accept(run, values)
             return [self._put_frame(key, fr_, r) for r in ready]
+
+    def _meter(self, key: str) -> Any:
+        """``telemetry.v2``'s meter of a frame key (§2.19), or None where its
+        contract does not use telemetry.v2 or its ``telemetry.series`` is not
+        declared. A counter field's count is written modulo its width by
+        :func:`zk2py.packed.encode` (§2.20, core §7.6)."""
+        from . import telemetry as tm, telemetry_v2 as t2
+
+        if key in self._meters:
+            return self._meters[key]
+        c, r = self._resource_of[key]
+        meter = None
+        if t2.uses_v2(c.canonical):
+            d = t2.contract_declarations(c).get(r["template"])
+            if isinstance(d, t2.FrameDeclaration) and d.declaration == tm.DECLARED:
+                meter = t2.Meter(d)
+        self._meters[key] = meter
+        return meter
 
     def end_frame(self, key: str) -> dict[str, Any] | None:
         """Core §7.7's MAY (0.87): "An owner MAY end a frame before it holds
@@ -2005,6 +2076,47 @@ class Owner:
         with self._frames_lock:
             ready = fr_.end()
             return None if ready is None else self._put_frame(key, fr_, ready)
+
+    def _frame_wall(self, mono: int) -> dict[str, int] | None:
+        """A record's wall time (core §7.7 "Times") for its instant ``mono``
+        on the monotonic clock: the wall clock less the monotonic one, read
+        once at the owner's first frame, so that two records' instants
+        differ by their monotonic interval to the millisecond; None while
+        the clock is unknown (:attr:`frame_clock_known`)."""
+        if not self.frame_clock_known:
+            return None
+        if self._wall_less_mono is None:
+            self._wall_less_mono = time.time_ns() - time.monotonic_ns()
+        wall_ms = (mono + self._wall_less_mono) // 1_000_000 - self.writing_epoch() * 1000
+        return {"s": wall_ms // 1000, "ms": wall_ms % 1000} if wall_ms >= 0 else None
+
+    def raw_frame(self, key: str, values: dict[str, Any]) -> dict[str, Any]:
+        """``scenarios-v2.md``'s *raw* step: "puts a frame on the owner's key
+        from the owner's session, under its run and its next seq. It
+        bypasses any check the owner's runtime makes": one full record, its
+        time now, each count reduced to its field's width (core §7.6), and
+        no meter (telemetry.v2 §2.19). The framer's own record before is
+        left as it was."""
+        fr_ = self._framer(key)
+        lo = fr_.layout
+        with self._frames_lock, self._seq_lock:
+            if self.run is None:
+                self.take_run()
+            run = self.run
+            assert run is not None
+            seq = self._stream_seq.get(key, 0)
+            self._stream_seq[key] = (seq + 1) % 2**24
+        value = {"time": self._frame_wall(time.monotonic_ns()),
+                 "records": [{"full": True, "values": dict(values),
+                              "absent": [f.name for f in lo.fields if f.name not in values]}]}
+        payload = zk2c.write("frame", run[0], run[1], seq, lo.tag, lo.write(value, self.writing_epoch()))
+        if key not in self._publishers:
+            self._member_publisher(key)
+        self._publishers[key].put(payload, encoding=zk2c.ENCODING)
+        out = {"run": zk2c.InBand(run[0], run[1], 0).run_hex(), "seq": seq, "records": value,
+               "bytes": len(payload), "lost": False, "raw": True}
+        self.frames_put.append((key, out))
+        return out
 
     def lose_frame(self, key: str) -> None:
         """``frames.md``'s lost frame, a test hook: "O takes the frame's seqs
