@@ -1,5 +1,6 @@
-# operations.md §3: the envelope's encoding follows the operation's error
-# type, else its response type (spec §5.2): JSON, CBOR, protobuf, raw.
+# operations.md §3 and §9: every error is the error form under zenoh/bytes,
+# its detail the error type's own bytes (core §5.2): JSON, CBOR, protobuf,
+# raw.
 [interface]
 name = "encodings"
 major = 1
@@ -43,8 +44,7 @@ response = "sensor.v1.Pose"
 error = "json:TcError"
 encoding = "cbor"
 
-# §3 step 6 (core 0.7, F-65): a raw `error` type, whose detail is base64
-# text in a JSON envelope.
+# §3 step 6: a raw `error` type, whose detail is its bytes, never base64.
 [resources.raw-error]
 kind = "operation"
 request = { raw = "text/plain" }

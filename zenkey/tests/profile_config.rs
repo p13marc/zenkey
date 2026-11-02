@@ -1420,6 +1420,11 @@ async fn s10_an_idempotent_retry() {
     let again_at = SystemTime::now();
     let r = set(&bus.c, RF0, "radio", body.clone(), "r2").await;
     let first = value(&r)["pending"].clone();
+    let Outcome::Value(answered) = &r else {
+        unreachable!("a value")
+    };
+    let first_bytes = answered.payload().to_bytes().into_owned();
+    let first_mark = answered.mark().expect("the value form's as-of mark");
     assert_eq!(first["token"].as_str(), Some(armed.token.as_str()));
     assert_eq!(first["deadline"].as_str(), Some(armed.deadline.as_str()));
     let apply_at = instant(first["apply_at"].as_str().unwrap());
@@ -1459,6 +1464,22 @@ async fn s10_an_idempotent_retry() {
     )
     .await;
     assert!(value(&r)["view"].is_object());
+    let Outcome::Value(cancelled) = &r else {
+        unreachable!("a value")
+    };
+    let after_cancel = cancelled.mark().expect("a mark");
+    assert!(
+        after_cancel.seq.get() > first_mark.seq.get(),
+        "the cancel's puts moved the owner's seq"
+    );
+    // Within 300 s, the same request gets the first answer's bytes again,
+    // its as-of mark the first's (core §5.1, "An answer sent again").
+    let again = set(&bus.c, RF0, "radio", body.clone(), "r4b").await;
+    let Outcome::Value(again) = &again else {
+        panic!("the first answer, not {again:?}")
+    };
+    assert_eq!(again.payload().to_bytes().as_ref(), first_bytes.as_slice());
+    assert_eq!(again.mark(), Some(first_mark));
     let shift = Duration::from_secs(300).saturating_sub(step1.elapsed()) + Duration::from_secs(1);
     rf0.cfg
         .simulate_offset(i64::try_from(shift.as_millis()).unwrap());
@@ -1524,9 +1545,13 @@ async fn s11_sensitive_values() {
     keep(&r);
     let e = refusal(&r);
     assert_eq!(e.code, "app");
+    // The error form's detail: the ConfigError's JSON (core §5.2).
+    let Some(Detail::Bytes(d)) = &e.detail else {
+        panic!("a detail in the type's own bytes: {e:?}")
+    };
     assert_eq!(
-        e.detail,
-        Some(Detail::Value(json!({"code": "device-refused"})))
+        serde_json::from_slice::<Json>(d).unwrap(),
+        json!({"code": "device-refused"})
     );
 
     // 3. V and St; the persist is forbidden.

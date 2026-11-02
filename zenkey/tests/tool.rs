@@ -30,10 +30,7 @@ async fn a_tool_discovers_retrieves_subscribes_and_calls() {
     let s = b.declare_writer(&probe, "stream/s", &none).await.unwrap();
     let _op = b
         .serve(&probe, "@op/op", Some(&none), |call| async move {
-            let body = call
-                .payload()
-                .map(|p| p.to_bytes().into_owned())
-                .unwrap_or_default();
+            let body = call.record().to_vec();
             call.reply(body)
                 .await
                 .map_err(|e| zenkey::OpError::internal(e.to_string()))
@@ -108,7 +105,7 @@ async fn a_tool_discovers_retrieves_subscribes_and_calls() {
     // Call as a tool.
     let c = Client::new(&tool, contract, &["lab/probe"]).unwrap();
     match c.call(&addr, "@op/op", &none, "ping").await.unwrap() {
-        Outcome::Value(a) => assert_eq!(&*a.payload().to_bytes(), b"ping"),
+        Outcome::Value(a) => assert_eq!(a.record().unwrap(), b"ping"),
         other => panic!("{other:?}"),
     }
 

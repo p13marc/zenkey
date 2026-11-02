@@ -2441,10 +2441,7 @@ impl Ctx<'_> {
                                     // --name: the instance answers with its name.
                                     let body = match named {
                                         Some(n) => n.into_bytes(),
-                                        None => call
-                                            .payload()
-                                            .map(|p| p.to_bytes().into_owned())
-                                            .unwrap_or_default(),
+                                        None => call.record().to_vec(),
                                     };
                                     call.reply(body)
                                         .await

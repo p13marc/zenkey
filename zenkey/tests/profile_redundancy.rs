@@ -666,9 +666,10 @@ async fn call(
     all: bool,
 ) -> Vec<String> {
     let key = format!("zk2/{address}/{iface}/@op/{op}");
+    // The request form (core §5.1): CH `0x40`, then the record.
     let replies = s
         .get(key)
-        .payload("x")
+        .payload(vec![0x40, b'x'])
         .target(if all {
             QueryTarget::All
         } else {
@@ -681,7 +682,11 @@ async fn call(
     let mut out = Vec::new();
     while let Ok(r) = replies.recv_async().await {
         out.push(match r.result() {
-            Ok(s) => String::from_utf8_lossy(&s.payload().to_bytes()).into_owned(),
+            Ok(s) => {
+                let bytes = s.payload().to_bytes();
+                let value = zenkey::model::wire::read_reply(&bytes).expect("a value form");
+                String::from_utf8_lossy(value.record).into_owned()
+            }
             Err(_) => "!".to_owned(),
         });
     }

@@ -8,6 +8,10 @@
 //! - **Fan-out calls (O2):** only to an operation declaring
 //!   `fanout = "allowed"`, with target `All` and consolidation `None`; every
 //!   reply is collected and attributed to its replier by its key (O3).
+//! - **The request form** (core §5.1, #985's C4c): every call writes its
+//!   request as `CH · record` under `zenoh/bytes`, CH's width bit 0 and its
+//!   tag the `request` type's; the record is what the caller hands in,
+//!   already encoded as that type.
 //! - **O3, both wires** (#980's C4b): every reply is read by its `Encoding`
 //!   alone, without the contract. Under `zenoh/bytes` a value is §7.5's
 //!   value form ([`Answer::form`], its as-of mark [`Answer::mark`]) and an
@@ -37,6 +41,7 @@ use serde::de::DeserializeOwned;
 use zenkey_model::authoring::Encoding as WireEncoding;
 use zenkey_model::contract::{Body, Contract, Fanout, Operation, Replies as RepliesKind, Resource};
 use zenkey_model::envelope::{self, ErrorReading};
+use zenkey_model::forms::Forms;
 use zenkey_model::grammar::{Addr, IfaceId, Key, KindToken, ZkKey, data_key};
 use zenkey_model::slug::chunk_slug;
 use zenkey_model::template::{Bindings, Segment};
@@ -51,7 +56,7 @@ pub use crate::call::{Attribution, ErrorMark, Malformed, Refusal, Silence, Trans
 use crate::consumer::{Presence, Provider};
 use crate::error::{Error, Result, zenoh};
 use crate::operation::{CallMetadata, SUMMARY, decode_value, find_resource, operation, values_of};
-use crate::writer::{encode_value, wire_encoding};
+use crate::writer::encode_value;
 
 /// The reply timeout when neither the client nor the contract's
 /// `timeout_ms` sets one: zenoh's own default.
@@ -338,6 +343,9 @@ struct Settings {
     /// `link.v2` §2.20): what a call waits at least, unless the client
     /// sets its own.
     face: Option<Duration>,
+    /// The deployment epoch a packed record's `time` fields count from
+    /// (core §7.6, §8.6): the service's, a tool's catalog's, else 0.
+    epoch: i64,
 }
 
 impl Settings {
@@ -346,6 +354,7 @@ impl Settings {
             timeout: None,
             metadata: None,
             face: None,
+            epoch: crate::codec::EPOCH_WITHOUT_CATALOG,
         }
     }
 
@@ -358,6 +367,14 @@ impl Settings {
             self.face.map_or(recommended, |f| recommended.max(f))
         })
     }
+}
+
+/// A call's request, as a caller writes it (core §5.1, "The forms"): the
+/// record already encoded as the `request` type, under CH, its width bit 0
+/// and its tag the `request` type's, carried under `zenoh/bytes`.
+fn request_form(contract: &Contract, op: &Operation, record: ZBytes) -> Result<ZBytes> {
+    let forms = Forms::of(contract, op).map_err(Error::Contract)?;
+    Ok(ZBytes::from(forms.request(&record.to_bytes())))
 }
 
 /// Fills a call's template values from R2's parameter bindings. A value the
@@ -466,6 +483,21 @@ impl Client {
         self
     }
 
+    /// The deployment epoch a packed request's and reply's `time` fields
+    /// count from (core §7.6, §8.6): a tool's from the catalog it holds for
+    /// the owner. A client from a service's role takes the service's.
+    #[must_use]
+    pub fn with_deployment_epoch(mut self, epoch: i64) -> Self {
+        self.settings.epoch = epoch;
+        self
+    }
+
+    /// The deployment epoch the typed calls write and read under.
+    #[must_use]
+    pub fn deployment_epoch(&self) -> i64 {
+        self.settings.epoch
+    }
+
     /// Retries after silence, for idempotent operations only (O4). A
     /// non-idempotent operation is called once, whatever this says.
     #[must_use]
@@ -532,18 +564,18 @@ impl Client {
         Ok(data_key(addr, &self.contract.iface, KindToken::Op, &refs)?)
     }
 
+    /// One query, `request` in its form already ([`request_form`]).
     async fn get(
         &self,
         key: OwnedKeyExpr,
         target: QueryTarget,
         op: &Operation,
-        encoding: Encoding,
         request: ZBytes,
     ) -> Result<flume::Receiver<Reply>> {
         self.session
             .get(key)
             .payload(request)
-            .encoding(encoding)
+            .encoding(Encoding::ZENOH_BYTES)
             .attachment(self.settings.metadata.as_ref().map(CallMetadata::to_bytes))
             .target(target)
             .consolidation(ConsolidationMode::None)
@@ -555,7 +587,8 @@ impl Client {
     }
 
     /// Calls a one-reply operation at `addr` (O1): `request` is already
-    /// encoded as the request type. Returns on the first value or owner's
+    /// encoded as the request type, its record, which the call writes in
+    /// the request form (core §5.1). Returns on the first value or owner's
     /// error, from either wire; after silence, the transport's own error
     /// replies included, an idempotent operation is retried (O4) and the
     /// silence is attributed through presence (O5).
@@ -575,8 +608,7 @@ impl Client {
         }
         let values = bind(&self.params, &r, values)?;
         let key = self.key_of(addr, &r, &values)?;
-        let encoding = wire_encoding(&op.request, op.encoding, &values);
-        let request: ZBytes = request.into();
+        let request = request_form(&self.contract, &op, request.into())?;
         let attempts = if op.idempotent { 1 + self.retries } else { 1 };
         let mut transport = None;
         for _ in 0..attempts {
@@ -585,7 +617,6 @@ impl Client {
                     key.clone().into_keyexpr(),
                     QueryTarget::BestMatching,
                     &op,
-                    encoding.clone(),
                     request.clone(),
                 )
                 .await?;
@@ -643,8 +674,7 @@ impl Client {
         let (r, op) = self.op(resource)?;
         let values = bind(&self.params, &r, values)?;
         let key = self.key_of(addr, &r, &values)?;
-        let encoding = wire_encoding(&op.request, op.encoding, &values);
-        let request: ZBytes = request.into();
+        let request = request_form(&self.contract, &op, request.into())?;
         let attempts = if op.idempotent { 1 + self.retries } else { 1 };
         let mut out = Replies::new(&op);
         for _ in 0..attempts {
@@ -654,7 +684,6 @@ impl Client {
                     key.clone().into_keyexpr(),
                     QueryTarget::BestMatching,
                     &op,
-                    encoding.clone(),
                     request.clone(),
                 )
                 .await?;
@@ -818,6 +847,20 @@ impl Fleet {
         self
     }
 
+    /// The deployment epoch the typed fan-outs write and read under
+    /// ([`Client::with_deployment_epoch`]).
+    #[must_use]
+    pub fn with_deployment_epoch(mut self, epoch: i64) -> Self {
+        self.settings.epoch = epoch;
+        self
+    }
+
+    /// The deployment epoch the typed fan-outs write and read under.
+    #[must_use]
+    pub fn deployment_epoch(&self) -> i64 {
+        self.settings.epoch
+    }
+
     /// Fans out across a constrained face: [`Client::across`]'s timeout.
     #[must_use]
     pub fn across(mut self, far: &zenkey_model::link::FarSide) -> Self {
@@ -921,8 +964,7 @@ impl Fleet {
     ) -> Result<(Replies, Vec<Arrival>)> {
         let (r, op) = self.op(resource)?;
         let values = bind(&self.params, &r, values)?;
-        let encoding = wire_encoding(&op.request, op.encoding, &values);
-        let request: ZBytes = request.into();
+        let request = request_form(&self.contract, &op, request.into())?;
         // Every query goes out before any is drained, so they run together.
         let started = std::time::Instant::now();
         let mut receivers = Vec::new();
@@ -931,7 +973,7 @@ impl Fleet {
                 self.session
                     .get(ke)
                     .payload(request.clone())
-                    .encoding(encoding.clone())
+                    .encoding(Encoding::ZENOH_BYTES)
                     .attachment(self.settings.metadata.as_ref().map(CallMetadata::to_bytes))
                     .target(QueryTarget::All)
                     .consolidation(ConsolidationMode::None)

@@ -271,6 +271,8 @@ async fn wait_present(s: &zenoh::Session, selection: &str, n: usize) {
 }
 
 /// A raw GET, as a caller that breaks the rules would make it: every reply.
+/// Its request is `payload` in the request form, CH `0x40` (a JSON Schema
+/// type's tag, 0) under `zenoh/bytes` (core §5.1).
 async fn raw_get(
     s: &zenoh::Session,
     sel: &str,
@@ -289,10 +291,12 @@ async fn raw_get_with(
     consolidation: ConsolidationMode,
     attachment: Option<&[u8]>,
 ) -> Vec<Reply> {
+    let mut request = vec![0x40];
+    request.extend_from_slice(payload);
     let rx = s
         .get(sel)
-        .payload(payload.to_vec())
-        .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
+        .payload(request)
+        .encoding(zenoh::bytes::Encoding::ZENOH_BYTES)
         .attachment(attachment.map(<[u8]>::to_vec))
         .target(target)
         .consolidation(consolidation)
@@ -312,15 +316,17 @@ async fn fan(s: &zenoh::Session, sel: &str, payload: &[u8]) -> Vec<Reply> {
     raw_get(s, sel, payload, QueryTarget::All, ConsolidationMode::None).await
 }
 
-/// The codes of the envelopes among `replies`, by their `Encoding` alone.
+/// The codes of the owners' errors among `replies`, each read as §7.5's
+/// error form (core §5.2).
 fn refusal_codes(replies: &[Reply]) -> Vec<String> {
     replies
         .iter()
         .filter_map(|r| r.result().err())
         .filter_map(|e| {
-            envelope::decode(&e.encoding().to_string(), &e.payload().to_bytes())
+            let bytes = e.payload().to_bytes();
+            envelope::ErrorForm::read(&e.encoding().to_string(), &bytes)
                 .ok()
-                .map(|env| env.code)
+                .map(|f| f.code.as_str().to_owned())
         })
         .collect()
 }
@@ -615,11 +621,7 @@ async fn encodings_service(s: &zenoh::Session) -> (Service, Vec<OperationServer>
             b.serve(&enc, &format!("@op/{op}"), None, move |call: Call| {
                 let (detail, misfit) = (detail.clone(), misfit.clone());
                 async move {
-                    let body = call
-                        .payload()
-                        .map(|p| p.to_bytes().into_owned())
-                        .unwrap_or_default();
-                    match body.as_slice() {
+                    match call.record() {
                         b"silent" => Ok(()),
                         b"none" => Err(OpError::app_without_detail("refused")),
                         b"detail" => Err(detail),
@@ -640,9 +642,9 @@ async fn encodings_service(s: &zenoh::Session) -> (Service, Vec<OperationServer>
 /// `invalid_request`; an optional operation unavailable for a missing
 /// capability is `unavailable` with `cause = capability`; a handler that
 /// returns without replying leaves `internal`; `app` comes without a detail,
-/// with a value inline, or with a raw type's bytes as base64 text, and a
-/// detail that does not fit goes out as `internal`. The envelope's encoding
-/// follows §5.2: the error type, else the response type, decides it.
+/// or with the error type's own bytes, never base64, and a detail its type
+/// cannot encode goes out as `internal`. Every error is §7.5's error form
+/// under `zenoh/bytes` (core §5.2).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s3_replies_and_errors() {
     let (_r1, ep) = router(None).await;
@@ -666,7 +668,11 @@ async fn s3_replies_and_errors() {
         answer.value::<SetResponse>().unwrap(),
         SetResponse { up: true }
     );
-    assert_eq!(answer.sample.encoding().to_string(), "application/json");
+    assert_eq!(answer.sample.encoding().to_string(), "zenoh/bytes");
+    assert!(
+        answer.mark().is_some(),
+        "the value form, with its as-of mark"
+    );
 
     // 2. A request that does not decode as the request type (O-13).
     let invalid = c
@@ -705,10 +711,9 @@ async fn s3_replies_and_errors() {
     let env = app.refusal().unwrap();
     assert_eq!(env.code, "app");
     assert_eq!(
-        env.detail,
-        Some(Detail::Value(
-            json!({"kind": "kernel", "message": "no such device"})
-        ))
+        env.detail_as::<zenkey::codec::Json<Value>>(None),
+        Some(Ok(json!({"kind": "kernel", "message": "no such device"}))),
+        "the detail, the error type's JSON"
     );
     assert_eq!(
         count(&seen.set),
@@ -726,59 +731,60 @@ async fn s3_replies_and_errors() {
             .is_empty()
     })
     .await;
-    const PB: &str = "application/protobuf;zk2.core.v1.Error";
-    const JS: &str = "application/json";
-    const CB: &str = "application/cbor";
+    use zenkey::codec::{Codec, Json};
+    use zenkey::model::authoring::Encoding as Wire;
     let tc_error = json!({"kind": "kernel", "message": "no such device"});
-    let base64 = Detail::Value(json!("/9j/4A=="));
-    for (op, payload, wire, code, detail) in [
-        // The encoding follows the error type, else the response type.
-        ("json", "x", JS, "invalid_request", None),
-        ("cbor", "x", CB, "invalid_request", None),
-        ("proto", "x", PB, "invalid_request", None),
-        ("raw", "x", JS, "invalid_request", None),
+    let jpeg = vec![0xff, 0xd8, 0xff, 0xe0];
+    // How a detail reads back: a JSON Schema type's on the operation's
+    // `encoding`, a protobuf or raw type's as its own bytes.
+    #[derive(Debug)]
+    enum Want {
+        None,
+        Json(Value),
+        Cbor(Value),
+        Bytes(Vec<u8>),
+    }
+    for (op, payload, code, want) in [
+        // Every error is an error form under `zenoh/bytes`, whatever the
+        // operation's types (core §5.2).
+        ("json", "x", "invalid_request", Want::None),
+        ("cbor", "x", "invalid_request", Want::None),
+        ("proto", "x", "invalid_request", Want::None),
+        ("raw", "x", "invalid_request", Want::None),
         // 5. A handler that returns without replying.
-        ("json", "silent", JS, "internal", None),
-        ("raw", "silent", JS, "internal", None),
+        ("json", "silent", "internal", Want::None),
+        ("raw", "silent", "internal", Want::None),
         // 6. No `error` type: `app` and no detail; a detail is `internal`.
-        ("json", "none", JS, "app", None),
-        ("proto", "none", PB, "app", None),
-        ("raw", "none", JS, "app", None),
-        ("json", "detail", JS, "internal", None),
-        ("proto", "detail", PB, "internal", None),
-        ("raw", "detail", JS, "internal", None),
-        // A JSON Schema `error` type: the value inline, or none.
-        (
-            "json-error",
-            "detail",
-            JS,
-            "app",
-            Some(Detail::Value(tc_error.clone())),
-        ),
-        ("json-error", "none", JS, "app", None),
-        ("json-error", "misfit", JS, "internal", None),
+        ("json", "none", "app", Want::None),
+        ("proto", "none", "app", Want::None),
+        ("raw", "none", "app", Want::None),
+        ("json", "detail", "internal", Want::None),
+        ("proto", "detail", "internal", Want::None),
+        ("raw", "detail", "internal", Want::None),
+        // A JSON Schema `error` type: the value's JSON or CBOR, or none.
+        ("json-error", "detail", "app", Want::Json(tc_error.clone())),
+        ("json-error", "none", "app", Want::None),
+        ("json-error", "misfit", "internal", Want::None),
         (
             "cbor-error",
             "detail",
-            CB,
             "app",
-            Some(Detail::Value(json!({"kind": "busy"}))),
+            Want::Cbor(json!({"kind": "busy"})),
         ),
-        ("cbor-error", "misfit", CB, "internal", None),
+        ("cbor-error", "misfit", "internal", Want::None),
         // A protobuf `error` type: the encoded message, or none.
         (
             "proto-error",
             "detail",
-            PB,
             "app",
-            Some(Detail::Bytes(vec![0x08, 0x01])),
+            Want::Bytes(vec![0x08, 0x01]),
         ),
-        ("proto-error", "none", PB, "app", None),
-        ("proto-error", "misfit", PB, "internal", None),
-        // A raw `error` type: a JSON envelope, the bytes as base64 text.
-        ("raw-error", "detail", JS, "app", Some(base64.clone())),
-        ("raw-error", "none", JS, "app", None),
-        ("raw-error", "misfit", JS, "internal", None),
+        ("proto-error", "none", "app", Want::None),
+        ("proto-error", "misfit", "internal", Want::None),
+        // A raw `error` type: its bytes, never base64, or none.
+        ("raw-error", "detail", "app", Want::Bytes(jpeg.clone())),
+        ("raw-error", "none", "app", Want::None),
+        ("raw-error", "misfit", "internal", Want::None),
     ] {
         let replies = raw_get(
             &tool,
@@ -790,16 +796,30 @@ async fn s3_replies_and_errors() {
         .await;
         let errs: Vec<_> = replies.iter().filter_map(|r| r.result().err()).collect();
         assert_eq!(errs.len(), 1, "{op} {payload}: one refusal");
-        assert_eq!(errs[0].encoding().to_string(), wire, "{op} {payload}");
-        let env = envelope::decode(wire, &errs[0].payload().to_bytes()).unwrap();
         assert_eq!(
-            (env.code.as_str(), env.detail.as_ref()),
-            (code, detail.as_ref()),
+            errs[0].encoding().to_string(),
+            "zenoh/bytes",
             "{op} {payload}"
         );
+        let bytes = errs[0].payload().to_bytes();
+        let form = envelope::ErrorForm::read("zenoh/bytes", &bytes).unwrap();
+        assert_eq!(form.code.as_str(), code, "{op} {payload}");
+        let detail = form.detail;
+        match &want {
+            Want::None => assert_eq!(detail, None, "{op} {payload}"),
+            Want::Json(v) => assert_eq!(
+                Json::<Value>::decode(detail.unwrap(), Some(Wire::Json)).unwrap(),
+                *v,
+                "{op} {payload}"
+            ),
+            Want::Cbor(v) => assert_eq!(
+                Json::<Value>::decode(detail.unwrap(), Some(Wire::Cbor)).unwrap(),
+                *v,
+                "{op} {payload}"
+            ),
+            Want::Bytes(b) => assert_eq!(detail, Some(b.as_slice()), "{op} {payload}"),
+        }
     }
-    // A caller holding the contract reads the raw detail back as bytes.
-    assert_eq!(base64.raw_bytes(), Some(vec![0xff, 0xd8, 0xff, 0xe0]));
 }
 
 /// §3 step 7: beside a replica. In `tc-replicated`, `set` is optional and
@@ -1746,4 +1766,599 @@ async fn a_caller_reads_the_forms_and_the_bare_wire_alike() {
             .all(|a| a.mark() == Some(mark()))
     );
     assert!(replies.partial().is_empty());
+}
+
+// ─── §9 A call's forms (core 0.94 §5.1, §5.2, §7.5; #985's C4c) ─────────────
+
+/// `seed.v1`, the contract of `spec/conformance/contracts/ok-packed-operation.toml`:
+/// `calibrate` (packed request, response and error), `scan` (many, a packed
+/// response and summary) and `reset` (a packed request, no `error` type).
+fn seed_contract() -> zenkey::model::contract::Contract {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../spec/conformance/contracts/ok-packed-operation.toml");
+    let l = zenkey::model::contract::load_path(&path);
+    l.contract
+        .unwrap_or_else(|| panic!("seed.v1:\n{}", l.report))
+}
+
+/// One query as its server received it: its `Encoding` and payload.
+type Captured = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
+
+fn capture(log: &Captured, call: &Call) {
+    let encoding = call
+        .query()
+        .encoding()
+        .map(ToString::to_string)
+        .unwrap_or_default();
+    let payload = call
+        .payload()
+        .map(|p| p.to_bytes().into_owned())
+        .unwrap_or_default();
+    log.lock().unwrap().push((encoding, payload));
+}
+
+/// A packed value of the type `ty` names (`packed:Status`,
+/// `packed:sensor#Status`), one of `c`'s operation types, written by its
+/// layout (core §7.6) at epoch 0.
+fn packed(c: &zenkey::model::contract::Contract, ty: &str, value: &Value) -> Vec<u8> {
+    use zenkey::model::schema::TypeId;
+    let short = ty.trim_start_matches("packed:");
+    let short = short.rsplit('#').next().unwrap_or(short);
+    let id = c
+        .resources
+        .iter()
+        .filter_map(|r| match &r.body {
+            zenkey::model::contract::Body::Operation(o) => Some(o),
+            zenkey::model::contract::Body::Data(_) => None,
+        })
+        .flat_map(|o| {
+            [
+                Some(&o.request),
+                Some(&o.response),
+                o.summary.as_ref(),
+                o.error.as_ref(),
+            ]
+        })
+        .flatten()
+        .find(
+            |t| matches!(t, TypeId::Packed { name, .. } if name.rsplit('#').next() == Some(short)),
+        )
+        .unwrap_or_else(|| panic!("no packed type {ty}"));
+    let layout = c.packed_layout(id).unwrap().expect("a packed type");
+    layout
+        .write(value, Some(0))
+        .expect("the value writes")
+        .bytes
+}
+
+/// What a raw `ping` server answers each attempt with (§9 step 5).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum PingAnswer {
+    RouterTimeout,
+    BusyWithCause,
+    BusyUnderString,
+    Busy,
+    Frozen,
+}
+
+/// §9: every query arrives under `zenoh/bytes` as `CH · record`, every
+/// value and error in its form under `zenoh/bytes`, each CH holding its
+/// type's tag, a detail its type's own bytes; a request under the wrong
+/// tag is `invalid_request` before any handler runs; a reply's as-of mark
+/// is the run and the last seq minted, a reply minting none, a new
+/// instance's its own run and seq 0; a reply error that is no error form,
+/// or under another `Encoding`, is the transport's, silence an idempotent
+/// call is retried after; a frozen server is silence; the bare wire's
+/// envelope is read as `busy`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s9_a_calls_forms() {
+    use zenkey::model::wire::Run;
+
+    let (_r, ep) = router(None).await;
+    let (owner, tool, test) = (client(&ep).await, client(&ep).await, client(&ep).await);
+    let seed: IfaceId = "seed.v1".parse().unwrap();
+    let enc: IfaceId = "encodings.v1".parse().unwrap();
+    let probe: IfaceId = "probe.v1".parse().unwrap();
+    let seed_c = seed_contract();
+    let sensor =
+        json!({"temperature": "21.5", "humidity": "40", "pressure": "1013.2", "battery": "3.7"});
+    let status = json!({"duty_available": "12.5", "signal_bars": 3, "oper": "up", "admin": true});
+    let change = json!({"at": 1_730_000_000_123_u64, "mode": "on", "count": 5});
+    let tc_error = json!({"kind": "kernel", "message": "no such device"});
+
+    // h1/tc: tc.v1's `set`, encodings.v1's variants, probe.v1's state and
+    // raw operation, and seed.v1.
+    let log: Captured = Arc::default();
+    let start = |log: Captured| {
+        let (owner, seed_c, enc, probe, seed) = (
+            owner.clone(),
+            seed_c.clone(),
+            enc.clone(),
+            probe.clone(),
+            seed.clone(),
+        );
+        let (status, change, tc_error) = (status.clone(), change.clone(), tc_error.clone());
+        async move {
+            let mut b = ServiceBuilder::new(&owner, config("h1/tc"));
+            for i in ["tc.v1", "encodings.v1", "probe.v1"] {
+                b.implement(imp(i)).unwrap();
+            }
+            b.implement(Implementation::new(seed_c.clone())).unwrap();
+            let mut servers = Vec::new();
+            // Each JSON Schema, protobuf or raw operation: accepted, or
+            // refused `app` with a detail when its record says `refuse`.
+            let ops: Vec<(IfaceId, &str, OpError)> = vec![
+                (tc(), SET, OpError::app("refused", &tc_error)),
+                (
+                    enc.clone(),
+                    "@op/cbor-error",
+                    OpError::app("refused", &json!({"kind": "busy"})),
+                ),
+                (
+                    enc.clone(),
+                    "@op/proto-error",
+                    OpError::app_bytes("refused", vec![0x08, 0x01]),
+                ),
+                (
+                    enc.clone(),
+                    "@op/raw-error",
+                    OpError::app_bytes("refused", vec![0xff, 0xd8]),
+                ),
+            ];
+            for (iface, op, refusal) in ops {
+                let log = Arc::clone(&log);
+                servers.push(
+                    b.serve(&iface, op, None, move |call: Call| {
+                        let (log, refusal) = (Arc::clone(&log), refusal.clone());
+                        async move {
+                            capture(&log, &call);
+                            if call.record().ends_with(b"refuse") {
+                                return Err(refusal);
+                            }
+                            // The response type's record: the request's,
+                            // where request and response are one type.
+                            let body = match call.record() {
+                                r if r.starts_with(b"{") => br#"{"up":true}"#.to_vec(),
+                                r => r.to_vec(),
+                            };
+                            call.reply(body).await.map_err(OpError::from)
+                        }
+                    })
+                    .await
+                    .unwrap(),
+                );
+            }
+            let calibrated = Arc::new(AtomicU64::new(0));
+            let (log2, seed2, status2, change2) = (
+                Arc::clone(&log),
+                seed_c.clone(),
+                status.clone(),
+                change.clone(),
+            );
+            servers.push(
+                b.serve(&seed, "@op/calibrate", None, move |call: Call| {
+                    let (log, n) = (Arc::clone(&log2), calibrated.fetch_add(1, Ordering::SeqCst));
+                    let (seed, status, change) = (seed2.clone(), status2.clone(), change2.clone());
+                    async move {
+                        capture(&log, &call);
+                        if n > 0 {
+                            return Err(OpError::app("device refused", &change));
+                        }
+                        call.reply(packed(&seed, "packed:sensor#Status", &status))
+                            .await
+                            .map_err(OpError::from)
+                    }
+                })
+                .await
+                .unwrap(),
+            );
+            let (log2, seed2, status2) = (Arc::clone(&log), seed_c.clone(), status.clone());
+            servers.push(
+                b.serve(&seed, "@op/scan", None, move |call: Call| {
+                    let (log, seed, status) = (Arc::clone(&log2), seed2.clone(), status2.clone());
+                    async move {
+                        capture(&log, &call);
+                        // Two values, each a Sensor, then the summary.
+                        let sensor = json!({"temperature": "21.5", "humidity": "40", "pressure": "1013.2", "battery": "3.7"});
+                        let v = packed(&seed, "packed:Sensor", &sensor);
+                        call.reply(v.clone()).await?;
+                        call.reply(v).await?;
+                        call.summary(packed(&seed, "packed:Status", &status)).await?;
+                        Ok(())
+                    }
+                })
+                .await
+                .unwrap(),
+            );
+            let log2 = Arc::clone(&log);
+            servers.push(
+                b.serve(&seed, "@op/reset", None, move |call: Call| {
+                    let log = Arc::clone(&log2);
+                    async move {
+                        capture(&log, &call);
+                        Err(OpError::busy(""))
+                    }
+                })
+                .await
+                .unwrap(),
+            );
+            let st = b
+                .declare_state_writer(&probe, "state/st", &Bindings::new())
+                .await
+                .unwrap();
+            // The rest of each interface, exposed and not served (§8.2).
+            for (iface, res) in [
+                (tc(), DIAGNOSTICS),
+                (tc(), LISTING),
+                (tc(), RESET),
+                (enc.clone(), "@op/json"),
+                (enc.clone(), "@op/cbor"),
+                (enc.clone(), "@op/proto"),
+                (enc.clone(), "@op/raw"),
+                (enc.clone(), "@op/json-error"),
+                (probe.clone(), "stream/s"),
+                (probe.clone(), "@stream/xs"),
+                (probe.clone(), "@state/xst"),
+                (probe.clone(), "events/ev"),
+                (probe.clone(), "@op/op"),
+            ] {
+                b.expose(&iface, res).unwrap();
+            }
+            (b.start().await.unwrap(), servers, st)
+        }
+    };
+    let (svc, servers, st) = start(Arc::clone(&log)).await;
+    wait_present(&tool, "h1/tc", 1).await;
+    let h1 = addr("h1/tc");
+    let wide = |run: Run| if run.is_wide() { 0x10 } else { 0 };
+    let run = svc.minter().run();
+    let w = wide(run);
+    let client_of =
+        |c: zenkey::model::contract::Contract| Client::new(&tool, Arc::new(c), &["h1/tc"]).unwrap();
+    let (tc_c, enc_c, seed_cl) = (
+        client_of(contract("tc.v1")),
+        client_of(contract("encodings.v1")),
+        client_of(seed_c.clone()),
+    );
+
+    // 1. Each kind of type, accepted then refused `app` with a detail.
+    let pose = vec![0x08, 0x01];
+    for (c, op, values, record, detail) in [
+        (
+            &tc_c,
+            SET,
+            member("eth0"),
+            br#"{"up":true}"#.to_vec(),
+            br#"{"kind":"kernel","message":"no such device"}"#.to_vec(),
+        ),
+        (&enc_c, "@op/cbor-error", Bindings::new(), pose.clone(), {
+            let mut out = Vec::new();
+            ciborium::into_writer(&json!({"kind": "busy"}), &mut out).unwrap();
+            out
+        }),
+        (
+            &enc_c,
+            "@op/proto-error",
+            Bindings::new(),
+            br#"{"up":true}"#.to_vec(),
+            vec![0x08, 0x01],
+        ),
+        (
+            &enc_c,
+            "@op/raw-error",
+            Bindings::new(),
+            b"text".to_vec(),
+            vec![0xff, 0xd8],
+        ),
+    ] {
+        let ok = c.call(&h1, op, &values, record.clone()).await.unwrap();
+        let Outcome::Value(a) = &ok else {
+            panic!("{op}: a value: {ok:?}")
+        };
+        assert_eq!(a.sample.encoding().to_string(), "zenoh/bytes", "{op}");
+        let bytes = a.payload().to_bytes();
+        assert_eq!(bytes[0], 0x40 | w, "{op}: CH, tag 0");
+        assert_eq!(
+            a.mark().map(|m| m.run),
+            Some(run),
+            "{op}: the as-of mark's run"
+        );
+        let mut refuse = record.clone();
+        refuse.extend_from_slice(b"refuse");
+        // A JSON record that ends "refuse" is no JSON: the handler reads
+        // its bytes, not the type.
+        let out = c.call(&h1, op, &values, refuse).await.unwrap();
+        let r = out
+            .refusal()
+            .unwrap_or_else(|| panic!("{op}: refused: {out:?}"));
+        assert_eq!(r.code, "app", "{op}");
+        assert_eq!(r.form.map(|m| m.tag.get()), Some(0), "{op}: CH's tag, 0");
+        assert_eq!(
+            r.detail,
+            Some(Detail::Bytes(detail)),
+            "{op}: the type's own bytes"
+        );
+    }
+    {
+        let log = log.lock().unwrap();
+        assert_eq!(log.len(), 8);
+        for (encoding, payload) in log.iter() {
+            assert_eq!(encoding, "zenoh/bytes", "every query under zenoh/bytes");
+            assert_eq!(payload[0], 0x40, "CH 0x40, then the record");
+        }
+        assert_eq!(&log[0].1[1..], br#"{"up":true}"#);
+        assert_eq!(&log[2].1[1..], [0x08, 0x01], "a protobuf record");
+        assert_eq!(&log[6].1[1..], b"text", "a raw record");
+    }
+
+    // 2. Packed types: each CH carries its type's tag.
+    log.lock().unwrap().clear();
+    let req = packed(&seed_c, "packed:Sensor", &sensor);
+    let out = seed_cl
+        .call(&h1, "@op/calibrate", &Bindings::new(), req.clone())
+        .await
+        .unwrap();
+    let Outcome::Value(a) = &out else {
+        panic!("calibrate: {out:?}")
+    };
+    assert_eq!(a.payload().to_bytes()[0], 0x4e | w, "Status's tag 14");
+    let calibrate = seed_c
+        .resources
+        .iter()
+        .find(|r| r.template.as_str() == "calibrate")
+        .and_then(|r| match &r.body {
+            zenkey::model::contract::Body::Operation(o) => Some(o.clone()),
+            zenkey::model::contract::Body::Data(_) => None,
+        })
+        .expect("calibrate");
+    let typed = zenkey::model::forms::Forms::of(&seed_c, &calibrate).unwrap();
+    assert_eq!(
+        typed
+            .response
+            .layout()
+            .unwrap()
+            .read(14, &a.record().unwrap(), Some(0))
+            .unwrap(),
+        status
+    );
+    let out = seed_cl
+        .call(&h1, "@op/calibrate", &Bindings::new(), req.clone())
+        .await
+        .unwrap();
+    let r = out.refusal().expect("calibrate refused app");
+    assert_eq!(
+        (r.code.as_str(), r.form.map(|m| m.tag.get())),
+        ("app", Some(2)),
+        "Change's tag 2"
+    );
+    let Some(Detail::Bytes(d)) = &r.detail else {
+        panic!("a Change detail")
+    };
+    assert_eq!(
+        typed
+            .error
+            .as_ref()
+            .unwrap()
+            .layout()
+            .unwrap()
+            .read(2, d, Some(0))
+            .unwrap(),
+        change
+    );
+    let many = seed_cl
+        .call_many(&h1, "@op/scan", &Bindings::new(), b"{}".to_vec())
+        .await
+        .unwrap();
+    assert_eq!(many.repliers.len(), 1);
+    let replier = &many.repliers[0];
+    assert_eq!(replier.values.len(), 2);
+    for v in &replier.values {
+        assert_eq!(v.payload().to_bytes()[0], 0x46 | w, "Sensor's tag 6");
+    }
+    let s = replier.summary().expect("its summary");
+    assert_eq!(s.payload().to_bytes()[0], 0x4e | w, "Status's tag 14");
+    assert_eq!(
+        s.sample.attachment().map(|a| a.to_bytes().into_owned()),
+        Some(b"summary".to_vec())
+    );
+    let out = seed_cl
+        .call(
+            &h1,
+            "@op/reset",
+            &Bindings::new(),
+            packed(&seed_c, "packed:Status", &status),
+        )
+        .await
+        .unwrap();
+    let r = out.refusal().expect("reset busy");
+    assert_eq!(
+        (r.code.as_str(), r.form.map(|m| m.tag.get())),
+        ("busy", Some(0)),
+        "no error type: tag 0"
+    );
+    {
+        let log = log.lock().unwrap();
+        let chs: Vec<u8> = log.iter().map(|(_, p)| p[0]).collect();
+        assert_eq!(
+            chs,
+            [0x46, 0x46, 0x40, 0x4e],
+            "calibrate twice, scan, reset"
+        );
+        assert_eq!(&log[0].1[1..], req.as_slice());
+    }
+
+    // 3. The wrong tag: `calibrate` a Sensor record under CH 0x40.
+    let mut wrong = vec![0x40];
+    wrong.extend_from_slice(&req);
+    let replies: Vec<Reply> = {
+        let rx = test
+            .get("zk2/h1/tc/seed.v1/@op/calibrate")
+            .payload(wrong)
+            .target(QueryTarget::BestMatching)
+            .consolidation(ConsolidationMode::None)
+            .timeout(T)
+            .await
+            .unwrap();
+        let mut out = Vec::new();
+        while let Ok(r) = rx.recv_async().await {
+            out.push(r);
+        }
+        out
+    };
+    assert_eq!(refusal_codes(&replies), ["invalid_request"]);
+    assert_eq!(log.lock().unwrap().len(), 4, "no handler ran");
+
+    // 4. The as-of mark: two puts, a call, a third put; then a new
+    // instance, called before its first put.
+    let p1 = st.put("one").await.unwrap();
+    let p2 = st.put("two").await.unwrap();
+    assert_eq!(p2.stamp.seq.get(), p1.stamp.seq.get() + 1);
+    let out = tc_c
+        .call(&h1, SET, &member("eth0"), br#"{"up":true}"#.to_vec())
+        .await
+        .unwrap();
+    let mark = out.answer().and_then(|a| a.mark()).expect("a mark");
+    assert_eq!(mark, p2.stamp, "the run, and the last seq minted");
+    let p3 = st.put("three").await.unwrap();
+    assert_eq!(
+        p3.stamp.seq.get(),
+        p2.stamp.seq.get() + 1,
+        "a reply mints no seq"
+    );
+    drop(servers);
+    drop(st);
+    svc.close().await.unwrap();
+    let (svc2, servers2, _st2) = start(Arc::clone(&log)).await;
+    wait_present(&tool, "h1/tc", 1).await;
+    let run2 = svc2.minter().run();
+    assert_ne!(run2, run, "a new instance, a new run");
+    let mark2 = common::eventually_some("the new instance answers", || async {
+        match tc_c
+            .call(&h1, SET, &member("eth0"), br#"{"up":true}"#.to_vec())
+            .await
+            .unwrap()
+        {
+            Outcome::Value(a) => a.mark(),
+            _ => None,
+        }
+    })
+    .await;
+    assert_eq!(
+        (mark2.run, mark2.seq.get()),
+        (run2, 0),
+        "its own run, seq 0"
+    );
+
+    // 5. Errors that are no owner's: a session of the test's own serves
+    // `diagnostics`, `ping` here, at h2/tc.
+    let mode = Arc::new(Mutex::new(PingAnswer::RouterTimeout));
+    let pings = Arc::new(AtomicU64::new(0));
+    // A frozen server holds its queries, unanswered, until the test ends.
+    let frozen: Arc<Mutex<Vec<zenoh::query::Query>>> = Arc::default();
+    let (m, n, held) = (Arc::clone(&mode), Arc::clone(&pings), Arc::clone(&frozen));
+    let _ping = test
+        .declare_queryable("zk2/h2/tc/tc.v1/@op/diagnostics")
+        .complete(true)
+        .callback(move |q| {
+            use zenoh::Wait;
+            n.fetch_add(1, Ordering::SeqCst);
+            let busy = vec![0x60, 0, 1, 0, 0, 7, 0xa0];
+            let _ = match *m.lock().unwrap() {
+                PingAnswer::RouterTimeout => q.reply_err(b"Timeout".to_vec()).wait(),
+                PingAnswer::BusyWithCause => q.reply_err(vec![0x60, 0, 1, 0, 0, 7, 0xa8]).wait(),
+                PingAnswer::BusyUnderString => q
+                    .reply_err(busy)
+                    .encoding(zenoh::bytes::Encoding::ZENOH_STRING)
+                    .wait(),
+                PingAnswer::Busy => q.reply_err(busy).wait(),
+                PingAnswer::Frozen => {
+                    held.lock().unwrap().push(q);
+                    Ok(())
+                }
+            };
+        })
+        .await
+        .unwrap();
+    let h2 = addr("h2/tc");
+    let ping = Client::new(&tool, tc_contract(), &["h2/tc"])
+        .unwrap()
+        .with_timeout(Duration::from_millis(500))
+        .with_retries(1);
+    for (answer, refusal) in [
+        (PingAnswer::RouterTimeout, Some("sample_kind")),
+        (PingAnswer::BusyWithCause, Some("cause")),
+        (PingAnswer::BusyUnderString, None),
+    ] {
+        *mode.lock().unwrap() = answer;
+        let before = pings.load(Ordering::SeqCst);
+        let out = ping
+            .call_value(&h2, DIAGNOSTICS, &Bindings::new(), &json!({}))
+            .await
+            .unwrap();
+        let silence = out
+            .silence()
+            .unwrap_or_else(|| panic!("{answer:?}: silence, not {out:?}"));
+        assert_eq!(silence.attempts, 2, "{answer:?}: called twice");
+        let t = silence.transport.as_ref().expect("the transport's error");
+        assert_eq!(t.refusal.map(|r| r.token()), refusal, "{answer:?}");
+        assert_eq!(pings.load(Ordering::SeqCst) - before, 2, "{answer:?}");
+    }
+    *mode.lock().unwrap() = PingAnswer::Busy;
+    let before = pings.load(Ordering::SeqCst);
+    let out = ping
+        .call_value(&h2, DIAGNOSTICS, &Bindings::new(), &json!({}))
+        .await
+        .unwrap();
+    assert_eq!(
+        out.refusal().map(|r| r.code.as_str()),
+        Some("busy"),
+        "an owner's error"
+    );
+    assert_eq!(pings.load(Ordering::SeqCst) - before, 1, "called once");
+
+    // 6. A frozen server behind the router: silence, called twice.
+    *mode.lock().unwrap() = PingAnswer::Frozen;
+    let before = pings.load(Ordering::SeqCst);
+    let out = ping
+        .call_value(&h2, DIAGNOSTICS, &Bindings::new(), &json!({}))
+        .await
+        .unwrap();
+    let silence = out.silence().expect("silence");
+    assert_eq!(silence.attempts, 2);
+    if let Some(t) = &silence.transport {
+        assert!(
+            ["zenoh/string", "zenoh/bytes"].contains(&t.encoding.as_str()),
+            "a querier's or a router's Timeout: {t}"
+        );
+    }
+    assert_eq!(pings.load(Ordering::SeqCst) - before, 2);
+
+    // 7. The bare wire: `set` answered with the JSON envelope.
+    let _bare = test
+        .declare_queryable("zk2/h3/tc/tc.v1/@op/interfaces/eth0/set")
+        .complete(true)
+        .callback(|q| {
+            use zenoh::Wait;
+            let _ = q
+                .reply_err(br#"{"code":"busy","message":""}"#.to_vec())
+                .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
+                .wait();
+        })
+        .await
+        .unwrap();
+    let h3 = Client::new(&tool, tc_contract(), &["h3/tc"])
+        .unwrap()
+        .with_retries(1);
+    let out = h3
+        .call_value(
+            &addr("h3/tc"),
+            SET,
+            &member("eth0"),
+            &SetRequest { up: true },
+        )
+        .await
+        .unwrap();
+    let r = out.refusal().expect("busy, read on the bare wire");
+    assert_eq!((r.code.as_str(), r.form), ("busy", None));
+    drop((servers2, frozen));
 }

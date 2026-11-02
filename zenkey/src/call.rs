@@ -8,7 +8,8 @@
 //!
 //! - **A handler** receives its decoded request and a [`CallInfo`] (the
 //!   template values, the claimed metadata of O7), and answers a value or
-//!   an [`OpError`], the error envelope of §5.2. A `replies = "many"`
+//!   an [`OpError`], §5.2's error, which the runtime writes in §7.5's
+//!   error form. A `replies = "many"`
 //!   handler sends through a [`Sink`]: values, then the summary (O6). A
 //!   handler over a whole template names the member a fan-out answers for
 //!   ([`CallInfo::member`], §5.1 "Over a template").
@@ -85,8 +86,9 @@ impl CallMetadata {
     }
 }
 
-/// A failed call, as its owner refuses it (O3): the error envelope of §5.2.
-/// The runtime encodes it as the operation's types say.
+/// A failed call, as its owner refuses it (O3): §5.2's error, its code,
+/// message, cause and detail. The runtime writes it in §7.5's error form,
+/// its detail in the operation's `error` type's own bytes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OpError(Envelope);
 
@@ -151,10 +153,12 @@ impl OpError {
         Self::new("app", message, None)
     }
 
-    /// `app`, with a value of the operation's declared `error` type: for a
-    /// JSON or CBOR envelope (§5.2). On an operation that declares no
-    /// `error` type, the runtime sends `internal` instead
-    /// ([`OpError::app_without_detail`] is that operation's `app`).
+    /// `app`, with a value of the operation's declared `error` type, a JSON
+    /// Schema type's, written as JSON or CBOR on the operation's `encoding`,
+    /// or a packed type's JSON reading, written by its layout (§5.2). On an
+    /// operation that declares no `error` type, or one of another kind, the
+    /// runtime sends `internal` instead ([`OpError::app_without_detail`] is
+    /// that operation's `app`).
     pub fn app<T: Serialize>(message: impl Into<String>, detail: &T) -> Self {
         match serde_json::to_value(detail) {
             Ok(v) => Self(Envelope {
@@ -168,9 +172,9 @@ impl OpError {
     }
 
     /// `app`, with the declared `error` type's value already encoded: a
-    /// protobuf message, carried as the envelope's bytes, or a raw type's
-    /// bytes, which the runtime sends as base64 text in its JSON envelope
-    /// (§5.2, 0.7, F-65).
+    /// protobuf message, a raw type's bytes, a packed record, or a JSON
+    /// Schema value's JSON or CBOR, each sent as it is, the error form's
+    /// detail (§5.2).
     pub fn app_bytes(message: impl Into<String>, detail: Vec<u8>) -> Self {
         Self(Envelope {
             code: "app".to_owned(),
@@ -180,11 +184,12 @@ impl OpError {
         })
     }
 
-    /// `app`, with a value of the declared `error` type through its codec:
-    /// a protobuf message is encoded into the envelope's bytes, a JSON
-    /// Schema value carried as a value, a raw type's bytes as base64 text
-    /// (§5.2). Generated code names the codec; a handler writes
-    /// `OpError::app_as::<Protobuf<NavError>>(…)`.
+    /// `app`, with a value of the declared `error` type through its codec
+    /// ([`Codec::detail`]): a protobuf message and a raw type's bytes as
+    /// bytes, a JSON Schema value and a packed record's JSON reading as a
+    /// value, which the runtime writes on the operation's `encoding` or
+    /// through its layout (§5.2). Generated code names the codec; a handler
+    /// writes `OpError::app_as::<Protobuf<NavError>>(…)`.
     pub fn app_as<C: Codec>(message: impl Into<String>, detail: &C::Value) -> Self {
         match C::detail(detail) {
             Ok(d) => Self(Envelope {
@@ -401,12 +406,14 @@ pub struct Collected<T, S> {
     pub summary: Option<S>,
 }
 
-type Encode<T> = fn(&T, Option<WireEncoding>) -> std::result::Result<Vec<u8>, String>;
+type Encode<T> = fn(&T, Option<WireEncoding>, i64) -> std::result::Result<Vec<u8>, String>;
 
 enum SinkInner<T, S> {
     Wire {
         out: Arc<dyn ReplyOut>,
         wire: Option<WireEncoding>,
+        /// The deployment epoch a packed record's `time` fields count from.
+        epoch: i64,
         value: Encode<T>,
         summary: Encode<S>,
     },
@@ -428,12 +435,23 @@ impl<T: Send + 'static, S: Send + 'static> Sink<T, S> {
         C: Codec<Value = T>,
         CS: Codec<Value = S>,
     {
+        Self::new_in::<C, CS>(out, wire, crate::codec::EPOCH_WITHOUT_CATALOG)
+    }
+
+    /// [`Sink::new`], a packed record's `time` fields counted from
+    /// `epoch`, the service's deployment epoch (core §7.6, §8.6).
+    pub fn new_in<C, CS>(out: Arc<dyn ReplyOut>, wire: Option<WireEncoding>, epoch: i64) -> Self
+    where
+        C: Codec<Value = T>,
+        CS: Codec<Value = S>,
+    {
         Self {
             inner: SinkInner::Wire {
                 out,
                 wire,
-                value: C::encode,
-                summary: CS::encode,
+                epoch,
+                value: C::encode_in,
+                summary: CS::encode_in,
             },
         }
     }
@@ -460,10 +478,11 @@ impl<T: Send + 'static, S: Send + 'static> Sink<T, S> {
             SinkInner::Wire {
                 out,
                 wire,
+                epoch,
                 value: enc,
                 ..
             } => {
-                let bytes = enc(&value, *wire).map_err(Error::Payload)?;
+                let bytes = enc(&value, *wire, *epoch).map_err(Error::Payload)?;
                 out.value(bytes).await
             }
             SinkInner::Memory(c) => {
@@ -484,10 +503,11 @@ impl<T: Send + 'static, S: Send + 'static> Sink<T, S> {
             SinkInner::Wire {
                 out,
                 wire,
+                epoch,
                 summary: enc,
                 ..
             } => {
-                let bytes = enc(&summary, *wire).map_err(Error::Payload)?;
+                let bytes = enc(&summary, *wire, *epoch).map_err(Error::Payload)?;
                 out.summary(bytes).await
             }
             SinkInner::Memory(c) => {
@@ -577,6 +597,30 @@ impl Refusal {
     #[must_use]
     pub fn mark(&self) -> Option<Stamp> {
         self.form.map(|m| m.stamp)
+    }
+
+    /// The refusal relayed as an owner's error of `op` (a proxy, a gateway
+    /// answering for another owner): its code, message and cause, and its
+    /// detail as the error form writes one again (core §5.2). An error
+    /// form's JSON Schema detail, its type's JSON or CBOR on `op`'s
+    /// `encoding`, is decoded back to a value; the bare wire's raw detail,
+    /// base64 text, back to its bytes; any other detail kept as it came.
+    /// The relaying owner writes it under its own as-of mark.
+    #[must_use]
+    pub fn relay(&self, op: &Operation) -> OpError {
+        use zenkey_model::schema::TypeId;
+        let mut env = self.envelope.clone();
+        env.detail = match (env.detail.take(), &op.error) {
+            (Some(Detail::Bytes(b)), Some(TypeId::JsonSchema { .. })) => Some(
+                crate::codec::decode_json::<serde_json::Value>(&b, op.encoding)
+                    .map_or(Detail::Bytes(b), Detail::Value),
+            ),
+            (Some(d @ Detail::Value(_)), Some(TypeId::Raw { .. })) => {
+                Some(d.raw_bytes().map_or(d, Detail::Bytes))
+            }
+            (d, _) => d,
+        };
+        OpError::from(env)
     }
 
     /// An `app` error's detail read as the operation's `error` type `C`, on

@@ -26,7 +26,6 @@ use std::time::{Duration, SystemTime};
 
 use serde_json::Value;
 use zenkey_model::authoring::Encoding as WireEncoding;
-use zenkey_model::catalog::EPOCH_WITHOUT_CATALOG;
 use zenkey_model::contract::{Body, Data, Operation, Replies as RepliesKind, Resource};
 use zenkey_model::grammar::{Addr, IfaceId, KindToken, data_key};
 use zenkey_model::schema::TypeId;
@@ -759,9 +758,10 @@ fn op_check<Req: Codec, Resp: Codec, Sum: Codec>(op: &Operation, at: &str) -> Re
 
 /// A value reply decoded as `C`, from either wire (core §5.1, observer
 /// §7.3): a value form's record by CH's tag on the contract's `encoding`,
-/// a bare reply's payload on its `Encoding`. A value form refused does not
-/// decode.
-fn decode_answer<C: Codec>(a: &Answer, wire: Option<WireEncoding>) -> Result<C::Value> {
+/// a bare reply's payload on its `Encoding`, a packed record's `time`
+/// fields under the caller's deployment epoch (§7.6, §8.6). A value form
+/// refused does not decode.
+fn decode_answer<C: Codec>(a: &Answer, wire: Option<WireEncoding>, epoch: i64) -> Result<C::Value> {
     let fail = |e: String| {
         Error::Payload(format!(
             "the reply on {} does not decode as its declared type: {e}",
@@ -770,22 +770,17 @@ fn decode_answer<C: Codec>(a: &Answer, wire: Option<WireEncoding>) -> Result<C::
     };
     let record = a.record().map_err(|r| fail(r.reason()))?;
     let encoding = a.record_encoding();
-    C::decode_record_in(
-        &record,
-        wire_of(encoding.as_deref(), wire),
-        a.tag(),
-        EPOCH_WITHOUT_CATALOG,
-    )
-    .map_err(fail)
+    C::decode_record_in(&record, wire_of(encoding.as_deref(), wire), a.tag(), epoch).map_err(fail)
 }
 
 fn typed_replies<Resp: Codec, Sum: Codec>(
     out: crate::client::Replies,
     wire: Option<WireEncoding>,
+    epoch: i64,
 ) -> Result<Replies<Resp::Value, Sum::Value>> {
     out.try_map(
-        |a| decode_answer::<Resp>(&a, wire),
-        |a| decode_answer::<Sum>(&a, wire),
+        |a| decode_answer::<Resp>(&a, wire, epoch),
+        |a| decode_answer::<Sum>(&a, wire, epoch),
     )
 }
 
@@ -801,11 +796,12 @@ pub async fn call<Req: Codec, Resp: Codec>(
 ) -> Result<Outcome<Resp::Value>> {
     let (_, op) = client.op(resource)?;
     op_check::<Req, Resp, Nothing>(&op, resource)?;
-    let bytes = Req::encode(&request, op.encoding).map_err(Error::Payload)?;
+    let epoch = client.deployment_epoch();
+    let bytes = Req::encode_in(&request, op.encoding, epoch).map_err(Error::Payload)?;
     client
         .call(addr, resource, values, bytes)
         .await?
-        .try_map(|a| decode_answer::<Resp>(&a, op.encoding))
+        .try_map(|a| decode_answer::<Resp>(&a, op.encoding, epoch))
 }
 
 /// Calls a many-reply operation at `addr` ([`Client::call_many`]): every
@@ -819,10 +815,12 @@ pub async fn call_many<Req: Codec, Resp: Codec, Sum: Codec>(
 ) -> Result<Replies<Resp::Value, Sum::Value>> {
     let (_, op) = client.op(resource)?;
     op_check::<Req, Resp, Sum>(&op, resource)?;
-    let bytes = Req::encode(&request, op.encoding).map_err(Error::Payload)?;
+    let epoch = client.deployment_epoch();
+    let bytes = Req::encode_in(&request, op.encoding, epoch).map_err(Error::Payload)?;
     typed_replies::<Resp, Sum>(
         client.call_many(addr, resource, values, bytes).await?,
         op.encoding,
+        epoch,
     )
 }
 
@@ -836,21 +834,32 @@ pub async fn fan_out<Req: Codec, Resp: Codec, Sum: Codec>(
 ) -> Result<Replies<Resp::Value, Sum::Value>> {
     let (_, op) = fleet.op(resource)?;
     op_check::<Req, Resp, Sum>(&op, resource)?;
-    let bytes = Req::encode(&request, op.encoding).map_err(Error::Payload)?;
-    typed_replies::<Resp, Sum>(fleet.call(resource, values, bytes).await?, op.encoding)
+    let epoch = fleet.deployment_epoch();
+    let bytes = Req::encode_in(&request, op.encoding, epoch).map_err(Error::Payload)?;
+    typed_replies::<Resp, Sum>(
+        fleet.call(resource, values, bytes).await?,
+        op.encoding,
+        epoch,
+    )
 }
 
+/// A call's request decoded as `C` (core §5.1, "The request"): its
+/// record, by CH's tag when it came in the request form, on the contract's
+/// `encoding`, or a bare request's payload on its `Encoding`; a packed
+/// record's `time` fields under the service's deployment epoch. One that
+/// does not decode is `invalid_request`.
 fn decode_request<C: Codec>(
     call: &Call,
     wire: Option<WireEncoding>,
 ) -> std::result::Result<C::Value, OpError> {
-    let bytes = call
-        .payload()
-        .map(|p| p.to_bytes().into_owned())
-        .unwrap_or_default();
-    let enc = call.query().encoding().map(ToString::to_string);
-    C::decode(&bytes, wire_of(enc.as_deref(), wire))
-        .map_err(|e| OpError::invalid_request(format!("the request does not decode: {e}")))
+    let enc = call.record_encoding().map(ToString::to_string);
+    C::decode_record_in(
+        call.record(),
+        wire_of(enc.as_deref(), wire),
+        call.request_tag(),
+        call.deployment_epoch(),
+    )
+    .map_err(|e| OpError::invalid_request(format!("the request does not decode: {e}")))
 }
 
 fn served_op<Req: Codec, Resp: Codec, Sum: Codec>(
@@ -873,8 +882,9 @@ fn served_op<Req: Codec, Resp: Codec, Sum: Codec>(
 
 /// Serves a one-reply operation over its whole template
 /// ([`ServiceBuilder::serve`]): the request decoded as `Req` (a failure is
-/// `invalid_request`), the handler's value encoded as `Resp` and replied, its
-/// error refused with its envelope (O3).
+/// `invalid_request`), the handler's value encoded as `Resp` and replied in
+/// the value form, its error refused in the error form (O3, core §5.1,
+/// §5.2).
 ///
 /// A fan-out whose key leaves a parameter unbound names no member: the
 /// handler names the one it answers for with [`CallInfo::member`], from what
@@ -901,7 +911,7 @@ where
         async move {
             let req = decode_request::<Req>(&call, wire)?;
             let resp = h(req, CallInfo::of(&call)).await?;
-            let bytes = Resp::encode(&resp, wire)
+            let bytes = Resp::encode_in(&resp, wire, call.deployment_epoch())
                 .map_err(|e| OpError::internal(format!("the response does not encode: {e}")))?;
             call.reply(bytes).await?;
             Ok(())
@@ -947,7 +957,11 @@ where
         let h = Arc::clone(&handler);
         async move {
             let req = decode_request::<Req>(&call, wire)?;
-            let sink = Sink::new::<Resp, Sum>(Arc::new(CallOut(call.clone())), wire);
+            let sink = Sink::new_in::<Resp, Sum>(
+                Arc::new(CallOut(call.clone())),
+                wire,
+                call.deployment_epoch(),
+            );
             h(req, CallInfo::of(&call), sink).await
         }
     })
