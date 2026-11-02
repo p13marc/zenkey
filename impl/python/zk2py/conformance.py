@@ -7900,8 +7900,38 @@ def family_frame(root: Path) -> list[Result]:
                 out.append(_check(name, got, c["expect"]))
                 if "refused" not in got:
                     out.append(_check(f"{name}: writes back", lo.write(got).hex(), c["hex"]))
+        elif path.name == "apply.json":
+            out += _frame_apply(data, layouts)
         else:
             out.append((f"frame/{path.name}", False, "an unknown fixture file: the runner does not read it"))
+    return out
+
+
+def _frame_apply(data: dict[str, Any], layouts: dict[str, Any]) -> list[Result]:
+    """``apply.json`` (observer 0.21, #981 K2): one key's frames, each its
+    run, seq and body, read in arrival order by one :class:`zk2py.frame.Reader`
+    that held nothing before the first -> each frame as the reader reads it.
+    Each body must read to its ``value`` under the layout's tag; each frame
+    is read twice, from that value and as a sealed form 5 put through
+    :meth:`~zk2py.frame.Reader.read_put` (the envelope first), and both
+    readers must agree."""
+    from . import frame, zk2c
+
+    out: list[Result] = []
+    key = "zk2/lab/modem/linkframes.v1/stream/frames/link"
+    for i, c in enumerate(data["cases"]):
+        lo = layouts[c["layout"]]
+        by_value, by_put = frame.Reader(lo), frame.Reader(lo)
+        for j, f in enumerate(c["frames"]):
+            name = f"frame: apply #{i} frame {j} ({f['run']} {f['seq']}): {c['note']}"
+            body = bytes.fromhex(f["hex"])
+            out.append(_check(f"{name}: the body reads to its value", lo.read(lo.tag, body), f["value"]))
+            got = by_value.read(f["run"], f["seq"], f["value"])
+            out.append(_check(name, got, f["expect"]))
+            width = 4 * len(f["run"])
+            sealed = zk2c.write("frame", width, int(f["run"], 16), f["seq"], lo.tag, body)
+            out.append(_check(f"{name}: read as a put, envelope first",
+                              by_put.read_put(zk2c.read_put(key, zk2c.ENCODING, sealed)), f["expect"]))
     return out
 
 

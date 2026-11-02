@@ -484,9 +484,10 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "undecodable and sniffs nothing; seed.LateJoiner counts it in undecodable and merges nothing (readings)  "
      "(round 93, observer 0.14)"),
     # observer 0.20 (#978, F-444): a heartbeat's body is never a record.
-    ("observer", "observer §7.3", "A tool MUST NOT decode, render or judge a heartbeat's body as a record", NOT_MET,
-     "round 97: echo_tool sniffs a heartbeat's body as it sniffs a record, octet-stream bytes shown as hexadecimal "
-     "(re-keyed to observer 0.20)"),
+    ("observer", "observer §7.3", "A tool MUST NOT decode, render or judge a heartbeat's body as a record", MET,
+     "echo_tool.heartbeat_of: given the covered revision, the body read with its collections; else its form, the "
+     "interface it covers and its size; never sniffed; freshness_v2.View reads it with the collections alone "
+     "(freshness_v2_scenarios §1 py-py and rust-py: echo_tool's rows; readings) (round 97, observer 0.20)"),
     ("observer", "observer §7.3", "A tool that shows a payload it cannot decode MUST", NOT_MET,
      "no zk2py tool shows a payload by its declared type: echo_tool sniffs each one, its type not held (0.12); the "
      "profiles' readers show no payload they cannot decode, an undecodable one being their judgement's own answer "
@@ -503,11 +504,11 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "5: 25, 31 and 27 B a put, §7 steps 1, 2 and 4's own) (round 95, observer 0.18)"),
     # observer 0.21 (#981 K2): §7.6, a tool's frames.
     ("observer", "observer §7.6", "A tool MUST show a scheduled record's time as scheduled, with its `jitter_ms`",
-     NA, "round 97: no zk2py tool reads a frame's records yet: echo_tool sniffs a frame's body (re-keyed to "
-     "observer 0.21)"),
-    ("observer", "observer §7.6", "A tool MUST show a `within` field with its `delta`", NA,
-     "round 97: no zk2py tool reads a frame's records yet: echo_tool sniffs a frame's body (re-keyed to "
-     "observer 0.21)"),
+     MET, "echo_tool's frame row, frame.Reader's records: time scheduled, after_ms step_ms × i and jitter_ms, never "
+     "measured (apply.json; frames_scenarios §3 py-py: echo_tool's record 1) (round 97, observer 0.21)"),
+    ("observer", "observer §7.6", "A tool MUST show a `within` field with its `delta`", MET,
+     "echo_tool's frame row, frame.FieldState.shown: within with its last value and its delta (apply.json; "
+     "frames_scenarios §4 py-py: echo_tool's queue_depth at seqs 1 to 4) (round 97, observer 0.21)"),
     # -- static --------------------------------------------------------------------------
     ("static", "core §1.1", "An implementation MUST refuse to build one, and", MET,
      "keys family"),
@@ -578,8 +579,9 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "bodies.json's reads) (round 96, core 0.81)"),
     ("static", "core §7.5", "Every body an implementation accepts MUST write back to the same bytes", MET,
      "heartbeat.write in the form read (heartbeat family: every accepted read written back) (round 96, core 0.81)"),
-    # core 0.83 (#981 K1): §7.7's frames. The owner's and the reader's rules are
-    # K2's and K3's: zk2py writes and reads none (round 96).
+    # core 0.83 (#981 K1): §7.7's frames. The owner's and the reader's rules
+    # were n/a at round 96; observer 0.21 and core 0.87 (#981 K2, K3) bring
+    # zk2py's reader and owner (round 97).
     # core 0.87 (#981 K3): never a mutation on a frame resource's key.
     ("owner", "core §7.7", "An owner MUST NOT put a mutation (§7.5) on a frame resource's key", NA,
      "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it "
@@ -596,18 +598,18 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it writes no frame, as core 0.83 says nothing does yet (K3's) (round 96, core 0.83)"),
     ("owner", "core §7.7", 'An owner MUST mark a record scheduled only when', NA,
      "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it writes no frame, as core 0.83 says nothing does yet (K3's) (round 96, core 0.83)"),
-    ("consumer", "core §7.7", 'A consumer or a tool MUST turn every field `unknown` at a gap', NA,
-     "zk2py reads no frame's records (K2's): packed.read_sample and open_put count a frame undecodable (no_reading), so no reader holds a field state (round 96, core 0.83)"),
-    ("consumer", "core §7.7", 'A consumer or a tool MUST turn a field with a deadband `unknown`', NA,
-     "zk2py reads no frame's records (K2's): packed.read_sample and open_put count a frame undecodable (no_reading), so no reader holds a field state (round 96, core 0.83)"),
+    ("consumer", "core §7.7", 'A consumer or a tool MUST turn every field `unknown` at a gap', MET,
+     "frame.Reader (frame_live.FrameSubscriber, a consumer of an owner's frame keys): every field unknown at a gap, a rewind and another run, the first frame included (frame family: apply.json; frames_scenarios §2, §5, §6 in py-py and rust-py) (round 97, observer 0.21)"),
+    ("consumer", "core §7.7", 'A consumer or a tool MUST turn a field with a deadband `unknown`', MET,
+     "frame.Reader: unknown, why deadband, at the max_records-th record after the inclusion (apply.json; frames_scenarios §4 step 5, X's frames) (round 97, observer 0.21)"),
     ("consumer", "core §7.7", 'A consumer or a tool MUST NOT show or use an `unknown` or `absent` field', MET,
-     "no zk2py reader shows or uses a frame's field: a frame is undecodable in packed.read_sample and open_put, every packed reading's (round 96, core 0.83)"),
-    ("observer", "core §7.7", 'A consumer or a tool MUST turn every field `unknown` at a gap', NA,
-     "zk2py reads no frame's records (K2's): packed.read_sample and open_put count a frame undecodable (no_reading), so no reader holds a field state (round 96, core 0.83)"),
-    ("observer", "core §7.7", 'A consumer or a tool MUST turn a field with a deadband `unknown`', NA,
-     "zk2py reads no frame's records (K2's): packed.read_sample and open_put count a frame undecodable (no_reading), so no reader holds a field state (round 96, core 0.83)"),
+     "frame.FieldState.shown: an unknown or absent field holds no value, its state's name alone (apply.json; frames_scenarios 'never a value', in every pairing) (round 97, observer 0.21)"),
+    ("observer", "core §7.7", 'A consumer or a tool MUST turn every field `unknown` at a gap', MET,
+     "echo_tool given the contract reads each frame key through one frame.Reader (apply.json; frames_scenarios §3, §4 py-py: echo_tool's rows) (round 97, observer 0.21)"),
+    ("observer", "core §7.7", 'A consumer or a tool MUST turn a field with a deadband `unknown`', MET,
+     "echo_tool's frame.Reader: unknown, why deadband (apply.json; frames_scenarios §4) (round 97, observer 0.21)"),
     ("observer", "core §7.7", 'A consumer or a tool MUST NOT show or use an `unknown` or `absent` field', MET,
-     "no zk2py reader shows or uses a frame's field: a frame is undecodable in packed.read_sample and open_put, every packed reading's (round 96, core 0.83)"),
+     "frame.FieldState.shown: an unknown or absent field holds no value, its state's name alone (apply.json; frames_scenarios 'never a value', in every pairing) (round 97, observer 0.21)"),
     ("static", "core §7.7", "An implementation that writes a frame MUST write its tag in CH's tag bits", MET,
      "frame.Layout.tag, the frame form's sha256's last byte's low 4 bits (frame family: layouts.json, every write sealed in form 5 under it and parsed back) (round 96, core 0.83)"),
     ("static", "core §7.7", 'An implementation that writes a frame MUST write the bits above for its records', MET,

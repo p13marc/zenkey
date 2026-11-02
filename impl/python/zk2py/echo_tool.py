@@ -67,6 +67,22 @@ still sniffed, and ``declared_type`` says so: decoding protobuf and JSON
 Schema types field by field needs more than zk2py's echo holds (README,
 "What it does not cover").
 
+**A heartbeat** (observer §7.3, text 0.20; round 97) is never read as a
+record of its resource's type, and never sniffed: its row's ``heartbeat``
+reads its body with the covered revision's collections when that revision
+is held (``--contracts``), and otherwise shows it by its envelope, its form,
+the interface it covers and its size (:func:`heartbeat_of`).
+
+**A frame** (observer §7.6, text 0.21; round 97): with its frame resource's
+contract held, each frame key's frames are read in arrival order by one
+:class:`zk2py.frame.Reader`, the row's ``frame`` each record at its seq and
+time (a scheduled one with its ``after_ms`` and ``jitter_ms``, never as
+measured), every field in its state (``within`` with its delta, ``unknown``
+with why, ``unknown`` and ``absent`` with no value). A mutation or a body
+the layout refuses is ``undecodable``, named. Without the declaration a
+frame is shown by its envelope, its run, its seq and its size, its body
+never sniffed.
+
 **Across a constrained face** (core §8.5, 0.78; observer §7.5, text 0.18).
 ``--across-face SYSTEM/SERVICE``, repeatable, needs ``--contracts`` and no
 ``SELECTOR``: the tool subscribes by the scopes the contracts in hand give
@@ -160,6 +176,8 @@ class Held:
                 raise ValueError(f"{c.interface}: two revisions held, and this tool reads no descriptor to choose "
                                  "between them")
             self.by_iface[c.interface] = c
+        #: one frame reader per frame key heard (observer §7.6)
+        self.readers: dict[str, Any] = {}
         self._templates = {
             name: [(templates.parse_template(r["template"]), r) for r in c.canonical["resources"]]
             for name, c in self.by_iface.items()}
@@ -178,6 +196,47 @@ class Held:
         if best is None:
             return None
         return c, next(r for t, r in rows if t is best[0])
+
+    def frame_reader(self, key: str, c: Any, r: dict[str, Any]) -> Any:
+        """The one :class:`zk2py.frame.Reader` of a frame key, which reads its
+        frames in the order they arrive (observer §7.6), or None where the
+        resource's layout does not resolve."""
+        from . import frame
+
+        if key not in self.readers:
+            lo = frame.layout_of(c, r)
+            self.readers[key] = None if lo is None else frame.Reader(lo)
+        return self.readers[key]
+
+
+def heartbeat_of(key: str, read: Any, size: int, held: "Held | None") -> dict[str, Any]:
+    """A heartbeat's row member (observer §7.3, text 0.20): "A tool MUST NOT
+    decode, render or judge a heartbeat's body as a record of its resource's
+    type." With the covered revision held it reads the body with that
+    revision's collections, and shows what it vouches for; a body of another
+    revision's tag, or one §7.5 refuses, is named. Without it, "it shows the
+    heartbeat by its envelope: its form, the interface it covers and its
+    size". The body is never sniffed."""
+    from . import heartbeat
+
+    covers = key.split("/")[-1]
+    out: dict[str, Any] = {"form": "heartbeat", "covers": covers, "bytes": size, "vouches": None}
+    c = None if held is None else held.by_iface.get(covers)
+    if c is None:
+        out["says"] = (f"a heartbeat covering {covers}: its covered revision is not held, so it is shown by its "
+                       "envelope, its form, the interface it covers and its size (observer §7.3)")
+        return out
+    lo = heartbeat.layout_of(c.canonical, c.fingerprint)
+    if read.tag != lo.tag:
+        out["says"] = (f"a heartbeat of another revision of {covers}: CH's tag {read.tag} is not the held "
+                       f"revision's {lo.tag}, so it is shown by its envelope (freshness.v2 §2.5 step 1)")
+        return out
+    try:
+        out["vouches"] = heartbeat.read(lo, read.record or b"")
+        out["says"] = f"read with the held revision of {covers}'s collections (observer §7.3)"
+    except heartbeat.Refused as e:
+        out["says"] = f"undecodable: the body is refused ({e.token}, core §7.5)"
+    return out
 
 
 def _held_type(c: Any, r: dict[str, Any]) -> dict[str, Any]:
@@ -226,9 +285,29 @@ def row_of(key: str, delete: bool, size: int, encoding: str, payload: bytes | No
     sniffed = decoded = None
     undecodable = None if read is None or not read.refused else read.undecodable()
     rec = None
-    if found is not None and found[1]["type"]["kind"] == "packed":
+    beat = framed = None
+    reader = None
+    if found is not None and found[1].get("frame") is not None:
+        reader = held.frame_reader(key, *found)
+    elif found is not None and found[1]["type"]["kind"] == "packed":
         rec = found[0].schemas.packed_record(found[1]["type"])
-    if rec is not None and not delete and payload is not None and read is not None:
+    if read is not None and not delete and payload is not None and read.form == "heartbeat":
+        # observer §7.3 (0.20): never read as a record, never sniffed
+        beat = heartbeat_of(key, read, size, held)
+    elif reader is not None and not delete and payload is not None and read is not None:
+        # observer §7.6 (0.21): a frame key's frames through one reader, in
+        # arrival order; a mutation or a refused body undecodable, named
+        framed = reader.read_put(read, epoch)
+        if "undecodable" in framed:
+            undecodable = f"undecodable as a frame of packed:{reader.layout.record.name}: {framed['undecodable']}"
+    elif read is not None and not delete and payload is not None and read.form == "frame":
+        # observer §7.6: "A frame whose declaration the tool does not hold is
+        # shown by its envelope: its run, its seq and its size. Its body is
+        # never sniffed as a record (§7.3)."
+        framed = {"form": "frame", "run": read.stamp.run_hex(), "seq": read.stamp.seq, "bytes": size,
+                  "says": "a frame whose declaration this tool does not hold: shown by its envelope, its body never "
+                          "sniffed (observer §7.6)"}
+    elif rec is not None and not delete and payload is not None and read is not None:
         got = packed.read_sample(rec, read, epoch)
         if got.undecodable:
             # Every refusal under a packed type is named as that type's: its
@@ -246,6 +325,10 @@ def row_of(key: str, delete: bool, size: int, encoding: str, payload: bytes | No
            "envelope": stamp, "undecodable": undecodable, "sniffed": sniffed}
     if held is not None:
         row["decoded"] = decoded
+    if beat is not None:
+        row["heartbeat"] = beat
+    if framed is not None:
+        row["frame"] = framed
     return row
 
 

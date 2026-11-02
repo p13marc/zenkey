@@ -1,9 +1,11 @@
-"""Core §7.7, frames (core 0.83, #981 K1): several records of one packed type
-(§7.6) under one envelope and one time. Session-free; built on
-:mod:`zk2py.packed`'s fields and codes. K1's static rules only: the
-declaration, the tag, the body written and read. The owner's and the
-reader's rules over a key's frames are K2's and K3's, and zk2py writes and
-reads no frame on a bus yet.
+"""Core §7.7, frames (core 0.83, #981 K1; the reader, observer 0.21, K2):
+several records of one packed type (§7.6) under one
+envelope and one time. Session-free; built on :mod:`zk2py.packed`'s fields
+and codes: the declaration, the tag, the body written and read
+(:class:`Layout`); the reader's field states over one key's frames
+(:class:`Reader`, round 97); and the owner's frames, gathered and written
+(:class:`Framer`, round 97). :mod:`zk2py.frame_live` and
+:meth:`zk2py.owner.Owner.record_frame` put them on a bus.
 
 **The declaration** (:class:`Declaration`, :func:`declaration`): ``records``
 (1 by default), ``step_ms`` (exactly when ``records`` is above 1),
@@ -282,3 +284,195 @@ class Layout:
         if pos % 8 and whole & ((1 << (8 - pos % 8)) - 1):
             raise Refused("pad", "a pad bit is 1")
         return {"time": None if ms >= 1000 else {"s": s, "ms": ms}, "records": recs}
+
+
+# -- the reader's fields (core §7.7, 0.83; observer §7.6, 0.21; #981 K2) ---------------------
+
+SEQ_MOD = 2**24
+#: why a field is unknown: the text's table, by its case (apply.json's ``why``)
+WHY = ("first", "run", "gap", "rewind", "deadband", "no_value")
+
+
+def follows(held_run: str | None, expected: int | None, run: str, seq: int) -> tuple[str, int | None]:
+    """What a frame at ``run``/``seq`` follows, for a reader holding
+    ``held_run`` and expecting ``expected`` (core §7.7 "The frames it
+    expects"): ``first`` (no run held), ``run`` (another run, its width
+    included), ``continues`` (the seq after the last record read), ``gap``
+    with the records lost (a newer seq by §4.3's serial order: ahead by 1 to
+    2^23 − 1), or ``rewind`` (any other seq, 2^23 ahead included)."""
+    if held_run is None or expected is None:
+        return "first", None
+    if run != held_run:
+        return "run", None
+    d = (seq - expected) % SEQ_MOD
+    if d == 0:
+        return "continues", None
+    if d < SEQ_MOD // 2:
+        return "gap", d
+    return "rewind", None
+
+
+@dataclass
+class FieldState:
+    """One field's state (core §7.7's table): ``known`` with its value,
+    ``within`` with the last value included (and its deadband's delta),
+    ``unknown`` with why, or ``absent``. ``since`` counts the records after
+    the last inclusion of a value, for a deadband; ``valued`` says that
+    inclusion was a value, not a reserved code."""
+
+    state: str = "unknown"
+    value: Any = None
+    why: str | None = "first"
+    since: int = 0
+    valued: bool = False
+
+    def shown(self, delta: Fraction | None) -> dict[str, Any]:
+        """The field as ``apply.json`` writes it, and as observer §7.6 has a
+        tool show it: ``known`` its value, ``within`` the last value and its
+        delta, ``unknown`` and ``absent`` their state's name and no value
+        (core §7.7: "MUST NOT show or use an unknown or absent field as a
+        value")."""
+        if self.state == "known":
+            return {"state": "known", "value": self.value}
+        if self.state == "within":
+            assert delta is not None
+            return {"state": "within", "value": self.value, "delta": packed.shortest(delta)}
+        if self.state == "absent":
+            return {"state": "absent"}
+        return {"state": "unknown", "why": self.why}
+
+
+class Reader:
+    """Core §7.7's **reader** of one frame key (a consumer or a tool): "It
+    keeps one state for each field of the key, in the run it holds". Each
+    frame is read in the order it arrives (:meth:`read`, a frame's run, its
+    seq and its body's value; :meth:`read_put`, a put's envelope read first).
+
+    - **What resets** (MUST): every field ``unknown`` at a gap, a rewind, and
+      a frame of another run, the first included; then the frame is read.
+    - **A record**, in order: an included field is ``known``, or ``absent``
+      where its presence bit is 0. An omitted field with no deadband holds
+      what it held in the record before, absent included (the owner includes
+      it whenever its code or presence differs: ``apply.json``'s reading of
+      §7.7's owner rule). An omitted field with a deadband is ``within``
+      fewer than ``max_records`` records after an inclusion of a value, and
+      ``unknown`` at the ``max_records``-th (``deadband``, MUST), or after an
+      inclusion that was absent or a reserved code (``no_value``).
+    - **Times**: record 0's is the frame's ``time``, ``unknown`` when all 42
+      bits are set; a later record's is ``scheduled`` (``step_ms`` × i, its
+      ``jitter_ms``, an instant and a bound, never a measurement) or
+      ``measured`` (its offset), known when record 0's is not."""
+
+    def __init__(self, layout: Layout) -> None:
+        self.layout = layout
+        self.run: str | None = None
+        self.expected: int | None = None
+        self.fields: dict[str, FieldState] = {f.name: FieldState() for f in layout.fields}
+        #: frames read, and those counted undecodable with why
+        self.read_count = 0
+        self.undecodable: list[str] = []
+
+    def _reset(self, why: str) -> None:
+        for s in self.fields.values():
+            s.state, s.value, s.why, s.since, s.valued = "unknown", None, why, 0, False
+
+    def _record(self, r: dict[str, Any]) -> None:
+        values, absent, full = r.get("values", {}), set(r.get("absent", [])), bool(r.get("full"))
+        for f in self.layout.fields:
+            s = self.fields[f.name]
+            if full or f.name in values or f.name in absent:
+                if f.name in values:
+                    v = values[f.name]
+                    s.state, s.value, s.why, s.since = "known", v, None, 0
+                    s.valued = not (isinstance(v, str) and v in f.reserved)
+                else:
+                    s.state, s.value, s.why, s.since, s.valued = "absent", None, None, 0, False
+                continue
+            db = self.layout.decl.deadband.get(f.name)
+            if db is None:
+                continue  # holds what it held in the record before
+            if s.state in ("known", "within") and s.valued:
+                s.since += 1
+                if s.since >= db.max_records:
+                    s.state, s.why = "unknown", "deadband"
+                    s.value = None
+                else:
+                    s.state = "within"
+            elif s.state in ("known", "absent"):
+                s.state, s.value, s.why = "unknown", None, "no_value"
+
+    def _time(self, t: dict[str, int] | None, i: int, at: Any) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        if i == 0:
+            out["time"] = "unknown" if t is None else "measured"
+            after = 0
+        elif at == "scheduled":
+            assert self.layout.decl.step_ms is not None
+            after = self.layout.decl.step_ms * i
+            out.update(time="scheduled", after_ms=after, jitter_ms=self.layout.decl.jitter_ms or 0)
+        else:
+            after = at
+            out.update(time="measured", after_ms=after)
+        if t is not None:
+            total = t["s"] * 1000 + t["ms"] + after
+            out["at"] = {"s": total // 1000, "ms": total % 1000}
+        return out
+
+    def read(self, run: str, seq: int, value: dict[str, Any]) -> dict[str, Any]:
+        """One frame, its body's value read (:meth:`Layout.read`): what it
+        follows (``lost`` with a gap), then each record's seq, time and
+        field states, as ``apply.json``'s ``expect`` writes them."""
+        how, lost = follows(self.run, self.expected, run, seq)
+        if how != "continues":
+            self._reset(how)
+        out: dict[str, Any] = {"run": run, "seq": seq, "follows": how}
+        if lost is not None:
+            out["lost"] = lost
+        recs = value["records"]
+        shown = []
+        for i, r in enumerate(recs):
+            self._record(r)
+            row = {"seq": (seq + i) % SEQ_MOD, **self._time(value.get("time"), i, r.get("at"))}
+            row["fields"] = {f.name: self.fields[f.name].shown(
+                self.layout.decl.deadband[f.name].delta if f.name in self.layout.decl.deadband else None)
+                for f in self.layout.fields}
+            shown.append(row)
+        out["records"] = shown
+        self.run, self.expected = run, (seq + len(recs)) % SEQ_MOD
+        self.read_count += 1
+        return out
+
+    def read_put(self, read: Any, epoch: int | None = None) -> dict[str, Any]:
+        """A put on the frame key, its envelope read first (observer §7.3,
+        a :class:`zk2py.zk2c.Read`): a frame is read with the layout; a
+        mutation, a heartbeat, a refused envelope, no envelope, or a body
+        the layout refuses has no reading and is counted undecodable, naming
+        why (core §7.7 "No reading"; observer §7.6). Its seqs are not
+        counted, so the next frame reads as following a gap."""
+        if not read.enveloped:
+            why = "no_envelope: a frame travels in core §7.5's envelope"
+        elif read.refused:
+            why = f"{read.refusal}: a refused zk2c envelope ({read.why})"
+        elif read.form != "frame":
+            why = f"no_reading: a {read.form} on a frame resource's key has no reading (core §7.7)"
+        else:
+            try:
+                value = self.layout.read(read.tag, read.record or b"", epoch)
+            except (Refused, packed.Refused) as e:
+                why = f"{e.token}: {str(e).split(': ', 1)[-1]}"
+            else:
+                return self.read(read.stamp.run_hex(), read.stamp.seq, value)
+        self.undecodable.append(why)
+        return {"undecodable": why, "envelope": None if read.stamp is None else {
+            "run": read.stamp.run_hex(), "seq": read.stamp.seq}}
+
+
+def layout_of(contract: Any, resource: dict[str, Any]) -> Layout | None:
+    """A loaded contract's frame resource as a :class:`Layout`: its record
+    type and its canonical ``frame`` member (core §9.5), or None for a
+    resource that is no frame resource or whose type does not resolve."""
+    if resource.get("frame") is None or resource.get("type", {}).get("kind") != "packed":
+        return None
+    rec = contract.schemas.packed_record(resource["type"])
+    return None if rec is None else Layout(rec, declaration(resource["frame"]))
+
