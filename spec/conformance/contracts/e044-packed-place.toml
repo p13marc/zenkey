@@ -1,6 +1,7 @@
-# core §7.1, §9.2 E044: a packed type where no envelope carries it. An
-# explicit stream's type, an attachment, and an operation's request and
-# response: one per reference. A packed type on an explicit state is fine.
+# core §7.1, §9.2 E044: a packed type where no CH carries its tag. An
+# explicit stream's type and an attachment: one per reference. A packed
+# type on an explicit state is fine, and so is an operation's
+# (ok-packed-operation).
 [interface]
 name = "seed"
 major = 1
@@ -18,11 +19,6 @@ type = "packed:Sensor"
 kind = "stream"
 type = { raw = "text/plain" }
 attachment = "packed:Status"
-
-[resources.calibrate]
-kind = "operation"
-request = "packed:Sensor"
-response = "packed:Status"
 
 [resources.held]
 kind = "state"

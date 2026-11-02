@@ -1,0 +1,817 @@
+{
+  "description": "core §7.5's error form, which carries §5.2's error in bytes. Written by an independent reading of the text (Python, standard library), checked, never blessed. `bytes`: every error byte in hex, read alone → `code` and `cause` (§5.2's names, `cause` `null` for none), and the `detail` and `message` bits, or `{\"refused\": token}`, the first of §7.5's checks on the byte: `cause`, `detail`, then `extension`. `writes`: an error and its stamp (`run_width`, `run`, `seq`, `tag`, `code`, `cause`, `message` a string or `null`, `detail` hex or `null`) → the reply_err's payload in hex, or the writer's refusal (`cause`, `detail`). A message over 255 bytes is cut to its longest prefix of whole characters within 255 bytes, and every accepted write parses back to its value with the message as cut (`reads_as` gives it where it was cut). `reads`: a reply error's Encoding, as zenoh writes it, and its payload in hex → `{\"error\": …}`, the stamp, the tag and the error it carries, or `{\"refused\": token}`: `encoding` when the Encoding is not exactly `zenoh/bytes` (a schema suffix included), since only `zenoh/bytes` carries a form, else the first of §7.5's refusals for a reply_err. A payload under one of §5.2's three envelope encodings is `cases.json`'s, and `encoding` here. The tag is reported, never checked against an operation's `error` type.",
+  "codes": [
+    "invalid_request",
+    "not_found",
+    "unavailable",
+    "forbidden",
+    "fanout_forbidden",
+    "busy",
+    "internal",
+    "app"
+  ],
+  "causes": [
+    null,
+    "build",
+    "config",
+    "capability"
+  ],
+  "bytes": [
+    {"byte": "00", "expect": {"code": "invalid_request", "cause": null, "detail": false, "message": false}},
+    {"byte": "01", "expect": {"refused": "extension"}},
+    {"byte": "02", "expect": {"code": "invalid_request", "cause": null, "detail": false, "message": true}},
+    {"byte": "03", "expect": {"refused": "extension"}},
+    {"byte": "04", "expect": {"refused": "detail"}},
+    {"byte": "05", "expect": {"refused": "detail"}},
+    {"byte": "06", "expect": {"refused": "detail"}},
+    {"byte": "07", "expect": {"refused": "detail"}},
+    {"byte": "08", "expect": {"refused": "cause"}},
+    {"byte": "09", "expect": {"refused": "cause"}},
+    {"byte": "0a", "expect": {"refused": "cause"}},
+    {"byte": "0b", "expect": {"refused": "cause"}},
+    {"byte": "0c", "expect": {"refused": "cause"}},
+    {"byte": "0d", "expect": {"refused": "cause"}},
+    {"byte": "0e", "expect": {"refused": "cause"}},
+    {"byte": "0f", "expect": {"refused": "cause"}},
+    {"byte": "10", "expect": {"refused": "cause"}},
+    {"byte": "11", "expect": {"refused": "cause"}},
+    {"byte": "12", "expect": {"refused": "cause"}},
+    {"byte": "13", "expect": {"refused": "cause"}},
+    {"byte": "14", "expect": {"refused": "cause"}},
+    {"byte": "15", "expect": {"refused": "cause"}},
+    {"byte": "16", "expect": {"refused": "cause"}},
+    {"byte": "17", "expect": {"refused": "cause"}},
+    {"byte": "18", "expect": {"refused": "cause"}},
+    {"byte": "19", "expect": {"refused": "cause"}},
+    {"byte": "1a", "expect": {"refused": "cause"}},
+    {"byte": "1b", "expect": {"refused": "cause"}},
+    {"byte": "1c", "expect": {"refused": "cause"}},
+    {"byte": "1d", "expect": {"refused": "cause"}},
+    {"byte": "1e", "expect": {"refused": "cause"}},
+    {"byte": "1f", "expect": {"refused": "cause"}},
+    {"byte": "20", "expect": {"code": "not_found", "cause": null, "detail": false, "message": false}},
+    {"byte": "21", "expect": {"refused": "extension"}},
+    {"byte": "22", "expect": {"code": "not_found", "cause": null, "detail": false, "message": true}},
+    {"byte": "23", "expect": {"refused": "extension"}},
+    {"byte": "24", "expect": {"refused": "detail"}},
+    {"byte": "25", "expect": {"refused": "detail"}},
+    {"byte": "26", "expect": {"refused": "detail"}},
+    {"byte": "27", "expect": {"refused": "detail"}},
+    {"byte": "28", "expect": {"refused": "cause"}},
+    {"byte": "29", "expect": {"refused": "cause"}},
+    {"byte": "2a", "expect": {"refused": "cause"}},
+    {"byte": "2b", "expect": {"refused": "cause"}},
+    {"byte": "2c", "expect": {"refused": "cause"}},
+    {"byte": "2d", "expect": {"refused": "cause"}},
+    {"byte": "2e", "expect": {"refused": "cause"}},
+    {"byte": "2f", "expect": {"refused": "cause"}},
+    {"byte": "30", "expect": {"refused": "cause"}},
+    {"byte": "31", "expect": {"refused": "cause"}},
+    {"byte": "32", "expect": {"refused": "cause"}},
+    {"byte": "33", "expect": {"refused": "cause"}},
+    {"byte": "34", "expect": {"refused": "cause"}},
+    {"byte": "35", "expect": {"refused": "cause"}},
+    {"byte": "36", "expect": {"refused": "cause"}},
+    {"byte": "37", "expect": {"refused": "cause"}},
+    {"byte": "38", "expect": {"refused": "cause"}},
+    {"byte": "39", "expect": {"refused": "cause"}},
+    {"byte": "3a", "expect": {"refused": "cause"}},
+    {"byte": "3b", "expect": {"refused": "cause"}},
+    {"byte": "3c", "expect": {"refused": "cause"}},
+    {"byte": "3d", "expect": {"refused": "cause"}},
+    {"byte": "3e", "expect": {"refused": "cause"}},
+    {"byte": "3f", "expect": {"refused": "cause"}},
+    {"byte": "40", "expect": {"refused": "cause"}},
+    {"byte": "41", "expect": {"refused": "cause"}},
+    {"byte": "42", "expect": {"refused": "cause"}},
+    {"byte": "43", "expect": {"refused": "cause"}},
+    {"byte": "44", "expect": {"refused": "cause"}},
+    {"byte": "45", "expect": {"refused": "cause"}},
+    {"byte": "46", "expect": {"refused": "cause"}},
+    {"byte": "47", "expect": {"refused": "cause"}},
+    {"byte": "48", "expect": {"code": "unavailable", "cause": "build", "detail": false, "message": false}},
+    {"byte": "49", "expect": {"refused": "extension"}},
+    {"byte": "4a", "expect": {"code": "unavailable", "cause": "build", "detail": false, "message": true}},
+    {"byte": "4b", "expect": {"refused": "extension"}},
+    {"byte": "4c", "expect": {"refused": "detail"}},
+    {"byte": "4d", "expect": {"refused": "detail"}},
+    {"byte": "4e", "expect": {"refused": "detail"}},
+    {"byte": "4f", "expect": {"refused": "detail"}},
+    {"byte": "50", "expect": {"code": "unavailable", "cause": "config", "detail": false, "message": false}},
+    {"byte": "51", "expect": {"refused": "extension"}},
+    {"byte": "52", "expect": {"code": "unavailable", "cause": "config", "detail": false, "message": true}},
+    {"byte": "53", "expect": {"refused": "extension"}},
+    {"byte": "54", "expect": {"refused": "detail"}},
+    {"byte": "55", "expect": {"refused": "detail"}},
+    {"byte": "56", "expect": {"refused": "detail"}},
+    {"byte": "57", "expect": {"refused": "detail"}},
+    {"byte": "58", "expect": {"code": "unavailable", "cause": "capability", "detail": false, "message": false}},
+    {"byte": "59", "expect": {"refused": "extension"}},
+    {"byte": "5a", "expect": {"code": "unavailable", "cause": "capability", "detail": false, "message": true}},
+    {"byte": "5b", "expect": {"refused": "extension"}},
+    {"byte": "5c", "expect": {"refused": "detail"}},
+    {"byte": "5d", "expect": {"refused": "detail"}},
+    {"byte": "5e", "expect": {"refused": "detail"}},
+    {"byte": "5f", "expect": {"refused": "detail"}},
+    {"byte": "60", "expect": {"code": "forbidden", "cause": null, "detail": false, "message": false}},
+    {"byte": "61", "expect": {"refused": "extension"}},
+    {"byte": "62", "expect": {"code": "forbidden", "cause": null, "detail": false, "message": true}},
+    {"byte": "63", "expect": {"refused": "extension"}},
+    {"byte": "64", "expect": {"refused": "detail"}},
+    {"byte": "65", "expect": {"refused": "detail"}},
+    {"byte": "66", "expect": {"refused": "detail"}},
+    {"byte": "67", "expect": {"refused": "detail"}},
+    {"byte": "68", "expect": {"refused": "cause"}},
+    {"byte": "69", "expect": {"refused": "cause"}},
+    {"byte": "6a", "expect": {"refused": "cause"}},
+    {"byte": "6b", "expect": {"refused": "cause"}},
+    {"byte": "6c", "expect": {"refused": "cause"}},
+    {"byte": "6d", "expect": {"refused": "cause"}},
+    {"byte": "6e", "expect": {"refused": "cause"}},
+    {"byte": "6f", "expect": {"refused": "cause"}},
+    {"byte": "70", "expect": {"refused": "cause"}},
+    {"byte": "71", "expect": {"refused": "cause"}},
+    {"byte": "72", "expect": {"refused": "cause"}},
+    {"byte": "73", "expect": {"refused": "cause"}},
+    {"byte": "74", "expect": {"refused": "cause"}},
+    {"byte": "75", "expect": {"refused": "cause"}},
+    {"byte": "76", "expect": {"refused": "cause"}},
+    {"byte": "77", "expect": {"refused": "cause"}},
+    {"byte": "78", "expect": {"refused": "cause"}},
+    {"byte": "79", "expect": {"refused": "cause"}},
+    {"byte": "7a", "expect": {"refused": "cause"}},
+    {"byte": "7b", "expect": {"refused": "cause"}},
+    {"byte": "7c", "expect": {"refused": "cause"}},
+    {"byte": "7d", "expect": {"refused": "cause"}},
+    {"byte": "7e", "expect": {"refused": "cause"}},
+    {"byte": "7f", "expect": {"refused": "cause"}},
+    {"byte": "80", "expect": {"code": "fanout_forbidden", "cause": null, "detail": false, "message": false}},
+    {"byte": "81", "expect": {"refused": "extension"}},
+    {"byte": "82", "expect": {"code": "fanout_forbidden", "cause": null, "detail": false, "message": true}},
+    {"byte": "83", "expect": {"refused": "extension"}},
+    {"byte": "84", "expect": {"refused": "detail"}},
+    {"byte": "85", "expect": {"refused": "detail"}},
+    {"byte": "86", "expect": {"refused": "detail"}},
+    {"byte": "87", "expect": {"refused": "detail"}},
+    {"byte": "88", "expect": {"refused": "cause"}},
+    {"byte": "89", "expect": {"refused": "cause"}},
+    {"byte": "8a", "expect": {"refused": "cause"}},
+    {"byte": "8b", "expect": {"refused": "cause"}},
+    {"byte": "8c", "expect": {"refused": "cause"}},
+    {"byte": "8d", "expect": {"refused": "cause"}},
+    {"byte": "8e", "expect": {"refused": "cause"}},
+    {"byte": "8f", "expect": {"refused": "cause"}},
+    {"byte": "90", "expect": {"refused": "cause"}},
+    {"byte": "91", "expect": {"refused": "cause"}},
+    {"byte": "92", "expect": {"refused": "cause"}},
+    {"byte": "93", "expect": {"refused": "cause"}},
+    {"byte": "94", "expect": {"refused": "cause"}},
+    {"byte": "95", "expect": {"refused": "cause"}},
+    {"byte": "96", "expect": {"refused": "cause"}},
+    {"byte": "97", "expect": {"refused": "cause"}},
+    {"byte": "98", "expect": {"refused": "cause"}},
+    {"byte": "99", "expect": {"refused": "cause"}},
+    {"byte": "9a", "expect": {"refused": "cause"}},
+    {"byte": "9b", "expect": {"refused": "cause"}},
+    {"byte": "9c", "expect": {"refused": "cause"}},
+    {"byte": "9d", "expect": {"refused": "cause"}},
+    {"byte": "9e", "expect": {"refused": "cause"}},
+    {"byte": "9f", "expect": {"refused": "cause"}},
+    {"byte": "a0", "expect": {"code": "busy", "cause": null, "detail": false, "message": false}},
+    {"byte": "a1", "expect": {"refused": "extension"}},
+    {"byte": "a2", "expect": {"code": "busy", "cause": null, "detail": false, "message": true}},
+    {"byte": "a3", "expect": {"refused": "extension"}},
+    {"byte": "a4", "expect": {"refused": "detail"}},
+    {"byte": "a5", "expect": {"refused": "detail"}},
+    {"byte": "a6", "expect": {"refused": "detail"}},
+    {"byte": "a7", "expect": {"refused": "detail"}},
+    {"byte": "a8", "expect": {"refused": "cause"}},
+    {"byte": "a9", "expect": {"refused": "cause"}},
+    {"byte": "aa", "expect": {"refused": "cause"}},
+    {"byte": "ab", "expect": {"refused": "cause"}},
+    {"byte": "ac", "expect": {"refused": "cause"}},
+    {"byte": "ad", "expect": {"refused": "cause"}},
+    {"byte": "ae", "expect": {"refused": "cause"}},
+    {"byte": "af", "expect": {"refused": "cause"}},
+    {"byte": "b0", "expect": {"refused": "cause"}},
+    {"byte": "b1", "expect": {"refused": "cause"}},
+    {"byte": "b2", "expect": {"refused": "cause"}},
+    {"byte": "b3", "expect": {"refused": "cause"}},
+    {"byte": "b4", "expect": {"refused": "cause"}},
+    {"byte": "b5", "expect": {"refused": "cause"}},
+    {"byte": "b6", "expect": {"refused": "cause"}},
+    {"byte": "b7", "expect": {"refused": "cause"}},
+    {"byte": "b8", "expect": {"refused": "cause"}},
+    {"byte": "b9", "expect": {"refused": "cause"}},
+    {"byte": "ba", "expect": {"refused": "cause"}},
+    {"byte": "bb", "expect": {"refused": "cause"}},
+    {"byte": "bc", "expect": {"refused": "cause"}},
+    {"byte": "bd", "expect": {"refused": "cause"}},
+    {"byte": "be", "expect": {"refused": "cause"}},
+    {"byte": "bf", "expect": {"refused": "cause"}},
+    {"byte": "c0", "expect": {"code": "internal", "cause": null, "detail": false, "message": false}},
+    {"byte": "c1", "expect": {"refused": "extension"}},
+    {"byte": "c2", "expect": {"code": "internal", "cause": null, "detail": false, "message": true}},
+    {"byte": "c3", "expect": {"refused": "extension"}},
+    {"byte": "c4", "expect": {"refused": "detail"}},
+    {"byte": "c5", "expect": {"refused": "detail"}},
+    {"byte": "c6", "expect": {"refused": "detail"}},
+    {"byte": "c7", "expect": {"refused": "detail"}},
+    {"byte": "c8", "expect": {"refused": "cause"}},
+    {"byte": "c9", "expect": {"refused": "cause"}},
+    {"byte": "ca", "expect": {"refused": "cause"}},
+    {"byte": "cb", "expect": {"refused": "cause"}},
+    {"byte": "cc", "expect": {"refused": "cause"}},
+    {"byte": "cd", "expect": {"refused": "cause"}},
+    {"byte": "ce", "expect": {"refused": "cause"}},
+    {"byte": "cf", "expect": {"refused": "cause"}},
+    {"byte": "d0", "expect": {"refused": "cause"}},
+    {"byte": "d1", "expect": {"refused": "cause"}},
+    {"byte": "d2", "expect": {"refused": "cause"}},
+    {"byte": "d3", "expect": {"refused": "cause"}},
+    {"byte": "d4", "expect": {"refused": "cause"}},
+    {"byte": "d5", "expect": {"refused": "cause"}},
+    {"byte": "d6", "expect": {"refused": "cause"}},
+    {"byte": "d7", "expect": {"refused": "cause"}},
+    {"byte": "d8", "expect": {"refused": "cause"}},
+    {"byte": "d9", "expect": {"refused": "cause"}},
+    {"byte": "da", "expect": {"refused": "cause"}},
+    {"byte": "db", "expect": {"refused": "cause"}},
+    {"byte": "dc", "expect": {"refused": "cause"}},
+    {"byte": "dd", "expect": {"refused": "cause"}},
+    {"byte": "de", "expect": {"refused": "cause"}},
+    {"byte": "df", "expect": {"refused": "cause"}},
+    {"byte": "e0", "expect": {"code": "app", "cause": null, "detail": false, "message": false}},
+    {"byte": "e1", "expect": {"refused": "extension"}},
+    {"byte": "e2", "expect": {"code": "app", "cause": null, "detail": false, "message": true}},
+    {"byte": "e3", "expect": {"refused": "extension"}},
+    {"byte": "e4", "expect": {"code": "app", "cause": null, "detail": true, "message": false}},
+    {"byte": "e5", "expect": {"refused": "extension"}},
+    {"byte": "e6", "expect": {"code": "app", "cause": null, "detail": true, "message": true}},
+    {"byte": "e7", "expect": {"refused": "extension"}},
+    {"byte": "e8", "expect": {"refused": "cause"}},
+    {"byte": "e9", "expect": {"refused": "cause"}},
+    {"byte": "ea", "expect": {"refused": "cause"}},
+    {"byte": "eb", "expect": {"refused": "cause"}},
+    {"byte": "ec", "expect": {"refused": "cause"}},
+    {"byte": "ed", "expect": {"refused": "cause"}},
+    {"byte": "ee", "expect": {"refused": "cause"}},
+    {"byte": "ef", "expect": {"refused": "cause"}},
+    {"byte": "f0", "expect": {"refused": "cause"}},
+    {"byte": "f1", "expect": {"refused": "cause"}},
+    {"byte": "f2", "expect": {"refused": "cause"}},
+    {"byte": "f3", "expect": {"refused": "cause"}},
+    {"byte": "f4", "expect": {"refused": "cause"}},
+    {"byte": "f5", "expect": {"refused": "cause"}},
+    {"byte": "f6", "expect": {"refused": "cause"}},
+    {"byte": "f7", "expect": {"refused": "cause"}},
+    {"byte": "f8", "expect": {"refused": "cause"}},
+    {"byte": "f9", "expect": {"refused": "cause"}},
+    {"byte": "fa", "expect": {"refused": "cause"}},
+    {"byte": "fb", "expect": {"refused": "cause"}},
+    {"byte": "fc", "expect": {"refused": "cause"}},
+    {"byte": "fd", "expect": {"refused": "cause"}},
+    {"byte": "fe", "expect": {"refused": "cause"}},
+    {"byte": "ff", "expect": {"refused": "cause"}}
+  ],
+  "writes": [
+    {
+      "note": "busy, with no message: 7 bytes",
+      "value": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "code": "busy",
+        "cause": null,
+        "message": null,
+        "detail": null
+      },
+      "expect": {
+        "hex": "600001000007a0"
+      }
+    },
+    {
+      "note": "busy, naming the pending change for a person",
+      "value": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "code": "busy",
+        "cause": null,
+        "message": "a change is pending (token 7)",
+        "detail": null
+      },
+      "expect": {
+        "hex": "600001000007a21d61206368616e67652069732070656e64696e672028746f6b656e203729"
+      }
+    },
+    {
+      "note": "unavailable for config",
+      "value": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "code": "unavailable",
+        "cause": "config",
+        "message": null,
+        "detail": null
+      },
+      "expect": {
+        "hex": "60000100000750"
+      }
+    },
+    {
+      "note": "unavailable for build, with a message",
+      "value": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "code": "unavailable",
+        "cause": "build",
+        "message": "no IMU",
+        "detail": null
+      },
+      "expect": {
+        "hex": "6000010000074a066e6f20494d55"
+      }
+    },
+    {
+      "note": "not_found with a 32-bit run",
+      "value": {
+        "run_width": 32,
+        "run": 3735928559,
+        "seq": 42,
+        "tag": 0,
+        "code": "not_found",
+        "cause": null,
+        "message": null,
+        "detail": null
+      },
+      "expect": {
+        "hex": "70deadbeef00002a20"
+      }
+    },
+    {
+      "note": "app with a detail: a packed Error {code: an enum of one value and an escape}, whose tag is 13, and its record 0x00: 8 bytes",
+      "value": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 13,
+        "code": "app",
+        "cause": null,
+        "message": null,
+        "detail": "00"
+      },
+      "expect": {
+        "hex": "6d0001000007e400"
+      }
+    },
+    {
+      "note": "app with a message and a detail",
+      "value": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 13,
+        "code": "app",
+        "cause": null,
+        "message": "device refused",
+        "detail": "00"
+      },
+      "expect": {
+        "hex": "6d0001000007e60e646576696365207265667573656400"
+      }
+    },
+    {
+      "note": "app with an empty detail",
+      "value": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "code": "app",
+        "cause": null,
+        "message": null,
+        "detail": ""
+      },
+      "expect": {
+        "hex": "600001000007e4"
+      }
+    },
+    {
+      "note": "app with no detail, under an error type's tag",
+      "value": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 13,
+        "code": "app",
+        "cause": null,
+        "message": null,
+        "detail": null
+      },
+      "expect": {
+        "hex": "6d0001000007e0"
+      }
+    },
+    {
+      "note": "an empty message: its bit set and length 0",
+      "value": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "code": "internal",
+        "cause": null,
+        "message": "",
+        "detail": null
+      },
+      "expect": {
+        "hex": "600001000007c200"
+      }
+    },
+    {
+      "note": "a message of 255 bytes is kept whole",
+      "value": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "code": "internal",
+        "cause": null,
+        "message": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "detail": null
+      },
+      "expect": {
+        "hex": "600001000007c2ff616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161"
+      }
+    },
+    {
+      "note": "a message of 300 bytes is cut to 255",
+      "value": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "code": "internal",
+        "cause": null,
+        "message": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "detail": null
+      },
+      "expect": {
+        "hex": "600001000007c2ff616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+        "reads_as": {
+          "message": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    },
+    {
+      "note": "253 bytes and `é`, 2 bytes, end at 255: kept",
+      "value": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "code": "internal",
+        "cause": null,
+        "message": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé",
+        "detail": null
+      },
+      "expect": {
+        "hex": "600001000007c2ff61616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161c3a9"
+      }
+    },
+    {
+      "note": "254 bytes and `é` end at 256: cut before `é`",
+      "value": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "code": "internal",
+        "cause": null,
+        "message": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé",
+        "detail": null
+      },
+      "expect": {
+        "hex": "600001000007c2fe6161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+        "reads_as": {
+          "message": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    },
+    {
+      "note": "252 bytes and `€`, 3 bytes, end at 255: kept",
+      "value": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "code": "internal",
+        "cause": null,
+        "message": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa€",
+        "detail": null
+      },
+      "expect": {
+        "hex": "600001000007c2ff616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161e282ac"
+      }
+    },
+    {
+      "note": "253 bytes and `€` end at 256: cut before `€`",
+      "value": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "code": "internal",
+        "cause": null,
+        "message": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa€",
+        "detail": null
+      },
+      "expect": {
+        "hex": "600001000007c2fd61616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+        "reads_as": {
+          "message": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    },
+    {
+      "note": "252 bytes and `😀`, 4 bytes, end at 256: cut to 252",
+      "value": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "code": "internal",
+        "cause": null,
+        "message": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀",
+        "detail": null
+      },
+      "expect": {
+        "hex": "600001000007c2fc616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+        "reads_as": {
+          "message": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    },
+    {
+      "note": "busy with a cause",
+      "value": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "code": "busy",
+        "cause": "config",
+        "message": null,
+        "detail": null
+      },
+      "expect": {
+        "refused": "cause"
+      }
+    },
+    {
+      "note": "unavailable with no cause",
+      "value": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "code": "unavailable",
+        "cause": null,
+        "message": null,
+        "detail": null
+      },
+      "expect": {
+        "refused": "cause"
+      }
+    },
+    {
+      "note": "internal with a detail",
+      "value": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "code": "internal",
+        "cause": null,
+        "message": null,
+        "detail": "00"
+      },
+      "expect": {
+        "refused": "detail"
+      }
+    },
+    {
+      "note": "unavailable for capability, with a detail",
+      "value": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "code": "unavailable",
+        "cause": "capability",
+        "message": null,
+        "detail": ""
+      },
+      "expect": {
+        "refused": "detail"
+      }
+    },
+    {
+      "note": "a cause and a detail both wrong: the cause first",
+      "value": {
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "code": "forbidden",
+        "cause": "build",
+        "message": null,
+        "detail": "00"
+      },
+      "expect": {
+        "refused": "cause"
+      }
+    }
+  ],
+  "reads": [
+    {
+      "note": "busy",
+      "encoding": "zenoh/bytes",
+      "hex": "600001000007a0",
+      "expect": {
+        "error": {
+          "run_width": 16,
+          "run": 1,
+          "seq": 7,
+          "tag": 0,
+          "code": "busy",
+          "cause": null,
+          "message": null,
+          "detail": null
+        }
+      }
+    },
+    {
+      "note": "unavailable for capability, with a message",
+      "encoding": "zenoh/bytes",
+      "hex": "6000010000075a026e6f",
+      "expect": {
+        "error": {
+          "run_width": 16,
+          "run": 1,
+          "seq": 7,
+          "tag": 0,
+          "code": "unavailable",
+          "cause": "capability",
+          "message": "no",
+          "detail": null
+        }
+      }
+    },
+    {
+      "note": "app with a detail under tag 13",
+      "encoding": "zenoh/bytes",
+      "hex": "6d0001000007e400",
+      "expect": {
+        "error": {
+          "run_width": 16,
+          "run": 1,
+          "seq": 7,
+          "tag": 13,
+          "code": "app",
+          "cause": null,
+          "message": null,
+          "detail": "00"
+        }
+      }
+    },
+    {
+      "note": "an error with a 32-bit run",
+      "encoding": "zenoh/bytes",
+      "hex": "70deadbeef00002a20",
+      "expect": {
+        "error": {
+          "run_width": 32,
+          "run": 3735928559,
+          "seq": 42,
+          "tag": 0,
+          "code": "not_found",
+          "cause": null,
+          "message": null,
+          "detail": null
+        }
+      }
+    },
+    {
+      "note": "a router's `Timeout`: zenoh/bytes, and no error form (`T` is a value's CH)",
+      "encoding": "zenoh/bytes",
+      "hex": "54696d656f7574",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "the querier's own `Timeout`: zenoh/string carries no form",
+      "encoding": "zenoh/string",
+      "hex": "54696d656f7574",
+      "expect": {
+        "refused": "encoding"
+      }
+    },
+    {
+      "note": "an error form's bytes under zenoh/string carry no form",
+      "encoding": "zenoh/string",
+      "hex": "600001000007a0",
+      "expect": {
+        "refused": "encoding"
+      }
+    },
+    {
+      "note": "today's JSON envelope: its encoding carries no form",
+      "encoding": "application/json",
+      "hex": "7b22636f6465223a2262757379222c226d657373616765223a22227d",
+      "expect": {
+        "refused": "encoding"
+      }
+    },
+    {
+      "note": "today's CBOR envelope",
+      "encoding": "application/cbor",
+      "hex": "a264636f64656462757379676d65737361676560",
+      "expect": {
+        "refused": "encoding"
+      }
+    },
+    {
+      "note": "today's protobuf envelope",
+      "encoding": "application/protobuf;zk2.core.v1.Error",
+      "hex": "0a04627573791200",
+      "expect": {
+        "refused": "encoding"
+      }
+    },
+    {
+      "note": "a schema suffix is another Encoding",
+      "encoding": "zenoh/bytes;zk2c",
+      "hex": "600001000007a0",
+      "expect": {
+        "refused": "encoding"
+      }
+    },
+    {
+      "note": "today's JSON envelope sent under zenoh/bytes: no error form",
+      "encoding": "zenoh/bytes",
+      "hex": "7b22636f6465223a2262757379222c226d657373616765223a22227d",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "an empty reply error under zenoh/bytes",
+      "encoding": "zenoh/bytes",
+      "hex": "",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a value under zenoh/bytes on a reply_err",
+      "encoding": "zenoh/bytes",
+      "hex": "4000010000077b7d",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a cause on busy",
+      "encoding": "zenoh/bytes",
+      "hex": "600001000007a8",
+      "expect": {
+        "refused": "cause"
+      }
+    },
+    {
+      "note": "the extension bit",
+      "encoding": "zenoh/bytes",
+      "hex": "600001000007a1",
+      "expect": {
+        "refused": "extension"
+      }
+    },
+    {
+      "note": "a message that is not UTF-8",
+      "encoding": "zenoh/bytes",
+      "hex": "600001000007a20180",
+      "expect": {
+        "refused": "utf8"
+      }
+    }
+  ]
+}

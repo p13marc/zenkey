@@ -1,0 +1,30 @@
+# core §7.1, §9.2 E044 narrowed: a packed type as an operation's request,
+# response, error and summary, each carried in §7.5's forms behind a CH
+# that holds its tag. A packed request beside a JSON Schema response, and
+# a JSON Schema request beside a packed response, are fine too.
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[schemas]
+jsonschema = ["schemas/seed.json"]
+packed = ["schemas/packed/sensor.json", "schemas/packed/events.json"]
+
+[resources.calibrate]
+kind = "operation"
+request = "packed:Sensor"
+response = "packed:sensor#Status"
+error = "packed:events#Change"
+
+[resources.scan]
+kind = "operation"
+request = "json:Empty"
+response = "packed:Sensor"
+replies = "many"
+summary = "packed:Status"
+
+[resources.reset]
+kind = "operation"
+request = "packed:Status"
+response = "json:Ack"

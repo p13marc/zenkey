@@ -1,5 +1,5 @@
 {
-  "description": "core §7.5, the zk2c envelope. Written by hand from the text, checked, never blessed. `headers`: one byte in hex → CH's three fields: `form` (bits 7–5, the code's name), `run_width` (bit 4: 0 is 16, 1 is 32) and `tag` (bits 3–0). Every byte reads as a header, a reserved form's included, and writes back to the same byte. `cases`: an envelope's bytes in hex, and `sample`, the kind of the sample that carries them (`put`: they are its payload; `delete`: they are its attachment) → `expect`, the parse, or `{\"refused\": token}`. A parse is `form`, `run_width`, `run` and `seq` (integers, each big-endian on the wire), `tag`, and `record`: the bytes after the seq in hex (a mutation's record, a heartbeat's body), or `null` for a delete. A refusal is the first that applies, in §7.5's order: `short` (no CH), `form` (a reserved form), `sample_kind` (a delete on a put, or a mutation, a heartbeat or a frame as a delete's attachment), `tag` (a delete whose tag is not 0), `short` (fewer bytes than CH, the run and the seq need), `trailing` (a byte after a delete's seq). The parse reads no contract and no key, so a mutation's, a heartbeat's or a frame's tag is reported, never checked against a type, a revision or a declaration, and a frame is parsed whatever its key: `key_kind`, which reads the key, is `carries.json`'s `reads`. A heartbeat's or a frame's `record` is its body. Every accepted case writes back to its bytes.",
+  "description": "core §7.5, the zk2c envelope and a call's forms. Written by hand from the text, checked, never blessed. `headers`: one byte in hex → CH's three fields: `form` (bits 7–5, the code's name), `run_width` (bit 4: 0 is 16, 1 is 32) and `tag` (bits 3–0). Every byte reads as a header, a reserved form's included, and writes back to the same byte. `cases`: an envelope's or a form's bytes in hex, and `sample`, what carries them (`put`: a put's payload, or a GET reply's that represents a put; `delete`: a delete's attachment, or a `reply_del`'s; `query`, `reply` and `reply_err`: a call's query, reply and reply error, each one's payload) → `expect`, the parse, or `{\"refused\": token}`. A parse is `form`, `run_width`, `run` and `seq` (integers, each big-endian on the wire), `tag`, and `record`: the bytes after the seq in hex (a mutation's or a value's record, a heartbeat's or a frame's body), or after a request's CH, or `null` for a delete and an error. A request, a value on a query, has `run_width`, `run` and `seq` `null`. An error's parse adds `error`: `code` and `cause` (§5.2's names, `cause` `null` for none), `message` (a string, or `null` when its bit is 0) and `detail` (the bytes after the message in hex, or `null` when its bit is 0). A refusal is the first that applies, in §7.5's order: `short` (no CH), `form` (a reserved form, 4 or 7), `sample_kind` (a form its sample does not carry: a put carries a mutation, a heartbeat or a frame, a delete's attachment a delete, a query and a reply a value, a reply_err an error), `tag` (a delete whose tag is not 0), `request_run` (a request whose width bit is 1), `short` (fewer bytes than CH, the run and the seq need, and an error's byte after them), `trailing` (a byte after a delete's seq), then on an error's byte and what follows it: `cause` (a cause on a code other than `unavailable`, or none on it), `detail` (a detail on a code other than `app`), `extension` (bit 0 set), `short` (a message with no length byte, or fewer bytes than it states), `utf8` (a message that is not UTF-8), and `trailing` (a byte after the message, or after the error's byte without one, where no detail follows). The parse reads no contract and no key, so the tag of every form but a delete is reported, never checked against a type, a revision or a declaration, and a frame is parsed whatever its key: `key_kind`, which reads the key, is `carries.json`'s `reads`. An error's detail is never read. Every accepted case writes back to its bytes.",
   "headers": [
     {
       "note": "a mutation with a 16-bit run",
@@ -56,7 +56,7 @@
       }
     },
     {
-      "note": "form 2, reserved",
+      "note": "form 2, a value: a request's CH with tag 0",
       "byte": "40",
       "expect": {
         "form": "value",
@@ -65,7 +65,34 @@
       }
     },
     {
-      "note": "form 3, reserved",
+      "note": "a value with a 32-bit run, which a request never has",
+      "byte": "50",
+      "expect": {
+        "form": "value",
+        "run_width": 32,
+        "tag": 0
+      }
+    },
+    {
+      "note": "`T`, 010 1 0100: a value with a 32-bit run and tag 4, the first byte of a router's `Timeout`",
+      "byte": "54",
+      "expect": {
+        "form": "value",
+        "run_width": 32,
+        "tag": 4
+      }
+    },
+    {
+      "note": "`[`, 010 1 1011: a value with a 32-bit run and tag 11",
+      "byte": "5b",
+      "expect": {
+        "form": "value",
+        "run_width": 32,
+        "tag": 11
+      }
+    },
+    {
+      "note": "form 3, an error",
       "byte": "60",
       "expect": {
         "form": "error",
@@ -74,7 +101,25 @@
       }
     },
     {
-      "note": "`{`, 011 1 1011: form 3, reserved",
+      "note": "011 0 1101: an error with a 16-bit run and tag 13",
+      "byte": "6d",
+      "expect": {
+        "form": "error",
+        "run_width": 16,
+        "tag": 13
+      }
+    },
+    {
+      "note": "an error with a 32-bit run",
+      "byte": "70",
+      "expect": {
+        "form": "error",
+        "run_width": 32,
+        "tag": 0
+      }
+    },
+    {
+      "note": "`{`, 011 1 1011: an error with a 32-bit run and tag 11",
       "byte": "7b",
       "expect": {
         "form": "error",
@@ -335,19 +380,19 @@
       }
     },
     {
-      "note": "value, reserved",
+      "note": "a value on a put: form 2 is a call's, never a put's",
       "sample": "put",
       "hex": "4000010000077b7d",
       "expect": {
-        "refused": "form"
+        "refused": "sample_kind"
       }
     },
     {
-      "note": "error, reserved",
+      "note": "an error on a put",
       "sample": "put",
       "hex": "600001000007",
       "expect": {
-        "refused": "form"
+        "refused": "sample_kind"
       }
     },
     {
@@ -480,11 +525,11 @@
       }
     },
     {
-      "note": "a JSON object with no envelope: `{` is 0x7b, form 3",
+      "note": "a JSON object with no envelope: `{` is 0x7b, an error, which a put does not carry",
       "sample": "put",
       "hex": "7b7d",
       "expect": {
-        "refused": "form"
+        "refused": "sample_kind"
       }
     },
     {
@@ -616,11 +661,11 @@
       }
     },
     {
-      "note": "a foreign attachment, a JSON Epoch: `{` is form 3",
+      "note": "a foreign attachment, a JSON Epoch: `{` is an error, which a delete does not carry",
       "sample": "delete",
       "hex": "7b2265706f6368223a2231227d",
       "expect": {
-        "refused": "form"
+        "refused": "sample_kind"
       }
     },
     {
@@ -669,6 +714,1020 @@
       "hex": "2000012345000008",
       "expect": {
         "refused": "trailing"
+      }
+    },
+    {
+      "note": "a request: CH 0x40, then the record `{}`, 1 byte over it",
+      "sample": "query",
+      "hex": "407b7d",
+      "expect": {
+        "form": "value",
+        "run_width": null,
+        "run": null,
+        "seq": null,
+        "tag": 0,
+        "record": "7b7d"
+      }
+    },
+    {
+      "note": "a request's CH alone: an empty record",
+      "sample": "query",
+      "hex": "40",
+      "expect": {
+        "form": "value",
+        "run_width": null,
+        "run": null,
+        "seq": null,
+        "tag": 0,
+        "record": ""
+      }
+    },
+    {
+      "note": "a request with tag 13, its packed request type's: reported, never checked",
+      "sample": "query",
+      "hex": "4da5c0",
+      "expect": {
+        "form": "value",
+        "run_width": null,
+        "run": null,
+        "seq": null,
+        "tag": 13,
+        "record": "a5c0"
+      }
+    },
+    {
+      "note": "tag 15 and a one-byte record",
+      "sample": "query",
+      "hex": "4f00",
+      "expect": {
+        "form": "value",
+        "run_width": null,
+        "run": null,
+        "seq": null,
+        "tag": 15,
+        "record": "00"
+      }
+    },
+    {
+      "note": "a request whose width bit is 1",
+      "sample": "query",
+      "hex": "507b7d",
+      "expect": {
+        "refused": "request_run"
+      }
+    },
+    {
+      "note": "a request's CH alone with its width bit set: request_run, not short",
+      "sample": "query",
+      "hex": "50",
+      "expect": {
+        "refused": "request_run"
+      }
+    },
+    {
+      "note": "an empty query payload has no CH",
+      "sample": "query",
+      "hex": "",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a mutation on a query",
+      "sample": "query",
+      "hex": "000001000007",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a delete on a query",
+      "sample": "query",
+      "hex": "200001000008",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a heartbeat on a query",
+      "sample": "query",
+      "hex": "c00001000007",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "an error on a query",
+      "sample": "query",
+      "hex": "600001000007a0",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "today's JSON request, with no CH: `{` is an error's CH, which a query does not carry",
+      "sample": "query",
+      "hex": "7b226d6f6465223a2261227d",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "today's protobuf request, with no CH: 0x08 is a mutation's CH",
+      "sample": "query",
+      "hex": "0801",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "111 1 0000: a reserved form, refused before its width bit",
+      "sample": "query",
+      "hex": "f0",
+      "expect": {
+        "refused": "form"
+      }
+    },
+    {
+      "note": "an event, reserved",
+      "sample": "query",
+      "hex": "80",
+      "expect": {
+        "refused": "form"
+      }
+    },
+    {
+      "note": "a value with a 16-bit run and the record `{}`: 6 bytes over the record",
+      "sample": "reply",
+      "hex": "4000010000077b7d",
+      "expect": {
+        "form": "value",
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "record": "7b7d"
+      }
+    },
+    {
+      "note": "a value with a 32-bit run: 8 bytes over the record",
+      "sample": "reply",
+      "hex": "50deadbeef00002a7b7d",
+      "expect": {
+        "form": "value",
+        "run_width": 32,
+        "run": 3735928559,
+        "seq": 42,
+        "tag": 0,
+        "record": "7b7d"
+      }
+    },
+    {
+      "note": "an empty record, the run and the seq at their 16-bit and 24-bit maxima",
+      "sample": "reply",
+      "hex": "40ffffffffff",
+      "expect": {
+        "form": "value",
+        "run_width": 16,
+        "run": 65535,
+        "seq": 16777215,
+        "tag": 0,
+        "record": ""
+      }
+    },
+    {
+      "note": "an empty record, the run at its 32-bit maximum",
+      "sample": "reply",
+      "hex": "50ffffffffffffff",
+      "expect": {
+        "form": "value",
+        "run_width": 32,
+        "run": 4294967295,
+        "seq": 16777215,
+        "tag": 0,
+        "record": ""
+      }
+    },
+    {
+      "note": "run 0, seq 0 and tag 13: an instance that minted no seq, and a value's tag reported",
+      "sample": "reply",
+      "hex": "4d000000000080",
+      "expect": {
+        "form": "value",
+        "run_width": 16,
+        "run": 0,
+        "seq": 0,
+        "tag": 13,
+        "record": "80"
+      }
+    },
+    {
+      "note": "CH 0x5b: a 32-bit run and tag 11",
+      "sample": "reply",
+      "hex": "5b0a0b0c0d0000012a",
+      "expect": {
+        "form": "value",
+        "run_width": 32,
+        "run": 168496141,
+        "seq": 1,
+        "tag": 11,
+        "record": "2a"
+      }
+    },
+    {
+      "note": "a value's CH alone",
+      "sample": "reply",
+      "hex": "40",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "an empty reply payload has no CH",
+      "sample": "reply",
+      "hex": "",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a 16-bit run's stamp one byte short",
+      "sample": "reply",
+      "hex": "4000010000",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "the width bit decides: 6 bytes are short of a 32-bit run's stamp",
+      "sample": "reply",
+      "hex": "500001000007",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a request's bytes as a reply: a value needs its stamp",
+      "sample": "reply",
+      "hex": "407b7d",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "an error on a reply",
+      "sample": "reply",
+      "hex": "600001000007a0",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a mutation on a call's reply: a GET's reply that represents a put is `put`, never `reply`",
+      "sample": "reply",
+      "hex": "0000010000077b7d",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a delete on a reply",
+      "sample": "reply",
+      "hex": "200001000008",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a frame on a reply",
+      "sample": "reply",
+      "hex": "a00001000007",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a heartbeat on a reply",
+      "sample": "reply",
+      "hex": "c00001000007",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "an event on a reply, reserved",
+      "sample": "reply",
+      "hex": "800001000007",
+      "expect": {
+        "refused": "form"
+      }
+    },
+    {
+      "note": "a snapshot on a reply, reserved",
+      "sample": "reply",
+      "hex": "e00001000007",
+      "expect": {
+        "refused": "form"
+      }
+    },
+    {
+      "note": "today's JSON reply, with no CH: `{` is an error's CH, which a reply does not carry",
+      "sample": "reply",
+      "hex": "7b226f6b223a747275657d",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a text reply with no CH: `o` is an error's CH",
+      "sample": "reply",
+      "hex": "6f6b",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a JSON array with no CH: `[` is a value's CH with a 32-bit run, and 5 bytes are short",
+      "sample": "reply",
+      "hex": "5b312c325d",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a JSON array of 8 bytes or more with no CH parses as a value: only the Encoding tells them apart (§5.2)",
+      "sample": "reply",
+      "hex": "5b312c322c332c345d",
+      "expect": {
+        "form": "value",
+        "run_width": 32,
+        "run": 824980012,
+        "seq": 3353652,
+        "tag": 11,
+        "record": "5d"
+      }
+    },
+    {
+      "note": "busy, with no cause, message or detail: 7 bytes",
+      "sample": "reply_err",
+      "hex": "600001000007a0",
+      "expect": {
+        "form": "error",
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "record": null,
+        "error": {
+          "code": "busy",
+          "cause": null,
+          "message": null,
+          "detail": null
+        }
+      }
+    },
+    {
+      "note": "the same with a 32-bit run: 9 bytes",
+      "sample": "reply_err",
+      "hex": "70deadbeef00002aa0",
+      "expect": {
+        "form": "error",
+        "run_width": 32,
+        "run": 3735928559,
+        "seq": 42,
+        "tag": 0,
+        "record": null,
+        "error": {
+          "code": "busy",
+          "cause": null,
+          "message": null,
+          "detail": null
+        }
+      }
+    },
+    {
+      "note": "the 32-bit run and the seq at their maxima",
+      "sample": "reply_err",
+      "hex": "70ffffffffffffffa0",
+      "expect": {
+        "form": "error",
+        "run_width": 32,
+        "run": 4294967295,
+        "seq": 16777215,
+        "tag": 0,
+        "record": null,
+        "error": {
+          "code": "busy",
+          "cause": null,
+          "message": null,
+          "detail": null
+        }
+      }
+    },
+    {
+      "note": "run 0 and seq 0: an instance that minted no seq",
+      "sample": "reply_err",
+      "hex": "600000000000a0",
+      "expect": {
+        "form": "error",
+        "run_width": 16,
+        "run": 0,
+        "seq": 0,
+        "tag": 0,
+        "record": null,
+        "error": {
+          "code": "busy",
+          "cause": null,
+          "message": null,
+          "detail": null
+        }
+      }
+    },
+    {
+      "note": "invalid_request, code 0",
+      "sample": "reply_err",
+      "hex": "60000100000700",
+      "expect": {
+        "form": "error",
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "record": null,
+        "error": {
+          "code": "invalid_request",
+          "cause": null,
+          "message": null,
+          "detail": null
+        }
+      }
+    },
+    {
+      "note": "not_found, code 1",
+      "sample": "reply_err",
+      "hex": "60000100000720",
+      "expect": {
+        "form": "error",
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "record": null,
+        "error": {
+          "code": "not_found",
+          "cause": null,
+          "message": null,
+          "detail": null
+        }
+      }
+    },
+    {
+      "note": "unavailable for build: code 2, cause 1",
+      "sample": "reply_err",
+      "hex": "60000100000748",
+      "expect": {
+        "form": "error",
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "record": null,
+        "error": {
+          "code": "unavailable",
+          "cause": "build",
+          "message": null,
+          "detail": null
+        }
+      }
+    },
+    {
+      "note": "unavailable for config: cause 2",
+      "sample": "reply_err",
+      "hex": "60000100000750",
+      "expect": {
+        "form": "error",
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "record": null,
+        "error": {
+          "code": "unavailable",
+          "cause": "config",
+          "message": null,
+          "detail": null
+        }
+      }
+    },
+    {
+      "note": "unavailable for capability: cause 3",
+      "sample": "reply_err",
+      "hex": "60000100000758",
+      "expect": {
+        "form": "error",
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "record": null,
+        "error": {
+          "code": "unavailable",
+          "cause": "capability",
+          "message": null,
+          "detail": null
+        }
+      }
+    },
+    {
+      "note": "forbidden, code 3",
+      "sample": "reply_err",
+      "hex": "60000100000760",
+      "expect": {
+        "form": "error",
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "record": null,
+        "error": {
+          "code": "forbidden",
+          "cause": null,
+          "message": null,
+          "detail": null
+        }
+      }
+    },
+    {
+      "note": "fanout_forbidden, code 4",
+      "sample": "reply_err",
+      "hex": "60000100000780",
+      "expect": {
+        "form": "error",
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "record": null,
+        "error": {
+          "code": "fanout_forbidden",
+          "cause": null,
+          "message": null,
+          "detail": null
+        }
+      }
+    },
+    {
+      "note": "internal, code 6",
+      "sample": "reply_err",
+      "hex": "600001000007c0",
+      "expect": {
+        "form": "error",
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "record": null,
+        "error": {
+          "code": "internal",
+          "cause": null,
+          "message": null,
+          "detail": null
+        }
+      }
+    },
+    {
+      "note": "app, code 7, with no detail",
+      "sample": "reply_err",
+      "hex": "600001000007e0",
+      "expect": {
+        "form": "error",
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "record": null,
+        "error": {
+          "code": "app",
+          "cause": null,
+          "message": null,
+          "detail": null
+        }
+      }
+    },
+    {
+      "note": "invalid_request with the message `bad mode`",
+      "sample": "reply_err",
+      "hex": "6000010000070208626164206d6f6465",
+      "expect": {
+        "form": "error",
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "record": null,
+        "error": {
+          "code": "invalid_request",
+          "cause": null,
+          "message": "bad mode",
+          "detail": null
+        }
+      }
+    },
+    {
+      "note": "app with a detail, a packed Error's 1-byte record, tag 13: 8 bytes",
+      "sample": "reply_err",
+      "hex": "6d0001000007e400",
+      "expect": {
+        "form": "error",
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 13,
+        "record": null,
+        "error": {
+          "code": "app",
+          "cause": null,
+          "message": null,
+          "detail": "00"
+        }
+      }
+    },
+    {
+      "note": "app with a message, then a detail",
+      "sample": "reply_err",
+      "hex": "6d0001000007e60e646576696365207265667573656400",
+      "expect": {
+        "form": "error",
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 13,
+        "record": null,
+        "error": {
+          "code": "app",
+          "cause": null,
+          "message": "device refused",
+          "detail": "00"
+        }
+      }
+    },
+    {
+      "note": "app with its detail bit and no byte after it: an empty detail, as a protobuf message with no field written",
+      "sample": "reply_err",
+      "hex": "600001000007e4",
+      "expect": {
+        "form": "error",
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "record": null,
+        "error": {
+          "code": "app",
+          "cause": null,
+          "message": null,
+          "detail": ""
+        }
+      }
+    },
+    {
+      "note": "app with a message and an empty detail",
+      "sample": "reply_err",
+      "hex": "600001000007e6026e6f",
+      "expect": {
+        "form": "error",
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "record": null,
+        "error": {
+          "code": "app",
+          "cause": null,
+          "message": "no",
+          "detail": ""
+        }
+      }
+    },
+    {
+      "note": "an empty message: its bit set and length 0, present and empty",
+      "sample": "reply_err",
+      "hex": "600001000007a200",
+      "expect": {
+        "form": "error",
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "record": null,
+        "error": {
+          "code": "busy",
+          "cause": null,
+          "message": "",
+          "detail": null
+        }
+      }
+    },
+    {
+      "note": "a message of 7 characters in 9 bytes of UTF-8",
+      "sample": "reply_err",
+      "hex": "600001000007a20964c3a96ac3a0207675",
+      "expect": {
+        "form": "error",
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "record": null,
+        "error": {
+          "code": "busy",
+          "cause": null,
+          "message": "déjà vu",
+          "detail": null
+        }
+      }
+    },
+    {
+      "note": "a message of 255 bytes, the longest",
+      "sample": "reply_err",
+      "hex": "600001000007a2ff616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+      "expect": {
+        "form": "error",
+        "run_width": 16,
+        "run": 1,
+        "seq": 7,
+        "tag": 0,
+        "record": null,
+        "error": {
+          "code": "busy",
+          "cause": null,
+          "message": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "detail": null
+        }
+      }
+    },
+    {
+      "note": "an empty payload has no CH",
+      "sample": "reply_err",
+      "hex": "",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "an error's CH alone",
+      "sample": "reply_err",
+      "hex": "60",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "6 bytes: the stamp, and no error byte",
+      "sample": "reply_err",
+      "hex": "600001000007",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "the width bit decides: 8 bytes are short of a 32-bit run's error",
+      "sample": "reply_err",
+      "hex": "70deadbeef00002a",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a 16-bit run's error under a 32-bit run's CH: 7 bytes are short of 9",
+      "sample": "reply_err",
+      "hex": "700001000007a0",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "busy with a cause",
+      "sample": "reply_err",
+      "hex": "600001000007a8",
+      "expect": {
+        "refused": "cause"
+      }
+    },
+    {
+      "note": "invalid_request for config",
+      "sample": "reply_err",
+      "hex": "60000100000710",
+      "expect": {
+        "refused": "cause"
+      }
+    },
+    {
+      "note": "unavailable with no cause",
+      "sample": "reply_err",
+      "hex": "60000100000740",
+      "expect": {
+        "refused": "cause"
+      }
+    },
+    {
+      "note": "busy with a detail",
+      "sample": "reply_err",
+      "hex": "600001000007a4",
+      "expect": {
+        "refused": "detail"
+      }
+    },
+    {
+      "note": "unavailable for config, with a detail",
+      "sample": "reply_err",
+      "hex": "60000100000754",
+      "expect": {
+        "refused": "detail"
+      }
+    },
+    {
+      "note": "busy with a cause and a detail: the cause first",
+      "sample": "reply_err",
+      "hex": "600001000007ac",
+      "expect": {
+        "refused": "cause"
+      }
+    },
+    {
+      "note": "the extension bit",
+      "sample": "reply_err",
+      "hex": "600001000007a1",
+      "expect": {
+        "refused": "extension"
+      }
+    },
+    {
+      "note": "a detail on busy and the extension bit: the detail first",
+      "sample": "reply_err",
+      "hex": "600001000007a5",
+      "expect": {
+        "refused": "detail"
+      }
+    },
+    {
+      "note": "the extension bit, before a message with no length byte",
+      "sample": "reply_err",
+      "hex": "600001000007a3",
+      "expect": {
+        "refused": "extension"
+      }
+    },
+    {
+      "note": "a message bit and no length byte",
+      "sample": "reply_err",
+      "hex": "600001000007a2",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a message of 5 bytes, 3 given",
+      "sample": "reply_err",
+      "hex": "600001000007a205616263",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a message of 255 bytes, 254 given",
+      "sample": "reply_err",
+      "hex": "600001000007a2ff6161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a message that is not UTF-8: a lone continuation byte",
+      "sample": "reply_err",
+      "hex": "600001000007a20180",
+      "expect": {
+        "refused": "utf8"
+      }
+    },
+    {
+      "note": "a message cut inside a character",
+      "sample": "reply_err",
+      "hex": "600001000007a201c3",
+      "expect": {
+        "refused": "utf8"
+      }
+    },
+    {
+      "note": "a message that is not UTF-8: a surrogate's bytes",
+      "sample": "reply_err",
+      "hex": "600001000007a203eda080",
+      "expect": {
+        "refused": "utf8"
+      }
+    },
+    {
+      "note": "a message that is not UTF-8: an overlong `/`",
+      "sample": "reply_err",
+      "hex": "600001000007a202c0af",
+      "expect": {
+        "refused": "utf8"
+      }
+    },
+    {
+      "note": "a message that is not UTF-8, then a byte after it: utf8 first",
+      "sample": "reply_err",
+      "hex": "600001000007a2018061",
+      "expect": {
+        "refused": "utf8"
+      }
+    },
+    {
+      "note": "a byte after the error's byte, with no message or detail",
+      "sample": "reply_err",
+      "hex": "600001000007a000",
+      "expect": {
+        "refused": "trailing"
+      }
+    },
+    {
+      "note": "a byte after the message, with no detail",
+      "sample": "reply_err",
+      "hex": "600001000007a2016162",
+      "expect": {
+        "refused": "trailing"
+      }
+    },
+    {
+      "note": "a value on a reply_err",
+      "sample": "reply_err",
+      "hex": "4000010000077b7d",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a router's `Timeout`, under zenoh/bytes: `T` is a value's CH, which a reply_err does not carry",
+      "sample": "reply_err",
+      "hex": "54696d656f7574",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a mutation on a reply_err",
+      "sample": "reply_err",
+      "hex": "000001000007",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a delete on a reply_err",
+      "sample": "reply_err",
+      "hex": "200001000008",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "an event on a reply_err, reserved",
+      "sample": "reply_err",
+      "hex": "800001000007",
+      "expect": {
+        "refused": "form"
+      }
+    },
+    {
+      "note": "a snapshot on a reply_err, reserved",
+      "sample": "reply_err",
+      "hex": "e00001000007a0",
+      "expect": {
+        "refused": "form"
+      }
+    },
+    {
+      "note": "today's JSON envelope read as a form: `{` is an error's CH, and its bytes break it",
+      "sample": "reply_err",
+      "hex": "7b22636f6465223a2262757379222c226d657373616765223a22227d",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "today's protobuf envelope read as a form: 0x0a, field 1's key, is a mutation's CH",
+      "sample": "reply_err",
+      "hex": "0a04627573791200",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "today's CBOR envelope read as a form: 0xa2, a map of two, is a frame's CH",
+      "sample": "reply_err",
+      "hex": "a264636f64656462757379676d65737361676560",
+      "expect": {
+        "refused": "sample_kind"
       }
     }
   ]

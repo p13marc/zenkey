@@ -162,6 +162,10 @@ section number alone is the core's.
   ([§7.5](core.md#75-the-zk2c-envelope)). An owner writes one on every
   state mutation, stream sample and event, an `@stream` sample's excepted
   ([§4.3](core.md#43-runs-and-sequence-numbers-s7)).
+- **Forms of a call**: a request, a value and an error, in bytes
+  ([§7.5](core.md#75-the-zk2c-envelope)). A value and an error carry an
+  **as-of mark**, a run and a seq ([§5.1](core.md#51-rules)). An error
+  holds §5.2's fields. No call uses them yet.
 - **Packed record**: bit fields, each as wide as its codes need
   ([§7.6](core.md#76-packed-records)). Its layout gives its envelope's
   tag.

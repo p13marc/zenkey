@@ -1,12 +1,15 @@
 //! The zk2c envelope (core §7.5, 0.72; #976, epic #975): the bytes that
 //! carry an owner's run and sequence number with a sample, before its
-//! record.
+//! record, and a call's forms of the same shape (core 0.92, #980's C4a).
 //!
 //! ```text
 //! mutation, a put's payload        CH · run · seq · record
 //! delete, a delete's attachment    CH · run · seq
 //! heartbeat, a put's payload       CH · run · seq · body        (core 0.81, #978's F1)
 //! frame, a put's payload           CH · run · seq · body        (core 0.83, #981's K1)
+//! request, a query's payload       CH · record                  (core 0.92, C4a)
+//! value, a reply's payload         CH · run · seq · record      (core 0.92, C4a)
+//! error, a reply error's payload   CH · run · seq · error       (core 0.92, C4a)
 //! CH                               form (bits 7–5) · run width (bit 4) · tag (bits 3–0)
 //! run                              16 or 32 bits unsigned, big-endian, as CH's width bit says
 //! seq                              24 bits unsigned, big-endian
@@ -21,21 +24,32 @@
 //! descriptor's spelling of a run ([`Run::hex`]), and which samples carry
 //! an envelope.
 //!
-//! **Parsing reads no contract,** as parsing a key does (§1.1): it knows
-//! the sample's kind, put ([`Envelope::parse`]) or delete
-//! ([`DeleteStamp::parse`]), and nothing more. So a mutation's tag is
-//! reported, never checked against a type; `packed` (#979) is the first
-//! type kind to define one. A put carries a mutation, a heartbeat or a
-//! frame ([`Envelope::form`]); a heartbeat's body is read with its covered
-//! revision ([`crate::heartbeat`]), its tag that revision's, and a frame's
-//! with its declaration ([`crate::frame`]), its tag that declaration's.
-//! [`read_put`] refuses a frame on a key whose kind token is not `stream`
-//! (`key_kind`), which [`Envelope::parse_on`] reads. The first refusal that
-//! applies is reported, in §7.5's order, with the token
-//! `spec/conformance/envelope/` pins ([`Refusal::token`]). Every envelope
-//! accepted writes back to its bytes.
+//! **A call's forms** (core 0.92 §7.5, adopted by no rule yet: C4c is the
+//! flip): a request ([`Request`], [`read_query`]), a value
+//! ([`Envelope::value`], [`read_reply`]) and an error
+//! ([`crate::envelope::ErrorForm`], [`read_reply_err`]). A value's and an
+//! error's stamp is the replying instance's as-of mark (§5.1); a request
+//! carries none. Each travels under `zenoh/bytes` ([`ENCODING`]).
 //!
-//! Not [`crate::envelope`], the error envelope of a failed call (§5.2).
+//! **Parsing reads no contract,** as parsing a key does (§1.1): it knows
+//! the sample ([`SampleKind`]) and nothing more: a put ([`Envelope::parse`]),
+//! a delete ([`DeleteStamp::parse`]), or a call's query, reply or reply
+//! error. So the tag of every form but a delete is reported, never checked
+//! against a type; `packed` (#979) is the first type kind to define one. A
+//! put carries a mutation, a heartbeat or a frame ([`Envelope::form`]); a
+//! heartbeat's body is read with its covered revision
+//! ([`crate::heartbeat`]), its tag that revision's, and a frame's with its
+//! declaration ([`crate::frame`]), its tag that declaration's.
+//! [`read_put`] refuses a frame on a key whose kind token is not `stream`
+//! (`key_kind`), which [`Envelope::parse_on`] reads. An error's detail is
+//! taken unread. The first refusal that applies is reported, in §7.5's
+//! order, with the token `spec/conformance/envelope/` pins
+//! ([`Refusal::token`]). Every envelope and form accepted writes back to
+//! its bytes.
+//!
+//! Not [`crate::envelope`]'s [`Envelope`](crate::envelope::Envelope), the
+//! error envelope of a failed call (§5.2), which its error form carries in
+//! bytes.
 //!
 //! **Reading** (observer §7.3, "the envelope first"): a reader tells a
 //! sample that carries an envelope by its key and its Encoding alone
@@ -48,20 +62,23 @@
 
 use thiserror::Error;
 
+use crate::envelope::{Cause, Code, ErrorForm};
 use crate::grammar::{KindToken, ZkKey, parse};
 
 /// A form: CH's three high bits. This version defines a mutation, a
-/// delete, a frame and a heartbeat, and reserves the other four for later
-/// versions, each refused.
+/// delete, a value, an error, a frame and a heartbeat, and reserves the
+/// other two, an event and a snapshot, for later versions, each refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Form {
     /// Code 0: a put's run and seq, then its record.
     Mutation,
     /// Code 1: a delete's run and seq, as its attachment, and no record.
     Delete,
-    /// Code 2, reserved: an operation's reply value.
+    /// Code 2: a call's request, as its query's payload, with no stamp;
+    /// and a reply's run and seq, then its record (core 0.92).
     Value,
-    /// Code 3, reserved: an operation's error reply.
+    /// Code 3: a reply error's run and seq, then §5.2's error in bytes
+    /// (core 0.92, [`crate::envelope::ErrorForm`]).
     Error,
     /// Code 4, reserved: an event's occurrence.
     Event,
@@ -116,10 +133,7 @@ impl Form {
     /// Whether this version defines the form; a reserved one is refused.
     #[must_use]
     pub const fn is_defined(self) -> bool {
-        matches!(
-            self,
-            Form::Mutation | Form::Delete | Form::Frame | Form::Heartbeat
-        )
+        !matches!(self, Form::Event | Form::Snapshot)
     }
 
     /// The form's name, as §7.5's table and the fixtures spell it.
@@ -136,18 +150,6 @@ impl Form {
             Form::Snapshot => "snapshot",
         }
     }
-
-    /// The kind of sample a defined form travels on; `None` for a reserved
-    /// one, which this version gives no sample. A frame and a heartbeat are
-    /// a put's payload, so each is refused on a delete's attachment.
-    #[must_use]
-    pub const fn sample_kind(self) -> Option<SampleKind> {
-        match self {
-            Form::Mutation | Form::Frame | Form::Heartbeat => Some(SampleKind::Put),
-            Form::Delete => Some(SampleKind::Delete),
-            _ => None,
-        }
-    }
 }
 
 impl std::fmt::Display for Form {
@@ -156,22 +158,57 @@ impl std::fmt::Display for Form {
     }
 }
 
-/// The kind of the sample that carries an envelope, as zenoh's
-/// `SampleKind`: a put carries it as its payload, a delete as its
-/// attachment.
+/// What carries an envelope or a form, its **sample** (core §7.5): the
+/// parser knows it, and nothing more.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SampleKind {
+    /// A put's payload, or the payload of a GET's reply that represents a
+    /// put (S2): a mutation, a heartbeat or a frame.
     Put,
+    /// A delete's attachment, or a `reply_del`'s (S2): a delete.
     Delete,
+    /// A call's query, its payload: a value with no stamp, a request.
+    Query,
+    /// A call's reply, its payload: a value. Never a GET's reply that
+    /// represents a put, which is a [`SampleKind::Put`].
+    Reply,
+    /// A call's `reply_err`, its payload: an error.
+    ReplyErr,
 }
 
 impl SampleKind {
-    /// `put` or `delete`, as the fixtures spell it.
+    /// Every sample, in §7.5's order.
+    pub const ALL: [SampleKind; 5] = [
+        SampleKind::Put,
+        SampleKind::Delete,
+        SampleKind::Query,
+        SampleKind::Reply,
+        SampleKind::ReplyErr,
+    ];
+
+    /// `put`, `delete`, `query`, `reply` or `reply_err`, as the fixtures
+    /// spell it.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             SampleKind::Put => "put",
             SampleKind::Delete => "delete",
+            SampleKind::Query => "query",
+            SampleKind::Reply => "reply",
+            SampleKind::ReplyErr => "reply_err",
+        }
+    }
+
+    /// Whether the sample carries the form: a put a mutation, a heartbeat
+    /// or a frame, a delete's attachment a delete, a query and a reply a
+    /// value, and a `reply_err` an error. No sample carries a reserved one.
+    #[must_use]
+    pub const fn carries(self, form: Form) -> bool {
+        match self {
+            SampleKind::Put => matches!(form, Form::Mutation | Form::Frame | Form::Heartbeat),
+            SampleKind::Delete => matches!(form, Form::Delete),
+            SampleKind::Query | SampleKind::Reply => matches!(form, Form::Value),
+            SampleKind::ReplyErr => matches!(form, Form::Error),
         }
     }
 }
@@ -350,7 +387,7 @@ impl Stamp {
         1 + self.run.width_bytes() + 3
     }
 
-    fn write_to(self, out: &mut Vec<u8>) {
+    pub(crate) fn write_to(self, out: &mut Vec<u8>) {
         match self.run {
             Run::U16(v) => out.extend_from_slice(&v.to_be_bytes()),
             Run::U32(v) => out.extend_from_slice(&v.to_be_bytes()),
@@ -359,18 +396,19 @@ impl Stamp {
     }
 }
 
-/// Why bytes are not an envelope of their sample's kind. The variants are
-/// in §7.5's order, which is the order they are found in.
+/// Why bytes are not an envelope or a form of their sample. The variants
+/// are in §7.5's order, which is the order they are found in: CH's checks,
+/// the stamp, a delete's end, then an error's byte and what follows it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum Refusal {
     /// No byte at all, so no CH.
     #[error("no byte, so no header byte")]
     Empty,
-    /// A form this version reserves.
+    /// A form this version reserves: an event or a snapshot.
     #[error("the form {0} is reserved")]
     Reserved(Form),
-    /// A form the sample's kind does not carry.
-    #[error("a {form} envelope on a {sample}")]
+    /// A form the sample does not carry ([`SampleKind::carries`]).
+    #[error("the form {form} on a {sample}, which does not carry it")]
     WrongSample { form: Form, sample: SampleKind },
     /// A frame on a key whose kind token is not `stream` (core 0.83).
     #[error("a frame on a {0} key, which is no plain stream's")]
@@ -378,45 +416,81 @@ pub enum Refusal {
     /// A delete whose tag is not 0.
     #[error("a delete's tag is {}, not 0", .0.get())]
     DeleteTag(Tag),
-    /// Fewer bytes than CH, the run and the seq need.
-    #[error("{have} bytes, short of the {need} that the header, the run and the seq need")]
+    /// A request whose width bit is 1: a request carries no run (core
+    /// 0.92).
+    #[error("a request's width bit is 1, and a request carries no run")]
+    RequestRun,
+    /// Fewer bytes than CH, the run and the seq need, and an error's byte
+    /// after them.
+    #[error("{have} bytes, short of the {need} that the header, the stamp and what follows need")]
     Short { need: usize, have: usize },
-    /// Bytes after a delete's seq.
-    #[error("{0} bytes after a delete's seq")]
+    /// Bytes after a delete's seq, or after an error that ends with its
+    /// message or its byte, where no detail follows.
+    #[error("{0} bytes after the form's end")]
     Trailing(usize),
+    /// An error's cause on a code other than `unavailable`, or none on
+    /// `unavailable` (core 0.92).
+    #[error("{}", cause_text(*.code, *.cause))]
+    Cause { code: Code, cause: Option<Cause> },
+    /// An error's detail on a code other than `app`.
+    #[error("a detail on {0}, where only app carries one")]
+    Detail(Code),
+    /// An error's extension bit set, which this version leaves 0.
+    #[error("the error's extension bit is set")]
+    Extension,
+    /// An error's message cut short: no length byte, or fewer bytes than
+    /// it states.
+    #[error("a message of {need} bytes, {have} given")]
+    MessageShort { need: usize, have: usize },
+    /// An error's message that is not UTF-8, as RFC 3629 defines it.
+    #[error("the message is not UTF-8")]
+    Utf8,
+}
+
+fn cause_text(code: Code, cause: Option<Cause>) -> String {
+    match cause {
+        None => format!("{code} without a cause"),
+        Some(c) => format!("a cause, {c}, on {code}"),
+    }
 }
 
 impl Refusal {
-    /// The reason token `spec/conformance/envelope/vectors.json` and
-    /// `carries.json` pin: `short`, `form`, `sample_kind`, `key_kind`,
-    /// `tag` or `trailing`.
+    /// The reason token `spec/conformance/envelope/vectors.json`,
+    /// `carries.json` and `spec/conformance/errors/forms.json` pin:
+    /// `short`, `form`, `sample_kind`, `key_kind`, `tag`, `request_run`,
+    /// `trailing`, `cause`, `detail`, `extension` or `utf8`.
     #[must_use]
     pub const fn token(&self) -> &'static str {
         match self {
-            Refusal::Empty | Refusal::Short { .. } => "short",
+            Refusal::Empty | Refusal::Short { .. } | Refusal::MessageShort { .. } => "short",
             Refusal::Reserved(_) => "form",
             Refusal::WrongSample { .. } => "sample_kind",
             Refusal::KeyKind(_) => "key_kind",
             Refusal::DeleteTag(_) => "tag",
+            Refusal::RequestRun => "request_run",
             Refusal::Trailing(_) => "trailing",
+            Refusal::Cause { .. } => "cause",
+            Refusal::Detail(_) => "detail",
+            Refusal::Extension => "extension",
+            Refusal::Utf8 => "utf8",
         }
     }
 }
 
-/// §7.5's parse, in its order: CH, its form, the sample's kind, a frame's
-/// key kind (when `kind` is known), a delete's tag, then the stamp. Returns
-/// CH, the stamp and every byte after it.
-fn read(
+/// §7.5's checks on CH, in its order: CH itself, its form, the sample, a
+/// frame's key kind (when `kind` is known), a delete's tag and a request's
+/// width bit. Returns CH and every byte after it.
+fn read_header(
     bytes: &[u8],
     sample: SampleKind,
     kind: Option<KindToken>,
-) -> Result<(Header, Stamp, &[u8]), Refusal> {
+) -> Result<(Header, &[u8]), Refusal> {
     let (&ch, rest) = bytes.split_first().ok_or(Refusal::Empty)?;
     let header = Header::from_byte(ch);
     if !header.form.is_defined() {
         return Err(Refusal::Reserved(header.form));
     }
-    if header.form.sample_kind() != Some(sample) {
+    if !sample.carries(header.form) {
         return Err(Refusal::WrongSample {
             form: header.form,
             sample,
@@ -431,8 +505,23 @@ fn read(
     if header.form == Form::Delete && header.tag != Tag::NONE {
         return Err(Refusal::DeleteTag(header.tag));
     }
+    if sample == SampleKind::Query && header.wide {
+        return Err(Refusal::RequestRun);
+    }
+    Ok((header, rest))
+}
+
+/// §7.5's parse of a form with a stamp, in its order: CH's checks
+/// ([`read_header`]), then the stamp, and an error's byte after it.
+/// Returns CH, the stamp and every byte after it.
+fn read(
+    bytes: &[u8],
+    sample: SampleKind,
+    kind: Option<KindToken>,
+) -> Result<(Header, Stamp, &[u8]), Refusal> {
+    let (header, rest) = read_header(bytes, sample, kind)?;
     let run_bytes = if header.wide { 4 } else { 2 };
-    let need = 1 + run_bytes + 3;
+    let need = 1 + run_bytes + 3 + usize::from(header.form == Form::Error);
     if bytes.len() < need {
         return Err(Refusal::Short {
             need,
@@ -450,22 +539,26 @@ fn read(
     Ok((header, Stamp { run, seq }, rest))
 }
 
-/// A put's payload under the envelope. This version defines two forms for
-/// a put: the mutation, `CH · run · seq · record`, the frame,
-/// `CH · run · seq · body` (core 0.83), and the heartbeat,
-/// `CH · run · seq · body` (core 0.81).
+/// A put's payload under the envelope, or a call's reply in its value
+/// form. This version defines three forms for a put: the mutation,
+/// `CH · run · seq · record`, the frame, `CH · run · seq · body` (core
+/// 0.83), and the heartbeat, `CH · run · seq · body` (core 0.81). A reply's
+/// value has a mutation's shape, `CH · run · seq · record` (core 0.92).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Envelope<'a> {
-    /// [`Form::Mutation`], [`Form::Frame`] or [`Form::Heartbeat`].
+    /// [`Form::Mutation`], [`Form::Frame`] or [`Form::Heartbeat`] on a
+    /// put, [`Form::Value`] on a reply.
     pub form: Form,
     /// A mutation's: 0 unless the record's type kind defines a tag. A
     /// frame's: its declaration's ([`crate::frame::Layout::tag`]). A
-    /// heartbeat's: its covered revision's.
+    /// heartbeat's: its covered revision's. A value's: its operation's
+    /// `response` type's, or its `summary` type's on a summary reply.
     pub tag: Tag,
+    /// A value's is the replying instance's as-of mark (core §5.1).
     pub stamp: Stamp,
-    /// Every byte after the seq, possibly none: a mutation's record, read
-    /// as the resource's type says (§7.1), or a frame's or a heartbeat's
-    /// body.
+    /// Every byte after the seq, possibly none: a mutation's or a value's
+    /// record, read as the resource's type says (§7.1), or a frame's or a
+    /// heartbeat's body.
     pub record: &'a [u8],
 }
 
@@ -475,6 +568,18 @@ impl<'a> Envelope<'a> {
     pub const fn mutation(tag: Tag, stamp: Stamp, record: &'a [u8]) -> Envelope<'a> {
         Envelope {
             form: Form::Mutation,
+            tag,
+            stamp,
+            record,
+        }
+    }
+
+    /// A value: a call's reply, its record under the replying instance's
+    /// as-of mark (core 0.92 §5.1, §7.5).
+    #[must_use]
+    pub const fn value(tag: Tag, stamp: Stamp, record: &'a [u8]) -> Envelope<'a> {
+        Envelope {
+            form: Form::Value,
             tag,
             stamp,
             record,
@@ -513,7 +618,8 @@ impl<'a> Envelope<'a> {
     /// # Errors
     ///
     /// [`Refusal::Empty`], [`Refusal::Reserved`], [`Refusal::WrongSample`]
-    /// for a delete's form, or [`Refusal::Short`], in that order.
+    /// for a form a put does not carry, or [`Refusal::Short`], in that
+    /// order.
     pub fn parse(bytes: &'a [u8]) -> Result<Envelope<'a>, Refusal> {
         Self::read_with(bytes, None)
     }
@@ -551,6 +657,7 @@ impl<'a> Envelope<'a> {
     }
 
     /// Its bytes: 6 over the record or the body, or 8 with a 32-bit run.
+    /// A value's write as a mutation's do.
     #[must_use]
     pub fn write(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.stamp.envelope_bytes() + self.record.len());
@@ -576,8 +683,8 @@ impl DeleteStamp {
     /// # Errors
     ///
     /// [`Refusal::Empty`], [`Refusal::Reserved`], [`Refusal::WrongSample`]
-    /// for a mutation's form, [`Refusal::DeleteTag`], [`Refusal::Short`] or
-    /// [`Refusal::Trailing`], in that order.
+    /// for any form but a delete, [`Refusal::DeleteTag`], [`Refusal::Short`]
+    /// or [`Refusal::Trailing`], in that order.
     pub fn parse(bytes: &[u8]) -> Result<DeleteStamp, Refusal> {
         let (_, stamp, rest) = read(bytes, SampleKind::Delete, None)?;
         if !rest.is_empty() {
@@ -606,8 +713,99 @@ impl DeleteStamp {
     }
 }
 
-/// The Encoding a sample that carries an envelope has (§7.5), as zenoh
-/// writes it: its default, with no schema. A raw media type zenoh does not
+/// A call's request, a query's payload: `CH · record` (core 0.92 §7.5).
+/// CH is a value's, form 2, with its width bit 0 and its operation's
+/// `request` type's tag. It carries no run and no seq: its caller need not
+/// be an owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Request<'a> {
+    /// Its operation's `request` type's tag: 0 unless that type's kind
+    /// defines one.
+    pub tag: Tag,
+    /// Every byte after CH, possibly none, read as the `request` type says.
+    pub record: &'a [u8],
+}
+
+impl<'a> Request<'a> {
+    /// A request: its record under CH.
+    #[must_use]
+    pub const fn new(tag: Tag, record: &'a [u8]) -> Request<'a> {
+        Request { tag, record }
+    }
+
+    /// Its CH: a value, width bit 0, and its tag.
+    #[must_use]
+    pub const fn header(&self) -> Header {
+        Header {
+            form: Form::Value,
+            wide: false,
+            tag: self.tag,
+        }
+    }
+
+    /// Its bytes: 1 over the record.
+    #[must_use]
+    pub fn write(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(1 + self.record.len());
+        out.push(self.header().byte());
+        out.extend_from_slice(self.record);
+        out
+    }
+}
+
+/// A call's query payload read as a request, or the first refusal that
+/// applies (core 0.92 §7.5). The `Encoding` is not read: a form travels
+/// under `zenoh/bytes` ([`ENCODING`]), which the caller tells.
+///
+/// # Errors
+///
+/// [`Refusal::Empty`], [`Refusal::Reserved`], [`Refusal::WrongSample`]
+/// for any form but a value, or [`Refusal::RequestRun`], in that order.
+pub fn read_query(payload: &[u8]) -> Result<Request<'_>, Refusal> {
+    let (header, record) = read_header(payload, SampleKind::Query, None)?;
+    Ok(Request {
+        tag: header.tag,
+        record,
+    })
+}
+
+/// A call's reply payload read as a value, or the first refusal that
+/// applies (core 0.92 §7.5). A GET's reply that represents a put is a put
+/// ([`Envelope::parse`]), never this. The `Encoding` is not read.
+///
+/// # Errors
+///
+/// [`Refusal::Empty`], [`Refusal::Reserved`], [`Refusal::WrongSample`]
+/// for any form but a value, or [`Refusal::Short`], in that order.
+pub fn read_reply(payload: &[u8]) -> Result<Envelope<'_>, Refusal> {
+    let (header, stamp, record) = read(payload, SampleKind::Reply, None)?;
+    Ok(Envelope {
+        form: header.form,
+        tag: header.tag,
+        stamp,
+        record,
+    })
+}
+
+/// A call's `reply_err` payload read as an error, or the first refusal
+/// that applies (core 0.92 §7.5): CH, the stamp, then the error's byte, its
+/// message and its detail, the detail's bytes unread. The `Encoding` is not
+/// read: [`ErrorForm::read`] gates on it.
+///
+/// # Errors
+///
+/// [`Refusal::Empty`], [`Refusal::Reserved`], [`Refusal::WrongSample`]
+/// for any form but an error, [`Refusal::Short`], then on the error's byte
+/// [`Refusal::Cause`], [`Refusal::Detail`], [`Refusal::Extension`],
+/// [`Refusal::MessageShort`], [`Refusal::Utf8`] or [`Refusal::Trailing`],
+/// in that order.
+pub fn read_reply_err(payload: &[u8]) -> Result<ErrorForm<'_>, Refusal> {
+    let (header, stamp, rest) = read(payload, SampleKind::ReplyErr, None)?;
+    ErrorForm::after_stamp(header.tag, stamp, rest)
+}
+
+/// The Encoding a sample that carries an envelope or a call's form has
+/// (§7.5), as zenoh writes it: its default, with no schema. A raw media type zenoh does not
 /// predefine travels as its custom encoding, which zenoh writes as the
 /// media type itself (§7.2), so it is never this.
 pub const ENCODING: &str = "zenoh/bytes";
@@ -930,13 +1128,19 @@ mod tests {
         };
         assert_eq!((e.stamp, e.record), (stamp, &br#"{"up":true}"#[..]));
         // A legacy payload under `zenoh/bytes` is refused, never read: `{`
-        // is form 3, reserved.
+        // is form 3, an error, which a put does not carry (core 0.92).
         let refused = read_put(key, ENCODING, br#"{"up":true}"#);
-        assert_eq!(refused, Reading::Refused(Refusal::Reserved(Form::Error)));
+        assert_eq!(
+            refused,
+            Reading::Refused(Refusal::WrongSample {
+                form: Form::Error,
+                sample: SampleKind::Put
+            })
+        );
         let Reading::Refused(r) = refused else {
             unreachable!()
         };
-        assert_eq!(r.reason(), "zk2c envelope refused: form");
+        assert_eq!(r.reason(), "zk2c envelope refused: sample_kind");
         assert_eq!(
             read_put(key, ENCODING, &[]),
             Reading::Refused(Refusal::Empty)
