@@ -155,6 +155,38 @@ def use_selectors(use: Use) -> list[str]:
             for p in use.providers for r in use.resources]
 
 
+def _collections(canonical: dict[str, Any]) -> set[str]:
+    """A revision's collections (core §7.5): each state or @state resource
+    with a horizon above 0, as ``<kind token>/<template>``."""
+    from . import freshness
+
+    return {f"{r['token']}/{r['template']}" for r in canonical["resources"]
+            if r["token"] in ("state", "@state") and freshness.horizon("state", r["annotations"]).horizon == "within"}
+
+
+def heartbeat_selectors(use: Use, contracts: dict[str, list[Contract]]) -> list[str]:
+    """§11.1 Consume (0.86): "each heartbeat a binding needs: where a bound
+    interface's contract uses freshness.v2 and the binding consumes one of
+    its collections (§7.5), the subscription to each named provider's
+    …/freshness.v2/stream/heartbeat/<iface>". ``contracts`` are the
+    deployment's revisions by interface, any one of which using
+    ``freshness.v2`` with that collection needs it."""
+    for c in contracts.get(use.interface, []):
+        if "freshness.v2" in c.canonical["uses"] and _collections(c.canonical) & set(use.resources):
+            return [f"zk2/{p}/freshness.v2/stream/heartbeat/{use.interface}" for p in use.providers]
+    return []
+
+
+def heartbeat_keys(service: str, contracts: list[Contract]) -> list[str]:
+    """The heartbeat each covered interface's owner serves (freshness.v2 §3),
+    one key per interface whose contract uses freshness.v2 and has a
+    collection: in the deployment's own keys under ``allow`` (§11.1, 0.86:
+    "Each owner of a covered interface serves it, for the fan-in and the
+    allow posture's complement")."""
+    return sorted({f"zk2/{service}/freshness.v2/stream/heartbeat/{c.interface}" for c in contracts
+                   if "freshness.v2" in c.canonical["uses"] and _collections(c.canonical)})
+
+
 def presence_selectors(providers: list[str]) -> list[str]:
     return [f"zk2/{p}/@zk/**" for p in providers]
 
@@ -207,6 +239,10 @@ def compile_grants(principals: list[Principal], *, egress_selectors: bool = True
 
     readers: list[tuple[str, str]] = []  # (principal, selector) a provider may be asked on
     presence_readers: list[tuple[str, str]] = []  # (principal, presence selector)
+    by_iface: dict[str, list[Contract]] = {}
+    for p in principals:
+        for c in p.implements:
+            by_iface.setdefault(c.interface, []).append(c)
     for p in principals:
         # Contract bundles are open.
         add(p.id, ("query", "declare_queryable", "reply"), INGRESS, [CONTRACTS])
@@ -222,6 +258,12 @@ def compile_grants(principals: list[Principal], *, egress_selectors: bool = True
             add(p.id, ("put", "delete", "reply"), EGRESS, sels)
             readers += [(p.id, s) for s in sels]
             providers += use.providers
+            # core 0.86: the heartbeat it needs, a subscription alone ("No
+            # GET of the heartbeat key": a re-read is S4's GET above)
+            beats = heartbeat_selectors(use, by_iface)
+            add(p.id, ("declare_subscriber",), INGRESS, beats)
+            add(p.id, ("put",), EGRESS, beats)
+            readers += [(p.id, s) for s in beats]
         for use in p.calls:
             sels = use_selectors(use)
             add(p.id, ("query",), INGRESS, sels)
@@ -269,7 +311,8 @@ def universe(principals: list[Principal]) -> list[str]:
     keys: list[str] = []
     for p in principals:
         if p.service:
-            keys += resource_keys(p.service, p.implements) + [f"zk2/{p.service}/@zk/**"]
+            keys += resource_keys(p.service, p.implements) + heartbeat_keys(p.service, p.implements) \
+                + [f"zk2/{p.service}/@zk/**"]
     return sorted(set(keys)) + [CONTRACTS]
 
 

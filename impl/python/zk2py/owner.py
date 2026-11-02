@@ -541,13 +541,15 @@ class Owner:
         for c in contracts:
             if not c.valid or c.canonical is None:
                 raise ValueError(f"{c.path}: not a valid contract: {c.codes}")
-            # core 0.83 (#981 K1): a frame resource's samples are frames, which
-            # this owner does not write (K3's): refused before anything is
-            # declared, never published as mutations, which have no reading.
-            framed = [r["template"] for r in c.canonical["resources"] if r.get("frame") is not None]
-            if framed:
-                raise OwnerRefused(f"{c.interface}: frame resources {framed}: zk2py's owner writes no frame "
-                                   "(core §7.7, K3)")
+            # core 0.87 (#981 K3): a frame resource's samples are frames,
+            # written by record_frame (core §7.7 "The owner's frames"); its
+            # layout must resolve, and no mutation is ever put on its key.
+            from . import frame as _frame
+
+            for r in c.canonical["resources"]:
+                if r.get("frame") is not None and _frame.layout_of(c, r) is None:
+                    raise OwnerRefused(f"{c.interface}: frame resource {r['template']}: its record type does not "
+                                       "resolve")
         #: freshness.v2 §2.4 (core 0.82): each interface it implements whose
         #: contract uses freshness.v2 and has a collection is covered by a
         #: heartbeat, and it implements the standard contract beside them
@@ -696,6 +698,12 @@ class Owner:
         self._hb_running: set[str] = set()
         self._hb_thread: threading.Thread | None = None
         self.heartbeats_sent: list[tuple[str, zk2c.InBand, dict[str, Any]]] = []
+        #: core §7.7 (0.87): each frame key's writer, the keys whose next frame
+        #: is lost (a test hook), and every frame put, (key, what was put)
+        self._framers: dict[str, Any] = {}
+        self._frames_lost: set[str] = set()
+        self._frames_lock = threading.RLock()
+        self.frames_put: list[tuple[str, dict[str, Any]]] = []
         #: False holds every heartbeat back: a test rig's owner that breaks
         #: §2.4's MUST on purpose
         self.send_heartbeats = True
@@ -875,7 +883,9 @@ class Owner:
         ``key``'s next stream seq, for a put made round the writer (a test's
         raw put, ``arbitration.v1`` scenarios §11's X): its seq is taken
         here, as :meth:`publish` takes it, so the key's seqs stay one count
-        (core §4.3)."""
+        (core §4.3). Refused on a frame resource's key (core §7.7, 0.87)."""
+        if self.is_frame_key(key):
+            raise OwnerRefused(f"{key}: a frame resource's key, on which no mutation is put (core §7.7)")
         return zk2c.mutation(self._next_stream_inband(key), record, self.tag_of(key))
 
     def _next_stream_inband(self, key: str) -> zk2c.InBand:
@@ -1426,6 +1436,9 @@ class Owner:
         assert self.session is not None
         old, old_entities = self.instance, self._instance_entities
         new = new or secrets.token_hex(8)
+        # Core §7.7: every open frame put under the run its records were
+        # measured in, before the new one.
+        self._end_frames()
         # Declared first, assigned after: a declaration that raises leaves
         # the owner on its old id, with nothing of the new one declared.
         with self._writes:
@@ -1545,6 +1558,9 @@ class Owner:
                 # vouches for it later.
                 held.confirm = self.mint()
             self._held[key] = held
+            if key in self.closed_writers:
+                # a new writer's put: a writer closed had cleared its bit
+                self.unvouched.discard(key)
             self.closed_writers.discard(key)
             return stamp if stamp is not None else ib
 
@@ -1572,8 +1588,13 @@ class Owner:
             if att is not None:
                 kw["attachment"] = att
             self._publishers[key].delete(**kw)
-            self._held[key] = _Held(None, self._encodings[key], stamp, time.monotonic() - max(0.0, elapsed_s),
-                                    ib, att)
+            held = _Held(None, self._encodings[key], stamp, time.monotonic() - max(0.0, elapsed_s), ib, att)
+            if self._covered(key):
+                # core §4.3 "Minting" (0.85): "An owner mints one at each
+                # mutation of such a member, though its put carries none": a
+                # delete's reply_del carries it, its last confirmation (S2)
+                held.confirm = self.mint()
+            self._held[key] = held
             return stamp if stamp is not None else ib
 
     def remove_member(self, key: str) -> None:
@@ -1746,16 +1767,25 @@ class Owner:
     def close_writer(self, key: str) -> None:
         """freshness.v1 §2.4: "The re-puts stop … when its writer for that
         member closes." The owner still holds the value and answers GETs
-        with it, under its last stamp; nobody confirms it."""
+        with it, under its last stamp; nobody confirms it. Under
+        ``freshness.v2`` (round 97) the member's bit clears: its heartbeat
+        stops vouching for it (``alarms.v1`` 0.11 §2.7: "It clears the
+        alarm's bit and lets the alarm go stale"; ``health.v1`` 0.8 §2.3)."""
         with self._writes:
             self.closed_writers.add(key)
+            if self._covered(key) is not None:
+                self.unvouched.add(key)
 
     def reopen_writer(self, key: str) -> None:
         """The member's writer is back (``alarms.v1`` §2.7, 0.2: "An
         evaluation that finds the condition again confirms it again"): its
-        re-puts resume, the next one at once if its interval ran out."""
+        re-puts resume, the next one at once if its interval ran out. Under
+        ``freshness.v2`` its bit is set again: "An evaluation that finds the
+        condition again sets the bit again" (``alarms.v1`` 0.11)."""
         with self._writes:
             self.closed_writers.discard(key)
+            if self._covered(key) is not None:
+                self.unvouched.discard(key)
 
     # -- freshness.v1 §2.4 and core §4.3 -----------------------------------
 
@@ -1922,6 +1952,103 @@ class Owner:
                     self._held[key] = _Held(held.payload, held.encoding, stamp, time.monotonic(), ib, wire)
                     self.reputs.append((key, stamp if stamp is not None else ib))
 
+    # -- core §7.7: frames (0.87, #981 K3) ---------------------------------------------
+
+    #: Whether this owner's wall clock is known: False writes every frame's
+    #: time as unknown, all 42 bits set (core §7.7 "Times": "or all ones
+    #: while its clock is unknown"), a test's choice.
+    frame_clock_known: bool = True
+
+    def is_frame_key(self, key: str) -> bool:
+        """Whether ``key`` is a frame resource's (core §7.7: its template has
+        no parameter, so its key is the resource's own)."""
+        found = self._resource_of.get(key)
+        return found is not None and found[1].get("frame") is not None
+
+    def _framer(self, key: str) -> Any:
+        from . import frame
+
+        if not self.is_frame_key(key):
+            raise OwnerRefused(f"{key}: no frame resource of this owner (core §7.7)")
+        with self._frames_lock:
+            if key not in self._framers:
+                c, r = self._resource_of[key]
+                lo = frame.layout_of(c, r)
+                assert lo is not None
+                self._framers[key] = frame.Framer(lo, self.writing_epoch())
+            return self._framers[key]
+
+    def record_frame(self, key: str, values: dict[str, Any], at_ns: int | None = None) -> list[dict[str, Any]]:
+        """One record of a frame resource, §7.6's JSON reading (an absent
+        optional field left out), measured now or at the monotonic instant
+        ``at_ns``: gathered into the key's open frame, and every frame it
+        makes ready put at once (:class:`zk2py.frame.Framer`). Returns the
+        frames put, each ``{run, seq, records, bytes, lost}``. Raises
+        :class:`zk2py.frame.Refused` or :class:`zk2py.packed.Refused` for a
+        record the text refuses: nothing is gathered of it."""
+        self._refuse_standby_write(key)
+        fr_ = self._framer(key)
+        mono = time.monotonic_ns() if at_ns is None else at_ns
+        wall = None
+        if self.frame_clock_known:
+            wall_ms = (time.time_ns() - (time.monotonic_ns() - mono)) // 1_000_000 - self.writing_epoch() * 1000
+            wall = {"s": wall_ms // 1000, "ms": wall_ms % 1000} if wall_ms >= 0 else None
+        with self._frames_lock:
+            ready = fr_.record(values, mono, wall)
+            return [self._put_frame(key, fr_, r) for r in ready]
+
+    def end_frame(self, key: str) -> dict[str, Any] | None:
+        """Core §7.7's MAY (0.87): "An owner MAY end a frame before it holds
+        records records, and puts it then." The frame put, or None with
+        none open."""
+        fr_ = self._framer(key)
+        with self._frames_lock:
+            ready = fr_.end()
+            return None if ready is None else self._put_frame(key, fr_, ready)
+
+    def lose_frame(self, key: str) -> None:
+        """``frames.md``'s lost frame, a test hook: "O takes the frame's seqs
+        and puts nothing, as a put a network dropped". The next frame put on
+        ``key`` is lost so."""
+        self._framer(key)
+        with self._frames_lock:
+            self._frames_lost.add(key)
+
+    def _end_frames(self) -> None:
+        """Every open frame put, before a new run (:meth:`new_epoch`): a
+        frame's records were measured under the run it is put in."""
+        for key in list(self._framers):
+            self.end_frame(key)
+
+    def _put_frame(self, key: str, fr_: Any, ready: Any) -> dict[str, Any]:
+        """A ready frame put on ``key`` (core §7.7): its value written under
+        the run it is put in, record 0 the next seq of the key, "and the
+        frame after it the seq that follows its last record's", in form 5
+        under the frame's tag, ``zenoh/bytes``, on the stream's publisher
+        with its QoS and no Zenoh timestamp (no row of §4.3's table)."""
+        with self._seq_lock:
+            if self.run is None:
+                self.take_run()
+            assert self.run is not None
+            run = self.run
+            value = fr_.seal(ready, run)
+            n = len(value["records"])
+            seq = self._stream_seq.get(key, 0)
+            self._stream_seq[key] = (seq + n) % 2**24
+        body = fr_.layout.write(value, self.writing_epoch())
+        payload = zk2c.write("frame", run[0], run[1], seq, fr_.layout.tag, body)
+        lost = key in self._frames_lost
+        if lost:
+            self._frames_lost.discard(key)
+        else:
+            if key not in self._publishers:
+                self._member_publisher(key)
+            self._publishers[key].put(payload, encoding=zk2c.ENCODING)
+        out = {"run": zk2c.InBand(run[0], run[1], 0).run_hex(), "seq": seq, "records": value,
+               "bytes": len(payload), "lost": lost}
+        self.frames_put.append((key, out))
+        return out
+
     def publish(self, key: str, payload: bytes, timestamp: zenoh.Timestamp | None = None,
                 attachment: bytes | None = None) -> None:
         """Put a stream sample on its declared publisher: on a ``stream``
@@ -1931,8 +2058,13 @@ class Owner:
         given (a test's, or a ``health.v1`` fault's, its owner's choice),
         else on §4.3's table by the owner, else not at all (§8.2); and with
         ``attachment`` when given (its bytes as the resource's attachment
-        encoding writes them, §7.2)."""
+        encoding writes them, §7.2). A frame resource's key takes
+        none: "An owner MUST NOT put a mutation (§7.5) on a frame resource's
+        key" (core §7.7, 0.87), so it is refused (:meth:`record_frame`)."""
         self._refuse_standby_write(key)
+        if self.is_frame_key(key):
+            raise OwnerRefused(f"{key}: a frame resource's key, on which no mutation is put (core §7.7): "
+                               "write its records with record_frame")
         if key not in self._publishers:
             self._member_publisher(key)
         if key in self._member_of:
@@ -2060,7 +2192,7 @@ class Owner:
             # as the delete's attachment", and the mutation's Zenoh
             # timestamp where it carried one.
             kw: dict[str, Any] = {} if held.stamp is None else {"timestamp": held.stamp}
-            if held.payload is not None and held.stamp is None and held.confirm is not None:
+            if held.stamp is None and held.confirm is not None:
                 # S2 (core 0.82): "The owner's reply of a member a
                 # freshness.v2 heartbeat confirms MUST carry instead that
                 # member's last confirmation".

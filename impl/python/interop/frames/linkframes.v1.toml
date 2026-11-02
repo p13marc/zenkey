@@ -1,0 +1,23 @@
+# spec/scenarios/frames.md's contract, linkframes.v1 (core §7.7, 0.87), as its
+# "Common setup" writes it: two frame resources over the record types Link
+# and Sample of spec/conformance/contracts/schemas/packed/frames.json, copied
+# here byte for byte as linkframes.json, so that `packed:linkframes#…` names
+# them. zk2py's frames scenarios use it, for every owner and every reader. It
+# must load with no finding at all.
+[interface]
+name  = "linkframes"
+major = 1
+minor = 0
+
+[schemas]
+packed = ["linkframes.json"]
+
+[resources."frames/link"]
+kind  = "stream"
+type  = "packed:linkframes#Link"
+frame = { keyframe_every = 15, deadband = { queue_depth = { delta = "4", max_records = 5 } } }
+
+[resources."frames/sample"]
+kind  = "stream"
+type  = "packed:linkframes#Sample"
+frame = { records = 3, step_ms = 10000, jitter_ms = 500, keyframe_every = 3 }

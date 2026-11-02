@@ -50,7 +50,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import zk2c
+from . import heartbeat, zk2c
 from . import freshness as fr
 from . import health as h
 
@@ -114,7 +114,13 @@ class Bus:
         self.extra: list[Any] = []
 
     def subscriber(self, address: str) -> fr.Subscriber:
+        from .contract import load_contract
+
         s = fr.Subscriber(self.s_session, f"zk2/{address}/health.v1/**", self.trust)
+        # 0.8 (#978 F4): S hears the heartbeat key covering health.v1 too,
+        # and reads each heartbeat as freshness.v2 §2.5 says.
+        hc = load_contract(h.CONTRACT)
+        s.follow(address, hc.canonical, hc.fingerprint)
         self.subs.append(s)
         time.sleep(0.2)
         return s
@@ -133,8 +139,12 @@ class Bus:
 
     def read(self, address: str, s: fr.Subscriber | None = None, get: bool = True,
              trust: fr.ClockTrust | None = None):
+        """S's reading (``s``) or G's. 0.8: "G and T take the deployment's
+        word, freshness.v1 §2.6's ground 1": a status put carries no Zenoh
+        timestamp of the owner's, so G can no longer measure it from S's
+        deliveries."""
         return h.read_near(self.t_session if s is None else self.g_session, address, subscriber=s,
-                           trust=self.trust if trust is None else trust, get=get)
+                           trust=fr.ClockTrust(word=True) if trust is None else trust, get=get)
 
     def t_read(self, address: str):
         """T in §5 to §7 (0.2): presence and GET, on the deployment's word
@@ -160,6 +170,22 @@ class Bus:
         # live.close: each session with the watch session zk2py opened for it
         for x in (self.s_session, self.g_session, self.t_session, self.router):
             live.close(x)
+
+
+def _puts(recs: list[fr.Received]) -> list[fr.Received]:
+    """What the owner put, a heartbeat's confirmation set aside (0.8)."""
+    return [r for r in recs if not r.confirmation]
+
+
+def _beats(s: fr.Subscriber, address: str, since: int) -> list[tuple[int, dict[str, Any]]]:
+    """The heartbeats covering health.v1 S read since ``since`` (0.8)."""
+    with s.lock:
+        return [(t, a) for t, a in s.beats.get((address, h.IFACE), []) if t >= since]
+
+
+def _vouches(a: dict[str, Any], key: str) -> bool:
+    sec = ((a.get("read") or {}).get("sections") or {}).get("state/status")
+    return isinstance(sec, dict) and key in sec.get("confirmed", [])
 
 
 def _status(payload: bytes) -> dict[str, Any] | None:
@@ -231,17 +257,18 @@ def section1(report: Report) -> None:
                                            and x[0][0]["reason"] == "starting" and x[0][1] == zid for x in got),
                      str(got))
         # Step 2.
-        bus.owner("lab/quiet", level=h.OK, reason="serving", tokenless={"health.v1"})
+        bus.owner("lab/quiet", level=h.OK, reason="serving", tokenless={"health.v1", "freshness.v2"})
         time.sleep(1.0)
         pres = live.list_presence(bus.t_session, "zk2/lab/quiet/@zk/**")
         qa = answers.get("lab/quiet instance", [])
         doc = json.loads(qa[0][1][0].payload) if qa and qa[0][1] and qa[0][1][0].ok else {}
         entry = next((e for e in doc.get("interfaces") or [] if e.get("iface") == "health.v1"), {})
         st_q = status_of(qa[0][0]) if qa else []
-        report.check(sec, "step 2: lab/quiet holds an instance token and no alive/health.v1 token, its descriptor "
-                          "lists health.v1 with \"token\": false, and T's GET at the instance token answers its "
-                          "status OK",
-                     len(pres.instances) == 1 and not [a for a in pres.alive if a["iface"] == "health.v1"]
+        report.check(sec, "step 2: lab/quiet holds an instance token and no alive/health.v1 or alive/freshness.v2 "
+                          "token, its descriptor lists health.v1 with \"token\": false, and T's GET at the instance "
+                          "token answers its status OK",
+                     len(pres.instances) == 1 and not [a for a in pres.alive if a["iface"] in ("health.v1",
+                                                                                            "freshness.v2")]
                      and entry.get("token") is False and len(st_q) == 1 and st_q[0][0]["level"] == h.OK,
                      f"{len(pres.instances)} instance, alive {[a['iface'] for a in pres.alive]}, entry {entry}, "
                      f"status {st_q}")
@@ -254,18 +281,25 @@ def section1(report: Report) -> None:
         report.check(sec, "step 3: G's reply is OK, \"serving\", with since_ns later than the first status's",
                      len(g) == 1 and g[0]["level"] == h.OK and g[0]["reason"] == "serving"
                      and g[0]["since_ns"] > first_since, f"{g}, first since {first_since}")
-        # Step 4.
-        time.sleep(35.0)
+        # Step 4 (0.8): "The owner puts nothing for 65 s, and S judges."
+        mark = time.monotonic_ns()
+        time.sleep(65.0)
         sk = "zk2/lab/svc/health.v1/state/status"
-        after = _since(s.of(sk), t3)
-        gaps = [(b.arrival_ns - a.arrival_ns) / fr.NS for a, b in zip(after, after[1:])]
-        report.check(sec, "step 4: in 35 s with no change, S receives the status again at least once, no two "
-                          "deliveries more than 30 s apart: the same payload, since_ns included, under a later "
-                          "stamp of the same id (freshness.v1 §2.4)",
-                     len(after) >= 2 and max(gaps) <= 30 + JITTER_S and len({r.payload for r in after}) == 1
-                     and all(_zid(r.stamp_id) == zid for r in after)
-                     and all(b.stamp_ns > a.stamp_ns for a, b in zip(after, after[1:])),
-                     f"{len(after)} deliveries, gaps {[round(x, 2) for x in gaps]} s")
+        after = _puts(_since(s.of(sk), mark))
+        beats = _beats(s, "lab/svc", mark)
+        arrivals = [mark] + [t for t, _ in beats]
+        gaps = [(b - a) / fr.NS for a, b in zip(arrivals, arrivals[1:])]
+        tag = heartbeat.layout_of(o.contract.canonical, o.contract.fingerprint).tag
+        r4, _ = bus.read("lab/svc", s, get=False)
+        a4 = h.judge(r4)
+        report.check(sec, "step 4: in 65 s S receives no put of the status (freshness.v2 §2.4), a heartbeat at least "
+                          "every 30 s vouching for it, under health.v1 1.1's tag, and judges healthy, ok, past the "
+                          "horizon",
+                     not after and bool(beats) and max(gaps) <= 30 + JITTER_S
+                     and all(_vouches(a, sk) for _, a in beats) and o.contract.fingerprint.startswith("sha256:60a43745")
+                     and a4.expect() == {"verdict": "healthy", "reason": "ok", "level": "ok"},
+                     f"{len(after)} puts, {len(beats)} heartbeats (tag {tag}), gaps {[round(x, 2) for x in gaps]} s, "
+                     f"{_answer(a4)}")
         # Step 5.
         o.close()
         bus.owners.remove(o)
@@ -292,25 +326,42 @@ def section2(report: Report) -> None:
     try:
         s = bus.subscriber("lab/svc")
         o = bus.owner("lab/svc", level=h.OK, reason="serving")
-        time.sleep(1.0)
+        t1 = time.monotonic_ns()
+        # 0.8 step 1: "The owner puts status OK, and goes on confirming it
+        # for 65 s. S and G judge."
+        _sleep_until(t1 + 65 * fr.NS)
         r_s, _ = bus.read("lab/svc", s, get=False)
-        r_g, _ = bus.read("lab/svc", None, get=True)
+        r_g, info_g = bus.read("lab/svc", None, get=True)
         a_s, a_g = h.judge(r_s), h.judge(r_g)
-        report.check(sec, "step 1: S and G both judge healthy, ok", a_s.expect() == a_g.expect()
-                     == {"verdict": "healthy", "reason": "ok", "level": "ok"}, f"S {_answer(a_s)}, G {_answer(a_g)}")
+        puts = _puts(s.of(o.status_key))
+        rd = info_g.get("status_reading")
+        report.check(sec, "step 1: past the horizon S and G both judge healthy, ok; S has received no put of the "
+                          "status since step 1's; G's reply is stamped with its last confirmation (freshness.v2 §2.4)",
+                     a_s.expect() == a_g.expect() == {"verdict": "healthy", "reason": "ok", "level": "ok"}
+                     and len(puts) == 1 and rd is not None and rd.stamp_ns is not None
+                     and (time.time_ns() - rd.stamp_ns) / fr.NS < 31,
+                     f"S {_answer(a_s)}, G {_answer(a_g)}, {len(puts)} puts, reply aged "
+                     f"{None if rd is None or not rd.stamp_ns else round((time.time_ns() - rd.stamp_ns) / fr.NS, 2)} s")
+        # step 2: the owner stops vouching (zk2py: its writer closed, its bit clear)
         o.owner.close_writer(o.status_key)
-        last = s.of(o.status_key)[-1].arrival_ns
+        t2 = time.monotonic_ns()
+        last = max(t for t, a in _beats(s, "lab/svc", 0) if _vouches(a, o.status_key))
         _sleep_until(last + 65 * fr.NS)
+        beats = _beats(s, "lab/svc", t2 + int(0.2 * fr.NS))
+        report.check(sec, "step 2: S receives heartbeats, each with the status's bit clear, and no put",
+                     bool(beats) and not any(_vouches(a, o.status_key) for _, a in beats)
+                     and len(_puts(s.of(o.status_key))) == 1, f"{len(beats)} heartbeats")
         r_s, info_s = bus.read("lab/svc", s, get=False)
         r_g, info_g = bus.read("lab/svc", None, get=True)
         a_s, a_g = h.judge(r_s), h.judge(r_g)
         pres = info_s["presence"]
         reading = info_g.get("status_reading")
         age = (time.time_ns() - reading.stamp_ns) / fr.NS if reading is not None and reading.stamp_ns else None
-        report.check(sec, "step 3: the owner's instance and interface tokens are present; 65 s after S's last "
-                          "delivery S judges stale, beyond_horizon, and G stale, beyond_horizon, its reply more than "
-                          "60.5 s old against its measured clock; neither unhealthy, FAILED or OK as current",
-                     len(pres.instances) == 1 and len(pres.alive) == 1
+        report.check(sec, "step 3: the owner's instance and interface tokens are present; 65 s after the last "
+                          "heartbeat that vouched for the status S judges stale, beyond_horizon, and G stale, "
+                          "beyond_horizon, its reply's stamp more than 60.5 s old; neither unhealthy, FAILED or OK "
+                          "as current",
+                     len(pres.instances) == 1 and len(pres.alive) >= 1
                      and a_s.expect() == a_g.expect() == {"verdict": "stale", "reason": "beyond_horizon", "level": None}
                      and age is not None and age > 60.5,
                      f"tokens {len(pres.instances)}+{len(pres.alive)}; S {_answer(a_s)}, G {_answer(a_g)}, "
@@ -454,7 +505,7 @@ def section4(report: Report) -> None:
         # set or re-stamped by its own session (v1.md §2.5), and is not
         # checked": S judges nothing by it.
         _sleep_until(t_det + 65 * fr.NS)
-        puts_after = [r for r in s.of(sk) if r.kind == "put" and r.arrival_ns > t_det]
+        puts_after = _puts([r for r in s.of(sk) if r.kind == "put" and r.arrival_ns > t_det])
         ahead_faults = [r for r, f in ((r, h.decode_fault(r.payload)) for r in s.of(fk)) if f and f["code"] == "clock_ahead"]
         gap = (ahead_faults[1].arrival_ns - ahead_faults[0].arrival_ns) / fr.NS if len(ahead_faults) > 1 else None
         pres = live.list_presence(bus.t_session, "zk2/lab/ahead/@zk/**")
@@ -478,24 +529,23 @@ def section4(report: Report) -> None:
             time.sleep(0.05)
         t_rel = time.monotonic_ns()
         _sleep_until(t_fix + 35 * fr.NS)
-        reput = [x for x in s.of(sk) if x.kind == "put" and x.arrival_ns > t_fix]
+        reput = _puts([x for x in s.of(sk) if x.kind == "put" and x.arrival_ns > t_fix])
         faults_after = [x for x, f in ((x, h.decode_fault(x.payload)) for x in s.of(fk))
                         if f and f["code"] == "clock_ahead" and x.arrival_ns > t_rel]
         r, _ = bus.read("lab/ahead", s, get=False)
         a = h.judge(r)
-        confirmations = [x.arrival_ns for x in s.of(sk) if x.kind == "put"]
-        all_faults = [x.arrival_ns for x, f in ((x, h.decode_fault(x.payload)) for x in s.of(fk))
-                      if f and f["code"] == "clock_ahead"]
         q = h.clock_from(s, "lab/ahead")
-        first_reput = (reput[0].arrival_ns - t_rel) / fr.NS if reput else None
-        report.check(sec, "step 3: the clock set right, the guard releases; S receives the status re-put within a "
-                          "few seconds, and no clock_ahead fault after; S judges healthy, ok, and the clock "
-                          "question answers no",
-                     not o.owner.ahead and reput and first_reput is not None and first_reput <= 3.0
+        vouch = [t for t, b in _beats(s, "lab/ahead", t_fix) if _vouches(b, sk)]
+        first = (vouch[0] - t_fix) / fr.NS if vouch else None
+        report.check(sec, "step 3: the clock set right, the guard releases; within 30 s S receives a heartbeat that "
+                          "vouches for the status again (freshness.v2 §2.10), no put of the status, and no "
+                          "clock_ahead fault after; S judges healthy, ok, and the clock question answers no",
+                     not o.owner.ahead and first is not None and first <= 30 + JITTER_S and not reput
                      and not faults_after and a.expect() == {"verdict": "healthy", "reason": "ok", "level": "ok"}
                      and q == "no",
-                     f"re-put {first_reput if first_reput is None else round(first_reput, 2)} s after the release, "
-                     f"{len(faults_after)} faults after, {_answer(a)}, clock ahead: {q}; events {o.owner.events}")
+                     f"vouched {first if first is None else round(first, 2)} s after the correction, {len(reput)} "
+                     f"puts, {len(faults_after)} faults after, {_answer(a)}, clock ahead: {q}; events "
+                     f"{o.owner.events}")
     finally:
         stop_beat.set()
         bus.close()
@@ -561,10 +611,12 @@ def section4m(report: Report) -> None:
                  f"{a['faults'][0][0].stamp_id if a['faults'] else None}, R1 {a['r1']}, owner {a['owner']}")
     b = run(drop=True)
     gets = [(x.stamp_id, h.decode_status(x.payload)) for x in b["get"]]
-    report.check(sec, "step 4: under drop_future_timestamp, S receives neither the fault nor the status put while "
-                      "the owner was ahead: R1 dropped both; G's reply holds the status under the owner's stamp, "
-                      "since a router never drops or re-stamps a reply (core §4.1)",
-                 b["ahead"] and not b["faults"] and not b["puts"] and len(gets) == 1
+    report.check(sec, "step 4: under drop_future_timestamp, S receives no fault: R1 dropped it; the status put "
+                      "carries no Zenoh timestamp of the owner's (freshness.v2 §2.4), so R1 stamps it and S receives "
+                      "it; G's reply holds the status under the owner's stamp, since a router never drops or "
+                      "re-stamps a reply (core §4.1)",
+                 b["ahead"] and not b["faults"] and len(b["puts"]) == 1
+                 and _zid(b["puts"][0].stamp_id) == _zid(b["r1"]) and len(gets) == 1
                  and _zid(gets[0][0]) == _zid(b["owner"]) and gets[0][1] is not None and gets[0][1]["level"] == h.OK,
                  f"ahead {b['ahead']}, {len(b['faults'])} faults, {len(b['puts'])} status puts; GET {gets}; owner "
                  f"{b['owner']}")
@@ -581,15 +633,18 @@ def section5(report: Report, n: int = 100) -> None:
     try:
         nav = load_contract(NAV)
         for i in range(n):
-            bus.owner(f"p5/dev{i}", level=h.OK, reason="serving", contracts=[nav], tokenless={"health.v1"})
+            bus.owner(f"p5/dev{i}", level=h.OK, reason="serving", contracts=[nav],
+                      tokenless={"health.v1", "freshness.v2"})
         time.sleep(1.5)
         pres = live.list_presence(bus.t_session, "zk2/p5/*/@zk/**")
         alive_health = live.list_presence(bus.t_session, "zk2/p5/*/@zk/alive/health.v1/**")
+        alive_fv2 = live.list_presence(bus.t_session, "zk2/p5/*/@zk/alive/freshness.v2/**")
         report.check(sec, f"{2 * n} tokens: an instance token and an alive/nav.v2 token each, no alive/health.v1 "
-                          "token; the second read finds nothing",
+                          "or alive/freshness.v2 token (0.8); the second reads find nothing",
                      len(pres.instances) == n and len(pres.alive) == n
                      and all(a["iface"] == "nav.v2" for a in pres.alive) and pres.complete
-                     and alive_health.count == 0 and alive_health.complete,
+                     and alive_health.count == 0 and alive_health.complete
+                     and alive_fv2.count == 0 and alive_fv2.complete,
                      f"{len(pres.instances)} instance, {len(pres.alive)} alive "
                      f"({sorted({a['iface'] for a in pres.alive})}), second read {alive_health.count}")
         answers = []
@@ -810,6 +865,10 @@ def _face_run(report: Report, workdir: str, run: str, crosses: bool, wait_s: flo
     try:
         addr = "vehicle-01/nav"
         s = fr.Subscriber(ground, f"zk2/{addr}/health.v1/state/status")  # statically, without presence
+        from .contract import load_contract
+
+        hc = load_contract(h.CONTRACT)
+        s.follow(addr, hc.canonical, hc.fingerprint)  # 0.8: the heartbeat crosses with the status
         time.sleep(0.2)
         t0 = time.monotonic_ns()
         _sleep_until(t0 + int(wait_s * fr.NS))
@@ -827,16 +886,19 @@ def _face_run(report: Report, workdir: str, run: str, crosses: bool, wait_s: flo
         tokens = live.list_presence(ground, "zk2/vehicle-01/*/@zk/**")
         a2 = h.judge(h.read_across(s, addr, crosses))
         if crosses:
-            report.check(sec, "step 2: G receives the status and its re-puts, sees no token across the face, and "
-                              "judges healthy, ok",
-                         len(got) >= 2 and tokens.count == 0
+            vouching = [t for t, a in _beats(s, addr, t1) if _vouches(a, o.status_key)]
+            report.check(sec, "step 2: G receives the status, and the heartbeats that vouch for it (link.v1 §2.9), "
+                              "sees no token across the face, and judges healthy, ok",
+                         len(_puts(got)) == 1 and bool(vouching) and tokens.count == 0
                          and a2.expect() == {"verdict": "healthy", "reason": "ok", "level": "ok"},
-                         f"{len(got)} deliveries, {tokens.count} tokens seen; {_answer(a2)}")
+                         f"{len(_puts(got))} puts, {len(vouching)} vouching heartbeats, {tokens.count} tokens seen; "
+                         f"{_answer(a2)}")
             o.owner.close_writer(o.status_key)
             last = s.of(o.status_key)[-1].arrival_ns
             _sleep_until(max(last, time.monotonic_ns()) + int(wait_s * fr.NS))
             a3 = h.judge(h.read_across(s, addr, crosses))
-            report.check(sec, "step 3: the writer closed, G judges stale: never down, never FAILED, never absent",
+            report.check(sec, "step 3: the owner stops vouching, G judges stale: never down, never FAILED, never "
+                              "absent",
                          a3.verdict == "stale" and a3.level is None, _answer(a3))
         else:
             report.check(sec, "step 2: nothing of the status crosses; G judges face_closed, never unhealthy, failed "

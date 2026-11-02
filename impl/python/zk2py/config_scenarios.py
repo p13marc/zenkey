@@ -339,6 +339,12 @@ class Bus:
         self.s_session = sessions.get("S") or live.open_client(self.endpoint)
         self.t = sessions.get("T") or live.open_client(self.endpoint)
         self.s = fr.Subscriber(self.s_session, selectors or [f"zk2/{a}/{cf.IFACE}/**" for a in addresses])
+        # 0.9 (#978 F4): S hears the heartbeat key covering config.v1 too.
+        from .contract import load_contract
+
+        cc = load_contract(cf.CONTRACT)
+        for a in addresses:
+            self.s.follow(a, cc.canonical, cc.fingerprint)
         self.tokens = Tokens(self.s_session, "zk2/lab/*/@zk/**")
         self.owners: list[Any] = []
         self.extra: list[Any] = []
@@ -516,20 +522,32 @@ def section1(report: Report, mode: Any) -> None:
         report.check(sec, "step 3: V and St answer revision 1, and agree (§2.19)",
                      gv is not None and gs is not None and gv["revision"] == 1 and cf.status_of(gv) == gs,
                      f"view revision {gv and gv['revision']}, status {gs}")
-        time.sleep(35.0)
+        # 0.9 (#978 F4): "The owner puts nothing for 65 s, and S judges V and
+        # St": no put or delete, a heartbeat at least every 30 s vouching for
+        # both, both fresh past the horizon.
+        mark = time.monotonic_ns()
+        time.sleep(65.0)
+        at = time.monotonic_ns()
         ok4 = True
         detail = []
+        with bus.s.lock:
+            beats = [(t, a) for t, a in bus.s.beats.get(("lab/rf0", cf.IFACE), []) if t >= mark]
+        arrivals = [mark] + [t for t, _ in beats]
+        gaps = [(b - a_) / NS for a_, b in zip(arrivals, arrivals[1:])]
         for which in ("view", "status"):
-            recs = bus.s.of(f"zk2/lab/rf0/{cf.IFACE}/state/{which}")
-            after = [x for x in recs if x.receipt_utc_ns >= t2]
-            gaps = [(b.arrival_ns - a_.arrival_ns) / NS for a_, b in zip(after, after[1:])]
-            reput = len(after) >= 2 and len({x.payload for x in after}) == 1 and max(gaps) <= 30 + JITTER_S
-            deletes = [x for x in recs if x.kind == "delete"]
-            ok4 = ok4 and reput and not deletes
-            detail.append(f"{which}: {len(after)} deliveries, gaps {[round(g, 1) for g in gaps]} s, "
-                          f"{len(deletes)} deletes")
-        report.check(sec, "step 4: in 35 s with no change, S receives V and St again within 30 s, unchanged "
-                          "(freshness.v1 §2.4), and no delete of either", ok4, "; ".join(detail))
+            k = f"zk2/lab/rf0/{cf.IFACE}/state/{which}"
+            puts = [x for x in bus.s.of(k) if x.arrival_ns >= mark and not x.confirmation]
+            vouched = bool(beats) and all(
+                k in ((a.get("read") or {}).get("sections", {}).get(f"state/{which}") or {}).get("confirmed", [])
+                for _, a in beats)
+            v = fr.judge_subscription(fr.Horizon("within", 60), bus.s.observation(k, at))
+            ok4 = ok4 and not puts and vouched and v.verdict == fr.FRESH
+            detail.append(f"{which}: {len(puts)} puts or deletes, vouched {vouched}, judged {v.pair()}")
+        ok4 = ok4 and bool(gaps) and max(gaps) <= 30 + JITTER_S
+        report.check(sec, "step 4: in 65 s with no change, S receives no put or delete of V or St (freshness.v2 "
+                          "§2.4), a heartbeat at least every 30 s vouching for both, and judges both fresh past the "
+                          "horizon", ok4, "; ".join(detail) + f"; {len(beats)} heartbeats, largest gap "
+                                                                 f"{max(gaps, default=0):.1f} s")
         del o
     finally:
         bus.close()

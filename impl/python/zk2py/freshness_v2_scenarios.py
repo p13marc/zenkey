@@ -25,9 +25,10 @@ allows. §4's R2 is a router linked to R1 through a TCP relay the run cuts
 and F is its client there.
 
 **The contract** is ``beacon.v2``, copied from the text into
-``impl/python/interop/freshness/beacon.v2.toml``; §7's is the same with
-``link.exposure = "link"`` on ``status`` and ``level`` (F-443),
-``beacon-face.v2.toml`` beside it.
+``impl/python/interop/freshness/beacon.v2.toml``. Since ``freshness.v2``
+0.2 it marks ``status`` and ``level`` ``link.exposure = "link"`` and lists
+``link.v1`` (F-443's answer), so §7's face runs it too, and round 96's
+``beacon-face.v2.toml`` is gone (round 97).
 
 Exit 0 when every check passes, 1 when any fails, 2 when a pairing cannot
 run (a black box missing).
@@ -54,7 +55,8 @@ from . import heartbeat, zk2c
 
 REPO = Path(__file__).resolve().parents[3]
 BEACON = REPO / "impl" / "python" / "interop" / "freshness" / "beacon.v2.toml"
-BEACON_FACE = REPO / "impl" / "python" / "interop" / "freshness" / "beacon-face.v2.toml"
+#: §7's contract: beacon.v2 itself since freshness.v2 0.2 (F-443's answer)
+BEACON_FACE = BEACON
 BLACKBOX = Path(os.environ.get("ZK2PY_BLACKBOX", "/srv/dev/scratch/zenkey/bin/current"))
 IFACE = "beacon.v2"
 BASE = f"zk2/lab/beacon/{IFACE}"
@@ -320,6 +322,28 @@ def _judge_rows(w: ZWatch, key: str, ttl_s: int, at: int, since: int) -> fr.Verd
                                                  None if last is None else fr.Delivery("put", at - last)))
 
 
+def _echo(ep: str, contract: Path | None) -> subprocess.Popen:
+    """zk2py's echo tool on the owner's heartbeat key for 9 s, given
+    ``contract`` or nothing."""
+    env = dict(os.environ, PYTHONPATH=str(REPO / "impl" / "python"))
+    return subprocess.Popen([sys.executable, "-m", "zk2py.echo_tool", "-c", ep, "--for", "9",
+                             *(["--contracts", str(contract)] if contract is not None else []),
+                             f"zk2/lab/beacon/{fv2.PROFILE}/stream/heartbeat/*"],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+
+
+def _echo_rows(p: subprocess.Popen) -> list[dict[str, Any]]:
+    try:
+        out, _ = p.communicate(timeout=60)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        out, _ = p.communicate()
+    try:
+        return json.loads(out)["samples"]
+    except (ValueError, KeyError):
+        return []
+
+
 # -- the bus ---------------------------------------------------------------------------------
 
 class Bus:
@@ -412,6 +436,10 @@ def section1(report: Report, pairing: str) -> None:
             h = subscriber(bus.h_session, [])
             s = subscriber(bus.s_session, ["state/status", "state/peer/{peer}"])
             bus.closers += [h, s]
+            # observer §7.3 (0.20): zk2py's echo tool on the heartbeat key,
+            # given beacon.v2 and given nothing.
+            echoes = [_echo(bus.endpoint, BEACON), _echo(bus.endpoint, None)]
+            time.sleep(2.0)
         else:
             zh = ZWatch(bus.endpoint, "lab/beacon", fv2.PROFILE, "heartbeat/{iface}", 14)
             zs = ZWatch(bus.endpoint, "lab/beacon", IFACE, "state/status", 14)
@@ -463,6 +491,18 @@ def section1(report: Report, pairing: str) -> None:
             v = s.judge(STATUS, t1_end)
             report.check(pairing, sec, "step 1: S judges status fresh 5 s after its put, beyond its horizon: the "
                                        "heartbeats confirmed it", v.verdict == fr.FRESH, f"{v.pair()}")
+            held, bare = (_echo_rows(e) for e in echoes)
+            hb_h = [r.get("heartbeat") or {} for r in held]
+            hb_b = [r.get("heartbeat") or {} for r in bare]
+            report.check(pairing, sec, "observer §7.3: zk2py's echo tool never reads a heartbeat's body as a record: "
+                                       "given beacon.v2 it shows what each vouches for; given nothing, its form, "
+                                       "the interface it covers and its size; never sniffed",
+                         bool(held) and bool(bare) and all(r.get("sniffed") is None for r in held + bare)
+                         and all(isinstance(x.get("vouches"), dict) and "state/status" in x["vouches"]["sections"]
+                                 for x in hb_h)
+                         and all(x.get("form") == "heartbeat" and x.get("covers") == IFACE and x.get("bytes")
+                                 and x.get("vouches") is None for x in hb_b),
+                         f"{len(held)} and {len(bare)} rows; {hb_h[:1]} {hb_b[:1]}")
         else:
             beats = _z_beats(zh, t1)
             ok, detail = _cadence(beats)

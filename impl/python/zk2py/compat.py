@@ -916,14 +916,51 @@ def _resource_compare(old: Revision, a: dict[str, Any], new: Revision, b: dict[s
             v.add(REVIEW, optional_types[m], f"{m} {'added' if x is None else 'removed'}")
             continue
         v.merge(type_compare(old, x, new, y, m))
-    _frame_rules(v, a, b)
+    _frame_rules(v, a, b, _field_names(old, a), _field_names(new, b))
     return v
 
 
-def _frame_rules(v: Verdict, a: dict[str, Any], b: dict[str, Any]) -> None:
+def _field_names(rev: Revision, r: dict[str, Any]) -> list[str] | None:
+    """A frame resource's record type's field names in field order, the
+    order the frame form lists its deadbands in (core §7.7), or None where
+    the type does not resolve in the revision."""
+    t = r.get("type")
+    if r.get("frame") is None or not isinstance(t, dict) or t.get("kind") != "packed":
+        return None
+    rec = rev.packed_type(t)
+    if rec is None:
+        return None
+    from . import packed
+
+    return [f.name for f in rec.items if isinstance(f, packed.Field)]
+
+
+def _deadbands_differ(da: dict[str, Any], names_a: list[str] | None, db: dict[str, Any],
+                      names_b: list[str] | None) -> bool:
+    """Whether two deadbands differ, §9.8 "by its field's place in the record
+    type, as the frame form lists it (§7.7), never by its name" (0.85,
+    F-451): place i of each record type against place i of the other, a
+    place only one type has differing where it carries a deadband. Without
+    both types' field names, the canonical members compare, by name."""
+    if names_a is None or names_b is None:
+        return da != db
+    for i in range(max(len(names_a), len(names_b))):
+        x = da.get(names_a[i]) if i < len(names_a) else None
+        y = db.get(names_b[i]) if i < len(names_b) else None
+        if x != y:
+            return True
+    return False
+
+
+def _frame_rules(v: Verdict, a: dict[str, Any], b: dict[str, Any], names_a: list[str] | None = None,
+                 names_b: list[str] | None = None) -> None:
     """§9.8 "Frames" (core 0.83, #981 K1), a frame resource paired with its
     counterpart, over the canonical form's ``frame`` member (resolved, a
-    deadband's ``delta`` in its shortest form)."""
+    deadband's ``delta`` in its shortest form). Since core 0.85 (F-451) a
+    deadband is compared by its field's place in each revision's record
+    type, as the frame form lists it, never by its name: a field renamed
+    keeps its deadband, and the rename is the packed rules'
+    ``field_renamed`` alone."""
     fa, fb = a.get("frame"), b.get("frame")
     if (fa is None) != (fb is None):
         v.add(BREAKING, "frame_toggled", f"frame {'added' if fa is None else 'removed'}")
@@ -932,7 +969,7 @@ def _frame_rules(v: Verdict, a: dict[str, Any], b: dict[str, Any]) -> None:
         return
     if any(fa[k] != fb[k] for k in ("records", "step_ms", "jitter_ms")):
         v.add(BREAKING, "frame_changed", "records, step_ms or jitter_ms changed")
-    if fa["deadband"] != fb["deadband"]:
+    if _deadbands_differ(fa["deadband"], names_a, fb["deadband"], names_b):
         v.add(BREAKING, "deadband_changed", f"deadband {fa['deadband']} → {fb['deadband']}")
     if fa["keyframe_every"] != fb["keyframe_every"]:
         v.add(REVIEW, "keyframe_changed", f"keyframe_every {fa['keyframe_every']} → {fb['keyframe_every']}")

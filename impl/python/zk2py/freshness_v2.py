@@ -534,3 +534,60 @@ def _member_of(layout: heartbeat.Layout, c: heartbeat.Collection, key: str) -> b
     chunks = key.split("/")
     return len(chunks) >= 6 and chunks[3] == layout.interface and chunks[4] == c.token \
         and templates.match(templates.parse_template(c.template), chunks[5:]) is not None
+
+
+def revision_of(session: Any, iface: str, fingerprint: str, timeout: float = 1.0) -> dict[str, Any] | None:
+    """The canonical form of the revision ``fingerprint`` of ``iface`` that
+    a descriptor names (core §3.3), so that a reader knows whether its owner
+    confirms by heartbeat (``alarms.v1`` §2.15, 0.11: "an owner whose
+    revision of alarms.v1 uses freshness.v2, as its descriptor names it").
+    A revision published under ``spec/profiles/.history`` or
+    ``examples/zk2/.history`` is read there; any other is retrieved from its
+    holders (core §8.4). None where neither gives it."""
+    from pathlib import Path
+
+    from . import bundle, live
+
+    hexd = fingerprint.removeprefix("sha256:")
+    repo = Path(__file__).resolve().parents[3]
+    for root in (repo / "spec" / "profiles" / ".history", repo / "examples" / "zk2" / ".history"):
+        f = root / iface / f"{hexd}.bundle.json"
+        if f.is_file():
+            try:
+                return bundle.verify(f.read_bytes(), fingerprint).contract
+            except Exception:  # noqa: BLE001 - a bundle that does not verify gives nothing
+                return None
+    if session is None:
+        return None
+    got = live.retrieve_bundle(session, iface, fingerprint, timeout=timeout)
+    v = getattr(got, "verified", None)
+    return None if v is None else v.contract
+
+
+def descriptor_revision(session: Any, address: str, iface: str,
+                        timeout: float = 1.0) -> tuple[dict[str, Any], str] | None:
+    """The revision of ``iface`` ``address``'s present instance names in its
+    descriptor, as (canonical, fingerprint), or None (no instance read, no
+    such interface, the revision not in hand)."""
+    import json
+
+    from . import live
+
+    pres = live.list_presence(session, f"zk2/{address}/@zk/instance/*")
+    if not pres.instances:
+        return None
+    d = live.get_descriptor(session, f"zk2/{address}/@zk/instance/{pres.instances[0]['instance']}", timeout=timeout)
+    if len(d) != 1 or not d[0].ok:
+        return None
+    entry = next((e for e in json.loads(d[0].payload).get("interfaces") or [] if e.get("iface") == iface), None)
+    fp = None if entry is None else entry.get("contract")  # core §3.3: the revision's fingerprint
+    if not fp:
+        return None
+    canonical = revision_of(session, iface, fp, timeout)
+    return None if canonical is None else (canonical, fp)
+
+
+def uses_v2(canonical: dict[str, Any] | None) -> bool:
+    """Whether a revision uses ``freshness.v2`` (its owners confirm by
+    heartbeat, never by a re-put)."""
+    return canonical is not None and PROFILE in canonical.get("uses", [])

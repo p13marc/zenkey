@@ -536,9 +536,11 @@ class _Loader:
         8's order (core 0.83, #981 K1): E047 and E049 read the record type,
         waiting for one that resolves, and E047's marker half and E049 for a
         packed declaration with no finding; E050 waits for the values it
-        reads, none of them E048's, and reads a ``timing.*`` value as
-        ``timing.v1`` §2.2 does. A frame resource with no finding is kept in
-        ``frames`` for its canonical form."""
+        reads, none of them E048's, and reads the ``timing.*`` values as
+        ``timing.v1`` §2.2 reads a declaration: one that does not read makes
+        it invalid, and E050 reads none of them (core 0.85, F-452). A frame
+        resource with no finding is kept in ``frames`` for its canonical
+        form."""
         from . import frame, timing
 
         table = spec["frame"]
@@ -614,8 +616,13 @@ class _Loader:
         ann.update(self.defaults.get("annotations", {}))
         ann.update((self.defaults.get("stream") or {}).get("annotations", {}))
         ann.update(spec.get("annotations", {}))
-        deadline = timing.value_ms(ann[timing.DEADLINE]) if timing.DEADLINE in ann else None
-        period = timing.value_ms(ann[timing.PERIOD]) if timing.PERIOD in ann else None
+        # Core 0.85 (F-452): "It reads the timing.* values as timing.v1 §2.2
+        # reads a declaration. Where one of them does not read, the
+        # declaration is invalid. E050 then reads none of its values".
+        read = {k: timing.value_ms(ann[k]) for k in timing.KEYS if k in ann}
+        if any(v is None for v in read.values()):
+            read = {}
+        deadline, period = read.get(timing.DEADLINE), read.get(timing.PERIOD)
         span = records * step if records_ok and step_ok and "step_ms" in table and records > 1 else None
         has_step = "step_ms" in table
         if deadline is not None and span is not None and deadline < span:
@@ -628,8 +635,22 @@ class _Loader:
                 if interval is None or d.max_records * interval > deadline:
                     self.diag("E050", f"{text}: deadband {name}: {d.max_records} × the interval "
                                       f"{interval} past the deadline {deadline}", text)
-        if timing.LIFESPAN in ann and timing.value_ms(ann[timing.LIFESPAN]) is not None:
+        if read.get(timing.LIFESPAN) is not None:
             self.diag("E050", f"{text}: timing.lifespan_ms on a frame resource", text)
+        # W108 (core 0.87): "a frame resource whose interval (§7.7) is above
+        # half its freshness.ttl_s"; "W108 waits for E048's none too. It
+        # reads the horizon as freshness.v1 §2.1 reads one, and an unstated
+        # interval gives none." The interval is the span with a step, else
+        # the timing.period_ms read with the declaration above (none of an
+        # invalid one, as E050 reads it).
+        if n == 0:
+            from . import freshness
+
+            interval = span if has_step else period
+            h = freshness.horizon("stream", ann)
+            if interval is not None and h.horizon == "within" and 2 * interval > h.ttl_s * 1000:
+                self.diag("W108", f"{text}: an interval of {interval} ms above half the horizon of {h.ttl_s} s, "
+                                  "so its owner, which puts a frame at least every ttl/2, cannot keep it", text)
         if n == 0 and e049 == 0 and rec is not None and len(good_db) == len(deadband or {}):
             self.frames[text] = frame.declaration(table)
 
