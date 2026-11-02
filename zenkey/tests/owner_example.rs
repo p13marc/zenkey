@@ -3077,3 +3077,208 @@ fn the_help_documents_the_telemetry_v2_surface() {
         assert!(owner::HELP.contains(piece), "--help names {piece:?}");
     }
 }
+
+/// `config.v2` in the owner example (#985 G2): `--config-v2` implements
+/// `rfcfg.v1`, the scenarios' contract, embedded, through the runtime; a
+/// black-box runner reads the record, calls in the forms, makes the device
+/// refuse, restarts the owner as a new instance number, and starts a run's
+/// token counter where it says. `--config` beside it is refused.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_implements_config_v2() {
+    use zenkey::config_v2;
+    use zenkey::model::config::v2::Interface;
+    use zenkey::{CallMetadata, Client, Outcome};
+
+    let (_r1, ep) = router(None).await;
+    let tool = client(&ep).await;
+    assert!(
+        owner::Options::parse(&["--config".into(), "--config-v2".into(), "ex/rf".into()]).is_err(),
+        "one configuration per service (config.v2 §1)"
+    );
+    let o = spawn_owner(&[
+        "--connect",
+        &ep,
+        "--config-v2",
+        "--config-floor",
+        "5",
+        "ex/rf",
+    ]);
+    assert_eq!(line(&o.lines).await, format!("connected {ep}"));
+    let ready = line(&o.lines).await;
+    let first: zenkey::model::grammar::InstanceId =
+        ready.rsplit('/').next().unwrap().parse().unwrap();
+    let addr: zenkey::model::grammar::Addr = "ex/rf".parse().unwrap();
+    let d = loop {
+        match presence::descriptor(&tool, &addr, &first, T).await.unwrap() {
+            presence::Found::Nothing => continue,
+            found => break found.into_descriptor().unwrap(),
+        }
+    };
+    assert!(
+        d.profiles.iter().any(|p| p == "config.v2"),
+        "{:?}",
+        d.profiles
+    );
+    let contract = std::sync::Arc::new(owner::config::rfcfg().unwrap());
+    let iface = Interface::of(&contract).unwrap();
+    let e = d.interfaces.iter().find(|e| e.iface == "rfcfg.v1").unwrap();
+    assert!(e.unavailable.is_empty(), "persist is served");
+
+    // The record, read by S4's GET, asked again while the owner is silent.
+    let read = || async {
+        let deadline = tokio::time::Instant::now() + SETTLE;
+        loop {
+            let rx = tool
+                .get("zk2/ex/rf/rfcfg.v1/state/config")
+                .target(QueryTarget::All)
+                .consolidation(ConsolidationMode::Latest)
+                .timeout(T)
+                .with(flume::unbounded::<Reply>())
+                .await
+                .unwrap();
+            let mut got = None;
+            while let Ok(r) = rx.recv_async().await {
+                if let Ok(s) = r.into_result() {
+                    let bytes = s.payload().to_bytes();
+                    let e = zenkey::model::wire::Envelope::parse(&bytes).unwrap();
+                    got = Some(iface.read_record(e.tag.get(), e.record, 0).unwrap());
+                }
+            }
+            if let Some(r) = got {
+                break r;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the record never answered"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    };
+    let r = read().await;
+    assert_eq!((r.revision, r.floor_s), (0, 5));
+    let record_line = o.ask("config record").await;
+    let json = record_line
+        .strip_prefix("config record ")
+        .expect(&record_line);
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(json).unwrap(),
+        iface.fields(&r),
+        "config record is the record's JSON reading"
+    );
+
+    let c = Client::new(&tool, std::sync::Arc::clone(&contract), &["ex/rf"])
+        .unwrap()
+        .with_timeout(Duration::from_secs(2))
+        .with_metadata(CallMetadata::new("ops", "r1"));
+    let set = |group: &str, fields: serde_json::Value| {
+        let c = c.clone();
+        let addr = addr.clone();
+        let mut f = fields;
+        f["dry_run"] = serde_json::json!(false);
+        let record = iface
+            .derived
+            .set(group)
+            .unwrap()
+            .1
+            .write(&f, None)
+            .unwrap()
+            .bytes;
+        let resource = config_v2::set(group);
+        async move {
+            c.call(
+                &addr,
+                &resource,
+                &zenkey::model::template::Bindings::new(),
+                record,
+            )
+            .await
+            .unwrap()
+        }
+    };
+
+    // The device told to refuse its next apply: app, device_refused, its
+    // words the message.
+    let held = o.ask("config fail-apply no carrier").await;
+    assert!(held.ends_with("next=fail-apply"), "{held}");
+    let r = set("duty", serde_json::json!({"fraction_ppm": 20000})).await;
+    let Outcome::Refused(e) = &r else {
+        panic!("a refusal, not {r:?}")
+    };
+    assert_eq!((e.code.as_str(), e.message.as_str()), ("app", "no carrier"));
+    let r = set("duty", serde_json::json!({"fraction_ppm": 20000})).await;
+    let Outcome::Value(a) = &r else {
+        panic!("the record, not {r:?}")
+    };
+    let applied = iface
+        .read_record(a.tag().unwrap().get(), &a.record().unwrap(), 0)
+        .unwrap();
+    assert_eq!(applied.revision, 1);
+    let device = o.ask("config device").await;
+    assert!(
+        device.contains(r#""fraction_ppm":20000"#) && device.contains("applies=1"),
+        "{device}"
+    );
+
+    // The counter started at 65,535: the next token's, then a new run.
+    let counter = o.ask("config counter 65535").await;
+    assert!(
+        counter.starts_with("config counter 65535 run "),
+        "{counter}"
+    );
+    let mut runs = Vec::new();
+    for v in [30000, 40000] {
+        let r = set("duty", serde_json::json!({"fraction_ppm": v})).await;
+        let Outcome::Value(a) = &r else {
+            panic!("the record, not {r:?}")
+        };
+        let rec = iface
+            .read_record(a.tag().unwrap().get(), &a.record().unwrap(), 0)
+            .unwrap();
+        let token = rec.last.unwrap().token;
+        runs.push((token >> 16, token & 0xffff));
+    }
+    assert_eq!(runs[0].1, 65_535);
+    assert_ne!(
+        runs[0].0, runs[1].0,
+        "a new run before the counter passes 65,535"
+    );
+
+    // A restart: a new instance number, from the startup values.
+    let restarted = o.ask("config restart").await;
+    let next: zenkey::model::grammar::InstanceId = restarted
+        .strip_prefix("config restarted zk2/ex/rf/@zk/instance/")
+        .unwrap_or_else(|| panic!("{restarted}"))
+        .parse()
+        .unwrap();
+    assert_ne!(next, first);
+    eventually("the new instance's record", || async {
+        let r = read().await;
+        r.instance != applied.instance && r.revision == 0
+    })
+    .await;
+    assert!(
+        o.ask("config nope")
+            .await
+            .starts_with("refused config nope: usage")
+    );
+    o.stop().await;
+}
+
+/// `owner --help` documents the `config.v2` surface a live runner drives
+/// (#985 G2).
+#[test]
+fn the_help_documents_the_config_v2_surface() {
+    for piece in [
+        "--config-v2",
+        "config.v2 (spec/profiles/config/v2.md)",
+        "rfcfg.v1",
+        "zk2/<system>/<service>/rfcfg.v1/state/config",
+        "config counter <n>",
+        "config counter <n> run <run>",
+        "config record",
+        "config record <json>",
+        "--config is refused beside --config-v2",
+    ] {
+        assert!(owner::HELP.contains(piece), "--help names {piece:?}");
+    }
+}

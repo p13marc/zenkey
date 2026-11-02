@@ -7,7 +7,8 @@
 //!     [--health] [--health-status <LEVEL>[:<reason>]] [--health-check <name>=<LEVEL>[:<detail>]]...
 //!     [--tokenless <iface>]... [--clock-reference <key>] [--clock-offset-ms <ms>]
 //!     [--cardinality <iface>:<resource>=<n>]...
-//!     [--config] [--config-floor <s>] [--config-apply-after-ms <ms>] [--config-no-persist]
+//!     [--config] [--config-v2] [--config-floor <s>] [--config-apply-after-ms <ms>]
+//!     [--config-no-persist]
 //!     [--alarms] [--alarms-record <file>] [--alarms-archive <system>/<service>]
 //!     [--alarms-rules <rule>[,<rule>...]] [--telemetry] [--telemetry-v2]
 //!     [--desired-author] [--desired-record <file>] [--desired-window <s>]
@@ -216,6 +217,22 @@
 //! desired document `config desired` bound: that binding is the
 //! deployment's, so the new instance converges it again, its view carrying
 //! no `desired` until it has acted (§2.18; text 0.3, F-114).
+//!
+//! **`config.v2`** (`spec/profiles/config/v2.md`, #985 G2) is implemented
+//! by the runtime ([`zenkey::config_v2`]) with `--config-v2`, on
+//! `rfcfg.v1`, its scenarios' contract, embedded byte for byte as
+//! `spec/profiles/config/conformance/contracts/` keeps it, unless an
+//! `rfcfg.v1` contract file is given, which is used instead. The startup is
+//! `conformance/v2/lifecycle.json`'s (`owner/config.rs`'s `rfcfg_startup`),
+//! `--config-floor`, `--config-apply-after-ms` and `--config-no-persist`
+//! apply as to `config.v1`, and `--config` beside it is refused: an instance
+//! has one configuration (v2.md §1). Every request is its `Set<T>` or
+//! `Control` record in the request form, and every answer the record in
+//! the value form or a refusal in the error form. The `config` commands
+//! drive it as they drive `config.v1`, and two more: `config counter <n>`
+//! starts the next token counter at `<n>` (scenarios-v2.md §7 step 5),
+//! answered `config counter <n> run <run>`, and `config record` is answered
+//! `config record <json>`, the record's JSON reading (v2.md §3).
 //!
 //! **`alarms.v1`** (`spec/profiles/alarms/v1.md`, #800) is implemented by
 //! the runtime ([`zenkey::alarms`]) with `--alarms`, implied by any
@@ -566,6 +583,7 @@ use std::time::{Duration, SystemTime};
 
 use zenkey::alarms::{self, Alarms, Condition, FileRecord};
 use zenkey::config_v1::{self, Configuration, DesiredConfig, Startup};
+use zenkey::config_v2;
 use zenkey::desired::{self, AuthorStartup, ReportAt, TargetStartup, Written};
 use zenkey::health::{self, Effective, Health, Level};
 use zenkey::hostid::{HostIdMinter, HostIdSource};
@@ -627,6 +645,10 @@ pub struct Options {
     /// `--config`, or implied by a `--config-*` option or the standard
     /// contract among the files: `config.v1` by the runtime.
     pub config: bool,
+    /// `--config-v2`: `rfcfg.v1`, config.v2's scenarios' contract, embedded
+    /// or given as a file, by the runtime's `config.v2` (#985 G2); the
+    /// `--config-*` options are then its.
+    pub config_v2: bool,
     /// `--config-floor <s>`: the floor (config.v1 §2.8).
     pub config_floor_s: u64,
     /// `--config-apply-after-ms <ms>`: the reach apply's delay (§2.9).
@@ -777,7 +799,8 @@ usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
     [--health] [--health-status <LEVEL>[:<reason>]] [--health-check <name>=<LEVEL>[:<detail>]]...
     [--tokenless <iface>]... [--clock-reference <key>] [--clock-offset-ms <ms>]
     [--cardinality <iface>:<resource>=<n>]...
-    [--config] [--config-floor <s>] [--config-apply-after-ms <ms>] [--config-no-persist]
+    [--config] [--config-v2] [--config-floor <s>] [--config-apply-after-ms <ms>]
+    [--config-no-persist]
     [--alarms] [--alarms-record <file>] [--alarms-archive <system>/<service>]
     [--alarms-rules <rule>[,<rule>...]] [--telemetry] [--telemetry-v2]
     [--desired-author] [--desired-record <file>] [--desired-window <s>]
@@ -810,7 +833,8 @@ Command words:
   vouch <iface> <resource> [<value>...] on|off
                                           a state member's bit in its owner's
                                           heartbeat (freshness.v2 §2.4)
-  config ...                              config.v1 (--config)
+  config ...                              config.v1 (--config) or config.v2
+                                          (--config-v2), below
   alarm ...                               alarms.v1 (--alarms), below
   telemetry ...                           telemetry.v1's writers and telemetry.v2's
                                           frames (--telemetry-v2), below
@@ -820,6 +844,55 @@ Command words:
   frame ...                               core §7.7's frames (--frames), below
   arbitrate ...                           arbitration.v1's actuator (--arbitrate), below
   commander ...                           arbitration.v1's commander (--commander), below
+
+config.v2 (spec/profiles/config/v2.md)
+  Implemented by the runtime with --config-v2, on rfcfg.v1, the scenarios'
+  contract (scenarios-v2.md, Conventions), embedded as
+  spec/profiles/config/conformance/contracts/ has it; an rfcfg.v1 contract
+  file given is used instead. The startup is
+  conformance/v2/lifecycle.json's: duty (hot) fraction_ppm 10000 from its
+  file, period_s 3600 and enforce true by default; radio (reach)
+  frequency_hz 868100000 from its file; link (reach) net_id 1 by default;
+  sim (hot) pin 0 from its file, sensitive, and attempts 3 by default;
+  queue (hot, outside the allowlist) tx_queue_len 100 by default;
+  modulation (contract) spreading_factor 9 from its file.
+
+  --config-v2                     implement rfcfg.v1 through the runtime's config.v2
+  --config-floor <s>              the floor, 10 s by default (v2.md §2.8)
+  --config-apply-after-ms <ms>    the device's apply_at after a reach set, 1000 by
+                                  default, rounded up to the second
+  --config-no-persist             no persisted layer: persist listed unavailable,
+                                  cause config
+  --config is refused beside --config-v2: an instance has one configuration.
+  The record is zk2/<system>/<service>/rfcfg.v1/state/config; each set/<group>
+  of a hot or reach group is served, and none for modulation. A request is its
+  Set<T> or Control record in the request form (core §7.5); an answer is the
+  record in the value form, or a refusal in the error form, under zenoh/bytes.
+
+  config fail-apply [<words>...]  the device's next apply refused, in these words
+  config fail-undo [unknown]      its next undo fails
+  config fail-persist [<words>...] its next persisted-layer write fails
+  config block-persist [<words>...] its persisted layer read-only until cleared
+  config clear                    every failure above cleared
+  config device                   what the device holds and did
+  config desired <json>           a DesiredConfig to converge (v2.md §2.18)
+  config offset <ms>              the owner's clock shifted from this host's
+  config counter <n>              the next token counter starts at <n>: when the run
+                                  written under now has minted a token, the owner
+                                  takes a new run, whose counter starts there
+                                  (scenarios-v2.md §7 step 5)
+  config record                   the record the owner holds now
+  config restart                  the service closes and comes up as a new instance
+
+  Answers, one line each:
+    config device held=<json> applies=<n> undos=<n> persisted=<json|none> next=<failures|->
+                                  after every failure command and config clear too
+    config desired <revision>
+    config offset <ms>
+    config counter <n> run <run>  the run written under now, as the descriptor states it
+    config record <json>          v2.md §3's JSON reading: each field by name, an absent
+                                  optional one no member, a time in ms since the epoch
+    config restarted zk2/<system>/<service>/@zk/instance/<id>
 
 alarms.v1 (spec/profiles/alarms/v1.md)
   Implemented by the runtime with --alarms, implied by any --alarms-* option,
@@ -1269,7 +1342,8 @@ impl Options {
              [--health-check <name>=<LEVEL>[:<detail>]]... [--tokenless <iface>]... \
              [--clock-reference <key>] [--clock-offset-ms <ms>] \
              [--cardinality <iface>:<resource>=<n>]... \
-             [--config] [--config-floor <s>] [--config-apply-after-ms <ms>] [--config-no-persist] \
+             [--config] [--config-v2] [--config-floor <s>] [--config-apply-after-ms <ms>] \
+             [--config-no-persist] \
              [--alarms] [--alarms-record <file>] [--alarms-archive <system>/<service>] \
              [--alarms-rules <rule>[,<rule>...]] [--telemetry] \
              [--desired-author] [--desired-record <file>] [--desired-window <s>] \
@@ -1286,6 +1360,7 @@ impl Options {
              <system>/<service>|@hostid.v1/<service> <contract.toml>..."
                 .to_owned()
         };
+        let mut config_flag = false;
         let mut o = Self {
             connect: None,
             hostid_root: None,
@@ -1298,6 +1373,7 @@ impl Options {
             clock_offset_ms: 0,
             cardinality: Vec::new(),
             config: false,
+            config_v2: false,
             config_floor_s: 10,
             config_apply_after_ms: 1000,
             config_persist: true,
@@ -1420,6 +1496,11 @@ impl Options {
                 }
                 [flag, tail @ ..] if flag == "--config" => {
                     o.config = true;
+                    config_flag = true;
+                    rest = tail;
+                }
+                [flag, tail @ ..] if flag == "--config-v2" => {
+                    o.config_v2 = true;
                     rest = tail;
                 }
                 [flag, value, tail @ ..] if flag == "--config-floor" => {
@@ -1692,6 +1773,18 @@ impl Options {
                     .to_owned(),
             );
         }
+        // config.v2 §1: one configuration per instance. The --config-*
+        // options are config.v2's with --config-v2.
+        if o.config_v2 {
+            if config_flag {
+                return Err(
+                    "--config and --config-v2: an instance implements config.v1 or a \
+                            config contract, never both (config.v2 §1)"
+                        .to_owned(),
+                );
+            }
+            o.config = false;
+        }
         if o.peer && o.connect.is_none() {
             return Err("--peer: give --connect, the peers' only endpoint".to_owned());
         }
@@ -1778,6 +1871,7 @@ pub async fn run_with(
     let mut tasking = None;
     let mut worker = None;
     let mut arb_steer = None;
+    let mut rfcfg = None;
     for f in &opts.contracts {
         let l = load_path(f);
         let Some(c) = l.contract else {
@@ -1801,6 +1895,12 @@ pub async fn run_with(
             && imp.fingerprint().hex().to_string() == config_v1::FINGERPRINT
         {
             opts.config = true;
+            continue;
+        }
+        // config.v2 (#985 G2): with --config-v2, an rfcfg.v1 file is the
+        // runtime's to implement.
+        if opts.config_v2 && imp.iface() == &config::rfcfg_iface() {
+            rfcfg = Some(imp);
             continue;
         }
         // And alarms.v1 (#800): the standard one, or with --alarms another
@@ -2025,6 +2125,24 @@ pub async fn run_with(
         let device = Arc::new(config::SimDevice::new(&startup));
         (startup, device)
     });
+    // config.v2 (#985 G2): rfcfg.v1's startup, and its simulated device.
+    let configured_v2 = if opts.config_v2 {
+        let imp = match rfcfg {
+            Some(i) => i,
+            None => Implementation::new(config::rfcfg()?),
+        };
+        let floor = u16::try_from(opts.config_floor_s)
+            .map_err(|e| format!("--config-floor {}: {e}", opts.config_floor_s))?;
+        let startup = config::rfcfg_startup(
+            floor,
+            Duration::from_millis(opts.config_apply_after_ms),
+            opts.config_persist,
+        );
+        let device = Arc::new(config::SimDevice::new_v2(&startup));
+        Some((startup, device, imp))
+    } else {
+        None
+    };
     let ctx = Ctx {
         opts: &opts,
         session: &session,
@@ -2032,6 +2150,7 @@ pub async fn run_with(
         minter,
         imps,
         configured,
+        configured_v2,
         alarms_revision,
         desired: desired_ctx,
         red,
@@ -2167,6 +2286,8 @@ struct Ctx<'a> {
     imps: Vec<Implementation>,
     /// config.v1's startup and device, with `--config`.
     configured: Option<(Startup, Arc<config::SimDevice>)>,
+    /// config.v2's startup, device and config contract, with `--config-v2`.
+    configured_v2: Option<(config_v2::Startup, Arc<config::SimDevice>, Implementation)>,
     /// The revision of alarms.v1 among the files, with `--alarms`; `None`:
     /// the standard one.
     alarms_revision: Option<Implementation>,
@@ -2209,6 +2330,7 @@ struct Up {
     health: Option<Health>,
     members: Members,
     config: Option<Configuration>,
+    config_v2: Option<config_v2::Configuration>,
     alarms: Option<Alarms>,
     /// desired.v1's author, its target and the target's drive.
     author: Option<desired::Author>,
@@ -2306,11 +2428,29 @@ impl Ctx<'_> {
             return Ok((answer, up));
         }
         if line.split_whitespace().collect::<Vec<_>>() != ["config", "restart"] {
-            let answer = command(line, &mut up, self.configured.as_ref()).await;
+            let device = match (&self.configured, &self.configured_v2) {
+                (Some((_, d)), _) | (None, Some((_, d, _))) => Some(d.as_ref()),
+                _ => None,
+            };
+            let answer = command(line, &mut up, device).await;
+            return Ok((answer, up));
+        }
+        // config.v2 §2.12, as config.v1's below: a restart is a new instance.
+        if let (Some(cfg), Some((startup, device, _))) = (up.config_v2.clone(), &self.configured_v2)
+        {
+            let events = cfg.published().await;
+            let bound = cfg.desired_document().await;
+            up.close().await?;
+            device.restart_v2(startup);
+            let up = self.up(events).await?;
+            if let (Some(doc), Some(next)) = (bound, &up.config_v2) {
+                next.set_desired(doc).await;
+            }
+            let answer = format!("config restarted {}", up.svc.instance_key()?);
             return Ok((answer, up));
         }
         let (Some(cfg), Some((startup, device))) = (up.config.clone(), &self.configured) else {
-            let refused = format!("refused {line}: config.v1 is not implemented here (--config)");
+            let refused = format!("refused {line}: {NO_CONFIG}");
             return Ok((refused, up));
         };
         // §2.12: the old instance goes first, the device runs its startup
@@ -2512,9 +2652,22 @@ impl Ctx<'_> {
         // layer the device holds (§2.12).
         let config = match &self.configured {
             Some((startup, device)) => {
-                let next = device.next_startup(startup, events);
+                let next = device.next_startup(startup, events.clone());
                 Some(
                     b.config_v1(next, Arc::clone(device) as Arc<dyn config_v1::Device>)
+                        .await?,
+                )
+            }
+            None => None,
+        };
+        // config.v2 §2.3: the config contract implemented, and the record
+        // put here, before the tokens (#985 G2).
+        let config_v2 = match &self.configured_v2 {
+            Some((startup, device, imp)) => {
+                b.implement(imp.clone())?;
+                let next = device.next_startup_v2(startup, events);
+                Some(
+                    b.config_v2(next, Arc::clone(device) as Arc<dyn config_v2::Device>)
                         .await?,
                 )
             }
@@ -2706,6 +2859,7 @@ impl Ctx<'_> {
             health,
             members,
             config,
+            config_v2,
             alarms,
             author,
             target,
@@ -2980,11 +3134,46 @@ fn device_line(d: &config::SimDevice, schema: &config_v1::Schema) -> String {
     })
 }
 
-/// Answers a `config` command but `restart` (the module doc's).
+/// Why a `config` command is refused where neither profile is implemented.
+const NO_CONFIG: &str = "config.v1 is not implemented here (--config), nor config.v2 (--config-v2)";
+
+/// The configuration a `config` command drives.
+#[derive(Clone, Copy)]
+enum Cfg<'a> {
+    V1(&'a Configuration),
+    V2(&'a config_v2::Configuration),
+}
+
+impl<'a> Cfg<'a> {
+    fn schema(self) -> &'a config_v1::Schema {
+        match self {
+            Self::V1(c) => c.schema(),
+            Self::V2(c) => c.schema(),
+        }
+    }
+
+    async fn set_desired(self, doc: DesiredConfig) {
+        match self {
+            Self::V1(c) => c.set_desired(doc).await,
+            Self::V2(c) => c.set_desired(doc).await,
+        }
+    }
+
+    fn simulate_offset(self, ms: i64) {
+        match self {
+            Self::V1(c) => c.simulate_offset(ms),
+            Self::V2(c) => c.simulate_offset(ms),
+        }
+    }
+}
+
+/// Answers a `config` command but `restart` (the module doc's): config.v1's
+/// or config.v2's, and config.v2's `counter` and `record`.
 async fn config_command(
     words: &[&str],
-    cfg: &Configuration,
+    cfg: Cfg<'_>,
     device: &config::SimDevice,
+    svc: &Service,
 ) -> Result<String, String> {
     let words_from = |n: usize| words.get(n..).map(|w| w.join(" ")).unwrap_or_default();
     let said = |n: usize, default: &str| {
@@ -3027,10 +3216,26 @@ async fn config_command(
             cfg.simulate_offset(ms);
             return Ok(format!("config offset {ms}"));
         }
+        ["config", "counter", n] => {
+            let Cfg::V2(c) = cfg else {
+                return Err("config counter is config.v2's (--config-v2)".to_owned());
+            };
+            let n: u16 = n.parse().map_err(|e| format!("{e}"))?;
+            c.simulate_counter_start(n).await;
+            return Ok(format!("config counter {n} run {}", svc.minter().run()));
+        }
+        ["config", "record"] => {
+            let Cfg::V2(c) = cfg else {
+                return Err("config record is config.v2's (--config-v2)".to_owned());
+            };
+            let fields = c.interface().fields(&c.state().await);
+            return Ok(format!("config record {fields}"));
+        }
         _ => {
             return Err(
                 "usage: config fail-apply [<words>] | fail-undo [unknown] | fail-persist [<words>] | \
-                 block-persist [<words>] | clear | device | desired <json> | offset <ms> | restart"
+                 block-persist [<words>] | clear | device | desired <json> | offset <ms> | restart \
+                 | counter <n> | record"
                     .to_owned(),
             );
         }
@@ -3626,11 +3831,7 @@ async fn redundancy_command(
 }
 
 /// Answers one command line (the module doc's) but `config restart`.
-async fn command(
-    line: &str,
-    up: &mut Up,
-    configured: Option<&(Startup, Arc<config::SimDevice>)>,
-) -> String {
+async fn command(line: &str, up: &mut Up, device: Option<&config::SimDevice>) -> String {
     let words: Vec<&str> = line.split_whitespace().collect();
     let refuse = |why: &str| format!("refused {}: {why}", words.join(" "));
     let rest = |n: usize| words.get(n..).map(|w| w.join(" ")).unwrap_or_default();
@@ -3655,10 +3856,15 @@ async fn command(
         };
     }
     if words.first() == Some(&"config") {
-        let (Some(cfg), Some((_, device))) = (&up.config, configured) else {
-            return refuse("config.v1 is not implemented here (--config)");
+        let cfg = match (&up.config, &up.config_v2) {
+            (Some(c), _) => Cfg::V1(c),
+            (None, Some(c)) => Cfg::V2(c),
+            (None, None) => return refuse(NO_CONFIG),
         };
-        return match config_command(&words, cfg, device).await {
+        let Some(device) = device else {
+            return refuse(NO_CONFIG);
+        };
+        return match config_command(&words, cfg, device, &up.svc).await {
             Ok(answer) => answer,
             Err(why) => refuse(&why),
         };
@@ -3816,7 +4022,7 @@ async fn main() {
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
                 tracing_subscriber::EnvFilter::new(
-                    "warn,zenkey::config_v1=info,zenkey::alarms=info",
+                    "warn,zenkey::config_v1=info,zenkey::config_v2=info,zenkey::alarms=info",
                 )
             }),
         )
