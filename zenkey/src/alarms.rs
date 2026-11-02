@@ -815,13 +815,18 @@ impl Alarms {
                 ..e.doc.clone()
             };
             let payload = e.writer.writer().encode(&doc)?;
-            self.fault()?;
             // §2.7: a resolved alarm is never confirmed, so its bit is clear
-            // before its resolved put is recorded; a put that fails leaves the
-            // firing alarm confirmed, as it was.
+            // before its resolved put is recorded. A put that fails leaves
+            // the firing alarm's bit as it was: set, or clear where
+            // `set_confirming(false)` cleared it.
+            let vouched = e.writer.is_vouched();
             e.writer.set_refresh(false);
-            if let Err(err) = e.writer.put(payload.clone()).await {
-                e.writer.set_refresh(true);
+            let put = match self.fault() {
+                Ok(()) => e.writer.put(payload.clone()).await.map(drop),
+                Err(err) => Err(err),
+            };
+            if let Err(err) = put {
+                e.writer.set_refresh(vouched);
                 return Err(err);
             }
             e.doc = doc;
@@ -1446,6 +1451,52 @@ mod tests {
         assert_eq!(adopted, want);
         assert!(report.failed.is_empty() && report.resolved.is_empty());
         assert_eq!(next.last().len(), 2);
+    }
+
+    /// §2.7: a resolve whose put fails leaves the firing alarm's bit as it
+    /// was: clear for one whose confirmation its owner turned off, never
+    /// vouched for again by the failure, and set for one still confirmed.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_failed_resolve_leaves_the_alarms_bit_as_it_was() {
+        let s = alone().await;
+        // No source: adoption makes no operation. 1 A's resolved put, 2 B's,
+        // both failing.
+        let startup = super::Startup {
+            fail_ops: [1, 2].into(),
+            ..super::Startup::default()
+        };
+        let (_b, alarms) = builder(&s, startup).await;
+        let a = alarms
+            .raise(
+                super::Condition::new("link_down", Severity::Warning, "down").label("peer", "r2"),
+            )
+            .await
+            .unwrap()
+            .alert_key;
+        let b = alarms
+            .raise(
+                super::Condition::new("disk_full", Severity::Warning, "full")
+                    .label("mount", "/var"),
+            )
+            .await
+            .unwrap()
+            .alert_key;
+        assert!(alarms.set_confirming(&a, false).await);
+        assert_eq!(alarms.is_confirming(&a).await, Some(false));
+        assert!(alarms.resolve(&a).await.is_err(), "the injected failure");
+        assert_eq!(alarms.get(&a).await.expect("held").state, State::Firing);
+        assert_eq!(
+            alarms.is_confirming(&a).await,
+            Some(false),
+            "turned off by its owner, and kept off"
+        );
+        assert!(alarms.resolve(&b).await.is_err(), "the injected failure");
+        assert_eq!(alarms.get(&b).await.expect("held").state, State::Firing);
+        assert_eq!(
+            alarms.is_confirming(&b).await,
+            Some(true),
+            "still confirmed"
+        );
     }
 
     /// §2.5: a resolve whose delete fails leaves the alarm held resolved,
