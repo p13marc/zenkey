@@ -1536,6 +1536,7 @@ impl World {
                 value: Some(Ok(ConfigStatus::of(view))),
                 stamp,
             }),
+            record: None,
         };
         let target = zenkey_fleet::ConfigTarget::One(addr.clone());
         let mut spec = zenkey_fleet::ConfigSpec::new(Duration::from_secs(5));
@@ -1563,8 +1564,119 @@ impl World {
                 }),
                 window: None,
                 replay,
+                v2: None,
             },
         ))
+    }
+
+    /// `lab/rf0` as a `config.v2` owner (#985 G3) on the spec's `rfcfg.v1`
+    /// (`spec/profiles/config/conformance/contracts/`), read through it: the
+    /// record of `records.json`'s idle case with a last change on `duty`
+    /// (its fraction differing from its startup value) and, with
+    /// `pending`, a reach change on `radio` armed under a two-minute
+    /// window, applied at once, its deadline a minute after
+    /// [`config_read_at`]. Its interface lands beside the report, as the
+    /// tool's sweep lands it.
+    pub fn config_report_v2(
+        &self,
+        pending: bool,
+    ) -> (
+        Arc<zenkey_fleet::report::ConfigReport>,
+        zenkey_fleet::model::config::V2Target,
+    ) {
+        use zenkey_fleet::bus::config::ServiceDocs;
+        use zenkey_fleet::bus::health::{Replied, Stamped};
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../spec/profiles/config/conformance/contracts/rfcfg.v1.toml");
+        let l = zenkey_model::contract::load_path(&path);
+        let contract = l
+            .contract
+            .unwrap_or_else(|| panic!("rfcfg.v1:\n{}", l.report));
+        let fingerprint = zenkey_model::canonical::Fingerprint::of(&contract);
+        let target = zenkey_fleet::model::config::V2Target::of(
+            Arc::new(contract),
+            fingerprint,
+            zenkey_fleet::DeploymentEpoch::Stated(0),
+        )
+        .expect("rfcfg.v1 reads");
+        let read_ms = zenkey_model::config::Time::parse("2026-10-18T09:00:00.000Z")
+            .expect("an instant")
+            .millis();
+        let mut state = serde_json::json!({
+            "instance": 4660, "revision": 1, "floor_s": 10, "would_be": false,
+            "pending": null, "last": {"token": 305438721u64, "groups": ["duty"]}, "desired": null,
+            "groups": {
+                "duty": {"writable": true, "params": {
+                    "fraction_ppm": {"source": "runtime", "differs": true, "value": 20000},
+                    "period_s": {"source": "default", "differs": false, "value": 3600},
+                    "enforce": {"source": "default", "differs": false, "value": true}}},
+                "radio": {"writable": true, "params": {
+                    "frequency_hz": {"source": "file", "differs": false, "value": 868100000}}},
+                "link": {"writable": true, "params": {
+                    "net_id": {"source": "default", "differs": false, "value": 1}}},
+                "sim": {"writable": true, "params": {
+                    "pin": {"source": "file"},
+                    "attempts": {"source": "default", "differs": false, "value": 3}}},
+                "queue": {"writable": false, "params": {
+                    "tx_queue_len": {"source": "default", "differs": false, "value": 100}}},
+                "modulation": {"params": {
+                    "spreading_factor": {"source": "file", "differs": false, "value": 9}}}
+            }
+        });
+        if pending {
+            state["revision"] = serde_json::json!(2);
+            state["pending"] = serde_json::json!({
+                "token": 305438722u64, "groups": ["radio"], "apply_at": null,
+                "deadline": read_ms + 60_000, "applied": true
+            });
+            state["groups"]["radio"]["params"]["frequency_hz"] =
+                serde_json::json!({"source": "runtime", "differs": true, "value": 869525000});
+        }
+        let state: zenkey_model::config::v2::State =
+            serde_json::from_value(state).expect("a record");
+        let size = target
+            .interface
+            .write_record(&state, 0)
+            .expect("the record writes")
+            .bytes
+            .len()
+            + 6;
+        let addr: zenkey_model::grammar::Addr = RF0.parse().expect("an address");
+        let docs = ServiceDocs {
+            record: Some(Replied {
+                value: Some(Ok(zenkey_fleet::model::config::RecordGot {
+                    state,
+                    inband: Some(zenkey_model::wire::Stamp {
+                        run: zenkey_model::wire::Run::U16(0x1234),
+                        seq: zenkey_model::wire::Seq::new(41).expect("a seq"),
+                    }),
+                    size,
+                })),
+                stamp: Some(Stamped {
+                    time: config_read_at() - Duration::from_secs(4),
+                    clock: "a1b2c3d4e5f60718".into(),
+                }),
+            }),
+            ..ServiceDocs::default()
+        };
+        let mut spec = zenkey_fleet::ConfigSpec::new(Duration::from_secs(5));
+        spec.clocks_synced = true;
+        let report = zenkey_fleet::judge_config(&zenkey_fleet::ConfigObservation {
+            namespace: String::new(),
+            address: addr.clone(),
+            spec,
+            presence: Some(Ok(self.observed_with_config())),
+            get: Ok(zenkey_fleet::ConfigGet {
+                selector: target.record_key(&addr),
+                read_at: config_read_at(),
+                complete: true,
+                services: [(addr, docs)].into(),
+            }),
+            window: None,
+            replay: None,
+            v2: Some(Ok(target.clone())),
+        });
+        (Arc::new(report), target)
     }
 
     /// Every publisher's payload at tick `n`.

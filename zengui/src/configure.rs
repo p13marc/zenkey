@@ -24,6 +24,13 @@
 //! anything the owner sends back. Nothing here is persisted: prefs never
 //! see the tool.
 //!
+//! **`config.v2`** (#985 G3): a service whose descriptor's `profiles` lists
+//! `config.v2` is read through its own config interface, which the reading
+//! lands with ([`Reading::v2`]); its record is the view the form is drawn
+//! from, its schema the contract's `config.groups` (v2 §2.2), and every
+//! act goes through that interface, its idempotency key a 32-bit nonce
+//! (v2 §2.14) and its every reply the record.
+//!
 //! **Time is a message, not a call.** The countdown reads [`ConfigState::now`],
 //! set by the tool's tick and by each landing, never `SystemTime::now()`
 //! in a view — so a scene renders the same countdown twice, and a deadline
@@ -36,7 +43,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use zenkey_fleet::model::config::{self as mc, Assignment, Given, TypedValues};
+use zenkey_fleet::model::config::{self as mc, Assignment, Given, TypedValues, V2Target};
 use zenkey_fleet::report::{ConfigActReport, ConfigReport};
 use zenkey_fleet::{ConfigOp, ConfigSpec};
 use zenkey_model::config::{
@@ -127,11 +134,25 @@ impl GroupForm {
     /// The idempotency key for `req`: the held one when `req` is the
     /// request it was minted for, else a fresh one.
     pub fn key_for(&mut self, req: &SetRequest, now: SystemTime) -> String {
+        self.key_minted(req, || zenkey::writer::ulid(now))
+    }
+
+    /// [`GroupForm::key_for`] for a `config.v2` owner: a 32-bit nonce,
+    /// spelt in decimal (v2 §2.14), drawn from a fresh ULID.
+    pub fn nonce_for(&mut self, req: &SetRequest, now: SystemTime) -> String {
+        self.key_minted(req, || {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            zenkey::writer::ulid(now).hash(&mut h);
+            (h.finish() as u32).to_string()
+        })
+    }
+
+    fn key_minted(&mut self, req: &SetRequest, mint: impl FnOnce() -> String) -> String {
         let print = fingerprint(req);
         match &self.key {
             Some((p, key)) if *p == print => key.clone(),
             _ => {
-                let key = zenkey::writer::ulid(now);
+                let key = mint();
                 self.key = Some((print, key.clone()));
                 key
             }
@@ -267,6 +288,8 @@ pub struct ReadLanding {
     pub namespace: String,
     pub why: ReadWhy,
     pub report: Arc<ConfigReport>,
+    /// A `config.v2` owner's config interface, as the reading found it.
+    pub v2: Option<V2Target>,
     /// This host's clock as it ended.
     pub at: SystemTime,
 }
@@ -287,6 +310,9 @@ pub struct ActLanding {
 pub struct Reading {
     pub addr: Addr,
     pub report: Arc<ConfigReport>,
+    /// A `config.v2` owner's config interface, the one its record was read
+    /// by: every act goes through it.
+    pub v2: Option<V2Target>,
     pub at: SystemTime,
     pub why: ReadWhy,
 }
@@ -352,7 +378,12 @@ impl ConfigState {
 
     /// The status the reading drew, decoded.
     pub fn status(&self) -> Option<&ConfigStatus> {
-        self.shown()?.report.status.value.as_ref()
+        self.shown()?.report.status.as_option()?.value.as_ref()
+    }
+
+    /// The config interface a `config.v2` owner's reading was read by.
+    pub fn v2(&self) -> Option<&V2Target> {
+        self.shown()?.v2.as_ref()
     }
 
     /// The pending change the documents read show: the view's, else the
@@ -392,14 +423,11 @@ impl ConfigState {
     /// by its token, so §5's "did it land?" is put.
     pub fn spec(&self, timeout: Duration, window: Option<Duration>) -> ConfigSpec {
         ConfigSpec {
-            timeout,
             window,
             clocks_synced: self.clocks_synced,
-            across_face: false,
-            status_only: false,
             token: self.armed.as_ref().map(|a| a.token.clone()),
             instance: self.armed.as_ref().and_then(|a| a.instance.clone()),
-            desired_revision: None,
+            ..ConfigSpec::new(timeout)
         }
     }
 
@@ -431,6 +459,7 @@ impl ConfigState {
         self.reading = Some(Reading {
             addr: l.addr,
             report: l.report,
+            v2: l.v2,
             at: l.at,
             why: l.why,
         });
@@ -729,6 +758,7 @@ mod tests {
         s.reading = Some(Reading {
             addr: "lab/rf0".parse().unwrap(),
             report: Arc::new(report(view(true))),
+            v2: None,
             at,
             why: ReadWhy::Asked,
         });
@@ -755,7 +785,9 @@ mod tests {
         ConfigReport {
             namespace: String::new(),
             service: "lab/rf0".into(),
+            profile: zenkey_fleet::report::ConfigProfile::V1,
             premise: ConfigPremise::Listed,
+            record: None,
             presence: None,
             window_s: None,
             clock: zenkey_fleet::report::ClockGround::DeploymentWord,
@@ -767,13 +799,13 @@ mod tests {
                 stamp: None,
                 freshness: fresh.clone(),
             }),
-            status: ConfigDocument {
+            status: Asked::Asked(ConfigDocument {
                 value: Some(ConfigStatus::of(&view)),
                 undecodable: None,
                 via: None,
                 stamp: None,
                 freshness: fresh,
-            },
+            }),
             projection: answer.clone(),
             pending: answer.clone(),
             pending_change: None,

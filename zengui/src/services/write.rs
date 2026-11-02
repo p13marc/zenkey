@@ -51,6 +51,9 @@ pub struct ConfigAct {
     pub timeout: std::time::Duration,
     /// What a `set` read and checked first.
     pub checked: Option<ConfigChecked>,
+    /// A `config.v2` owner's config interface (#985 G3), the request then
+    /// written as its record and every reply read as the record.
+    pub v2: Option<zenkey_fleet::model::config::V2Target>,
 }
 
 /// The call metadata a Config act claims (core O7): the operator's login
@@ -82,6 +85,7 @@ pub fn config(c: ConfigAct) -> Task<Message> {
                 sensitive,
                 timeout,
                 checked,
+                v2,
             } = c;
             let result = zenkey_fleet::call_config(
                 &session,
@@ -97,6 +101,7 @@ pub fn config(c: ConfigAct) -> Task<Message> {
                     timeout,
                     across_face: false,
                     checked,
+                    v2,
                 },
             )
             .await

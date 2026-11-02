@@ -128,6 +128,15 @@ pub const ALL: &[Scene] = &[
         build: workbench_config_refused,
         landmark: "refused here — nothing was sent",
     },
+    // The Config tool on a config.v2 owner (#985 G3): `lab/rf0` on the
+    // spec's `rfcfg.v1`, its form drawn from the contract's `config.groups`,
+    // its values the record's, a reach change on `radio` pending.
+    Scene {
+        name: "workbench-config-v2",
+        size: DESKTOP,
+        build: workbench_config_v2,
+        landmark: "record: fresh (the owner's reply, S4) — confirmed within its horizon",
+    },
     Scene {
         name: "traffic",
         size: DESKTOP,
@@ -994,11 +1003,35 @@ fn config_window(theme: ThemeChoice, view: zenkey_model::config::ConfigView) -> 
             namespace: String::new(),
             why: ReadWhy::Asked,
             report,
+            v2: None,
             at: super::config_read_at(),
         }),
     );
     config_msg(&mut app, ConfigMsg::Tick(super::config_now()));
     (app, world)
+}
+
+/// The Config tool on `lab/rf0` as a `config.v2` owner (#985 G3): the
+/// window as [`config_window`] gives it, the reading landed with its
+/// interface, `rfcfg.v1`, so the form is the contract's.
+fn workbench_config_v2(theme: ThemeChoice) -> Zengui {
+    use zengui::configure::{ReadLanding, ReadWhy};
+    use zengui::view::configure::ConfigMsg;
+    let (mut app, world) = config_window(theme, World::new().config_view(false));
+    let (report, target) = world.config_report_v2(true);
+    config_msg(
+        &mut app,
+        ConfigMsg::Read(ReadLanding {
+            addr: super::RF0.parse().expect("an address"),
+            namespace: String::new(),
+            why: ReadWhy::AfterAct,
+            report,
+            v2: Some(target),
+            at: super::config_read_at() + std::time::Duration::from_millis(1),
+        }),
+    );
+    config_msg(&mut app, ConfigMsg::Tick(super::config_now()));
+    app
 }
 
 fn workbench_config(theme: ThemeChoice) -> Zengui {

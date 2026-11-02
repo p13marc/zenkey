@@ -224,6 +224,14 @@ fn set(
         Ok(b) => b,
         Err(why) => return refuse(cfg, act, why),
     };
+    // config.v2 (#985 G3): what the group's Set<T> cannot carry is refused
+    // here, a contract group's set first (v2 §2.4).
+    let v2 = cfg.v2().cloned();
+    if let Some(t) = &v2
+        && let Err(why) = mc::set_of(&t.interface, &group, &built.request)
+    {
+        return refuse(cfg, act, why);
+    }
     // The owner's own checks, against the view just read (§2.5, "A caller
     // that checks first"): the refusal printed is the one it would send.
     if let Err(r) = mc::precheck(&view, &group, &built.request) {
@@ -250,10 +258,18 @@ fn set(
     let now = SystemTime::now();
     let form = cfg.forms.entry(group.clone()).or_default();
     let mut request = built.request;
-    request.idempotency_key = Some(form.key_for(&request, now));
+    request.idempotency_key = Some(if v2.is_some() {
+        form.nonce_for(&request, now)
+    } else {
+        form.key_for(&request, now)
+    });
     let shown = mc::shown_request(&request, Some(&view), &group, &built.typed.read);
     let checked = ConfigChecked {
-        read: ConfigCheckedRead::View,
+        read: if v2.is_some() {
+            ConfigCheckedRead::Record
+        } else {
+            ConfigCheckedRead::View
+        },
         typed_by: built.typed.typed_by,
         instance: Some(view.instance.clone()),
         revision: Some(view.revision),
@@ -284,6 +300,7 @@ fn set(
         sensitive: mc::sensitive_params(Some(&view)),
         timeout: cx.dep.timeout(),
         checked: Some(checked),
+        v2,
     })
 }
 
@@ -383,6 +400,7 @@ fn control(cfg: &mut ConfigState, replaying: bool, cx: Ctx, act: Act) -> Task<Me
         sensitive: mc::sensitive_params(Some(&view)),
         timeout: cx.dep.timeout(),
         checked: None,
+        v2: cfg.v2().cloned(),
     })
 }
 
@@ -401,7 +419,9 @@ fn answered(cfg: &mut ConfigState, dep: &Deployment, l: configure::ActLanding) -
         let silent = matches!(report.answer, ConfigActAnswer::Silent { .. });
         let changed = matches!(
             report.answer,
-            ConfigActAnswer::Applied { .. } | ConfigActAnswer::Pending { .. }
+            ConfigActAnswer::Applied { .. }
+                | ConfigActAnswer::Pending { .. }
+                | ConfigActAnswer::Record { .. }
         );
         let dry_run = matches!(l.act, Act::Set { dry_run: true, .. });
         if let Act::Set { group, .. } = &l.act {
@@ -428,7 +448,40 @@ fn answered(cfg: &mut ConfigState, dep: &Deployment, l: configure::ActLanding) -
                 let window = until_applied(&pending.apply_at, l.at);
                 next = read(cfg, dep, ReadWhy::UntilApplied, Some(window));
             }
-            ConfigActAnswer::Applied { .. } if dry_run => {}
+            ConfigActAnswer::Applied { .. } | ConfigActAnswer::Record { .. } if dry_run => {}
+            // config.v2's every reply is the record (#985 G3, v2 §2.9): a
+            // reach set's pending with its apply_at, read again after it.
+            ConfigActAnswer::Record { view, record, .. } if matches!(l.act, Act::Set { .. }) => {
+                if let Some(p) = &record.pending
+                    && (p.apply_at.is_some() || margin.is_some())
+                {
+                    let apply_at = p
+                        .apply_at
+                        .map(|a| zenkey_model::config::Time::from_millis(a).rfc3339());
+                    cfg.arm(
+                        &p.token.to_string(),
+                        Some(view.instance.clone()),
+                        apply_at.clone(),
+                        margin,
+                    );
+                    if let Some(a) = apply_at {
+                        let window = until_applied(&a, l.at);
+                        next = read(cfg, dep, ReadWhy::UntilApplied, Some(window));
+                    } else {
+                        next = read(cfg, dep, ReadWhy::AfterAct, None);
+                    }
+                } else {
+                    next = read(cfg, dep, ReadWhy::AfterAct, None);
+                }
+            }
+            ConfigActAnswer::Record { view, .. } if l.act == Act::Extend => {
+                if let (Some(a), Some(m)) = (cfg.armed.as_mut(), margin)
+                    && view.pending.as_ref().is_some_and(|p| p.token == a.token)
+                {
+                    a.margin_until = Some(m);
+                }
+                next = read(cfg, dep, ReadWhy::AfterAct, None);
+            }
             ConfigActAnswer::Applied { view } => {
                 // A hot change under a window is pending in the view it
                 // answered (§2.9): armed here, by that token.
