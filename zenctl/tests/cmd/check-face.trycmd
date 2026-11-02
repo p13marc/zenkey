@@ -310,3 +310,47 @@ Error: --peer-config needs a link.v2 face policy (`profile = "link.v2"`, link.v2
 check face: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
 
 ```
+
+A policy on `zm-1.10.2-r1`, zenoh-modem's zenoh fork, narrows every other
+principal over the fork's link protocols (`link.v2` §2.4), so its subjects
+name `unixsock-dgram`, which stock zenoh 1.10.1's loader refuses (#1044).
+The router config is then read as data, in zenoh's shapes and the
+binding's link protocols, and the note says so. zenoh-modem's RF router,
+running the block `acl gen` wrote, and the ground's client running the
+block `acl gen --far-config` wrote, the catalog the ground holds beside
+them: exit 0.
+
+```console
+$ zenctl check face tests/cmd/fixtures/link/router-zm-rf0.json5 --face-policy ../examples/zk2/zenoh-modem/faces/zenohd-rf0.face.toml --enrollment ../examples/zk2/zenoh-modem/faces/zenoh-modem.enrollment.toml --contracts ../examples/zk2/zenoh-modem --contracts ../spec/profiles/config/config.v1.toml --contracts ../spec/profiles/health/health.v1.toml --catalog ../examples/zk2/zenoh-modem/catalog.json --peer-config tests/cmd/fixtures/link/far-zm-rf0.json5 --format table
+rf: no_arq at arq: the medium repairs no lost frame, and zenoh repairs no lost declaration: a lost subscriber or queryable stays lost while the transport stays up (link.v2 §2.1) (link.v2 §2.1, §2.10, §2.16)
+face rf: frame_unlisted modem.v3/stream/frames/message: an exposed frame resource the face's frames leaves out, which no face of the policy lets cross: its owner writes it for no far side (link.v2 §2.7)
+tests/cmd/fixtures/link/router-zm-rf0.json5: face rf (far ground): 11 deny rule(s) across subject(s) ground; 0 downsampling rule(s) on its transports
+transport (link.v2 §2.19), an omitted key read at zm-1.10.2-r1's default:
+    transport.lease_ms              planned 240000     runs 240000     far end 240000
+    transport.keep_alive            planned 4          runs 4          far end 4
+    transport.wait_before_close_ms  planned 240000000  runs 240000000  far end 240000000
+    transport.sequence              planned "16bit"    runs "16bit"    far end "16bit"
+    transport.batch_bytes           planned 222        runs 222        far end 222
+    transport.open_timeout_ms       planned 10000      runs 10000      far end 10000
+    transport.accept_timeout_ms     planned 10000      runs 10000      far end 10000
+    transport.interests_timeout_ms  planned 10000      runs 10000      far end 10000
+catalog: the far side holds ab76ec37, the policy names ab76ec37
+PASS
+judged against the config file tests/cmd/fixtures/link/router-zm-rf0.json5 read as data, in zenoh 1.10.1's shapes and zm-1.10.2-r1's link protocols: what a router runs is not observable on the bus, so a file that differs from what it was started with is invisible here (core §11.3, link.v1 §2.14)
+stock zenoh's loader refuses zm-1.10.2-r1's link protocols, so no zenoh loaded the file: whether the router's own loader accepts it is not checked (link.v2 §2.4)
+tombstone windows not asked: pass --window ADDRESS=SECS for each listed owner of state (link.v1 §2.11)
+
+```
+
+Read as data, every key that does not read as zenoh's is named, at its
+path: here a subject's link protocol misspelt, which is no link protocol
+of the fork's, and a rule's `permission` taken out, which zenoh requires.
+No verdict on a block read in part: exit 2.
+
+```console
+$ zenctl check face tests/cmd/fixtures/link/router-zm-rf0-unread.json5 --face-policy ../examples/zk2/zenoh-modem/faces/zenohd-rf0.face.toml --enrollment ../examples/zk2/zenoh-modem/faces/zenoh-modem.enrollment.toml --contracts ../examples/zk2/zenoh-modem --contracts ../spec/profiles/config/config.v1.toml --contracts ../spec/profiles/health/health.v1.toml --catalog ../examples/zk2/zenoh-modem/catalog.json --format table
+? 2
+Error: tests/cmd/fixtures/link/router-zm-rf0-unread.json5: read as data under zm-1.10.2-r1 (link.v2 §2.4), 2 key(s) do not read as zenoh 1.10.1's: access_control.rules[14] (id "face:rf:zk"): missing field `permission`; access_control.subjects (id "lora-node"): "unixsock-dgrm" is not a link protocol of zm-1.10.2-r1 (tcp, udp, tls, quic, serial, unixpipe, unixsock-stream, unixsock-dgram, vsock, ws)
+check face: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```

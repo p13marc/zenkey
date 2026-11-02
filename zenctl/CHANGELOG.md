@@ -6,6 +6,19 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a fork binding's router config is read as data (#1044)
+
+A `link.v2` policy on `zm-1.10.2-r1`, zenoh-modem's zenoh fork, narrows
+other principals over the fork's link protocols (`link.v2` §2.4), so the
+router block names `unixsock-dgram`, which stock zenoh 1.10.1's loader
+refuses.
+
+| Before | Now | Notes |
+|---|---|---|
+| `check face`, `acl gen --check` on a fork binding's router config: exit 2, "zenoh refused the config" | read as data, in zenoh 1.10.1's shapes and the binding's link protocols: the same verdicts as through zenoh's loader | stock bindings and `link.v1` policies keep zenoh's loader. The coverage note says the file was read as data, and that whether the router's own loader accepts it is not checked; the JSON carries `"read": "data"` |
+| — | a key that does not read as data, every one named at its path (an unknown field, a missing one, an empty list, a value outside zenoh's vocabulary, a key expression that is not canonical, a link protocol not the binding's), exit 2 | |
+| `check face --peer-config` on a fork binding: through zenoh's loader | read as the router's config is | |
+
 ## Unreleased (`main`, zk2) — `call` and `bench call` read both wires (#985 C4b, for #980)
 
 Core 0.92 §7.5 defines a call's value and error forms, which C4c's owners
@@ -21,6 +34,7 @@ owner answers in a form yet, so nothing that read before reads differently.
 | a `reply_err` under `zenoh/bytes`: the transport's | the error form, an owner's error (exit 1): its code, cause and message, its detail decoded as the `error` type on the contract's `encoding`, and the envelope's `mark`; the table adds `as of run r, seq s` | an error form may carry no message: `message` is then `""`, and the table shows the code alone |
 | a router's `Timeout`: `zenoh/bytes: Timeout` | `zenoh/bytes: Timeout (no error form: sample_kind)`: still the transport's, still silence (exit 2), retried when idempotent | any `zenoh/bytes` reply error the form's parse refuses is the transport's, its refusal named; non-UTF-8 bytes are shown as `0x` and hex |
 | `bench call`: refusals by the envelope's code | by the code of either wire's error; a form the parse refuses counted as the transport's | |
+
 
 ## Unreleased (`main`, zk2) — the far side of a face: its timeout, its transport, declaring again (#988, L4)
 
