@@ -61,10 +61,60 @@ pub const DEFAULT_KEEP_ALIVE: u32 = 4;
 ///
 /// A deployment on another binding states its own: zm-1.10.2-r1, the fork
 /// zenoh-modem builds on, defaults to 10 s, its lease (#1011). A tool takes
-/// the deployment's word for it (zenctl's `--wait-before-close`), never its
-/// own session's configuration, which states how long the tool's own
-/// pushes wait and says nothing of its routers'.
+/// the deployment's word for it (zenctl's `--wait-before-close`, or the
+/// `[transport]` of the routers' `link.v2` face policy: [`Routers::of`]),
+/// never its own session's configuration, which states how long the
+/// tool's own pushes wait and says nothing of its routers'.
 pub const DEFAULT_WAIT_BEFORE_CLOSE: Duration = Duration::from_secs(5);
+
+/// The routers' link settings a window's reader reads by (§2.7, observer
+/// §5.2): their lease, keep-alives and `wait_before_close`. The
+/// deployment's word: a `link.v2` face policy's `[transport]`, which its
+/// routers run (`link.v2` §2.16; [`Routers::of`]), and zenoh 1.10.1's
+/// defaults where it gives none ([`Routers::default`], #1011's item 3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Routers {
+    pub lease: Duration,
+    pub keep_alive: u32,
+    pub wait_before_close: Duration,
+}
+
+impl Default for Routers {
+    /// zenoh 1.10.1's: a 10 s lease, 4 keep-alives, a 5 s
+    /// `wait_before_close`.
+    fn default() -> Self {
+        Routers {
+            lease: DEFAULT_LEASE,
+            keep_alive: DEFAULT_KEEP_ALIVE,
+            wait_before_close: DEFAULT_WAIT_BEFORE_CLOSE,
+        }
+    }
+}
+
+impl Routers {
+    /// What routers that run `transport` run: a face policy's
+    /// `[transport]`, every key resolved (`link.v2` §2.1).
+    #[must_use]
+    pub fn of(transport: &crate::link::Transport) -> Routers {
+        Routers {
+            lease: Duration::from_millis(transport.lease_ms),
+            keep_alive: u32::try_from(transport.keep_alive).unwrap_or(u32::MAX),
+            wait_before_close: Duration::from_millis(transport.wait_before_close_ms),
+        }
+    }
+
+    /// [`stall_bound`] of these routers.
+    #[must_use]
+    pub fn stall_bound(&self) -> Duration {
+        stall_bound(self.wait_before_close, self.lease, self.keep_alive)
+    }
+
+    /// [`presence_tail`] of these routers, with the reader's `timeout`.
+    #[must_use]
+    pub fn presence_tail(&self, timeout: Duration) -> Duration {
+        presence_tail(self.lease, self.wait_before_close, timeout)
+    }
+}
 
 /// The longest a window's reader may stall without a router giving up on
 /// it (§2.7, 0.27): the transport's `wait_before_close`, or its lease less
@@ -840,6 +890,45 @@ mod tests {
         assert_eq!(
             j(Kind::Event, Bound::Of(1), &w(59.0, true, true, apart)),
             (V::Unobservable, R::WindowTooShort)
+        );
+    }
+
+    #[test]
+    fn a_face_policys_transport_is_what_its_routers_run() {
+        let s = Duration::from_secs;
+        let t = crate::link::Transport {
+            lease_ms: 240_000,
+            keep_alive: 4,
+            wait_before_close_ms: 240_000,
+            sequence: crate::link::Sequence::Bit16,
+            batch_bytes: 222,
+            open_timeout_ms: 10_000,
+            accept_timeout_ms: 10_000,
+            interests_timeout_ms: 10_000,
+        };
+        let rf = Routers::of(&t);
+        assert_eq!(rf.wait_before_close, s(240));
+        assert_eq!(
+            rf.presence_tail(s(15)),
+            s(255),
+            "RF: 240 s and the reply timeout"
+        );
+        assert_eq!(
+            rf.stall_bound(),
+            s(180),
+            "the lease less one 60-s keep-alive"
+        );
+        let sbd = Routers::of(&crate::link::Transport {
+            lease_ms: 3_600_000,
+            keep_alive: 2,
+            wait_before_close_ms: 3_600_000,
+            ..t
+        });
+        assert_eq!(sbd.stall_bound(), s(1800), "SBD's two keep-alives");
+        assert_eq!(
+            Routers::default().presence_tail(s(1)),
+            presence_tail(DEFAULT_LEASE, DEFAULT_WAIT_BEFORE_CLOSE, s(1)),
+            "given no policy, zenoh 1.10.1's"
         );
     }
 

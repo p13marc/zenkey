@@ -311,4 +311,12 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   `DEFAULT_WAIT_BEFORE_CLOSE` are zenoh 1.10.1's defaults, said so
   (#1011): `zm-1.10.2-r1`'s `wait_before_close` is 10 s, and a tool takes
   the deployment's word (`--wait-before-close`), never its own session's
-  configuration, which states only its own pushes' wait.
+  configuration, which states only its own pushes' wait. #988 L4 (core
+  0.91): `budget::Routers` (lease, keep-alives, `wait_before_close`;
+  `of(&link::Transport)`, `stall_bound`, `presence_tail`, zenoh 1.10.1's
+  by default) is a window reader's word from the routers' face policy
+  (#1011's item 3); `link::FacePolicy::far_side(face)` → `FarSide`
+  (`reply_timeout`, `at_least`, `redeclares` = `!arq`, `session_keys`,
+  `silence` = `SILENT_HORIZONS` × horizon; `FarSideRefusal::{NotV2,
+  NoFace}`), and `redeclare_horizon(c, r)` / `redeclare_heartbeat_horizon(c)`
+  (a `freshness.v2` state has none of its own) for core §8.5.

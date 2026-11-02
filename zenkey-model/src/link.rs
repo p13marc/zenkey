@@ -1266,6 +1266,148 @@ impl FacePolicy {
     pub fn address(&self, service: &str) -> String {
         format!("{}/{service}", self.system)
     }
+
+    /// What a reader or a caller across `face` reads of this policy (v2
+    /// §2.20, §2.21): a link.v2 policy's face. A `link.v1` policy states
+    /// no reply timeout and no transport, and is refused, as a face it
+    /// does not name is.
+    pub fn far_side(&self, face: &str) -> Result<FarSide, FarSideRefusal> {
+        let (Profile::V2, Some(transport)) = (self.profile, self.transport) else {
+            return Err(FarSideRefusal::NotV2);
+        };
+        let Some(f) = self.faces.get(face) else {
+            return Err(FarSideRefusal::NoFace {
+                face: face.to_owned(),
+                faces: self.faces.keys().cloned().collect(),
+            });
+        };
+        // A link.v2 face that parsed states both (v2 §2.1).
+        let (Some(reply_timeout_ms), Some(arq)) = (f.reply_timeout_ms, f.arq) else {
+            return Err(FarSideRefusal::NotV2);
+        };
+        Ok(FarSide {
+            face: face.to_owned(),
+            reply_timeout_ms,
+            arq,
+            transport,
+        })
+    }
+}
+
+// ── link.v2: the far side's readers and callers (v2 §2.20, §2.21) ────────
+
+/// How many horizons of silence a subscription across a face waits before
+/// it is declared again (core §8.5, v2 §2.21).
+pub const SILENT_HORIZONS: u32 = 2;
+
+/// What a reader or a caller on the far side of one face of a link.v2
+/// policy takes from the policy (v2 §2.20, §2.21; core §8.1, §8.5): how
+/// long a reply may take, whether the medium repairs a lost frame, and the
+/// transport its own session runs (v2 §2.16).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FarSide {
+    /// The face's name in the policy.
+    pub face: String,
+    /// `reply_timeout_ms`: the deployment's word to every caller across
+    /// the face (v2 §2.1).
+    pub reply_timeout_ms: u64,
+    /// `arq`: whether the medium repairs a lost frame below zenoh.
+    pub arq: bool,
+    /// The router's `[transport]`, which both ends run (v2 §2.16).
+    pub transport: Transport,
+}
+
+impl FarSide {
+    /// How long a caller across the face waits at least (core §8.1).
+    #[must_use]
+    pub fn reply_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(self.reply_timeout_ms)
+    }
+
+    /// `timeout`, raised to the face's reply timeout when it is shorter
+    /// (core §8.1: at least the face's).
+    #[must_use]
+    pub fn at_least(&self, timeout: std::time::Duration) -> std::time::Duration {
+        timeout.max(self.reply_timeout())
+    }
+
+    /// Whether a reader across the face declares a silent subscription
+    /// again (core §8.5): where the medium repairs no lost frame. With
+    /// ARQ, a frame arrives or the transport closes, and a transport that
+    /// opens again declares everything anew.
+    #[must_use]
+    pub fn redeclares(&self) -> bool {
+        !self.arq
+    }
+
+    /// The configuration a session across the face runs (v2 §2.16, §2.18):
+    /// each `[transport]` key at zenoh's key, in zenoh's units, as the far
+    /// end's block writes it: a client of the near router is the gateway
+    /// client's session.
+    #[must_use]
+    pub fn session_keys(&self) -> Vec<(TransportKey, Value)> {
+        TransportKey::ALL
+            .into_iter()
+            .map(|k| (k, self.transport.value(k)))
+            .collect()
+    }
+
+    /// The silence after which a subscription with `horizon` is declared
+    /// again: [`SILENT_HORIZONS`] of it (core §8.5).
+    #[must_use]
+    pub fn silence(horizon: std::time::Duration) -> std::time::Duration {
+        horizon.saturating_mul(SILENT_HORIZONS)
+    }
+}
+
+/// Why [`FacePolicy::far_side`] gave no far side.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FarSideRefusal {
+    /// A `link.v1` policy: no reply timeout, no ARQ, no transport.
+    NotV2,
+    /// The policy has no face of that name; its faces, in order.
+    NoFace { face: String, faces: Vec<String> },
+}
+
+impl fmt::Display for FarSideRefusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotV2 => f.write_str(
+                "a link.v1 policy states no reply timeout and no transport: a far side reads a \
+                 link.v2 policy (link.v2 §2.20)",
+            ),
+            Self::NoFace { face, faces } => write!(
+                f,
+                "the policy has no face {face:?}; its faces are {}",
+                faces.join(", ")
+            ),
+        }
+    }
+}
+
+/// The horizon of a subscription to `r`, a resource of `c`, that a reader
+/// across a face declares again after silence (core §8.5): its
+/// `freshness.ttl_s` above 0, where its owner puts at least once a
+/// horizon. A state of a contract that uses `freshness.v2` has none of its
+/// own: its owner re-puts nothing, and its heartbeat's subscription speaks
+/// for it ([`redeclare_heartbeat_horizon`]). `None`: never silent this way.
+#[must_use]
+pub fn redeclare_horizon(c: &Contract, r: &Resource) -> Option<std::time::Duration> {
+    if matches!(r.kind, Kind::State) && freshness::uses_v2(c) {
+        return None;
+    }
+    freshness::horizon_of(r).ttl()
+}
+
+/// The horizon of a subscription to `c`'s heartbeat (core §8.5,
+/// `freshness.v2` §2.4): the shortest of the collections it covers, where
+/// `c` uses `freshness.v2` and has one.
+#[must_use]
+pub fn redeclare_heartbeat_horizon(c: &Contract) -> Option<std::time::Duration> {
+    if !freshness::uses_v2(c) {
+        return None;
+    }
+    crate::heartbeat::Layout::of(c).horizon()
 }
 
 /// What [`parse`] read: the policy when no error refused it, and every
@@ -4085,5 +4227,59 @@ mod tests {
         assert!(within_lease(1000, 2400, 10_000));
         assert!(!within_lease(1024, 2400, 10_000));
         assert!(within_lease(65_535, MAX_U32, MAX_U32));
+    }
+
+    /// The far side of a link.v2 face (v2 §2.20, §2.21): its reply timeout
+    /// raises a shorter one, never a longer one; a face without ARQ
+    /// re-declares; its session runs the eight `[transport]` keys; a
+    /// `link.v1` policy and a face the policy does not name are refused.
+    #[test]
+    fn a_far_side_reads_its_face_of_a_link_v2_policy() {
+        use std::time::Duration;
+        let text = "profile = \"link.v2\"\nsystem = \"lab\"\nservices = []\n\
+                    binding = \"zenoh-1.10.1\"\n\
+                    [transport]\nlease_ms = 240000\nkeep_alive = 4\n\
+                    wait_before_close_ms = 240000\nsequence = \"16bit\"\nbatch_bytes = 222\n\
+                    [face.rf]\nfar = \"ground\"\nattach = \"client\"\n\
+                    select = { link_protocols = [\"unixsock-stream\"] }\n\
+                    class = \"constrained\"\nexpose = \"none\"\nmax_outage_s = 3600\n\
+                    link_bps = 2400\nloss_ppm = 50000\narq = false\nreply_timeout_ms = 15000\n";
+        let parsed = parse(text);
+        let policy = parsed.policy.expect("a policy");
+        let far = policy.far_side("rf").expect("its face");
+        assert_eq!(far.reply_timeout(), Duration::from_secs(15));
+        assert_eq!(
+            far.at_least(Duration::from_secs(1)),
+            Duration::from_secs(15)
+        );
+        assert_eq!(
+            far.at_least(Duration::from_secs(30)),
+            Duration::from_secs(30)
+        );
+        assert!(
+            far.redeclares(),
+            "no ARQ: a silent subscription is declared again"
+        );
+        assert_eq!(
+            FarSide::silence(Duration::from_secs(300)),
+            Duration::from_secs(600)
+        );
+        let keys = far.session_keys();
+        assert_eq!(keys.len(), 8);
+        assert_eq!(
+            keys[2],
+            (TransportKey::WaitBeforeClose, Value::from(240_000_000u64)),
+            "wait_before_close in µs"
+        );
+        assert!(matches!(
+            policy.far_side("sbd"),
+            Err(FarSideRefusal::NoFace { faces, .. }) if faces == ["rf"]
+        ));
+        let v1 = FacePolicy {
+            profile: Profile::V1,
+            transport: None,
+            ..policy
+        };
+        assert_eq!(v1.far_side("rf"), Err(FarSideRefusal::NotV2));
     }
 }
