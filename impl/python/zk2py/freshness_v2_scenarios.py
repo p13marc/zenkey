@@ -25,9 +25,10 @@ allows. §4's R2 is a router linked to R1 through a TCP relay the run cuts
 and F is its client there.
 
 **The contract** is ``beacon.v2``, copied from the text into
-``impl/python/interop/freshness/beacon.v2.toml``; §7's is the same with
-``link.exposure = "link"`` on ``status`` and ``level`` (F-443),
-``beacon-face.v2.toml`` beside it.
+``impl/python/interop/freshness/beacon.v2.toml``. Since ``freshness.v2``
+0.2 it marks ``status`` and ``level`` ``link.exposure = "link"`` and lists
+``link.v1`` (F-443's answer), so §7's face runs it too, and round 96's
+``beacon-face.v2.toml`` is gone (round 97).
 
 Exit 0 when every check passes, 1 when any fails, 2 when a pairing cannot
 run (a black box missing).
@@ -54,7 +55,8 @@ from . import heartbeat, zk2c
 
 REPO = Path(__file__).resolve().parents[3]
 BEACON = REPO / "impl" / "python" / "interop" / "freshness" / "beacon.v2.toml"
-BEACON_FACE = REPO / "impl" / "python" / "interop" / "freshness" / "beacon-face.v2.toml"
+#: §7's contract: beacon.v2 itself since freshness.v2 0.2 (F-443's answer)
+BEACON_FACE = BEACON
 BLACKBOX = Path(os.environ.get("ZK2PY_BLACKBOX", "/srv/dev/scratch/zenkey/bin/current"))
 IFACE = "beacon.v2"
 BASE = f"zk2/lab/beacon/{IFACE}"

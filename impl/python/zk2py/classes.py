@@ -1,5 +1,5 @@
-"""The conformance classes zk2py claims (core §12, 0.66 to 0.83), and its walk of
-``spec/RULES.md`` (#609, rounds 89 to 96, the mend after #926 part 5 and the
+"""The conformance classes zk2py claims (core §12, 0.66 to 0.87), and its walk of
+``spec/RULES.md`` (#609, rounds 89 to 97, the mend after #926 part 5 and the
 mend after round 94).
 
 ``python -m zk2py.classes`` prints the walk as a Markdown table, one row per
@@ -163,9 +163,10 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "owner.Owner.answer_state: the held Zenoh timestamp, where the mutation carried one (state_pairings §1  "
      "expected 5) (round 93, core 0.73)"),
     # core 0.82 (#978 F3): a freshness.v2 member's reply carries its last
-    # confirmation (round 96).
-    ("owner", "core §4.2", "The owner's reply of a member a `freshness.v2` heartbeat confirms MUST carry instead",
-     MET, "owner.Owner.answer_state: a covered member's reply stamped with _Held.confirm, the later of its put's "
+    # confirmation (round 96). Re-keyed at core 0.85 (F-445): every member of
+    # a state the table lists under freshness.v2, vouched for or not.
+    ("owner", "core §4.2", "The owner's reply of a member of a state that §4.3's table lists under `freshness.v2` "
+     "MUST carry instead", MET, "owner.Owner.answer_state: a covered member's reply stamped with _Held.confirm, the later of its put's "
      "minted time and the last heartbeat that vouched for it, its put stamped by none (freshness_v2_scenarios §3, "
      "py-py and py-zenctl: zenctl get state's last_confirmation) (round 96, core 0.82; F-445, F-446)"),
     ("owner", "core §4.2", "It MUST answer a selector over them with", MET,
@@ -482,6 +483,10 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "zk2c.Read: a refused envelope's record is None, its token named (Read.undecodable); echo_tool's row says  "
      "undecodable and sniffs nothing; seed.LateJoiner counts it in undecodable and merges nothing (readings)  "
      "(round 93, observer 0.14)"),
+    # observer 0.20 (#978, F-444): a heartbeat's body is never a record.
+    ("observer", "observer §7.3", "A tool MUST NOT decode, render or judge a heartbeat's body as a record", NOT_MET,
+     "round 97: echo_tool sniffs a heartbeat's body as it sniffs a record, octet-stream bytes shown as hexadecimal "
+     "(re-keyed to observer 0.20)"),
     ("observer", "observer §7.3", "A tool that shows a payload it cannot decode MUST", NOT_MET,
      "no zk2py tool shows a payload by its declared type: echo_tool sniffs each one, its type not held (0.12); the "
      "profiles' readers show no payload they cannot decode, an undecodable one being their judgement's own answer "
@@ -496,6 +501,13 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "echo_tool --across-face SYSTEM/SERVICE with --contracts: face.scopes, each concrete resource's exact key  "
      "and each template's selector, an event's ULID chunk a wildcard, a subscriber each (constrained_live step  "
      "5: 25, 31 and 27 B a put, §7 steps 1, 2 and 4's own) (round 95, observer 0.18)"),
+    # observer 0.21 (#981 K2): §7.6, a tool's frames.
+    ("observer", "observer §7.6", "A tool MUST show a scheduled record's time as scheduled, with its `jitter_ms`",
+     NA, "round 97: no zk2py tool reads a frame's records yet: echo_tool sniffs a frame's body (re-keyed to "
+     "observer 0.21)"),
+    ("observer", "observer §7.6", "A tool MUST show a `within` field with its `delta`", NA,
+     "round 97: no zk2py tool reads a frame's records yet: echo_tool sniffs a frame's body (re-keyed to "
+     "observer 0.21)"),
     # -- static --------------------------------------------------------------------------
     ("static", "core §1.1", "An implementation MUST refuse to build one, and", MET,
      "keys family"),
@@ -568,6 +580,10 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "heartbeat.write in the form read (heartbeat family: every accepted read written back) (round 96, core 0.81)"),
     # core 0.83 (#981 K1): §7.7's frames. The owner's and the reader's rules are
     # K2's and K3's: zk2py writes and reads none (round 96).
+    # core 0.87 (#981 K3): never a mutation on a frame resource's key.
+    ("owner", "core §7.7", "An owner MUST NOT put a mutation (§7.5) on a frame resource's key", NA,
+     "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it "
+     "puts nothing on one (re-keyed to core 0.87)"),
     ("owner", "core §7.7", 'An owner MUST give a frame the seq of its record 0', NA,
      "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it writes no frame, as core 0.83 says nothing does yet (K3's) (round 96, core 0.83)"),
     ("owner", "core §7.7", "An owner MUST start a key's first frame in a run with a full record", NA,

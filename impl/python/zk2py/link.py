@@ -575,10 +575,32 @@ def _heartbeat_denies(deny: list[dict[str, Any]], beats: dict[str, bool], listed
     return others[:3] + mine + others[3:]
 
 
+def _with_heartbeats(listed: list[str], interfaces: dict[str, Any],
+                     res: dict[str, list[Resource]]) -> list[str]:
+    """``freshness.v2`` among the listed interfaces wherever a listed
+    interface has a heartbeat (§2.9), though the deployment does not list it:
+    its owners implement ``freshness.v2``'s standard contract beside it
+    (``freshness.v2`` §3; ``health.v1`` §2.7), so §2.7's step 2 gives it a
+    deny of its own, and §2.9's MUST keeps a heartbeat home whose
+    collections do not cross. zenoh-modem's RF face denies
+    ``stream:freshness.v2`` so, for ``health.v1``'s and ``config.v1``'s
+    revisions 1.1 (``plan.json``, #978 F4; round 97's reading, F-455). Its
+    resources are the standard contract's where none is given."""
+    if HEARTBEAT_IFACE in listed or not any(heartbeat_of(interfaces[i], res[i]) for i in listed):
+        return listed
+    if HEARTBEAT_IFACE in interfaces:
+        res[HEARTBEAT_IFACE] = merge_revisions(HEARTBEAT_IFACE, revisions_of(interfaces[HEARTBEAT_IFACE]))
+    else:
+        from . import freshness_v2
+        res[HEARTBEAT_IFACE] = merge_revisions(HEARTBEAT_IFACE, [resources_of(freshness_v2.standard_contract())])
+    return sorted([*listed, HEARTBEAT_IFACE], key=_bytes)
+
+
 def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
               interfaces: dict[str, Any]) -> dict[str, Any]:
     listed = sorted({i for s in policy.services for i in implements[s]}, key=_bytes)
     res = {i: merge_revisions(i, revisions_of(interfaces[i])) for i in listed}
+    listed = _with_heartbeats(listed, interfaces, res)
     expose = face.expose
     crosses = {(r.iface, r.token, r.template): r.crossing(expose) for i in listed for r in res[i]}
     warnings: list[dict[str, Any]] = []
@@ -616,7 +638,7 @@ def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
     # overlapped ones set aside."
     beats = {i: any(r.token in ("state", "@state") and r.horizon().horizon == "within" and crossing_res(r)
                     for r in res[i])
-             for i in listed if heartbeat_of(interfaces[i], res[i])}
+             for i in listed if i in interfaces and heartbeat_of(interfaces[i], res[i])}
     deny = _heartbeat_denies(deny, beats, listed, res, crosses, expose)
     rules = []
     if expose == "link":

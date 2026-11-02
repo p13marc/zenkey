@@ -1,16 +1,18 @@
 # freshness.v2's scenario contract, as spec/profiles/freshness/scenarios-v2.md
-# "Conventions" writes it ("The contract"), copied from that text. zk2py's
-# freshness.v2 scenarios use it. It must load with no finding at all.
+# "Conventions" writes it ("The contract"), copied from that text: since
+# freshness.v2 0.2 (F-443) it marks status and level link.exposure = "link",
+# and lists link.v1. Every section of zk2py's freshness.v2 scenarios uses it,
+# §7's face included. It must load with no finding at all.
 [interface]
 name  = "beacon"
 major = 2
 minor = 0
-uses  = ["freshness.v2"]
+uses  = ["freshness.v2", "link.v1"]
 
 [resources.status]                         # one member: a heartbeat every 0.95 s
 kind        = "state"
 type        = { raw = "text/plain" }
-annotations = { "freshness.ttl_s" = 2 }
+annotations = { "freshness.ttl_s" = 2, "link.exposure" = "link" }
 
 [resources."peer/{peer}"]                  # templated, best_effort under loss
 kind        = "state"
@@ -40,4 +42,4 @@ type = { raw = "text/plain" }
 [resources.level]                          # a stream, ttl 1 s
 kind        = "stream"
 type        = { raw = "text/plain" }
-annotations = { "freshness.ttl_s" = 1 }
+annotations = { "freshness.ttl_s" = 1, "link.exposure" = "link" }

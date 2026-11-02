@@ -650,6 +650,12 @@ class Window:
     listened_s: float
     lossless: bool
     present_throughout: bool
+    #: For an owner whose revision uses ``freshness.v2`` (text 0.11, #978
+    #: F4): whether the latest heartbeat covering its alarms heard in the
+    #: window was in step with the reader's view, its section's digest and
+    #: live count the view's (``freshness.v2`` §2.5); False when none was
+    #: heard. None for an owner that re-puts (``freshness.v1``).
+    in_step: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -667,9 +673,11 @@ def owner_set(presence: str, descriptor: dict[str, Any] | None, face: dict[str, 
     reasons; the seed (`no_seed`, `seed_incomplete`); the window
     (`window_lost`, then `owner_gap`, which "across a face … is not asked
     there"); `answered`; across a face, an empty GET (`across_face`);
-    `no_member` and `window_short`; then `window`. ``window`` is over §2.15's
-    span (from its declaration, or after a loss from the first complete GET
-    that followed it), as the caller measured it."""
+    `no_member` and `window_short`; for a ``freshness.v2`` owner, a window
+    whose latest heartbeat was not in step with the view, or that heard
+    none, `window_unconfirmed` (0.11's step 7); then `window`. ``window`` is
+    over §2.15's span (from its declaration, or after a loss from the first
+    complete GET that followed it), as the caller measured it."""
     if presence == "absent":
         return Verdict(NOT_ASKED, "absent")
     if presence == "incomplete":
@@ -701,6 +709,8 @@ def owner_set(presence: str, descriptor: dict[str, Any] | None, face: dict[str, 
         return Verdict(UNOBSERVABLE, "no_member")
     if window.listened_s <= ttl_s:
         return Verdict(UNOBSERVABLE, "window_short")
+    if window.in_step is False:
+        return Verdict(UNOBSERVABLE, "window_unconfirmed")
     return Verdict(ESTABLISHED, "window")
 
 

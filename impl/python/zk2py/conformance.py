@@ -381,7 +381,12 @@ def _example_against_history(root: Path, rel: str, c, built: bytes) -> list[Resu
       is byte-identical to it (§9.6: "one contract revision has one
       bundle");
     - against every published revision of its interface, FULL_TRANSITIVE,
-      the class is ``compatible``."""
+      the class is ``compatible``, or ``review`` for a revision that is
+      itself published: "**Review:** a human MUST accept it before
+      publication" (§9.8), so its bundle in the history root is that
+      acceptance. ``health.v1``'s, ``alarms.v1``'s and ``config.v1``'s
+      revisions 1.1 are such reviews against their 1.0, ``uses_changed``
+      (#978 F4, round 97)."""
     from . import bundle, compat
 
     hist = root / c.interface
@@ -395,8 +400,9 @@ def _example_against_history(root: Path, rel: str, c, built: bytes) -> list[Resu
                  for p in sorted(hist.glob("*.bundle.json"))]
     candidate = compat.Revision(c.canonical, {a.id: a.data for a in c.schemas.artifacts()})
     total, _ = compat.full_transitive(revisions, candidate, compat.contract_compare)
-    ok = total.cls == compat.COMPATIBLE
-    out.append((f"{rel} (compatible with {len(revisions)} published)", ok,
+    ok = total.cls == compat.COMPATIBLE or (total.cls == compat.REVIEW and published.is_file())
+    said = "" if total.cls == compat.COMPATIBLE else f", a review accepted by its publication: {total.reasons}"
+    out.append((f"{rel} (compatible with {len(revisions)} published{said if ok else ''})", ok,
                 "" if ok else f"{total.cls}: {total.reasons}"))
     return out
 
@@ -878,7 +884,8 @@ def _alarms_seed(s: Any):
 def _alarms_window(w: Any):
     from . import alarms
 
-    return None if w is None else alarms.Window(w["listened_s"], bool(w["lossless"]), bool(w["present_throughout"]))
+    return None if w is None else alarms.Window(w["listened_s"], bool(w["lossless"]), bool(w["present_throughout"]),
+                                                None if "in_step" not in w else bool(w["in_step"]))
 
 
 def _alarms_conclusions(path: Path) -> list[Result]:
@@ -3516,10 +3523,11 @@ def family_readings(root: Path) -> list[Result]:
 
 
 def _round96_k1_readings(root: Path) -> list[tuple[str, Any, Any]]:
-    """Core 0.83 (#609, round 96's extension; #981 K1): its entry; the
-    sentences F-451 to F-454 quote, as they read; and zk2py's readings of
-    what they leave open, through :mod:`zk2py.frame`, :mod:`zk2py.compat`
-    and the contract linter. No session is opened."""
+    """Core 0.83 (#609, round 96's extension; #981 K1) and the answers to
+    F-451 to F-454 (core 0.85, ``timing.v1`` 0.10 and core 0.87; round 97):
+    each answer as it reads and the form it replaced gone, then zk2py's
+    reading of it, through :mod:`zk2py.frame`, :mod:`zk2py.compat` and the
+    contract linter. No session is opened."""
     from . import compat, frame, packed
     from .contract import load_contract
 
@@ -3529,13 +3537,18 @@ def _round96_k1_readings(root: Path) -> list[tuple[str, Any, Any]]:
     def missing(text: str, *quotes: str) -> list[str]:
         return [q for q in quotes if q not in text]
 
+    def kept(text: str, *quotes: str) -> list[str]:
+        return [f"still: {q}" for q in quotes if q in text]
+
     core, tim = flat("core.md"), flat("profiles/timing/v1.md")
     log = (spec / "CHANGELOG.md").read_text(encoding="utf-8").splitlines()
     out: list[tuple[str, Any, Any]] = [
-        ("core 0.83's entry, frames defined",
-         [any(line.startswith("## 0.83 ") and "frames defined" in line for line in log)], [True]),
+        ("core 0.83's entry, frames defined; 0.85's, round 96's findings answered",
+         [any(line.startswith("## 0.83 ") and "frames defined" in line for line in log),
+          any(line.startswith("## 0.85 ") and "zk2py round 96's findings answered" in line for line in log)],
+         [True, True]),
     ]
-    # F-451: a field renamed that carries a deadband.
+    # F-451, answered by core 0.85: a deadband compared by its field's place.
     doc = {"types": {"R": {"fields": [{"name": "level", "type": "int", "minimum": 0, "maximum": 1000}]}}}
     ren = {"types": {"R": {"fields": [{"name": "depth", "type": "int", "minimum": 0, "maximum": 1000}]}}}
     a_ = frame.Layout(packed.lint(doc).types["R"], frame.declaration(
@@ -3543,16 +3556,18 @@ def _round96_k1_readings(root: Path) -> list[tuple[str, Any, Any]]:
     b_ = frame.Layout(packed.lint(ren).types["R"], frame.declaration(
         {"deadband": {"depth": {"delta": "4", "max_records": 5}}}))
     v = compat.Verdict()
-    compat._frame_rules(v, {"frame": a_.decl.canonical()}, {"frame": b_.decl.canonical()})
-    out.append(("F-451: §9.8's deadband row and its tag sentence, §7.7's names left out, §9.5's deadband by name; "
-                "zk2py's reading: a renamed field's deadband is deadband_changed, its tag unmoved",
-                missing(core, "| A deadband added, removed or changed | breaking: what an omitted field holds moves, "
-                              "either way | `deadband_changed` |",
-                        "Each breaking change above, and each of the layout, moves the frame's tag (§7.7).",
-                        "Names are left out, so a field renamed keeps the tag.",
-                        "`deadband` is an object by field name of `{\"delta\", \"max_records\"}`")
-                + [a_.tag == b_.tag, v.cls], [True, "breaking"]))
-    # F-452: E050 reads a timing value alone; timing.v1 judges an invalid declaration's none.
+    compat._frame_rules(v, {"frame": a_.decl.canonical()}, {"frame": b_.decl.canonical()}, ["level"], ["depth"])
+    moved = compat.Verdict()
+    compat._frame_rules(moved, {"frame": a_.decl.canonical()}, {"frame": frame.declaration(
+        {"deadband": {"level": {"delta": "5", "max_records": 5}}}).canonical()}, ["level"], ["level"])
+    out.append(("F-451 answered (core 0.85): a deadband compared by its field's place, never by its name; zk2py's "
+                "reading: a renamed field keeps its deadband and its tag, a changed delta is deadband_changed",
+                missing(core, "**A deadband is compared by its field's place** in the record type, as the frame form "
+                              "lists it (§7.7), never by its name. So a field renamed keeps its deadband. The rename "
+                              "is the packed rules' `field_renamed`, a review.",
+                        "Names are left out, so a field renamed keeps the tag.")
+                + [a_.tag == b_.tag, v.cls, moved.cls], [True, "compatible", "breaking"]))
+    # F-452, answered by core 0.85: E050 reads the values as a declaration.
     text = """[interface]
 name  = "seed"
 major = 1
@@ -3567,33 +3582,40 @@ frame       = { records = 3, step_ms = 10000 }
 annotations = { "timing.deadline_ms" = 20000, "timing.period_ms" = "x" }
 """
     c = load_contract(spec / "conformance" / "contracts" / "zk2py-f452.toml", text=text)
-    out.append(("F-452: E050 reads each timing value alone, timing.v1 §2.2 judges none of an invalid declaration; "
-                "zk2py's reading: a valid deadline below the span beside an invalid period is E050",
-                missing(core, "It reads a `timing.*` value as `timing.v1` §2.2 does, and one that does not read "
-                              "gives none.")
-                + missing(tim, "A reader MUST NOT judge a period, a deadline or a lifespan of a resource whose "
-                               "declaration is invalid")
-                + [c.codes], [["E050"]]))
-    out.append(("F-453: timing.v1 §2.2 says no core lint reads an annotation's value; core E050 reads timing.*",
-                missing(tim, "The core has no code for it: W105 is about keys, and no core lint reads an annotation's "
-                             "value.")
-                + missing(core, "| E050 | timing a frame resource cannot keep (`timing.v1` §2.3)"), []))
-    out.append(("F-454: §7.7's owner and reader rules cite scenarios/frames.md, which spec/ does not hold",
+    c2 = load_contract(spec / "conformance" / "contracts" / "zk2py-f452.toml",
+                       text=text.replace('"timing.period_ms" = "x"', '"timing.period_ms" = 10000'))
+    out.append(("F-452 answered (core 0.85): E050 reads the timing values as timing.v1 §2.2 reads a declaration; "
+                "zk2py's reading: a deadline below the span beside an invalid period gives none, beside a valid one "
+                "E050",
+                missing(core, "It reads the `timing.*` values as `timing.v1` §2.2 reads a declaration. Where one of "
+                              "them does not read, the declaration is invalid. E050 then reads none of its values, as "
+                              "`timing.v1` judges none.")
+                + kept(core, "It reads a `timing.*` value as `timing.v1` §2.2 does, and one that does not read gives "
+                             "none.")
+                + [c.codes, c2.codes], [[], ["E050"]]))
+    out.append(("F-453 answered (timing.v1 0.10): §2.2's sentence on core lints names E050",
+                missing(tim, "The core has no code for an invalid value. W105 is about keys. E050 reads these values "
+                             "only on a frame resource, and none of an invalid declaration (core §7.7, §9.2).")
+                + kept(tim, "The core has no code for it: W105 is about keys, and no core lint reads an annotation's "
+                            "value."), []))
+    fm = (spec / "scenarios" / "frames.md").read_text(encoding="utf-8") \
+        if (spec / "scenarios" / "frames.md").is_file() else ""
+    out.append(("F-454 answered (core 0.87): §7.7's citations of scenarios/frames.md, which holds §1 to §6",
                 missing(core, "`[Sc: frames.md §1]`", "`[Sc: frames.md §4]`", "`[Sc: frames.md §2, §5, §6]`")
-                + [(spec / "scenarios" / "frames.md").exists()], [False]))
+                + [[n for n in range(1, 7) if f"\n## §{n} " not in fm]], [[]]))
     return out
 
 
 def _round96_readings(root: Path) -> list[tuple[str, Any, Any]]:
     """Core 0.81 and 0.82, ``freshness.v2`` text 0.1, ``link.v1`` text 0.11
     and ``link.v2`` text 0.1 (#609, round 96; #978 F1 and F3, #988 L1 and
-    L2). Each text at its version or later with its entry; the sentences
-    F-442 to F-450 quote, as they read; then zk2py's readings of what they
-    leave open. No session is opened."""
-    import hashlib
+    L2), and the answers to F-442 to F-450 (core 0.85, observer 0.20,
+    ``freshness.v2`` 0.2, ``link.v1`` 0.12 and ``link.v2`` 0.2; round 97):
+    each answer as it reads and the form it replaced gone, then zk2py's
+    reading of it. No session is opened."""
     import re
 
-    from . import catalog, freshness_v2, heartbeat, jcs, link, zk2c
+    from . import catalog, freshness_v2, heartbeat, link, zk2c
     from .contract import load_contract
     from .owner import keeps_timestamp
 
@@ -3603,6 +3625,9 @@ def _round96_readings(root: Path) -> list[tuple[str, Any, Any]]:
     def missing(text: str, *quotes: str) -> list[str]:
         return [q for q in quotes if q not in text]
 
+    def kept(text: str, *quotes: str) -> list[str]:
+        return [f"still: {q}" for q in quotes if q in text]
+
     def entry(rel: str, version: str, words: str) -> list[str]:
         log = (spec / rel).read_text(encoding="utf-8").splitlines()
         ok = any(line.startswith(f"## {version} ") and words in line for line in log)
@@ -3611,91 +3636,116 @@ def _round96_readings(root: Path) -> list[tuple[str, Any, Any]]:
     core, obs, rules, log = flat("core.md"), flat("observer.md"), flat("RULES.md"), flat("CHANGELOG.md")
     v2, sc2, l1, l2 = (flat("profiles/freshness/v2.md"), flat("profiles/freshness/scenarios-v2.md"),
                        flat("profiles/link/v1.md"), flat("profiles/link/v2.md"))
-    llog = flat("profiles/link/CHANGELOG.md")
     m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
     core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
     repo = spec.parent
     beacon = load_contract(repo / "impl" / "python" / "interop" / "freshness" / "beacon.v2.toml")
-    face = load_contract(repo / "impl" / "python" / "interop" / "freshness" / "beacon-face.v2.toml")
+    ref = load_contract(repo / "zenkey" / "tests" / "contracts" / "beacon.v2.toml")
     old = load_contract(repo / "impl" / "python" / "interop" / "freshness" / "beacon.v1.toml")
     lo = heartbeat.layout_of(beacon.canonical, beacon.fingerprint)
     out: list[tuple[str, Any, Any]] = [
-        ("core 0.82 or later, freshness.v2 0.1, link.v1 0.11 and link.v2 0.1, each with its entry",
-         [core_v >= (0, 82)] + entry("CHANGELOG.md", "0.81", "the heartbeat defined")
-         + entry("CHANGELOG.md", "0.82", "adopts the heartbeat")
-         + entry("profiles/freshness/CHANGELOG.md", "`v2.md` 0.1", "confirmed by a heartbeat")
-         + entry("profiles/link/CHANGELOG.md", "0.11", "never downsampled")
-         + entry("profiles/link/CHANGELOG.md", "link.v2 0.1", "the face's transport"),
+        ("core 0.85 or later, observer 0.20, freshness.v2 0.2, link.v1 0.12 and link.v2 0.2, each with its entry",
+         [core_v >= (0, 85)] + entry("CHANGELOG.md", "0.85", "zk2py round 96's findings answered")
+         + entry("observer-CHANGELOG.md", "0.20", "a heartbeat's body")
+         + entry("profiles/freshness/CHANGELOG.md", "`v2.md` 0.2", "zk2py round 96's findings answered")
+         + entry("profiles/link/CHANGELOG.md", "0.12", "a heartbeat over several revisions")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 0.2", "the catalog read as core §8.6 reads one"),
          [True]),
-        ("F-442: 0.82's entry counts 198 rules; RULES.md's table held 207 at 0.82 (re-keyed at 0.83, 223)",
-         missing(log, "joins S2's evidence. `RULES.md` lists 198 rules.")
+        ("F-442 answered (core 0.85): 0.82's entry counts 207 rules, as RULES.md's table did",
+         missing(log, "joins S2's evidence. `RULES.md` lists 207 rules.")
+         + kept(log, "joins S2's evidence. `RULES.md` lists 198 rules.")
          + [int(re.search(r"\| Every rule, once \| (\d+) \|", rules).group(1)) >= 207],
          [True]),
-        ("F-443: every section uses beacon.v2, §7's reads link.exposure; beacon.v2 declares none, and a contract "
-         "that does lists link.v1 (E020)",
-         missing(sc2, "Every section uses `beacon.v2`.", "`status` and `level` read `link.exposure = \"link\"` there.")
-         + [k for r in beacon.canonical["resources"] for k in r["annotations"] if k.startswith("link.")]
-         + [face.codes, face.canonical["uses"], face.fingerprint == beacon.fingerprint],
-         [[], ["freshness.v2", "link.v1"], False]),
-        ("F-444: core §7.5 reads a record as the resource's type; the heartbeat's is octet-stream, and observer "
-         "names no heartbeat",
-         missing(core, "**The record** is every byte after the seq, possibly none. It is read as the resource's "
-                       "type says (§7.1).")
-         + [freshness_v2.standard_contract().canonical["resources"][0]["type"]["media_type"],
-            "heartbeat" in obs.lower()],
-         ["application/octet-stream", False]),
-        ("F-445, F-446: S2's freshness.v2 sentence and the table's cell; zk2py's reading: no Zenoh timestamp on a "
+        ("F-443 answered (freshness.v2 0.2): beacon.v2 marks status and level link and lists link.v1; zk2py's copy "
+         "loads with no finding, and is the reference's test contract, fingerprint for fingerprint",
+         missing(sc2, 'uses = ["freshness.v2", "link.v1"]',
+                 "`link.exposure` marks `status` and `level` to cross a face (`link.v1` §2.2). So the contract lists "
+                 "`link.v1`. Only §7 runs a face.",
+                 "`beacon.v2` marks `status` and `level` `link.exposure = \"link\"` (the conventions).")
+         + kept(sc2, "`status` and `level` read `link.exposure = \"link\"` there.")
+         + [beacon.codes, beacon.canonical["uses"],
+            sorted(r["template"] for r in beacon.canonical["resources"]
+                   if r["annotations"].get("link.exposure") == "link"),
+            beacon.fingerprint == ref.fingerprint],
+         [[], ["freshness.v2", "link.v1"], ["level", "status"], True]),
+        ("F-444 answered (core 0.85, observer 0.20): a heartbeat carries a body, never a record of its resource's "
+         "type, and a tool MUST NOT read one as such",
+         missing(core, "**The record** is every byte after a mutation's seq, possibly none. It is read as the "
+                       "resource's type says (§7.1). A heartbeat and a frame carry a **body** there instead, never a "
+                       "record of the resource's type.")
+         + missing(obs, "A tool MUST NOT decode, render or judge a heartbeat's body as a record of its resource's "
+                        "type.",
+                   "it shows the heartbeat by its envelope: its form, the interface it covers and its size.")
+         + kept(core, "**The record** is every byte after the seq, possibly none."),
+         []),
+        ("F-445, F-446 answered (core 0.85): S2 names every member of a freshness.v2 state, vouched for or not, and "
+         "§4.3 mints a last confirmation at each mutation and heartbeat; zk2py's reading: no Zenoh timestamp on a "
          "freshness.v2 state's put, one on a freshness.v1 state's",
-         missing(core, "The owner's reply of a member a `freshness.v2` heartbeat confirms MUST carry instead that "
-                       "member's last confirmation, as §4.3's table says.",
-                 "on its replies alone: the later of its last mutation's time and the last heartbeat's that vouched "
-                 "for it (S2), never on a put")
+         missing(core, "The owner's reply of a member of a state that §4.3's table lists under `freshness.v2` MUST "
+                       "carry instead that member's last confirmation, as the table says. That holds whether or not "
+                       "a heartbeat vouched for the member since its last mutation.",
+                 "on its replies alone, never on a put: the later of the timestamps the owner minted at its last "
+                 "mutation and at the last heartbeat that vouched for it",
+                 "An owner mints one at each mutation of such a member, though its put carries none. It mints one "
+                 "as it writes each heartbeat (§7.5). That heartbeat's time is the timestamp's instant, to the "
+                 "millisecond")
+         + kept(core, "The owner's reply of a member a `freshness.v2` heartbeat confirms MUST carry instead")
          + [keeps_timestamp(beacon, next(r for r in beacon.canonical["resources"] if r["template"] == "status")),
             keeps_timestamp(old, next(r for r in old.canonical["resources"] if r["template"] == "status"))],
          [False, True]),
-        ("F-447: §2.10's every bit clear; zk2py's reading: the map and the digests kept, every vouched bit clear",
-         missing(v2, "Its heartbeats go on, every bit clear, so its liveness still crosses.")
+        ("F-447 answered (freshness.v2 0.2): every vouched bit clear, the map, the live counts and the digests "
+         "kept; zk2py's reading, the same",
+         missing(v2, "Its heartbeats go on, every vouched bit clear, so its liveness still crosses. Each keeps its "
+                     "map, its live counts and its digests as the owner holds them.")
+         + kept(v2, "Its heartbeats go on, every bit clear, so its liveness still crosses.")
          + [freshness_v2.owner_body(lo, {"state/status"}, {
              "zk2/lab/beacon/beacon.v2/state/status": freshness_v2.OwnerView(
                  "zk2/lab/beacon/beacon.v2/state/status", zk2c.InBand(16, 1, 0))}, None, vouch=False)],
          [{"time": None, "sections": {"state/status": {"digest": f"{heartbeat.digest([('zk2/lab/beacon/beacon.v2/state/status', 16, 1, 0)]):08x}", "vouched": False}}}]),
     ]
-    # F-448: only a heartbeat read at step 4 moves the sequence (apply.json case 8).
+    # F-448: only a read heartbeat counts (apply.json's new case).
     view = freshness_v2.View(lo, ["state/status"])
     body = heartbeat.write(lo, {"time": None, "sections": {}})
     steps = [view.heartbeat(lo.tag, zk2c.InBand(16, 9, 5), body, 0),
              view.heartbeat(lo.tag, zk2c.InBand(16, 9, 6), b"", 1),
              view.heartbeat(lo.tag, zk2c.InBand(16, 9, 7), body, 2)]
-    out.append(("F-448: older is the one step not counted; zk2py's reading: a refused 6 between 5 and 7 leaves a gap",
-                missing(v2, "nothing is confirmed, and it is not counted (`older`).",
-                        "A heartbeat whose seq is not the last one's plus 1, within one run, follows a lost one.")
+    out.append(("F-448 answered (freshness.v2 0.2): only a read heartbeat counts; zk2py's reading: a refused 6 "
+                "between 5 and 7 leaves a gap",
+                missing(v2, "**What counts.** A **read heartbeat** is one read at step 4. A heartbeat stopped at step "
+                            "1, 2 or 3 is not counted. It moves neither the sequence (below) nor a count of "
+                            "divergences in a row.",
+                        "A read heartbeat whose seq is not the last read one's plus 1, within one run, follows a "
+                        "lost one.")
+                + kept(v2, "nothing is confirmed, and it is not counted (`older`).")
                 + [[x.get("refused") or x["read"]["gap"] for x in steps]], [[False, "short", True]]))
-    # F-449: transport.json's catalogs, refused by core §8.6, their JCS id the policy's.
+    # F-449: transport.json's catalogs are core §8.6 documents now.
     tj = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "transport.json")
-    docs = [c["catalog"] for c in tj["cases"] if "catalog" in c]
     reads = []
-    for d in docs:
+    for d in [c["catalog"] for c in tj["cases"] if "catalog" in c]:
         try:
             reads.append(catalog.read(json.dumps(d)).id)
         except catalog.Refused as e:
             reads.append(e.token)
-    out.append(("F-449: link.v2 §2.19's id and its changelog's §8.6 'not landed'; core §8.6 refuses every catalog "
-                "transport.json gives, and their JCS ids are read alone",
-                missing(l2, "The id is the first 4 bytes of the sha256 of the catalog document's JCS bytes (RFC "
-                            "8785), as 8 lowercase hex digits.")
-                + missing(llog, "since core §8.6 has not landed.")
-                + [reads, [hashlib.sha256(jcs.dumps(d)).hexdigest()[:8] for d in docs][0]],
-                [["member", "member", "member"], "50a01c11"]))
+    out.append(("F-449 answered (link.v2 0.2): §2.19's catalog read as core §8.6 reads one; zk2py's reading: every "
+                "catalog transport.json gives reads, radio.v1's and its successor's ids",
+                missing(l2, "**The catalog** is read as core §8.6 reads one, and its id is §8.6's.",
+                        "**A file §8.6 refuses** holds no id to compare.")
+                + kept(l2, "The id is the first 4 bytes of the sha256 of the catalog document's JCS bytes (RFC "
+                           "8785), as 8 lowercase hex digits.")
+                + [sorted(set(reads))], [["62129a35", "feb61e3d"]]))
     # F-450: a heartbeat over two revisions, one freshness.v1's.
     revs = {"revisions": [{"uses": ["freshness.v1"], "resources": [
         {"template": "mode", "token": "state", "annotations": {"freshness.ttl_s": 60}}]},
         {"uses": ["freshness.v2"], "resources": [
             {"template": "mode", "token": "state", "annotations": {"freshness.ttl_s": 60}}]}]}
     res = link.merge_revisions("two.v1", link.revisions_of(revs))
-    out.append(("F-450: §2.9's 'a revision of it … uses freshness.v2 and it has a collection'; zk2py's reading: "
-                "a heartbeat over the revisions together",
+    out.append(("F-450 answered (link.v1 0.12): a heartbeat where a revision uses freshness.v2, the revisions read "
+                "together giving a collection; zk2py's reading, the same",
                 missing(l1, "A listed interface has a heartbeat when a revision of it the generator is given uses "
-                            "`freshness.v2` and it has a collection")
+                            "`freshness.v2`, and the revisions read together (§2.3) give it a collection",
+                        "Another revision that uses `freshness.v1` takes none of it away.",
+                        "A service running a revision that uses `freshness.v1` sends no heartbeat, and its re-puts "
+                        "are evidence of their own.")
                 + [link.heartbeat_of(revs, res)], [True]))
     return out
 
