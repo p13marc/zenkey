@@ -26,7 +26,9 @@
 //! has its status put before step 3, as `health.v1` §2.3 makes a MUST
 //! ([`crate::health`]); one implementing `config.v1` through
 //! [`ServiceBuilder::config_v1`] has its view and status put when it
-//! declares them, as `config.v1` §2.3 makes a MUST ([`crate::config_v1`]);
+//! declares them, as `config.v1` §2.3 makes a MUST ([`crate::config_v1`]),
+//! and one implementing a config contract through
+//! [`ServiceBuilder::config_v2`] its record ([`crate::config_v2`]);
 //! one implementing `alarms.v1` through [`ServiceBuilder::alarms`] adopts
 //! its previous instance's alarms there, putting each again before
 //! anything is alive (`alarms.v1` §2.9, [`crate::alarms`]); an author of
@@ -196,6 +198,8 @@ pub struct ServiceBuilder {
     pub(crate) health: Option<crate::health::Health>,
     /// `config.v1`, once [`ServiceBuilder::config_v1`] implemented it.
     pub(crate) config_v1: Option<crate::config_v1::Configuration>,
+    /// `config.v2`, once [`ServiceBuilder::config_v2`] implemented it.
+    pub(crate) config_v2: Option<crate::config_v2::Configuration>,
     /// `alarms.v1`, once [`ServiceBuilder::alarms`] implemented it.
     pub(crate) alarms: Option<crate::alarms::Alarms>,
     /// `desired.v1`'s desired resources this service authors.
@@ -217,6 +221,10 @@ pub struct ServiceBuilder {
     /// [`ServiceBuilder::catalog`] gave it one.
     catalog: Option<Arc<Catalog>>,
 }
+
+/// Why a second configuration is refused (`config.v2` §1).
+const ONE_CONFIGURATION: &str = "an instance implements config.v1's standard contract or a config contract, never \
+     both: it has one configuration (config.v2 §1)";
 
 /// Why a profile's owner the runtime implements is refused on a governed
 /// interface (`redundancy.v1` §2.4, #841): it writes its keys before the
@@ -331,6 +339,7 @@ impl ServiceBuilder {
             closed: tokio::sync::watch::Sender::new(false),
             health: None,
             config_v1: None,
+            config_v2: None,
             alarms: None,
             desired_authors: Vec::new(),
             desired_targets: Vec::new(),
@@ -541,7 +550,40 @@ impl ServiceBuilder {
         if self.config_v1.is_some() || self.implements(&iface) {
             return Err(Error::Duplicate(iface));
         }
+        if self.config_v2.is_some() {
+            return Err(Error::Contract(ONE_CONFIGURATION.to_owned()));
+        }
         crate::config_v1::Configuration::declare(self, startup, device).await
+    }
+
+    /// Implements `config.v2` over the service's config contract, which
+    /// the builder implements already ([`crate::config_v2`]): the one
+    /// interface whose contract lists `config.v2` in `uses` (§2.1), its
+    /// contract linted (§2.2). The owner starts from `startup`, never from a
+    /// runtime change of an earlier instance (§2.12), and configures
+    /// `device`, `config.v1`'s [`crate::config_v1::Device`]. The record is
+    /// put here, so before step 4 (§2.3); each settable group's `set/<g>` is
+    /// served, `confirm`, `cancel` and `extend`, and `persist` with a
+    /// persisted layer, else listed unavailable with cause `config`
+    /// (§2.13). The timer runs until the service closes. Its instance
+    /// number is the run taken here, so a run store
+    /// ([`ServiceBuilder::run_store`]) is given before. Refused when the
+    /// service implements no config contract or two, `config.v2` already
+    /// or `config.v1` (one configuration, §1), when the contract does not
+    /// lint, when `startup.device_schema` differs from it (Appendix B), or
+    /// when `startup` is not one an owner can start from.
+    pub async fn config_v2(
+        &mut self,
+        startup: crate::config_v2::Startup,
+        device: Arc<dyn crate::config_v1::Device>,
+    ) -> Result<crate::config_v2::Configuration> {
+        if let Some(c) = &self.config_v2 {
+            return Err(Error::Duplicate(c.iface().clone()));
+        }
+        if self.config_v1.is_some() || self.implements(&crate::config_v1::iface()) {
+            return Err(Error::Contract(ONE_CONFIGURATION.to_owned()));
+        }
+        crate::config_v2::Configuration::declare(self, startup, device).await
     }
 
     /// Implements `alarms.v1`, its standard contract embedded
@@ -653,7 +695,9 @@ impl ServiceBuilder {
     /// `config.v1`'s owner as a target (`desired.v1` §2.16): the role
     /// `role`, as [`ServiceBuilder::desired_target`] holds it, each act made
     /// on the `config.v1` this builder implements
-    /// ([`ServiceBuilder::config_v1`], called first). A put is converged
+    /// ([`ServiceBuilder::config_v1`], called first), or its `config.v2`
+    /// ([`ServiceBuilder::config_v2`]), whose record carries the report
+    /// (`config.v2` §2.18). A put is converged
     /// once in the instance, whatever its revision, and reported in the view
     /// and the status; a delete reverts each parameter the documents it
     /// acted on named to its startup value, and the view and the status
@@ -677,11 +721,16 @@ impl ServiceBuilder {
                 &r.iface,
             )));
         }
-        let Some(cfg) = self.config_v1.clone() else {
-            return Err(Error::Contract(
-                "desired.v1 §2.16: implement config.v1 (ServiceBuilder::config_v1) first"
-                    .to_owned(),
-            ));
+        let cfg = match (self.config_v1.clone(), self.config_v2.clone()) {
+            (Some(c), _) => crate::desired::Configured::V1(c),
+            (None, Some(c)) => crate::desired::Configured::V2(c),
+            (None, None) => {
+                return Err(Error::Contract(
+                    "desired.v1 §2.16: implement config.v1 (ServiceBuilder::config_v1) or a \
+                     config contract (ServiceBuilder::config_v2) first"
+                        .to_owned(),
+                ));
+            }
         };
         let handler = Arc::new(crate::desired::ConfigHandler { cfg });
         crate::desired::Target::declare(self, role, author, resource, report, handler, startup)
@@ -1283,6 +1332,7 @@ impl ServiceBuilder {
             clock: None,
             health: self.health,
             config_v1: self.config_v1,
+            config_v2: self.config_v2,
             alarms: self.alarms,
             desired_authors: self.desired_authors,
             desired_targets: self.desired_targets,
@@ -1547,6 +1597,8 @@ pub struct Service {
     health: Option<crate::health::Health>,
     /// `config.v1`, when the builder implemented it.
     config_v1: Option<crate::config_v1::Configuration>,
+    /// `config.v2`, when the builder implemented it.
+    config_v2: Option<crate::config_v2::Configuration>,
     /// `alarms.v1`, when the builder implemented it.
     alarms: Option<crate::alarms::Alarms>,
     /// `desired.v1`'s authored resources and target roles.
@@ -1728,6 +1780,13 @@ impl Service {
     #[must_use]
     pub fn config_v1(&self) -> Option<&crate::config_v1::Configuration> {
         self.config_v1.as_ref()
+    }
+
+    /// Its `config.v2`, when [`ServiceBuilder::config_v2`] implemented it:
+    /// the handle the builder returned.
+    #[must_use]
+    pub fn config_v2(&self) -> Option<&crate::config_v2::Configuration> {
+        self.config_v2.as_ref()
     }
 
     /// Its `alarms.v1`, when [`ServiceBuilder::alarms`] implemented it: the
@@ -1998,7 +2057,8 @@ impl Service {
     /// (§1.5), is the caller's: the runtime never owns the session.
     ///
     /// Refused for a service implementing `config.v1` through
-    /// [`ServiceBuilder::config_v1`]: a new instance is a restart of its
+    /// [`ServiceBuilder::config_v1`], or `config.v2` through
+    /// [`ServiceBuilder::config_v2`]: a new instance is a restart of its
     /// configuration (`config.v1` §2.12), which the runtime makes as a new
     /// service, from the startup values ([`crate::config_v1`]).
     ///
@@ -2013,10 +2073,10 @@ impl Service {
     /// with the old instance kept, writing under the new run, which its
     /// descriptor is put again stating (§3.3).
     pub async fn new_epoch(&mut self) -> Result<InstanceId> {
-        if self.config_v1.is_some() {
+        if self.config_v1.is_some() || self.config_v2.is_some() {
             return Err(Error::Contract(
-                "config.v1: a new instance is a restart of the configuration, from its startup \
-                 values (config.v1 §2.12): close this service and start another"
+                "config.v1, config.v2: a new instance is a restart of the configuration, from \
+                 its startup values (config.v1 §2.12): close this service and start another"
                     .to_owned(),
             ));
         }
@@ -2203,6 +2263,9 @@ impl Service {
         // config.v1: its operations go with the tokens, so a restarted
         // instance never shares a key with this one (§2.12).
         if let Some(c) = &self.config_v1 {
+            c.shutdown().await?;
+        }
+        if let Some(c) = &self.config_v2 {
             c.shutdown().await?;
         }
         if let Some(q) = self.descriptor_q.take() {

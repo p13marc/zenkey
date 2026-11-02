@@ -245,6 +245,29 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   at `Owner::next_due`, and converges desired state; a restart is a new
   service from `Startup` (`new_epoch` is refused while it runs), and the
   owner example's `--config` drives it from stdin.
+  `config_v2` (#985 G2) is `config.v2`'s owner over the service's own
+  config contract, implemented first: `ServiceBuilder::config_v2(Startup,
+  Device)` (the `Device` is `config_v1`'s) refuses none or two contracts
+  that use `config.v2`, `config.v1` beside it, a contract whose
+  `config::v2::lint_contract` has a finding, and a `Startup::device_schema`
+  that differs from the contract's by a group, class, parameter, kind,
+  bound or sensitive mark (Appendix B); it wraps
+  `zenkey_model::config::v2::Owner` over a `Mint` of the service's
+  `Minter` (`Minter::mint_seq`, `new_run`; each run's counter start drawn
+  once, `Configuration::simulate_counter_start` a test's), and writes each
+  `Output` in its order from one flush: the puts as stamped
+  (`StateWriter::put_sealed`), the reply as written (`Call::reply_form`/
+  `refuse_form`), the events under their stamps (`EventWriter::put_sealed`).
+  One queryable per settable group's `set/<g>`, none for a contract group;
+  `persist` without a layer is listed unavailable; a bare-wire request is
+  given CH again under its type's tag. `set_desired` converges through
+  `Owner::converge`/`report_desired`, and `desired_config` (desired.v1
+  §2.16) feeds it as it feeds config.v1's (`desired::Configured`,
+  `profile_desired.rs`'s `config_v2_as_a_target`).
+  `tests/profile_config_v2.rs` is `scenarios-v2.md` §1–§12 over the
+  spec's `rfcfg.v1`; the owner example's `--config-v2`
+  embeds it (`owner/config.rs`'s `rfcfg`, `rfcfg_startup`) and drives it
+  with `config`'s commands, plus `config counter <n>` and `config record`.
   `alarms` (#800, AB) is `alarms.v1`'s owner on the embedded standard
   bundle: `ServiceBuilder::alarms(Startup)` → `Alarms` (also
   `Service::alarms()`). `raise(Condition)` makes §2.5's act from what is

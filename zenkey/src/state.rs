@@ -490,6 +490,26 @@ impl Minter {
         r.seq = next.min(SEQ_END);
     }
 
+    /// The next state and event seq of the run, with no Zenoh timestamp
+    /// and never held by the clock guard: for a profile whose model mints
+    /// its own stamps, its writes then putting them as minted
+    /// ([`StateWriter::put_sealed`], [`crate::writer::EventWriter`]'s), each
+    /// deciding its timestamp and its guard there (`config.v2`, #985 G2).
+    pub(crate) fn mint_seq(&self) -> wire::Stamp {
+        let mut r = self.runs.lock().expect("not poisoned");
+        self.next_seq(&mut r)
+    }
+
+    /// Takes a new run within the instance now (core §4.3's MAY): the
+    /// descriptor put stating it once the service runs, then every seq from
+    /// 0. `config.v2`'s owner takes one before its token counter passes
+    /// 65,535 (§2.6).
+    pub(crate) fn new_run(&self) {
+        let mut r = self.runs.lock().expect("not poisoned");
+        self.ensure(&mut r);
+        self.switch(&mut r);
+    }
+
     /// The session's clock now, offset as [`Minter::simulate_offset`] says.
     pub(crate) fn now(&self) -> Timestamp {
         let t = self.session.new_timestamp();
@@ -1395,6 +1415,55 @@ impl StateWriter {
         if let Some(p) = pending {
             p.commit();
         }
+        Ok(stamped)
+    }
+
+    /// Puts `payload`, a put's payload already sealed in §7.5's envelope
+    /// under `stamp` by a profile's model, which minted the seq through
+    /// [`Minter`] (`config.v2`, #985 G2: the owner writes what its model's
+    /// output says, byte for byte). Otherwise as [`StateWriter::put`]: the
+    /// record checked by its layout, the budget, the store, and a Zenoh
+    /// timestamp only where the writer stamps, which the clock guard holds.
+    pub(crate) async fn put_sealed(&self, stamp: wire::Stamp, payload: Vec<u8>) -> Result<Stamped> {
+        let admitted = self.writer.serving().await?;
+        let mut held = self.member.held.lock().await;
+        let record = wire::Envelope::parse(&payload)
+            .map_err(|r| Error::Payload(format!("not a put's envelope: {}", r.reason())))?
+            .record
+            .to_vec();
+        self.writer.admit_record(&record)?;
+        let timed = self.writer.is_stamped();
+        if timed && self.minter.is_ahead() {
+            if self.covered {
+                self.store.vouch(self.key.as_str(), false);
+            }
+            return Err(Error::ClockAhead);
+        }
+        let stamped = Stamped {
+            stamp,
+            time: timed.then(|| self.minter.time()),
+        };
+        self.writer.admit()?;
+        if self.keep {
+            held.value = Some((record, None));
+        }
+        held.at = tokio::time::Instant::now();
+        self.store.put(
+            &self.key,
+            payload.clone(),
+            self.writer.encoding().clone(),
+            None,
+            stamped,
+            self.is_vouched(),
+            self.confirmed_at(&stamped),
+        );
+        let sent = self
+            .writer
+            .put_stamped(&admitted, payload.into(), None, stamped)
+            .await;
+        drop(held);
+        self.member.wake.notify_one();
+        sent?;
         Ok(stamped)
     }
 
