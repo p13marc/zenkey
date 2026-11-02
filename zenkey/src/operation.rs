@@ -103,7 +103,9 @@ pub fn envelope_encoding(op: &Operation) -> &'static str {
             _ => envelope::JSON,
         },
         TypeId::Protobuf { .. } => envelope::PROTOBUF,
-        // No operation's type is packed (core §7.1, E044).
+        // A packed operation type lints since core 0.92 (§7.1), and travels
+        // in §7.5's forms, which no owner writes before C4c: until then its
+        // envelope is JSON, as a raw type's.
         TypeId::Raw { .. } | TypeId::Packed { .. } => envelope::JSON,
     }
 }

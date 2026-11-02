@@ -186,7 +186,7 @@ impl<T: PackedRecord> Codec for Packed<T> {
         Self::encode_in(value, wire, EPOCH_WITHOUT_CATALOG)
     }
     /// A record read under the type's own tag, which checks no tag CH
-    /// carried. A packed type travels only in an envelope (E044), and every
+    /// carried. A packed type travels only behind a CH (E044), and every
     /// typed read of one (a subscription, S4's GET, an archive's
     /// last-known) decodes by [`Codec::decode_record_in`] with the tag the
     /// envelope carried; this is for bytes a caller already admitted by it

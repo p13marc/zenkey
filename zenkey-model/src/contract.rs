@@ -950,20 +950,20 @@ fn resolve_data(
         Some(template),
         cx,
     );
-    // §7.1 (0.75): a packed record needs the envelope's tag, which an
-    // explicit stream's samples and an attachment never carry.
+    // §7.1 (0.75, narrowed by 0.92): a packed record needs CH's tag, which
+    // an explicit stream's samples and an attachment never carry.
     if kind == Kind::Stream && explicit && type_.as_ref().is_some_and(TypeId::is_packed) {
         cx.report.push(Diagnostic::error(
             "E044",
             at,
-            "type: a packed type on an explicit stream, whose samples carry no envelope",
+            "type: a packed type on an explicit stream, whose samples carry no CH for its tag",
         ));
     }
     if attachment.as_ref().is_some_and(TypeId::is_packed) {
         cx.report.push(Diagnostic::error(
             "E044",
             at,
-            "attachment: a packed type as an attachment, which carries no envelope",
+            "attachment: a packed type as an attachment, which carries no CH for its tag",
         ));
     }
     let base = cx.base.clone();
@@ -1278,22 +1278,8 @@ fn resolve_op(
     let response = resolve_type(spec.response.as_ref(), "response", at, None, cx);
     let error = resolve_type(spec.error.as_ref(), "error", at, None, cx);
     let summary = resolve_type(spec.summary.as_ref(), "summary", at, None, cx);
-    // §7.1 (0.75): an operation's request, reply and error carry no
-    // envelope, so no reader could check a packed record's tag.
-    for (what, t) in [
-        ("request", &request),
-        ("response", &response),
-        ("error", &error),
-        ("summary", &summary),
-    ] {
-        if t.as_ref().is_some_and(TypeId::is_packed) {
-            cx.report.push(Diagnostic::error(
-                "E044",
-                at,
-                format!("{what}: a packed type on an operation, which carries no envelope"),
-            ));
-        }
-    }
+    // §7.1 (0.92): an operation's request, response, error and summary may
+    // each be packed, since §7.5's forms carry the tag in their CH.
     let base = cx.base.clone();
     let replies =
         pick(spec.replies.as_ref(), kd, &base, |b| b.replies.as_ref()).unwrap_or(Replies::One);

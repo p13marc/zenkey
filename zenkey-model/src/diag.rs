@@ -273,7 +273,7 @@ pub const CODES: &[(&str, &str)] = &[
     ),
     (
         "E044",
-        "a packed type with no envelope to carry it: an explicit stream's, an attachment, or an operation's type",
+        "a packed type with no CH to carry its tag: an explicit stream's type, or an attachment",
     ),
     (
         "E045",
