@@ -417,8 +417,8 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "core §5.1", "Caller and tool: MUST NOT treat an empty", MET,
      "judgement, live.o3_verdict (observer_scenarios, operations.md §5)"),
     ("observer", "core §5.2", "It MUST refuse", MET,
-     "envelope.decode (errors family); at core 0.94 a caller's or a tool's that reads the bare wire, listed under "
-     "the caller alone (F-472)"),
+     "envelope.decode (errors family); a caller's or a tool's that reads the bare wire, listed under the caller "
+     "alone at core 0.94 (F-472) and under both since core 0.95's index (round 102)"),
     ("observer", "core §5.2", "A caller or a tool MUST read a `reply_err` under the `Encoding` `zenoh/bytes` by",
      MET, "live.read_reply_error, which live.o3_verdict and live.show_reply read through (forms_live §9 step 5) "
           "(round 101, core 0.94)"),

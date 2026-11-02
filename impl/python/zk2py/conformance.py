@@ -3755,7 +3755,7 @@ def family_readings(root: Path) -> list[Result]:
         + _mend_after_round93_readings(root) + _round94_readings(root) + _mend_after_round94_readings(root) \
         + _round95_readings(root) + _round96_readings(root) + _round96_k1_readings(root) + _round97_readings(root) \
         + _round98_readings(root) + _round99_readings(root) + _round100_readings(root) \
-        + _round101_readings(root)
+        + _round101_readings(root) + _round102_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -4551,12 +4551,14 @@ def _round101_readings(root: Path) -> list[tuple[str, Any, Any]]:
     core, obs, ops = flat("core.md"), flat("observer.md"), flat("scenarios/operations.md")
     m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
     core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    m = re.search(r"\| \*\*Text version\*\* \| (\d+)\.(\d+)", obs)
+    obs_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
     out: list[tuple[str, Any, Any]] = [
-        ("core 0.94 or later and observer 0.24, written against it, each with its entry (#985 C4c)",
-         [core_v >= (0, 94)] + entry("CHANGELOG.md", "0.94", "value and error forms")
-         + entry("observer-CHANGELOG.md", "0.24", "a call's forms read first")
-         + missing(obs, "| **Text version** | 0.24", "| **Written against** | core 0.94"),
-         [True]),
+        ("core 0.94 or later and observer 0.24 or later, each with its entry (#985 C4c); observer 0.25 is written "
+         "against core 0.95 (round 102)",
+         [core_v >= (0, 94), obs_v >= (0, 24)] + entry("CHANGELOG.md", "0.94", "value and error forms")
+         + entry("observer-CHANGELOG.md", "0.24", "a call's forms read first"),
+         [True, True]),
     ]
     # The evidence, as 0.94's entry counts it: calls.json new, the others'
     # cases unchanged since 0.92.
@@ -4634,51 +4636,116 @@ def _round101_readings(root: Path) -> list[tuple[str, Any, Any]]:
     rows = classes._rules_md(spec)
     dec = sorted(r[0] for r in rows if r[1] == "core §5.2" and "**Decoding.**" in r[3])
     read = sorted(r[0] for r in rows if r[1] == "core §5.2" and "MUST read a `reply_err` under" in r[3])
-    out.append(("F-472 (open): §5.2's Decoding MUST, of \"A caller or a tool that reads the bare wire\", is listed "
-                "under the caller alone; the reading MUST beside it, of the same subject, under both; the observer "
-                "class counts 69",
+    out.append(("F-472 (round 101; answered by core 0.95's index, round 102): §5.2's Decoding MUST, of \"A caller or "
+                "a tool that reads the bare wire\", was listed under the caller alone; it is under both now, as the "
+                "reading MUST beside it, and the observer class counts 70",
                 missing(core, "**Decoding.** A caller or a tool that reads the bare wire decodes an envelope")
                 + [dec, read, counted.get("Observer: the tool role, and a reader")],
-                [["caller"], ["caller", "observer"], 69]))
+                [["caller", "observer"], ["caller", "observer"], 70]))
     # F-473: a bare-wire envelope its decoding refuses: "that envelope …
     # not as the transport's", or "A malformed error is the transport's
     # too". zk2py reads it as the transport's, its decoding's token named.
     bad = live.read_reply_error("application/json", b'{"code":"busy"}')
     good = live.read_reply_error("application/json", b'{"code":"busy","message":""}')
-    out.append(("F-473 (open): a bare-wire envelope its decoding refuses is that envelope by \"The bare wire\", the "
-                "transport's by \"A malformed error\"; zk2py reads it as the transport's (decode), a good one busy",
+    out.append(("F-473 (round 101; answered by core 0.95 §5.2, round 102): a bare-wire envelope its decoding refuses "
+                "is a malformed error, the transport's; zk2py reads it so (decode), a good one busy",
                 missing(core, "under one of the envelope's three encodings as that envelope (below), not as the "
-                              "transport's.", "**A malformed error** is the transport's too.")
+                              "transport's. One its decoding refuses (below, \"Decoding\") is a malformed error, the "
+                              "transport's, as an error form the parse refuses is.",
+                        "**A malformed error** is the transport's too.")
                 + [(bad.kind, bad.refusal), (good.kind, good.code, good.bare)],
                 [("transport", "decode"), ("error", "busy", True)]))
     # F-474: §9 step 4 puts "its state", and neither setup declares one.
     sec9 = ops[ops.index("## §9 A call's forms"):]
     setup = sec9[:sec9.index("**Steps.**")]
-    out.append(("F-474 (open): operations.md §9 step 4 puts h1/tc's state, and its setup and the common one declare "
-                "no state; zk2py's tc.v1 declares status",
-                missing(sec9, "`h1/tc` puts its state twice, and the caller calls `set`.")
-                + ["state" in setup, "state" in ops[:ops.index("## §1 ")],
+    out.append(("F-474 (round 101; answered by core 0.95's operations.md §9, round 102): step 4 puts h1/tc's "
+                "parameterless state status, which its setup now gives it, declared by tc.v1 or another interface; "
+                "zk2py's tc.v1 declares status",
+                missing(sec9, "`h1/tc` puts `status` twice, and the caller calls `set`.",
+                        "`h1/tc` exposes a parameterless state too, `status`, which step 4 puts.")
+                + ["status" in setup,
                    "[resources.status]" in (spec.parent / "impl" / "python" / "interop" / "operations"
                                             / "tc.v1.toml").read_text(encoding="utf-8")],
-                [False, False, True]))
+                [True, True]))
     # F-475: no text bounds a value reply by its Encoding; a bare JSON array
     # of 8 bytes or more parses as a value (vectors.json), so a reader that
     # takes no MAY hands its "record" on.
     arr = zk2c.parse(bytes.fromhex("5b312c322c332c345d"), "reply")
-    out.append(("F-475 (open): \"A caller reads a reply by §7.5's parse\", bounded by no Encoding; [1,2,3,4] under "
-                "application/json parses as a value, tag 11, record ']'; zk2py takes the MAY",
-                missing(core, "**Reading a value.** A caller reads a reply by §7.5's parse,")
+    out.append(("F-475 (round 101; answered by core 0.95 §5.1 and observer 0.25 §7.3, round 102): a caller reads a "
+                "reply under zenoh/bytes by §7.5's parse, and one under another Encoding is no value form; "
+                "[1,2,3,4] still parses as a value, tag 11, record ']', so only the Encoding tells them apart",
+                missing(core, "**Reading a value.** A caller reads a reply under `zenoh/bytes` by §7.5's parse,",
+                        "**Under another `Encoding`** a reply is no value form, so it is malformed too, unless the "
+                        "caller reads the bare wire (below).")
+                + missing(obs, "**Another `Encoding`.** A reply under any other `Encoding` is no value form, and is "
+                               "undecodable as a refused one is, unless the tool reads the bare wire")
                 + [(arr.form, arr.width, arr.tag, arr.record)],
                 [("value", 32, 11, b"]")]))
     # F-476: the as-of mark's seq is "the last it minted …, or 0 when it has
     # minted none", and a run's seqs count from 0, so a reply before the first
     # put and one after it carry one mark (forms_live §9 step 4, both owners).
-    out.append(("F-476 (open): the as-of mark's seq is the last minted, or 0 when none is, and a run's first put is seq "
-                "0: a reply before it and one after it carry one mark; operations.md §9 step 4 checks the first alone",
+    out.append(("F-476 (round 101; answered by core 0.95 §5.1, round 102): a reply before a run's first put and one "
+                "after it both carry seq 0; a caller orders a mark of seq 0 before the write of seq 1, and not "
+                "against the write of seq 0",
                 missing(core, "The seq is the last it minted for state and events under that run, or 0 when it has "
-                              "minted none.", "Within one run, it can order the reply against the state it holds, by "
-                                              "seq.")
+                              "minted none.",
+                        "**At or after.** A mark of seq n, once its run has minted n, is at or after the write of seq "
+                        "n, and before the write of n + 1.",
+                        "so it orders a mark of seq 0 before the write of seq 1, and not against the write of seq 0.")
                 + missing(ops, "The second instance's reply carries its own descriptor's run, and seq 0."), []))
+    return out
+
+
+def _round102_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.95 and observer 0.25 (round 101's F-472 to F-479 answered),
+    config.v2 0.1 and its status draft, and link.v2's status draft, read at
+    main ee5fb697 (#609, round 102): each entry, and what each says changed
+    and did not. Round 101's readings of F-472 to F-476 are re-keyed to their
+    answers in :func:`_round101_readings`; config.v2's own readings are the
+    config family's (``v2/``) and :func:`_config_v2_readings`."""
+    import re
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, obs = flat("core.md"), flat("observer.md")
+    v2, l2, idx = flat("profiles/config/v2.md"), flat("profiles/link/v2.md"), flat("profiles/README.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.95 or later and observer 0.25, written against it, each with its entry (round 101 answered); "
+         "config.v2 0.1 and its draft entry; link.v2's draft entry",
+         [core_v >= (0, 95)] + entry("CHANGELOG.md", "0.95", "round 101")
+         + entry("observer-CHANGELOG.md", "0.25", "another `Encoding`")
+         + entry("profiles/config/CHANGELOG.md", "config.v2 0.1", "one packed record")
+         + entry("profiles/config/CHANGELOG.md", "config.v2 draft", "zenoh-modem")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 draft", "zenoh-modem")
+         + missing(obs, "| **Text version** | 0.25", "| **Written against** | core 0.95"),
+         [True]),
+    ]
+    # "No rule": RULES.md as the entry counts it.
+    rules = (spec / "RULES.md").read_text(encoding="utf-8")
+    counted = {n: int(c) for n, c in re.findall(r"^\| \[([^\]]+)\]\(#[^)]*\) \| (\d+)", rules, re.M)}
+    once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
+    out.append(("core 0.95's entry: no rule; RULES.md lists 239 rules, the observer class 70 (F-472's index)",
+                [int(once.group(1)) if once else None, counted.get("Observer: the tool role, and a reader")],
+                [239, 70]))
+    # The statuses: config.v2 and link.v2 draft, each used by zenoh-modem,
+    # their texts unchanged at 0.1 and 0.6.
+    out.append(("config.v2 0.1 and link.v2 0.6 are draft, used by zenoh-modem, in the index's first table",
+                missing(v2, "| **Text version** | 0.1", "| **Status** | draft |",
+                        "| **Written against** | core 0.94")
+                + missing(l2, "| **Text version** | 0.6", "| **Status** | draft |")
+                + missing(idx, "| [`config.v2`](config/v2.md) | 0.1 | draft | zenoh-modem | 0.94 |",
+                          "| [`link.v2`](link/v2.md) | 0.6 | draft | zenoh-modem | 0.91 |"), []))
     return out
 
 
