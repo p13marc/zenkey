@@ -280,7 +280,12 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
   as zenctl's). `tests/examples.rs` requires every contract in
   `examples/zk2/` to load with **no finding at all**, and to be published in
-  `examples/zk2/.history` and compatible with it. After an intended change,
+  `examples/zk2/.history` and compatible with it, or a published
+  `uses_changed` review alone (#978 F5: the adopters' contracts and
+  `nav.v2` on `freshness.v2`, `link/radio.v1` kept on v1 for `link.v1`'s
+  scenarios), as `tests/profiles.rs` accepts a standard contract's (F4).
+  zenoh-modem's catalog appends each new `modem.v3`, `config.v1` and
+  `health.v1` revision (`zk2 catalog add`). After an intended change,
   run `cargo run -p zenkey-model --bin zk2 -- contract bundle <file>
   --history examples/zk2/.history`; the history is append-only.
   `budget::DEFAULT_LEASE`, `DEFAULT_KEEP_ALIVE` and
