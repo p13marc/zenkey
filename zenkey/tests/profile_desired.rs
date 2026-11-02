@@ -1438,6 +1438,120 @@ async fn config_v1_as_a_target() {
     asvc.close().await.unwrap();
 }
 
+/// `config.v2`'s owner `lab/rf0` as a target (`config.v2` §2.18, #985 G2):
+/// the spec's `rfcfg.v1`, fed through `desired.v1` as `config.v1`'s owner
+/// is. A put converges and is reported in the record; a refused one keeps
+/// what was in force, its group named by index; a delete reverts what the
+/// documents named, and the record carries no desired fields after it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn config_v2_as_a_target() {
+    use zenkey::config_v2;
+    use zenkey::model::config::v2::ParamState;
+    use zenkey::model::config::{DesiredOutcome, Value as CValue};
+
+    let bus = one_router().await;
+    let configs = imp("configs.v1");
+    let ci = configs.iface().clone();
+    let author_session = client(&bus.ep1).await;
+    let mut ab = ServiceBuilder::new(&author_session, config(AUTHOR));
+    ab.implement(configs.clone()).unwrap();
+    let author = ab
+        .desired_author(&ci, CONFIGS, AuthorStartup::default())
+        .await
+        .unwrap();
+    let asvc = ab.start().await.unwrap();
+
+    let owner = client(&bus.ep1).await;
+    let mut cfg = config(RF0).bind("configs", &[AUTHOR]);
+    cfg.bindings.get_mut("configs").unwrap().params = [
+        ("system".to_owned(), "self.system".to_owned()),
+        ("service".to_owned(), "self.service".to_owned()),
+    ]
+    .into();
+    let startup = sim::rfcfg_startup(10, Duration::from_secs(1), true);
+    let device = Arc::new(sim::SimDevice::new_v2(&startup));
+    let mut b = ServiceBuilder::new(&owner, cfg);
+    b.require("configs", ci.clone(), true);
+    b.implement(zenkey::Implementation::new(sim::rfcfg().unwrap()))
+        .unwrap();
+    let c = b
+        .config_v2(startup, Arc::clone(&device) as Arc<dyn config_v2::Device>)
+        .await
+        .unwrap();
+    let t = b
+        .desired_config("configs", &configs, CONFIGS, None, TargetStartup::default())
+        .await
+        .unwrap();
+    let svc = b.start().await.unwrap();
+    eventually("the target's first seed", || async {
+        t.last_seed().is_some()
+    })
+    .await;
+    let duty = |s: &config_v2::State| match &s.groups["duty"].params["fraction_ppm"] {
+        ParamState::Plain { value, .. } => value.clone(),
+        ParamState::Sensitive { .. } => None,
+    };
+    assert_eq!(duty(&c.state().await), Some(CValue::Integer(10000)));
+
+    // A put: converged, in the record's fields.
+    author
+        .put(
+            "lab/rf0",
+            bytes(&json!({"revision": 1, "values": {"duty": {"fraction_ppm": 20000}}})),
+        )
+        .await
+        .unwrap();
+    eventually("revision 1 converged", || async {
+        c.state().await.desired.is_some_and(|d| {
+            d.observed_revision == 1 && d.outcome == Some(DesiredOutcome::Converged)
+        })
+    })
+    .await;
+    assert_eq!(duty(&c.state().await), Some(CValue::Integer(20000)));
+    eventually("the role's report", || async {
+        t.report().await.outcome == Some(Outcome::Converged)
+    })
+    .await;
+
+    // Refused whole: a reach group, the record naming it.
+    author
+        .put(
+            "lab/rf0",
+            bytes(&json!({"revision": 2, "values": {
+                "duty": {"fraction_ppm": 30000}, "radio": {"frequency_hz": 869525000}}})),
+        )
+        .await
+        .unwrap();
+    eventually("revision 2 refused", || async {
+        t.report().await.outcome == Some(Outcome::Refused)
+    })
+    .await;
+    let refusal = t.report().await.refusal.unwrap();
+    assert_eq!(
+        (refusal.code.as_str(), refusal.pointer.as_deref()),
+        ("reach", Some("/values/radio"))
+    );
+    let d = c.state().await.desired.unwrap();
+    assert_eq!(
+        (d.outcome, d.refusal.and_then(|r| r.group)),
+        (Some(DesiredOutcome::Refused), Some("radio".to_owned()))
+    );
+    assert_eq!(duty(&c.state().await), Some(CValue::Integer(20000)));
+
+    // The delete: the parameters named back at their startup values, and
+    // no desired fields in the record.
+    author.delete("lab/rf0").await.unwrap();
+    eventually("reverted", || async {
+        t.report().await.outcome == Some(Outcome::Reverted)
+    })
+    .await;
+    let s = c.state().await;
+    assert_eq!(duty(&s), Some(CValue::Integer(10000)), "the file's value");
+    assert_eq!(s.desired, None);
+    svc.close().await.unwrap();
+    asvc.close().await.unwrap();
+}
+
 /// `config.v1`'s owner `lab/rf0` as a target of `lab/author`'s
 /// `configs.v1`, on `device`, its floor `floor_s`.
 struct ConfigUp {
