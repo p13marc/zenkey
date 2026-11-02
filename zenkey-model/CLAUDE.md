@@ -296,6 +296,23 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   each counter series' consecutive samples. `tests/profiles.rs` runs
   `telemetry/conformance/v2/{declarations,readings,continuity}.json` and loads
   `conformance/contracts/meterframe.v1.toml`, the scenarios' contract.
+  `config.v2` (#985 G1, text 0.1, experimental) is `config::v2`
+  (`src/config/v2.rs`): `Groups::read(annotation, packed files)` (§2.2's
+  reasons in order), `Derived::of` (`Record`, `Set<T>`, `Control`,
+  `Error`; `to_text` is what `zk2 config derive <contract.toml>` prints,
+  reading the contract unlinted), `Interface::of(&Contract)`, `lint` over
+  `Resources`, `State` with `write_record`/`read_record` (`RecordRefusal`:
+  core §7.6's, then `group`, `pending`, `last`, `desired`, `parameter`),
+  `decode_set`/`decode_control` over C4a's `read_query`, and
+  `validate_set`/`validate_control`/`check_desired` running config.v1's
+  validators over `Groups::schema(writable)`. `v2::Owner` wraps
+  `config::Owner` unchanged but for two opt-ins (`whole_seconds`, the
+  `apply_at` accessor): v1's string tokens numbered `run<<16|counter`,
+  the record put whenever its bytes change, the reply under the as-of
+  mark, events after, a key's first answer replayed byte for byte; a
+  `Mint` stamps, which the runtime implements over its minter (G2).
+  `tests/profiles/config_v2.rs`, a module of `profiles.rs`, runs the six
+  `v2/` fixtures and loads `rfcfg.v1.toml`.
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
