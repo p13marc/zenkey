@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.92** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.93** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -2700,6 +2700,13 @@ the owner sets where its session would add one anyway.
   - **The exception** is a candidate of a governed interface:
     [`redundancy.v1`](profiles/redundancy/v1.md) §2.10 asks it to enable
     timestamping.
+    - **Whatever its clock.** A candidate's session stamps every write
+      while its clock is ahead too, so the guard holds every state write
+      (§4.3, "A candidate's"). Without it, its puts carry its router's
+      stamp or none, and a consumer that follows the incumbent discards
+      them (`redundancy.v1` §2.10).
+    - **The reference** refuses a candidate whose session runs without
+      timestamping, at `ServiceBuilder::redundancy`, before its claim.
 - **A router on a constrained face.** A deployment SHOULD run a router
   that forwards puts onto a constrained face (§8.5) with timestamping
   disabled. A router with it enabled stamps every unstamped put it routes,
