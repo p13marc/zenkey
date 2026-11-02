@@ -841,9 +841,11 @@ async fn a_state_get_that_reaches_its_timeout_seeds_incompletely() {
 
 /// The state leg against a zk2 owner the runtime brings up (`tc.netif.v1`
 /// at `host-a/tc`, its state served): the seeded watch zengui's tree uses
-/// receives the owner's current value and, for the key it deleted within
-/// the window, a `reply_del` — a deletion with the deletion's stamp (S2,
-/// S3) — every stamp the owner's own (S1).
+/// receives the owner's current value, with its last confirmation, the
+/// owner's own stamp, and, for the key it deleted within the window, a
+/// `reply_del` — a deletion with the deletion's in-band stamp (S2, S3).
+/// `tc.netif.v1` uses `freshness.v2` since #978's F5, so neither its put
+/// nor its delete carried a Zenoh timestamp (core §4.3's table).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_seeded_watch_seeds_from_a_zk2_owner() {
     use util::zk2::{T, client, config, eventually, example, iface, router};
@@ -932,25 +934,30 @@ async fn a_seeded_watch_seeds_from_a_zk2_owner() {
     };
     let owner = TimestampId::from(owners.zid());
     let key = |name: &str| format!("zk2/host-a/tc/tc.netif.v1/state/interfaces/default/{name}");
-    // `interfaces` declares `freshness.ttl_s`: on core §4.3's table, each
-    // reply carries its mutation's Zenoh timestamp beside its in-band stamp.
+    // `interfaces` declares `freshness.ttl_s` and uses freshness.v2: its
+    // mutations carry no Zenoh timestamp, and a reply of a live member
+    // carries its last confirmation, the owner's (S2, core §4.3's table).
     assert_eq!(
-        seen.get(&key("eth0")),
-        Some(&(SampleKind::Put, put0.time, Some(put0.stamp))),
-        "the current value, with its stamps (S2)"
+        (put0.time, deleted.time),
+        (None, None),
+        "a freshness.v2 state's put and delete carry no Zenoh timestamp"
+    );
+    let (kind, confirmed, inband) = seen.get(&key("eth0")).expect("eth0's reply");
+    assert_eq!(
+        (kind, inband),
+        (&SampleKind::Put, &Some(put0.stamp)),
+        "the current value, with its in-band stamp (S2)"
+    );
+    assert_eq!(
+        confirmed.map(|t| *t.get_id()),
+        Some(owner),
+        "its last confirmation, the owner's Zenoh timestamp (S2)"
     );
     assert_eq!(
         seen.get(&key("eth1")),
-        Some(&(SampleKind::Delete, deleted.time, Some(deleted.stamp))),
-        "the reply_del, a deletion with the deletion's stamps (S3)"
+        Some(&(SampleKind::Delete, None, Some(deleted.stamp))),
+        "the reply_del, a deletion with the deletion's in-band stamp (S3)"
     );
-    for (_, stamp, _) in seen.values() {
-        assert_eq!(
-            stamp.map(|t| *t.get_id()),
-            Some(owner),
-            "the owner's Zenoh timestamp, on the table (S1)"
-        );
-    }
     assert_eq!(
         coverage.state,
         Asked::Asked(SeedLeg {

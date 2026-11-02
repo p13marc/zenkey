@@ -332,5 +332,10 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `FaceCheck::{binding, transport, catalog}` rows. `tests/acl_plans.rs`
   pins the four media of `examples/zk2/link/media/`
   (`link-v2.<medium>.json5`) and flags a hand-edited `wait_before_close`
-  on each; `tests/link_face.rs`' `v2_s1_the_router_runs_the_block` runs
+  on each, and its tcgui and walkthrough plans grant each bound
+  `freshness.v2` heartbeat since #978 F5 moved those contracts (bless with
+  `ACL_BLESS=1`). Since F5 no tcgui state is on core §4.3's table: a test
+  that needs row 1 reads `zenkey/tests/contracts/beacon.v1.toml` or runs
+  `tc.netif.v1`'s published revision 1.0 from its bundle
+  (`zk2_observe`'s timeline); `tests/link_face.rs`' `v2_s1_the_router_runs_the_block` runs
   link.v2 scenarios §1 over a relay that counts keep-alives.

@@ -83,7 +83,11 @@ fn an_authoring_directory_loads_and_names_what_is_not_a_contract() {
     let netif = set.of_iface(&iface("tc.netif.v1")).next().expect("netif");
     assert_eq!(netif.source(), ContractSource::File);
     let view = netif.view();
-    assert_eq!(view.minor, Some(0));
+    assert_eq!(
+        view.minor,
+        Some(1),
+        "revision 1.1, on freshness.v2 since #978's F5"
+    );
     assert!(view.summary.is_some());
     assert_eq!(
         netif.fingerprint(),

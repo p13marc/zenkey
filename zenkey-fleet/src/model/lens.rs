@@ -1756,20 +1756,30 @@ mod tests {
         );
     }
 
-    /// Core §4.3's table through the lens: a state with a horizon is on
-    /// it, a plain state is not, and a key resolving to no resource in
-    /// hand says nothing.
+    /// Core §4.3's table through the lens: a `freshness.v1` state with a
+    /// horizon is on it, a plain state is not, nor a `freshness.v2` one
+    /// with a horizon (`tc.netif.v1` since #978's F5), and a key resolving
+    /// to no resource in hand says nothing.
     #[test]
     fn the_lens_says_whether_a_keys_resource_is_on_the_table() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../examples/zk2/tcgui/tc.netif.v1.toml");
-        let (set, problems) = ContractSet::load_path(&path);
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let (mut set, problems) =
+            ContractSet::load_path(&root.join("examples/zk2/tcgui/tc.netif.v1.toml"));
         assert!(problems.is_empty(), "{problems:?}");
+        let (beacon, problems) =
+            ContractSet::load_path(&root.join("zenkey/tests/contracts/beacon.v1.toml"));
+        assert!(problems.is_empty(), "{problems:?}");
+        set.extend(beacon);
         let lens = Lens::new("", None, &set).offline(&set);
         assert_eq!(
-            lens.on_the_table("zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0"),
+            lens.on_the_table("zk2/lab/b/beacon.v1/state/status"),
             Some(true),
-            "freshness.ttl_s 60"
+            "freshness.v1, freshness.ttl_s 2"
+        );
+        assert_eq!(
+            lens.on_the_table("zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0"),
+            Some(false),
+            "freshness.v2, freshness.ttl_s 60"
         );
         assert_eq!(
             lens.on_the_table("zk2/host-a/tc/tc.netif.v1/state/namespaces"),
