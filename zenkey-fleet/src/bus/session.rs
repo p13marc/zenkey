@@ -6,6 +6,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::{Error, Result};
+use zenkey_model::link::{FarSide, TransportKey};
 use zenoh::Session;
 
 /// How long [`open_reporting`] gives `zenoh::open` before calling the
@@ -153,10 +154,44 @@ pub async fn open_reporting_within(
     scouting: Option<bool>,
     deadline: Duration,
 ) -> Result<Session, OpenFailure> {
-    let config = config_off_runtime(file, connect, listen, scouting, Posture::Explorer)
+    let config = config_off_runtime(file, connect, listen, scouting, Posture::Explorer, None)
         .await
         .map_err(OpenFailure::Config)?;
     open_config(config, deadline).await
+}
+
+/// [`open_reporting`] for a session **across a constrained face** (core
+/// §8.5; `link.v2` §2.16, §2.18; #988 L4): it runs the face's
+/// `[transport]`, every key at zenoh's key as the far end's block writes
+/// it, so both ends of the face run one lease and keep-alive. A key the
+/// config file states stands, as every stated key does, and the interests
+/// timeout is the longer of [`TOOL_INTERESTS_TIMEOUT`] and the face's. The
+/// connect deadline is [`OPEN_TIMEOUT`] past the face's `open_timeout_ms`:
+/// a handshake over a slow medium takes its air.
+pub async fn open_reporting_across(
+    far: &FarSide,
+    file: Option<&Path>,
+    connect: &[String],
+    listen: &[String],
+    scouting: Option<bool>,
+) -> Result<Session, OpenFailure> {
+    let config = config_off_runtime(
+        file,
+        connect,
+        listen,
+        scouting,
+        Posture::Explorer,
+        Some(far.clone()),
+    )
+    .await
+    .map_err(OpenFailure::Config)?;
+    open_config(config, across_deadline(far)).await
+}
+
+/// How long a session across `far` is given to open: [`OPEN_TIMEOUT`]
+/// past the face's own open timeout.
+fn across_deadline(far: &FarSide) -> Duration {
+    OPEN_TIMEOUT.saturating_add(Duration::from_millis(far.transport.open_timeout_ms))
 }
 
 /// Open a session **in** a deployment's namespace (#612, FJ4), for zk2's
@@ -191,6 +226,29 @@ pub async fn open_in_namespace(
         listen,
         scouting,
         Posture::Namespaced,
+        None,
+    )
+    .await
+}
+
+/// [`open_in_namespace`] across a constrained face: the face's transport,
+/// as [`open_reporting_across`] runs it.
+pub async fn open_in_namespace_across(
+    far: &FarSide,
+    namespace: &str,
+    file: Option<&Path>,
+    connect: &[String],
+    listen: &[String],
+    scouting: Option<bool>,
+) -> Result<Session, OpenFailure> {
+    open_namespaced(
+        namespace,
+        file,
+        connect,
+        listen,
+        scouting,
+        Posture::Namespaced,
+        Some(far),
     )
     .await
 }
@@ -220,6 +278,7 @@ pub async fn open_owner_in_namespace(
         listen,
         scouting,
         Posture::Owner { governed },
+        None,
     )
     .await
 }
@@ -256,6 +315,23 @@ pub async fn open_watch(
     crate::WatchSession::new(&session, namespace).map_err(OpenFailure::Config)
 }
 
+/// [`open_watch`] across a constrained face: the face's transport, as
+/// [`open_reporting_across`] runs it.
+pub async fn open_watch_across(
+    far: &FarSide,
+    namespace: &str,
+    file: Option<&Path>,
+    connect: &[String],
+    listen: &[String],
+    scouting: Option<bool>,
+) -> Result<crate::WatchSession, OpenFailure> {
+    if !namespace.is_empty() {
+        check_namespace(namespace).map_err(OpenFailure::Config)?;
+    }
+    let session = open_reporting_across(far, file, connect, listen, scouting).await?;
+    crate::WatchSession::new(&session, namespace).map_err(OpenFailure::Config)
+}
+
 async fn open_namespaced(
     namespace: &str,
     file: Option<&Path>,
@@ -263,8 +339,9 @@ async fn open_namespaced(
     listen: &[String],
     scouting: Option<bool>,
     posture: Posture,
+    far: Option<&FarSide>,
 ) -> Result<Session, OpenFailure> {
-    let mut config = config_off_runtime(file, connect, listen, scouting, posture)
+    let mut config = config_off_runtime(file, connect, listen, scouting, posture, far.cloned())
         .await
         .map_err(OpenFailure::Config)?;
     if !namespace.is_empty() {
@@ -278,7 +355,7 @@ async fn open_namespaced(
             ))
         })?;
     }
-    open_config(config, OPEN_TIMEOUT).await
+    open_config(config, far.map_or(OPEN_TIMEOUT, across_deadline)).await
 }
 
 /// A namespace is a concrete key-expression prefix: no wildcard, no `$*`,
@@ -397,15 +474,23 @@ async fn config_off_runtime(
     listen: &[String],
     scouting: Option<bool>,
     posture: Posture,
+    far: Option<FarSide>,
 ) -> Result<zenoh::Config> {
     let Some(path) = file else {
-        return build_config_as(None, connect, listen, scouting, posture);
+        return build_config_as(None, connect, listen, scouting, posture, far.as_ref());
     };
     let path = path.to_path_buf();
     let connect = connect.to_vec();
     let listen = listen.to_vec();
     tokio::task::spawn_blocking(move || {
-        build_config_as(Some(&path), &connect, &listen, scouting, posture)
+        build_config_as(
+            Some(&path),
+            &connect,
+            &listen,
+            scouting,
+            posture,
+            far.as_ref(),
+        )
     })
     .await
     // A join failure here is this crate's own task management, not the
@@ -542,7 +627,7 @@ fn build_config(
     listen: &[String],
     scouting: Option<bool>,
 ) -> Result<zenoh::Config> {
-    build_config_as(file, connect, listen, scouting, Posture::Explorer)
+    build_config_as(file, connect, listen, scouting, Posture::Explorer, None)
 }
 
 fn build_config_as(
@@ -551,6 +636,7 @@ fn build_config_as(
     listen: &[String],
     scouting: Option<bool>,
     posture: Posture,
+    far: Option<&FarSide>,
 ) -> Result<zenoh::Config> {
     let (mut config, stated) = match file {
         Some(path) => {
@@ -639,6 +725,32 @@ fn build_config_as(
         && !stated.states("timestamping/enabled")
     {
         set(&mut config, "timestamping/enabled", &governed.to_string())?;
+    }
+    // Across a constrained face (#988 L4; `link.v2` §2.16, §2.18): the
+    // face's transport, so both ends run one lease and keep-alive. A stated
+    // key stands, and a long reply wait keeps the tool's interests timeout.
+    if let Some(far) = far {
+        for (key, value) in far.session_keys() {
+            if stated.states(key.path()) {
+                continue;
+            }
+            let value = match key {
+                TransportKey::InterestsTimeout => {
+                    let tool =
+                        u64::try_from(TOOL_INTERESTS_TIMEOUT.as_millis()).unwrap_or(u64::MAX);
+                    serde_json::Value::from(tool.max(far.transport.interests_timeout_ms))
+                }
+                _ => value,
+            };
+            config
+                .insert_json5(key.path(), &value.to_string())
+                .map_err(|e| {
+                    Error::unaskable(
+                        format!("face {:?}'s transport.{}", far.face, key.key()),
+                        format!("zenoh refuses {value} at {}: {e}", key.path()),
+                    )
+                })?;
+        }
     }
     Ok(config)
 }
@@ -988,6 +1100,69 @@ mod tests {
         std::fs::remove_file(path).ok();
     }
 
+    /// A session across a constrained face runs the face's transport
+    /// (#988 L4; `link.v2` §2.16, §2.18): each key at zenoh's key in its
+    /// units, the tool's longer interests timeout kept, and a key the file
+    /// states left as it states it.
+    #[test]
+    fn a_session_across_a_face_runs_its_transport() {
+        let far = FarSide {
+            face: "rf".into(),
+            reply_timeout_ms: 15_000,
+            arq: false,
+            transport: zenkey_model::link::Transport {
+                lease_ms: 240_000,
+                keep_alive: 4,
+                wait_before_close_ms: 240_000,
+                sequence: zenkey_model::link::Sequence::Bit16,
+                batch_bytes: 222,
+                open_timeout_ms: 10_000,
+                accept_timeout_ms: 10_000,
+                interests_timeout_ms: 10_000,
+            },
+        };
+        let ep = vec!["tcp/127.0.0.1:7447".to_string()];
+        let read = |file: Option<&Path>, key: &str| {
+            build_config_as(file, &ep, &[], None, Posture::Explorer, Some(&far))
+                .unwrap()
+                .get_json(key)
+                .unwrap()
+        };
+        assert_eq!(read(None, "transport/link/tx/lease"), "240000");
+        assert_eq!(read(None, "transport/link/tx/keep_alive"), "4");
+        assert_eq!(
+            read(None, "transport/link/tx/sequence_number_resolution"),
+            r#""16bit""#
+        );
+        assert_eq!(read(None, "transport/link/tx/batch_size"), "222");
+        assert_eq!(
+            read(
+                None,
+                "transport/link/tx/queue/congestion_control/block/wait_before_close"
+            ),
+            "240000000",
+            "in µs"
+        );
+        assert_eq!(
+            read(None, "routing/interests/timeout"),
+            "120000",
+            "the tool's, longer"
+        );
+        let lease = temp_config(
+            "across-lease.json5",
+            "{ transport: { link: { tx: { lease: 60000 } } } }",
+        );
+        assert_eq!(
+            read(Some(&lease), "transport/link/tx/lease"),
+            "60000",
+            "the file's word stands"
+        );
+        assert_eq!(read(Some(&lease), "transport/link/tx/keep_alive"), "4");
+        assert_eq!(across_deadline(&far), Duration::from_secs(20));
+        let plain = build_config(None, &ep, &[], None).unwrap();
+        assert_eq!(plain.get_json("transport/link/tx/lease").unwrap(), "10000");
+    }
+
     /// A mock owner's session stamps nothing of its own (core §8.2): its
     /// values carry their in-band stamps, and §4.3's table its runtime's
     /// own timestamps. A file that states the setting is obeyed; an
@@ -996,7 +1171,7 @@ mod tests {
     #[test]
     fn an_owner_posture_turns_timestamping_off() {
         let ts = |posture, file: Option<&Path>| {
-            build_config_as(file, &[], &[], None, posture)
+            build_config_as(file, &[], &[], None, posture, None)
                 .unwrap()
                 .get_json("timestamping/enabled")
                 .unwrap()
@@ -1018,10 +1193,17 @@ mod tests {
     #[test]
     fn a_governed_owner_posture_turns_timestamping_on() {
         let ts = |file: Option<&Path>| {
-            build_config_as(file, &[], &[], None, Posture::Owner { governed: true })
-                .unwrap()
-                .get_json("timestamping/enabled")
-                .unwrap()
+            build_config_as(
+                file,
+                &[],
+                &[],
+                None,
+                Posture::Owner { governed: true },
+                None,
+            )
+            .unwrap()
+            .get_json("timestamping/enabled")
+            .unwrap()
         };
         assert_eq!(ts(None), "true");
         let off = temp_config(
@@ -1037,7 +1219,7 @@ mod tests {
     #[test]
     fn a_tool_session_waits_long_for_its_routers_interests() {
         let wait = |posture, file: Option<&Path>| {
-            build_config_as(file, &[], &[], None, posture)
+            build_config_as(file, &[], &[], None, posture, None)
                 .unwrap()
                 .get_json("routing/interests/timeout")
                 .unwrap()
