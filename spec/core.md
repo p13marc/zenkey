@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.92** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.96** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -1799,15 +1799,21 @@ value and its error. This section defines their bytes too. §5.1 says what
 a value's and an error's run and seq name, and §5.2 what an error holds.
 No rule at this version has a caller or an owner write them (§5).
 
+A **snapshot** is one collection's state in a GET's reply: its members'
+values and tombstones, in pages. This section defines its bytes, and how
+an owner cuts one into pages (below). No rule at this version has an
+owner write one, or a reader read one (§4.2).
+
 **The layouts.** A put carries an envelope as its payload, and a delete as
-its attachment. A call's query, reply and reply error carry a form as
-their payload:
+its attachment. A GET's reply carries a snapshot as its payload. A call's
+query, reply and reply error carry a form as their payload:
 
 ```text
 mutation, a put's payload            CH · run · seq · record
 delete, a delete's attachment        CH · run · seq
 heartbeat, a put's payload           CH · run · seq · body
 frame, a put's payload               CH · run · seq · body
+snapshot, a GET reply's payload      CH · run · asof · body
 request, a query's payload           CH · record
 value, a reply's payload             CH · run · seq · record
 error, a reply error's payload       CH · run · seq · error
@@ -1828,6 +1834,7 @@ run. A delete's is `0x20` or `0x30`. And `0x1b` is `000 1 1011`: form 0, a
 32-bit run and tag 11. Only the `packed` kind defines a tag (§7.6). A
 delete carries no record, so its tag is 0. A heartbeat's tag names a
 contract revision (below). A frame's tag is its declaration's (§7.7).
+A snapshot's is its collection's type's, as a mutation's is.
 - **A request's** tag is its operation's `request` type's. Its width bit
   is 0, since it carries no run.
 - **A value's** is the operation's `response` type's, or its `summary`
@@ -1835,8 +1842,8 @@ contract revision (below). A frame's tag is its declaration's (§7.7).
 - **An error's** is the operation's `error` type's, whether a detail
   follows or not. It is 0 for an operation that declares none.
 
-**The forms.** Each form has one code. This version defines six of
-them, and reserves the other two for later versions:
+**The forms.** Each form has one code. This version defines seven of
+them, and reserves the other for a later version:
 
 | Code | Form | What it carries |
 |---|---|---|
@@ -1847,7 +1854,7 @@ them, and reserves the other two for later versions:
 | 4 | event | reserved: an event's occurrence |
 | 5 | frame | a stream's records under one header, a put's payload (§7.7) |
 | 6 | heartbeat | an owner's confirmation of the state it holds for one interface (below) |
-| 7 | snapshot | reserved: a collection's state in one reply |
+| 7 | snapshot | a collection's state, a GET reply's payload, in pages (below) |
 
 A value carried by a query is a **request**. It has no run and no seq.
 
@@ -1857,13 +1864,16 @@ as CH's width bit says. The seq is an unsigned 24-bit integer, from 0 to
 Together they are the envelope's stamp, the sample's in-band stamp.
 This section fixes their widths and their byte order. What a run names,
 and how a seq counts, are §4.3's. A value's and an error's are the
-replying instance's as-of mark, which §5.1 defines.
+replying instance's as-of mark, which §5.1 defines. A snapshot's run is
+the owner's when it builds the snapshot. Its **asof** takes the seq's
+place (below).
 
 **The record** is every byte after a mutation's seq, possibly none. It
-is read as the resource's type says (§7.1). A heartbeat and a frame carry
-a **body** there instead, never a record of the resource's type. A
-heartbeat's is read with its covered revision's collections (below). A
-frame's is read with its declaration (§7.7). A sample that carries
+is read as the resource's type says (§7.1). A heartbeat, a frame and a
+snapshot carry a **body** there instead, never a record of the resource's
+type. A heartbeat's is read with its covered revision's collections
+(below). A frame's is read with its declaration (§7.7). A snapshot's is
+read without the contract (below). A sample that carries
 an envelope has the Encoding `zenoh/bytes`, whatever its record's type:
 the contract names the type.
 - **A request's record** is every byte after its CH, possibly none. It is
@@ -1908,13 +1918,19 @@ So `0xa0` is `busy`, with no cause, detail or message. `0x50` is
   `[F: errors/forms.json]`
 
 **Sizes.** A mutation is 6 bytes over its record, or 8 with a 32-bit run.
-So is a heartbeat over its body, and a frame over its body.
+So is a heartbeat over its body, a frame over its body, and a snapshot's
+page over its body.
 A delete's attachment is 6 or 8 bytes, and an attachment costs 2 more on
 the wire. Beside them, a Zenoh timestamp is 26 bytes. A predefined
 Encoding is 1 byte, and `zenoh/bytes` costs none (Appendix B).
 - **A request** is 1 byte over its record, and a value 6 or 8.
 - **An error** is 7 bytes, or 9 with a 32-bit run. A message adds its
   length and a byte, and a detail its own bytes.
+- **A snapshot's page** with no entry is 16 bytes, or 18 with a 32-bit
+  run, while each integer in it fits one byte (below). A live entry adds
+  6 bytes over its id and its record, while each is below 128 bytes. A
+  tombstone adds 5 bytes over its id. An entry's own run adds 2 or 4, and
+  its confirmation's time 6.
 
 **Why the payload.** Zenoh gives a sample one attachment.
 [`telemetry.v1`](profiles/telemetry/v1.md)'s Epoch, a contract's declared
@@ -1926,24 +1942,26 @@ reader refuse an attachment that is not an envelope.
 **Parsing.** An envelope or a form is parsed without the contract, as a
 key is (§1.1). The parser knows what carries the bytes, its **sample**:
 - a put's payload, or the payload of a GET's reply that represents a put
-  (S2);
+  (S2) or carries a snapshot;
 - a delete's attachment, or a `reply_del`'s (S2);
 - a call's query, its reply or its `reply_err`, each one's payload.
 
-For a frame it also knows its key's kind token, which the grammar reads
-from the key alone. It knows nothing more. So it reports the tag of every
-form but a delete, and checks none: §7.6's reader, a heartbeat's reader
-and §7.7's do. Of an error, it reads the byte and the message, and
-takes the detail's bytes unread. An
+For a frame and a snapshot it also knows its key's kind token, which the
+grammar reads from the key alone. It knows nothing more. So it reports the
+tag of every form but a delete, and checks none: §7.6's reader, a
+heartbeat's reader and §7.7's do. Of an error, it reads the byte and the
+message, and takes the detail's bytes unread. Of a snapshot, it takes the
+body unread: the snapshot's own reading reads it (below). An
 implementation MUST refuse an envelope or a form for the first of these
 that applies, in this order:
 - no byte at all, so no CH (`short`);
-- a reserved form, 4 or 7 (`form`);
+- a reserved form, 4 (`form`);
 - a form its sample does not carry (`sample_kind`). A put carries a
-  mutation, a heartbeat or a frame, and a delete's attachment a delete.
-  A query and a reply carry a value, and a `reply_err` an error;
+  mutation, a heartbeat, a frame or a snapshot, and a delete's attachment
+  a delete. A query and a reply carry a value, and a `reply_err` an error;
 - a frame on a key whose kind token is not `stream`, such as a state's,
-  an event's or an `@stream` key (`key_kind`);
+  an event's or an `@stream` key, or a snapshot on a key whose kind token
+  is neither `state` nor `@state` (`key_kind`);
 - a delete whose tag is not 0 (`tag`);
 - a request whose width bit is 1 (`request_run`);
 - fewer bytes than CH, the run and the seq need, and an error's byte
@@ -1964,6 +1982,9 @@ that applies, in this order:
 
 Every envelope and form an implementation accepts MUST write back to the
 same bytes. `[F: envelope/vectors.json]`
+
+**Only a GET's reply carries a snapshot.** No owner puts one on its key.
+The parser cannot tell how a put came, so it reads a snapshot either way.
 
 **The heartbeat.** A **heartbeat** is a put an owner sends for one
 interface it serves, its **covered interface**. It vouches for the members of that interface's
@@ -2062,6 +2083,146 @@ that applies, in this order, naming the refusal:
 
 Every body an implementation accepts MUST write back to the same bytes.
 `[F: heartbeat/bodies.json]`
+
+**The snapshot.** A snapshot answers a GET with one collection's state,
+in one or more pages. Each page is a GET's reply, with the snapshot's
+envelope and a body.
+
+- **Its collection** is one `state` or `@state` resource of the owner's
+  interface, with its members. It may have a horizon or not: a
+  heartbeat's collections are only those with one (above). A resource
+  with no parameter is a collection of at most one member.
+- **Its run** is the one the owner writes under when it builds the
+  snapshot (§4.3).
+- **Its asof** is a seq of that run. The snapshot reflects every state
+  mutation of its run whose seq is at or below asof:
+  - the entry or the tombstone it lists for a member is that member's
+    last mutation as of asof, or a later one;
+  - a member that none of its pages lists had no live value as of asof.
+
+**A page's body** follows its envelope:
+
+```text
+body        time · page · coll · live · tombs
+time        t32 · ms16: when the owner built the snapshot
+page        an integer: the page's index × 2, plus 1 when a later page follows
+coll        an integer: the collection's index
+live        an integer, their count · that many live entries
+tombs       an integer, their count · that many tombstones
+live entry  id · flags · run, when flags say · seq · conf, when flags say · length · record
+tombstone   id · flags · run, when flags say · seq
+id          an integer, its length in bytes · that many bytes
+flags       one byte (below)
+run         16 or 32 bits, as flags say
+seq         24 bits: the mutation's seq
+conf        t32 · ms16: the member's last confirmation
+length      an integer: the record's length in bytes
+record      that many bytes
+```
+
+- **An integer** is unsigned LEB128. Each byte holds 7 bits, the least
+  significant group first, and each byte but the last has its high bit
+  set. An integer is at most 5 bytes and at most 2^32 − 1. It is in its
+  shortest form: its last byte is 0 only when it is its only byte.
+  - **Reading one,** a reader takes a byte at a time, and stops at the
+    fifth. A fifth byte with its high bit set is refused, whatever
+    follows it.
+- **The fixed fields**, `run`, `seq`, `t32` and `ms16`, are big-endian,
+  as the envelope's are.
+- **A time** counts from the deployment epoch E (§7.6). An instant t, in
+  milliseconds since the Unix epoch, has t32 = ⌊(t − 1000 × E) / 1000⌋
+  and ms16 = (t − 1000 × E) modulo 1000.
+  - **Unknown.** t32 all ones with ms16 0 says the owner's clock is
+    unknown.
+  - **Unused.** An ms16 above 999 is unused, and so is any ms16 but 0
+    with t32 all ones.
+- **The snapshot's time** is when the owner built it. It is no
+  confirmation: each live entry carries its own (below).
+- **The page** holds the page's index, from 0, above its low bit,
+  **more**. More is 1 when a later page of the snapshot follows.
+- **The collection's index** is its resource's place, from 0, among the
+  interface's resources of the reply key's kind token, in the canonical
+  form's order (§9.5). A reader with the contract maps it to a template.
+
+**The flags** byte holds four fields, its bits numbered as CH's are:
+
+| Bits | Field | Value |
+|---|---|---|
+| 7 | run | 1 when the entry's own run follows |
+| 6–5 | confirmation | 0, 1 or 2 (below). 3 is unused. |
+| 4 | run width | 0 for a 16-bit run, 1 for a 32-bit run. It is 0 when no run follows. |
+| 3–0 | unused | 0 |
+
+- **An entry's run** is the header's, unless its own follows. An entry
+  states its own when its member's last mutation was under another run,
+  such as one its instance wrote under before it took a new run (§4.3).
+  Two runs of different widths are two runs.
+- **A live entry** is a member whose last mutation is a put. Its seq is
+  that put's, and its record is the put's record, without its envelope. A
+  packed record is whole, its pad included (§7.6).
+- **A tombstone** is a member the owner deleted within the window (S3).
+  Its seq is the delete's.
+- **The confirmation** says when the owner last vouched for a live entry:
+  - **0, none:** the collection has no horizon. A tombstone's is 0.
+  - **1, at the snapshot's time:** the owner vouches for the member as it
+    builds the snapshot, as a heartbeat sent then would.
+  - **2, at conf,** which follows: the owner does not vouch for it now.
+    Its conf is its last confirmation, the later of its last mutation and
+    the last heartbeat that vouched for it.
+- **An id** is empty, or plain chunks (§1.2) joined by `/`. The member's
+  key is the reply's key, then `/` and the id. An empty id names the
+  reply's key itself.
+- **Order.** A body's live entries come in the byte order of their ids,
+  and so do its tombstones. No id is both live and a tombstone.
+- **Why no contract.** Every record keeps its length, so a reader without
+  the contract reads every entry's id, stamp and confirmation. Without it,
+  the reader cannot map the collection's index to a template.
+
+**Reading a snapshot's body.** A body is read after its envelope, with
+the header's run. An implementation MUST refuse a body for the first of
+these that applies, reading its fields in order, naming the refusal:
+- the body ends before a byte a field needs, an integer's last byte
+  included (`short`);
+- an integer whose fifth byte has its high bit set, whatever follows it,
+  one above 2^32 − 1, or one not in its shortest form (`leb128`);
+- a time or a conf whose ms16 is unused (`time`);
+- an id that is neither empty nor plain chunks joined by `/` (`id`);
+- an id not above the one before it in its list, or a tombstone's id that
+  a live entry of the body has (`order`);
+- a flags byte with a bit from 3 to 0 set, bit 4 without bit 7,
+  confirmation 3, or a tombstone's confirmation other than 0 (`flags`);
+- an entry's own run that is the header's, in width and value (`run`);
+- a byte after the last tombstone (`trailing`).
+
+Where one field meets two of them, the first in this list applies.
+`[F: snapshot/bodies.json]`
+
+An implementation MUST NOT write a page that this reading refuses.
+`[F: snapshot/bodies.json]`
+
+Every page an implementation accepts MUST write back to the same bytes.
+`[F: snapshot/bodies.json]`
+
+**Pages.** An owner cuts a snapshot into pages under a **page size**, a
+number of bytes it is configured with. Each page has the snapshot's CH,
+run, asof, time and coll, and its own index.
+- **The entries** are the snapshot's live entries and tombstones
+  together, in the byte order of their ids.
+- **Filling.** The pages take the entries in that order, from page 0. A
+  page takes the next entry when it holds none yet, or when its bytes with
+  that entry, from CH to its last tombstone, are within the page size.
+  Otherwise the next page takes it.
+- **The last page** holds the last entry, and its more bit is 0. A
+  snapshot with no entry is one page, with none.
+- **So a page** is larger than the page size only when it holds a single
+  entry, or none. Its more bit never changes its size.
+
+An implementation that cuts a snapshot into pages MUST cut it so.
+`[F: snapshot/bodies.json]`
+
+**Complete.** A reader holds a snapshot complete when it holds one page
+of each index from 0 to a page whose more bit is 0, all with one CH, run,
+asof, time and coll. It then holds every entry the snapshot has.
 
 ### 7.6 Packed records
 
@@ -4286,11 +4447,12 @@ descriptor checker. A class holds its role's rules in this text and in
 **How a static rule binds.** A static rule binds an implementation where
 it does what the rule governs. Such acts are parsing or building a key,
 and parsing or writing an envelope or a call's form (§7.5), a packed
-record (§7.6) or a frame (§7.7). So are reading a catalog or checking its
-succession (§8.6), slugging a value, linting a contract, building or
-verifying a bundle, checking a history and classifying a revision. A
-rule on what a contract states binds it through the contracts it writes
-and the lints it runs.
+record (§7.6) or a frame (§7.7). So are reading or writing a snapshot's
+page, and cutting a snapshot into pages (§7.5). So are reading a catalog
+or checking its succession (§8.6), slugging a value, linting a contract,
+building or verifying a bundle, checking a history and classifying a
+revision. A rule on what a contract states binds it through the contracts
+it writes and the lints it runs.
 §9.8's publication rules bind whoever publishes a revision: its CI, and the
 person who accepts it.
 
@@ -4942,7 +5104,8 @@ section each was written against, whose pointer leads on.
 | `conformance/budget/` | §2.7, `lossless.json` and the reader's stall included |
 | `conformance/seed/` | §4.2 a late joiner's merge: `merge.json` the Zenoh timestamps' order, unstamped samples, and a tool's across two ids; `inband.json` §4.3's in-band stamps, plain and serial order, and a tool's and a consumer's across two runs |
 | `conformance/errors/` | §5.2: `cases.json` the envelope, `forms.json` §7.5's error form and a router's `Timeout` |
-| `conformance/envelope/` | §7.5, a call's forms included |
+| `conformance/envelope/` | §7.5, a call's forms and a snapshot's envelope included |
+| `conformance/snapshot/` | §7.5, a snapshot's pages: their bytes, their reading and the paging rule |
 | `conformance/frame/` | §7.7 |
 | `conformance/catalog/` | §8.6 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
@@ -5109,7 +5272,8 @@ brief:
   and the sample that carries them → the parse, or the refusal's token,
   the first that applies in §7.5's order (`cases`).
   - **The sample** is `put` or `delete` for an envelope, and `query`,
-    `reply` or `reply_err` for a call's form.
+    `reply` or `reply_err` for a call's form. A snapshot is on `put`, its
+    asof in the seq's place and its body as its record, unread.
   - **The parse** is the form, the run's width in bits, the run, the seq,
     the tag, and the record in hex. The record is `null` for a delete and
     an error, and a request's width, run and seq are `null`.
@@ -5121,6 +5285,18 @@ brief:
     [`observer.md`](observer.md) §7.3). A key and a put's payload under
     `zenoh/bytes` → how it reads: plain, its form, or the refusal's token
     (`reads`).
+- **`snapshot/`**: a page of a snapshot → its bytes in hex and their
+  size, or the writer's refusal (`bodies.json`'s `writes`). A page's bytes,
+  CH to its last tombstone → the page, or the reader's refusal, the first
+  in §7.5's order (`reads`). A snapshot and a page size → its pages' bytes
+  and sizes (`pages`).
+  - **A page** is its tag, run and asof, its time, index, more bit and
+    collection, and its live entries and tombstones.
+  - **An entry** is its id, its own run or `null` for the header's, and
+    its seq. A live entry adds its confirmation, `none`, `time` or `conf`
+    with its time, and its record in hex.
+  - Every page read writes back to its bytes, and every set of pages reads
+    back to its snapshot's entries.
 - **`frame/`**: one packed document, shared by every case (`schema`).
   A record type and a `frame` table → the frame form, its sha256, its
   tag, the count's and the offset's widths, and the span (`layouts.json`).
