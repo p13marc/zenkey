@@ -136,6 +136,7 @@ pub async fn run(cli: crate::cli::CheckFaceArgs) -> Result<()> {
             .unwrap_or_else(|| dep.namespace().to_owned()),
         default_permission: acl::permission(default_permission),
         face_policy: Some(parsed.clone()),
+        catalog: None,
     };
     let plan = ASKING
         .ask(zenkey_fleet::plan_acl(&enrollment, &contracts, &opts).map_err(anyhow::Error::from));

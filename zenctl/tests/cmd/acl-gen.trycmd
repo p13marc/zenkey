@@ -666,7 +666,11 @@ transport: {
 },
 routing: { interests: { timeout: 10000 } },  // ms
 radio: no_arq at arq: the medium repairs no lost frame, and zenoh repairs no lost declaration: a lost subscriber or queryable stays lost while the transport stays up (link.v2 §2.1) (link.v2 §2.1, §2.10, §2.16)
+face radio: not_packed radio.v1/@stream/frames: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
+face radio: not_packed radio.v1/events/fault: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
+face radio: not_packed radio.v1/state/oper: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
 face radio: interval_over_horizon radio.v1/stream/air/dropped_total: a crossing stream whose horizon is below twice the interval: the far side can judge it stale between two samples (§2.12)
+face radio: not_packed radio.v1/stream/air/dropped_total: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
 
 ```
 

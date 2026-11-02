@@ -207,7 +207,11 @@ exit 0.
 ```console
 $ zenctl check face tests/cmd/fixtures/link/router-rf.json5 --face-policy ../examples/zk2/link/media/rf.face.toml --enrollment ../examples/zk2/link/radio.enrollment.toml --contracts ../examples/zk2/link/radio.v1.toml --peer-config tests/cmd/fixtures/link/far-rf.json5 --format table
 radio: no_arq at arq: the medium repairs no lost frame, and zenoh repairs no lost declaration: a lost subscriber or queryable stays lost while the transport stays up (link.v2 §2.1) (link.v2 §2.1, §2.10, §2.16)
+face radio: not_packed radio.v1/@stream/frames: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
+face radio: not_packed radio.v1/events/fault: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
+face radio: not_packed radio.v1/state/oper: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
 face radio: interval_over_horizon radio.v1/stream/air/dropped_total: a crossing stream whose horizon is below twice the interval: the far side can judge it stale between two samples (§2.12)
+face radio: not_packed radio.v1/stream/air/dropped_total: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
 tests/cmd/fixtures/link/router-rf.json5: face radio (far ground): 8 deny rule(s) across subject(s) ground; 2 downsampling rule(s) on its transports
 transport (link.v2 §2.19), an omitted key read at zenoh-1.10.1's default:
     transport.lease_ms              planned 240000     runs 240000     far end 240000
@@ -233,7 +237,11 @@ and `transport_differs` at the key, which the comparison names too. Exit 1.
 $ zenctl check face tests/cmd/fixtures/link/router-rf-wbc.json5 --face-policy ../examples/zk2/link/media/rf.face.toml --enrollment ../examples/zk2/link/radio.enrollment.toml --contracts ../examples/zk2/link/radio.v1.toml --format table
 ? 1
 radio: no_arq at arq: the medium repairs no lost frame, and zenoh repairs no lost declaration: a lost subscriber or queryable stays lost while the transport stays up (link.v2 §2.1) (link.v2 §2.1, §2.10, §2.16)
+face radio: not_packed radio.v1/@stream/frames: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
+face radio: not_packed radio.v1/events/fault: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
+face radio: not_packed radio.v1/state/oper: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
 face radio: interval_over_horizon radio.v1/stream/air/dropped_total: a crossing stream whose horizon is below twice the interval: the far side can judge it stale between two samples (§2.12)
+face radio: not_packed radio.v1/stream/air/dropped_total: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
 tests/cmd/fixtures/link/router-rf-wbc.json5: face radio (far ground): 8 deny rule(s) across subject(s) ground; 2 downsampling rule(s) on its transports
   ✗ transport_differs  face -  transport.wait_before_close_ms
   ✗ wait_under_lease   face -  transport.wait_before_close_ms
@@ -266,7 +274,11 @@ a warning), and the catalog it holds is one the RF policy does not name
 $ zenctl check face tests/cmd/fixtures/link/router-rf.json5 --face-policy ../examples/zk2/link/media/rf.face.toml --enrollment ../examples/zk2/link/radio.enrollment.toml --contracts ../examples/zk2/link/radio.v1.toml --peer-config tests/cmd/fixtures/link/far-default.json5 --catalog tests/cmd/fixtures/link/catalog.json --format table
 ? 1
 radio: no_arq at arq: the medium repairs no lost frame, and zenoh repairs no lost declaration: a lost subscriber or queryable stays lost while the transport stays up (link.v2 §2.1) (link.v2 §2.1, §2.10, §2.16)
+face radio: not_packed radio.v1/@stream/frames: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
+face radio: not_packed radio.v1/events/fault: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
+face radio: not_packed radio.v1/state/oper: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
 face radio: interval_over_horizon radio.v1/stream/air/dropped_total: a crossing stream whose horizon is below twice the interval: the far side can judge it stale between two samples (§2.12)
+face radio: not_packed radio.v1/stream/air/dropped_total: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
 tests/cmd/fixtures/link/router-rf.json5: face radio (far ground): 8 deny rule(s) across subject(s) ground; 2 downsampling rule(s) on its transports
   ✗ catalog_mismatch  face -  catalog
   ✗ peer_differs      face -  transport.lease_ms

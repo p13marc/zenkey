@@ -138,6 +138,10 @@ pub struct AclOptions {
     /// attachment, exposure and rate. A policy its linter refused is an
     /// [`Error::Unaskable`], its findings named.
     pub face_policy: Option<link::Parsed>,
+    /// The catalog the far side holds (core §8.6), for a `link.v2` face
+    /// policy: a revision of an interface crossing a face that it does not
+    /// list refuses the plan (`link.v2` §2.18, `catalog_missing`).
+    pub catalog: Option<zenkey_model::catalog::Catalog>,
 }
 
 impl Default for AclOptions {
@@ -146,6 +150,7 @@ impl Default for AclOptions {
             namespace: String::new(),
             default_permission: AclPermission::Deny,
             face_policy: None,
+            catalog: None,
         }
     }
 }
@@ -1429,7 +1434,7 @@ pub fn plan_acl(
     };
     let faces: Vec<FacePlan> = match policy {
         None => Vec::new(),
-        Some(p) => plan_faces(p, enrollment, &mut contracts)?,
+        Some(p) => plan_faces(p, enrollment, &mut contracts, opts.catalog.as_ref())?,
     };
 
     // The enrolled addresses, and what each implements: every holder's
@@ -2165,8 +2170,12 @@ fn plan_faces(
     policy: &FacePolicy,
     enrollment: &Enrollment,
     contracts: &mut Contracts<'_>,
+    catalog: Option<&zenkey_model::catalog::Catalog>,
 ) -> Result<Vec<FacePlan>> {
-    let mut dep = link::Deployment::default();
+    let mut dep = link::Deployment {
+        catalog: catalog.cloned(),
+        ..link::Deployment::default()
+    };
     for s in &enrollment.service {
         let Ok(a) = Addr::from_str(&s.address) else {
             continue;
@@ -2198,19 +2207,37 @@ fn plan_faces(
         }
     }
     link::plan(policy, &dep).map_err(|errors| {
+        let deployment = errors.iter().any(|f| {
+            matches!(
+                f.code,
+                link::Code::ServiceUnknown | link::Code::ContractUnknown
+            )
+        });
         Error::unaskable(
             "--face-policy",
-            format!(
-                "the face policy cannot be planned (link.v1 §2.3): {}. A listed service is \
-                 one the enrollment declares as `{}/<service>`, and every interface it \
-                 implements needs its contract (--contracts)",
-                errors
-                    .iter()
-                    .map(|f| f.to_string())
-                    .collect::<Vec<_>>()
-                    .join("; "),
-                policy.system
-            ),
+            if deployment {
+                format!(
+                    "the face policy cannot be planned (link.v1 §2.3): {}. A listed service \
+                     is one the enrollment declares as `{}/<service>`, and every interface it \
+                     implements needs its contract (--contracts)",
+                    errors
+                        .iter()
+                        .map(|f| f.to_string())
+                        .collect::<Vec<_>>()
+                        .join("; "),
+                    policy.system
+                )
+            } else {
+                // link.v2's refusals (v2 §2.3), each with what it means.
+                format!(
+                    "the face policy cannot be planned (link.v2 §2.3): {}",
+                    errors
+                        .iter()
+                        .map(|f| format!("{f}: {}", link_says(f.code)))
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                )
+            },
         )
     })
 }
@@ -2405,6 +2432,60 @@ pub fn link_says(code: link::Code) -> &'static str {
         C::CatalogMismatch => {
             "the catalog the far side holds is not the policy's: it decodes with another \
              (link.v2 §2.19)"
+        }
+        C::FrameOverInterval => {
+            "a crossing frame resource whose cadence is shorter than the face's interval_s: \
+             never downsampled, it crosses more often than the face's rate (§2.8)"
+        }
+        C::FrameOverBatch => {
+            "a crossing frame resource whose largest frame is above the batch: zenoh \
+             fragments it and resends no fragment, so one lost loses the frame (§2.8)"
+        }
+        C::HistoryOnFrame => {
+            "a crossing frame resource that declares history: its source info crosses with \
+             every put, and its cache stays home (§2.8)"
+        }
+        C::PackedRequired => {
+            "a contract that lists link.v2 exposes a resource whose type is not packed: it \
+             breaks link.v2's packed requirement, and no plan is derived (link.v2 §2.17)"
+        }
+        C::NotPacked => {
+            "a crossing resource whose type is not packed: its contract does not list \
+             link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)"
+        }
+        C::FrameUnknown => {
+            "an entry of the face's frames names no frame resource of a listed interface \
+             (link.v2 §2.7)"
+        }
+        C::FrameUnlisted => {
+            "an exposed frame resource the face's frames leaves out, which no face of the \
+             policy lets cross: its owner writes it for no far side (link.v2 §2.7)"
+        }
+        C::KeyframeUnreachable => {
+            "the face's keyframe_s is above keyframe_every × every_s: the owner may write \
+             full records more often than its contract says, never less (link.v2 §2.7)"
+        }
+        C::HorizonUnderFace => {
+            "a crossing frame or heartbeat whose horizon is below the face's horizon_s: no \
+             router thins it, so its owner spends more than the face affords (link.v2 §2.12)"
+        }
+        C::BlockOverBatch => {
+            "a crossing block resource whose longest put is above the batch: its fragments \
+             queue behind everything before them, and a block push that cannot be queued \
+             within wait_before_close closes the transport (link.v2 §2.16)"
+        }
+        C::KeepAliveNotSuppressed => {
+            "the face's shortest crossing cadence is above the keep-alive interval: the \
+             uplink pays keep-alives beside its data (link.v2 §2.16)"
+        }
+        C::TimedDownsampled => {
+            "a timed stream, which a downsampling rule would make miss its deadline: it is \
+             denied, never downsampled (link.v2 §2.8)"
+        }
+        C::CatalogMissing => {
+            "a revision of an interface that crosses the face is not an entry of the \
+             catalog the far side holds: it could not decode what that revision's owners \
+             put (link.v2 §2.18)"
         }
         _ => "the face policy's linter refuses it (§2.1)",
     }

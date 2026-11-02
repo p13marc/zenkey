@@ -66,6 +66,7 @@ fn plan(
             namespace: String::new(),
             default_permission,
             face_policy: face_policy.map(link::parse),
+            catalog: None,
         },
     )
     .expect("the example plans")
@@ -217,6 +218,7 @@ fn radio_plan(default_permission: AclPermission) -> AclPlan {
             namespace: String::new(),
             default_permission,
             face_policy: Some(link::parse(&policy)),
+            catalog: None,
         },
     )
     .expect("the radio example plans")
@@ -330,6 +332,7 @@ fn media_plan(medium: &str, default_permission: AclPermission) -> AclPlan {
             namespace: String::new(),
             default_permission,
             face_policy: Some(link::parse(&media_policy(medium))),
+            catalog: None,
         },
     )
     .expect("a medium's policy plans")
@@ -440,6 +443,7 @@ fn config_plan(default_permission: AclPermission) -> AclPlan {
             namespace: String::new(),
             default_permission,
             face_policy: None,
+            catalog: None,
         },
     )
     .expect("the config enrollment plans")
@@ -537,6 +541,7 @@ async fn a_watch_sessions_wire_keys_are_inside_a_tools_presence_grant() {
                 namespace: namespace.to_owned(),
                 default_permission: AclPermission::Deny,
                 face_policy: None,
+                catalog: None,
             },
         )
         .expect("the walkthrough's plan");
