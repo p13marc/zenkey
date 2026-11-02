@@ -575,7 +575,562 @@
       ],
       "note": "a link.v1 policy knows neither `frames` nor `horizon_s`: `unknown_field` each (§2.1)",
       "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\nframes       = { \"probe.v1/frames/link\" = { every_s = 60 } }\nhorizon_s    = 300\n"
+    },
+    {
+      "expect": [],
+      "note": "a device face beside a listed service: `devices` names one owner on a first hop by its address, and no finding (§2.1, §2.5). Written by reading link.v2 0.6",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"probe-a\"\nattach           = \"device\"\ndevices          = [\"lab/probe-a\"]\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "devices",
+          "code": "missing_field",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "`attach = \"device\"` with no `devices`: `missing_field` (§2.1). Written by reading link.v2 0.6",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"probe-a\"\nattach           = \"device\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "devices",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "`devices` on a client face: `bad_value`, as `region` there is (§2.1). Written by reading link.v2 0.6",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\ndevices          = [\"lab/probe-a\"]\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "region",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "`region` on a device face: `bad_value`, as with `client` (§2.1). Written by reading link.v2 0.6",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"probe-a\"\nattach           = \"device\"\ndevices          = [\"lab/probe-a\"]\nregion           = \"ground\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "devices",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "an empty `devices`: `bad_value` (§2.1). Written by reading link.v2 0.6",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"probe-a\"\nattach           = \"device\"\ndevices          = []\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "devices",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "a device listed twice in `devices`: one `bad_value` (§2.1). Written by reading link.v2 0.6",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"probe-a\"\nattach           = \"device\"\ndevices          = [\"lab/probe-a\", \"lab/probe-a\"]\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "devices",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "entries that are not an address of two plain chunks, one chunk, a wildcard and three chunks: `devices` is one value, so one `bad_value` (§2.1). Written by reading link.v2 0.6",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"probe-a\"\nattach           = \"device\"\ndevices          = [\"probe-a\", \"lab/*\", \"lab/probe-a/x\"]\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "devices",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "`devices` that is not an array: `bad_value` (§2.1). Written by reading link.v2 0.6",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"probe-a\"\nattach           = \"device\"\ndevices          = \"lab/probe-a\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "attach",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        },
+        {
+          "at": "devices",
+          "code": "unknown_field",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "a link.v1 policy knows no device face: `attach = \"device\"` is `bad_value` and `devices` `unknown_field` (§2.1). Written by reading link.v2 0.6",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"probe-a\"\nattach       = \"device\"\ndevices      = [\"lab/probe-a\"]\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "devices",
+          "code": "device_listed",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "a device among `services`, as `<system>/<service>`: `device_listed` (§2.1, §2.5). Written by reading link.v2 0.6",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"probe-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"probe-a\"\nattach           = \"device\"\ndevices          = [\"lab/probe-a\"]\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "devices",
+          "code": "device_listed",
+          "face": "radio",
+          "severity": "error"
+        },
+        {
+          "at": "devices",
+          "code": "device_listed",
+          "face": "sat",
+          "severity": "error"
+        }
+      ],
+      "note": "one device on two faces: `device_listed` for each (§2.1, §2.5). Written by reading link.v2 0.6",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"probe-a\"\nattach           = \"device\"\ndevices          = [\"lab/probe-a\"]\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n\n[face.sat]\nfar              = \"probe-a-sat\"\nattach           = \"device\"\ndevices          = [\"lab/probe-a\"]\nselect           = { link_protocols = [\"serial\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/*/*/@zk/alive/**",
+              "zk2/*/*/@zk/member/**",
+              "zk2/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          },
+          {
+            "flows": [
+              "egress"
+            ],
+            "key_exprs": [
+              "zk2/*/*/@zk/instance/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          },
+          {
+            "flows": [
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/*/*/@zk/instance/**"
+            ],
+            "messages": [
+              "declare_subscriber",
+              "query",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "radio",
+        "namespace": ""
+      },
+      "expect": [],
+      "note": "a device face's block holding §2.6's carve: no finding (§2.15). Written by reading link.v2 0.6",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"probe-a\"\nattach           = \"device\"\ndevices          = [\"lab/probe-a\"]\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/**/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "radio",
+        "namespace": ""
+      },
+      "expect": [],
+      "note": "the control: a device face's block keeping link.v1's whole `zk`, which includes each key expression the check reads: no finding (§2.6, §2.15). Written by reading link.v2 0.6",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"probe-a\"\nattach           = \"device\"\ndevices          = [\"lab/probe-a\"]\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/*/*/@zk/alive/**",
+              "zk2/*/*/@zk/member/**",
+              "zk2/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "radio",
+        "namespace": ""
+      },
+      "expect": [
+        {
+          "at": "@zk",
+          "code": "zk_not_denied",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "a device face's `zk` without its two instance rules: the instance keys are not denied on the eleven pairs outside the Own row (§2.15). Written by reading link.v2 0.6",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"probe-a\"\nattach           = \"device\"\ndevices          = [\"lab/probe-a\"]\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/*/*/@zk/alive/**",
+              "zk2/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          },
+          {
+            "flows": [
+              "egress"
+            ],
+            "key_exprs": [
+              "zk2/*/*/@zk/instance/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          },
+          {
+            "flows": [
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/*/*/@zk/instance/**"
+            ],
+            "messages": [
+              "declare_subscriber",
+              "query",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "radio",
+        "namespace": ""
+      },
+      "expect": [
+        {
+          "at": "@zk",
+          "code": "zk_not_denied",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "a device face's carve that leaves the member tokens out: `zk_not_denied` (§2.15). Written by reading link.v2 0.6",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"probe-a\"\nattach           = \"device\"\ndevices          = [\"lab/probe-a\"]\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/*/*/@zk/alive/**",
+              "zk2/*/*/@zk/member/**",
+              "zk2/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          },
+          {
+            "flows": [
+              "egress"
+            ],
+            "key_exprs": [
+              "zk2/*/*/@zk/instance/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          },
+          {
+            "flows": [
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/*/*/@zk/instance/**"
+            ],
+            "messages": [
+              "declare_subscriber",
+              "query",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "radio",
+        "namespace": ""
+      },
+      "expect": [
+        {
+          "at": "@zk",
+          "code": "zk_not_denied",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "the carve on a client face, where the check is link.v1's: no deny includes `zk2/**/@zk/**` on the Own row's pairs, so `zk_not_denied` (§2.15). Written by reading link.v2 0.6",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "fleet/zk2/*/*/@zk/alive/**",
+              "fleet/zk2/*/*/@zk/member/**",
+              "fleet/zk2/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          },
+          {
+            "flows": [
+              "egress"
+            ],
+            "key_exprs": [
+              "fleet/zk2/*/*/@zk/instance/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          },
+          {
+            "flows": [
+              "ingress"
+            ],
+            "key_exprs": [
+              "fleet/zk2/*/*/@zk/instance/**"
+            ],
+            "messages": [
+              "declare_subscriber",
+              "query",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "radio",
+        "namespace": "fleet"
+      },
+      "expect": [],
+      "note": "a namespace: the carve carries it, and no finding (§2.15). Written by reading link.v2 0.6",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"probe-a\"\nattach           = \"device\"\ndevices          = [\"lab/probe-a\"]\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "block": {
+        "deny": [
+          {
+            "flows": [
+              "egress",
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/*/*/@zk/alive/**",
+              "zk2/*/*/@zk/member/**",
+              "zk2/@zk/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          },
+          {
+            "flows": [
+              "egress"
+            ],
+            "key_exprs": [
+              "zk2/*/*/@zk/instance/**"
+            ],
+            "messages": [
+              "put",
+              "delete",
+              "declare_queryable",
+              "reply",
+              "liveliness_token",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          },
+          {
+            "flows": [
+              "ingress"
+            ],
+            "key_exprs": [
+              "zk2/*/*/@zk/instance/**"
+            ],
+            "messages": [
+              "declare_subscriber",
+              "query",
+              "declare_liveliness_subscriber",
+              "liveliness_query"
+            ]
+          }
+        ],
+        "downsampling": [],
+        "face": "radio",
+        "namespace": "fleet"
+      },
+      "expect": [
+        {
+          "at": "@zk",
+          "code": "zk_not_denied",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "a namespace the carve does not carry: `zk_not_denied` (§2.15). Written by reading link.v2 0.6",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"probe-a\"\nattach           = \"device\"\ndevices          = [\"lab/probe-a\"]\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
     }
   ],
-  "description": "link.v2's linter (v2.md §2.1, §2.4, §2.10, §2.16), a face's `frames` and `horizon_s` among it. Each case is a face policy, `policy`, and `expect`, every finding of it, sorted by face (none first), `at`, then `code`, as link.v1's lints.json writes them. A policy with no `profile` is link.v1's, read finding for finding as link.v1 §2.1 says."
+  "description": "link.v2's linter (v2.md §2.1, §2.4, §2.10, §2.16), a face's `frames` and `horizon_s` among it. Each case is a face policy, `policy`, and `expect`, every finding of it, sorted by face (none first), `at`, then `code`, as link.v1's lints.json writes them. A policy with no `profile` is link.v1's, read finding for finding as link.v1 §2.1 says. A device face (§2.5) is `attach = \"device\"` with `devices`. A case may carry link.v1's `block`, read as link.v1's lints.json reads it, `zk_not_denied` on a device face read as §2.15 says. The device cases, from case 40, were written by reading the text, not derived by the reference."
 }
