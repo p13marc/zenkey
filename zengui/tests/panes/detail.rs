@@ -711,6 +711,8 @@ fn the_detail_pane_offers_no_chart_for_a_non_numeric_payload() {
         metric: None,
         timing: None,
         frame: None,
+        frame_metric: None,
+        frame_caches: Vec::new(),
         caches: Default::default(),
     };
     let mut ui = simulator::<Message, _, _>(section(DetailData {
@@ -755,6 +757,8 @@ fn the_detail_pane_labels_the_series_it_plots() {
         metric: None,
         timing: None,
         frame: None,
+        frame_metric: None,
+        frame_caches: Vec::new(),
         caches: Default::default(),
     };
     let mut ui = simulator::<Message, _, _>(section(DetailData {

@@ -4,6 +4,17 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — the Series plots a frame's fields (#983, T2)
+
+`telemetry.v2` 0.1 binds a frame resource's fields to metric series.
+
+| Before | Now | Notes |
+|---|---|---|
+| a frame resource: its FRAME section alone | a Series section with one chart per series field, one point per record, a record that included no value a gap, never 0, and a counter's rate under its time basis (measured, scheduled ±jitter and never shown as measured, or arrival), each through the fleet's `TelemetryBook::frame` (`zengui::metric::FrameFold`) | the ring counts frames, so a frame of three records is three points |
+| — | the identity's SERIES rows, a field's kind, unit and mirror each; on a mirrored stream, ALSO CARRIED BY `<frame> (<field>), a series apart` | §2.17 |
+| a narrow counter's change outside its serial window: not counted (no frame was read) | counted, a gap in the rate, said `wrap_or_decrease` | §2.20 |
+| — | the shots scenes `inspector-frame-series` and `inspector-frame-series-scheduled` (`World::meterframed`, `lab/meterframe` on `meterframe.v1`) | |
+
 ## Unreleased (`main`, zk2) — the spray writes frames (#981, K3)
 
 Core 0.87 has owners write frames (§7.7), through the runtime's frame

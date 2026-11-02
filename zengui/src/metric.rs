@@ -170,6 +170,9 @@ pub struct NoRates {
     pub decreased: u64,
     /// The elapsed time was 0 or less.
     pub elapsed: u64,
+    /// A narrow counter's change outside its serial window: a wrap or a
+    /// decrease, which its values cannot tell apart (telemetry.v2 §2.20).
+    pub wrap_or_decrease: u64,
 }
 
 /// What the window's history says of one metric member: see the module doc.
@@ -218,6 +221,10 @@ pub struct MetricRead {
     /// The latest decreases within an established epoch, at most
     /// [`DECREASES_KEPT`].
     pub decreases: Vec<Decrease>,
+    /// The frame resources of its revision whose series mirror this one,
+    /// each `(frame template, field)`: the same quantity carried apart, a
+    /// series of its own never paired with this one (telemetry.v2 §2.17).
+    pub carried_by: Vec<(String, String)>,
 }
 
 impl MetricRead {
@@ -405,6 +412,8 @@ struct Folded {
 pub struct MetricFold {
     inputs: Inputs,
     metric: Arc<MetricResource>,
+    /// The frames whose series mirror this resource (telemetry.v2 §2.17).
+    carried_by: Vec<(String, String)>,
     /// Opened at the first entry folded, its origin that entry's arrival:
     /// a fold begun over an empty ring has no arrival to count from yet.
     book: Option<TelemetryBook>,
@@ -426,9 +435,17 @@ impl MetricFold {
             &resolved.revision,
             resolved.index(),
         )?);
+        // A frame resource's series are [`FrameFold`]'s (telemetry.v2).
+        if metric.frame.is_some() {
+            return None;
+        }
+        let carried_by = carried_by(resolved);
+        let mut empty = MetricRead::empty(metric.ty.declaration.clone());
+        empty.carried_by = carried_by.clone();
         let mut fold = MetricFold {
             inputs: Inputs::of(resolved, ring),
-            read: Arc::new(MetricRead::empty(metric.ty.declaration.clone())),
+            read: Arc::new(empty),
+            carried_by,
             metric,
             book: None,
             folded: None,
@@ -546,6 +563,7 @@ impl MetricFold {
                 stamp: entry.stamp,
                 at: entry.received,
                 via: MetricVia::Subscription,
+                frame: None,
             },
             envelope,
         );
@@ -586,6 +604,7 @@ impl MetricFold {
     /// latest (§2.5).
     fn snapshot(&self) -> MetricRead {
         let mut out = MetricRead::empty(self.metric.ty.declaration.clone());
+        out.carried_by = self.carried_by.clone();
         if let Some(m) = self.book.as_ref().and_then(|b| b.member(&self.inputs.key)) {
             if m.kind.is_some() {
                 out.kind = m.kind;
@@ -635,9 +654,8 @@ impl MetricFold {
                         NoRate::Reset => out.no_rate.reset += 1,
                         NoRate::Decreased => out.no_rate.decreased += 1,
                         NoRate::Elapsed => out.no_rate.elapsed += 1,
-                        // A narrow counter's, which only a frame carries
-                        // (telemetry.v2 §2.20): no frame is read here.
-                        NoRate::Kind | NoRate::WrapOrDecrease => {}
+                        NoRate::WrapOrDecrease => out.no_rate.wrap_or_decrease += 1,
+                        NoRate::Kind => {}
                     }
                 }
             }
@@ -735,14 +753,422 @@ impl MetricRead {
             tally: PairTally::default(),
             resets: Resets::default(),
             decreases: Vec::new(),
+            carried_by: Vec::new(),
         }
     }
+}
+
+/// The frame resources of `resolved`'s revision whose declared series
+/// mirror its resource, each `(frame template, field)` (telemetry.v2
+/// §2.16, §2.17).
+fn carried_by(resolved: &Resolved) -> Vec<(String, String)> {
+    let c = resolved.revision.contract();
+    let template = resolved.resource().template.as_str();
+    c.resources
+        .iter()
+        .filter_map(|r| Some((r, zenkey_fleet::FrameMetric::of(c, r)?)))
+        .flat_map(|(r, f)| {
+            f.declared()
+                .unwrap_or_default()
+                .iter()
+                .filter(|s| s.mirror.as_deref() == Some(template))
+                .map(|s| (r.template.as_str().to_owned(), s.field.clone()))
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 /// `resolved`'s metric member over `ring`, read once ([`MetricFold`]):
 /// `None` when the resource is no metric resource (§2.1).
 pub fn read(resolved: &Resolved, ring: &HistoryRing) -> Option<MetricRead> {
     MetricFold::new(resolved, ring).map(|f| (*f.read()).clone())
+}
+
+// ─── telemetry.v2: a frame's series (#983 T2) ──────────────────────────────
+
+/// One series of a frame key, as the window read it (telemetry.v2 §2.17):
+/// the frame key and one field, plotted one point per record.
+#[derive(Debug, Clone)]
+pub struct FieldRead {
+    /// Its field, kind, unit, semantic, mirror and width (§2.16).
+    pub series: zenkey_model::telemetry::frames::FieldSeries,
+    /// One point per record of every retained frame: a sample's plotted
+    /// value, else a gap — a record that did not include the field, or held
+    /// no value, is never 0 (§2.18).
+    pub value: Series,
+    /// A counter's rate, one point per record: the rate of the pair the
+    /// record closed, else a gap. `None` for any other kind.
+    pub rate: Option<Series>,
+    pub rate_unit: Option<String>,
+    /// The latest rated pair's time basis (§2.21).
+    pub basis: Option<zenkey_model::telemetry::TimeBasis>,
+    /// Records that included the field with a value (§2.18).
+    pub samples: u64,
+    /// Records that were no sample, by the reading's token.
+    pub no_sample: std::collections::BTreeMap<&'static str, u64>,
+    /// The latest sample, core §7.6's JSON reading.
+    pub latest: Option<serde_json::Value>,
+    pub tally: PairTally,
+    pub no_rate: NoRates,
+    pub decreases: Vec<Decrease>,
+}
+
+impl FieldRead {
+    /// Its unit, the entry's or its mirror's; unknown, never
+    /// dimensionless, when none gives one (§2.17).
+    pub fn unit(&self) -> Unit {
+        match &self.series.unit {
+            Some(u) => Unit::Known(u.clone(), Source::Declared),
+            None => Unit::Unknown,
+        }
+    }
+
+    /// What its chart plots, as a caption's label; `None` for a text.
+    pub fn plotted_label(&self) -> Option<String> {
+        let kind = match self.series.kind {
+            MetricKind::Counter => match self.series.width {
+                Some(w) if w < 64 => format!("counter, modulo 2^{w}"),
+                _ => "counter".to_owned(),
+            },
+            MetricKind::Gauge => "gauge".to_owned(),
+            MetricKind::Boolean => "boolean (1 = true, 0 = false)".to_owned(),
+            _ => return None,
+        };
+        Some(format!("{} · {kind}", self.series.field))
+    }
+
+    /// Its kind, unit and mirror, for the Inspector's identity.
+    pub fn identity_words(&self) -> String {
+        let mut w = format!("{} · {}", self.series.kind, self.unit().words());
+        if let Some(m) = &self.series.mirror {
+            w.push_str(&format!(" · mirrors {m}"));
+        }
+        w
+    }
+
+    /// Its records that were no sample, in words: `""` when none.
+    pub fn no_sample_words(&self) -> String {
+        self.no_sample
+            .iter()
+            .map(|(t, n)| format!("{n} {t}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+/// A frame key's series, as the window read them (telemetry.v2 §2.16–§2.21).
+#[derive(Debug, Clone)]
+pub struct FrameMetricRead {
+    /// Why no field is read: the resource's `telemetry.series` is invalid
+    /// (§2.16), in the fleet's words.
+    pub invalid: Option<String>,
+    /// Each series, in field order.
+    pub fields: Vec<FieldRead>,
+    /// Frames read, and frames that could not be (a body its layout
+    /// refused, a mutation, a refused envelope), each a gap in every chart.
+    pub frames: u64,
+    pub unread: u64,
+}
+
+/// One series of one record, folded.
+#[derive(Debug, Clone)]
+struct Point {
+    sample: bool,
+    reading: &'static str,
+    value: Option<f64>,
+    json: Option<serde_json::Value>,
+    pair: Option<zenkey_fleet::PairSeen>,
+}
+
+/// One folded ring entry: a frame's records, each its series' points; or a
+/// frame that could not be read.
+#[derive(Debug, Clone)]
+struct FoldedFrame {
+    seq: u64,
+    unread: bool,
+    records: Vec<Vec<Point>>,
+}
+
+/// One slot's frame key, its series folded as its ring grows (telemetry.v2,
+/// #983 T2): one [`TelemetryBook`] for the fold's life, whose fold holds
+/// the key's frame reader, so a frame lost turns the fields its successors
+/// omit `unknown` and the epoch is the run (§2.19). A ring entry is a
+/// frame, so the ring's bound counts frames, and a frame of several records
+/// several points. It rebuilds, as [`MetricFold`] does, when it cannot
+/// follow its ring, its oldest retained frame then its reader's first.
+#[derive(Debug, Clone)]
+pub struct FrameFold {
+    inputs: Inputs,
+    metric: Arc<MetricResource>,
+    book: Option<TelemetryBook>,
+    folded: Option<u64>,
+    entries: std::collections::VecDeque<FoldedFrame>,
+    decoded: u64,
+    read: Arc<FrameMetricRead>,
+}
+
+impl FrameFold {
+    /// `resolved`'s frame key, folded over `ring`: `None` when its resource
+    /// is no frame resource whose `telemetry.series` is declared or
+    /// invalid (§2.16).
+    pub fn new(resolved: &Resolved, ring: &HistoryRing) -> Option<FrameFold> {
+        let metric = Arc::new(MetricResource::of(
+            &resolved.address,
+            &resolved.revision,
+            resolved.index(),
+        )?);
+        metric.frame.as_ref()?;
+        let mut fold = FrameFold {
+            inputs: Inputs::of(resolved, ring),
+            read: Arc::new(FrameMetricRead {
+                invalid: metric.invalid_words(),
+                fields: Vec::new(),
+                frames: 0,
+                unread: 0,
+            }),
+            metric,
+            book: None,
+            folded: None,
+            entries: std::collections::VecDeque::new(),
+            decoded: 0,
+        };
+        fold.fold(ring);
+        fold.read = Arc::new(fold.snapshot());
+        Some(fold)
+    }
+
+    /// Whether this fold reads `resolved`'s key through the same revision.
+    pub fn reads(&self, resolved: &Resolved) -> bool {
+        self.inputs.key == resolved.key
+            && self.inputs.index == resolved.index()
+            && self.inputs.fingerprint == resolved.revision.fingerprint().to_string()
+    }
+
+    /// [`MetricFold::advance`]'s, for a frame key.
+    pub fn advance(&mut self, resolved: &Resolved, ring: &HistoryRing) -> bool {
+        let oldest = ring.iter().next_back().map(|e| e.seq);
+        let newest = ring.newest().map(|e| e.seq);
+        let rewound = matches!((self.folded, newest), (Some(f), Some(n)) if n < f)
+            || (self.folded.is_some() && newest.is_none());
+        let hole = matches!((self.folded, oldest), (Some(f), Some(o)) if o > f + 1);
+        if Inputs::of(resolved, ring) != self.inputs || rewound || hole {
+            let decoded = self.decoded;
+            match FrameFold::new(resolved, ring) {
+                Some(mut fresh) => {
+                    fresh.decoded += decoded;
+                    *self = fresh;
+                }
+                None => return false,
+            }
+            return true;
+        }
+        let moved = self.fold(ring);
+        if moved {
+            self.read = Arc::new(self.snapshot());
+        }
+        moved
+    }
+
+    /// The read, as of the last fold.
+    pub fn read(&self) -> Arc<FrameMetricRead> {
+        Arc::clone(&self.read)
+    }
+
+    /// Frames decoded since the fold began, rebuilds included.
+    pub fn decoded(&self) -> u64 {
+        self.decoded
+    }
+
+    fn fold(&mut self, ring: &HistoryRing) -> bool {
+        let mut moved = false;
+        if self.metric.declared() {
+            let after = self.folded;
+            let fresh = || ring.iter().filter(|e| after.is_none_or(|f| e.seq > f));
+            if self.book.is_none()
+                && let Some(t0) = fresh().map(|e| e.received).min()
+            {
+                self.book = Some(TelemetryBook::new(None, t0));
+            }
+            let newest_first: Vec<&crate::history::HistoryEntry> = fresh().collect();
+            for entry in newest_first.into_iter().rev() {
+                self.fold_one(entry);
+                moved = true;
+            }
+        }
+        if let Some(n) = ring.newest() {
+            self.folded = Some(n.seq);
+        }
+        let oldest = ring.iter().next_back().map(|e| e.seq);
+        while self
+            .entries
+            .front()
+            .is_some_and(|e| oldest.is_none_or(|o| e.seq < o))
+        {
+            self.entries.pop_front();
+            moved = true;
+        }
+        moved
+    }
+
+    fn fold_one(&mut self, entry: &crate::history::HistoryEntry) {
+        use zenkey_fleet::model::inband::Payload;
+        let Some(book) = self.book.as_mut() else {
+            return;
+        };
+        let key = self.inputs.key.clone();
+        let bytes = entry.payload.to_bytes();
+        let encoding = (!entry.encoding.is_empty()).then_some(entry.encoding.as_str());
+        let (payload, envelope, frame) =
+            match zenkey_fleet::model::inband::payload(&key, encoding, &bytes) {
+                Payload::Frame { body, stamp, tag } => (body.to_vec(), Some(Ok(stamp)), Some(tag)),
+                Payload::Record { record, stamp, .. } => (record.to_vec(), Some(Ok(stamp)), None),
+                Payload::Refused(r) => (bytes.to_vec(), Some(Err(r)), None),
+                Payload::Plain(b) | Payload::Heartbeat { body: b, .. } => (b.to_vec(), None, None),
+            };
+        let seen = book.frame(
+            &self.metric,
+            MetricSample {
+                key,
+                delete: entry.is_delete,
+                payload,
+                attachment: None,
+                stamp: entry.stamp,
+                at: entry.received,
+                via: MetricVia::Subscription,
+                frame,
+            },
+            envelope,
+        );
+        self.decoded += 1;
+        let mut records = Vec::new();
+        if let Some(folded) = &seen.folded {
+            for (r, rec) in folded.records.iter().enumerate() {
+                let mut points = Vec::new();
+                for read in &rec.fields {
+                    let sample = read.reading.sample();
+                    points.push(Point {
+                        sample: sample.is_some(),
+                        reading: read.reading.as_str(),
+                        value: sample.and_then(|v| plotted(&v.measure)),
+                        json: sample.map(|v| v.json.clone()),
+                        pair: seen
+                            .pairs
+                            .iter()
+                            .find(|p| p.record == r && p.series == read.series)
+                            .map(|p| p.seen.clone()),
+                    });
+                }
+                records.push(points);
+            }
+        }
+        self.entries.push_back(FoldedFrame {
+            seq: entry.seq,
+            unread: seen.unread.is_some(),
+            records,
+        });
+    }
+
+    /// The read over the retained frames.
+    fn snapshot(&self) -> FrameMetricRead {
+        let series = self
+            .metric
+            .frame
+            .as_ref()
+            .and_then(|f| f.declared())
+            .unwrap_or_default();
+        let mut out = FrameMetricRead {
+            invalid: self.metric.invalid_words(),
+            fields: Vec::new(),
+            frames: 0,
+            unread: 0,
+        };
+        for e in &self.entries {
+            if e.unread {
+                out.unread += 1;
+            } else if !e.records.is_empty() {
+                out.frames += 1;
+            }
+        }
+        for (k, s) in series.iter().enumerate() {
+            let counter = s.kind == MetricKind::Counter;
+            let mut f = FieldRead {
+                series: s.clone(),
+                value: Series::new(),
+                rate: None,
+                rate_unit: None,
+                basis: None,
+                samples: 0,
+                no_sample: std::collections::BTreeMap::new(),
+                latest: None,
+                tally: PairTally::default(),
+                no_rate: NoRates::default(),
+                decreases: Vec::new(),
+            };
+            let mut rate = Series::new();
+            for e in &self.entries {
+                if e.unread {
+                    f.value.push_gap();
+                    rate.push_gap();
+                    continue;
+                }
+                for rec in &e.records {
+                    let Some(p) = rec.get(k) else {
+                        continue;
+                    };
+                    if p.sample {
+                        f.samples += 1;
+                        f.latest = p.json.clone();
+                    } else {
+                        *f.no_sample.entry(p.reading).or_default() += 1;
+                    }
+                    match p.value {
+                        Some(v) => f.value.push(v),
+                        None => f.value.push_gap(),
+                    }
+                    let Some(seen) = &p.pair else {
+                        rate.push_gap();
+                        continue;
+                    };
+                    match &seen.pair.rate {
+                        Ok(r) => {
+                            rate.push(r.per_s);
+                            f.rate_unit = r.unit.clone();
+                            f.basis = r.basis;
+                        }
+                        Err(why) => {
+                            rate.push_gap();
+                            match why {
+                                NoRate::Reset => f.no_rate.reset += 1,
+                                NoRate::Decreased => f.no_rate.decreased += 1,
+                                NoRate::Elapsed => f.no_rate.elapsed += 1,
+                                NoRate::WrapOrDecrease => f.no_rate.wrap_or_decrease += 1,
+                                NoRate::Kind => {}
+                            }
+                        }
+                    }
+                    f.tally.add(&seen.pair);
+                    if let (Continuity::Decreased, Some(Basis::Established(via))) =
+                        (seen.pair.continuity, seen.pair.basis)
+                    {
+                        if f.decreases.len() == DECREASES_KEPT {
+                            f.decreases.remove(0);
+                        }
+                        f.decreases.push(Decrease {
+                            seq: e.seq,
+                            earlier: seen.earlier.clone(),
+                            later: seen.later.clone(),
+                            via,
+                        });
+                    }
+                }
+            }
+            if counter {
+                f.rate = Some(rate);
+            }
+            out.fields.push(f);
+        }
+        out
+    }
 }
 
 #[cfg(test)]
@@ -1088,5 +1514,128 @@ mod tests {
                 .contains("never read as dimensionless")
         );
         assert_eq!(Unit::Known("By".into(), Source::Declared).why_none(), None);
+    }
+
+    /// `meterframe.v1`, `telemetry.v2`'s scenarios' contract.
+    fn meterframe() -> Arc<zenkey_fleet::ContractSet> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../spec/profiles/telemetry/conformance/contracts/meterframe.v1.toml");
+        let (set, problems) = zenkey_fleet::ContractSet::load_path(&path);
+        assert!(problems.is_empty(), "{problems:?}");
+        Arc::new(set)
+    }
+
+    /// A ring of `key`'s frames, each in `spec/conformance/frame/bodies.json`'s
+    /// spelling, under `layout`, enveloped at run 0001 from seq `seqs[i]`,
+    /// arriving a second apart.
+    fn frame_ring(r: &Resolved, frames: &[(u32, serde_json::Value)]) -> HistoryRing {
+        use zenkey_model::wire::{Run, Seq, Stamp};
+        let layout = zenkey_model::frame::Layout::of_resource(r.revision.contract(), r.resource())
+            .unwrap()
+            .unwrap();
+        let t0 = Instant::now();
+        let mut ring = HistoryRing::new(64);
+        for (i, (seq, v)) in frames.iter().enumerate() {
+            let bytes = zenkey_model::frame::Frame::from_json(v, &layout, None)
+                .unwrap()
+                .envelope(
+                    &layout,
+                    Stamp {
+                        run: Run::U16(1),
+                        seq: Seq::new(*seq).unwrap(),
+                    },
+                )
+                .unwrap();
+            ring.push(&zenkey_fleet::SampleView {
+                key: r.key.clone(),
+                payload: zenoh::bytes::ZBytes::from(bytes),
+                encoding: "zenoh/bytes".into(),
+                kind: zenoh::sample::SampleKind::Put,
+                timestamp: None,
+                stamped_by: None,
+                attachment: None,
+                priority: zenoh::qos::Priority::DEFAULT,
+                congestion_control: zenoh::qos::CongestionControl::DEFAULT,
+                reliability: zenoh::qos::Reliability::DEFAULT,
+                express: false,
+                source: None,
+                received: t0 + std::time::Duration::from_secs(i as u64),
+            });
+        }
+        ring
+    }
+
+    /// #983 T2 (telemetry.v2 §2.17–§2.21): a frame key's series, one
+    /// point per record. `rx`, a 24-bit counter in frames of three
+    /// scheduled records, plots each count and rates each pair under the
+    /// schedule; across its wrap the increase is read in its window, and a
+    /// step outside it is `wrap_or_decrease`, a gap with no rate.
+    #[test]
+    fn a_frames_series_plot_one_point_a_record() {
+        use serde_json::json;
+        let set = meterframe();
+        let r = resolve(&set, "zk2/lab/meterframe/meterframe.v1/stream/frames/bytes");
+        assert!(MetricFold::new(&r, &HistoryRing::new(4)).is_none(), "v2's");
+        let frame = |s: u64, rx: [u64; 3]| {
+            json!({"time": {"s": s, "ms": 0}, "records": [
+                {"full": true, "values": {"rx": rx[0]}},
+                {"full": true, "at": "scheduled", "values": {"rx": rx[1]}},
+                {"full": true, "at": "scheduled", "values": {"rx": rx[2]}}]})
+        };
+        let top = (1u64 << 24) - 1;
+        let ring = frame_ring(
+            &r,
+            &[
+                (0, frame(100, [top - 99, top - 98, 100])),
+                (3, frame(103, [400, 300, 600])),
+            ],
+        );
+        let fold = FrameFold::new(&r, &ring).expect("a frame resource");
+        let read = fold.read();
+        assert!(read.invalid.is_none());
+        assert_eq!((read.frames, read.unread), (2, 0));
+        let rx = &read.fields[0];
+        assert_eq!(rx.series.field, "rx");
+        assert_eq!(rx.unit(), Unit::Known("By".into(), Source::Declared));
+        assert_eq!(rx.value.len(), 6, "one point a record");
+        assert_eq!(rx.samples, 6);
+        let rate = rx.rate.as_ref().expect("a counter's rate");
+        let points = rate.points();
+        assert_eq!(points[0], None, "the window's first sample");
+        assert_eq!(points[1], Some(1.0), "top - 99 → top - 98 in one second");
+        assert_eq!(points[2], Some(199.0), "across the wrap: 199 in its window");
+        assert_eq!(points[3], Some(300.0));
+        assert_eq!(points[4], None, "400 → 300: outside the window");
+        assert_eq!(points[5], Some(300.0));
+        assert_eq!(rx.tally.wrap_or_decrease, 1);
+        assert_eq!(rx.no_rate.wrap_or_decrease, 1);
+        assert!(
+            matches!(
+                rx.basis,
+                Some(zenkey_model::telemetry::TimeBasis::Scheduled { .. })
+            ),
+            "{:?}",
+            rx.basis
+        );
+        assert_eq!(
+            rx.plotted_label().as_deref(),
+            Some("rx · counter, modulo 2^24")
+        );
+    }
+
+    /// A mirrored stream says which frames carry its quantity too, a series
+    /// apart (telemetry.v2 §2.17).
+    #[test]
+    fn a_mirrored_stream_names_the_frames_that_carry_it() {
+        let set = meterframe();
+        let r = resolve(
+            &set,
+            "zk2/lab/meterframe/meterframe.v1/stream/sdu/dropped_total",
+        );
+        let m = read(&r, &ring(&[])).expect("a v1 metric");
+        assert_eq!(
+            m.carried_by,
+            [("frames/link".to_owned(), "dropped".to_owned())]
+        );
     }
 }

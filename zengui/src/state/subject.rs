@@ -88,6 +88,10 @@ sub_state! {
         /// each ring entry decoded once. `None` when the key resolves to no
         /// metric resource, or nothing records it.
         pub(crate) metric: Option<crate::metric::MetricFold>,
+        /// The slot key's frame series (telemetry.v2, #983 T2): one book per
+        /// slot, each ring entry, a frame, folded once. `None` when the key
+        /// resolves to no frame resource with a `telemetry.series`.
+        pub(crate) frame_metric: Option<crate::metric::FrameFold>,
         /// The slot key's owner, as the presence link said it at each
         /// landing since the slot started recording (#908, MC): what a
         /// `timing.v1` miss reads its owner's state from. Reset with the
@@ -136,6 +140,7 @@ impl SubjectSlot {
             series_leaf: None,
             series: None,
             metric: None,
+            frame_metric: None,
             timing_owner: crate::timing::OwnerTrack::default(),
             timing_key: None,
             timing_lost: false,
@@ -175,10 +180,12 @@ impl SubjectSlot {
     fn advance_metric(&mut self, identities: &crate::keyfacts::IdentityCache) {
         let Some(rec) = self.history.as_ref() else {
             self.metric = None;
+            self.frame_metric = None;
             return;
         };
         let Some(resolved) = identities.get(&rec.key).and_then(|r| r.resolved.as_ref()) else {
             self.metric = None;
+            self.frame_metric = None;
             return;
         };
         match &mut self.metric {
@@ -186,6 +193,12 @@ impl SubjectSlot {
                 fold.advance(resolved, &rec.ring);
             }
             _ => self.metric = crate::metric::MetricFold::new(resolved, &rec.ring),
+        }
+        match &mut self.frame_metric {
+            Some(fold) if fold.reads(resolved) => {
+                fold.advance(resolved, &rec.ring);
+            }
+            _ => self.frame_metric = crate::metric::FrameFold::new(resolved, &rec.ring),
         }
     }
 
@@ -210,6 +223,10 @@ impl SubjectSlot {
         let rec = self.history.as_ref()?;
         let resolved = identities.get(&rec.key).and_then(|r| r.resolved.as_ref());
         let metric = self.metric.as_ref().map(crate::metric::MetricFold::read);
+        let frame_metric = self
+            .frame_metric
+            .as_ref()
+            .map(crate::metric::FrameFold::read);
         let unit = crate::metric::unit_of(resolved, metric.as_deref());
         // A metric member plots the profile's value; the structural leaves
         // are for everything else, a metric whose declaration is invalid
@@ -255,6 +272,16 @@ impl SubjectSlot {
             frame: resolved
                 .and_then(|r| crate::frame::read(r, &rec.key, &rec.ring, epoch_of(&r.address)))
                 .map(std::sync::Arc::new),
+            frame_caches: frame_metric
+                .as_ref()
+                .map(|f| {
+                    f.fields
+                        .iter()
+                        .map(|_| view::detail::FieldCaches::default())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            frame_metric,
         })
     }
 
@@ -426,6 +453,7 @@ impl SubjectState {
             // Folded again below, over the pin's own ring: a clone is
             // another generation, never the follow slot's fold (#819, TD).
             metric: None,
+            frame_metric: None,
             timing_owner: follow.timing_owner.clone(),
             timing_key: follow.timing_key.clone(),
             timing_lost: follow.timing_lost,

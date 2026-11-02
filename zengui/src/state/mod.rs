@@ -221,6 +221,9 @@ mod tests {
                     // telemetry.v1's fold of the slot key's history (#819,
                     // TD): derived from the recorder, dropped with it.
                     "metric",
+                    // telemetry.v2's fold of the slot key's frames (#983,
+                    // T2): derived from the recorder, dropped with it.
+                    "frame_metric",
                     // timing.v1's window over the slot key's history (#908,
                     // MC): its owner as the presence link landed it, the
                     // key that track is of, a pump lag while it recorded,
@@ -412,7 +415,8 @@ mod tests {
         // (CD): the Config tool came back on config.v1, as a verdict — 94.
         // Then #819 (TD): a slot's telemetry.v1 fold of its history — 95.
         // Then #908 (MC): a slot's timing.v1 window — its owner track, the
-        // key it is of, a lag and the latest tick's instant — 99.
-        assert_eq!(leaves, 99, "the split must place every field exactly once");
+        // key it is of, a lag and the latest tick's instant — 99. Then #983
+        // (T2): a slot's telemetry.v2 fold of its frames — 100.
+        assert_eq!(leaves, 100, "the split must place every field exactly once");
     }
 }
