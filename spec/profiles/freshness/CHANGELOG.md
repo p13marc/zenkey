@@ -5,6 +5,48 @@ entry naming its text. Each entry records what changed, what deliberately
 did not, and why. A breaking change is a new major, a new file, never an
 entry here ([`../README.md`](../README.md)).
 
+## `v2.md` 0.5 — 2026-11-02: a candidate's held write clears its bit (#978)
+
+zk2py's round 98 found §2.10 contradicting core §4.3 for a
+`redundancy.v1` candidate (F-461). A candidate's session stamps every
+write (core §8.2), so its guard holds every write of a member of this
+text, while §2.10 said it holds none and the heartbeats go on vouching.
+A held put of a new value left the owner holding a value it could no
+longer make current, and the heartbeat turned it fresh. `zs.catalog.v1`
+and `zs.desired.v1` use both profiles. This text, written against core
+0.90, answers it with core 0.90's "Ahead".
+
+**Changed: §2.10.**
+- **Before:** "The puts and deletes of a member of this profile carry
+  none, so the guard holds none of them", and the heartbeats go on
+  vouching as at any other time.
+- **Now:** that holds on a session without timestamping. A new bullet,
+  "A held write": where the guard holds a member's write (a candidate's
+  session stamps every write), the owner clears its bit until a write of
+  it goes on. `[Sc: §2]` By §2.4's "Only a value it holds current", the
+  value it still holds is one it can no longer vouch for.
+- **§2.4's "Its stamps"** says the puts carry no Zenoh timestamp on a
+  session without timestamping (core §8.2), and Appendix A's row names
+  the member whose write the guard held.
+
+**`scenarios-v2.md` §2, step 6.** A candidate, `lab/candidate`, serves
+`beacon.v2` at minor 1, governed by `redundancy.v1`, its clock 2 s ahead.
+Before any write is held, its heartbeats vouch for `status`, the time
+unknown. Its held put of `still up` clears the bit, the digest still over
+the first put. The guard's release alone sets nothing, and the next put
+that goes through sets it again. The reference runs it as
+`s2_a_candidates_held_put_clears_its_bit`
+(`zenkey/tests/profile_freshness_v2.rs`, its contract
+`zenkey/tests/contracts/beacon-governed.v2.toml`).
+
+**Deliberately not changed.**
+- **No keyword rule.** §2.4's MUST, to set a bit only while the owner
+  vouches, binds the new bullet, which states none.
+- **An owner whose session runs without timestamping,** as core §8.2
+  asks of any but a candidate, sees no change: §2.10's time of all ones
+  and its replies are 0.4's.
+- **The body:** no fixture, contract or fingerprint moves.
+
 ## `v2.md` 0.4 — 2026-11-02: a clock ahead holds no confirmation (#978)
 
 Core 0.88 (#978's F6) narrows its clock guard. An owner whose clock is

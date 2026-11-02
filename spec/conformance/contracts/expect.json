@@ -630,6 +630,10 @@
       "codes": [],
       "fingerprint": "sha256:7e7bf5af892e882a0c75451c51150d1bc584256513e64386b341591ceb19d762"
     },
+    "ok-telemetry-v2-series": {
+      "codes": [],
+      "fingerprint": "sha256:36ce621472286a687848da60e98205d788f41b0452a6d510cfbcc6bc0764bd99"
+    },
     "w101-overlap": {
       "codes": [
         "W101"
@@ -689,6 +693,12 @@
         "W105"
       ],
       "fingerprint": "sha256:2fa4909975cb88c06a5c5da5bd59e504f37c6d159ce9b93ce4b88773082eafc2"
+    },
+    "w105-telemetry-series": {
+      "codes": [
+        "W105"
+      ],
+      "fingerprint": "sha256:775f137c5b5c31aaf37ba6335897abdc06139d97b170d68468f30f90586f8ff0"
     },
     "w105-timing-max-rate": {
       "codes": [

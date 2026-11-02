@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.89** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.90** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -1094,7 +1094,7 @@ time a profile reads (the table below).
   | A state whose contract declares `freshness.ttl_s` above 0, and does not use `freshness.v2` | a reply's age ([`freshness.v1`](profiles/freshness/v1.md) §2.4, §2.6) | S1, S2 |
   | A state whose contract declares `freshness.ttl_s` above 0, and uses `freshness.v2` | a reply's age, from its last confirmation ([`freshness.v2`](profiles/freshness/v2.md) §2.4, §2.6) | on its replies alone, never on a put: the later of the timestamps the owner minted at its last mutation and at the last heartbeat that vouched for it (S2, "Minting" below) |
   | A `desired.v1` desired resource | the order of an author's versions ([`desired.v1`](profiles/desired/v1.md) §2.4, §2.6, §2.11) | S1, S2 |
-  | A state that is a `telemetry.v1` metric resource | a rate's time base ([`telemetry.v1`](profiles/telemetry/v1.md) §2.11) | S1, S2 |
+  | A state that is a metric resource of `telemetry.v1`, or of `telemetry.v2` and no frame resource | a rate's time base ([`telemetry.v1`](profiles/telemetry/v1.md) §2.11, which [`telemetry.v2`](profiles/telemetry/v2.md) §0 restates) | S1, S2 |
   | A stream that declares a `timing.v1` lifespan | a sample's age ([`timing.v1`](profiles/timing/v1.md) §2.6) | that section says |
   | A `health.v1` fault | nothing a reader concludes ([`health.v1`](profiles/health/v1.md) §2.5) | where the owner sets one, as that section allows |
   | Every put of a `redundancy.v1` candidate | which instance is the incumbent ([`redundancy.v1`](profiles/redundancy/v1.md) §2.10) | by the candidate session's HLC, as that section says |
@@ -1146,12 +1146,18 @@ time a profile reads (the table below).
     design ([`freshness.v1`](profiles/freshness/v1.md) §2.10).
   - **What goes on.** The owner's other state writes go on, and its
     events and streams. A put or a delete that carries no Zenoh timestamp
-    gives a router no time of the owner's to re-stamp or drop. A state of
-    a contract that uses `freshness.v2` is one: its heartbeat goes on
-    vouching for it, with its time unknown
-    ([`freshness.v2`](profiles/freshness/v2.md) §2.10). Its replies carry
-    a last confirmation from the clock ahead, which a router never
-    re-stamps (§4.1). `[Sc: state.md §7]`
+    gives a router no time of the owner's to re-stamp or drop. On a
+    session without timestamping, a state of a contract that uses
+    `freshness.v2` is one: its heartbeat goes on vouching for it, with its
+    time unknown ([`freshness.v2`](profiles/freshness/v2.md) §2.10). Its
+    replies carry a last confirmation from the clock ahead, which a router
+    never re-stamps (§4.1). `[Sc: state.md §7]`
+    `[Sc: profiles/freshness/scenarios-v2.md §2]`
+  - **A candidate's.** A `redundancy.v1` candidate's session stamps every
+    write (§8.2), so the guard holds every write of its `freshness.v2`
+    members too. Its heartbeat goes on, but never vouches for a member
+    whose write the guard held, until a write of it goes on
+    ([`freshness.v2`](profiles/freshness/v2.md) §2.10).
     `[Sc: profiles/freshness/scenarios-v2.md §2]`
   - **The report.** The standard way is a stream sample: a `health.v1`
     owner publishes a `faults` sample with code `clock_ahead`
@@ -3819,7 +3825,10 @@ other:
    major, so a contract uses one major of a profile: two in one `uses` is
    E002. `[F: contracts/e002-two-majors]` Two contracts of one instance may
    use two majors of it, so a descriptor's `profiles` can list both
-   (§3.3).
+   (§3.3). W105 reads the table of the major the contract uses:
+   `telemetry.v2`'s ([`profiles/telemetry/v2.md`](profiles/telemetry/v2.md)
+   §4) adds `series` to `telemetry.v1`'s four keys.
+   `[F: contracts/w105-telemetry-series, ok-telemetry-v2-series]`
 3. **A registered verbatim kind**, such as `@blob`, at position 5. This
    point is reserved: this version refuses such keys (§1.2), and a later
    version defines their form.
@@ -4761,7 +4770,7 @@ profile's own table replaces its interim one.
 | `freshness` | `ttl_s` | [`profiles/freshness/v1.md`](profiles/freshness/v1.md) §4 |
 | `link` | `exposure` | [`profiles/link/v1.md`](profiles/link/v1.md) §4 |
 | `alarms` | none | [`profiles/alarms/v1.md`](profiles/alarms/v1.md) §4 |
-| `telemetry` | `kind`, `unit`, `buckets`, `semantic` | [`profiles/telemetry/v1.md`](profiles/telemetry/v1.md) §4 |
+| `telemetry` | `kind`, `unit`, `buckets`, `semantic`; `telemetry.v2` §4 adds `series` | [`profiles/telemetry/v1.md`](profiles/telemetry/v1.md) §4, [`profiles/telemetry/v2.md`](profiles/telemetry/v2.md) §4 |
 | `desired` | `target_param` | [`profiles/desired/v1.md`](profiles/desired/v1.md) §4 |
 | `redundancy` | `election` | [`profiles/redundancy/v1.md`](profiles/redundancy/v1.md) §4 |
 | `timing` | `period_ms`, `deadline_ms`, `lifespan_ms` | [`profiles/timing/v1.md`](profiles/timing/v1.md) §4 |

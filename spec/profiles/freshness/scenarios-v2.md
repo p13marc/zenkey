@@ -4,7 +4,8 @@ The rules of [`v2.md`](v2.md) that a fixture cannot check, in the form of
 the core's scenarios ([`../../scenarios/README.md`](../../scenarios/README.md)):
 a setup, steps, and expected observations. The reference runtime runs §1
 to §7 (`zenkey/tests/profile_freshness_v2.rs`, one test per section,
-named after it).
+named after it). §2's step 6 has a test of its own,
+`s2_a_candidates_held_put_clears_its_bit`.
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.4) are v2.md's rules; core
@@ -118,6 +119,15 @@ named after it).
    `lab/ahead`'s `status` and heartbeat, listens 4 s, and H2 reads its
    heartbeats. Then G GETs `lab/ahead`'s `status`.
 5. The first owner closes its service. S listens 3 s.
+6. A candidate, `lab/candidate`, serves `beacon.v2` at minor 1. Its
+   `uses` adds `redundancy.v1`, and `status` is its only resource. The
+   reference keeps it as `zenkey/tests/contracts/beacon-governed.v2.toml`.
+   Its session stamps every write (core §8.2). Its clock is 2 s ahead of
+   R1's. It watches the key of step 4, and puts `status` = `up`. Once
+   its guard holds, it puts `status` = `still up`, and H3 reads its
+   heartbeats 2.5 s. Then its clock is right again, and once its guard
+   releases, H3 reads 2.5 s more. Then it puts `status` = `still up`
+   again.
 
 **Expected.**
 - **Step 1.** S judges `status` fresh at 3 s, past its horizon.
@@ -134,6 +144,13 @@ named after it).
   `status` unobservable (v1 §2.6's band).
 - **Step 5.** A silent heartbeat: S judges `status` stale more than 2 s
   after the last heartbeat. It never reports the owner down.
+- **Step 6.** Before the second put, its heartbeats vouch for `status`,
+  the time unknown: no write of it was held. The second put is refused,
+  since it would carry a Zenoh timestamp. From it on, each heartbeat H3
+  hears vouches for nothing, its time unknown, and `status`'s digest is
+  still over the first put's stamp (§2.10). After the release the time is
+  known, and the bit stays clear. The third put goes on, and a heartbeat
+  after it vouches for `status`, its digest over that put's stamp.
 
 ## §3 A GET reader's age from the confirmation stamp (§2.4, §2.6)
 

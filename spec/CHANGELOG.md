@@ -3,6 +3,64 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.90 — 2026-11-02: zk2py round 98's findings answered (#978, #983)
+
+zk2py's round 98 read `telemetry.v2` 0.1 (#983's T1 and T3), #978's F5
+and F6, and round 97's answers cold. It filed F-461 to F-464, none a
+blocker. This version answers the core's: F-461, F-462 and F-463.
+`freshness.v2` 0.5 answers F-461 beside it, and `telemetry.v2` 0.2
+F-464.
+
+**Changed: §4.3, "Ahead", a candidate's `freshness.v2` members
+(F-461).** "What goes on" said a state of a contract that uses
+`freshness.v2` carries no Zenoh timestamp, so its heartbeat goes on
+vouching for it. A `redundancy.v1` candidate's session stamps every write
+(§8.2's exception), so "What it holds" holds every write of its members.
+`zs.catalog.v1` and `zs.desired.v1` are such contracts. A held put of a
+new value left the heartbeat vouching for the value it was to replace.
+- **Now:** "What goes on" holds on a session without timestamping. A new
+  bullet, "A candidate's": the guard holds every write of a candidate's
+  `freshness.v2` members, and its heartbeat goes on, but never vouches
+  for a member whose write the guard held, until a write of it goes on
+  (`freshness.v2` 0.5, §2.10).
+  `[Sc: profiles/freshness/scenarios-v2.md §2]`
+- **The reference** read §2.10 by the letter: its heartbeat went on
+  vouching for such a member. A `StateWriter` now clears a covered
+  member's bit when the guard holds its put, re-put or delete, and the
+  next put that goes through sets it as `set_vouched` left it
+  (`zenkey::state`). `freshness.v2`'s scenarios §2 step 6 is
+  `zenkey/tests/profile_freshness_v2.rs`'s
+  `s2_a_candidates_held_put_clears_its_bit`.
+
+**Changed: §4.3's table, a state metric resource of `telemetry.v2`
+(F-462).** The row named a `telemetry.v1` metric resource. A contract
+that moves its `uses` to `telemetry.v2` keeps its state metric
+resources, which `telemetry.v2` §0 reads by v1's rules, v1 §2.11's
+second time base among them. By the letter, such a state was on no row,
+and §8.2 forbade its owner the stamp.
+- **Now:** the row reads "A state that is a metric resource of
+  `telemetry.v1`, or of `telemetry.v2` and no frame resource".
+- **The reference** stamped such a state already. zk2py follows in its
+  next round.
+
+**Changed: §10 point 2 and Appendix D, a later major's vocabulary
+(F-463).** W105 found its table by the key's profile name, and the core
+gave `telemetry` one table, v1's.
+- **Now:** W105 reads the table of the major the contract uses, and
+  `telemetry.v2`'s §4 adds `series` to `telemetry.v1`'s four keys.
+  Appendix D's row says "`telemetry.v2` §4 adds `series`".
+- **`contracts/w105-telemetry-series`** and **`ok-telemetry-v2-series`**
+  put `telemetry.series` on one frame resource under each major: W105
+  under `telemetry.v1`, none under `telemetry.v2`. The reference's linter
+  read it so since T1 (`zenkey_model::contract`).
+
+**Deliberately not changed.**
+- **No keyword rule.** "Ahead"'s MUST is 0.88's. The new bullet states
+  no keyword: `freshness.v2` §2.4's MUST to set a bit only while the owner
+  vouches binds it. `RULES.md` lists 227 rules, as 0.89's did.
+- **A candidate's replies** carry a last confirmation, as before (S2).
+- **No wire or fingerprint moves.** Two contract fixtures are new.
+
 ## 0.89 — 2026-11-02: zk2py round 97's findings answered (#978, #981)
 
 zk2py's round 97 read core 0.84 to 0.87, observer 0.20 and 0.21, and

@@ -392,6 +392,15 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   a frame read alone is an archive's or a history cache's reply.
   `link.v1` 0.14 lists `freshness.v2` beside any interface with a
   heartbeat, and `alarms.v1` 0.13's scenarios §1, §3, §5 read in band.
+  Core 0.90 answers zk2py round 98's F-461 to F-463: §4.3's "Ahead", a
+  candidate's session stamps every write, so the guard holds its
+  `freshness.v2` members' writes, and a held write clears the member's
+  bit until a write goes on (`freshness.v2` 0.5 §2.10, scenarios §2 step
+  6); the table's metric row covers `telemetry.v2`'s non-frame state; W105
+  reads the major's table (`contracts/w105-telemetry-series`,
+  `ok-telemetry-v2-series`). `telemetry.v2` 0.2 (F-464): an incomparable
+  pair states no epoch, null and null as in v1 (`v2/continuity.json`'s
+  fourteenth case, a frame's own `layout`).
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`

@@ -7,6 +7,48 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `telemetry.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## telemetry.v2 0.2 — 2026-11-02: an incomparable pair states no epoch (#983)
+
+zk2py's round 98 found an incomparable pair's epoch ambiguous (F-464).
+§2.20 made two counter samples of two widths incomparable, v1 §2.10's
+`unobservable`, with no rate. §5 said every pair of a frame's series is
+established. v1's `continuity.json` spells an incomparable pair with
+`epoch` and `via` null, and v2's cases spelled every pair `established`,
+`in_band`, none of them incomparable. This text, written against core
+0.90, answers it.
+
+**Changed: §2.20.** An incomparable pair is v1 §2.10's second answer,
+which comes before the epoch, so the pair states no epoch, as v1 spells
+such a pair. `[F: v2/continuity.json]` A tool that holds two revisions of
+a frame resource can form one.
+
+**Changed: §5 and §2.19.** Every pair of a frame's series whose epoch is
+asked is established, and an incomparable pair's is not asked.
+
+**Why not `established`, `in_band`.** That spelling, as
+`wrap_or_decrease` is spelled, was the first reading. But
+`zenkey_model::telemetry::pair` answers an incomparable pair before its
+epoch, as v1 §2.10's order has it, and so does zk2py. A
+`wrap_or_decrease` pair is answered after the epoch, within one, so it
+states one. Giving an incomparable pair an epoch would take more than a
+line of the model crate's `pair`, which v1's pairs share, for a pair no
+reader of one revision forms.
+
+**`v2/continuity.json`.** A frame may name its own `layout`, as a tool
+holding two revisions of the resource reads them. The schema adds
+`BytesWide`, `rx` at 32 bits, and the layouts `bytes_wide`. A new case,
+the fourteenth: `rx` at 24 bits, then two frames at 32. The pair across
+is `unobservable`, `incomparable`, `epoch` and `via` null, `no_rate`
+`kind`, and the next is `same_epoch`, 600 By/s.
+`zenkey-model/tests/profiles.rs` reads a frame's own layout, and requires
+a pair of each `why`.
+
+**Deliberately not changed.**
+- **No keyword rule,** and no rule of `telemetry.v1`.
+- **The reference's model:** it gave null and null already.
+- **`readings.json`** keeps its schema: no reading there needs the new
+  type.
+
 ## telemetry.v2 0.1 — 2026-11-02: a frame's fields as metric series (#983, T1)
 
 Core 0.83 defined frames (§7.7), and 0.87 has owners write them. A frame
