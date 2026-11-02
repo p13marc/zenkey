@@ -7,6 +7,66 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.5 — 2026-11-02: editorial: Appendix B gives zenoh-modem's faces, no rule changed (#988 L5)
+
+#988's L5 moves zenoh-modem's routers onto this text. Five face policies,
+in `examples/zk2/zenoh-modem/faces/`, run one router per medium: RF, LoRa
+at SF7, SF9 and SF12, and SBD. Each names the binding `zm-1.10.2-r1` and
+the catalog the ground holds. `conformance/v2/plan.json` gains a case for
+each, its plan the reference's.
+
+**Changed: Appendix B, which states no rule.**
+- **The media table** gains LoRa SF9's row, zenoh-modem's alone: 240 s
+  with 4 keep-alives, and a 117 B batch for its 115 B frame. A bullet says
+  why 60 s with 2 left a keep-alive between two frames.
+- **zenoh-modem's faces**, a new paragraph: which of `modem.v3`'s frames
+  each face lists, at what cadence, and the warnings each plan draws.
+  - SF7 and SF12 draw `keep_alive_not_suppressed`: their keep-alive
+    interval is below their frames' cadence.
+  - SF12 draws `interval_over_horizon` and `horizon_under_face` on
+    `frames/link`, whose 150 s horizon is below what one frame every
+    900 s affords.
+  - Every face draws `frame_unlisted` for the frames it leaves out.
+- **`modem.v3` keeps `uses` at `link.v1`.** It crosses these faces as
+  §2.17's last paragraph says. Every resource its revision 3.2 exposes is
+  a packed frame, so no plan warns `not_packed`.
+
+**Deliberately not changed.**
+- **No rule, fixture case or scenario changed.** The five cases are
+  added, and every other case's plan is as before.
+- **The status stays `experimental`.** The index's **Used by** reads
+  what a descriptor would list (`../README.md`). A face policy is never
+  on the bus (§3), and `modem.v3` lists `link.v1`. So no adopter uses
+  this text yet. That changes when a contract of a mapping lists it.
+- **It restates `link.v1` text 0.14 still.** 0.15 changed no rule.
+
+## 0.15 — 2026-11-02: editorial: Appendix B reads `modem.v3` 3.2, no rule changed (#983 T4, #988 L5)
+
+#983's T4 gave `modem.v3` revision 3.2. It exposes nine frame resources,
+all packed, and its four link streams are `host` again. This text's
+Appendix B, and three sentences that cite it, still described 3.1's plan.
+
+**Changed: wording that states no rule.**
+- **Appendix B's RF plan** is the one `plan.json`'s first case derives
+  from 3.2. `stream:modem.v3` is seven subtree denies, with no name.
+  `stream:freshness.v2` is denied whole, as text 0.14 stated. No
+  downsampling rule is left, every frame crossing whole (§2.8).
+  `frames/link`'s horizon makes it liveness evidence.
+- **Appendix B's open items.** The counter's epoch, the sketch's gap 1,
+  is closed: each counter crosses as a frame's field, the frame's run its
+  epoch, in band. Two radios on one node cite `link.v2`'s router per
+  medium. A paragraph says zenoh-modem's routers now run `link.v2`
+  policies, and that this text's two stay its examples.
+- **The head's contract example** is `frames/link`, in place of
+  `sdu/dropped_total`, which no longer crosses.
+- **§2.7's and §2.13's sentences** on zenoh-modem's face read 3.2.
+
+**Deliberately not changed.**
+- **No rule, and no fixture's policy.** `plan.json`'s first two cases
+  keep theirs, and their plans are derived again from 3.2 with T4.
+- **Written against core 0.32**, still.
+- **`link.v2` restates text 0.14**, and stays correct: no rule moved.
+
 ## link.v2 0.4 — 2026-11-02: the far side's callers and readers (#988 L4)
 
 Text 0.3 gave each face a `reply_timeout_ms` and an `arq`, and said in
