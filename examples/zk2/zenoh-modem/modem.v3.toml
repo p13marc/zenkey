@@ -13,10 +13,13 @@
 # - `sensor`, `describe`, `introspect` and the two `alive` tokens: the descriptor, the contract
 #   bundle and the instance/interface tokens (r3 §3.10).
 #
-# Counts: 95 resources (82 streams, 7 states, 4 events, 2 operations); 89 of them optional.
+# Counts: 105 resources (85 streams, 14 states, 4 events, 2 operations); 99 of them optional.
 # v1's 86 are 73 streams, 7 states, 4 events and 2 operations, 80 of them optional with a
 # `capability:` gate; with config.v1's 8, that is v1's 88 gated entries. Revision 3.2 adds the
-# 9 frame resources, each optional with a `config:` gate (#983 T4).
+# 9 frame resources, each optional with a `config:` gate (#983 T4). Revision 3.3 (#991) adds 3
+# frame resources over one record of all 73 readings, whose ranges are zenoh-modem's, and
+# deprecates 3.2's 9, whose layouts it cannot change within the major (core §9.8); and it adds
+# the 7 states again as packed records, under `packed/`, beside the JSON states.
 #
 # QoS comes from the interface defaults (draft 1, D2; README gap 4), expanded before
 # canonicalization, so writing a value out per resource would not change the fingerprint:
@@ -31,19 +34,20 @@
 #
 # Exposure: link.v1's default is `host` (never crosses a constrained face). Only the frame
 # resources say otherwise, since revision 3.2 (#983 T4): the four v1 `exposure = "link"` streams
-# are `host` again, their readings crossing in `frames/link`. The faces and their rates are
-# deployment (link.md).
+# are `host` again, their readings crossing in a frame. Since revision 3.3 (#991) only
+# `frames/fast`, `frames/slow` and `frames/paid` are `link`; 3.2's 9 are deprecated and `host`.
+# The faces, the frames each lists and their cadences are deployment (link.md, faces/).
 
 [interface]
 name    = "modem"
 major   = 3
-minor   = 2
+minor   = 3
 summary = "One modem device on a host: what its medium carries and loses, what it measures, what it is"
 uses    = ["telemetry.v2", "freshness.v2", "link.v1"]
 
 [schemas]
 jsonschema = ["schemas/modem.json"]
-packed     = ["schemas/modem-frames.json"]
+packed     = ["schemas/modem-frames.json", "schemas/modem-readings.json", "schemas/modem-states.json"]
 
 [defaults.stream]
 priority = "data_low"
@@ -716,22 +720,18 @@ gate        = "capability:link_quality"
 annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "%" }
 doc         = "relative transmit link quality, percent"
 
-# --- telemetry: frames (telemetry.v2, since revision 3.2; #983 T4, #991) ---------------------
-# Core §7.7's frame resources: the readings above in packed records (schemas/modem-frames.json),
-# for the media whose rate a JSON stream per reading cannot afford. Each field is a series of
-# telemetry.v2 (§2.16), named by its `telemetry.series` mirror, which lends it its kind and unit;
-# the series is the frame key and the field, never the mirrored stream (§2.17). The epoch is the
-# frame's run, in band across a face (§2.19), so a decrease of a counter within one run is no
-# longer read as a reset there (README gap 1).
-# - One record a frame, its time measured and its cadence the owner's configuration (#981 §1.2):
-#   rf0 every minute, LoRa SF9 every 2, SF12 every 15 (#991's per-medium table).
-# - Priority `data`, not the readings' `data_low`: no QoS extension on the wire, and the frames
-#   share batches with freshness.v2's heartbeat.
-# - Every frame resource is optional, gated by the owner's configuration (`config:frames.<name>`):
-#   #991's table picks which ones a device publishes, so a device lists the others unavailable.
-# - Exposed `link`, so each crosses a face that exposes, whole and never downsampled (link.v1
-#   §2.8); the four link streams went back to `host` in 3.2.
-# - The ranges and widths are illustrative, and #991 fixes them.
+# --- telemetry: frames, 3.2's (telemetry.v2; #983 T4), deprecated since 3.3 (#991) -----------
+# Core §7.7's frame resources of revision 3.2: the readings above in packed records
+# (schemas/modem-frames.json), one frame per group of readings. Deprecated since 3.3, and `host`:
+# - their ranges and widths were illustrative, and a frame's record has no extension marker, so
+#   every change to its layout is breaking (core §9.8, `bound_changed`, `width_changed`). 3.3
+#   carries the readings at zenoh-modem's own ranges in new frame resources instead (below);
+# - one frame per group spent ~15 B of envelope, time and put on each of eight frames a minute:
+#   401 KB a day on RF for all 73, against the report's ~203 KB for one frame, and 164 % and
+#   241 % of LoRa's duty at SF9 and SF12 (README, "Frames");
+# - a deprecated resource stays until the next major (core §9.8). An owner lists them
+#   unavailable, and no face lets them cross: `host` since 3.3 (link.v1 §2.7).
+# Each kept as 3.2 declared it, but for its `deprecated` and its exposure.
 
 [resources."frames/link"]
 kind        = "stream"
@@ -741,9 +741,10 @@ optional    = true
 gate        = "config:frames.link"
 frame       = { records = 1, keyframe_every = 1 }
 doc         = "the four link readings, which crossed RF as four streams before 3.2"
+deprecated  = { since = 3, replaced_by = "frames/fast", reason = "3.2's illustrative ranges; frames/fast carries its readings at zenoh-modem's (#991)" }
 
 [resources."frames/link".annotations]
-"link.exposure" = "link"
+"link.exposure" = "host"
 "freshness.ttl_s" = 150
 
 [resources."frames/link".annotations."telemetry.series"]
@@ -760,9 +761,10 @@ optional    = true
 gate        = "config:frames.sdu"
 frame       = { records = 1, keyframe_every = 15 }
 doc         = "the SDU plane's nine counters"
+deprecated  = { since = 3, replaced_by = "frames/fast", reason = "3.2's illustrative ranges; frames/fast carries its readings at zenoh-modem's (#991)" }
 
 [resources."frames/sdu".annotations]
-"link.exposure" = "link"
+"link.exposure" = "host"
 
 [resources."frames/sdu".annotations."telemetry.series"]
 tx_sdus_total       = "sdu/tx_sdus_total"
@@ -783,9 +785,10 @@ optional    = true
 gate        = "config:frames.sched"
 frame       = { records = 1, keyframe_every = 15, deadband = { queue_depth = { delta = "4", max_records = 5 }, lane_backlog_bytes = { delta = "1024", max_records = 5 } } }
 doc         = "the scheduler's counters, its queue and the lane backlog"
+deprecated  = { since = 3, replaced_by = "frames/fast", reason = "3.2's illustrative ranges; frames/fast carries its readings at zenoh-modem's (#991)" }
 
 [resources."frames/sched".annotations]
-"link.exposure" = "link"
+"link.exposure" = "host"
 
 [resources."frames/sched".annotations."telemetry.series"]
 dropped_total         = "sched/dropped_total"
@@ -803,9 +806,10 @@ optional    = true
 gate        = "config:frames.air"
 frame       = { records = 1, keyframe_every = 15 }
 doc         = "what the module frames and the medium spends: frames, listen-before-talk, airtime, ARQ, slot waste, receive errors, the duty cycle"
+deprecated  = { since = 3, replaced_by = "frames/fast", reason = "3.2's illustrative ranges; frames/fast carries its readings at zenoh-modem's (#991)" }
 
 [resources."frames/air".annotations]
-"link.exposure" = "link"
+"link.exposure" = "host"
 
 [resources."frames/air".annotations."telemetry.series"]
 tx_frames_total      = "air/tx_frames_total"
@@ -827,9 +831,10 @@ optional    = true
 gate        = "config:frames.layer"
 frame       = { records = 1, keyframe_every = 15 }
 doc         = "what each configured layer refuses and does: aead, address, fec, fragment, compress"
+deprecated  = { since = 3, replaced_by = "frames/fast", reason = "3.2's illustrative ranges; frames/fast carries its readings at zenoh-modem's (#991)" }
 
 [resources."frames/layer".annotations]
-"link.exposure" = "link"
+"link.exposure" = "host"
 
 [resources."frames/layer".annotations."telemetry.series"]
 aead_auth_failures_total           = "layer/aead/auth_failures_total"
@@ -864,9 +869,10 @@ optional    = true
 gate        = "config:frames.if"
 frame       = { records = 1, keyframe_every = 15, deadband = { qdisc_backlog_bytes = { delta = "4096", max_records = 5 }, qdisc_backlog_pkts = { delta = "4", max_records = 5 } } }
 doc         = "the kernel's interface counters and its queue disciplines"
+deprecated  = { since = 3, replaced_by = "frames/fast", reason = "3.2's illustrative ranges; frames/fast carries its readings at zenoh-modem's (#991)" }
 
 [resources."frames/if".annotations]
-"link.exposure" = "link"
+"link.exposure" = "host"
 
 [resources."frames/if".annotations."telemetry.series"]
 in_octets           = "if/in_octets"
@@ -889,9 +895,10 @@ optional    = true
 gate        = "config:frames.radio"
 frame       = { records = 1, keyframe_every = 15, deadband = { rssi = { delta = "1", max_records = 5 }, snr = { delta = "1", max_records = 5 } } }
 doc         = "what the radio measures: bars, RSSI, RSRP, RSRQ, SNR, error rate"
+deprecated  = { since = 3, replaced_by = "frames/fast", reason = "3.2's illustrative ranges; frames/fast carries its readings at zenoh-modem's (#991)" }
 
 [resources."frames/radio".annotations]
-"link.exposure" = "link"
+"link.exposure" = "host"
 
 [resources."frames/radio".annotations."telemetry.series"]
 signal_bars = "radio/signal_bars"
@@ -909,9 +916,10 @@ optional    = true
 gate        = "config:frames.bearer"
 frame       = { records = 1, keyframe_every = 15 }
 doc         = "what a bearer reports of its link (DLEP RFC 8175 section 13): rates, latency, resources, quality"
+deprecated  = { since = 3, replaced_by = "frames/fast", reason = "3.2's illustrative ranges; frames/fast carries its readings at zenoh-modem's (#991)" }
 
 [resources."frames/bearer".annotations]
-"link.exposure" = "link"
+"link.exposure" = "host"
 
 [resources."frames/bearer".annotations."telemetry.series"]
 rx_rate     = "link/rx_rate"
@@ -931,11 +939,303 @@ optional    = true
 gate        = "config:frames.message"
 frame       = { records = 1, keyframe_every = 1 }
 doc         = "all 73 readings in one record, its counters at 24 bits: one paid message"
+deprecated  = { since = 3, replaced_by = "frames/paid", reason = "3.2's illustrative ranges; frames/paid carries its readings at zenoh-modem's (#991)" }
 
 [resources."frames/message".annotations]
-"link.exposure" = "link"
+"link.exposure" = "host"
 
 [resources."frames/message".annotations."telemetry.series"]
+sdu_tx_sdus_total                        = "sdu/tx_sdus_total"
+sdu_tx_bytes_total                       = "sdu/tx_bytes_total"
+sdu_rx_sdus_total                        = "sdu/rx_sdus_total"
+sdu_rx_bytes_total                       = "sdu/rx_bytes_total"
+sdu_dropped_total                        = "sdu/dropped_total"
+sdu_tx_failed_total                      = "sdu/tx_failed_total"
+sdu_rx_unroutable_total                  = "sdu/rx_unroutable_total"
+sdu_rx_oversize_total                    = "sdu/rx_oversize_total"
+sdu_tx_oversize_total                    = "sdu/tx_oversize_total"
+sched_dropped_total                      = "sched/dropped_total"
+sched_stale_total                        = "sched/stale_total"
+sched_peerless_total                     = "sched/peerless_total"
+sched_queue_depth                        = "sched/queue_depth"
+sched_lane_backlog_bytes                 = "sched/lane_backlog_bytes"
+sched_lane_backlog_drain_ms              = "sched/lane_backlog_drain_ms"
+air_tx_frames_total                      = "air/tx_frames_total"
+air_rx_frames_total                      = "air/rx_frames_total"
+air_cad_deferrals_total                  = "air/cad_deferrals_total"
+air_cad_forced_total                     = "air/cad_forced_total"
+layer_aead_auth_failures_total           = "layer/aead/auth_failures_total"
+layer_aead_replays_total                 = "layer/aead/replays_total"
+layer_aead_unknown_key_total             = "layer/aead/unknown_key_total"
+layer_aead_send_key_id                   = "layer/aead/send_key_id"
+layer_address_foreign_total              = "layer/address/foreign_total"
+layer_address_unknown_source_total       = "layer/address/unknown_source_total"
+layer_fec_repair_frames_total            = "layer/fec/repair_frames_total"
+layer_fec_repaired_total                 = "layer/fec/repaired_total"
+layer_fec_unrecoverable_total            = "layer/fec/unrecoverable_total"
+layer_fec_late_repair_total              = "layer/fec/late_repair_total"
+layer_fec_unused_repair_total            = "layer/fec/unused_repair_total"
+layer_fec_malformed_total                = "layer/fec/malformed_total"
+layer_fragment_fragments_total           = "layer/fragment/fragments_total"
+layer_fragment_reassembled_total         = "layer/fragment/reassembled_total"
+layer_fragment_rcs_failures_total        = "layer/fragment/rcs_failures_total"
+layer_fragment_timeouts_total            = "layer/fragment/timeouts_total"
+layer_fragment_oversize_total            = "layer/fragment/oversize_total"
+layer_fragment_malformed_total           = "layer/fragment/malformed_total"
+layer_compress_compressed_total          = "layer/compress/compressed_total"
+layer_compress_stored_total              = "layer/compress/stored_total"
+layer_compress_bytes_saved_total         = "layer/compress/bytes_saved_total"
+layer_compress_dictionary_mismatch_total = "layer/compress/dictionary_mismatch_total"
+layer_compress_malformed_total           = "layer/compress/malformed_total"
+air_airtime_ms_total                     = "air/airtime_ms_total"
+air_retransmits_total                    = "air/retransmits_total"
+air_bytes_wasted_total                   = "air/bytes_wasted_total"
+air_rx_errors_total                      = "air/rx_errors_total"
+air_duty_cycle_available                 = "air/duty_cycle_available"
+air_duty_cycle_wait_ms                   = "air/duty_cycle_wait_ms"
+radio_signal_bars                        = "radio/signal_bars"
+if_in_octets                             = "if/in_octets"
+if_out_octets                            = "if/out_octets"
+if_in_errors                             = "if/in_errors"
+if_out_errors                            = "if/out_errors"
+if_in_discards                           = "if/in_discards"
+if_out_discards                          = "if/out_discards"
+if_in_multicast_pkts                     = "if/in_multicast_pkts"
+if_in_pkts                               = "if/in_pkts"
+if_out_pkts                              = "if/out_pkts"
+if_qdisc_backlog_bytes                   = "if/qdisc_backlog_bytes"
+if_qdisc_backlog_pkts                    = "if/qdisc_backlog_pkts"
+radio_rssi                               = "radio/rssi"
+radio_rsrp                               = "radio/rsrp"
+radio_rsrq                               = "radio/rsrq"
+radio_snr                                = "radio/snr"
+radio_error_rate                         = "radio/error_rate"
+link_rx_rate                             = "link/rx_rate"
+link_tx_rate                             = "link/tx_rate"
+link_rx_max_rate                         = "link/rx_max_rate"
+link_tx_max_rate                         = "link/tx_max_rate"
+link_latency                             = "link/latency"
+link_resources                           = "link/resources"
+link_rx_quality                          = "link/rx_quality"
+link_tx_quality                          = "link/tx_quality"
+
+# --- telemetry: frames (telemetry.v2, since revision 3.3; #991) ------------------------------
+# Core §7.7's frame resources: all 73 readings in one packed record, `Readings`
+# (schemas/modem-readings.json), each field a series of telemetry.v2 (§2.16), named by its
+# `telemetry.series` mirror, which lends it its kind and unit; the series is the frame key and
+# the field, never the mirrored stream (§2.17). The epoch is the frame's run, in band across a
+# face (§2.19).
+# - One record, so one envelope, one time and one put a frame: a delta record carries a bit per
+#   reading and the readings that moved. A device writes the readings it lacks absent, a bit each.
+# - Three resources of one record type, one per horizon a medium can carry (link.v2 §2.12: "a
+#   contract meant for a slow medium declares horizons that medium can carry"). Each face lists
+#   the one its medium affords (faces/), and the owner's configuration puts it at the face's
+#   cadence (`config:device.frames.<name>`, a `[[device]]`'s `frames` table in zenoh-modem's
+#   file):
+#   - `frames/fast`, horizon 300 s, a full record at least every 15: RF and LoRa at SF7 every
+#     minute, LoRa at SF9 every 2 (the face asks a full record every 15 minutes);
+#   - `frames/slow`, horizon 1,800 s, a full record at least every 4: LoRa at SF12 every 15
+#     minutes, so hourly;
+#   - `frames/paid`, horizon 3,600 s, every frame full: SBD, one a paid message every 1,800 s.
+#   Each is liveness evidence across its face (link.v1 §2.12).
+# - Priority `data`, not the readings' `data_low`: no QoS extension on the wire, and the frames
+#   share batches with freshness.v2's heartbeat.
+# - Exposed `link`, so each crosses a face that lists it, whole and never downsampled (link.v2
+#   §2.7, link.v1 §2.8).
+# - Deadbands (fast and slow) on the readings that wander: RSSI and SNR by 1 dB, the scheduler's
+#   queue by 4 and its lane backlog by 1 KiB, the qdisc backlog by 4 KiB and 4 packets, each
+#   included at least every `max_records` records.
+
+[resources."frames/fast"]
+kind        = "stream"
+type        = "packed:modem-readings#Readings"
+priority    = "data"
+optional    = true
+gate        = "config:device.frames.fast"
+frame       = { records = 1, keyframe_every = 15, deadband = { radio_rssi = { delta = "1", max_records = 5 }, radio_snr = { delta = "1", max_records = 5 }, sched_queue_depth = { delta = "4", max_records = 5 }, sched_lane_backlog_bytes = { delta = "1024", max_records = 5 }, if_qdisc_backlog_bytes = { delta = "4096", max_records = 5 }, if_qdisc_backlog_pkts = { delta = "4", max_records = 5 } } }
+doc         = "all 73 readings in one record, a delta each frame and a full record at least every 15: for a medium that carries one every minute or two, RF and LoRa at SF7 and SF9"
+
+[resources."frames/fast".annotations]
+"link.exposure" = "link"
+"freshness.ttl_s" = 300
+
+[resources."frames/fast".annotations."telemetry.series"]
+sdu_tx_sdus_total                        = "sdu/tx_sdus_total"
+sdu_tx_bytes_total                       = "sdu/tx_bytes_total"
+sdu_rx_sdus_total                        = "sdu/rx_sdus_total"
+sdu_rx_bytes_total                       = "sdu/rx_bytes_total"
+sdu_dropped_total                        = "sdu/dropped_total"
+sdu_tx_failed_total                      = "sdu/tx_failed_total"
+sdu_rx_unroutable_total                  = "sdu/rx_unroutable_total"
+sdu_rx_oversize_total                    = "sdu/rx_oversize_total"
+sdu_tx_oversize_total                    = "sdu/tx_oversize_total"
+sched_dropped_total                      = "sched/dropped_total"
+sched_stale_total                        = "sched/stale_total"
+sched_peerless_total                     = "sched/peerless_total"
+sched_queue_depth                        = "sched/queue_depth"
+sched_lane_backlog_bytes                 = "sched/lane_backlog_bytes"
+sched_lane_backlog_drain_ms              = "sched/lane_backlog_drain_ms"
+air_tx_frames_total                      = "air/tx_frames_total"
+air_rx_frames_total                      = "air/rx_frames_total"
+air_cad_deferrals_total                  = "air/cad_deferrals_total"
+air_cad_forced_total                     = "air/cad_forced_total"
+layer_aead_auth_failures_total           = "layer/aead/auth_failures_total"
+layer_aead_replays_total                 = "layer/aead/replays_total"
+layer_aead_unknown_key_total             = "layer/aead/unknown_key_total"
+layer_aead_send_key_id                   = "layer/aead/send_key_id"
+layer_address_foreign_total              = "layer/address/foreign_total"
+layer_address_unknown_source_total       = "layer/address/unknown_source_total"
+layer_fec_repair_frames_total            = "layer/fec/repair_frames_total"
+layer_fec_repaired_total                 = "layer/fec/repaired_total"
+layer_fec_unrecoverable_total            = "layer/fec/unrecoverable_total"
+layer_fec_late_repair_total              = "layer/fec/late_repair_total"
+layer_fec_unused_repair_total            = "layer/fec/unused_repair_total"
+layer_fec_malformed_total                = "layer/fec/malformed_total"
+layer_fragment_fragments_total           = "layer/fragment/fragments_total"
+layer_fragment_reassembled_total         = "layer/fragment/reassembled_total"
+layer_fragment_rcs_failures_total        = "layer/fragment/rcs_failures_total"
+layer_fragment_timeouts_total            = "layer/fragment/timeouts_total"
+layer_fragment_oversize_total            = "layer/fragment/oversize_total"
+layer_fragment_malformed_total           = "layer/fragment/malformed_total"
+layer_compress_compressed_total          = "layer/compress/compressed_total"
+layer_compress_stored_total              = "layer/compress/stored_total"
+layer_compress_bytes_saved_total         = "layer/compress/bytes_saved_total"
+layer_compress_dictionary_mismatch_total = "layer/compress/dictionary_mismatch_total"
+layer_compress_malformed_total           = "layer/compress/malformed_total"
+air_airtime_ms_total                     = "air/airtime_ms_total"
+air_retransmits_total                    = "air/retransmits_total"
+air_bytes_wasted_total                   = "air/bytes_wasted_total"
+air_rx_errors_total                      = "air/rx_errors_total"
+air_duty_cycle_available                 = "air/duty_cycle_available"
+air_duty_cycle_wait_ms                   = "air/duty_cycle_wait_ms"
+radio_signal_bars                        = "radio/signal_bars"
+if_in_octets                             = "if/in_octets"
+if_out_octets                            = "if/out_octets"
+if_in_errors                             = "if/in_errors"
+if_out_errors                            = "if/out_errors"
+if_in_discards                           = "if/in_discards"
+if_out_discards                          = "if/out_discards"
+if_in_multicast_pkts                     = "if/in_multicast_pkts"
+if_in_pkts                               = "if/in_pkts"
+if_out_pkts                              = "if/out_pkts"
+if_qdisc_backlog_bytes                   = "if/qdisc_backlog_bytes"
+if_qdisc_backlog_pkts                    = "if/qdisc_backlog_pkts"
+radio_rssi                               = "radio/rssi"
+radio_rsrp                               = "radio/rsrp"
+radio_rsrq                               = "radio/rsrq"
+radio_snr                                = "radio/snr"
+radio_error_rate                         = "radio/error_rate"
+link_rx_rate                             = "link/rx_rate"
+link_tx_rate                             = "link/tx_rate"
+link_rx_max_rate                         = "link/rx_max_rate"
+link_tx_max_rate                         = "link/tx_max_rate"
+link_latency                             = "link/latency"
+link_resources                           = "link/resources"
+link_rx_quality                          = "link/rx_quality"
+link_tx_quality                          = "link/tx_quality"
+
+[resources."frames/slow"]
+kind        = "stream"
+type        = "packed:modem-readings#Readings"
+priority    = "data"
+optional    = true
+gate        = "config:device.frames.slow"
+frame       = { records = 1, keyframe_every = 4, deadband = { radio_rssi = { delta = "1", max_records = 4 }, radio_snr = { delta = "1", max_records = 4 }, sched_queue_depth = { delta = "4", max_records = 4 }, sched_lane_backlog_bytes = { delta = "1024", max_records = 4 }, if_qdisc_backlog_bytes = { delta = "4096", max_records = 4 }, if_qdisc_backlog_pkts = { delta = "4", max_records = 4 } } }
+doc         = "all 73 readings in one record, a full record at least every 4: for a medium that carries one every 15 minutes, LoRa at SF12"
+
+[resources."frames/slow".annotations]
+"link.exposure" = "link"
+"freshness.ttl_s" = 1800
+
+[resources."frames/slow".annotations."telemetry.series"]
+sdu_tx_sdus_total                        = "sdu/tx_sdus_total"
+sdu_tx_bytes_total                       = "sdu/tx_bytes_total"
+sdu_rx_sdus_total                        = "sdu/rx_sdus_total"
+sdu_rx_bytes_total                       = "sdu/rx_bytes_total"
+sdu_dropped_total                        = "sdu/dropped_total"
+sdu_tx_failed_total                      = "sdu/tx_failed_total"
+sdu_rx_unroutable_total                  = "sdu/rx_unroutable_total"
+sdu_rx_oversize_total                    = "sdu/rx_oversize_total"
+sdu_tx_oversize_total                    = "sdu/tx_oversize_total"
+sched_dropped_total                      = "sched/dropped_total"
+sched_stale_total                        = "sched/stale_total"
+sched_peerless_total                     = "sched/peerless_total"
+sched_queue_depth                        = "sched/queue_depth"
+sched_lane_backlog_bytes                 = "sched/lane_backlog_bytes"
+sched_lane_backlog_drain_ms              = "sched/lane_backlog_drain_ms"
+air_tx_frames_total                      = "air/tx_frames_total"
+air_rx_frames_total                      = "air/rx_frames_total"
+air_cad_deferrals_total                  = "air/cad_deferrals_total"
+air_cad_forced_total                     = "air/cad_forced_total"
+layer_aead_auth_failures_total           = "layer/aead/auth_failures_total"
+layer_aead_replays_total                 = "layer/aead/replays_total"
+layer_aead_unknown_key_total             = "layer/aead/unknown_key_total"
+layer_aead_send_key_id                   = "layer/aead/send_key_id"
+layer_address_foreign_total              = "layer/address/foreign_total"
+layer_address_unknown_source_total       = "layer/address/unknown_source_total"
+layer_fec_repair_frames_total            = "layer/fec/repair_frames_total"
+layer_fec_repaired_total                 = "layer/fec/repaired_total"
+layer_fec_unrecoverable_total            = "layer/fec/unrecoverable_total"
+layer_fec_late_repair_total              = "layer/fec/late_repair_total"
+layer_fec_unused_repair_total            = "layer/fec/unused_repair_total"
+layer_fec_malformed_total                = "layer/fec/malformed_total"
+layer_fragment_fragments_total           = "layer/fragment/fragments_total"
+layer_fragment_reassembled_total         = "layer/fragment/reassembled_total"
+layer_fragment_rcs_failures_total        = "layer/fragment/rcs_failures_total"
+layer_fragment_timeouts_total            = "layer/fragment/timeouts_total"
+layer_fragment_oversize_total            = "layer/fragment/oversize_total"
+layer_fragment_malformed_total           = "layer/fragment/malformed_total"
+layer_compress_compressed_total          = "layer/compress/compressed_total"
+layer_compress_stored_total              = "layer/compress/stored_total"
+layer_compress_bytes_saved_total         = "layer/compress/bytes_saved_total"
+layer_compress_dictionary_mismatch_total = "layer/compress/dictionary_mismatch_total"
+layer_compress_malformed_total           = "layer/compress/malformed_total"
+air_airtime_ms_total                     = "air/airtime_ms_total"
+air_retransmits_total                    = "air/retransmits_total"
+air_bytes_wasted_total                   = "air/bytes_wasted_total"
+air_rx_errors_total                      = "air/rx_errors_total"
+air_duty_cycle_available                 = "air/duty_cycle_available"
+air_duty_cycle_wait_ms                   = "air/duty_cycle_wait_ms"
+radio_signal_bars                        = "radio/signal_bars"
+if_in_octets                             = "if/in_octets"
+if_out_octets                            = "if/out_octets"
+if_in_errors                             = "if/in_errors"
+if_out_errors                            = "if/out_errors"
+if_in_discards                           = "if/in_discards"
+if_out_discards                          = "if/out_discards"
+if_in_multicast_pkts                     = "if/in_multicast_pkts"
+if_in_pkts                               = "if/in_pkts"
+if_out_pkts                              = "if/out_pkts"
+if_qdisc_backlog_bytes                   = "if/qdisc_backlog_bytes"
+if_qdisc_backlog_pkts                    = "if/qdisc_backlog_pkts"
+radio_rssi                               = "radio/rssi"
+radio_rsrp                               = "radio/rsrp"
+radio_rsrq                               = "radio/rsrq"
+radio_snr                                = "radio/snr"
+radio_error_rate                         = "radio/error_rate"
+link_rx_rate                             = "link/rx_rate"
+link_tx_rate                             = "link/tx_rate"
+link_rx_max_rate                         = "link/rx_max_rate"
+link_tx_max_rate                         = "link/tx_max_rate"
+link_latency                             = "link/latency"
+link_resources                           = "link/resources"
+link_rx_quality                          = "link/rx_quality"
+link_tx_quality                          = "link/tx_quality"
+
+[resources."frames/paid"]
+kind        = "stream"
+type        = "packed:modem-readings#Readings"
+priority    = "data"
+optional    = true
+gate        = "config:device.frames.paid"
+frame       = { records = 1, keyframe_every = 1 }
+doc         = "all 73 readings in one record, every frame full: one paid message, for SBD"
+
+[resources."frames/paid".annotations]
+"link.exposure" = "link"
+"freshness.ttl_s" = 3600
+
+[resources."frames/paid".annotations."telemetry.series"]
 sdu_tx_sdus_total                        = "sdu/tx_sdus_total"
 sdu_tx_bytes_total                       = "sdu/tx_bytes_total"
 sdu_rx_sdus_total                        = "sdu/rx_sdus_total"
@@ -1067,7 +1367,81 @@ gate        = "capability:registration"
 annotations = { "freshness.ttl_s" = 60 }
 doc         = "network registration and access technology, as the bearer reports them"
 
+# --- state, packed (since revision 3.3; #991) ----------------------------------------------
+# The 7 states again, as packed records (schemas/modem-states.json), beside the JSON documents:
+# a resource's type kind cannot change within the major (core §9.8, `type_kind_changed`). Each
+# record holds what a packed field can (core §7.6): enums, numbers, bits and times. The text
+# (a reason, a name, a revision, an address) stays in the JSON state, and each record ends with
+# an extension marker for the fields a later minor appends.
+# - Same horizon as its JSON twin (ttl 60), confirmed by the same heartbeat (freshness.v2 §2.4):
+#   each is one more collection of modem.v3's heartbeat, on the host bus.
+# - `host`, as every state is: a state exposed `link` crosses every face that exposes (link.v2
+#   lists frames only), and its heartbeat with it every 30 s, which neither SBD's messages nor
+#   LoRa's duty affords. Across a face each is read by a GET, by grant (link.v1 §2.9), at a
+#   record's size: 2 to 20 B, against 111 to 585 B of JSON.
+# - Optional, as any resource a minor adds, with its JSON twin's gate.
+
+[resources."packed/sdu/link"]
+kind        = "state"
+type        = "packed:modem-states#LinkRecord"
+optional    = true
+gate        = "capability:sdu"
+annotations = { "freshness.ttl_s" = 60 }
+doc         = "`sdu/link` packed: the medium's capabilities and how many lanes it carries, connected or not"
+
+[resources."packed/sdu/endpoint/{endpoint}"]
+kind        = "state"
+type        = "packed:modem-states#EndpointRecord"
+params      = { endpoint = "string" }
+cardinality = 64
+optional    = true
+gate        = "capability:sdu"
+annotations = { "freshness.ttl_s" = 60 }
+doc         = "`sdu/endpoint/{endpoint}` packed: how many lanes reach one remote, and how many are attached"
+
+[resources."packed/destination/{destination}"]
+kind        = "state"
+type        = "packed:modem-states#DestinationRecord"
+params      = { destination = "string" }
+cardinality = 64
+optional    = true
+gate        = "capability:destinations"
+annotations = { "freshness.ttl_s" = 60 }
+doc         = "`destination/{destination}` packed: the radio's metrics toward one neighbour"
+
+[resources."packed/security"]
+kind        = "state"
+type        = "packed:modem-states#SecurityRecord"
+optional    = true
+annotations = { "freshness.ttl_s" = 60 }
+doc         = "`security` packed: the provider, its scope and each guarantee"
+
+[resources."packed/oper"]
+kind        = "state"
+type        = "packed:modem-states#OperRecord"
+optional    = true
+annotations = { "freshness.ttl_s" = 60 }
+doc         = "`oper` packed: status, admin state, recoverable, last change, uptime and clock"
+
+[resources."packed/identity"]
+kind        = "state"
+type        = "packed:modem-states#IdentityRecord"
+optional    = true
+annotations = { "freshness.ttl_s" = 60 }
+doc         = "`identity` packed: the equipment identifier"
+
+[resources."packed/radio"]
+kind        = "state"
+type        = "packed:modem-states#RadioRecord"
+optional    = true
+gate        = "capability:registration"
+annotations = { "freshness.ttl_s" = 60 }
+doc         = "`radio` packed: registration and access technology"
+
 # --- events ------------------------------------------------------------------------------------
+# Unchanged by revision 3.3 (#991). Each template is a literal, so a far reader that subscribes
+# to `…/events/<template>/*` declares `…/events/<template>`, and each put carries its ULID chunk
+# alone: the shortest suffix core §8.5 (#980 C1b) allows. None is exposed, so none crosses a face.
 # event (D3): a reader that arrives after the radio died must still learn it, and when (v1
 # RFC 04 §1.3). v1 rate = "rare": at most 1/h, the rest folded into `occurrences`, so 7d holds
 # at most 168 per device.

@@ -1,5 +1,5 @@
 {
-  "description": "modem.v3's frame records (core section 7.6, 7.7; telemetry.v2, #983 T4). Every field is optional: a device that cannot answer writes it absent, never 0. The ranges and widths are illustrative, and #991 fixes them. A group frame's counters are 32 bits, the kernel's octet counters 40; frames/message's are 24.",
+  "description": "modem.v3's frame records (core section 7.6, 7.7; telemetry.v2, #983 T4). Every field is optional: a device that cannot answer writes it absent, never 0. The ranges and widths are illustrative. Since revision 3.3 the frames of these types are deprecated, and modem-readings.json carries the readings at zenoh-modem's ranges (#991). A group frame's counters are 32 bits, the kernel's octet counters 40; frames/message's are 24.",
   "types": {
     "LinkReadings": {
       "description": "frames/link: sdu/dropped_total, sched/queue_depth, air/duty_cycle_available and air/duty_cycle_wait_ms, as core section 7.7's fixtures' Link (63 bits)",

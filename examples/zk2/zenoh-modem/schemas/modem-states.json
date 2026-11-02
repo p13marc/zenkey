@@ -1,0 +1,86 @@
+{
+  "description": "modem.v3's seven states as packed records (core section 7.6; #991), since revision 3.3, beside the JSON states that keep their text. Each ends with an extension marker, so a later minor appends optional fields.",
+  "types": {
+    "OperRecord": {
+      "description": "state `packed/oper`: `oper`'s status, admin state, whether it recovers, its last change, uptime and clock (Oper, modem-contract documents.rs). Its `reason` (the device's words) and `boot_id` stay in the JSON `oper`: the record's run tells driver starts apart",
+      "fields": [
+        {"name": "status", "type": "enum", "values": ["up", "down", "notPresent", "unknown"], "escape": true},
+        {"name": "admin", "type": "enum", "values": ["up", "down"], "escape": true},
+        {"name": "recoverable", "type": "bool"},
+        {"name": "last_change", "type": "time", "ms": true, "optional": true},
+        {"name": "uptime_s", "type": "int", "minimum": 0, "maximum": 4294967295},
+        {"name": "clock_synced", "type": "bool"},
+        "..."
+      ]
+    },
+    "IdentityRecord": {
+      "description": "state `packed/identity`: the equipment identifier, an IMEI's 15 digits (3GPP TS 23.003). The RFC 8348 names and revisions are text, and stay in the JSON `identity`",
+      "fields": [
+        {"name": "imei", "type": "int", "minimum": 0, "maximum": 999999999999999, "optional": true},
+        "..."
+      ]
+    },
+    "SecurityRecord": {
+      "description": "state `packed/security`: who provides link security, its scope, and each guarantee as a bit, never one boolean (I6). The principal's name and the note are text, and stay in the JSON `security`; `principal_named` says whether it names one",
+      "fields": [
+        {"name": "provider", "type": "enum", "values": ["none", "zenoh_modem_aead"], "escape": true},
+        {"name": "scope", "type": "enum", "values": ["none", "hop"], "escape": true},
+        {"name": "confidentiality", "type": "bool"},
+        {"name": "integrity", "type": "bool"},
+        {"name": "anti_replay", "type": "bool"},
+        {"name": "peer_authentication_at_establishment", "type": "bool"},
+        {"name": "principal_named", "type": "bool"},
+        "..."
+      ]
+    },
+    "RadioRecord": {
+      "description": "state `packed/radio`: registration and access technology, ModemManager's names with `-` as `_` and 5gnr as nr5g (modem-device's Registration, AccessTechnology)",
+      "fields": [
+        {"name": "registration", "type": "enum", "values": ["idle", "home", "searching", "denied", "roaming", "unknown"], "escape": true},
+        {"name": "access_technology", "type": "enum", "values": ["gsm", "gprs", "edge", "umts", "hspa", "lte", "lte_cat_m", "lte_nb_iot", "nr5g", "iridium"], "escape": true, "optional": true},
+        "..."
+      ]
+    },
+    "LinkRecord": {
+      "description": "state `packed/sdu/link`: the medium's capabilities (Capabilities, documents.rs), flattened, and how many lanes it carries and how many have Zenoh attached. Each lane's own facts are `@op/sdu/lanes`'s",
+      "fields": [
+        {"name": "tx_max_sdu", "type": "int", "minimum": 0, "maximum": 65535},
+        {"name": "rx_max_sdu", "type": "int", "minimum": 0, "maximum": 65535},
+        {"name": "reliable", "type": "bool"},
+        {"name": "duplex", "type": "enum", "values": ["full", "half"], "escape": true},
+        {"name": "max_batch_size", "type": "int", "minimum": 0, "maximum": 65537},
+        {"name": "framing_frame", "type": "int", "minimum": 0, "maximum": 65535, "optional": true},
+        {"name": "framing_arq", "type": "enum", "values": ["none", "bounded", "unbounded"], "escape": true, "optional": true},
+        {"name": "framing_arq_attempts", "type": "int", "minimum": 0, "maximum": 254, "reserved": ["out_of_range"], "optional": true},
+        {"name": "framing_frames_per_max_sdu", "type": "int", "minimum": 0, "maximum": 65535, "optional": true},
+        {"name": "listen_before_talk", "type": "bool"},
+        {"name": "sdu_time_ms", "type": "int", "minimum": 0, "maximum": 16777214, "reserved": ["out_of_range"], "optional": true},
+        {"name": "lanes", "type": "int", "minimum": 0, "maximum": 1023},
+        {"name": "lanes_connected", "type": "int", "minimum": 0, "maximum": 1023},
+        "..."
+      ]
+    },
+    "EndpointRecord": {
+      "description": "state `packed/sdu/endpoint/{endpoint}`: how many lanes reach the remote, and how many have Zenoh attached (EndpointState, documents.rs); each lane's name is `@op/sdu/lanes`'s",
+      "fields": [
+        {"name": "lanes", "type": "int", "minimum": 0, "maximum": 255},
+        {"name": "connected", "type": "int", "minimum": 0, "maximum": 255},
+        "..."
+      ]
+    },
+    "DestinationRecord": {
+      "description": "state `packed/destination/{destination}`: the radio's metrics toward one DLEP destination (DestinationState, documents.rs; RFC 8175 section 13), at the ranges of `Readings`' `link_*`. Its addresses are text, and stay in the JSON destination",
+      "fields": [
+        {"name": "rx_rate_bps", "type": "fixed", "minimum": "0", "maximum": "10000000000", "resolution": "100", "reserved": ["out_of_range"], "optional": true},
+        {"name": "tx_rate_bps", "type": "fixed", "minimum": "0", "maximum": "10000000000", "resolution": "100", "reserved": ["out_of_range"], "optional": true},
+        {"name": "rx_max_rate_bps", "type": "fixed", "minimum": "0", "maximum": "10000000000", "resolution": "100", "reserved": ["out_of_range"], "optional": true},
+        {"name": "tx_max_rate_bps", "type": "fixed", "minimum": "0", "maximum": "10000000000", "resolution": "100", "reserved": ["out_of_range"], "optional": true},
+        {"name": "latency_us", "type": "fixed", "minimum": "0", "maximum": "60000000", "resolution": "100", "reserved": ["out_of_range"], "optional": true},
+        {"name": "resources_pct", "type": "int", "minimum": 0, "maximum": 100, "reserved": ["out_of_range"], "optional": true},
+        {"name": "rx_quality_pct", "type": "int", "minimum": 0, "maximum": 100, "reserved": ["out_of_range"], "optional": true},
+        {"name": "tx_quality_pct", "type": "int", "minimum": 0, "maximum": 100, "reserved": ["out_of_range"], "optional": true},
+        "..."
+      ]
+    }
+  }
+}
