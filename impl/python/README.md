@@ -5729,6 +5729,129 @@ F-436's fix, as before.
 Round 98 found F-461 to F-464, four, none a blocker. See "At core 0.89
 and telemetry.v2 0.1" in `SPEC-FINDINGS.md`.
 
+## Core 0.90 and 0.91, observer 0.23, `freshness.v2` 0.5, `telemetry.v2` 0.2, and `link.v2` 0.3 to 0.5: the contract side, frames per face and the far side (round 99)
+
+Since round 98 main took:
+- **core 0.90, `freshness.v2` 0.5 and `telemetry.v2` 0.2,** the answers
+  to round 98's F-461 to F-464;
+- **`link.v2` 0.3** (#988 L3): the contract side (§2.17's packed
+  requirement) and frames per face (§2.7, §2.8, §2.12, §2.13, §2.16,
+  §2.18), with `v2/exposure.json`, new `lints.json` and `plan.json` cases
+  and `conformance/contracts/probe.v1.toml`;
+- **core 0.91, observer 0.23 and `link.v2` 0.4** (#988 L4): the far side,
+  core §8.1's reply timeout and §8.5's declaring again, observer §7.5, and
+  `constrained.md` §8 and §9;
+- **#983's T2** (no rule): `zenctl telemetry` reads frames;
+- **mid-round, 2ed6d968 (#1048):** `modem.v3` 3.2 on nine `telemetry.v2`
+  frame resources, `gendev.v1` 1.1's `frames/sample`, zenoh-modem's faces
+  on `link.v2` (0.5, five new `plan.json` cases), `telemetry.v2` draft, and
+  editorial `link.v1` 0.15 and `telemetry.v1` 0.8. zk2py rebased onto it.
+
+zk2py diffed every keyword sentence of the changed texts between f42e9742,
+bdb12e5e and 2ed6d968. **No rule changed beyond what the changelogs
+state.**
+
+### The classes zk2py claims
+
+Unchanged at the core: the **owner**, **consumer**, **caller** and
+**observer** classes, at the full level. It now follows `link.v2` as a
+tool (0.3's plan) and as a far side's caller, consumer and tool (0.4).
+
+### Its walk of `RULES.md` at 0.91
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 75 | 64 | 3 | 8 |
+| consumer | 23 | 19 | 0 | 4 |
+| caller | 14 | 14 | 0 | 0 |
+| observer | 86 | 82 | 2 | 2 |
+| static, in every class | 62 | 60 | 0 | 2 |
+
+- **234 rows walked of 234, none without a verdict.** The walk was
+  re-keyed first, in its own commit: core §8.1's SHOULD under the consumer,
+  the caller and the observer, §8.5's under the consumer and the observer,
+  and observer §7.5's, each not met there, then met with the far side.
+- **Not met:** unchanged, the owner's three SHOULDs and observer §7.3's
+  two decoding MUSTs.
+
+### What round 99 changed in zk2py
+
+- **`link_v2`, text 0.3:** a face's `frames` and `horizon_s`, each entry
+  checked alone; `FaceReading`, handed to `link.plan_face`, denies an
+  unlisted frame and a timed stream, reads a listed frame's cadence as its
+  `every_s`, and warns `not_packed`, `timed_downsampled`,
+  `horizon_under_face`, `block_over_batch` and `keep_alive_not_suppressed`;
+  across the faces `frame_unlisted`; and the refusals `packed_required`,
+  `frame_unknown`, `keyframe_unreachable` and, given the far side's
+  catalog, `catalog_missing`. A resource's type kind, congestion and
+  longest put are read from each revision (F-469's reading), and a loaded
+  revision carries its fingerprint. An implied `freshness.v2` takes its
+  stream deny alone, as the fixtures do (F-466). `v2/exposure.json` is read.
+- **`far_side`** (core §8.1, §8.5, observer §7.5, `link.v2` §2.20,
+  §2.21): `FarSide`, one face of a `link.v2` policy; `live.call` with no
+  timeout of its own waits the operation's `timeout_ms`, else 10 s, across
+  a face at least its reply timeout, one it sets taken at its word;
+  `live.get_state` and a seed floored at the face's; `Redeclaring`
+  undeclares and declares anew a subscription silent for two horizons, its
+  transport up, through `Owner.subscribe_role(across=, horizon_s=)` and
+  `echo_tool.watch`; `echo_tool --face-policy F --face NAME`, its session on
+  the face's `[transport]`.
+- **The answers:** `keeps_timestamp` stamps a `telemetry.v2` state metric
+  (F-462); `SeriesReader.under` reads a frame under the revision it names
+  (F-464); the re-put path clears a held member's bit (F-461).
+- **`adopter_frames`** (the coordinator's addition, #983's last "Done
+  when"): `modem.v3` 3.2's nine frame resources and `gendev.v1`'s
+  `frames/sample`, written by zk2py's `Framer`, read back envelope first
+  and through `SeriesReader`. `gendev.v1.toml` is the one `docs/` file the
+  coordinator opened, read as contract TOML; zk2py's loader reads its two
+  schema files beside it.
+- **The mend of round 98's review (PR #1041):** the re-put path; R's
+  exception recorded as `{"error": why}`, apart from an undecodable
+  payload, a bare sample conformed outside the lock; the meter gathers,
+  and accepts a frame's counts once its put goes through, a failed put
+  giving its seqs back; `alarms_scenarios`' `--full`; `clock_question`'s
+  docstring in its checks' order.
+- **`readings`: 872, up from 860.**
+
+**`just py-conformance`: 5173 of 5173**, on main 2ed6d968: `link` 273
+(`v2/` lints 40, plan 19, exposure 18, transport 16), `telemetry` 351
+(`continuity.json` 14), `readings` 872.
+
+### Live
+
+| Run | Pairing | Result |
+|---|---|---|
+| `far_side_live`: `constrained.md` §8 steps 1–2, §9 steps 1–4, in process, a proxy dropping a batch | zk2py's owner, caller, consumer and tool | 16/16 |
+| `freshness.v2` `scenarios-v2.md` §2, step 6 new | zk2py owner, zk2py readers | 13/13 (step 6: 5/5) |
+| | owner example, zk2py readers | 10/13 (step 6: 2/5, F-467) |
+| | zk2py owner, `zenctl watch` | 10/10 (step 6: 2/2) |
+| `telemetry.v2` `scenarios-v2.md` §1–§7 | zk2py owner, zenctl (`watch`, `get`, `telemetry`) | 35/35, every step judged |
+| | zk2py owner, zk2py R; owner example, zk2py R | 30/30 each |
+| `constrained.md` §7 (regression) | zk2py | every check |
+
+- **`constrained.md` §8:** the call setting no timeout drew the router's
+  `Timeout` at 1.00 s and no value; across the face, the value at 1.50 s.
+- **§9:** a dropped 13-byte `DeclareSubscriber` healed once at 2.02 s, for
+  the consumer and the tool; with `arq = true` nothing in 3.5 s; a dropped
+  49-byte batch holding the key's `DeclareKeyExpr` stayed silent, declared
+  again once at 2.02 s. The proxy reads zenoh's stream framing, and skips
+  a keep-alive's 1-byte batch when told to drop "the next batch".
+- **`zenctl telemetry`** reads every frame pair as R does; it reads
+  presence where R reads none, so §7's bare pair is established by
+  presence where R assumes it. Its frame pairs say `presence none`.
+- **Frames' sizes** (`adopter_frames`), link.v1 §2.8's largest frame:
+  `frames/link` 22 B, `frames/message` 213 B, `frames/sample` 97 B, as the
+  Rust side measured; `frames/air` 49, `bearer` 32, `if` 58, `layer` 106,
+  `radio` 21, `sched` 32, `sdu` 51. A delta of every field is 1–3 B more
+  where `keyframe_every` is above 1 (F-470).
+
+**Not run:** `link.v2`'s scenarios §1 and §2 on routers (§2's plan,
+expected 1 and 2, is a reading); core §8.5's MAY, a session opened again;
+`constrained.md` §9 on a real radio; F-436's fix, as before.
+
+Round 99 found F-465 to F-470, six, none a blocker. See "At core 0.91,
+observer 0.23 and link.v2 0.4" in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -5738,7 +5861,9 @@ and telemetry.v2 0.1" in `SPEC-FINDINGS.md`.
     client (`live.call(attachment=…)`) and read by the owner
     (`OpCall.metadata()`), for `config.v1`'s attribution;
   - serving roles (§6);
-  - constrained faces (§8.5);
+  - constrained faces (§8.5) beyond keys across a face (round 95) and the
+    far side's timeouts and declaring again (round 99): a session opened
+    again (§8.5's MAY), and a far router's declarations;
   - the scenarios other than presence.md, retrieval.md, grammar.md §1,
     state.md (all but its archives' §4, §5, §6, §9 and §8's union storage,
     round 93) and parts of operations.md. types.md §2 needs a renderer, which zk2py
@@ -5884,7 +6009,12 @@ impl/python/
     config_scenarios.py config.v1 scenarios.md §1–§14 against zk2py's owner or the Rust owner example
     link.py           link.v1   the face policy, exposure, the plan and its carve-out, the checks, a generator
     link_scenarios.py link.v1   scenarios.md §1–§13 on zenoh-python routers, over examples/zk2/link/
-    link_v2.py        link.v2   the policy, the plan, the transport block and its checks (round 96)
+    link_v2.py        link.v2   the policy, the plan, the transport block and its checks (round 96); the contract
+                                side and frames per face, exposure.json (0.3, round 99)
+    far_side.py       §8.1 §8.5 a far side across a face: the reply timeout, a subscription's horizon, Redeclaring
+                                (core 0.91, observer 0.23, link.v2 0.4; round 99)
+    far_side_live.py  §8.1 §8.5 constrained.md §8 and §9 in process, a proxy dropping a batch the far client sends
+    adopter_frames.py §7.7     modem.v3 3.2's and gendev.v1's frames written, read back and read as series (round 99)
     alarms.py         alarms.v1 the key and the sanitizing step, references, strict JSON, the document, transitions,
                                 the conclusions, AlarmsOwner, the reader on a bus
     alarms_scenarios.py alarms.v1 scenarios.md §1–§10 against zk2py's owner or the Rust owner example
@@ -5985,7 +6115,8 @@ impl/python/
                       for the owner rules round 89's walk found (§5.1, §5.2, O6); state/ zk2py_ground.v1,
                       state.md's plans, status and streams at 0.73, and zk2py_relay.v1, §13's governed stream;
                       packed/ zk2py_packed_reader.v1, the consumer of the Rust tests' packed.v1;
-                      constrained/ zk2py_face.v1 and zk2py_face_reader.v1, constrained.md §7's owner and consumer
+                      constrained/ zk2py_face.v1 and zk2py_face_reader.v1, constrained.md §7's owner and consumer,
+                      and zk2py_faced_reader.v1, §9's consumer of the reference's faced.v1
 ```
 
 The JSON schemas are read from `spec/` at run time (`shape.py`), not copied.
