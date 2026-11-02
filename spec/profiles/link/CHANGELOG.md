@@ -7,6 +7,50 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## 0.14 — 2026-11-02: zk2py round 97's findings answered (#978, #981)
+
+zk2py's round 97 read core 0.84 to 0.87 and this text's 0.12 and 0.13
+cold. It filed F-455 to F-460, none a blocker. This version answers
+F-455, and F-457's half that is this text's. Core 0.89 answers F-456,
+F-457 and F-460, observer 0.22 F-458, and `alarms.v1` 0.13 F-459.
+
+**Stated: §2.9, `freshness.v2` is a listed interface (F-455).**
+`plan.json`'s first case lists `rf0` implementing `modem.v3`, `config.v1`
+and `health.v1`, and denies `stream:freshness.v2`. By §2.7's words
+`freshness.v2` was no listed interface: step 2 gave it no deny, and `rf0`'s
+two heartbeats would cross under `allow`, against §2.9's MUST.
+- **Now:** an interface with a heartbeat makes `freshness.v2` a listed
+  interface of each service that implements it, as `freshness.v2` §3 has
+  every such owner implement it. That holds whether or not the deployment
+  names it.
+- **Its stream denies** are carved from the heartbeats alone, as §2.7
+  already said, so a deployment that does not name it need not give its
+  standard contract.
+- **The reference** read it so already: `zenkey_model::link`'s plan
+  carves `freshness.v2`'s stream deny from the listed interfaces'
+  heartbeats, named or not. zk2py reads it so since round 97; before, it
+  denied nothing of `freshness.v2` there. No plan of the reference
+  changes.
+
+**Changed: §2.8's `frame_over_interval` (F-457).** It restated core
+§7.7's interval, "its span, else its `timing.period_ms`", and now cites
+it. Core 0.89 says the period is that of a declaration `timing.v1` §2.2
+reads valid.
+- **So** a period beside a value that does not read, such as
+  `timing.deadline_ms = "x"`, states no interval. It draws neither
+  `frame_over_interval` nor §2.12's `interval_over_horizon`.
+- **`plan.json`'s frames case** adds such a resource, `frames/unread` in
+  `conformance/contracts/sampler.v1.toml`, which is liveness evidence and
+  draws no warning.
+- **The reference and zk2py** read it so already.
+
+**Deliberately not changed.**
+- **No rule.** §2.9's MUST is 0.11's. F-455's sentence names what it
+  binds, and F-457's is the core's definition read where this text
+  cites it.
+- **A deployment that names `freshness.v2`** still gives its contract
+  (`contract_unknown`), as for any interface it names.
+
 ## 0.13 — 2026-11-02: a frame crosses whole, never downsampled (#981)
 
 Core 0.83 defined frames (§7.7), and 0.87 has owners write them. A frame

@@ -103,7 +103,8 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   `Minter::session_timestamping`, and warns naming core §8.2) and answers
   GETs with the bytes put, a `reply_del` whose attachment is the delete's
   envelope, each with the mutation's Zenoh timestamp where it had one,
-  within the window; `Consumer::get` is S4's owner-only
+  within the window (a `freshness.v2` member's last confirmation in its
+  place, a tombstone's the timestamp minted at its delete, core 0.89); `Consumer::get` is S4's owner-only
   `All`+`Latest` GET, silence being `StateGet::Silent`; `ValueOrder` is
   S7's consumer rule, per key, a value under an id other than the held
   value's accepted, handed every value from a consumer's first on, a

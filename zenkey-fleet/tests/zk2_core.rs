@@ -947,11 +947,13 @@ async fn a_state_read_keeps_its_bytes_and_a_raw_get_reads_a_tombstone() {
     assert_eq!(tombstone.key, origin);
     assert_eq!(tombstone.kind, Some(SampleKind::Delete));
     // tc.netif.v1 uses freshness.v2 since #978's F5: its delete carried no
-    // Zenoh timestamp, so its `reply_del` carries none (S2); the stamp is
-    // the delete's attachment, in band.
-    assert!(
-        tombstone.timestamp.is_none(),
-        "a freshness.v2 deletion carries no Zenoh timestamp (S2)"
+    // Zenoh timestamp, and its `reply_del` carries the one the owner minted
+    // at the delete, its last confirmation (core 0.89's S2, F-460); the
+    // in-band stamp is the delete's attachment.
+    assert_eq!(
+        tombstone.timestamp.map(|t| *t.get_id()),
+        Some(zenoh::time::TimestampId::from(owners.zid())),
+        "a freshness.v2 reply_del carries the owner's last confirmation (S2)"
     );
     let Answer::Value(payload) = &tombstone.answer else {
         panic!("a delete is a sample, not an error reply: {tombstone:?}")

@@ -3,6 +3,75 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.89 — 2026-11-02: zk2py round 97's findings answered (#978, #981)
+
+zk2py's round 97 read core 0.84 to 0.87, observer 0.20 and 0.21, and
+the profiles moved onto `freshness.v2` cold. It filed F-455 to F-460,
+none a blocker. This version answers the core's: F-456, F-457 and F-460,
+and the round's remark on 0.87's entry. `link.v1` 0.14 answers F-455,
+observer 0.22 F-458, and `alarms.v1` 0.13 F-459.
+
+**Corrected: 0.87's entry.** It said the "History" paragraph states no
+keyword, though it opens "A frame resource MAY declare `history`". Its
+one keyword is that MAY, which `RULES.md` does not list, so its counts
+stand. The entry now says so.
+
+**Added: §9.7, "A published revision was accepted" (F-456).**
+`spec/profiles/.history/` holds revisions 1.0 and 1.1 of `health.v1`,
+`alarms.v1` and `config.v1`. Checked FULL_TRANSITIVE, each 1.1 is a
+review against its 1.0 (`uses_changed`) at every run, and the root
+records no acceptance.
+- **Now:** a revision in the history root passed §9.8's review when it
+  was published. A check of it against the root does not refuse it for a
+  review. It reports the review as accepted, or says nothing of it. It
+  still refuses a breaking change.
+- **The reference.** `zenkey-build`'s gate already built a published
+  revision without a word (`zenkey-build/tests/gate.rs`'s
+  `a_published_review_revision_builds_without_a_word`). `zk2 contract
+  compat --history` of one exited 1 on its review. It now prints the
+  review, then `accepted: the revision is published`, and exits 0
+  (`zenkey-model/tests/cli.rs`'s `a_published_review_is_accepted`). A
+  review not yet published still exits 1.
+
+**Changed: §7.7, "The interval" (F-457).** It was "the
+`timing.period_ms` its resource declares". Read alone, a period beside
+`timing.deadline_ms = "x"` was an interval, though E050 reads none of
+that declaration.
+- **Now:** it is the `timing.period_ms` of a declaration `timing.v1`
+  §2.2 reads valid. With none, it is unstated.
+- **So** W108, and `link.v1`'s `frame_over_interval` and
+  `interval_over_horizon`, read no interval beside a declaration that
+  does not read. The reference and zk2py read it so already.
+- **`contracts/w108-frame-horizon`** adds `frames/unread`, a period of
+  60 s under a horizon of 100 s beside such a deadline, which draws no
+  W108. `link.v1` 0.14's `plan.json` adds its case.
+
+**Changed: S2 and §4.3's "Minting", a `reply_del`'s last confirmation
+(F-460).** S2 had a `freshness.v2` member's reply carry its last
+confirmation. Whether a key deleted within the window was a member was
+left open, and the two implementations disagreed: zk2py's owner minted a
+timestamp at the delete and its `reply_del` carried it, the reference's
+carried none.
+- **Now:** a key of such a state deleted within the window is a member
+  too. Its `reply_del` carries the timestamp minted at the delete.
+- **"Minting"** mints at each mutation of such a member, a delete among
+  them, though the mutation carries none.
+- **So** a reader attributes such a `reply_del` to the owner by its
+  Zenoh timestamp, as it does a reply.
+- **The reference's owner** now does so: a covered member's tombstone
+  keeps the timestamp minted at its delete (`zenkey::state`), and the
+  owner example's `reply_del` carries it. `alarms.v1`'s scenarios §3 and
+  §5 assert it (`zenkey/tests/profile_alarms.rs`), and S2 cites §3.
+
+**Deliberately not changed.**
+- **No keyword rule.** S2's MUST is 0.85's: the sentence says which
+  replies it binds. §9.7's and §7.7's sentences state no keyword.
+  `RULES.md` lists 227 rules, as 0.88's did.
+- **A delete carries no Zenoh timestamp** of a `freshness.v2` member, as
+  §4.3's table says: only its `reply_del` does.
+- **A `reply_del` of any other state** carries the delete's Zenoh
+  timestamp where the delete carried one, as before.
+
 ## 0.88 — 2026-11-02: the clock guard holds only a write that carries a Zenoh timestamp (#978)
 
 §4.3's "Ahead" stopped every state write of an owner whose clock guard
@@ -80,9 +149,10 @@ a record its owner might never measure.
 seqs' order, and never one older than the reader read, which would read
 as a rewind. The last keyframe among them heals it at once. Across a face
 the `@adv` deny keeps the cache home, and `link.v1` 0.13 warns of the
-cost (`history_on_frame`). The paragraph states no keyword: a seed that
-merges by seq within a run, as the reference's tools do, already orders
-the cache's frames so.
+cost (`history_on_frame`). Its one keyword is the MAY to declare
+`history`, which `RULES.md` does not list. The rest states no new rule: a
+seed that merges by seq within a run, as the reference's tools do,
+already orders the cache's frames so.
 
 **Changed: §7.7's three reader MUSTs** cite `[F: frame/apply.json]`
 beside their scenarios. K2's fixture is their evidence, and it predates

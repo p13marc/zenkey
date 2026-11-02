@@ -283,7 +283,8 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   It depends on `zenoh-keyexpr` and no other zenoh crate
   (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
   (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
-  as zenctl's). `tests/examples.rs` requires every contract in
+  as zenctl's; `compat --history` of a revision the history holds reports
+  its review accepted and exits 0, core 0.89 §9.7). `tests/examples.rs` requires every contract in
   `examples/zk2/` to load with **no finding at all**, and to be published in
   `examples/zk2/.history` and compatible with it, or a published
   `uses_changed` review alone (#978 F5: the adopters' contracts and

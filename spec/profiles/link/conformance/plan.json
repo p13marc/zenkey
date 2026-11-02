@@ -3651,6 +3651,7 @@
               {
                 "evidence": [
                   "sampler.v1/stream/frames/link",
+                  "sampler.v1/stream/frames/unread",
                   "sampler.v1/stream/frames/wide"
                 ],
                 "service": "lab/modem"
@@ -3666,7 +3667,7 @@
           "sampler.v1"
         ]
       },
-      "note": "frame resources across a face (§2.7, §2.8, §2.12, 0.13): every frame resource exposed link crosses and none is downsampled, the plain stream level alone has a rule; frames/link's horizon makes it liveness evidence, and frames/wide's too; frames/minute's period and frames/sample's span are shorter than interval_s (frame_over_interval); frames/wide's largest frame, four full records of sixteen 32-bit counters with three offsets, is 278 bytes against a batch of 220 (frame_over_batch), it declares history (history_on_frame), and its span of 240 s is above half its horizon of 300 s (interval_over_horizon, read from its interval, not interval_s); frames/home, not exposed, is denied by its own subtree",
+      "note": "frame resources across a face (§2.7, §2.8, §2.12, 0.13): every frame resource exposed link crosses and none is downsampled, the plain stream level alone has a rule; frames/link's horizon makes it liveness evidence, and frames/wide's too; frames/minute's period and frames/sample's span are shorter than interval_s (frame_over_interval); frames/wide's largest frame, four full records of sixteen 32-bit counters with three offsets, is 278 bytes against a batch of 220 (frame_over_batch), it declares history (history_on_frame), and its span of 240 s is above half its horizon of 300 s (interval_over_horizon, read from its interval, not interval_s); frames/unread's period of 30 s and horizon of 50 s draw neither frame_over_interval nor interval_over_horizon, and it is liveness evidence: its deadline does not read, so timing.v1 §2.2 reads its declaration invalid and its interval is unstated (core §7.7; 0.14, F-457); frames/home, not exposed, is denied by its own subtree",
       "policy": "# Frames across a face (link.v1 0.13)\nsystem   = \"lab\"\nservices = [\"modem\"]\n\n[face.rf]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 60\nmax_outage_s = 600\nbatch_bytes  = 220\nlink_bps     = 2400\n"
     }
   ],

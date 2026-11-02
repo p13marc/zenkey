@@ -707,7 +707,7 @@
         "W108",
         "W108"
       ],
-      "fingerprint": "sha256:0b5566df063317ab8165cbb26b319f3d61ba02d3c55ffa25c169b64d13aa38e1"
+      "fingerprint": "sha256:5eacbec915c832744b23dcda21dd3c856b5cd0a09a0bb511ae3c2469e2e6d25b"
     }
   },
   "description": "Contract lints, canonical forms and fingerprints (core.md §9.1–§9.5). For each `<stem>.toml`: the sorted diagnostic codes (the code tables of §9.2 and §9.1) and the fingerprint, null when the contract is invalid. A valid contract's canonical JCS bytes are `<stem>.canonical.json`. Files load from this directory, without the file-name convention check (W107)."

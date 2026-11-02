@@ -1,7 +1,9 @@
 # core §7.7, §9.2 W108, freshness.v1 §2.4: a frame resource whose interval
 # is above half its horizon. A span of 30 s under a horizon of 50 s; a
 # period of 60 s under 100 s. A span of 30 s under 60 s is within, and a
-# horizon beside an unstated interval gives none.
+# horizon beside an unstated interval gives none. So does a period of 60 s
+# under 100 s beside a deadline that does not read: timing.v1 §2.2 reads
+# that declaration invalid, so its interval is unstated (cascade 8).
 [interface]
 name  = "seed"
 major = 1
@@ -34,3 +36,9 @@ kind        = "stream"
 type        = "packed:frames#Link"
 frame       = { records = 1 }
 annotations = { "freshness.ttl_s" = 10 }
+
+[resources."frames/unread"]
+kind        = "stream"
+type        = "packed:frames#Link"
+frame       = { records = 1 }
+annotations = { "timing.period_ms" = 60000, "timing.deadline_ms" = "x", "freshness.ttl_s" = 100 }

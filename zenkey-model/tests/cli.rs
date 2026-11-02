@@ -188,3 +188,38 @@ fn catalog_exit_codes() {
     assert_eq!(zk2(&["catalog", "new", &invalid]), 1);
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// `zk2 contract compat --history` of a revision the history root holds
+/// (core §9.7, zk2py round 97's F-456): it passed its review when it was
+/// published, so its review is reported as accepted and the exit is 0.
+/// The same revision against a root that holds only its predecessor is a
+/// review not yet accepted, exit 1. `health.v1`'s revision 1.1 uses
+/// `freshness.v2` where 1.0 used `freshness.v1` (`uses_changed`).
+#[test]
+fn a_published_review_is_accepted() {
+    let profiles = Path::new(env!("CARGO_MANIFEST_DIR")).join("../spec/profiles");
+    let contract = profiles.join("health/health.v1.toml").display().to_string();
+    let history = profiles.join(".history").display().to_string();
+    let (code, out) = run(&["contract", "compat", "--history", &history, &contract]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("same revision as a published one"), "{out}");
+    assert!(out.contains("review [uses_changed]"), "{out}");
+    assert!(out.contains("accepted: the revision is published"), "{out}");
+
+    let dir = std::env::temp_dir().join(format!("zk2-accepted-cli-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("health.v1")).unwrap();
+    // Revision 1.0 alone.
+    let first = "e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df.bundle.json";
+    std::fs::copy(
+        profiles.join(".history/health.v1").join(first),
+        dir.join("health.v1").join(first),
+    )
+    .unwrap();
+    let root = dir.display().to_string();
+    let (code, out) = run(&["contract", "compat", "--history", &root, &contract]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("review [uses_changed]"), "{out}");
+    assert!(!out.contains("accepted"), "{out}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
