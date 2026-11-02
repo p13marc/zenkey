@@ -40,15 +40,16 @@ pub async fn run(cli: CheckConformArgs) -> Result<()> {
         clocks_synced,
         lease,
         wait_before_close,
+        face_policy,
         skip,
         contracts,
         ns,
     } = cli;
     let dep = ASKING.ask(Deployment::resolve(&ns));
     let window = ASKING.ask(super::positive_secs("--for", for_secs));
-    let lease = ASKING.ask(super::positive_secs("--lease", lease));
-    let wait_before_close = ASKING.ask(super::positive_secs(
-        "--wait-before-close",
+    let routers = ASKING.ask(zk2::routers(
+        face_policy.as_deref(),
+        lease,
         wait_before_close,
     ));
     let offline = ASKING.ask(zk2::load_contracts(&contracts));
@@ -61,13 +62,13 @@ pub async fn run(cli: CheckConformArgs) -> Result<()> {
         calls_granted,
         clocks_synced,
         // §2.7 (0.25): the owner is watched a lease past the window. The
-        // deployment's lease is not on the bus: zenoh's default
-        // (`zenkey_model::budget::DEFAULT_LEASE`) unless `--lease` says.
-        lease,
+        // deployment's lease is not on the bus: `--lease`, else the routers'
+        // face policy's, else zenoh's default (#1011).
+        lease: routers.lease,
         // §2.7 (0.27): a window is lossless only if this run never stalled
         // past it, nor past the lease less a keep-alive. Not on the bus
-        // either: zenoh's default unless `--wait-before-close` says.
-        wait_before_close,
+        // either: the same ladder.
+        wait_before_close: routers.wait_before_close,
         // F-222: a skipped case sends nothing.
         skip: zenkey_fleet::bus::conform::Skipped::of(&skip),
     };

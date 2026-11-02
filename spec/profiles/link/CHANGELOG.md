@@ -7,6 +7,40 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.4 — 2026-11-02: the far side's callers and readers (#988 L4)
+
+Text 0.3 gave each face a `reply_timeout_ms` and an `arq`, and said in
+Appendix A that how a far side's readers wait and re-declare was not in
+the text yet. This version is #988's L4. Core 0.91 states both rules,
+and this text points to them.
+
+**Added: §2.20, a caller across the face.** A face's `reply_timeout_ms`
+is core §8.1's reply timeout: a caller, a consumer or a tool across the
+face waits at least that long. Its session runs the face's `[transport]`.
+`[Sc: core constrained.md §8]`
+
+**Added: §2.21, a reader across the face.** Where `arq` is false, a
+consumer or a tool declares a subscription again after two horizons of
+silence, its transport up, as core §8.5 and observer §7.5 say.
+`[Sc: core constrained.md §9]`
+
+**Changed: Appendix A.** Two rows for them, and the "Not in this
+version" note gone.
+
+**Deliberately not changed.**
+- **No rule of this text's own.** Both are core rules, which bind a
+  far side whatever text its face policy is read by. This text says
+  which of its keys they read.
+- **No lint and no plan field.** §2.1 already requires both keys, and
+  `reply_timeout_short` and `no_arq` already warn. `v2/lints.json` gains
+  one case, which L3's review asked for: an entry of `frames` whose key
+  names no frame resource and whose value is not a table draws one
+  `bad_value`, as §2.1 already said.
+- **The memo's lab scenarios** (#989's "a reply across RF at the face's
+  timeout" and "a lost declaration, healed") run in process as the
+  core's `constrained.md` §8 and §9, a proxy dropping the declaration's
+  frame. `scenarios-v2.md` gains no section.
+
 ## link.v2 0.3 — 2026-11-02: the contract side, and frames per face (#988 L3)
 
 Text 0.2 said what a face runs. It said nothing of what a contract that

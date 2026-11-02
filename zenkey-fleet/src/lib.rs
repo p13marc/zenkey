@@ -271,7 +271,8 @@ pub use bus::seed::{SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
 pub use bus::serve::{MockResponder, ServedQuery, declare_responder};
 pub use bus::session::{
     OPEN_TIMEOUT, OpenFailure, TOOL_INTERESTS_TIMEOUT, check_namespace, open, open_in_namespace,
-    open_owner_in_namespace, open_reporting, open_reporting_within, open_watch, open_with_config,
+    open_in_namespace_across, open_owner_in_namespace, open_reporting, open_reporting_across,
+    open_reporting_within, open_watch, open_watch_across, open_with_config,
 };
 // A tool's watch session (#830, #875): in no namespace, on the wire keys.
 pub use bus::watch::{TokenHeard, WatchSession};

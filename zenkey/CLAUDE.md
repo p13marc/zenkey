@@ -410,5 +410,19 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   #980 C1b: 45–46 B a put by exact key, 82 B under `zk2/**`). `tests/budget.rs`'s §1
   routers state `wait_before_close` 5 s (`ROUTER_WAIT_BEFORE_CLOSE`),
   never zenoh's default, which zenoh-modem's fork `zm-1.10.2-r1` makes
-  10 s (#1011). v1's `zenkey` 0.11.x stays
+  10 s (#1011). #988 L4 (core 0.91 §8.1, §8.5): `Client::across` /
+  `Fleet::across` (the face's `reply_timeout_ms` a floor under the
+  contract's `timeout_ms` and 10 s, a `with_timeout` taken at its word),
+  `TargetStartup::across`, `Consumer::across` (every GET, replay and
+  re-read floored; with `arq = false` each subscriber with a horizon goes
+  through `redeclare::Redeclaring`, `Subscription::redeclared`).
+  `redeclare` undeclares then declares (zenoh joins a twin subscriber and
+  sends nothing), counts silence from the latest of the declaration, the
+  last sample and a transport event, and skips a session cut off; it
+  repairs a lost `DeclareSubscriber`, never a lost `DeclareKeyExpr`
+  (zenoh declares a prefix once a transport, core Appendix B).
+  `common::lossy_link_to` + `Link::lose_up(text)` / `lose_next_up()` drop
+  the next batch the dialler sends holding `text`, or the next but a
+  keep-alive (stream-link framing), for `constrained.rs`'s §9; §8 is a 1.5 s raw queryable against
+  `tests/contracts/faced.v1.toml`'s 1 s `timeout_ms`. v1's `zenkey` 0.11.x stays
   on crates.io, from the `v1` branch; no member of `main` links it.

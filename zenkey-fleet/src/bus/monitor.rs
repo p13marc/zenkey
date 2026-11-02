@@ -742,7 +742,7 @@ pub struct WatchId(u64);
 
 struct WatchEntry {
     selector: String,
-    subscriber: zenoh::pubsub::Subscriber<()>,
+    subscriber: Declared,
     /// The seed task, while a seeded watch's seed phase is still running.
     ///
     /// Aborted wherever the watch ends — [`Monitor::unwatch`],
@@ -754,6 +754,14 @@ struct WatchEntry {
     /// frontend that re-scopes rapidly leaves one of these alive per dropped
     /// monitor, each holding session teardown open for up to `policy.timeout`.
     seed_task: Option<tokio::task::JoinHandle<()>>,
+}
+
+/// How a watch's subscriber is held: declared once, or, across a
+/// constrained face, by the monitor's [`zenkey::redeclare::Redeclaring`],
+/// which declares it again after silence ([`Monitor::watch_across`]).
+enum Declared {
+    Plain(zenoh::pubsub::Subscriber<()>),
+    Across(zenkey::redeclare::SlotId),
 }
 
 /// How long [`Monitor::start`] waits for its liveliness subscribers to
@@ -803,6 +811,10 @@ pub struct Monitor {
     /// [`Monitor::shutdown`]; dropped with the monitor otherwise.
     liveliness: Vec<(String, zenoh::pubsub::Subscriber<()>)>,
     tasks: Vec<tokio::task::JoinHandle<()>>,
+    /// The watches across a constrained face, declared again after silence
+    /// (core §8.5, observer §7.5): made at the first
+    /// [`Monitor::watch_across`].
+    redeclaring: tokio::sync::OnceCell<zenkey::redeclare::Redeclaring>,
 }
 
 impl std::fmt::Debug for Monitor {
@@ -924,6 +936,7 @@ impl Monitor {
             merges: Arc::default(),
             liveliness,
             tasks,
+            redeclaring: tokio::sync::OnceCell::new(),
         };
         for selector in &spec.selectors {
             monitor.watch(selector).await?;
@@ -956,12 +969,78 @@ impl Monitor {
             id,
             WatchEntry {
                 selector: selector.to_string(),
-                subscriber,
+                subscriber: Declared::Plain(subscriber),
                 seed_task: None,
             },
         );
         let _ = self.core.tx.send(FleetEvent::WatchChanged);
         Ok(id)
+    }
+
+    /// [`Monitor::watch`] **across a constrained face** whose medium repairs
+    /// no lost frame (core §8.5, observer §7.5; #988 L4): the subscriber is
+    /// declared again whenever it hears nothing for two `horizon`s while the
+    /// session's transport stays up ([`zenkey::redeclare`]). zenoh 1.10.1
+    /// never repairs a declaration its medium lost, so a watch whose
+    /// declaration a radio dropped would otherwise stay silent for as long
+    /// as the transport stays up. `horizon` is that of what the selector
+    /// hears, from the contracts in hand. Each time is counted
+    /// ([`Monitor::redeclared`]).
+    pub async fn watch_across(&self, selector: &str, horizon: Duration) -> Result<WatchId> {
+        let redeclaring = self
+            .redeclaring
+            .get_or_try_init(|| zenkey::redeclare::Redeclaring::start(&self.session))
+            .await
+            .map_err(|e| Error::bus("subscribe", selector, e))?;
+        let key = zenoh::key_expr::OwnedKeyExpr::autocanonize(selector.to_owned())
+            .map_err(|e| Error::unaskable(format!("selector {selector:?}"), e.to_string()))?;
+        let core = Arc::clone(&self.core);
+        let slot = redeclaring
+            .declare(
+                key,
+                horizon,
+                Arc::new(move |sample| {
+                    let view = SampleView::of(&sample);
+                    let sn = view.source.map(|s| s.sn);
+                    core.ingest(view, sn);
+                }),
+            )
+            .await
+            .map_err(|e| Error::bus("subscribe", selector, e))?;
+        let id = WatchId(self.next_watch.fetch_add(1, Ordering::Relaxed));
+        self.watches.lock().await.insert(
+            id,
+            WatchEntry {
+                selector: selector.to_string(),
+                subscriber: Declared::Across(slot),
+                seed_task: None,
+            },
+        );
+        let _ = self.core.tx.send(FleetEvent::WatchChanged);
+        Ok(id)
+    }
+
+    /// How many times a watch across a face was declared again after
+    /// silence ([`Monitor::watch_across`]).
+    pub fn redeclared(&self) -> u64 {
+        self.redeclaring
+            .get()
+            .map_or(0, zenkey::redeclare::Redeclaring::redeclared)
+    }
+
+    /// Undeclares one watch's subscriber, acknowledged.
+    async fn undeclare(&self, declared: Declared) -> std::result::Result<(), String> {
+        match declared {
+            Declared::Plain(s) => s.undeclare().await.map_err(|e| e.to_string()),
+            Declared::Across(slot) => match self.redeclaring.get() {
+                Some(r) => r
+                    .undeclare(slot)
+                    .await
+                    .map(|_| ())
+                    .map_err(|e| e.to_string()),
+                None => Ok(()),
+            },
+        }
     }
 
     /// Declare `selectors` on this monitor, tearing it down — acknowledged —
@@ -1071,7 +1150,7 @@ impl Monitor {
             id,
             WatchEntry {
                 selector: selector.to_string(),
-                subscriber,
+                subscriber: Declared::Plain(subscriber),
                 seed_task: None,
             },
         );
@@ -1125,9 +1204,7 @@ impl Monitor {
         if let Some(task) = entry.seed_task.take() {
             task.abort();
         }
-        entry
-            .subscriber
-            .undeclare()
+        self.undeclare(entry.subscriber)
             .await
             .map_err(|e| Error::bus("undeclare", &entry.selector, e))?;
         let kept: Vec<String> = {
@@ -1262,7 +1339,7 @@ impl Monitor {
             if let Some(task) = entry.seed_task.take() {
                 task.abort();
             }
-            if let Err(e) = entry.subscriber.undeclare().await {
+            if let Err(e) = self.undeclare(entry.subscriber).await {
                 failed.push(format!("{}: {e}", entry.selector));
             }
         }

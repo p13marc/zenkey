@@ -1244,6 +1244,19 @@ impl TargetStartup {
         self.reread = Some(period);
         self
     }
+
+    /// Across a constrained face (core §8.1, `link.v2` §2.20): every GET and
+    /// presence read waits at least the face's `reply_timeout_ms`, and so
+    /// does the archive's read. Over RF, a reply came back 3.3–7.4 s after
+    /// its GET, where the default [`TargetStartup::timeout`] is 1 s.
+    #[must_use]
+    pub fn across(mut self, far: &zenkey_model::link::FarSide) -> Self {
+        self.timeout = far.at_least(self.timeout);
+        if let Some((_, timeout)) = &mut self.archive {
+            *timeout = far.at_least(*timeout);
+        }
+        self
+    }
 }
 
 /// A put's document as an act hands it to the [`Handler`] (§2.7): decoded
@@ -2284,6 +2297,34 @@ mod tests {
     #[test]
     fn a_pointer_escapes_its_names() {
         assert_eq!(escape("a/b~c"), "a~1b~0c");
+    }
+
+    /// Across a face (core §8.1): the target's GETs and its archive's read
+    /// wait at least the face's reply timeout, and a longer one stands.
+    #[test]
+    fn a_target_across_a_face_waits_its_reply_timeout() {
+        use std::time::Duration;
+        use zenkey_model::link::{Binding, FarSide};
+        let far = FarSide {
+            face: "rf".into(),
+            reply_timeout_ms: 15_000,
+            arq: false,
+            transport: Binding::Zenoh1_10_1.defaults(),
+        };
+        let archive: zenkey_model::grammar::Addr = "ground/archive".parse().unwrap();
+        let t = super::TargetStartup::default()
+            .with_archive(archive.clone(), Duration::from_secs(60))
+            .across(&far);
+        assert_eq!(
+            t.timeout,
+            Duration::from_secs(15),
+            "1 s by default, 15 s across RF"
+        );
+        assert_eq!(
+            t.archive,
+            Some((archive, Duration::from_secs(60))),
+            "a longer one stands"
+        );
     }
 
     /// An application shares the handles across tasks.

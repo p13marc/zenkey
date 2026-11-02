@@ -400,7 +400,21 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   reads the major's table (`contracts/w105-telemetry-series`,
   `ok-telemetry-v2-series`). `telemetry.v2` 0.2 (F-464): an incomparable
   pair states no epoch, null and null as in v1 (`v2/continuity.json`'s
-  fourteenth case, a frame's own `layout`).
+  fourteenth case, a frame's own `layout`). Core 0.91 and observer text
+  0.23 (#988 L4) are the far side's: §8.1, a caller, consumer or tool
+  across a face SHOULD wait at least its `reply_timeout_ms`; §8.5, one
+  whose medium repairs no lost frame SHOULD declare a subscription again
+  after two horizons of silence, its transport up (undeclare, then
+  declare; it repairs a lost `DeclareSubscriber`, never a lost
+  `DeclareKeyExpr`, which zenoh sends once a transport; a `freshness.v2`
+  state's own subscription has no horizon, its heartbeat's has), and a
+  caller MAY reopen its session; observer §7.5, a tool's scope the same,
+  its horizon from the contracts in hand; observer §5.2, the routers'
+  lease and `wait_before_close` read from their policy's `[transport]`
+  (#1011's item 3). Appendix B's "A lost declaration and a late reply",
+  `scenarios/constrained.md` §8 and §9 (a proxy drops the declaration's
+  batch, in process), `docs/zk2/upstream/declarations-are-never-repaired.md`;
+  230 rules.
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`
@@ -413,7 +427,9 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   adds §2.16 (the router-wide `[transport]` and its lints), §2.18 (the
   generator writes it, and the far end's) and §2.19 (`check face`'s
   `transport_differs`, `wait_under_lease`, `peer_differs`,
-  `catalog_mismatch`). §2.20 and §2.21 are left for #988's L4. Appendix
+  `catalog_mismatch`). Text 0.4 (#988 L4) adds §2.20 and §2.21, which
+  point to core §8.1 and §8.5 for a far side's callers and readers.
+  Appendix
   B's four media are `examples/zk2/link/media/*.face.toml`. Text 0.3
   (#988 L3) restates `link.v1` 0.14 and adds the contract side: §2.17 (a
   contract listing `link.v2` exposes only packed resources,

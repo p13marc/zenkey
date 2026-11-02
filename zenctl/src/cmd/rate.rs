@@ -31,7 +31,7 @@ pub async fn run(cli: crate::cli::RateArgs) -> Result<()> {
         bytes: bandwidth,
         per_key,
         loss,
-        face: crate::cli::AcrossFaceArgs { across_face },
+        face: across,
         latency,
         contracts: _,
         ns: _,
@@ -40,7 +40,11 @@ pub async fn run(cli: crate::cli::RateArgs) -> Result<()> {
     // statistic, and the aggregate table has no column to print it in.
     let per_key = per_key || latency;
     let namespace = dep.namespace().to_owned();
-    let face = zk2::FaceScope::of(&across_face, &contracts, &namespace, zk2::Reads::Samples)?;
+    let face = zk2::FaceScope::of(&across, &contracts, &namespace, zk2::Reads::Samples)?;
+    let dep = match &face {
+        Some(f) => f.deployment(dep),
+        None => dep,
+    };
     let typed = selector.is_some();
     let selector = zk2::wire_selector(selector.as_deref(), &namespace)?;
     // Across a face, the scope the contracts give (core §8.5); the report
@@ -67,14 +71,28 @@ pub async fn run(cli: crate::cli::RateArgs) -> Result<()> {
     };
 
     let session = dep.link().session().await?;
-    let monitor = zenkey_fleet::Monitor::start(
-        &session,
-        zenkey_fleet::MonitorSpec {
-            selectors: watched,
-            ..Default::default()
-        },
-    )
-    .await?;
+    let monitor = match &face {
+        // Across a face, each watch declared as the face says (core §8.5).
+        Some(face) => {
+            let monitor =
+                zenkey_fleet::Monitor::start(&session, zenkey_fleet::MonitorSpec::default())
+                    .await?;
+            for s in &watched {
+                face.watch(&monitor, s).await?;
+            }
+            monitor
+        }
+        None => {
+            zenkey_fleet::Monitor::start(
+                &session,
+                zenkey_fleet::MonitorSpec {
+                    selectors: watched,
+                    ..Default::default()
+                },
+            )
+            .await?
+        }
+    };
 
     eprintln!("measuring {selector} for {for_secs}s…");
     tokio::time::sleep(window).await;

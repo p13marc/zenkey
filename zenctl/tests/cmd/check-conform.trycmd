@@ -220,14 +220,13 @@ Options:
           This host's clock and the owners' agree within the HLC delta (500 ms), as the deployment keeps them: a state reply's stamp is then aged against this clock (freshness.v1 §2.6). Without it, a stamp is aged only against a clock this run measured on a live put
 
       --lease <SECS>
-          The deployment's link lease, seconds (zenoh's `transport/link/tx/lease`): a path gone silent withdraws the owner's token only when it runs out, so a window that could pass is followed by this, or --wait-before-close when longer, and --timeout, of watching the owner (spec §2.7, 0.25; observer §5.2)
-          
-          [default: 10]
+          The deployment's link lease, seconds (zenoh's `transport/link/tx/lease`): a path gone silent withdraws the owner's token only when it runs out, so a window that could pass is followed by this, or --wait-before-close when longer, and --timeout, of watching the owner (spec §2.7, 0.25; observer §5.2). Default: --face-policy's, else zenoh 1.10.1's 10 s
 
       --wait-before-close <SECS>
-          The routers' wait_before_close, seconds (zenoh's `transport/link/tx/queue/congestion_control/block/wait_before_close`): a router waits that long on this run's full queue, then closes the transport. A window is lossless only if this run never stalled longer than it, nor than --lease less one keep-alive (spec §2.7, 0.27). A router that waits it tells a withdrawal that late, so where it is longer than --lease, a window's owner is watched for it (observer §5.2). The default is zenoh 1.10.1's; a deployment on another binding states its own (zm-1.10.2-r1's is 10 s)
-          
-          [default: 5]
+          The routers' wait_before_close, seconds (zenoh's `transport/link/tx/queue/congestion_control/block/wait_before_close`): a router waits that long on this run's full queue, then closes the transport. A window is lossless only if this run never stalled longer than it, nor than --lease less one keep-alive (spec §2.7, 0.27). A router that waits it tells a withdrawal that late, so where it is longer than --lease, a window's owner is watched for it (observer §5.2). Default: --face-policy's, else zenoh 1.10.1's 5 s; a deployment on another binding states its own (zm-1.10.2-r1's is 10 s)
+
+      --face-policy <FILE>
+          The routers' face policy (TOML, `link.v2` §2.1): its `[transport]` is what they run, so its lease and wait_before_close are the defaults of --lease and --wait-before-close (#1011). A `link.v1` policy states no transport and is refused, exit 2
 
       --skip <CASE>
           Do not ask this case (repeatable): every row of it reads `not_asked`, which neither passes nor fails the run, and nothing it alone would send is sent: no call for `operation`, no fan-out probe for `fanout-refused`, no standby probe for `redundancy-standby`

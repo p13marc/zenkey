@@ -1,0 +1,20 @@
+# constrained.md §8–§9: across a face, an operation whose contract
+# recommends a 1 s timeout, its reply slower, and a stream with a 1 s
+# horizon.
+[interface]
+name  = "faced"
+major = 1
+minor = 0
+uses  = ["freshness.v1"]
+
+[resources.slow]
+kind       = "operation"
+request    = { raw = "text/plain" }
+response   = { raw = "text/plain" }
+idempotent = true
+timeout_ms = 1000
+
+[resources.level]
+kind        = "stream"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 1 }

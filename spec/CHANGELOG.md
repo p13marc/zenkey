@@ -3,6 +3,89 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.91 — 2026-11-02: the far side's caller and reader (#988 L4)
+
+`link.v2` gives each face a `reply_timeout_ms` and an `arq` (link.v2
+0.1, §2.1), and left what a far side's callers and readers do with them
+to #988's L4. This version is L4's core half. Observer 0.23 is its
+tool's half, and `link.v2` 0.4 points its §2.20 and §2.21 here.
+
+**Added: §8.1, "Across a constrained face".** A caller, a consumer or a
+tool across a constrained face whose face policy states a reply timeout
+SHOULD wait at least that long for each reply it asks for: a call's, a
+GET's and a seed's. `[Sc: constrained.md §8]`
+- **Why.** Over zenoh-modem's simulated radio, GET replies came back
+  3.3–7.4 s after their GET, where the reference's defaults were 1 s
+  (`desired.v1`'s target) and 5 s (`zenctl`), and its desired target
+  never read its document (the wire baseline's W2 findings 6 and 7). A
+  router answers `Timeout` at the query's own timeout and drops the
+  reply, so no router setting helps. §5.1's "The timeout" says so.
+- **The reference.** `zenkey_model::link::FacePolicy::far_side` reads a
+  face's `FarSide`. `Client::across` and `Fleet::across` wait at least
+  its timeout unless the caller set one; `Consumer::across` floors every
+  GET, a seed, a replay and a re-read at it; `TargetStartup::across`
+  floors the target's GETs and its archive's read. `zenctl`'s raw
+  observers take `--face-policy F --face NAME` beside `--across-face`,
+  and the face's timeout is then the default `--timeout`.
+
+**Added: §8.5, "A declaration the medium lost is never repaired".** A
+consumer or a tool across a constrained face whose medium repairs no
+lost frame SHOULD declare a subscription again when it has heard nothing
+on it for two of its horizons while its session's transport stayed up.
+`[Sc: constrained.md §9]`
+- **Why.** Zenoh 1.10.1 sends each declaration once, and its receiver
+  reads no sequence gap as a loss. On zenoh-modem's radio a lost
+  `DeclareKeyExpr` dropped 25 of 25 health puts at the far router, and a
+  reopen lost one again (the wire baseline's "A declaration lost in the
+  setup", its LoRa finding 2).
+- **What it reads.** A subscription's horizon is its resource's
+  `freshness.ttl_s`, or a heartbeat's. A `freshness.v2` state's own
+  subscription has none, since its owner re-puts nothing. The silence
+  counts from the latest of the declaration, the last sample and the
+  transport's last move, and a session cut off declares nothing.
+- **Undeclare, then declare.** zenoh 1.10.1 joins a subscriber to one
+  the session holds on the same key and sends nothing (Appendix B), so
+  the old one goes first.
+- **A lost `DeclareKeyExpr` is not repaired.** The memo expected
+  re-declaring to heal one, the far side's prefix winning. It does not:
+  a session's runtime declares a prefix toward its router once a
+  transport, and its face's mapping keeps the resource from being
+  cleaned, so the new subscriber rides the scope the router never
+  learned. Only a transport that opens again repairs it. §8.5 says so,
+  and `constrained.md` §9 step 4 pins it.
+- **The MAY.** A caller MAY open its session again after two GETs in a
+  row drew no reply. The reference does not: a session is its
+  application's.
+- **The reference.** `zenkey::redeclare::Redeclaring` holds such
+  subscriptions, `Consumer::across` declares through it where the face
+  says `arq = false` (`Subscription::redeclared`), and so does the
+  fleet's `Monitor::watch_across` (`Monitor::redeclared`). A tool's
+  session across a face runs the face's `[transport]`
+  (`zenkey_fleet::open_reporting_across` and its namespaced and watch
+  siblings).
+- **Evidence.** `scenarios/constrained.md` §9: a proxy drops the batch
+  carrying the far client's `DeclareSubscriber`, its transport left up,
+  or the one holding the key's `DeclareKeyExpr`. It runs in process
+  (`zenkey/tests/constrained.rs`, `zenkey-fleet/tests/redeclare.rs`). The
+  memo planned it as #989's lab scenario. A proxy that drops the frame is
+  the medium's loss, in process, where an ACL toggled or an interest
+  timed out would be a router's choice.
+
+**Added: Appendix B, "A lost declaration and a late reply".** Four
+facts of zenoh 1.10.1, each with its file and line: a declaration is
+sent once and a gap is read as none, a subscriber beside a twin sends
+nothing, a prefix is declared toward a router once a transport, and a
+late reply is dropped. The draft upstream report is
+`docs/zk2/upstream/declarations-are-never-repaired.md`, not filed.
+
+**Deliberately not changed.**
+- **No MUST.** A medium that repairs (`arq = true`) needs neither rule,
+  and a deployment may know its medium better than the policy says.
+- **The router.** Nothing on the router repairs a declaration, so no
+  deployment rule is added. `link.v2` §2.1's `no_arq` already warns of
+  such a face.
+- **`RULES.md`** lists 230 rules, 227 and these three.
+
 ## 0.90 — 2026-11-02: zk2py round 98's findings answered (#978, #983)
 
 zk2py's round 98 read `telemetry.v2` 0.1 (#983's T1 and T3), #978's F5

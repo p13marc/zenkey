@@ -47,7 +47,7 @@ pub async fn take(cli: SnapshotArgs) -> Result<()> {
     let SnapshotArgs {
         selectors,
         explicit,
-        face: crate::cli::AcrossFaceArgs { across_face },
+        face: across,
         out,
         max_replies,
         no_presence,
@@ -68,7 +68,11 @@ pub async fn take(cli: SnapshotArgs) -> Result<()> {
     // before the session, because nothing the fleet answers changes it.
     let mode = super::output_mode(&out, overwrite)?;
     let namespace = dep.namespace().to_owned();
-    let face = zk2::FaceScope::of(&across_face, &contracts, &namespace, zk2::Reads::State)?;
+    let face = zk2::FaceScope::of(&across, &contracts, &namespace, zk2::Reads::State)?;
+    let dep = match &face {
+        Some(f) => f.deployment(dep),
+        None => dep,
+    };
     let asked = zk2::wire_scope(
         &selectors,
         explicit,

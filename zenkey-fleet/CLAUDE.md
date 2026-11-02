@@ -329,7 +329,13 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   handed in place of the rules' own, `TriggerSpec::across_face` watches
   the capture's selectors alone, and `judge::field::run_field_over` watches
   several: each reads no presence for its lens, keys resolving through the
-  contracts in hand.
+  contracts in hand. #988 L4: `open_reporting_across`,
+  `open_in_namespace_across` and `open_watch_across` run a `link::FarSide`'s
+  `[transport]` (a stated key stands, the interests timeout at least
+  `TOOL_INTERESTS_TIMEOUT`, the deadline `OPEN_TIMEOUT` past the face's
+  `open_timeout_ms`); `Monitor::watch_across(selector, horizon)` declares
+  through `zenkey::redeclare::Redeclaring` (`Monitor::redeclared`),
+  `tests/redeclare.rs` is `constrained.md` §9 step 2 through a lossy relay.
   `link.v2` (#988 L2) runs through `model::acl`: a v2 face policy's
   `Transport`, `Binding` and catalog id ride `AclPlan::{transport,
   binding, catalog}` (absent for `link.v1`, so its pinned plans did not

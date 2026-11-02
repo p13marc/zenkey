@@ -45,7 +45,7 @@ pub async fn run(cli: crate::cli::TimelineArgs) -> Result<()> {
     let crate::cli::TimelineArgs {
         selectors,
         explicit: crate::cli::ExplicitArgs { explicit },
-        face: crate::cli::AcrossFaceArgs { across_face },
+        face: across,
         for_secs,
         order,
         from,
@@ -62,7 +62,7 @@ pub async fn run(cli: crate::cli::TimelineArgs) -> Result<()> {
             // Clap has already required `--for` without `--from`; the
             // positivity check is the one every window shares (#307).
             let secs = for_secs.expect("clap requires --for without --from");
-            live(&selectors, explicit, &across_face, secs, &dep, &contracts).await?
+            live(&selectors, explicit, &across, secs, &dep, &contracts).await?
         }
     };
     let report = timeline(&window, order);
@@ -77,14 +77,18 @@ pub async fn run(cli: crate::cli::TimelineArgs) -> Result<()> {
 async fn live(
     selectors: &[String],
     explicit: bool,
-    across_face: &[String],
+    across: &crate::cli::AcrossFaceArgs,
     for_secs: f64,
     dep: &Deployment,
     contracts: &zenkey_fleet::ContractSet,
 ) -> Result<Window> {
     let duration = super::positive_secs("--for", for_secs)?;
+    let face = zk2::FaceScope::of(across, contracts, dep.namespace(), zk2::Reads::Samples)?;
+    let dep = &match &face {
+        Some(f) => f.deployment(dep.clone()),
+        None => dep.clone(),
+    };
     let namespace = dep.namespace();
-    let face = zk2::FaceScope::of(across_face, contracts, namespace, zk2::Reads::Samples)?;
     let selectors = zk2::wire_scope(
         selectors,
         explicit,
@@ -117,7 +121,10 @@ async fn live(
         zenkey_fleet::Monitor::start(&session, zenkey_fleet::MonitorSpec::default()).await?;
     let mut events = monitor.events();
     for selector in &selectors {
-        monitor.watch(selector).await?;
+        match &face {
+            Some(face) => face.watch(&monitor, selector).await?,
+            None => monitor.watch(selector).await?,
+        };
     }
     // The window starts once every watch is declared — the first instant
     // the observer could have seen all of what it was asked to.

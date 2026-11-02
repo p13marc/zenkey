@@ -1,13 +1,15 @@
-//! `spec/scenarios/constrained.md` §2, §3, §5 and §7 (spec §1.6, R7, §3.3,
-//! §8.5), the parts a Rust runtime can check. §2 and §5 name a zenoh-pico
-//! owner; here a session without a namespace stands in for it, and the pico
-//! itself is spike S15's. §7 counts the bytes that cross toward a far client
-//! through a TCP proxy, the link's stand-in.
+//! `spec/scenarios/constrained.md` §2, §3, §5, §7, §8 and §9 (spec §1.6,
+//! R7, §3.3, §8.1, §8.5), the parts a Rust runtime can check. §2 and §5
+//! name a zenoh-pico owner; here a session without a namespace stands in
+//! for it, and the pico itself is spike S15's. §7 counts the bytes that
+//! cross toward a far client through a TCP proxy, the link's stand-in, and
+//! §9's proxy loses the batch carrying a far client's declaration, as a
+//! medium with no ARQ does.
 
 mod common;
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use common::{T, client, client_ns, config, contract, eventually, imp, router};
 use zenkey::ServiceBuilder;
@@ -346,4 +348,238 @@ async fn s7_keys_across_the_face() {
         reply.len()
     );
     assert!(carries(&reply, state_key), "{reply:?}");
+}
+
+/// A far side across a face of a link.v2 policy, as `FacePolicy::far_side`
+/// reads one: `reply_timeout_ms` and `arq` its own, zenoh's transport.
+fn far(reply_timeout_ms: u64, arq: bool) -> zenkey::model::link::FarSide {
+    zenkey::model::link::FarSide {
+        face: "radio".into(),
+        reply_timeout_ms,
+        arq,
+        transport: zenkey::model::link::Binding::Zenoh1_10_1.defaults(),
+    }
+}
+
+/// §8 (core §8.1, `link.v2` §2.20): the owner's reply takes 1.5 s, behind
+/// what a radio queued before it. A caller that waits the contract's 1 s
+/// recommendation hears nothing, the router answering `Timeout` and
+/// dropping the reply; a caller across the face waits the face's 3 s and
+/// gets the value.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s8_a_caller_across_a_face_waits_its_reply_timeout() {
+    use zenkey::Client;
+    use zenkey::client::Outcome;
+    let (_r1, ep) = router(None).await;
+    let owner = client(&ep).await;
+    let caller = client(&ep).await;
+    let key = "zk2/v/slow/faced.v1/@op/slow";
+    let queries = owner
+        .declare_queryable(key)
+        .complete(true)
+        .with(flume::unbounded::<zenoh::query::Query>())
+        .await
+        .unwrap();
+    let late = tokio::spawn(async move {
+        while let Ok(q) = queries.recv_async().await {
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(1500)).await;
+                q.reply(q.key_expr().clone(), "done").await.unwrap();
+            });
+        }
+    });
+    let addr = common::addr("v/slow");
+    let contract = Arc::new(contract("faced.v1"));
+    let near = Client::new(&caller, Arc::clone(&contract), &["v/slow"])
+        .unwrap()
+        .with_presence(zenkey::consumer::Presence::Unavailable);
+    // The queryable is routed before either call.
+    let querier = caller.declare_querier(key).await.unwrap();
+    eventually("the owner's queryable is routed", || async {
+        querier.matching_status().await.unwrap().matching()
+    })
+    .await;
+    drop(querier);
+
+    // 1. The contract's 1 s: silent, the reply comes after the timeout.
+    let t = Instant::now();
+    let outcome = near
+        .call(&addr, "@op/slow", &Bindings::new(), "go")
+        .await
+        .unwrap();
+    assert!(matches!(outcome, Outcome::NoAnswer(_)), "{outcome:?}");
+    assert!(
+        t.elapsed() < Duration::from_millis(1400),
+        "{:?}",
+        t.elapsed()
+    );
+
+    // 2. Across the face: at least its 3 s, so the value comes back.
+    let across = near.across(&far(3000, false));
+    let t = Instant::now();
+    let outcome = across
+        .call(&addr, "@op/slow", &Bindings::new(), "go")
+        .await
+        .unwrap();
+    let Outcome::Value(answer) = outcome else {
+        panic!("across the face the reply comes back: {outcome:?}")
+    };
+    assert_eq!(answer.payload().to_bytes().as_ref(), b"done");
+    assert!(
+        t.elapsed() >= Duration::from_millis(1400),
+        "{:?}",
+        t.elapsed()
+    );
+    late.abort();
+}
+
+/// A stream owner putting `faced.v1`'s `stream/level` (a 1 s horizon)
+/// every 100 ms, a client of `ep`; the task that puts.
+async fn level_owner(ep: &str) -> (zenkey::Service, tokio::task::JoinHandle<()>) {
+    let owner = client(ep).await;
+    let faced: IfaceId = "faced.v1".parse().unwrap();
+    let mut b = ServiceBuilder::new(&owner, config("v/level"));
+    b.implement(imp("faced.v1")).unwrap();
+    b.expose(&faced, "@op/slow").unwrap();
+    let level = b
+        .declare_writer(&faced, "stream/level", &Bindings::new())
+        .await
+        .unwrap();
+    let svc = b.start().await.unwrap();
+    let puts = tokio::spawn(async move {
+        loop {
+            let _ = level.put("1").await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    });
+    (svc, puts)
+}
+
+/// How §9 loses a declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Lost {
+    /// The `DeclareSubscriber`: the key expression's `DeclareKeyExpr`
+    /// crossed before, with an earlier subscription the far client made
+    /// and undeclared, which the session's runtime keeps for the transport.
+    Subscriber,
+    /// The batch holding the key's text: its `DeclareKeyExpr`, and the
+    /// `DeclareSubscriber` beside it.
+    KeyExpr,
+}
+
+/// §9 (core §8.5, `link.v2` §2.21): the proxy loses a far consumer's
+/// declaration of `stream/level`, its transport left up, and nothing is
+/// delivered for two horizons.
+/// - **The subscriber's declaration lost**, across a face with no ARQ: the
+///   subscription is then declared again, once, and the stream is
+///   delivered from then on.
+/// - **With ARQ** (the control) it is never declared again, and stays
+///   silent.
+/// - **The key expression's declaration lost**: declared again, it stays
+///   silent, since zenoh 1.10.1 declares a prefix toward its router once a
+///   transport (core Appendix B). Only a transport that opens again
+///   repairs it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s9_a_lost_declaration_is_declared_again_after_two_silent_horizons() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use zenkey::consumer::Consumer;
+    let (_r1, ep) = router(None).await;
+    let (_svc, puts) = level_owner(&ep).await;
+    let key = "zk2/v/level/faced.v1/stream/level";
+    let contract = Arc::new(contract("faced.v1"));
+    for (lost, arq) in [
+        (Lost::Subscriber, false),
+        (Lost::Subscriber, true),
+        (Lost::KeyExpr, false),
+    ] {
+        let case = format!("{lost:?}, arq {arq}");
+        let link = common::lossy_link_to(&ep).await;
+        let session = client(link.endpoint()).await;
+        if lost == Lost::Subscriber {
+            // The key expression crosses with a first subscription, which
+            // hears the stream and goes.
+            let first = session
+                .declare_subscriber(key)
+                .with(flume::unbounded::<Sample>())
+                .await
+                .unwrap();
+            tokio::time::timeout(common::SETTLE, first.recv_async())
+                .await
+                .expect("the first subscription hears the stream")
+                .unwrap();
+            first.undeclare().await.unwrap();
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            link.lose_next_up();
+        } else {
+            link.lose_up(key);
+        }
+        let consumer = Consumer::for_tool(
+            &session,
+            Arc::clone(&contract),
+            &["v/level"],
+            &Default::default(),
+        )
+        .unwrap()
+        .with_presence(Presence::Unavailable)
+        .across(&far(1000, arq));
+        let heard = Arc::new(AtomicU64::new(0));
+        let h = Arc::clone(&heard);
+        let t = Instant::now();
+        let sub = consumer
+            .subscribe("stream/level", move |_| {
+                h.fetch_add(1, Ordering::SeqCst);
+            })
+            .await
+            .unwrap();
+        eventually("the declaration's batch is lost", || async {
+            link.lost_up() == 1
+        })
+        .await;
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        assert_eq!(heard.load(Ordering::SeqCst), 0, "{case}: nothing crosses");
+        match (lost, arq) {
+            (Lost::Subscriber, false) => {
+                let deadline = Instant::now() + common::SETTLE;
+                while heard.load(Ordering::SeqCst) == 0 {
+                    assert!(
+                        Instant::now() < deadline,
+                        "{case}: never crossed, declared again {}",
+                        sub.redeclared()
+                    );
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                let after = t.elapsed();
+                assert!(
+                    after >= Duration::from_secs(2),
+                    "two horizons first: {after:?}"
+                );
+                assert_eq!(sub.redeclared(), 1);
+                let before = heard.load(Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(1000)).await;
+                assert!(heard.load(Ordering::SeqCst) > before, "it goes on crossing");
+                assert_eq!(
+                    sub.redeclared(),
+                    1,
+                    "a stream that crosses is not re-declared"
+                );
+            }
+            (Lost::Subscriber, true) => {
+                tokio::time::sleep(Duration::from_millis(1500)).await;
+                assert_eq!(heard.load(Ordering::SeqCst), 0, "{case}: still silent");
+                assert_eq!(sub.redeclared(), 0, "{case}: never declared again");
+            }
+            (Lost::KeyExpr, _) => {
+                tokio::time::sleep(Duration::from_millis(1500)).await;
+                assert!(sub.redeclared() >= 1, "{case}: declared again");
+                assert_eq!(
+                    heard.load(Ordering::SeqCst),
+                    0,
+                    "{case}: a lost DeclareKeyExpr is not declared again on this transport"
+                );
+            }
+        }
+        drop(sub);
+        session.close().await.unwrap();
+    }
+    puts.abort();
 }

@@ -401,6 +401,12 @@ Options:
       --across-face <SYSTEM/SERVICE>
           A service across a constrained face, SYSTEM/SERVICE, repeatable. The scope is then built from the contracts in hand (--contracts, the deployment's word, since no descriptor crosses): under each address, each concrete resource by its exact key and each template by its key with every parameter a wildcard. Never `<ns>/zk2/**`, under which every put would carry its key's text across the face (core §8.5). A selector given beside it, typed or a rule's, is narrowed to that scope, and --explicit, where the verb has it, adds the explicit resources. No presence is read: keys resolve through --contracts alone
 
+      --face-policy <FILE>
+          With --face, the face policy (TOML, `link.v2` §2.1) whose face the tool reads across (#988 L4). Its session runs the face's `[transport]` (`link.v2` §2.16), so both ends run one lease and keep_alive; the default --timeout is the face's `reply_timeout_ms` (core §8.1); and where the face says `arq = false`, each selector with a horizon in the contracts in hand is declared again after two horizons of silence while the transport stays up, which repairs a subscriber's declaration its medium lost; a lost key expression stays lost until the transport reopens (core §8.5, observer §7.5). A `link.v1` policy states none of that and is refused, exit 2
+
+      --face <NAME>
+          The face of --face-policy, by its name (`[face.<name>]`)
+
       --fmt <FMT>
           kcat-style format string: %k wire key, %K the key relative to the namespace, %A address, %i interface, %r resource (`<kind>/<template>`, when a contract resolved it), %t declared type, %v value, %e encoding, %l payload bytes, %n counter, %T timestamp, %a attachment (empty when none arrived), %q QoS axes (priority/congestion/reliability, +express — the wire's actual axes, #120), %S source zid:eid#sn (empty when the publisher attaches no SourceInfo), %{a.b.c} a decoded payload field by dot-path, %% literal percent
 
@@ -606,6 +612,12 @@ Options:
       --across-face <SYSTEM/SERVICE>
           A service across a constrained face, SYSTEM/SERVICE, repeatable. The scope is then built from the contracts in hand (--contracts, the deployment's word, since no descriptor crosses): under each address, each concrete resource by its exact key and each template by its key with every parameter a wildcard. Never `<ns>/zk2/**`, under which every put would carry its key's text across the face (core §8.5). A selector given beside it, typed or a rule's, is narrowed to that scope, and --explicit, where the verb has it, adds the explicit resources. No presence is read: keys resolve through --contracts alone
 
+      --face-policy <FILE>
+          With --face, the face policy (TOML, `link.v2` §2.1) whose face the tool reads across (#988 L4). Its session runs the face's `[transport]` (`link.v2` §2.16), so both ends run one lease and keep_alive; the default --timeout is the face's `reply_timeout_ms` (core §8.1); and where the face says `arq = false`, each selector with a horizon in the contracts in hand is declared again after two horizons of silence while the transport stays up, which repairs a subscriber's declaration its medium lost; a lost key expression stays lost until the transport reopens (core §8.5, observer §7.5). A `link.v1` policy states none of that and is refused, exit 2
+
+      --face <NAME>
+          The face of --face-policy, by its name (`[face.<name>]`)
+
       --contracts <PATH>
           Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
           
@@ -702,6 +714,12 @@ Options:
       --across-face <SYSTEM/SERVICE>
           A service across a constrained face, SYSTEM/SERVICE, repeatable. The scope is then built from the contracts in hand (--contracts, the deployment's word, since no descriptor crosses): under each address, each concrete resource by its exact key and each template by its key with every parameter a wildcard. Never `<ns>/zk2/**`, under which every put would carry its key's text across the face (core §8.5). A selector given beside it, typed or a rule's, is narrowed to that scope, and --explicit, where the verb has it, adds the explicit resources. No presence is read: keys resolve through --contracts alone
 
+      --face-policy <FILE>
+          With --face, the face policy (TOML, `link.v2` §2.1) whose face the tool reads across (#988 L4). Its session runs the face's `[transport]` (`link.v2` §2.16), so both ends run one lease and keep_alive; the default --timeout is the face's `reply_timeout_ms` (core §8.1); and where the face says `arq = false`, each selector with a horizon in the contracts in hand is declared again after two horizons of silence while the transport stays up, which repairs a subscriber's declaration its medium lost; a lost key expression stays lost until the transport reopens (core §8.5, observer §7.5). A `link.v1` policy states none of that and is refused, exit 2
+
+      --face <NAME>
+          The face of --face-policy, by its name (`[face.<name>]`)
+
       --contracts <PATH>
           Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
           
@@ -783,6 +801,12 @@ Options:
 
       --across-face <SYSTEM/SERVICE>
           A service across a constrained face, SYSTEM/SERVICE, repeatable. The scope is then built from the contracts in hand (--contracts, the deployment's word, since no descriptor crosses): under each address, each concrete resource by its exact key and each template by its key with every parameter a wildcard. Never `<ns>/zk2/**`, under which every put would carry its key's text across the face (core §8.5). A selector given beside it, typed or a rule's, is narrowed to that scope, and --explicit, where the verb has it, adds the explicit resources. No presence is read: keys resolve through --contracts alone
+
+      --face-policy <FILE>
+          With --face, the face policy (TOML, `link.v2` §2.1) whose face the tool reads across (#988 L4). Its session runs the face's `[transport]` (`link.v2` §2.16), so both ends run one lease and keep_alive; the default --timeout is the face's `reply_timeout_ms` (core §8.1); and where the face says `arq = false`, each selector with a horizon in the contracts in hand is declared again after two horizons of silence while the transport stays up, which repairs a subscriber's declaration its medium lost; a lost key expression stays lost until the transport reopens (core §8.5, observer §7.5). A `link.v1` policy states none of that and is refused, exit 2
+
+      --face <NAME>
+          The face of --face-policy, by its name (`[face.<name>]`)
 
   -o, --out <FILE>
           Output file. An existing file is refused (exit 2) unless --overwrite: a capture is the one artifact this verb exists to keep
@@ -997,6 +1021,12 @@ Options:
       --across-face <SYSTEM/SERVICE>
           A service across a constrained face, SYSTEM/SERVICE, repeatable. The scope is then built from the contracts in hand (--contracts, the deployment's word, since no descriptor crosses): under each address, each concrete resource by its exact key and each template by its key with every parameter a wildcard. Never `<ns>/zk2/**`, under which every put would carry its key's text across the face (core §8.5). A selector given beside it, typed or a rule's, is narrowed to that scope, and --explicit, where the verb has it, adds the explicit resources. No presence is read: keys resolve through --contracts alone
 
+      --face-policy <FILE>
+          With --face, the face policy (TOML, `link.v2` §2.1) whose face the tool reads across (#988 L4). Its session runs the face's `[transport]` (`link.v2` §2.16), so both ends run one lease and keep_alive; the default --timeout is the face's `reply_timeout_ms` (core §8.1); and where the face says `arq = false`, each selector with a horizon in the contracts in hand is declared again after two horizons of silence while the transport stays up, which repairs a subscriber's declaration its medium lost; a lost key expression stays lost until the transport reopens (core §8.5, observer §7.5). A `link.v1` policy states none of that and is refused, exit 2
+
+      --face <NAME>
+          The face of --face-policy, by its name (`[face.<name>]`)
+
       --for <SECS>
           The passive window, seconds. Not with --from: a capture's span is in its rows
 
@@ -1098,6 +1128,12 @@ Options:
 
       --across-face <SYSTEM/SERVICE>
           A service across a constrained face, SYSTEM/SERVICE, repeatable. The scope is then built from the contracts in hand (--contracts, the deployment's word, since no descriptor crosses): under each address, each concrete resource by its exact key and each template by its key with every parameter a wildcard. Never `<ns>/zk2/**`, under which every put would carry its key's text across the face (core §8.5). A selector given beside it, typed or a rule's, is narrowed to that scope, and --explicit, where the verb has it, adds the explicit resources. No presence is read: keys resolve through --contracts alone
+
+      --face-policy <FILE>
+          With --face, the face policy (TOML, `link.v2` §2.1) whose face the tool reads across (#988 L4). Its session runs the face's `[transport]` (`link.v2` §2.16), so both ends run one lease and keep_alive; the default --timeout is the face's `reply_timeout_ms` (core §8.1); and where the face says `arq = false`, each selector with a horizon in the contracts in hand is declared again after two horizons of silence while the transport stays up, which repairs a subscriber's declaration its medium lost; a lost key expression stays lost until the transport reopens (core §8.5, observer §7.5). A `link.v1` policy states none of that and is refused, exit 2
+
+      --face <NAME>
+          The face of --face-policy, by its name (`[face.<name>]`)
 
   -o, --out <FILE>
           Output file. Refused (exit 2) when nobody answered: a file of silence would read as an empty deployment. An existing file is refused too (exit 2), before any session, unless --overwrite
@@ -1530,6 +1566,12 @@ Options:
 
       --across-face <SYSTEM/SERVICE>
           A service across a constrained face, SYSTEM/SERVICE, repeatable. The scope is then built from the contracts in hand (--contracts, the deployment's word, since no descriptor crosses): under each address, each concrete resource by its exact key and each template by its key with every parameter a wildcard. Never `<ns>/zk2/**`, under which every put would carry its key's text across the face (core §8.5). A selector given beside it, typed or a rule's, is narrowed to that scope, and --explicit, where the verb has it, adds the explicit resources. No presence is read: keys resolve through --contracts alone
+
+      --face-policy <FILE>
+          With --face, the face policy (TOML, `link.v2` §2.1) whose face the tool reads across (#988 L4). Its session runs the face's `[transport]` (`link.v2` §2.16), so both ends run one lease and keep_alive; the default --timeout is the face's `reply_timeout_ms` (core §8.1); and where the face says `arq = false`, each selector with a horizon in the contracts in hand is declared again after two horizons of silence while the transport stays up, which repairs a subscriber's declaration its medium lost; a lost key expression stays lost until the transport reopens (core §8.5, observer §7.5). A `link.v1` policy states none of that and is refused, exit 2
+
+      --face <NAME>
+          The face of --face-policy, by its name (`[face.<name>]`)
 
       --every <SECS>
           Seconds between evaluations — the one period flag (#307)

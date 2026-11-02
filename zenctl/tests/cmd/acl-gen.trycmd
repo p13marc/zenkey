@@ -682,3 +682,14 @@ $ zenctl acl gen --enrollment ../examples/zk2/link/radio.enrollment.toml --contr
 Error: --far-config: the face policy states no transport; a link.v2 policy does (`profile = "link.v2"` and a `[transport]` table, link.v2 §2.1)
 
 ```
+
+`--catalog` is the far side's catalog, which only a `link.v2` face has
+(link.v2 §2.18). Beside a `link.v1` policy it is refused for that, exit 2,
+before its file is read: this one does not exist.
+
+```console
+$ zenctl acl gen --enrollment ../examples/zk2/link/radio.enrollment.toml --contracts ../examples/zk2/link/radio.v1.toml --face-policy ../examples/zk2/link/radio.face.toml --catalog tests/cmd/fixtures/catalog/no-such-catalog.json
+? 2
+Error: --catalog needs a link.v2 --face-policy (`profile = "link.v2"`, link.v2 §2.18): the catalog is what a face's far side decodes with
+
+```

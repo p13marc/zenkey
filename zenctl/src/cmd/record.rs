@@ -45,7 +45,7 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
     let crate::cli::RecordArgs {
         selectors,
         explicit: crate::cli::ExplicitArgs { explicit },
-        face: crate::cli::AcrossFaceArgs { across_face },
+        face: across,
         out,
         for_secs,
         count,
@@ -64,23 +64,22 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
     let mode = super::output_mode(&out, overwrite)?;
     // The contracts are read by the rules `--on` judges, and across a face
     // by the scope itself; a plain capture keeps payloads as bytes.
-    let contracts = if on.is_empty() && across_face.is_empty() {
+    let contracts = if on.is_empty() && across.across_face.is_empty() {
         zenkey_fleet::ContractSet::new()
     } else {
         zk2::load_contracts(&contracts)?
     };
-    let face = zk2::FaceScope::of(
-        &across_face,
-        &contracts,
-        dep.namespace(),
-        zk2::Reads::Samples,
-    )?;
+    let face = zk2::FaceScope::of(&across, &contracts, dep.namespace(), zk2::Reads::Samples)?;
+    let dep = match &face {
+        Some(f) => f.deployment(dep),
+        None => dep,
+    };
     let selectors = selectors_of(&selectors, explicit, dep.namespace(), face.as_ref())?;
     if let Some(face) = &face {
         eprintln!("{}", face.note(&selectors));
     }
     if on.is_empty() {
-        return run_inner(&selectors, &out, mode, for_secs, count, &dep).await;
+        return run_inner(&selectors, &out, mode, for_secs, count, &dep, face.as_ref()).await;
     }
     // `requires = "on"` on `--pre`, and `requires = "pre"` on `--on`: clap
     // has already refused one without the other, so this is the type's
@@ -159,6 +158,7 @@ async fn run_inner(
     for_secs: Option<f64>,
     count: u64,
     dep: &Deployment,
+    face: Option<&zk2::FaceScope>,
 ) -> Result<()> {
     let duration = match for_secs {
         Some(secs) => Some(super::positive_secs("--for", secs)?),
@@ -180,7 +180,10 @@ async fn run_inner(
         zenkey_fleet::Monitor::start(&session, zenkey_fleet::MonitorSpec::default()).await?;
     let mut events = monitor.events();
     for s in selectors {
-        monitor.watch(s).await?;
+        match face {
+            Some(face) => face.watch(&monitor, s).await?,
+            None => monitor.watch(s).await?,
+        };
     }
 
     eprintln!(

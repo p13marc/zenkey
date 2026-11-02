@@ -153,12 +153,19 @@ where
 /// - **Counting**: every byte it forwards toward the side that connected
 ///   is counted, so a test reads what crossed toward a far session
 ///   (`spec/scenarios/constrained.md` §7).
+/// - **Losing** ([`lossy_link_to`]): on request, the next batch the
+///   connecting side sends, or the next that holds a given text, is
+///   dropped, once, and the link stays up: a frame a medium with no ARQ
+///   lost below zenoh (`constrained.md` §9). It reads the stream link's
+///   framing, each batch after its 2-byte length, and never drops a
+///   keep-alive.
 pub struct Link {
     endpoint: String,
     cut: std::sync::Arc<std::sync::atomic::AtomicBool>,
     stalled: std::sync::Arc<std::sync::atomic::AtomicBool>,
     down: std::sync::Arc<std::sync::atomic::AtomicU64>,
     capture: Capture,
+    loss: Loss,
     conns: std::sync::Arc<std::sync::Mutex<Vec<tokio::task::AbortHandle>>>,
     _accept: tokio::task::JoinHandle<()>,
 }
@@ -207,6 +214,96 @@ impl Link {
     pub fn captured_down(&self) -> Vec<u8> {
         self.capture.lock().unwrap().take().unwrap_or_default()
     }
+
+    /// Drops the next batch the connecting side sends that holds `text`,
+    /// once (see [`Link`]).
+    pub fn lose_up(&self, text: &str) {
+        *self.loss.armed.lock().unwrap() = Some(Arm::Text(text.as_bytes().to_vec()));
+    }
+
+    /// Drops the next batch the connecting side sends but a keep-alive,
+    /// once (see [`Link`]).
+    pub fn lose_next_up(&self) {
+        *self.loss.armed.lock().unwrap() = Some(Arm::Next);
+    }
+
+    /// How many batches [`Link::lose_up`] dropped.
+    pub fn lost_up(&self) -> u64 {
+        self.loss.lost.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+/// What a [`Link`] drops of what the connecting side sends.
+#[derive(Clone, Default)]
+struct Loss {
+    armed: std::sync::Arc<std::sync::Mutex<Option<Arm>>>,
+    lost: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+
+/// Which batch a [`Loss`] drops next.
+enum Arm {
+    /// The next one holding these bytes.
+    Text(Vec<u8>),
+    /// The next one but a keep-alive.
+    Next,
+}
+
+/// zenoh 1.10.1's `KeepAlive`, a transport message with no field: a batch
+/// of one byte after the stream link's length.
+const KEEP_ALIVE: u8 = 0x04;
+
+/// [`pump`] for the connecting side's direction: it forwards whole
+/// batches, read by the stream link's 2-byte little-endian length, and
+/// drops the one [`Loss`] is armed for.
+async fn pump_framed(
+    mut from: tokio::net::tcp::OwnedReadHalf,
+    mut to: tokio::net::tcp::OwnedWriteHalf,
+    stalled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    loss: Loss,
+) {
+    use std::sync::atomic::Ordering;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut pending: Vec<u8> = Vec::new();
+    loop {
+        while stalled.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let n = match from.read(&mut buf).await {
+            Ok(0) | Err(_) => break,
+            Ok(n) => n,
+        };
+        while stalled.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        pending.extend_from_slice(&buf[..n]);
+        let mut out: Vec<u8> = Vec::new();
+        while pending.len() >= 2 {
+            let len = usize::from(u16::from_le_bytes([pending[0], pending[1]]));
+            if pending.len() < 2 + len {
+                break;
+            }
+            let batch: Vec<u8> = pending.drain(..2 + len).collect();
+            let mut armed = loss.armed.lock().unwrap();
+            let keep_alive = batch.len() == 3 && batch[2] == KEEP_ALIVE;
+            let hit = !keep_alive
+                && match armed.as_ref() {
+                    Some(Arm::Text(t)) => batch.windows(t.len()).any(|w| w == t.as_slice()),
+                    Some(Arm::Next) => true,
+                    None => false,
+                };
+            if hit {
+                *armed = None;
+                loss.lost.fetch_add(1, Ordering::SeqCst);
+            } else {
+                out.extend_from_slice(&batch);
+            }
+        }
+        if !out.is_empty() && to.write_all(&out).await.is_err() {
+            break;
+        }
+    }
+    let _ = to.shutdown().await;
 }
 
 /// A [`Link`]'s copy of what it forwarded toward the side that connected,
@@ -276,6 +373,16 @@ pub async fn retrying_client(endpoint: &str) -> zenoh::Session {
 
 /// A [`Link`] forwarding to `upstream` (`tcp/127.0.0.1:<port>`).
 pub async fn link_to(upstream: &str) -> Link {
+    link_with(upstream, false).await
+}
+
+/// [`link_to`], able to lose a batch ([`Link::lose_up`]): it reads the
+/// connecting side's stream as zenoh frames it.
+pub async fn lossy_link_to(upstream: &str) -> Link {
+    link_with(upstream, true).await
+}
+
+async fn link_with(upstream: &str, framed: bool) -> Link {
     use std::sync::atomic::Ordering;
     let target = upstream.trim_start_matches("tcp/").to_owned();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -285,6 +392,8 @@ pub async fn link_to(upstream: &str) -> Link {
     let conns: std::sync::Arc<std::sync::Mutex<Vec<tokio::task::AbortHandle>>> = Default::default();
     let down = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     let capture = Capture::default();
+    let loss = Loss::default();
+    let lossy = loss.clone();
     let tally = Tally {
         count: std::sync::Arc::clone(&down),
         capture: std::sync::Arc::clone(&capture),
@@ -306,11 +415,16 @@ pub async fn link_to(upstream: &str) -> Link {
             let (up_rd, up_wr) = up.into_split();
             let (a, b) = (std::sync::Arc::clone(&st), std::sync::Arc::clone(&st));
             let counted = Some(tally.clone());
+            let lossy = lossy.clone();
             let h = tokio::spawn(async move {
-                tokio::join!(
-                    pump(down_rd, up_wr, a, None),
-                    pump(up_rd, down_wr, b, counted)
-                );
+                let up = async {
+                    if framed {
+                        pump_framed(down_rd, up_wr, a, lossy).await;
+                    } else {
+                        pump(down_rd, up_wr, a, None).await;
+                    }
+                };
+                tokio::join!(up, pump(up_rd, down_wr, b, counted));
             });
             cs.lock().unwrap().push(h.abort_handle());
         }
@@ -321,6 +435,7 @@ pub async fn link_to(upstream: &str) -> Link {
         stalled,
         down,
         capture,
+        loss,
         conns,
         _accept: accept,
     }

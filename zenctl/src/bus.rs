@@ -62,6 +62,10 @@ pub(crate) struct Link {
     /// The timeout the user chose, by flag or context; `None` when the
     /// default stands.
     chosen_timeout: Option<Duration>,
+    /// The face this invocation reads across (`--face-policy` and `--face`,
+    /// #988 L4): its sessions run the face's transport, and the default
+    /// timeout is its `reply_timeout_ms` (core §8.1).
+    far: Option<zenkey_model::link::FarSide>,
     out: OutputArgs,
 }
 
@@ -88,8 +92,26 @@ impl Link {
                 .timeout
                 .or_else(|| stored.and_then(|c| c.timeout))
                 .map(Duration::from_secs),
+            far: None,
             out: args.out,
         }
+    }
+
+    /// This connection across a constrained face (core §8.1, §8.5; #988
+    /// L4): the default `--timeout` is the face's `reply_timeout_ms` (a
+    /// `--timeout`, or a context's, still stands), and every session it
+    /// opens runs the face's `[transport]` (`link.v2` §2.16).
+    pub(crate) fn across(mut self, far: zenkey_model::link::FarSide) -> Link {
+        if self.chosen_timeout.is_none() {
+            self.timeout = far.reply_timeout();
+        }
+        self.far = Some(far);
+        self
+    }
+
+    /// The face this connection reads across, if any.
+    pub(crate) fn far(&self) -> Option<&zenkey_model::link::FarSide> {
+        self.far.as_ref()
     }
 
     pub(crate) fn format(&self) -> crate::render::Format {
@@ -121,9 +143,22 @@ impl Link {
     /// read that looks across namespaces.
     pub(crate) async fn session(&self) -> Result<zenoh::Session> {
         let t = &self.transport;
-        zenkey_fleet::open_reporting(t.file.as_deref(), &t.connect, &t.listen, t.scouting)
+        match &self.far {
+            Some(far) => zenkey_fleet::open_reporting_across(
+                far,
+                t.file.as_deref(),
+                &t.connect,
+                &t.listen,
+                t.scouting,
+            )
             .await
-            .map_err(open_error)
+            .map_err(open_error),
+            None => {
+                zenkey_fleet::open_reporting(t.file.as_deref(), &t.connect, &t.listen, t.scouting)
+                    .await
+                    .map_err(open_error)
+            }
+        }
     }
 
     /// A session **in** `namespace` over this connection: the one act that
@@ -181,6 +216,17 @@ impl Deployment {
         &self.link
     }
 
+    /// This deployment read across a constrained face ([`Link::across`]).
+    pub(crate) fn across(mut self, far: zenkey_model::link::FarSide) -> Deployment {
+        self.link = self.link.across(far);
+        self
+    }
+
+    /// The face this deployment is read across, if any.
+    pub(crate) fn far(&self) -> Option<&zenkey_model::link::FarSide> {
+        self.link.far()
+    }
+
     pub(crate) fn format(&self) -> crate::render::Format {
         self.link.format()
     }
@@ -201,14 +247,29 @@ impl Deployment {
     /// verb reads, it reads as the deployment's own consumers do.
     pub(crate) async fn session(&self) -> Result<zenoh::Session> {
         let t = &self.link.transport;
-        zenkey_fleet::open_in_namespace(
-            &self.namespace,
-            t.file.as_deref(),
-            &t.connect,
-            &t.listen,
-            t.scouting,
-        )
-        .await
+        match self.far() {
+            Some(far) => {
+                zenkey_fleet::open_in_namespace_across(
+                    far,
+                    &self.namespace,
+                    t.file.as_deref(),
+                    &t.connect,
+                    &t.listen,
+                    t.scouting,
+                )
+                .await
+            }
+            None => {
+                zenkey_fleet::open_in_namespace(
+                    &self.namespace,
+                    t.file.as_deref(),
+                    &t.connect,
+                    &t.listen,
+                    t.scouting,
+                )
+                .await
+            }
+        }
         .map_err(open_error)
     }
 
@@ -232,14 +293,29 @@ impl Deployment {
     /// no presence live opens none.
     pub(crate) async fn watch_session(&self) -> Result<zenkey_fleet::WatchSession> {
         let t = &self.link.transport;
-        zenkey_fleet::open_watch(
-            &self.namespace,
-            t.file.as_deref(),
-            &t.connect,
-            &t.listen,
-            t.scouting,
-        )
-        .await
+        match self.far() {
+            Some(far) => {
+                zenkey_fleet::open_watch_across(
+                    far,
+                    &self.namespace,
+                    t.file.as_deref(),
+                    &t.connect,
+                    &t.listen,
+                    t.scouting,
+                )
+                .await
+            }
+            None => {
+                zenkey_fleet::open_watch(
+                    &self.namespace,
+                    t.file.as_deref(),
+                    &t.connect,
+                    &t.listen,
+                    t.scouting,
+                )
+                .await
+            }
+        }
         .map_err(open_error)
     }
 
@@ -325,6 +401,42 @@ mod tests {
         assert_eq!(ns(None, Some(&ctx)), "prod");
         assert_eq!(ns(Some("site/a"), Some(&ctx)), "site/a");
         assert_eq!(ns(Some(""), Some(&ctx)), "", "an empty flag is the root");
+    }
+
+    /// Across a face (#988 L4, core §8.1): the face's reply timeout is the
+    /// default `--timeout`, and a `--timeout` or a context's still stands.
+    #[test]
+    fn across_a_face_the_default_timeout_is_the_faces() {
+        let far = zenkey_model::link::FarSide {
+            face: "rf".into(),
+            reply_timeout_ms: 15_000,
+            arq: false,
+            transport: zenkey_model::link::Binding::Zenoh1_10_1.defaults(),
+        };
+        let link = |timeout: Option<u64>, stored: Option<&StoredContext>| {
+            let args = SessionArgs {
+                context: None,
+                connect: vec![],
+                listen: vec![],
+                scouting: false,
+                timeout,
+                zenoh_config: None,
+                out: OutputArgs {
+                    format: crate::render::Format::Table,
+                    color: crate::render::ColorChoice::Never,
+                },
+            };
+            Link::resolve_with(&args, stored).across(far.clone())
+        };
+        assert_eq!(link(None, None).timeout(), Duration::from_secs(15));
+        assert_eq!(link(None, None).chosen_timeout(), None);
+        assert_eq!(link(Some(2), None).timeout(), Duration::from_secs(2));
+        let ctx = StoredContext {
+            timeout: Some(30),
+            ..StoredContext::default()
+        };
+        assert_eq!(link(None, Some(&ctx)).timeout(), Duration::from_secs(30));
+        assert_eq!(link(None, None).far(), Some(&far));
     }
 
     /// The `--context` **name** survives resolution, because the completion

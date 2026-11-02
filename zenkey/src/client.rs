@@ -216,13 +216,29 @@ impl crate::call::Replies<Answer, Answer> {
 struct Settings {
     timeout: Option<Duration>,
     metadata: Option<CallMetadata>,
+    /// The reply timeout of the face the client calls across (core §8.1,
+    /// `link.v2` §2.20): what a call waits at least, unless the client
+    /// sets its own.
+    face: Option<Duration>,
 }
 
 impl Settings {
+    fn new() -> Self {
+        Self {
+            timeout: None,
+            metadata: None,
+            face: None,
+        }
+    }
+
+    /// The client's own timeout; else the operation's `timeout_ms`, else
+    /// [`DEFAULT_TIMEOUT`], raised to the face's reply timeout across a
+    /// face (spec §5.1, "The timeout"; §8.1).
     fn timeout(&self, op: &Operation) -> Duration {
-        self.timeout
-            .or(op.timeout_ms.map(Duration::from_millis))
-            .unwrap_or(DEFAULT_TIMEOUT)
+        self.timeout.unwrap_or_else(|| {
+            let recommended = op.timeout_ms.map_or(DEFAULT_TIMEOUT, Duration::from_millis);
+            self.face.map_or(recommended, |f| recommended.max(f))
+        })
     }
 }
 
@@ -280,10 +296,7 @@ impl Client {
                 .map(|p| Provider::parse(p))
                 .collect::<Result<_>>()?,
             params: BTreeMap::new(),
-            settings: Settings {
-                timeout: None,
-                metadata: None,
-            },
+            settings: Settings::new(),
             retries: 0,
             presence: Presence::Observable,
         })
@@ -314,10 +327,24 @@ impl Client {
         Ok(c)
     }
 
-    /// The reply timeout for every call, over the contract's `timeout_ms`.
+    /// The reply timeout for every call, over the contract's `timeout_ms`
+    /// and the face's (core §8.1: the timeout is the caller's).
     #[must_use]
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.settings.timeout = Some(timeout);
+        self
+    }
+
+    /// Calls across a constrained face (core §8.1, `link.v2` §2.20): unless
+    /// [`Client::with_timeout`] sets one, every call waits at least the
+    /// face's `reply_timeout_ms`, over the contract's `timeout_ms` and
+    /// [`DEFAULT_TIMEOUT`]. A reply later than the query's timeout is
+    /// dropped by the router, so no router setting makes up for a caller
+    /// that gave up first (core Appendix B). The session is the caller's,
+    /// opened with the face's transport ([`zenkey_model::link::FarSide::session_keys`]).
+    #[must_use]
+    pub fn across(mut self, far: &zenkey_model::link::FarSide) -> Self {
+        self.settings.face = Some(far.reply_timeout());
         self
     }
 
@@ -658,10 +685,7 @@ impl Fleet {
             contract,
             selection: covering(&selection),
             params: BTreeMap::new(),
-            settings: Settings {
-                timeout: None,
-                metadata: None,
-            },
+            settings: Settings::new(),
         })
     }
 
@@ -671,6 +695,13 @@ impl Fleet {
     #[must_use]
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.settings.timeout = Some(timeout);
+        self
+    }
+
+    /// Fans out across a constrained face: [`Client::across`]'s timeout.
+    #[must_use]
+    pub fn across(mut self, far: &zenkey_model::link::FarSide) -> Self {
+        self.settings.face = Some(far.reply_timeout());
         self
     }
 

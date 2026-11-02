@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.22 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.23 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.85 ([`core.md`](core.md)) |
+| **Written against** | core 0.91 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
@@ -879,7 +879,10 @@ owner's rule and an event's rate stay in core §2.7, and the QoS in core
   - **`wait_before_close`** is the deployment's too: the routers'. Its
     default is 5 s in zenoh 1.10.1, and 10 s in zm-1.10.2-r1. A tool's own
     session configuration states how long its own pushes wait, not its
-    routers'. A push that cannot queue within it closes the transport it
+    routers'. A tool given the routers' `link.v2` face policy reads both
+    the lease and `wait_before_close` from its `[transport]`, which the
+    routers run (`link.v2` §2.16). Given none, it takes zenoh 1.10.1's,
+    unless told. A push that cannot queue within it closes the transport it
     pushes on (core Appendix B, "What a path drops"). A path that stays up
     while its queue is full keeps its lease. So its withdrawal can reach
     the reader up to `wait_before_close` after the failure. That is later
@@ -1137,6 +1140,26 @@ This is core §8.5's "Keys across the face", for a tool.
 
 `[Sc: constrained.md §7]`
 
+**Declaring again after silence** is core §8.5's, for a tool.
+- A tool across a constrained face whose medium repairs no lost frame
+  SHOULD declare a scope again when it has heard nothing on it for two of
+  its horizons while its session's transport stayed up, as core §8.5
+  says. `[Sc: constrained.md §9]`
+  - **Its horizon** comes from the contracts in hand, as its scope does:
+    the shortest horizon of the resources the scope reads that have one.
+    A scope with none is never declared again.
+  - **What the face says.** The face policy gives the medium's `arq`
+    (`link.v2` §2.1). A tool given none takes the medium for one that
+    repairs.
+  - **What it concludes.** Silence on a scope declared again is still
+    silence (§2): no verdict on its owner, nor on the face. A lost
+    `DeclareKeyExpr` stays lost until the transport opens again (core
+    §8.5).
+- **A tool's own timeouts** across such a face are core §8.1's: at least
+  the face's `reply_timeout_ms` for each reply it asks for. Its session
+  runs the face's `[transport]`, so that both ends run one lease
+  (`link.v2` §2.16).
+
 ### 7.6 Frames
 
 This is core §7.7's reader, for a tool. A tool reads a frame's body with
@@ -1302,7 +1325,7 @@ tooling guide's rules that carry evidence were promoted with text 0.1.
 | `scenarios/budget.md` §1–§3 | §5.2, §5.3 |
 | `scenarios/operations.md` §3, §5, §8 | §2, §3.2 (§8 step 6), §6.1, §7.2 (§5 step 2) |
 | `scenarios/bindings.md` §3, §5 | §7.1 |
-| `scenarios/constrained.md` §3, §7 | §7.1 (§3), §7.5 (§7) |
+| `scenarios/constrained.md` §3, §7, §9 | §7.1 (§3), §7.5 (§7, §9) |
 | `scenarios/types.md` §2 | §7.3 |
 | `scenarios/grammar.md` §1, §2 | §8.2 (§1 step 5) |
 | `profiles/*/conformance/conclusions.json` (`arbitration`, `redundancy`, `timing`) | §1, not this profile's |
