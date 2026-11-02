@@ -67,7 +67,8 @@ case name. It exits with:
 | bundles | §9.6 | `bundle` | the twelve verification steps and their tags. `seed.toml` also **builds** to `valid.bundle.json` byte for byte, and `contracts/ok-packed.toml` to `packed.bundle.json` (0.75). |
 | history | §9.7 | `history` | `[at, tag]` per history root |
 | descriptors | §3.3 | `descriptor` | the D codes (D012, a standby marked tokenless, since 0.39), against `descriptors/contracts/nav.v2.toml`. That contract's fingerprint, computed here, is the `sha256:fea2…` the fixtures expect. |
-| errors | §5.2 | `envelope`, `cbor` | JSON, CBOR and protobuf envelopes, and the refusal tags |
+| errors | §5.2, §7.5 | `envelope`, `cbor`, `zk2c` | `cases.json`: JSON, CBOR and protobuf envelopes, the bare wire's since core 0.94, and the refusal tags; `forms.json`: the error form's 256 bytes, its writes and its reads by Encoding |
+| envelope | §7.5, §5.1, §5.2 (0.72 to 0.94) | `zk2c`, `calls` | `vectors.json` (each header and case, accepted ones written back), `carries.json`, and `calls.json` (round 101): an operation's forms by its types' tags, its writes and its reads, a packed record under CH's tag |
 | budget | core §2.7, observer §5 (0.24, 0.25, 0.27) | `budget` | every file of `budget/`: `bounds.json` (the bound across instances), `population.json` (a GET's or a window's population against it), `rate.json` (an event's rate per member) and `lossless.json` (whether a window is shown to have lost no delivery, 0.25; its `reader_stall` and `stall_bounds`, 0.27). An unknown file there fails. |
 | seed | §4.2 (0.27) | `seed` | `seed/merge.json`: `order` (two stamps, or a stamp and none, compared) and `cases` (a key's arrivals, each kept or not). An unknown file there fails. |
 | compat | §9.7, §9.8 | `compat` | **all 100 cases** (spec 0.8), evaluated through `compat/README.md`'s one-resource wrapper: §9.8's six tables, the JSON Schema and protobuf rules, `same_revision`, and the FULL_TRANSITIVE cases (with each pairwise `against`). The packed cases (0.75) are wrapped as `packed` artifacts. |
@@ -572,7 +573,9 @@ Every wait is the 1 s that §8.1 gives a conformance run.
   silence.
 - `zk2py.live.call` makes a call: `BestMatching` (O1), or `All` for a
   fan-out (O2), with consolidation `None`. It returns a value, a decoded
-  §5.2 envelope, a transport error, or silence (O5).
+  §5.2 envelope, a transport error, or silence (O5). Since core 0.94
+  (round 101) it writes the request form and reads the value and error
+  forms, and the bare wire as §5.1's MAY allows.
 - `zk2py.owner.Owner` is a minimal owner, a router or a client of one. It
   brings itself up in §8.2's order: a stamped raw state value (S1, S2),
   parameterless operations answered per O1–O3 (echo, a JSON operation,
@@ -5965,6 +5968,178 @@ before.
 Round 100 found F-471, one gap, not a blocker. See "At core 0.93 (#985
 C4a, round 99's answers)" in `SPEC-FINDINGS.md`.
 
+## Core 0.94 and `observer.md` 0.24: the flip, every call in the value and error forms (round 101)
+
+Since round 100 main took:
+- **core 0.94** (#985 C4c, the flip): a caller writes its request in
+  §7.5's request form, and an owner its values and its errors in the
+  value and error forms, each under `zenoh/bytes` with its as-of mark,
+  whatever its types' kind. An answer sent again is its first bytes, mark
+  included. A `reply_err` under `zenoh/bytes` is read by §7.5's parse, and
+  every other one is the transport's. A reader MAY still read the bare
+  wire, any `Encoding` but `zenoh/bytes`. New are `envelope/calls.json`
+  and `operations.md` §9;
+- **observer 0.24:** §7.3, "A call's forms first";
+- **config.v2 0.1** (#985 G1), present and not read: #985's later round
+  reads it after G2 and G3, so the config family names `v2/` and
+  `contracts/` as present and not read, and files nothing on them;
+- #1044, #1047 and the zenoh-modem migration guide, with no rule change.
+
+zk2py diffed every keyword sentence of the changed texts between
+037fce56 and fd50c100. **No rule changed beyond what the changelogs
+state.** `RULES.md` lists one rule under the caller alone that binds a
+tool too (F-472).
+
+### The classes zk2py claims
+
+Unchanged: the **owner**, **consumer**, **caller** and **observer**
+classes, at the full level, and the static rules. config.v2 is listed as
+not followed.
+
+### Its walk of `RULES.md` at 0.94
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 77 | 66 | 3 | 8 |
+| consumer | 23 | 19 | 0 | 4 |
+| caller | 18 | 18 | 0 | 0 |
+| observer | 90 | 86 | 2 | 2 |
+| static, in every class | 64 | 62 | 0 | 2 |
+
+- **245 rows walked of 245, none without a verdict.** The walk was
+  re-keyed first, in the commit that brings `just py-conformance` level,
+  with the new owner and caller rules "not met". The flip's commit makes
+  them met.
+- §5.2's `Encoding` MUST is gone. The observer's verdict on "Decoding"
+  stands beyond the index (F-472).
+- **Not met:** unchanged, the owner's three SHOULDs and observer §7.3's
+  two decoding MUSTs.
+
+### What round 101 changed in zk2py
+
+- **`calls`** (new): an operation's forms by its types.
+  - Each CH's tag is a packed type's, else 0.
+  - A record is encoded and read as its type says: a packed one through
+    §7.6 under CH's tag, a JSON Schema one as JSON or CBOR on the
+    operation's `encoding`, a protobuf or raw one as its bytes.
+  - An error's detail its type refuses keeps the error the owner's.
+  - `zk2c.check_error` holds §7.5's writer checks, and `cbor` gains a
+    writer.
+- **The owner** (`owner.OpCall`, `owner._refuse`):
+  - every value and summary is the value form, and every refusal the
+    error form, under `zenoh/bytes`, with `Owner.mark`'s as-of mark: the
+    run it writes under, and the last state-and-event seq it minted, or 0;
+  - a request is read by §7.5's parse, and its record as the `request`
+    type, a packed one under CH's tag. Either refusal is `invalid_request`,
+    after the three refusals before any handler;
+  - a request under another `Encoding` is the bare wire, its payload the
+    record;
+  - `refuse(detail=)` takes a value of the `error` type, encoded as it
+    says. A detail it cannot encode raises before anything is sent, so the
+    call ends `internal`;
+  - `OpCall.resend` sends an answer's first bytes again.
+- **config.v1's owner** keeps each first answer's bytes (`Kept.wire`) and
+  resends them on a retried `set` (§2.14). A dropped reply is made and
+  kept, never sent. Its `ConfigError` detail is that type's JSON bytes.
+- **The caller** (`live.call`):
+  - it writes `CH · record` under `zenoh/bytes`, the tag the request
+    type's;
+  - it reads each reply by §7.5's parse (`live.read_reply`): a refused one
+    is `refused_value`, an answer whose bytes are never handed on;
+  - it reads each `reply_err` by §5.2 (`live.read_reply_error`): a form
+    the parse accepts is the owner's error, every other one the
+    transport's;
+  - it takes §5.1's MAY: under the envelope's three encodings it reads the
+    bare wire's envelope, and one its decoding refuses is the transport's
+    (F-473). `read_bare=False` is a caller that does not;
+  - `attempts` retries an idempotent concrete call after silence alone
+    (O4).
+- **The tool:** `live.show_reply` shows a reply as observer §7.3 says. A
+  value is decoded as its type where the operation is held. A refused
+  value is named. An error is shown by its code, cause and message, its
+  detail decoded by the `error` type. The transport's is shown with its
+  `Encoding` and its bytes. The as-of mark is shown as a run and a seq.
+- **The envelope family** reads `calls.json` whole: 3 types, 3 forms, 21
+  writes, 18 reads, and each accepted read written back.
+- **`forms_live`** (rewritten): `operations.md` §9 in three pairings, over
+  `interop/operations/tc.v1.toml` (new), beside `ok-packed-operation`.
+- **`readings`: 896, up from 883.** Round 100's readings of 0.92's "no rule
+  adopts them" are re-keyed to their absence. Round 101's readings state
+  0.94's rules, and F-472 to F-476 as zk2py reads them.
+
+**`just py-conformance`: 5711 of 5711**, on main b483902e. Of them,
+`envelope` 332 (`calls.json` 57), `errors` 361, `config` 332 (`v2/` and
+`contracts/` keyed, not read) and `readings` 896.
+
+### Live
+
+`operations.md` §9, step by step (`forms_live`):
+
+| Step | zk2py caller, zk2py owner | zk2py caller, the owner example | `zenctl call`, zk2py owner |
+|---|---|---|---|
+| 1, each kind of type | 28/28 | 16/16 | 20/22 (F-478) |
+| 2, packed types | 5/5 | 2/2 | 1/5 (F-477) |
+| 3, the wrong tag | 2/2 | 1/1 | 2/2 |
+| 4, the as-of mark | 2/2 | 2/2 | 2/2 |
+| 5, errors that are no owner's | 4/4 | as py-py's caller | 4/4 |
+| 6, a timeout behind a router | 1/1 | as py-py's caller | 1/1 |
+| 7, the bare wire | 2/2 | as py-py's caller | 1/1 |
+
+- **The owner example** answers with its default handlers. A raw
+  operation echoes, in the value form. Every other is refused `app` with
+  no detail. So its step 1 and 2 checks are its CHs and its refusals:
+  `calibrate` 0x72 under Change's tag, `scan` and `reset` 0x70. It reads
+  zk2py's request forms, and step 3's tag-0 Sensor is `invalid_request`.
+  Its marks follow its puts, and a new instance's reply carries seq 0.
+- **Steps 5 to 7** play no owner, so they test the caller. zk2py's runs in
+  `py-py`, and is the same in `py-rust`.
+- **`zenctl call`** reads every reply error as §5.2 says. It reads the
+  bare wire, step 7's envelope being `busy`, exit 1. Two bugs:
+  - **F-477:** it refuses a packed request type, nothing sent: "which no
+    caller writes yet";
+  - **F-478:** it reads a CBOR operation's value and detail as JSON, and
+    shows them undecodable.
+- **F-476:** in each pairing, a second instance's reply before its first
+  put, that put and a reply after it all carry seq 0.
+- **A router's `Timeout`:** zenoh-python's caller drew its own under
+  `zenoh/string` 6 times of 6, at 1 s and 2 s. `zenctl call` drew the
+  router's under `zenoh/bytes` 4 times in 6. Both are silence.
+
+config.v1's scenarios through the forms:
+
+| Run | Result |
+|---|---|
+| `config_scenarios`, zk2py's owner | 52/52 |
+| `config_scenarios`, the owner example | 52/52 |
+
+- §10 step 2 now compares the bytes. With zk2py's owner, the retried
+  `set`'s reply is the dropped reply's bytes, its mark included. With the
+  owner example, it is the first reply's bytes, which C set aside.
+
+The regression, after the flip:
+- `far_side_live` 16/16, and `observer_scenarios` §5 and §8 step 6 8/8.
+- `live_interop`, whole on the black boxes, 442 of 463.
+  - **Two failures were the flip's:** operations.md §1's controls sent a
+    bare `get`, which zk2py's owner now refuses `invalid_request`. They now
+    send the request form, and `--only o1` passes whole.
+  - **One is the reference's:** F-479, the `consume` example printing a raw
+    value with its form.
+  - **18 involve no call:**
+    - 10 on the owner example's descriptors, tokens, `health.v1` re-puts
+      and clock steps, which list or expect no `freshness.v2`;
+    - `s7`'s 7, which look for an older black box's path;
+    - `consume`'s stop on `health.v1`, which now exits 1 on `@op/none`.
+
+    They are not re-keyed, and not investigated, this round.
+
+**Not run:** the C4b reading of both wires, which is the reference's;
+`link.v2`'s scenarios on routers; core §8.5's MAY; and F-436's fix, as
+before.
+
+Round 101 found F-472 to F-479: one contradiction, one ambiguity, three
+gaps and three bugs in the reference. None is a blocker. F-471's answer holds.
+See "At core 0.94 and observer 0.24 (#985 C4c)" in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -6018,11 +6193,12 @@ C4a, round 99's answers)" in `SPEC-FINDINGS.md`.
   zk2py's owner holds values only for parameterless state. It answers
   templated operations through the handlers and members it is given, and
   otherwise names no member.
-- **A call's forms on the wire** (core 0.92, round 100): zk2py parses and
-  writes them (`zk2c`), but no zk2py owner answers in one and no caller
-  sends one, since no rule adopts them (core §5.1, "The forms"). A tool's
-  reading of both wires, C4b's, is not zk2py's yet. A packed operation is
-  served and answers every call `app` in JSON (F-471).
+- **A call's forms** (core 0.94, round 101): zk2py's owners answer in
+  them and its callers write them; its readers read the bare wire too, as
+  §5.1's MAY allows. zk2py's tools show a call's reply only through
+  `live.show_reply`, which `forms_live` judges: no zk2py command-line tool
+  calls an operation, as `zenctl call` does. config.v2 (#985 G1) is not
+  read.
 - **Of `telemetry.v2`** (round 98): a candidate of a `freshness.v2`
   contract with its clock ahead, live (F-461); zk2py's echo tool shows a
   frame's field states, never its series; histograms, which no field
@@ -6088,11 +6264,15 @@ impl/python/
     history.py        §9.7      the history check
     descriptor.py     §3.3      the D codes
     catalog.py        §8.6      the deployment catalog: its reading, id, succession and a reader's resolution (round 95)
-    cbor.py, envelope.py §5.2   the error envelope
+    cbor.py, envelope.py §5.2   the error envelope, the bare wire's since core 0.94; cbor's writer (round 101)
+    calls.py          §5.1 §5.2 a call's forms by its operation's types: tags, records encoded and read, a packed one
+                                under CH's tag, calls.json's writes and reads (core 0.94, round 101)
     zk2c.py           §7.5, observer §7.3 the zk2c envelope: parse, write, which sample carries one, a sample read
                                 envelope first (round 93); a call's forms, the request, the value and the error,
                                 parsed, written and read by a reply error's Encoding (core 0.92, round 100)
-    forms_live.py     §5.2 §7.5 a router's own Timeout measured, and both owners on a packed operation (round 100)
+    forms_live.py     §5.1 §5.2 operations.md §9, a call's forms, in three pairings: zk2py's caller and owner, zk2py's
+                                caller and the owner example, zenctl call and zk2py's owner (core 0.94, round 101;
+                                round 100's run measured a router's own Timeout)
     packed.py         §7.6 §9.2 the packed kind: a file's lints (E038–E045), layouts, the tag, the writer and the
                                 reader in exact decimals, a record in the envelope (round 94); a sample read
                                 as observer §7.3 reads it, the deployment epoch (the mend after round 94)
@@ -6229,7 +6409,8 @@ impl/python/
                       security.md §4's two principals for `zenctl acl gen`; timing/ pace.v1,
                       timing.v1's scenarios' contract; arbitration/ steer.v1 and rudder.v1,
                       arbitration.v1's scenarios' contracts; grammar/ zk2py_guard.v1, grammar.md §1's owner;
-                      operations/ zk2py_frozen.v1, operations.md §5's frozen server;
+                      operations/ zk2py_frozen.v1, operations.md §5's frozen server; tc.v1 with calls.json
+                                  and proto/tc/v1/calls.proto, operations.md §9's contract (round 101);
                       desired/ also configs.v1 (revision 1.1 on freshness.v2 since round 98) and
                       zk2py_configured.v1, desired.v1 scenarios §12's author
                       and the role of zk2py's config.v1 owner; classes/ zk2py_replica.v1, three operations
