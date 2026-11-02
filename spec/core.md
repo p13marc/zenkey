@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.90** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.91** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -1300,8 +1300,9 @@ SHOULD NOT repeat a template parameter (W102). `[F: contracts/w102-repeat]`
   complete. `[Sc: operations.md §1]`
 - **The timeout** is the caller's (§8.1). A caller that sets none waits
   the operation's `timeout_ms`, the contract's recommendation, and with
-  neither, 10 s, zenoh's default query timeout (Appendix B). A call that
-  ends there with no value and no envelope is silent (O5).
+  neither, 10 s, zenoh's default query timeout (Appendix B). Across a
+  constrained face, it waits at least the face's reply timeout (§8.1). A
+  call that ends there with no value and no envelope is silent (O5).
 - **Retries (O4)** are opt-in: a caller makes one attempt unless it is
   configured for more, and calls an operation that is not `idempotent` once,
   whatever the configuration.
@@ -2457,6 +2458,19 @@ Liveliness tokens carry no payload; everything is in the key.
   for presence after an owner starts, are the caller's choices. The
   scenarios, and so a conformance run, use 1 s unless they say otherwise.
   S6's "the GET's timeout" is that choice.
+  - **Across a constrained face.** A caller, a consumer or a tool across a
+    constrained face whose face policy states a reply timeout
+    ([`link.v2`](profiles/link/v2.md) §2.1's `reply_timeout_ms`) SHOULD
+    wait at least that long for each reply it asks for: a call's, a GET's
+    and a seed's. `[Sc: constrained.md §8]`
+    - **Why the policy says it.** Over a radio, GET replies came back
+      3.3–7.4 s after their GET, past every default timeout. A router
+      answers a query `Timeout` at the query's own timeout and drops a
+      later reply (Appendix B). So no router setting makes up for a caller
+      that gave up first.
+    - **The reference** raises its defaults to it: a call that sets no
+      timeout waits the longer of §5.1's and the face's. A timeout the
+      caller sets is taken at its word.
   - **When the wait for presence starts.** An owner starts when its
     session opens, before §8.2's first step, and a tool cannot see that
     instant. The scenarios count the wait from the later of two instants it
@@ -2727,6 +2741,42 @@ facts.
 
   Without that grant, its queries are never routed.
   `[Sc: link.v1 scenarios §2]`
+- **A declaration the medium lost is never repaired.** Zenoh 1.10.1 sends
+  each declaration once. A subscriber, a queryable or a key expression
+  whose declaration a medium lost below zenoh stays unknown to the router
+  for as long as the transport stays up (Appendix B). A face policy says
+  whether its medium repairs a lost frame
+  ([`link.v2`](profiles/link/v2.md) §2.1's `arq`).
+  - A consumer or a tool across a constrained face whose medium repairs
+    no lost frame SHOULD declare a subscription again when it has heard
+    nothing on it for two of its horizons while its session's transport
+    stayed up. `[Sc: constrained.md §9]`
+  - **A subscription's horizon** is that of what it hears: its resource's
+    `freshness.ttl_s` above 0, or a heartbeat's, the shortest horizon of
+    the collections it covers
+    ([`freshness.v2`](profiles/freshness/v2.md) §2.4). A state of a
+    contract that uses `freshness.v2` has none of its own: its owner
+    re-puts nothing, and its heartbeat speaks for it. A subscription to
+    what has no horizon is never declared again.
+  - **The silence** counts from the latest of three instants: the
+    subscription's declaration, its last sample, and its session's last
+    transport opening or closing. A transport that opens again declares
+    every subscription anew. Through a session cut off from every router
+    nothing is declared.
+  - **Declaring again** undeclares the subscription, then declares it
+    anew. Beside the old one, zenoh 1.10.1 would join the new subscriber
+    to it and send nothing (Appendix B). A sample put between the two is
+    missed, after two horizons of silence. It costs one declaration a
+    silent subscription every two horizons.
+  - **What it repairs** is a subscriber's declaration. A lost
+    `DeclareKeyExpr` it does not: a session's runtime declares a prefix
+    toward its router once a transport (Appendix B). Only a transport
+    that opens again repairs that.
+  - A caller across the face MAY open its session again after two GETs
+    in a row drew no reply, its transport up. A session that opens again
+    declares everything anew. Toward a far router in a south region, the
+    routers' own declarations stay as they were.
+  - **A tool's half** is [`observer.md`](observer.md) §7.5.
 - **Access control is per hop** (§11.3). The near router sees the far
   router as one principal, carrying the union of the grants the far side's
   sessions need.
@@ -4441,6 +4491,50 @@ Appendix B. These are the ones the rules above cite:
    - A far-side prefix at the same resource heals the puts, by fact 1. It
      does not heal a queryable whose declaration was lost.
 
+**A lost declaration and a late reply** (§8.1, §8.5, observer §7.5).
+Read in zenoh 1.10.1's `src/`, and in `zenoh-transport`'s:
+1. **A declaration is sent once.** A session sends a subscriber's
+   declaration on its face once, with no acknowledgement
+   (`api/session.rs:1788`). A transport's receiver takes a frame whose
+   sequence number is past the next one expected as the next, and reads
+   no gap as a loss (`zenoh-transport`'s `unicast/universal/rx.rs:222–241`,
+   `roll`). So a frame a medium lost below zenoh takes its declarations
+   with it, and the transport stays up.
+2. **A subscriber beside a twin sends nothing.** A subscriber on the key
+   of one the session holds joins it, and sends no declaration
+   (`register_subscriber`, `api/session.rs:398–450`). So only a
+   subscriber declared after the silent one was undeclared sends a
+   `DeclareSubscriber`.
+3. **A prefix is declared toward a router once a transport.** The
+   session's runtime declares a subscription's non-wild prefix toward its
+   router the first time it propagates one there. It keeps the mapping
+   in the face's `local_mappings` (`Resource::decl_key`,
+   `net/routing/dispatcher/resource.rs:661–729`). That reference keeps
+   the resource from ever being cleaned (`Resource::clean`, `:535–561`).
+   So a lost `DeclareKeyExpr` is never sent again on that transport.
+   - Measured by the reference: a subscriber undeclared and declared
+     again rode the lost scope, its `DeclareSubscriber` and no key text,
+     and heard nothing.
+4. **A late reply is dropped.** A router answers a query it routed
+   `Timeout` at the query's own timeout, and forgets the query
+   (`net/routing/dispatcher/queries.rs:476–515`). A reply that comes after
+   is dropped and logged "Route reply: Query not found!" (`queries.rs:623`).
+   - Measured on zenoh-modem's simulated radio: GET replies came back
+     3.3–7.4 s after their GET, where the reference's defaults were 1 s
+     and 5 s (the wire baseline's W2 findings 6 and 7).
+   - The draft upstream report, not filed:
+     [`declarations-are-never-repaired.md`](../docs/zk2/upstream/declarations-are-never-repaired.md).
+
+Measured by [`scenarios/constrained.md`](scenarios/constrained.md) §8 and
+§9 (`zenkey/tests/constrained.rs`, `zenkey-fleet/tests/redeclare.rs`):
+- a call whose reply took 1.5 s drew none at its contract's 1 s. Across a
+  face whose reply timeout is 3 s, it drew the value;
+- a subscription whose `DeclareSubscriber` a proxy dropped heard nothing
+  for two horizons. Declared again once, it heard the stream from then
+  on. With ARQ, it stayed silent;
+- one whose `DeclareKeyExpr` the proxy dropped stayed silent, declared
+  again.
+
 Measured by [`scenarios/constrained.md`](scenarios/constrained.md) §7
 (`zenkey/tests/constrained.rs`), through a TCP proxy toward a far client:
 - a stream put crossed in 45–46 B under its exact key, with none of its
@@ -4726,7 +4820,7 @@ section each was written against, whose pointer leads on.
 | `scenarios/retrieval.md` | §8.4 |
 | `scenarios/types.md` | §2.4, §7.1–§7.2 |
 | `scenarios/security.md` | §11; §4 the admin read admitting no GET of a node's declaration records, and a query admitted by inclusion |
-| `scenarios/constrained.md` | §1.6, R7, §8.5, §12; §7 keys across a face, and Appendix B |
+| `scenarios/constrained.md` | §1.6, R7, §8.5, §12; §7 keys across a face, and Appendix B; §8 a reply across a face (§8.1); §9 a declaration lost across a face, declared again (§8.5) |
 | `scenarios/budget.md` | §2.7: what a path drops and a reader sees (§1–§3), an owner keeping its bound and its rate (§4–§7); a stalled reader, and a tool's window over one (§1); Appendix B |
 | `profiles/<name>/conformance/`, `profiles/<name>/scenarios.md` | each profile's own rules (§10; [`profiles/README.md`](profiles/README.md)) |
 | `profiles/freshness/scenarios.md` §1, §2 | §4.2 a re-put, §4.3 an owner ahead |

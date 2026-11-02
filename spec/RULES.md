@@ -52,12 +52,12 @@ The owner, consumer and caller sections each point to them.
 | Role | Rules |
 |---|---|
 | [Owner](#owner) | 71 |
-| [Consumer](#consumer) | 20 |
-| [Caller](#caller) | 13 |
+| [Consumer](#consumer) | 22 |
+| [Caller](#caller) | 14 |
 | [Deployment](#deployment) | 17 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 63, 25 of them a reader's |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 66, 25 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 61 |
-| Every rule, once | 227 |
+| Every rule, once | 230 |
 | [Rule ids](#rule-ids) | 85 |
 
 ## Owner
@@ -293,6 +293,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§8.1](core.md#81-tokens) | Every instance MUST hold one [an instance token], including pure consumers, so the data-flow graph has no invisible node. | `[Sc: presence.md §1]` |
+| [§8.1](core.md#81-tokens) | A caller, a consumer or a tool across a constrained face whose face policy states a reply timeout ([`link.v2`](profiles/link/v2.md) §2.1's `reply_timeout_ms`) SHOULD wait at least that long for each reply it asks for: a call's, a GET's and a seed's. | `[Sc: constrained.md §8]` |
 
 ### [core §8.4 Contract retrieval](core.md#84-contract-retrieval)
 
@@ -306,6 +307,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 |---|---|---|
 | [§8.5](core.md#85-constrained-faces) | A consumer across a constrained face SHOULD subscribe to each concrete resource it reads by its exact key, and to a template by its literal prefix up to the first parameter. | `[Sc: constrained.md §7]` |
 | [§8.5](core.md#85-constrained-faces) | A consumer across a constrained face SHOULD NOT use a selector wider than what it reads. | `[Sc: constrained.md §7]` |
+| [§8.5](core.md#85-constrained-faces) | A consumer or a tool across a constrained face whose medium repairs no lost frame SHOULD declare a subscription again when it has heard nothing on it for two of its horizons while its session's transport stayed up. | `[Sc: constrained.md §9]` |
 
 ### [core §11.1 Grant shapes](core.md#111-grant-shapes)
 
@@ -340,6 +342,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§8.1](core.md#81-tokens) | Every instance MUST hold one [an instance token], including pure consumers, so the data-flow graph has no invisible node. | `[Sc: presence.md §1]` |
+| [§8.1](core.md#81-tokens) | A caller, a consumer or a tool across a constrained face whose face policy states a reply timeout ([`link.v2`](profiles/link/v2.md) §2.1's `reply_timeout_ms`) SHOULD wait at least that long for each reply it asks for: a call's, a GET's and a seed's. | `[Sc: constrained.md §8]` |
 
 ### [core §8.4 Contract retrieval](core.md#84-contract-retrieval)
 
@@ -466,6 +469,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§8.1](core.md#81-tokens) | Every instance MUST hold one [an instance token], including pure consumers, so the data-flow graph has no invisible node. | `[Sc: presence.md §1]` |
+| [§8.1](core.md#81-tokens) | A caller, a consumer or a tool across a constrained face whose face policy states a reply timeout ([`link.v2`](profiles/link/v2.md) §2.1's `reply_timeout_ms`) SHOULD wait at least that long for each reply it asks for: a call's, a GET's and a seed's. | `[Sc: constrained.md §8]` |
 
 ### [core §8.4 Contract retrieval](core.md#84-contract-retrieval)
 
@@ -475,6 +479,12 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§8.4](core.md#84-contract-retrieval) | A caller or tool MUST retrieve a bundle as follows: (4 items) | `[Sc: retrieval.md §1–§3]` |
 | [§8.4](core.md#84-contract-retrieval) | A caller or tool MUST set consolidation `None` on both attempts. | `[Sc: retrieval.md §2]` |
 | [§8.4](core.md#84-contract-retrieval) | **The reply.** … A caller or tool MUST NOT depend on the encoding: the hash is the check. | `[Sc: retrieval.md §1]` |
+
+### [core §8.5 Constrained faces](core.md#85-constrained-faces)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§8.5](core.md#85-constrained-faces) | A consumer or a tool across a constrained face whose medium repairs no lost frame SHOULD declare a subscription again when it has heard nothing on it for two of its horizons while its session's transport stayed up. | `[Sc: constrained.md §9]` |
 
 ### [core §8.6 The deployment catalog](core.md#86-the-deployment-catalog)
 
@@ -613,6 +623,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§7.5](observer.md#75-subscribing-across-a-face) | A tool across a constrained face SHOULD subscribe as core §8.5 says, by the scopes the contracts in hand give for the addresses it reads. | `[Sc: constrained.md §7]` |
+| [§7.5](observer.md#75-subscribing-across-a-face) | A tool across a constrained face whose medium repairs no lost frame SHOULD declare a scope again when it has heard nothing on it for two of its horizons while its session's transport stayed up, as core §8.5 says. | `[Sc: constrained.md §9]` |
 
 ### [observer §7.6 Frames](observer.md#76-frames)
 

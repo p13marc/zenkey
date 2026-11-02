@@ -543,6 +543,24 @@
     {
       "expect": [
         {
+          "at": "arq",
+          "code": "no_arq",
+          "face": "radio",
+          "severity": "warning"
+        },
+        {
+          "at": "frames.frames/link",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "an entry whose key names no frame resource and whose value is not a table: one `bad_value` at `frames.<key>`, each entry reported once (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nframes           = { \"frames/link\" = 60 }\n"
+    },
+    {
+      "expect": [
+        {
           "at": "frames",
           "code": "unknown_field",
           "face": "radio",

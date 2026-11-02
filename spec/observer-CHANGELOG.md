@@ -13,6 +13,40 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.23 — 2026-11-02: §7.5, a tool across a face declares again (#988 L4)
+
+Core 0.91 adds §8.1's reply timeout across a face and §8.5's declaring
+again after silence. This version is their tool's half, and #1011's item
+3 where a window's reader meets it.
+
+**Added: §7.5, "Declaring again after silence".** A tool across a
+constrained face whose medium repairs no lost frame SHOULD declare a
+scope again when it has heard nothing on it for two of its horizons
+while its session's transport stayed up. `[Sc: constrained.md §9]`
+- Its horizon comes from the contracts in hand, as its scope does: the
+  shortest of the resources the scope reads that have one.
+- Silence on a scope declared again is still silence, no verdict (§2):
+  a lost `DeclareKeyExpr` is not repaired by it (core §8.5).
+- A tool's timeouts across such a face are core §8.1's, and its session
+  runs the face's `[transport]` (`link.v2` §2.16).
+- **The reference.** `zenctl`'s raw observers given `--face-policy F
+  --face NAME` beside `--across-face`: `echo`, `rate`, `record` and
+  `timeline` watch each scope through `Monitor::watch_across`. `field`
+  and `watchdog` take the face's timeout and transport, and declare as
+  before: their subscriptions are the fleet's judges'.
+
+**Changed: §5.2, "`wait_before_close`" (#1011's item 3).** A tool given
+the routers' `link.v2` face policy reads the lease and
+`wait_before_close` from its `[transport]`, which the routers run.
+Given none, it takes zenoh 1.10.1's, unless told.
+- **The reference.** `zenctl check conform` and `alarms` take
+  `--face-policy` for it: `--lease` and `--wait-before-close` default to
+  its `[transport]`'s (`zenkey_model::budget::Routers`).
+
+**Deliberately not changed.** No rule of §5.2 moved: it already read
+"the deployment's" lease and `wait_before_close`. `RULES.md` counts the
+new SHOULD among core 0.91's 230.
+
 ## 0.22 — 2026-11-02: §7.6, whose GET answers a frame (#981)
 
 zk2py's round 97 read this text's 0.20 and 0.21 cold, and filed F-458
