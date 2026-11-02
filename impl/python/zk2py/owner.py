@@ -32,9 +32,21 @@ withholds:
   A handler names at most one member per call, whatever ``replies`` is, and
   one the call selects; anything else is refused to it (§5.1, 0.8). Every
   value goes on the operation's own concrete key, or the named member's;
-  every failure is a ``reply_err`` carrying the §5.2 envelope, and a call
-  left without its answer is ``internal`` (O3). An optional operation not
-  exposed is answered ``unavailable`` with its cause (O3).
+  every failure is a ``reply_err``, and a call left without its answer is
+  ``internal`` (O3). An optional operation not exposed is answered
+  ``unavailable`` with its cause (O3).
+
+**A call's forms (core 0.94, #985 C4c).** Every value reply is §7.5's
+value form and every refusal its error form, under ``zenoh/bytes``, each
+with the owner's as-of mark (:meth:`Owner.mark`): "an owner MUST write each
+value reply in §7.5's value form … with its as-of mark", and "MUST answer
+a failed call in §7.5's error form". Each CH carries its type's tag
+(:mod:`zk2py.calls`). A request is read by §7.5's parse, and its record as
+the ``request`` type, a packed one under CH's tag; one either refuses is
+``invalid_request``, after the three refusals before any handler (§5.1,
+"The request"). A request under another ``Encoding`` is read as the bare
+wire, its payload the record (§5.1's MAY). An answer sent again is its
+first bytes, mark included (:meth:`OpCall.resend`).
 
 **Bring-up (§8.2).** Step 2 runs first (the order of steps 1 and 2 is free),
 so a refusal declares nothing: a required resource not exposed, an optional
@@ -101,7 +113,7 @@ from typing import Any
 
 import zenoh
 
-from . import bundle, envelope, freshness, freshness_v2, templates, zk2c
+from . import bundle, freshness, freshness_v2, templates, zk2c
 from . import heartbeat as hbeat
 from .contract import Contract
 from .lexical import parse_interface_id
@@ -280,17 +292,6 @@ def member_key(base: str, r: dict[str, Any], values: dict[str, Any]) -> str:
     return f"{base}/{r['token']}/{'/'.join(chunks)}"
 
 
-def _value_encoding(r: dict[str, Any]) -> str:
-    """A response value's Encoding (§7.2): a raw type's media type; a JSON
-    Schema type's JSON, or CBOR where the resource says so; protobuf's."""
-    t = r["response"]
-    if t["kind"] == "raw":
-        return t["media_type"]
-    if t["kind"] == "jsonschema":
-        return "application/cbor" if r.get("encoding") == "cbor" else "application/json"
-    return "application/protobuf"
-
-
 def replica_only(rows: list[tuple[dict[str, Any], str]]) -> bool:
     """Core §5.1 "Beside replicas": whether an instance's exposed resources
     of one interface (its plan's rows, :meth:`Owner._plan`) are all
@@ -299,8 +300,16 @@ def replica_only(rows: list[tuple[dict[str, Any], str]]) -> bool:
     return bool(exposed) and all(r["kind"] == "operation" and r.get("serving") == "replicated" for r in exposed)
 
 
-def _refuse(query: zenoh.Query, enc: str, code: str, message: str, **kw: Any) -> None:
-    query.reply_err(envelope.encode(enc, code, message, **kw), encoding=enc)
+def _refuse(query: zenoh.Query, op: Any, mark: zk2c.InBand, code: str, message: str | None,
+            cause: str | None = None) -> bytes:
+    """A refusal before any handler runs (§5.1, "The order of refusals"):
+    §7.5's error form under ``zenoh/bytes``, the owner's as-of mark, CH's tag
+    the operation's ``error`` type's (core 0.94 §5.2). It carries no detail."""
+    from . import calls
+
+    wire = calls.error(op, mark, code, cause, message)
+    query.reply_err(wire, encoding=calls.FORM_ENCODING)
+    return wire
 
 
 class MemberRefused(RuntimeError):
@@ -317,17 +326,46 @@ class OpCall:
     member it answers for, :meth:`name`, and every value goes on that
     member's key; a concrete operation's key is named already."""
 
-    def __init__(self, query: zenoh.Query, base: str, r: dict[str, Any], enc: str,
+    def __init__(self, query: zenoh.Query, base: str, r: dict[str, Any], op: Any, mark: Any,
                  bound: dict[str, list[str] | None], key_expr: str):
-        self.query, self.base, self.resource, self.enc = query, base, r, enc
+        """``op``: the operation's :class:`zk2py.calls.Operation`; ``mark``:
+        a function giving the owner's as-of mark when a reply is written
+        (core §5.1: "The run is the one it writes under when it replies")."""
+        from . import calls
+
+        self.query, self.base, self.resource, self.op, self._mark = query, base, r, op, mark
         self.bound, self.key_expr = bound, key_expr
-        self.payload = b"" if query.payload is None else query.payload.to_bytes()
+        #: the query's payload as it came, and its Encoding
+        self.wire = b"" if query.payload is None else query.payload.to_bytes()
+        enc = getattr(query, "encoding", None)
+        self.encoding = calls.FORM_ENCODING if enc is None else str(enc)
+        #: core §5.1's MAY: a request under another Encoding is the bare
+        #: wire, its payload the record. A query with no payload at all
+        #: carries no Encoding of its own, and is read as a form: it has no
+        #: CH (``short``).
+        self.bare = query.payload is not None and calls.bare(self.encoding)
+        #: the request's record (``payload``), its CH's tag, and the token of
+        #: §7.5's parse that refused it, then invalid_request (§5.1)
+        self.payload, self.tag, self.request_refusal = self.wire, None, None
+        if not self.bare:
+            try:
+                env = zk2c.parse(self.wire, "query")
+            except zk2c.Refused as e:
+                self.payload, self.request_refusal = b"", e.token
+            else:
+                self.payload, self.tag = env.record or b"", env.tag
+        #: the request read as its type (:meth:`zk2py.calls.Operation.decode`),
+        #: set before the handler runs where it reads
+        self.request: Any = None
         #: the request's attachment, the call metadata's carrier (O7)
         self.attachment = None if query.attachment is None else query.attachment.to_bytes()
         self.member_key: str | None = None if r["params"] else f"{base}/{r['token']}/{r['template']}"
         self.values = self.summaries = self.envelopes = 0
         self.refused_to_handler: list[str] = []
         self.failed: str | None = None
+        #: every answer this call sent, (``value``, ``summary`` or ``error``,
+        #: its bytes), in order
+        self.sent: list[tuple[str, bytes]] = []
 
     def name(self, **values: Any) -> str:
         """Name the member this call answers for; returns its key. A second
@@ -348,8 +386,20 @@ class OpCall:
         self.member_key = key
         return key
 
-    def reply(self, payload: bytes, encoding: str | None = None) -> None:
-        """A value reply on the named member's key (O3)."""
+    def _value_wire(self, record: bytes, summary: bool = False) -> bytes:
+        from . import calls
+
+        return calls.value(self.op, self._mark(), bytes(record), summary=summary)
+
+    def reply(self, payload: bytes, *, send: bool = True) -> bytes:
+        """A value reply on the named member's key (O3): ``payload``, the
+        record's bytes as the ``response`` type says, in §7.5's value form
+        under ``zenoh/bytes`` with the owner's as-of mark (core 0.94 §5.1).
+        Returns the bytes; ``send`` False makes them and counts the call
+        answered without sending them (a test's lost reply, config.v1
+        scenarios §10)."""
+        from . import calls
+
         if self.member_key is None:
             self.refused_to_handler.append("a value before naming a member")
             raise MemberRefused("name the member this call answers for first")
@@ -358,34 +408,79 @@ class OpCall:
         if self.summaries:
             # O6: "each replier MUST end with exactly one summary reply".
             raise RuntimeError("the summary ended this replier: no value after it (O6)")
-        self.query.reply(self.member_key, payload, encoding=encoding or _value_encoding(self.resource))
+        wire = self._value_wire(payload)
+        if send:
+            self.query.reply(self.member_key, wire, encoding=calls.FORM_ENCODING)
         self.values += 1
+        self.sent.append(("value", wire))
+        return wire
 
-    def summary(self, payload: bytes, encoding: str | None = None) -> None:
+    def reply_value(self, value: Any) -> bytes:
+        """A value reply of ``value``, encoded as the ``response`` type says
+        (:meth:`zk2py.calls.Operation.encode`: a packed value through §7.6's
+        writer, a JSON Schema value as JSON or CBOR)."""
+        return self.reply(self.op.encode("response", value))
+
+    def summary(self, payload: bytes) -> bytes:
         """O6: the one summary reply, its attachment the bytes ``summary``:
         "each replier MUST end with exactly one summary reply", so a second
         is refused to the handler, as is one for an operation that declares
-        no ``summary``, or whose ``replies`` is not ``many`` (E033)."""
+        no ``summary``, or whose ``replies`` is not ``many`` (E033). The value
+        form, its tag the ``summary`` type's (core 0.94 §5.1)."""
+        from . import calls
+
         if self.member_key is None:
             raise MemberRefused("name the member this call answers for first")
         if self.resource.get("summary") is None or self.resource["replies"] != "many":
             raise RuntimeError("this operation declares no summary (O6, E033)")
         if self.summaries:
             raise RuntimeError("one summary per replier: it is sent already (O6)")
-        self.query.reply(self.member_key, payload, encoding=encoding or "application/octet-stream",
-                         attachment=b"summary")
+        wire = self._value_wire(payload, summary=True)
+        self.query.reply(self.member_key, wire, encoding=calls.FORM_ENCODING, attachment=b"summary")
         self.summaries += 1
+        self.sent.append(("summary", wire))
+        return wire
 
-    def refuse(self, code: str, message: str, **kw: Any) -> None:
-        """A ``reply_err`` carrying the §5.2 envelope. §5.2: "An operation
-        that declares no error type has none to send … an owner MUST NOT put
-        a detail in it", so a detail for one is refused to the handler,
-        nothing sent; one that does not fit its envelope is refused by
-        :func:`zk2py.envelope.encode`, nothing sent either."""
-        if kw.get("detail") is not None and self.resource.get("error") is None:
-            raise ValueError("this operation declares no error type: an envelope carries no detail (§5.2)")
-        _refuse(self.query, self.enc, code, message, **kw)
+    def refuse(self, code: str, message: str | None, *, cause: str | None = None, detail: Any = None,
+               send: bool = True) -> bytes:
+        """A ``reply_err`` in §7.5's error form under ``zenoh/bytes``, with
+        the owner's as-of mark and the ``error`` type's tag (core 0.94
+        §5.2). ``detail`` is a value of the operation's ``error`` type,
+        encoded as it says: a JSON Schema or packed value, a protobuf
+        message's or a raw type's bytes. §5.2: "An operation that declares no
+        error type has none to send, and an owner MUST NOT put a detail in
+        its error", and "A detail its type cannot encode … MUST NOT be sent
+        by an owner": each raises before anything is sent, so the handler
+        has failed and its call ends ``internal``, as the reference sends.
+        Returns the bytes; ``send`` False makes them without sending."""
+        from . import calls
+
+        if detail is not None and self.resource.get("error") is None:
+            raise ValueError("this operation declares no error type: an error carries no detail (§5.2)")
+        record = None if detail is None else self.op.encode("error", detail)
+        wire = calls.error(self.op, self._mark(), code, cause, message, record)
+        if send:
+            self.query.reply_err(wire, encoding=calls.FORM_ENCODING)
         self.envelopes += 1
+        self.sent.append(("error", wire))
+        return wire
+
+    def resend(self, kind: str, wire: bytes) -> None:
+        """An answer this owner sent before, sent again: "The owner MUST then
+        send that answer's bytes unchanged, its mark included" (core 0.94
+        §5.1, "An answer sent again"). ``kind`` ``value`` replies on the
+        call's member key, ``error`` as a ``reply_err``."""
+        from . import calls
+
+        if kind == "error":
+            self.query.reply_err(wire, encoding=calls.FORM_ENCODING)
+            self.envelopes += 1
+        else:
+            if self.member_key is None:
+                raise MemberRefused("name the member this call answers for first")
+            self.query.reply(self.member_key, wire, encoding=calls.FORM_ENCODING)
+            self.values += 1
+        self.sent.append((kind, wire))
 
     def metadata(self) -> dict[str, str]:
         """Core O7 (§5.1 "Call metadata"): the attachment read as call
@@ -610,6 +705,9 @@ class Owner:
         self.calls: list[str] = []
         #: the calls a handler ran for (refusals before a handler excluded)
         self.handled: list[str] = []
+        #: each call's query as this owner received it: (key, Encoding,
+        #: payload), for operations.md §9's capture
+        self.queries: list[tuple[str, str, bytes]] = []
         #: freshness.v1 §2.4: each re-put state member's horizon
         self.horizons: dict[str, freshness.Horizon] = {}
         #: members whose writer closed: no re-put until a new writer puts
@@ -693,6 +791,9 @@ class Owner:
         #: one it used" (core §4.3) holds of every run it took.
         self.runs_used: list[tuple[int, int]] = []
         self._seq = 0
+        #: the last state-and-event seq minted under the run, None for none:
+        #: a reply's as-of mark (core 0.94 §5.1)
+        self._minted: int | None = None
         self._stream_seq: dict[str, int] = {}
         self._seq_lock = threading.RLock()
         #: samples a role's subscription heard whose envelope was refused,
@@ -826,6 +927,7 @@ class Owner:
             self.run = run
             self.runs_used.append(run)
             self._seq = 0
+            self._minted = None
             self._stream_seq = {}
             return run
 
@@ -890,6 +992,7 @@ class Owner:
                 self._put_descriptor()
             assert self.run is not None
             ib = zk2c.InBand(self.run[0], self.run[1], self._seq)
+            self._minted = self._seq
             self._seq += 1
             return ib
 
@@ -1468,7 +1571,7 @@ class Owner:
             # run", which its first descriptor states. A declaration that
             # raises leaves the old run too.
             with self._seq_lock:
-                before = (self.run, self._seq, dict(self._stream_seq))
+                before = (self.run, self._seq, dict(self._stream_seq), self._minted)
                 self.take_run()
             try:
                 entities, doc, tokens = self._declare_instance(self._plan_made, new)
@@ -1476,7 +1579,7 @@ class Owner:
                 # The old run, its seq and its stream seqs come back; the run
                 # the failed re-mint took stays in runs_used (see the field).
                 with self._seq_lock:
-                    self.run, self._seq, self._stream_seq = before[0], before[1], before[2]
+                    self.run, self._seq, self._stream_seq, self._minted = before[0], before[1], before[2], before[3]
                 raise
             self.instance, self._instance_entities, self.descriptor = new, entities, doc
             self._iface_tokens = tokens
@@ -2370,8 +2473,29 @@ class Owner:
         if finish:
             query.drop()
 
+    def _operation(self, r: dict[str, Any]) -> Any:
+        """``r``'s :class:`zk2py.calls.Operation`, by the contract that
+        declares it, its packed ``time`` fields under this owner's epoch."""
+        from . import calls
+
+        for c in self.contracts:
+            if any(x is r for x in c.canonical["resources"]):
+                return calls.Operation.of_resource(r, c.schemas, self.writing_epoch())
+        return calls.Operation.of_resource(r, None, self.writing_epoch())
+
+    def mark(self) -> zk2c.InBand:
+        """The as-of mark of a reply this owner writes now (core 0.94 §5.1):
+        "The run is the one it writes under when it replies (§4.3). The seq
+        is the last it minted for state and events under that run, or 0 when
+        it has minted none. A reply mints no seq"."""
+        with self._seq_lock:
+            if self.run is None:
+                self.take_run()
+            assert self.run is not None
+            return zk2c.InBand(self.run[0], self.run[1], 0 if self._minted is None else self._minted)
+
     def _unavailable_handler(self, r: dict[str, Any], cause: str):
-        enc = envelope.envelope_encoding(r)
+        op = self._operation(r)
 
         def handle(query: zenoh.Query) -> None:
             asked = str(query.key_expr)
@@ -2379,14 +2503,41 @@ class Owner:
             # §5.1 (0.9) "The order of refusals": fanout_forbidden (O2)
             # first, then unavailable (O3), then a key that names no member.
             if any(templates.is_wild(c) for c in asked.split("/")) and r["fanout"] != "allowed":
-                _refuse(query, enc, "fanout_forbidden", f"{r['template']} is fanout = \"forbidden\": "
-                                                        "call one concrete key (O2)")
+                _refuse(query, op, self.mark(), "fanout_forbidden", f"{r['template']} is fanout = \"forbidden\": "
+                                                                    "call one concrete key (O2)")
                 return
             # O3: "MUST answer a call to an optional operation it does not
             # expose with unavailable and its cause".
-            _refuse(query, enc, "unavailable", f"{r['template']} is not exposed here", cause=cause)
+            _refuse(query, op, self.mark(), "unavailable", f"{r['template']} is not exposed here", cause=cause)
 
         return handle
+
+    @staticmethod
+    def _read_request(call: "OpCall") -> str | None:
+        """Core §5.1, "The request" (0.94): "A request that §7.5's parse
+        refuses, or whose record does not decode as the operation's request
+        type, is refused with invalid_request. The record is read on the
+        contract's encoding (§7.2), and a packed one under its CH's tag
+        (§7.6)." Sets ``call.request``; returns why it is refused, or None.
+        A protobuf or raw record is handed to the handler as its bytes: its
+        decode is the handler's. A bare request (§5.1's MAY) has no CH, so a
+        packed one has no tag and cannot be read (observer §7.3: "One that
+        came in no envelope has no tag")."""
+        from . import calls, packed
+
+        if call.request_refusal is not None:
+            return f"the request is no request form: {call.request_refusal} (core §7.5)"
+        kind = call.op.kind("request")
+        if kind not in ("packed", "jsonschema"):
+            call.request = call.payload
+            return None
+        if kind == "packed" and call.bare:
+            return "a packed request on the bare wire has no CH, so no tag (core §7.6)"
+        try:
+            call.request = call.op.decode("request", call.tag or 0, call.payload)
+        except (packed.Refused, calls.Refused) as e:
+            return f"the request does not decode as its type: {e.token} (core §5.1, §7.6)"
+        return None
 
     def _op_handler(self, base: str, r: dict[str, Any], member: dict[str, Any] | None = None):
         """The queryable callback for one exposed operation of the interface
@@ -2397,8 +2548,11 @@ class Owner:
         template, a key whose concrete parameter chunk is not a canonical
         slug is ``invalid_request`` (§5.1, 0.8). Then the operation's
         handler (the caller's, from ``handlers``, or the default below), and
-        after it O3: a call left without its answer is ``internal``."""
-        enc = envelope.envelope_encoding(r)
+        after it O3: a call left without its answer is ``internal``. Every
+        answer is in §7.5's forms (core 0.94), and a request that is no form,
+        or whose record does not decode as its type, is ``invalid_request``
+        after the three refusals above and before the handler (§5.1)."""
+        op = self._operation(r)
         tpl = templates.parse_template(r["template"])
         app = self.handlers.get(f"{r['token']}/{r['template']}")
 
@@ -2412,8 +2566,8 @@ class Owner:
                 # operation not exposed has its own queryable, which keeps
                 # the same order: _unavailable_handler.)
                 if any(templates.is_wild(c) for c in asked.split("/")) and r["fanout"] != "allowed":
-                    _refuse(query, enc, "fanout_forbidden", f"{r['template']} is fanout = \"forbidden\": "
-                                                            "call one concrete key (O2)")
+                    _refuse(query, op, self.mark(), "fanout_forbidden",
+                            f"{r['template']} is fanout = \"forbidden\": call one concrete key (O2)")
                     return
                 if member is not None:
                     bound: dict[str, list[str] | None] = {
@@ -2427,12 +2581,19 @@ class Owner:
                         # a canonical slug (§1.4) names no member … refuses
                         # such a call invalid_request before any handler
                         # runs, fan-out or not".
-                        _refuse(query, enc, "invalid_request", "the key names no member of the template")
+                        _refuse(query, op, self.mark(), "invalid_request", "the key names no member of the template")
                         return
                     bound = got
                 else:
                     bound = {}
-                call = OpCall(query, base, r, enc, bound, asked)
+                call = OpCall(query, base, r, op, self.mark, bound, asked)
+                # a test's capture of each query "as the server receives it"
+                # (operations.md §9): its key, its Encoding and its payload
+                self.queries.append((asked, call.encoding, call.wire))
+                why = self._read_request(call)
+                if why is not None:
+                    call.refuse("invalid_request", why)
+                    return
                 if member is not None:
                     call.name(**member)
                 self.handled.append(asked)
@@ -2466,21 +2627,19 @@ class Owner:
             return
         req, resp = r["request"]["kind"], r["response"]["kind"]
         if req == "raw" and resp == "raw":
-            call.reply(call.payload, encoding=r["response"]["media_type"])
+            call.reply(call.payload)
         elif req == "jsonschema" and resp == "jsonschema":
-            try:
-                if not isinstance(json.loads(call.payload or b"null"), dict):
-                    raise ValueError("not an object")
-            except ValueError:
+            # the request is read already (_read_request): an object, or
+            # invalid_request
+            if not isinstance(call.request, dict):
                 call.refuse("invalid_request", "the request does not decode as the request type")
                 return
-            call.reply(json.dumps({"state": "up"}).encode(), encoding="application/json")
+            call.reply_value({"state": "up"})
         else:
             # §5.2 (0.7): any operation may refuse with app; with no error
-            # type there is no detail. A packed operation type (core 0.92,
-            # E044 narrowed) is refused so too: no rule adopts §7.5's forms
-            # yet, and §5.2's envelope it answers in is JSON, as for a raw
-            # type, where §5.2 names no packed kind (F-471).
+            # type there is no detail. Since core 0.94 a packed operation
+            # type travels in the forms like any other (F-471's answer); the
+            # default handler has no value of it to send.
             kinds = sorted({req, resp} - {"raw", "jsonschema"})
             what = " or ".join(kinds) if kinds else f"{req} to {resp}"
             call.refuse("app", f"this owner serves no {what} operation")

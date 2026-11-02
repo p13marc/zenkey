@@ -114,9 +114,10 @@ class Called:
 
     kind: str                          # "value", "refused", "silent"
     doc: Any = None                    # the value, decoded
-    envelope: dict[str, Any] | None = None
-    raw: bytes = b""
+    envelope: dict[str, Any] | None = None   # the owner's error, its ConfigError detail decoded
+    raw: bytes = b""                   # the reply's payload as it came: its form (core 0.94)
     at_ns: int = 0                     # C's clock when the call returned
+    mark: Any = None                   # the reply's as-of mark (core §5.1)
 
     @property
     def code(self) -> str | None:
@@ -141,14 +142,27 @@ def call(session: Any, address: str, op: str, request: Any, *, actor: str | None
     key = f"zk2/{address}/{cf.IFACE}/@op/{op}" if not op.startswith("set/") else \
         f"zk2/{address}/{cf.IFACE}/@op/set/{slug(op[4:])}"
     meta = {k: v for k, v in (("actor", actor), ("request_id", request_id)) if v is not None}
-    res = live.call(session, key, cf.encode_json(request), encoding="application/json", timeout=timeout, first=True,
+    # core 0.94 §5.1: the request in its form, CH 0x40 (config.v1's types are
+    # JSON Schema's, tag 0), under zenoh/bytes
+    res = live.call(session, key, cf.encode_json(request), timeout=timeout, first=True,
                     attachment=json.dumps(meta).encode() if meta else None)
     at = time.time_ns()
     for r in res.replies:
         if r.kind == "value":
-            return Called("value", json.loads(r.payload), raw=r.payload, at_ns=at)
-        if r.kind == "envelope":
-            return Called("refused", envelope=r.envelope, raw=r.payload, at_ns=at)
+            return Called("value", json.loads(r.payload), raw=r.raw, at_ns=at, mark=r.mark)
+        if r.kind == "refused_value":
+            return Called("refused_value", raw=r.raw, at_ns=at)
+        if r.kind == "error":
+            # core 0.94 §5.2: a form's detail is the error type's own bytes,
+            # here json:ConfigError's JSON, which C holds the contract for;
+            # the bare wire's envelope carried it decoded
+            e = dict(r.error or {})
+            if isinstance(e.get("detail"), (bytes, bytearray)):
+                try:
+                    e["detail"] = json.loads(e["detail"])
+                except ValueError:
+                    e["detail"] = {"undecodable": bytes(e["detail"]).hex()}
+            return Called("refused", envelope=e, raw=r.raw, at_ns=at, mark=r.mark)
     return Called("silent", at_ns=at)
 
 
@@ -254,6 +268,10 @@ class PyOwner:
 
     def dropped(self) -> list[Any]:
         return [json.loads(x) for x in self.o.dropped]
+
+    def dropped_wire(self) -> list[bytes]:
+        """The dropped replies' forms, as written (core 0.94 §5.1)."""
+        return list(self.o.dropped_wire)
 
 
 class RustOwner:
@@ -944,6 +962,7 @@ def section10(report: Report, mode: Any) -> None:
             r1 = call(bus.c, "lab/rf0", "set/radio", req)
             armed = (bus.get("status") or {}).get("pending") is not None
             first = (o.dropped() or [None])[0]
+            first_wire = (o.dropped_wire() or [None])[0]
             report.check(sec, "step 1: the owner arms the change; C receives nothing (the reply dropped at the "
                               "owner)", r1.kind == "silent" and armed, f"{r1.short()}, pending {armed}")
         time.sleep(max(0.0, t0 + 5 - time.monotonic()))
@@ -954,6 +973,15 @@ def section10(report: Report, mode: Any) -> None:
                           "the owner published nothing new (§2.14)",
                      r2.kind == "value" and r2.doc == first and applies == 1 and not bus.events(since_utc=t0u),
                      f"{r2.short()} vs step 1's {first}; applies {applies}")
+        # core 0.94 §5.1, "An answer sent again": "The owner MUST then send
+        # that answer's bytes unchanged, its mark included" (scenarios §10,
+        # its citation). The owner example's first reply reached C, set
+        # aside unread; zk2py's was made and dropped at the owner.
+        want = r1.raw if bus.rust else first_wire
+        report.check(sec, "step 2 (core 0.94 §5.1): the reply's bytes are step 1's, its value form and its as-of mark "
+                          "unchanged",
+                     r2.kind == "value" and want is not None and r2.raw == want,
+                     f"{r2.raw.hex()} vs {None if want is None else want.hex()} (mark {r2.mark})")
         r3 = call(bus.c, "lab/rf0", "set/radio", {**req, "values": {"frequency_hz": 869000000}})
         report.check(sec, "step 3: the same key with another frequency_hz is invalid_request",
                      r3.code == "invalid_request", r3.short())

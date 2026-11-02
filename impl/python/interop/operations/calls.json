@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "calls.json",
+  "$comment": "operations.md §9 (core 0.94, #985 C4c): set's JSON Schema request, response and error, and the state step 4 puts.",
+  "$defs": {
+    "SetRequest": {
+      "type": "object",
+      "properties": {
+        "mtu": { "type": "integer", "minimum": 68, "maximum": 9216 }
+      },
+      "required": ["mtu"]
+    },
+    "SetResponse": {
+      "type": "object",
+      "properties": {
+        "applied": { "type": "boolean" }
+      },
+      "required": ["applied"]
+    },
+    "TcError": {
+      "type": "object",
+      "properties": {
+        "reason": { "type": "string" }
+      },
+      "required": ["reason"]
+    },
+    "Status": {
+      "type": "object",
+      "properties": {
+        "n": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["n"]
+    }
+  }
+}

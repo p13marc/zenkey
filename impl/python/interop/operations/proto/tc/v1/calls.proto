@@ -1,0 +1,12 @@
+syntax = "proto3";
+package tc.v1;
+
+// operations.md §9 (core 0.94): set's protobuf variant, its request and
+// response, and its error type.
+message Set {
+  uint32 mtu = 1;
+}
+
+message Fault {
+  string reason = 1;
+}

@@ -4626,6 +4626,59 @@ def _round101_readings(root: Path) -> list[tuple[str, Any, Any]]:
     once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
     out.append(("core 0.94's entry: RULES.md lists 239 rules, 7 more; the owner 73, the caller 18",
                 [int(once.group(1)) if once else None, counted.get("Owner"), counted.get("Caller")], [239, 73, 18]))
+    # F-472: §5.2's Decoding MUST binds "a caller or a tool that reads the
+    # bare wire", and RULES.md lists it under the caller alone, where the two
+    # reading MUSTs of the same subject are under both.
+    from . import classes, live
+
+    rows = classes._rules_md(spec)
+    dec = sorted(r[0] for r in rows if r[1] == "core §5.2" and "**Decoding.**" in r[3])
+    read = sorted(r[0] for r in rows if r[1] == "core §5.2" and "MUST read a `reply_err` under" in r[3])
+    out.append(("F-472 (open): §5.2's Decoding MUST, of \"A caller or a tool that reads the bare wire\", is listed "
+                "under the caller alone; the reading MUST beside it, of the same subject, under both; the observer "
+                "class counts 69",
+                missing(core, "**Decoding.** A caller or a tool that reads the bare wire decodes an envelope")
+                + [dec, read, counted.get("Observer: the tool role, and a reader")],
+                [["caller"], ["caller", "observer"], 69]))
+    # F-473: a bare-wire envelope its decoding refuses: "that envelope …
+    # not as the transport's", or "A malformed error is the transport's
+    # too". zk2py reads it as the transport's, its decoding's token named.
+    bad = live.read_reply_error("application/json", b'{"code":"busy"}')
+    good = live.read_reply_error("application/json", b'{"code":"busy","message":""}')
+    out.append(("F-473 (open): a bare-wire envelope its decoding refuses is that envelope by \"The bare wire\", the "
+                "transport's by \"A malformed error\"; zk2py reads it as the transport's (decode), a good one busy",
+                missing(core, "under one of the envelope's three encodings as that envelope (below), not as the "
+                              "transport's.", "**A malformed error** is the transport's too.")
+                + [(bad.kind, bad.refusal), (good.kind, good.code, good.bare)],
+                [("transport", "decode"), ("error", "busy", True)]))
+    # F-474: §9 step 4 puts "its state", and neither setup declares one.
+    sec9 = ops[ops.index("## §9 A call's forms"):]
+    setup = sec9[:sec9.index("**Steps.**")]
+    out.append(("F-474 (open): operations.md §9 step 4 puts h1/tc's state, and its setup and the common one declare "
+                "no state; zk2py's tc.v1 declares status",
+                missing(sec9, "`h1/tc` puts its state twice, and the caller calls `set`.")
+                + ["state" in setup, "state" in ops[:ops.index("## §1 ")],
+                   "[resources.status]" in (spec.parent / "impl" / "python" / "interop" / "operations"
+                                            / "tc.v1.toml").read_text(encoding="utf-8")],
+                [False, False, True]))
+    # F-475: no text bounds a value reply by its Encoding; a bare JSON array
+    # of 8 bytes or more parses as a value (vectors.json), so a reader that
+    # takes no MAY hands its "record" on.
+    arr = zk2c.parse(bytes.fromhex("5b312c322c332c345d"), "reply")
+    out.append(("F-475 (open): \"A caller reads a reply by §7.5's parse\", bounded by no Encoding; [1,2,3,4] under "
+                "application/json parses as a value, tag 11, record ']'; zk2py takes the MAY",
+                missing(core, "**Reading a value.** A caller reads a reply by §7.5's parse,")
+                + [(arr.form, arr.width, arr.tag, arr.record)],
+                [("value", 32, 11, b"]")]))
+    # F-476: the as-of mark's seq is "the last it minted …, or 0 when it has
+    # minted none", and a run's seqs count from 0, so a reply before the first
+    # put and one after it carry one mark (forms_live §9 step 4, both owners).
+    out.append(("F-476 (open): the as-of mark's seq is the last minted, or 0 when none is, and a run's first put is seq "
+                "0: a reply before it and one after it carry one mark; operations.md §9 step 4 checks the first alone",
+                missing(core, "The seq is the last it minted for state and events under that run, or 0 when it has "
+                              "minted none.", "Within one run, it can order the reply against the state it holds, by "
+                                              "seq.")
+                + missing(ops, "The second instance's reply carries its own descriptor's run, and seq 0."), []))
     return out
 
 
@@ -7259,8 +7312,10 @@ def _round89_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 + [refused(cardinality={"zk2py_probe.v1": {"state/status": 1}})],
                 ["refused", "refused", "starts", "starts", "refused", "refused"]))
 
+    from . import calls, zk2c
+
     class Query:
-        payload = attachment = None
+        payload = attachment = encoding = None
 
         def __init__(self) -> None:
             self.sent: list[str] = []
@@ -7276,7 +7331,8 @@ def _round89_readings(root: Path) -> list[tuple[str, Any, Any]]:
 
     def call(template: str, *steps: tuple[str, Any]) -> tuple[list[str], list[str]]:
         q = Query()
-        c = ow.OpCall(q, base, rres[template], "application/json", {}, f"{base}/@op/{template}")
+        c = ow.OpCall(q, base, rres[template], calls.Operation.of_resource(rres[template], replica.schemas),
+                      lambda: zk2c.InBand(16, 0, 0), {}, f"{base}/@op/{template}")
         said = []
         for what, arg in steps:
             try:
@@ -7291,7 +7347,8 @@ def _round89_readings(root: Path) -> list[tuple[str, Any, Any]]:
         raises: :meth:`OpCall.finish` after a handler that failed, as
         ``Owner._op_handler`` runs it."""
         q = Query()
-        c = ow.OpCall(q, base, rres[template], "application/json", {}, f"{base}/@op/{template}")
+        c = ow.OpCall(q, base, rres[template], calls.Operation.of_resource(rres[template], replica.schemas),
+                      lambda: zk2c.InBand(16, 0, 0), {}, f"{base}/@op/{template}")
         try:
             for what, arg in steps:
                 getattr(c, what)(**arg) if isinstance(arg, dict) else getattr(c, what)(arg)

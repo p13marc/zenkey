@@ -1166,7 +1166,7 @@ def section8(rp: Report, runs: int) -> None:
         a.close()
         late = live.call(bus.g, APPEND, b"x")
         rp.check(sec, "3. a call at once after A's clean close, before B serves: no value and no envelope from B",
-                 all(r.payload != b"B" and r.kind != "envelope" for r in late.replies),
+                 all(r.payload != b"B" and r.kind != "error" for r in late.replies),
                  f"{[(r.kind, r.payload[:20]) for r in late.replies] or 'silence'}")
     finally:
         bus.close()
