@@ -200,7 +200,9 @@ pub(crate) struct AcrossFaceArgs {
     /// With --face, the face policy (TOML, `link.v2` §2.1) whose face the
     /// tool reads across (#988 L4). Its session runs the face's
     /// `[transport]` (`link.v2` §2.16), so both ends run one lease and
-    /// keep_alive; the default --timeout is the face's `reply_timeout_ms`
+    /// keep_alive, but a key the --zenoh-config file states wins, and the
+    /// interests timeout stays at least the tool's 120 s; the default
+    /// --timeout is the face's `reply_timeout_ms`
     /// (core §8.1); and where the face says `arq = false`, each selector
     /// with a horizon in the contracts in hand is declared again after two
     /// horizons of silence while the transport stays up, which repairs a

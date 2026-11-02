@@ -6,7 +6,7 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
-## Unreleased (`main`, zk2) — a fork binding's router config is read as data (#1044)
+## Unreleased (`main`, zk2) — a fork binding's router config is read as data (#1044, #1047)
 
 A `link.v2` policy on `zm-1.10.2-r1`, zenoh-modem's zenoh fork, narrows
 other principals over the fork's link protocols (`link.v2` §2.4), so the
@@ -18,6 +18,8 @@ refuses.
 | `check face`, `acl gen --check` on a fork binding's router config: exit 2, "zenoh refused the config" | read as data, in zenoh 1.10.1's shapes and the binding's link protocols: the same verdicts as through zenoh's loader | stock bindings and `link.v1` policies keep zenoh's loader. The coverage note says the file was read as data, and that whether the router's own loader accepts it is not checked; the JSON carries `"read": "data"` |
 | — | a key that does not read as data, every one named at its path (an unknown field, a missing one, an empty list, a value outside zenoh's vocabulary, a key expression that is not canonical, a link protocol not the binding's), exit 2 | |
 | `check face --peer-config` on a fork binding: through zenoh's loader | read as the router's config is | |
+| `--face-policy` beside `--across-face`, or on `check conform` and `alarms`, refused by the linter: one sentence, or the errors | the linter's errors named, on both | #1047 |
+| a watch across a face whose declaration again fails: retried, logged at debug | retried at every check, warned of once a horizon for each watch | #1047 |
 
 ## Unreleased (`main`, zk2) — `call` and `bench call` read both wires (#985 C4b, for #980)
 

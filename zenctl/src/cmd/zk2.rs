@@ -437,29 +437,35 @@ pub struct FaceScope {
     far: Option<zenkey_model::link::FarSide>,
 }
 
-/// The far side `--face-policy F --face NAME` names (#988 L4): the face of
-/// a `link.v2` policy. Refused, exit 2: a file that cannot be read, a
-/// policy the linter refuses (its errors named), a `link.v1` policy, and a
-/// face it does not name.
-pub fn far_side(policy: &std::path::Path, face: &str) -> Result<zenkey_model::link::FarSide> {
-    let text = std::fs::read_to_string(policy)
-        .map_err(|e| unaskable!("--face-policy {}: {e}", policy.display()))?;
+/// A `--face-policy` file the linter accepts (#1047): the one reading
+/// behind [`far_side`] and [`routers`]. Refused, exit 2: a file that cannot
+/// be read, and a policy the linter refuses, its errors named.
+fn face_policy(path: &std::path::Path) -> Result<zenkey_model::link::FacePolicy> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| unaskable!("--face-policy {}: {e}", path.display()))?;
     let parsed = zenkey_model::link::parse(&text);
-    let Some(p) = parsed.policy else {
+    parsed.policy.ok_or_else(|| {
         let errors: Vec<String> = parsed
             .findings
             .iter()
             .filter(|f| f.is_error())
             .map(ToString::to_string)
             .collect();
-        return Err(unaskable!(
+        unaskable!(
             "--face-policy {}: the linter refuses it ({}); `zenctl check face` or `acl gen` \
              names every finding",
-            policy.display(),
+            path.display(),
             errors.join("; ")
-        ));
-    };
-    p.far_side(face)
+        )
+    })
+}
+
+/// The far side `--face-policy F --face NAME` names (#988 L4): the face of
+/// a `link.v2` policy. Refused, exit 2: what [`face_policy`] refuses, a
+/// `link.v1` policy, and a face it does not name.
+pub fn far_side(policy: &std::path::Path, face: &str) -> Result<zenkey_model::link::FarSide> {
+    face_policy(policy)?
+        .far_side(face)
         .map_err(|e| unaskable!("--face-policy {} --face {face}: {e}", policy.display()))
 }
 
@@ -687,8 +693,8 @@ impl FaceScope {
 /// §5.2; #1011's item 3): `--lease` and `--wait-before-close` where given,
 /// else what the routers' `link.v2` face policy's `[transport]` states
 /// (`link.v2` §2.16), else zenoh 1.10.1's. Refused, exit 2: a flag that is
-/// not a positive number of seconds, and a policy the linter refuses or a
-/// `link.v1` one, which states no transport.
+/// not a positive number of seconds, what [`face_policy`] refuses, and a
+/// `link.v1` policy, which states no transport.
 pub fn routers(
     policy: Option<&std::path::Path>,
     lease: Option<f64>,
@@ -697,17 +703,7 @@ pub fn routers(
     let mut routers = match policy {
         None => zenkey_model::budget::Routers::default(),
         Some(path) => {
-            let text = std::fs::read_to_string(path)
-                .map_err(|e| unaskable!("--face-policy {}: {e}", path.display()))?;
-            let parsed = zenkey_model::link::parse(&text);
-            let Some(p) = parsed.policy else {
-                return Err(unaskable!(
-                    "--face-policy {}: the linter refuses it; `zenctl check face` or `acl gen` \
-                     names every finding",
-                    path.display()
-                ));
-            };
-            let Some(t) = p.transport else {
+            let Some(t) = face_policy(path)?.transport else {
                 return Err(unaskable!(
                     "--face-policy {}: a link.v1 policy states no transport; give --lease and \
                      --wait-before-close, or a link.v2 policy (link.v2 §2.16)",
