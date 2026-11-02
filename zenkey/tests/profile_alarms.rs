@@ -675,7 +675,7 @@ async fn s3_resolve_then_delete() {
 
     // 2. Within 1 s of the delete: a reply_del, with the delete's in-band
     // stamp, and the timestamp the owner minted at the delete, its last
-    // confirmation (core S2, text 0.12, zk2py round 97's F-460).
+    // confirmation (core S2, text 0.13, zk2py round 97's F-460).
     let answer = get(&g).await;
     let c = reply(&answer, A_KEY).expect("a reply for A");
     assert!(matches!(c, Current::Deleted { .. }), "{c:?}");
