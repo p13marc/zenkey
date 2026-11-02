@@ -278,11 +278,17 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   given CH again under its type's tag. `set_desired` converges through
   `Owner::converge`/`report_desired`, and `desired_config` (desired.v1
   §2.16) feeds it as it feeds config.v1's (`desired::Configured`,
-  `profile_desired.rs`'s `config_v2_as_a_target`).
+  `profile_desired.rs`'s `config_v2_as_a_target`). Its re-mint is
+  config_v1's (#1064): `restarting` (the cancel written as a `Control`
+  request) and `Restarting::start`, which runs `v2::Owner::restart_in`
+  under the run `new_epoch` took, so the instance number is that run.
   `tests/profile_config_v2.rs` is `scenarios-v2.md` §1–§12 over the
-  spec's `rfcfg.v1`; the owner example's `--config-v2`
+  spec's `rfcfg.v1`, and the re-mint; the owner example's `--config-v2`
   embeds it (`owner/config.rs`'s `rfcfg`, `rfcfg_startup`) and drives it
   with `config`'s commands, plus `config counter <n>` and `config record`.
+  `tests/zenoh_modem_config.rs` is zenoh-modem's `config.v2-binding.md`
+  §15 on `sx1262_config.v1` (#985 G4): the reach round trip across an
+  ACL face, under a fixed run and counter, with the binding's bytes.
   `alarms` (#800, AB) is `alarms.v1`'s owner on the embedded standard
   bundle: `ServiceBuilder::alarms(Startup)` → `Alarms` (also
   `Service::alarms()`). `raise(Condition)` makes §2.5's act from what is
