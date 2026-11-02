@@ -1,4 +1,4 @@
-# Constrained scenarios (core §1.6, R7, §8.1, §8.5, §12)
+# Constrained scenarios (core §1.6, R7, §8.1, §8.2, §8.4, §8.5, §12)
 
 Common setup: a vehicle router with 50 services, and a link to the ground
 shaped as a serial line at 2,400 bit/s with a 200 ms RTT.
@@ -149,3 +149,59 @@ runtime has declared the key's prefix toward the router.
 
 *The reference: `zenkey/tests/constrained.rs` (§8, §9 steps 1, 3 and 4)
 and `zenkey-fleet/tests/redeclare.rs` (step 2).*
+
+## §10 A first-hop device (§8.1, §8.2, §8.4, §8.5; observer §3.11, §7.1)
+
+**Setup.**
+- One router. A device owner at `lab/probe-a` is its client through a
+  TCP proxy. The proxy counts each declaration that crosses toward the
+  router, by kind and key.
+- The owner implements `probe.v1` (`link.v2`'s test contract) and
+  `health.v1`, so `freshness.v2` too. It puts a heartbeat covering each
+  of the first two (`freshness.v2` §2.4).
+- It is configured for a first hop: its three interfaces in its
+  tokenless set, and no bundle held.
+- The router's block is a `link.v2` device face's that lists the owner,
+  under `deny` (`link.v2` §2.5, §2.6).
+- On the near side, three clients of the router: a holder of the three
+  bundles, a tool, and a consumer bound to `lab/probe-a`'s `probe.v1`
+  that waits on presence (R5).
+
+**Steps.**
+1. The device starts.
+2. The proxy closes its connection. The device's session opens a new
+   transport.
+3. The device starts a new run (§4.3), so its descriptor changes.
+4. **Control:** the router's block keeps `link.v1` §2.6's whole `zk`, and
+   the device starts again.
+5. **Control:** under step 1's block, the device starts at its defaults,
+   with no tokenless set and its bundles held.
+6. A device configured for a first hop that also implements
+   `zs.catalog.v1`, whose contract uses `redundancy.v1`, is started.
+
+**Expected.**
+1. Toward the router the proxy counts one `DeclareToken`, the instance
+   token's. Under `@zk` it counts one `DeclareQueryable`, the
+   descriptor's. No interface token crosses, and no contract queryable.
+   - The tool lists the device and its three interfaces from its
+     descriptor, each `"token": false`. It reports no missing interface
+     token.
+   - The consumer's wait ends once the instance token and the descriptor
+     are in.
+   - The tool retrieves `probe.v1`'s bundle from the near holder.
+2. While the link is closed, the tool reports the device's link closed,
+   never the device down.
+   - Its liveness is its heartbeat's: confirmed until the horizon
+     passes, then unobservable, never down.
+   - At the new transport the proxy counts step 1's declarations again,
+     once each, and nothing more under `@zk`.
+3. The tool shows the new run, from the descriptor put it hears.
+4. The tool lists no instance at `lab/probe-a`. The device's presence is
+   unobservable across the face, never absent. The consumer still
+   receives the device's puts and heartbeats, and judges its liveness
+   from them (R7).
+5. At each transport the proxy counts the instance token, three interface
+   tokens and three contract queryables. The tool sees the instance token
+   alone: the face denied the rest once it had crossed (Appendix B).
+6. The device does not start: step 2 of §8.2 refuses it, and no instance
+   token crosses.

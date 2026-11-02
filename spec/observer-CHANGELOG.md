@@ -13,6 +13,58 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.26 — 2026-11-02: a provider found by its instance token, and a first hop (#982 H1)
+
+Core 0.96 lets an owner on a first hop hold its instance token alone.
+Its every interface is tokenless, and its descriptor is the only list of
+what it implements. This version is the reader's half.
+
+**Added: §3.6, "A provider is found by its instance token".** A reader
+MUST find an interface's providers by instance tokens and their
+descriptors, where it lists them and where it waits for one (core R5).
+A reader MUST NOT conclude a provider absent for want of an interface
+token. `[Sc: presence.md §5; constrained.md §10]`
+- **Why now.** Core §8.1 has said since U22 that a tokenless set's
+  providers are found so. No rule bound a reader to it. A first-hop
+  owner's every interface is tokenless, so a reader of interface tokens
+  alone never finds it.
+- **The reference** has read so since #1018, #982's H0:
+  `Consumer::present`, R5's `wait_for_provider`, `Consumer::liveness`
+  and `Client::present` find a tokenless provider by its instance token
+  and descriptor, and conclude absence only from a complete read. H0
+  needed no text of its own, and this rule now binds it.
+- **No token expected.** An interface marked `"token": false` is none of
+  §3.2's fault shapes, and §3.2 says so.
+
+**Added: §3.11, "A first hop".** A near reader finds such an owner by its
+instance token, where its face lets it cross, and reads the rest from
+its descriptor.
+- **The token follows the link.** A tool that knows an owner is on a
+  first hop MUST NOT report it down from its instance token's absence,
+  even where a complete read establishes it. It reports the owner's link
+  closed, and its liveness from what crosses (§7.1).
+  `[Sc: constrained.md §10]`
+- **How a tool knows.** The face policy lists the owner on a device face
+  (`link.v2` §2.5).
+- **Alive implies callable** holds across the hop, a lost declaration
+  breaking it as it breaks every declaration.
+- **A MAY.** A tool may keep the descriptor it read across the token's
+  return under the same instance id. It then misses what the owner put
+  while the link was closed, until the owner's next put. The memo's H3
+  caches so.
+
+**Changed: §7.1, "Liveness across a face".** Across a first hop the
+owner's instance token crosses, and shows its link, not its liveness.
+`[Sc: constrained.md §10]`
+
+**Deliberately not changed.**
+- **No reading of the face from the descriptor.** Every entry marked
+  `"token": false` is no first-hop mark: a deployment above the presence
+  budget may make an owner's every interface tokenless too.
+- **§3.6's complete read.** A first-hop owner's absent token is absent
+  as any is. What the rule changes is what a tool may conclude from it.
+- **`RULES.md`** counts these three among core 0.96's 246.
+- **The header** is written against core 0.96.
 ## 0.25 — 2026-11-02: §7.3, a reply under another `Encoding` (#609, #985)
 
 zk2py's round 101 read core 0.94 and this text's 0.24 cold, and filed
