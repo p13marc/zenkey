@@ -160,6 +160,38 @@ fn a_lint_error_fails_and_a_lint_warning_warns() {
     std::fs::remove_dir_all(d).unwrap();
 }
 
+/// config.v2 §2.2 (#985 G2): a config contract's lint findings fail the
+/// build, as errors; the spec's `rfcfg.v1` builds.
+#[test]
+fn a_config_contracts_finding_fails_the_build() {
+    let spec = Path::new(env!("CARGO_MANIFEST_DIR")).join("../spec/profiles/config");
+    let d = std::env::temp_dir().join(format!("zk2-gate-config-v2-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    let contracts = d.join("conformance/contracts");
+    std::fs::create_dir_all(&contracts).unwrap();
+    std::fs::copy(spec.join("config.v2.json"), d.join("config.v2.json")).unwrap();
+    let from = spec.join("conformance/contracts");
+    std::fs::copy(from.join("rfcfg.json"), contracts.join("rfcfg.json")).unwrap();
+    let toml = std::fs::read_to_string(from.join("rfcfg.v1.toml")).unwrap();
+    let build = |text: &str| {
+        std::fs::write(contracts.join("rfcfg.v1.toml"), text).unwrap();
+        Config::new()
+            .contracts_dir(&contracts)
+            .out_file(d.join("out/zk2.rs"))
+            .generate()
+    };
+    let g = build(&toml).unwrap();
+    assert_eq!(g.interfaces, ["rfcfg.v1"]);
+    // `cancel` gone: resource_missing, an error.
+    let cut = toml.replace("[resources.cancel]", "[resources.cancelled]");
+    let e = build(&cut).unwrap_err();
+    let Error::Lint { report, .. } = &e else {
+        panic!("a lint error, not {e}")
+    };
+    assert_eq!(report, "error[config.v2 resource_missing] cancel", "{e}");
+    std::fs::remove_dir_all(d).unwrap();
+}
+
 #[test]
 fn a_hint_that_names_nothing_warns_and_one_that_is_no_reference_fails() {
     let d = published("hints");

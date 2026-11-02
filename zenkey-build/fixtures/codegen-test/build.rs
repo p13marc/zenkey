@@ -6,7 +6,9 @@
 //! the packed vectors' types (#979 B2), `linkframes.v1`
 //! (`zenkey/tests/contracts/frames/`), frame resources (#981 K3), and
 //! `packedops.v1` (`zenkey/tests/contracts/packed-ops/`), packed operation
-//! types (#985 C4c).
+//! types (#985 C4c), and `rfcfg.v1`
+//! (`spec/profiles/config/conformance/contracts/`), config.v2's derived
+//! types (#985 G2).
 //!
 //! One history root serves all three directories: `health.v1`'s revision
 //! 1.0 was published in `examples/zk2/.history` before the contract moved,
@@ -31,6 +33,9 @@ fn main() {
         // core §5.1, §7.6 (#985 C4c): packedops.v1's packed operation
         // types, served and called in the forms.
         .contracts_dir(root.join("zenkey/tests/contracts/packed-ops"))
+        // config.v2 (#985 G2): the spec's rfcfg.v1, whose packed file holds
+        // its groups' types and the types derived from them.
+        .contracts_dir(root.join("spec/profiles/config/conformance/contracts"))
         .history_dir(examples.join(".history"))
         .json_type("json:TcError", "crate::model::TcError")
         .generate()

@@ -21,7 +21,8 @@
 //! [`Config::generate`] fails the consumer's build, where the contract was
 //! authored:
 //! - on **every lint error** of `zenkey-model` (stable codes; warnings go to
-//!   `cargo:warning`), and the set's checks (E035, E036);
+//!   `cargo:warning`), a `config.v2` contract's findings (its §2.2), and
+//!   the set's checks (E035, E036);
 //! - **with a history**, on a candidate that is `breaking` against any
 //!   published revision (`zenkey_model::compat::check_history`, the rules
 //!   of `zk2 contract compat --history`), itself published or not: publishing
@@ -307,6 +308,19 @@ impl Config {
                     warnings.push(format!("{shown}: {w}"));
                 }
                 match l.contract {
+                    // config.v2 §2.2: an implementation that lints a contract
+                    // reports its declaration's and its resources' findings as
+                    // errors.
+                    Some(c) if !zenkey_model::config::v2::lint_contract(&c).is_empty() => {
+                        let findings = zenkey_model::config::v2::lint_contract(&c)
+                            .iter()
+                            .map(|x| format!("error[config.v2 {}] {}", x.reason.token(), x.at))
+                            .collect::<Vec<_>>();
+                        return Err(Error::Lint {
+                            file: shown,
+                            report: findings.join("\n"),
+                        });
+                    }
                     Some(c) => out.push((f, c)),
                     None => {
                         let errors: Vec<String> =
