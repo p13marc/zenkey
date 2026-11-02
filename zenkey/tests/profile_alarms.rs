@@ -12,12 +12,20 @@
 //! `zenkey_model::alarms::Track` over S's deliveries of a key, and every
 //! verdict is `zenkey_model::alarms`'s judges'.
 //!
-//! **The horizon.** §2 waits 455 s and §6 about 910 s at the contract's
+//! **The horizon.** §2 waits 905 s and §6 about 910 s at the contract's
 //! 900 s: they run in the slow tier, `#[ignore]`d. Their fast variants run
 //! the same owner code on a test's copy of the standard contract whose
 //! `freshness.ttl_s` is 4, never published: [`ServiceBuilder::alarms_with`]
-//! takes the confirmation period from it (1.9 s), so the fast variants
-//! check what the owner puts, and the slow ones the verdicts at 900 s.
+//! takes the confirmation period from it, its heartbeat every 1.9 s, and S
+//! reads that heartbeat with the copy. The fast variants check what the
+//! owner sends, and the slow ones the verdicts at 900 s.
+//!
+//! **The heartbeat** (text 0.11, #978's F4): the contract uses
+//! `freshness.v2`, so the owner never re-puts a firing alarm, and its
+//! heartbeat covering `alarms.v1` vouches for it by a bit. H reads those
+//! heartbeats raw. A put carries no Zenoh timestamp of the owner's: S's
+//! deliveries arrive under R1's stamp, and the in-band stamp is what S
+//! checks of them (core §4.3, S1).
 
 mod common;
 
@@ -25,7 +33,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use common::{T, addr, client, config, eventually, eventually_some, router};
+use common::{Beats, T, addr, client, config, eventually, eventually_some, router};
 use zenkey::alarms::{
     self, Act, Alarms, Condition, FileRecord, Retired, Severity, Source, Startup,
 };
@@ -34,7 +42,7 @@ use zenkey::model::alarms::{
     self as am, Alarm, Answer, Judged, Latest, Listing, Presence, Reading, Reason, Seed,
     SetVerdict, Track, Transition,
 };
-use zenkey::model::freshness::{ClockTrust, DEFAULT_DELTA, Observation};
+use zenkey::model::freshness::{ClockTrust, DEFAULT_DELTA, Observation, Verdict};
 use zenkey::model::grammar::{InstanceId, ZkKey};
 use zenkey::model::seed::Mark;
 use zenkey::state::{Current, StateAnswer};
@@ -72,6 +80,28 @@ fn key_of(alert_key: &str) -> String {
     format!("zk2/{SVC}/alarms.v1/state/alarms/{alert_key}")
 }
 
+/// The heartbeat key covering `lab/svc`'s `alarms.v1`.
+const HB_KEY: &str = "zk2/lab/svc/freshness.v2/stream/heartbeat/alarms.v1";
+
+/// H: `lab/svc`'s heartbeats covering `alarms.v1`, read with `imp`.
+async fn heartbeats(
+    s: &zenoh::Session,
+    imp: &Implementation,
+) -> (zenoh::pubsub::Subscriber<()>, Beats) {
+    let layout = zenkey::model::heartbeat::Layout::of(imp.contract());
+    common::heartbeats(s, HB_KEY, layout).await
+}
+
+/// The ranks a heartbeat vouches for in `alarms.v1`'s one collection.
+fn vouched(b: &common::Beat) -> Vec<u64> {
+    b.hb.sections
+        .first()
+        .cloned()
+        .flatten()
+        .map(|s| s.members.vouched())
+        .unwrap_or_default()
+}
+
 /// A test's copy of the standard contract, its `freshness.ttl_s` set to
 /// `ttl_s`: never published, never in `spec/`.
 fn fast(ttl_s: u64) -> Implementation {
@@ -94,6 +124,7 @@ struct Rec {
     delete: bool,
     payload: Vec<u8>,
     stamp: Option<Timestamp>,
+    inband: Option<zenkey::model::wire::Stamp>,
 }
 
 impl Rec {
@@ -107,10 +138,6 @@ impl Rec {
 
     fn doc(&self) -> Alarm {
         am::decode(&self.payload).expect("an alarms.v1 document")
-    }
-
-    fn stamp_id(&self) -> String {
-        self.stamp.expect("stamped").get_id().to_string()
     }
 }
 
@@ -127,6 +154,7 @@ fn push(log: &Log, x: &Sample) {
         delete: x.kind() == SampleKind::Delete,
         payload: common::record(x),
         stamp: x.timestamp().copied(),
+        inband: common::inband(x),
     });
 }
 
@@ -215,13 +243,14 @@ async fn at_new_token(log: &Log, n: usize) {
 
 /// A tool's consumer of `lab/svc`'s `alarms.v1`, on the standard contract.
 fn reader(s: &zenoh::Session) -> Consumer {
-    Consumer::for_tool(
-        s,
-        alarms::implementation().shared_contract(),
-        &[SVC],
-        &Default::default(),
-    )
-    .unwrap()
+    reader_of(s, &alarms::implementation())
+}
+
+/// A tool's consumer of `lab/svc`'s `alarms.v1` on `imp`'s revision: a
+/// heartbeat's tag is its covered revision's, so S reads a test copy's
+/// heartbeats with that copy (`freshness.v2` §2.5).
+fn reader_of(s: &zenoh::Session, imp: &Implementation) -> Consumer {
+    Consumer::for_tool(s, imp.shared_contract(), &[SVC], &Default::default()).unwrap()
 }
 
 /// Waits until the owner's session sees S's subscription, so that its
@@ -349,11 +378,14 @@ fn judge_s(
             Err(_) => Latest::Undecodable,
         }
     };
+    // §2.14 step 5 (text 0.11): a freshness.v2 owner's put carries no
+    // stamp of its own, so S's delivery is unattributable.
+    let _ = zid;
     let r = Reading {
         presence,
         observations: &obs,
         latest: Some(latest),
-        previous_instance: !last.delete && last.stamp_id() != zid,
+        previous_instance: false,
         held_whole: false,
         left_out: false,
     };
@@ -418,7 +450,13 @@ async fn s1_raise() {
     let recs = deliveries(&s.log, A_KEY, 1).await;
     let put = &recs[0];
     assert!(!put.delete);
-    assert_eq!(put.stamp_id(), owner_zid, "stamped by the owner (core S1)");
+    assert!(put.inband.is_some(), "its in-band stamp (core S1)");
+    assert!(
+        put.stamp
+            .is_none_or(|t| t.get_id().to_string() != owner_zid),
+        "no Zenoh timestamp of the owner's (freshness.v2 §2.4): {:?}",
+        put.stamp
+    );
     let doc = put.doc();
     assert_eq!(doc, done.document);
     assert_eq!(
@@ -437,7 +475,16 @@ async fn s1_raise() {
         panic!("a value: {c:?}")
     };
     assert_eq!(am::decode(&sample.payload().to_bytes()).unwrap(), doc);
-    assert_eq!(c.timestamp(), put.stamp, "under the same stamp (core S2)");
+    assert_eq!(
+        answer.mark(c),
+        put.inband.map(Mark::InBand),
+        "under the put's in-band stamp (core S2)"
+    );
+    assert_eq!(
+        c.clock().as_deref(),
+        Some(owner_zid.as_str()),
+        "the reply carries its last confirmation, the owner's (freshness.v2 §2.4)"
+    );
     let (firing, stale) = judge_g(&answer, A_KEY, presence, &zid);
     assert_eq!(pair(firing), (Answer::Yes, Reason::Firing));
     assert_eq!(pair(stale), (Answer::No, Reason::Fresh));
@@ -467,17 +514,21 @@ async fn s1_raise() {
     svc.close().await.unwrap();
 }
 
-/// §2 on `imp`: an escalation, a refresh, then nothing for `quiet`, with no
-/// two deliveries more than `bound` apart.
+/// §2 on `imp`: an escalation, a refresh, then nothing for `quiet`, past
+/// the horizon: no re-put, a heartbeat at most `bound` apart vouching for
+/// A, and S judging A firing at the end.
 async fn escalate_refresh_confirm(imp: Implementation, quiet: Duration, bound: Duration) {
     let (_r1, ep) = router(None).await;
     let os = client(&ep).await;
     let rs = client(&ep).await;
-    let owner_zid = os.zid().to_string();
     let s = record(&rs).await;
+    let (_h, beats) = heartbeats(&rs, &imp).await;
+    let tag = zenkey::model::heartbeat::Layout::of(imp.contract()).tag;
+    let g = reader_of(&rs, &imp);
+    let sub = g.subscribe(RES, |_| {}).await.unwrap();
     let (b, a) = owner(&os, config(SVC), imp, Startup::default()).await;
     let svc = b.start().await.unwrap();
-    presence_of(&rs, None).await;
+    let (presence, zid) = presence_of(&rs, None).await;
     seen_by(&os).await;
     let t0 = a
         .raise(alarm_a(Severity::Warning))
@@ -523,56 +574,39 @@ async fn escalate_refresh_confirm(imp: Implementation, quiet: Duration, bound: D
     assert_eq!(reads(&recs)[2], Transition::Refreshed);
     let refreshed_at = recs[2].at;
 
-    // 3. Nothing for a while: confirmed, unchanged, observed_at_ms too.
-    tokio::time::sleep_until((refreshed_at + quiet).into()).await;
+    // 3. Nothing for `quiet`, past the horizon: no re-put; the heartbeat
+    // vouches for A at most `bound` apart (`freshness.v2` §2.4), and S
+    // judges A firing.
+    let end = refreshed_at + quiet;
+    tokio::time::sleep_until(end.into()).await;
     let recs = of(&snapshot(&s.log), A_KEY);
-    let confirmations = &recs[2..];
+    assert_eq!(recs.len(), 3, "never re-put: {recs:#?}");
+    let seen = common::assert_cadence(&beats, refreshed_at, end, bound, JITTER, tag);
     assert!(
-        confirmations.len() >= 2,
-        "the refresh and a confirmation: {recs:#?}"
+        seen.iter().all(|b| vouched(b) == [0]),
+        "each vouches for A, the one firing alarm"
     );
-    for w in confirmations.windows(2) {
-        assert!(
-            w[1].at - w[0].at <= bound + JITTER,
-            "no two deliveries more than {bound:?} apart: {:?}",
-            w[1].at - w[0].at
-        );
-        assert_eq!(
-            w[1].payload, w[0].payload,
-            "unchanged, observed_at_ms included"
-        );
-        assert!(
-            w[1].stamp.unwrap() > w[0].stamp.unwrap(),
-            "under a later stamp"
-        );
-        assert_eq!(w[1].stamp_id(), owner_zid, "of the same id");
-    }
-    assert!(
-        refreshed_at + quiet - recs.last().unwrap().at <= bound + JITTER,
-        "and none more than {bound:?} before the window ends"
-    );
-    assert!(
-        reads(&recs)[3..]
-            .iter()
-            .all(|t| *t == Transition::Confirmed),
-        "each read confirmed"
-    );
+    // At the contract's own horizon, the copy's 4 s or the standard's 900 s.
+    let j = g.freshness(RES, &[sub.freshness(&key_of(A_KEY))]).unwrap();
+    assert_eq!(j.verdict, Verdict::Fresh, "past the horizon: {j:?}");
+    let (firing, _) = judge_s(&sub, &snapshot(&s.log), A_KEY, presence, &zid);
+    assert_eq!(pair(firing), (Answer::Yes, Reason::Firing));
     svc.close().await.unwrap();
 }
 
-/// §2, fast: the contract's ttl 4 s, so confirmed every 1.9 s.
+/// §2, fast: the contract's ttl 4 s, so a heartbeat every 1.9 s.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s2_escalate_refresh_and_confirm() {
     escalate_refresh_confirm(fast(4), Duration::from_secs(7), Duration::from_secs(2)).await;
 }
 
-/// §2 at the standard contract: 455 s of nothing, confirmed every 450 s.
+/// §2 at the standard contract: 905 s of nothing, a heartbeat every 450 s.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "slow tier: §2 waits 455 s at the contract's 900 s horizon"]
+#[ignore = "slow tier: §2 waits 905 s at the contract's 900 s horizon"]
 async fn s2_escalate_refresh_and_confirm_at_900_s() {
     escalate_refresh_confirm(
         alarms::implementation(),
-        Duration::from_secs(455),
+        Duration::from_secs(905),
         Duration::from_secs(450),
     )
     .await;
@@ -629,7 +663,11 @@ async fn s3_resolve_then_delete() {
     let answer = get(&g).await;
     let c = reply(&answer, A_KEY).expect("a reply for A");
     assert!(matches!(c, Current::Deleted { .. }), "{c:?}");
-    assert_eq!(c.timestamp(), recs[2].stamp, "the delete's stamp (core S3)");
+    assert_eq!(
+        answer.mark(c),
+        recs[2].inband.map(Mark::InBand),
+        "the delete's in-band stamp (core S3)"
+    );
     let (firing, _) = judge_g(&answer, A_KEY, presence, &zid);
     assert_eq!(pair(firing), (Answer::No, Reason::Deleted));
 
@@ -803,10 +841,9 @@ async fn s5_a_restart_mid_incident() {
     for k in [r_key.as_str(), p_key] {
         let c = reply(&at_token, k).unwrap_or_else(|| panic!("{k}: a reply_del at the token"));
         assert!(matches!(c, Current::Deleted { .. }), "{k}: {c:?}");
-        assert_eq!(
-            c.clock().as_deref(),
-            Some(new_zid.as_str()),
-            "{k}'s delete stamped by the new instance"
+        assert!(
+            matches!(at_token.mark(c), Some(Mark::InBand(s)) if s.run == svc.minter().run()),
+            "{k}'s delete stamped in band by the new instance's run"
         );
     }
 
@@ -828,9 +865,9 @@ async fn s5_a_restart_mid_incident() {
         .expect("A put again");
     assert_eq!(a_put.doc(), a_doc, "unchanged, t0 kept");
     assert_eq!(
-        a_put.stamp_id(),
-        new_zid,
-        "under the new instance's stamp id"
+        a_put.inband.map(|s| s.run),
+        Some(svc.minter().run()),
+        "under the new instance's run"
     );
     let all = snapshot(&s.log);
     assert_eq!(
@@ -867,10 +904,12 @@ async fn s5_a_restart_mid_incident() {
     svc.close().await.unwrap();
 }
 
-/// §6 on `imp`: the owner stops confirming A and keeps its tokens; S
-/// receives nothing more of it for `quiet`, and G's GET still answers it,
-/// under the last stamp. Returns S's subscription and log, G's consumer,
-/// the owner's presence and zid, and what keeps the bus up.
+/// §6 on `imp`: the owner stops confirming A and keeps its tokens; for
+/// `quiet` after the last heartbeat that vouched for A, S receives no put
+/// of it, and its heartbeats with A's bit clear; G's GET still answers it,
+/// under that last confirmation. Returns S's subscription and log, G's
+/// consumer, the owner's presence and zid, the heartbeats, and what keeps
+/// the bus up.
 async fn stops_confirming(
     imp: Implementation,
     quiet: Duration,
@@ -882,12 +921,14 @@ async fn stops_confirming(
     Presence,
     String,
     Alarms,
+    Beats,
 ) {
     let (r1, ep) = router(None).await;
     let os = client(&ep).await;
     let rs = client(&ep).await;
     let s = record(&rs).await;
-    let g = reader(&rs);
+    let (h, beats) = heartbeats(&rs, &imp).await;
+    let g = reader_of(&rs, &imp);
     let sub = g.subscribe(RES, |_| {}).await.unwrap();
     let (b, a) = owner(&os, config(SVC), imp, Startup::default()).await;
     let svc = b.start().await.unwrap();
@@ -897,47 +938,105 @@ async fn stops_confirming(
     deliveries(&s.log, A_KEY, 1).await;
     assert_eq!(a.is_confirming(A_KEY).await, Some(true));
 
-    // 1. Its evaluation of A's rule stops, and so do its re-puts of A.
+    eventually("a heartbeat vouches for A", || async {
+        beats.lock().unwrap().iter().any(|b| vouched(b) == [0])
+    })
+    .await;
+
+    // 1. Its evaluation of A's rule stops, and so does its heartbeat's
+    // vouching for A.
     assert!(a.set_confirming(A_KEY, false).await);
     assert_eq!(a.is_confirming(A_KEY).await, Some(false));
+    let cleared = Instant::now();
     let before = of(&snapshot(&s.log), A_KEY);
-    let last = before.last().unwrap().clone();
-    tokio::time::sleep_until((last.at + quiet).into()).await;
+    let last = beats
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|b| b.at <= cleared && vouched(b) == [0])
+        .map(|b| b.at)
+        .max()
+        .expect("a heartbeat vouched for A");
+    let confirmed = reply(&get(&g).await, A_KEY)
+        .and_then(Current::timestamp)
+        .expect("its last confirmation");
+    tokio::time::sleep_until((last + quiet).into()).await;
     let log = snapshot(&s.log);
-    assert_eq!(of(&log, A_KEY).len(), before.len(), "nothing more of A");
+    assert_eq!(of(&log, A_KEY).len(), before.len(), "no put of A");
+    let after: Vec<common::Beat> = beats
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|b| b.at > cleared + JITTER)
+        .cloned()
+        .collect();
+    assert!(!after.is_empty(), "its heartbeats go on");
+    assert!(
+        after.iter().all(|b| vouched(b).is_empty()),
+        "each with A's bit clear"
+    );
     let tokens = presence::tokens(&rs, &format!("zk2/{SVC}/@zk/instance/*"), T)
         .await
         .unwrap();
     assert_eq!(tokens.len(), 1, "its instance token held");
     let answer = get(&g).await;
     let c = reply(&answer, A_KEY).expect("its GETs still answer A");
-    assert_eq!(
-        c.timestamp(),
-        last.stamp,
-        "under the last stamp, not a newer one"
+    assert!(
+        c.timestamp().is_some_and(|t| t <= confirmed),
+        "under its last confirmation, not a newer one"
     );
-    ((r1, os, rs, s, svc), sub, log, g, presence, zid, a)
+    (
+        (r1, os, rs, s, svc, h),
+        sub,
+        log,
+        g,
+        presence,
+        zid,
+        a,
+        beats,
+    )
 }
 
-/// §6, fast: the contract's ttl 4 s; nothing more of A for six of its
-/// confirmation periods, and its confirmation back on re-puts it at once.
+/// §6, fast: the contract's ttl 4 s; no confirmation of A for six of its
+/// heartbeat periods, and its confirmation back on, the next heartbeat
+/// vouches for it again, with no put.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s6_a_hung_owner_goes_stale() {
-    let (bus, _sub, log, g, _presence, _zid, a) =
+    let (bus, sub, log, g, _presence, _zid, a, beats) =
         stops_confirming(fast(4), Duration::from_secs(12)).await;
-    // Its evaluation back: confirmed at once, its interval run out.
+    // At the copy's horizon, 4 s: stale (§2.14's judges read 900 s, the
+    // standard's, which the slow variant checks).
+    let j = g.freshness(RES, &[sub.freshness(&key_of(A_KEY))]).unwrap();
+    assert_eq!(j.verdict, Verdict::Stale, "{j:?}");
+    // Its evaluation back: the next heartbeat vouches for A.
+    let held = reply(&get(&g).await, A_KEY)
+        .and_then(Current::timestamp)
+        .expect("stamped");
     assert!(a.set_confirming(A_KEY, true).await);
     let start = Instant::now();
     eventually("A confirmed again", || async {
-        get(&g).await.current.iter().any(|c| {
-            c.key() == key_of(A_KEY) && c.timestamp() > of(&log, A_KEY).last().unwrap().stamp
-        })
+        beats
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|b| b.at > start && vouched(b) == [0])
     })
     .await;
     assert!(
         start.elapsed() < Duration::from_secs(2) + JITTER,
-        "at once: {:?}",
+        "at the next heartbeat: {:?}",
         start.elapsed()
+    );
+    eventually("G's reply carries the new confirmation", || async {
+        reply(&get(&g).await, A_KEY)
+            .and_then(Current::timestamp)
+            .is_some_and(|t| t > held)
+    })
+    .await;
+    assert_eq!(
+        of(&log, A_KEY).len(),
+        1,
+        "no put of A: its heartbeat confirms it"
     );
     drop(bus);
 }
@@ -947,7 +1046,7 @@ async fn s6_a_hung_owner_goes_stale() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "slow tier: §6 waits 905 s at the contract's 900 s horizon"]
 async fn s6_a_hung_owner_goes_stale_at_900_s() {
-    let (bus, sub, log, g, presence, zid, _a) =
+    let (bus, sub, log, g, presence, zid, _a, _beats) =
         stops_confirming(alarms::implementation(), Duration::from_secs(905)).await;
     // 2. S judges.
     let (firing, stale) = judge_s(&sub, &log, A_KEY, presence, &zid);
@@ -1082,8 +1181,8 @@ async fn a_re_mint_puts_every_alarm_again() {
     seen_by(&os).await;
     let raised = a.raise(alarm_a(Severity::Warning)).await.unwrap().document;
     let first = deliveries(&s.log, A_KEY, 1).await[0]
-        .stamp
-        .expect("stamped");
+        .inband
+        .expect("stamped in band");
     let g = reader(&rs);
     let n = snapshot(&s.log).len();
     svc.new_epoch().await.unwrap();
@@ -1095,8 +1194,8 @@ async fn a_re_mint_puts_every_alarm_again() {
     };
     assert_eq!(am::decode(&sample.payload().to_bytes()).unwrap(), raised);
     assert!(
-        c.timestamp().expect("stamped") > first,
-        "the re-put's stamp, not the raise's"
+        matches!(at_token.mark(c), Some(Mark::InBand(s)) if s != first),
+        "the re-put's in-band stamp, not the raise's"
     );
     deliveries(&s.log, A_KEY, 2).await;
     assert_eq!(

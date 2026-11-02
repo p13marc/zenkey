@@ -421,3 +421,90 @@ pub fn record(s: &zenoh::sample::Sample) -> Vec<u8> {
 pub fn inband(s: &zenoh::sample::Sample) -> Option<zenkey::model::wire::Stamp> {
     zenkey::inband::stamp(s)
 }
+
+/// One heartbeat as a raw subscriber reads it (`freshness.v2` §2.4, core
+/// §7.5's form 6): its arrival, its CH tag, its key's run and seq, and its
+/// body read with the covered revision's collections.
+#[derive(Debug, Clone)]
+pub struct Beat {
+    pub at: std::time::Instant,
+    pub tag: zenkey::model::wire::Tag,
+    pub stamp: zenkey::model::wire::Stamp,
+    pub hb: zenkey::model::heartbeat::Heartbeat,
+}
+
+/// The heartbeats a [`heartbeats`] subscriber heard, in arrival order.
+pub type Beats = std::sync::Arc<std::sync::Mutex<Vec<Beat>>>;
+
+/// A raw subscriber on the heartbeat key `key`, each heartbeat read with
+/// `layout` (#978's F4: health.v1, alarms.v1 and config.v1 are confirmed so).
+pub async fn heartbeats(
+    s: &zenoh::Session,
+    key: &str,
+    layout: zenkey::model::heartbeat::Layout,
+) -> (zenoh::pubsub::Subscriber<()>, Beats) {
+    use zenkey::model::wire::{Envelope, Form};
+    let beats: Beats = std::sync::Arc::default();
+    let w = std::sync::Arc::clone(&beats);
+    let sub = s
+        .declare_subscriber(key.to_owned())
+        .callback(move |sample| {
+            let at = std::time::Instant::now();
+            let bytes = sample.payload().to_bytes();
+            let e = Envelope::parse(&bytes).expect("an envelope");
+            assert_eq!(e.form, Form::Heartbeat, "core §7.5's form 6");
+            let hb = zenkey::model::heartbeat::Heartbeat::parse(e.record, &layout)
+                .expect("a body of the covered revision's");
+            w.lock().unwrap().push(Beat {
+                at,
+                tag: e.tag,
+                stamp: e.stamp,
+                hb,
+            });
+        })
+        .await
+        .unwrap();
+    (sub, beats)
+}
+
+/// Asserts that `beats` came at most `period` plus `jitter` apart, from
+/// `from` to `to`, their seqs consecutive within one run, each with `tag`;
+/// returns those in that span.
+pub fn assert_cadence(
+    beats: &Beats,
+    from: std::time::Instant,
+    to: std::time::Instant,
+    period: Duration,
+    jitter: Duration,
+    tag: zenkey::model::wire::Tag,
+) -> Vec<Beat> {
+    let all: Vec<Beat> = beats
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|b| b.at >= from && b.at <= to)
+        .cloned()
+        .collect();
+    assert!(!all.is_empty(), "no heartbeat between the two instants");
+    let mut at = from;
+    for b in &all {
+        assert!(
+            b.at - at <= period + jitter,
+            "heartbeats more than {period:?} apart: {:?}",
+            b.at - at
+        );
+        assert_eq!(b.tag, tag, "the covered revision's tag");
+        at = b.at;
+    }
+    assert!(to - at <= period + jitter, "no heartbeat near the end");
+    for w in all.windows(2) {
+        if w[0].stamp.run == w[1].stamp.run {
+            assert_eq!(
+                w[1].stamp.seq.get(),
+                w[0].stamp.seq.get().wrapping_add(1) & zenkey::model::wire::Seq::MAX.get(),
+                "consecutive seqs"
+            );
+        }
+    }
+    all
+}

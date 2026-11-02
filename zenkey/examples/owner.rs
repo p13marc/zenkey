@@ -79,14 +79,15 @@
 //!
 //! **`health.v1`** (`spec/profiles/health/v1.md`, #721) is implemented by
 //! the runtime ([`zenkey::health`]) with `--health`, or when a contract
-//! file given is the standard one (its fingerprint is `e9dbcdcb…`, as
+//! file given is the standard one (its fingerprint is `60a43745…`, as
 //! `spec/profiles/health/health.v1.toml` is): the status is put before the
 //! tokens, `UNSPECIFIED` with reason `starting` unless
 //! `--health-status <LEVEL>[:<reason>]` sets one (§2.3); each
 //! `--health-check <name>=<LEVEL>[:<detail>]` is a check put before the
 //! tokens too, the status raised to the worst of them (§2.2). A level is
 //! `OK`, `DEGRADED` or `FAILED`, in any case; a check may be `UNSPECIFIED`,
-//! one it cannot run (§2.3). The status is re-put every 28.5 s.
+//! one it cannot run (§2.3). The status is never re-put: the heartbeat
+//! covering `health.v1` vouches for it every 28.5 s (`freshness.v2` §2.4).
 //!
 //! **Commands**, one per line on standard input, each answered by one line
 //! on standard output, while the owner runs:
@@ -156,7 +157,7 @@
 //!
 //! **`config.v1`** (`spec/profiles/config/v1.md`, #768) is implemented by
 //! the runtime ([`zenkey::config_v1`]) with `--config`, or when a contract
-//! file given is the standard one (its fingerprint is `727ff009…`, as
+//! file given is the standard one (its fingerprint is `4778b0aa…`, as
 //! `spec/profiles/config/config.v1.toml` is). The schema is
 //! `conformance/lifecycle.json`'s `rf`, as `scenarios.md` runs it, and a
 //! contract group after it:
@@ -213,12 +214,13 @@
 //! **`alarms.v1`** (`spec/profiles/alarms/v1.md`, #800) is implemented by
 //! the runtime ([`zenkey::alarms`]) with `--alarms`, implied by any
 //! `--alarms-*` option, or when a contract file given is the standard one
-//! (its fingerprint is `95579151…`, as `spec/profiles/alarms/alarms.v1.toml`
+//! (its fingerprint is `e2b48d58…`, as `spec/profiles/alarms/alarms.v1.toml`
 //! is). With `--alarms`, an `alarms.v1` contract file of another revision is
 //! implemented by the runtime on that revision instead, its
 //! `freshness.ttl_s` setting the confirmation period: a runner's copy of
-//! the standard contract with a short horizon is its fast tier. Each firing
-//! alarm is re-put every 427.5 s at the standard horizon (§2.7).
+//! the standard contract with a short horizon is its fast tier. The
+//! heartbeat covering `alarms.v1` vouches for each firing alarm every
+//! 427.5 s at the standard horizon, and none is re-put (§2.7).
 //!
 //! - `--alarms-record <file>` is the owner's persistent record
 //!   ([`zenkey::alarms::FileRecord`]): read at start, and rewritten whole
@@ -773,11 +775,12 @@ Command words:
 alarms.v1 (spec/profiles/alarms/v1.md)
   Implemented by the runtime with --alarms, implied by any --alarms-* option,
   or when a contract file given is the standard alarms.v1 (fingerprint
-  95579151...). With --alarms, an alarms.v1 contract file of another revision
+  e2b48d58...). With --alarms, an alarms.v1 contract file of another revision
   is implemented on that revision instead, its freshness.ttl_s setting the
   confirmation period: a runner's copy of the standard contract with a short
-  horizon is accepted (each firing alarm re-put every 427.5 s at the
-  standard 900 s, every 1.9 s at 4 s).
+  horizon is accepted (the heartbeat vouching for each firing alarm every
+  427.5 s at the standard 900 s, every 1.9 s at 4 s; a revision that uses
+  freshness.v1 re-puts it instead).
 
   --alarms                        implement alarms.v1
   --alarms-record <file>          the owner's persistent record, read at start and

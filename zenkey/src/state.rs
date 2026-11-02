@@ -1091,6 +1091,9 @@ pub struct StateWriter {
     member: Arc<Member>,
     /// The refresher's period: [`REFRESH_LEAD`] of ttl/2.
     period: Option<Duration>,
+    /// [`REFRESH_LEAD`] of ttl/2 whoever confirms the member: the
+    /// refresher, or under `freshness.v2` its owner's heartbeat.
+    confirm: Option<Duration>,
     refresher: Option<tokio::task::JoinHandle<()>>,
     /// Whether it keeps its last value: a horizon above 0, so a re-put
     /// ([`StateWriter::reput`]) can put it again.
@@ -1133,10 +1136,11 @@ impl StateWriter {
         // freshness.v2 §2.4: a member a heartbeat covers is never re-put.
         let covered = store.covers(key.as_str());
         let keep = horizon.refresh_bound().is_some();
-        let period = horizon
+        let confirm = horizon
             .refresh_bound()
             .map(|b| b.mul_f64(REFRESH_LEAD))
-            .filter(|p| !p.is_zero() && !covered);
+            .filter(|p| !p.is_zero());
+        let period = confirm.filter(|_| !covered);
         let refresher = period.and_then(|period| {
             let Ok(rt) = tokio::runtime::Handle::try_current() else {
                 tracing::warn!(
@@ -1167,6 +1171,7 @@ impl StateWriter {
             minter,
             member,
             period,
+            confirm,
             refresher,
             keep,
             covered,
@@ -1200,6 +1205,22 @@ impl StateWriter {
     #[must_use]
     pub fn refresh_period(&self) -> Option<Duration> {
         self.period.filter(|_| self.refresher.is_some())
+    }
+
+    /// The longest a member goes unconfirmed while it is vouched for
+    /// (`freshness.v1` and `freshness.v2` §2.4): [`REFRESH_LEAD`] of ttl/2.
+    /// Under `freshness.v1` it is the refresher's period. Under
+    /// `freshness.v2` the member's heartbeat beats at most that far apart,
+    /// at its interface's shortest horizon. `None` for a member with no
+    /// horizon above 0, or one under `freshness.v1` with no runtime to
+    /// re-put it.
+    #[must_use]
+    pub fn confirm_period(&self) -> Option<Duration> {
+        if self.covered {
+            self.confirm
+        } else {
+            self.refresh_period()
+        }
     }
 
     /// Whether the member is re-put now: it has a horizon above 0, and

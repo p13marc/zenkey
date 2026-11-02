@@ -21,7 +21,13 @@
 //! §10's 300 s are the owner's clock moved
 //! ([`Configuration::simulate_offset`]), as health.v1's suite moves a
 //! clock: the key is forgotten at 300 s on the owner's clock, which is all
-//! the step observes. §6 waits its 80 s, §1 its 35 s.
+//! the step observes. §6 waits its 80 s, §1 its 65 s.
+//!
+//! **The heartbeat** (text 0.9, #978's F4): the contract uses
+//! `freshness.v2`, so the view and the status are put on change and never
+//! again unchanged; the owner's heartbeat covering `config.v1` vouches for
+//! both. §1 reads it raw, H, and judges both fresh past the horizon through
+//! a tool's subscription that hears it.
 //!
 //! §8's access control is R1's, with users authenticated by name and
 //! password: `default_permission: "deny"`, `ops` granted every act but
@@ -44,8 +50,10 @@ use common::{SETTLE, T, client, config, eventually, router, router_with};
 use serde_json::{Value as Json, json};
 use sim::{SimDevice, UndoFailure};
 use zenkey::config_v1::{self, ConfigStatus, ConfigView, Configuration, DesiredConfig, Startup};
+use zenkey::consumer::Consumer;
 use zenkey::model::config::{ConfigChangeEvent, Outcome as Ending, Source, Time, Value};
 use zenkey::model::envelope::{Detail, Envelope};
+use zenkey::model::freshness::Verdict;
 use zenkey::model::grammar::{ZkKey, parse};
 use zenkey::model::template::Bindings;
 use zenkey::{CallMetadata, Client, Outcome, Service, ServiceBuilder, presence};
@@ -434,6 +442,23 @@ async fn bus() -> Bus {
 async fn s1_a_hot_set_read_back() {
     let bus = bus().await;
     let s = recorder(&bus.s, RF0).await;
+    let layout = zenkey::model::heartbeat::Layout::of(config_v1::implementation().contract());
+    let tag = layout.tag;
+    let (_h, beats) = common::heartbeats(
+        &bus.s,
+        &format!("zk2/{RF0}/freshness.v2/stream/heartbeat/config.v1"),
+        layout,
+    )
+    .await;
+    let tool = Consumer::for_tool(
+        &bus.s,
+        config_v1::implementation().shared_contract(),
+        &[RF0],
+        &Default::default(),
+    )
+    .unwrap();
+    let sub_view = tool.subscribe(config_v1::VIEW, |_| {}).await.unwrap();
+    let sub_status = tool.subscribe(config_v1::STATUS, |_| {}).await.unwrap();
     let tokens = bus
         .c
         .liveliness()
@@ -536,41 +561,75 @@ async fn s1_a_hot_set_read_back() {
     assert_eq!((v1.revision, st1.revision), (1, 1));
     assert_eq!(st1, ConfigStatus::of(&v1));
 
-    // 4. Nothing put for 35 s: both re-put within 30 s, unchanged, and
-    // never deleted (freshness.v1 §2.4).
+    // 4. Nothing put for 65 s: neither is re-put, the heartbeat vouches for
+    // both (freshness.v2 §2.4), S judges both fresh past the horizon, and
+    // neither is deleted.
     let at = s
         .views()
         .iter()
         .find(|(_, v)| v.revision == 1)
         .map(|(t, _)| *t)
         .unwrap();
-    tokio::time::sleep(Duration::from_secs(35).saturating_sub(at.elapsed())).await;
-    let again = |xs: Vec<(Instant, Json)>| -> Vec<Duration> {
-        xs.iter()
-            .filter(|(t, _)| *t > at)
-            .map(|(t, _)| t.duration_since(at))
-            .collect()
+    let status_at = s
+        .statuses()
+        .iter()
+        .find(|(_, v)| v.revision == 1)
+        .map(|(t, _)| *t)
+        .unwrap();
+    let end = at.max(status_at) + Duration::from_secs(65);
+    tokio::time::sleep_until(end.into()).await;
+    let after = |xs: Vec<(Instant, Json)>, from: Instant| {
+        xs.iter().filter(|(t, _)| *t > from).count()
     };
-    let views: Vec<(Instant, Json)> = s.of("/config.v1/state/view");
-    let statuses: Vec<(Instant, Json)> = s.of("/config.v1/state/status");
-    let re_views = again(views.clone());
-    let re_statuses = again(statuses.clone());
-    assert!(
-        re_views
-            .first()
-            .is_some_and(|d| *d <= Duration::from_secs(30)),
-        "{re_views:?}"
+    assert_eq!(
+        after(s.of("/config.v1/state/view"), at),
+        0,
+        "the view never re-put"
     );
-    assert!(
-        re_statuses
-            .first()
-            .is_some_and(|d| *d <= Duration::from_secs(30) + JITTER),
-        "{re_statuses:?}"
+    assert_eq!(
+        after(s.of("/config.v1/state/status"), status_at),
+        0,
+        "the status never re-put"
     );
-    let last_view = views.last().unwrap().1.clone();
-    assert_eq!(serde_json::to_value(&v1).unwrap(), last_view, "unchanged");
+    let seen = common::assert_cadence(&beats, at, end, Duration::from_secs(30), JITTER, tag);
+    for b in &seen {
+        assert!(
+            b.hb.sections.iter().all(|s| matches!(
+                s,
+                Some(zenkey::model::heartbeat::Section {
+                    members: zenkey::model::heartbeat::Members::One { vouched: true },
+                    ..
+                })
+            )),
+            "each vouches for the view and the status: {b:?}"
+        );
+    }
+    for (sub, key, what) in [
+        (
+            &sub_view,
+            format!("zk2/{RF0}/config.v1/state/view"),
+            "the view",
+        ),
+        (
+            &sub_status,
+            format!("zk2/{RF0}/config.v1/state/status"),
+            "the status",
+        ),
+    ] {
+        let j = tool
+            .freshness(&key_resource(&key), &[sub.freshness(&key)])
+            .unwrap();
+        assert_eq!(j.verdict, Verdict::Fresh, "{what}, 65 s after its put");
+    }
     assert_eq!(s.state_deletes(), 0);
     rf0.svc.close().await.unwrap();
+}
+
+/// The resource a member key of `lab/rf0`'s `config.v1` is, as the
+/// consumer names it.
+fn key_resource(key: &str) -> String {
+    let (_, rest) = key.split_once("/config.v1/").expect("a config.v1 key");
+    rest.to_owned()
 }
 
 /// §2 A reach set, confirmed (§2.8, §2.9, §2.10).

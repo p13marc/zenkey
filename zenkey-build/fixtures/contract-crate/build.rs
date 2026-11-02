@@ -4,6 +4,7 @@
 //!
 //! `health.v1`'s revision 1.0 was published in `examples/zk2/.history`
 //! before the contract moved, so that one root serves both directories.
+//! Its revision 1.1 (#978's F4) is published there too.
 
 use std::path::PathBuf;
 
