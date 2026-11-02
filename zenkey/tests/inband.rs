@@ -212,7 +212,7 @@ async fn a_state_get_reads_enveloped_replies() {
                 )
                 .wait()
                 .unwrap();
-            q.reply(vehicle(3), vec![0xe0, 0, 0])
+            q.reply(vehicle(3), vec![0x80, 0, 0])
                 .encoding(Encoding::ZENOH_BYTES)
                 .wait()
                 .unwrap();
@@ -252,7 +252,7 @@ async fn a_state_get_reads_enveloped_replies() {
     assert_eq!(
         answer.undecodable.get(&vehicle(3)).map(|r| r.token()),
         Some("form"),
-        "form 7, a snapshot, is reserved"
+        "form 4, an event, is reserved"
     );
 }
 
@@ -302,7 +302,7 @@ async fn a_typed_get_keeps_each_keys_in_band_stamp() {
                 )
                 .wait()
                 .unwrap();
-            q.reply(vehicle(3), vec![0xe0, 0, 0])
+            q.reply(vehicle(3), vec![0x80, 0, 0])
                 .encoding(Encoding::ZENOH_BYTES)
                 .wait()
                 .unwrap();

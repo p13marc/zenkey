@@ -7,6 +7,7 @@
 //! delete, a delete's attachment    CH · run · seq
 //! heartbeat, a put's payload       CH · run · seq · body        (core 0.81, #978's F1)
 //! frame, a put's payload           CH · run · seq · body        (core 0.83, #981's K1)
+//! snapshot, a GET reply's payload  CH · run · asof · body       (core 0.97, #977's E1)
 //! request, a query's payload       CH · record                  (core 0.92, C4a)
 //! value, a reply's payload         CH · run · seq · record      (core 0.92, C4a)
 //! error, a reply error's payload   CH · run · seq · error       (core 0.92, C4a)
@@ -36,12 +37,18 @@
 //! a delete ([`DeleteStamp::parse`]), or a call's query, reply or reply
 //! error. So the tag of every form but a delete is reported, never checked
 //! against a type; `packed` (#979) is the first type kind to define one. A
-//! put carries a mutation, a heartbeat or a frame ([`Envelope::form`]); a
+//! put carries a mutation, a heartbeat, a frame or a snapshot
+//! ([`Envelope::form`]); a
 //! heartbeat's body is read with its covered revision
 //! ([`crate::heartbeat`]), its tag that revision's, and a frame's with its
-//! declaration ([`crate::frame`]), its tag that declaration's.
-//! [`read_put`] refuses a frame on a key whose kind token is not `stream`
-//! (`key_kind`), which [`Envelope::parse_on`] reads. An error's detail is
+//! declaration ([`crate::frame`]), its tag that declaration's. A
+//! snapshot's body (core 0.97, #977's E1) is taken unread, its asof in the
+//! seq's place, and read by [`crate::collection`], its tag its
+//! collection's type's. [`read_put`] refuses a frame on a key whose kind
+//! token is not `stream`, and a snapshot on one that is neither `state`
+//! nor `@state` (`key_kind`), which [`Envelope::parse_on`] reads. Only a
+//! GET's reply carries a snapshot, but the parser cannot tell how a put
+//! came, so it reads one either way. An error's detail is
 //! taken unread. The first refusal that applies is reported, in §7.5's
 //! order, with the token `spec/conformance/envelope/` pins
 //! ([`Refusal::token`]). Every envelope and form accepted writes back to
@@ -66,8 +73,8 @@ use crate::envelope::{Cause, Code, ErrorForm};
 use crate::grammar::{KindToken, ZkKey, parse};
 
 /// A form: CH's three high bits. This version defines a mutation, a
-/// delete, a value, an error, a frame and a heartbeat, and reserves the
-/// other two, an event and a snapshot, for later versions, each refused.
+/// delete, a value, an error, a frame, a heartbeat and a snapshot, and
+/// reserves the other, an event, for a later version, refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Form {
     /// Code 0: a put's run and seq, then its record.
@@ -88,7 +95,8 @@ pub enum Form {
     /// Code 6: an owner's confirmation of the state it holds for one
     /// interface, a put's payload (core 0.81, [`crate::heartbeat`]).
     Heartbeat,
-    /// Code 7, reserved: a collection's state in one reply.
+    /// Code 7: a collection's state, a GET reply's payload, in pages
+    /// (core 0.97, [`crate::collection`]).
     Snapshot,
 }
 
@@ -133,7 +141,7 @@ impl Form {
     /// Whether this version defines the form; a reserved one is refused.
     #[must_use]
     pub const fn is_defined(self) -> bool {
-        !matches!(self, Form::Event | Form::Snapshot)
+        !matches!(self, Form::Event)
     }
 
     /// The form's name, as §7.5's table and the fixtures spell it.
@@ -163,7 +171,8 @@ impl std::fmt::Display for Form {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SampleKind {
     /// A put's payload, or the payload of a GET's reply that represents a
-    /// put (S2): a mutation, a heartbeat or a frame.
+    /// put (S2) or carries a snapshot: a mutation, a heartbeat, a frame or a
+    /// snapshot.
     Put,
     /// A delete's attachment, or a `reply_del`'s (S2): a delete.
     Delete,
@@ -199,13 +208,16 @@ impl SampleKind {
         }
     }
 
-    /// Whether the sample carries the form: a put a mutation, a heartbeat
-    /// or a frame, a delete's attachment a delete, a query and a reply a
+    /// Whether the sample carries the form: a put a mutation, a heartbeat,
+    /// a frame or a snapshot, a delete's attachment a delete, a query and a reply a
     /// value, and a `reply_err` an error. No sample carries a reserved one.
     #[must_use]
     pub const fn carries(self, form: Form) -> bool {
         match self {
-            SampleKind::Put => matches!(form, Form::Mutation | Form::Frame | Form::Heartbeat),
+            SampleKind::Put => matches!(
+                form,
+                Form::Mutation | Form::Frame | Form::Heartbeat | Form::Snapshot
+            ),
             SampleKind::Delete => matches!(form, Form::Delete),
             SampleKind::Query | SampleKind::Reply => matches!(form, Form::Value),
             SampleKind::ReplyErr => matches!(form, Form::Error),
@@ -404,15 +416,16 @@ pub enum Refusal {
     /// No byte at all, so no CH.
     #[error("no byte, so no header byte")]
     Empty,
-    /// A form this version reserves: an event or a snapshot.
+    /// A form this version reserves: an event.
     #[error("the form {0} is reserved")]
     Reserved(Form),
     /// A form the sample does not carry ([`SampleKind::carries`]).
     #[error("the form {form} on a {sample}, which does not carry it")]
     WrongSample { form: Form, sample: SampleKind },
-    /// A frame on a key whose kind token is not `stream` (core 0.83).
-    #[error("a frame on a {0} key, which is no plain stream's")]
-    KeyKind(KindToken),
+    /// A frame on a key whose kind token is not `stream` (core 0.83), or a
+    /// snapshot on one that is neither `state` nor `@state` (core 0.97).
+    #[error("a {form} on a {kind} key, which does not carry it")]
+    KeyKind { form: Form, kind: KindToken },
     /// A delete whose tag is not 0.
     #[error("a delete's tag is {}, not 0", .0.get())]
     DeleteTag(Tag),
@@ -465,7 +478,7 @@ impl Refusal {
             Refusal::Empty | Refusal::Short { .. } | Refusal::MessageShort { .. } => "short",
             Refusal::Reserved(_) => "form",
             Refusal::WrongSample { .. } => "sample_kind",
-            Refusal::KeyKind(_) => "key_kind",
+            Refusal::KeyKind { .. } => "key_kind",
             Refusal::DeleteTag(_) => "tag",
             Refusal::RequestRun => "request_run",
             Refusal::Trailing(_) => "trailing",
@@ -478,7 +491,7 @@ impl Refusal {
 }
 
 /// §7.5's checks on CH, in its order: CH itself, its form, the sample, a
-/// frame's key kind (when `kind` is known), a delete's tag and a request's
+/// frame's or a snapshot's key kind (when `kind` is known), a delete's tag and a request's
 /// width bit. Returns CH and every byte after it.
 fn read_header(
     bytes: &[u8],
@@ -496,11 +509,13 @@ fn read_header(
             sample,
         });
     }
-    if header.form == Form::Frame
-        && let Some(k) = kind
-        && k != KindToken::Stream
+    if let Some(k) = kind
+        && !key_carries(header.form, k)
     {
-        return Err(Refusal::KeyKind(k));
+        return Err(Refusal::KeyKind {
+            form: header.form,
+            kind: k,
+        });
     }
     if header.form == Form::Delete && header.tag != Tag::NONE {
         return Err(Refusal::DeleteTag(header.tag));
@@ -509,6 +524,17 @@ fn read_header(
         return Err(Refusal::RequestRun);
     }
     Ok((header, rest))
+}
+
+/// Whether a key of the kind `kind` carries the form, by its kind alone: a
+/// frame only a `stream` key, a snapshot only a `state` or `@state` key,
+/// and every other form any key (core §7.5's `key_kind`).
+const fn key_carries(form: Form, kind: KindToken) -> bool {
+    match form {
+        Form::Frame => matches!(kind, KindToken::Stream),
+        Form::Snapshot => matches!(kind, KindToken::State | KindToken::ExplicitState),
+        _ => true,
+    }
 }
 
 /// §7.5's parse of a form with a stamp, in its order: CH's checks
@@ -540,25 +566,29 @@ fn read(
 }
 
 /// A put's payload under the envelope, or a call's reply in its value
-/// form. This version defines three forms for a put: the mutation,
+/// form. This version defines four forms for a put: the mutation,
 /// `CH · run · seq · record`, the frame, `CH · run · seq · body` (core
-/// 0.83), and the heartbeat, `CH · run · seq · body` (core 0.81). A reply's
+/// 0.83), the heartbeat, `CH · run · seq · body` (core 0.81), and the
+/// snapshot, `CH · run · asof · body` (core 0.97), a GET reply's. A reply's
 /// value has a mutation's shape, `CH · run · seq · record` (core 0.92).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Envelope<'a> {
-    /// [`Form::Mutation`], [`Form::Frame`] or [`Form::Heartbeat`] on a
-    /// put, [`Form::Value`] on a reply.
+    /// [`Form::Mutation`], [`Form::Frame`], [`Form::Heartbeat`] or
+    /// [`Form::Snapshot`] on a put, [`Form::Value`] on a reply.
     pub form: Form,
     /// A mutation's: 0 unless the record's type kind defines a tag. A
     /// frame's: its declaration's ([`crate::frame::Layout::tag`]). A
-    /// heartbeat's: its covered revision's. A value's: its operation's
-    /// `response` type's, or its `summary` type's on a summary reply.
+    /// heartbeat's: its covered revision's. A snapshot's: its collection's
+    /// type's. A value's: its operation's `response` type's, or its
+    /// `summary` type's on a summary reply.
     pub tag: Tag,
-    /// A value's is the replying instance's as-of mark (core §5.1).
+    /// A value's is the replying instance's as-of mark (core §5.1). A
+    /// snapshot's is the owner's run and its asof, in the seq's place.
     pub stamp: Stamp,
     /// Every byte after the seq, possibly none: a mutation's or a value's
-    /// record, read as the resource's type says (§7.1), or a frame's or a
-    /// heartbeat's body.
+    /// record, read as the resource's type says (§7.1), or a frame's, a
+    /// heartbeat's or a snapshot's body, a snapshot's unread
+    /// ([`crate::collection::Page::read`] reads it).
     pub record: &'a [u8],
 }
 
@@ -597,6 +627,18 @@ impl<'a> Envelope<'a> {
         }
     }
 
+    /// A snapshot's page: its body under the owner's run and its asof, in
+    /// the seq's place (core 0.97 §7.5, [`crate::collection`]).
+    #[must_use]
+    pub const fn snapshot(tag: Tag, run: Run, asof: Seq, body: &'a [u8]) -> Envelope<'a> {
+        Envelope {
+            form: Form::Snapshot,
+            tag,
+            stamp: Stamp { run, seq: asof },
+            record: body,
+        }
+    }
+
     /// Whether it is a frame's: its bytes after the seq are a body, never a
     /// record.
     #[must_use]
@@ -611,9 +653,16 @@ impl<'a> Envelope<'a> {
         matches!(self.form, Form::Heartbeat)
     }
 
+    /// Whether it is a snapshot's page: its bytes after the asof are a
+    /// body, never a record.
+    #[must_use]
+    pub const fn is_snapshot(&self) -> bool {
+        matches!(self.form, Form::Snapshot)
+    }
+
     /// A put's payload read as an envelope, or the first refusal that
-    /// applies. The key is not read, so a frame is accepted on any key:
-    /// [`Envelope::parse_on`] reads its key's kind.
+    /// applies. The key is not read, so a frame or a snapshot is accepted
+    /// on any key: [`Envelope::parse_on`] reads its key's kind.
     ///
     /// # Errors
     ///
@@ -625,7 +674,8 @@ impl<'a> Envelope<'a> {
     }
 
     /// [`Envelope::parse`] for a put on a key of the kind `kind`: a frame on
-    /// a key whose kind is not `stream` is [`Refusal::KeyKind`], after the
+    /// a key whose kind is not `stream`, or a snapshot on one that is
+    /// neither `state` nor `@state`, is [`Refusal::KeyKind`], after the
     /// sample's kind and before the stamp (core §7.5).
     ///
     /// # Errors
@@ -898,6 +948,11 @@ pub enum Reading<'a> {
     /// revision ([`crate::heartbeat::Heartbeat::parse`]), never decoded as
     /// a record of the key's type. Its stamp is its key's.
     Heartbeat(Envelope<'a>),
+    /// A snapshot's page (core 0.97, form 7) on a `state` or `@state`
+    /// key, a GET reply's: its body is read by
+    /// [`crate::collection::Page::read`], never decoded as a record of the
+    /// key's type. Its stamp is the owner's run and the snapshot's asof.
+    Snapshot(Envelope<'a>),
     /// An envelope refused: the sample is undecodable, with the refusal's
     /// token as its reason ([`Refusal::reason`]). It is counted and shown
     /// as such, never decoded or sniffed as a payload with no envelope
@@ -918,6 +973,7 @@ pub fn read_put<'a>(key: &str, encoding: &str, payload: &'a [u8]) -> Reading<'a>
     match parsed {
         Ok(e) if e.is_frame() => Reading::Framed(e),
         Ok(e) if e.is_heartbeat() => Reading::Heartbeat(e),
+        Ok(e) if e.is_snapshot() => Reading::Snapshot(e),
         Ok(e) => Reading::Enveloped(e),
         Err(r) => Reading::Refused(r),
     }

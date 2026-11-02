@@ -1214,7 +1214,10 @@ fn envelope_carries() {
         let bytes = unhex(case["hex"].as_str().expect("hex"));
         let got = match read_put(key, ENCODING, &bytes) {
             Reading::Plain => json!({"reads": "plain"}),
-            Reading::Enveloped(e) | Reading::Framed(e) | Reading::Heartbeat(e) => {
+            Reading::Enveloped(e)
+            | Reading::Framed(e)
+            | Reading::Heartbeat(e)
+            | Reading::Snapshot(e) => {
                 assert_eq!(e.write(), bytes, "{note}: writes back");
                 json!({"reads": e.form.as_str()})
             }
@@ -1226,6 +1229,10 @@ fn envelope_carries() {
     assert!(
         seen.contains(r#"{"refused":"key_kind"}"#),
         "a key_kind case"
+    );
+    assert!(
+        seen.contains(r#"{"reads":"snapshot"}"#),
+        "a snapshot read on a state key"
     );
 }
 
@@ -1250,7 +1257,7 @@ fn error_form_json(e: &zenkey_model::envelope::ErrorForm<'_>) -> Value {
 }
 
 /// `spec/conformance/envelope/vectors.json` (core §7.5, 0.72; #976; a
-/// call's forms, 0.92): CH's three fields from one byte, and an envelope's
+/// call's forms, 0.92; a snapshot's envelope, 0.97): CH's three fields from one byte, and an envelope's
 /// or a form's bytes with its sample → the parse or the refusal's token,
 /// the first in §7.5's order. Every header and every accepted case writes
 /// back to its bytes. Written by hand from the text, checked, never
@@ -2458,5 +2465,255 @@ fn catalog_schema_is_current() {
             text,
             "spec/catalog.schema.json is stale: ZK2_BLESS=1 cargo test -p zenkey-model --test conformance"
         );
+    }
+}
+
+/// A snapshot's time as `snapshot/bodies.json` spells it: `{"s", "ms"}`, or
+/// `null` for the unknown time.
+fn snapshot_time(v: &Value) -> zenkey_model::collection::Time {
+    use zenkey_model::collection::Time;
+    if v.is_null() {
+        return Time::Unknown;
+    }
+    Time::Known {
+        s: u32::try_from(v["s"].as_u64().expect("s")).expect("t32"),
+        ms: u16::try_from(v["ms"].as_u64().expect("ms")).expect("ms16"),
+    }
+}
+
+fn snapshot_time_json(t: zenkey_model::collection::Time) -> Value {
+    use zenkey_model::collection::Time;
+    match t {
+        Time::Unknown => Value::Null,
+        Time::Known { s, ms } => json!({"s": s, "ms": ms}),
+    }
+}
+
+/// A run from `run_width` and `run`; `None` where both are `null`.
+fn snapshot_run(v: &Value) -> Option<zenkey_model::wire::Run> {
+    use zenkey_model::wire::Run;
+    let run = v["run"].as_u64()?;
+    Some(match v["run_width"].as_u64() {
+        Some(16) => Run::U16(u16::try_from(run).expect("a 16-bit run")),
+        Some(32) => Run::U32(u32::try_from(run).expect("a 32-bit run")),
+        other => panic!("run_width {other:?}"),
+    })
+}
+
+fn snapshot_run_json(run: Option<zenkey_model::wire::Run>) -> (Value, Value) {
+    match run {
+        None => (Value::Null, Value::Null),
+        Some(r) => (json!(if r.is_wide() { 32 } else { 16 }), json!(r.value())),
+    }
+}
+
+fn snapshot_seq(v: &Value) -> zenkey_model::wire::Seq {
+    zenkey_model::wire::Seq::new(u32::try_from(v.as_u64().expect("a seq")).unwrap()).expect("seq")
+}
+
+/// A snapshot's entries, `live` and `tombs`, as the fixture spells them.
+fn snapshot_entries(
+    v: &Value,
+) -> (
+    Vec<zenkey_model::collection::Entry>,
+    Vec<zenkey_model::collection::Tombstone>,
+) {
+    use zenkey_model::collection::{Confirmation, Entry, Tombstone};
+    let live = v["live"]
+        .as_array()
+        .expect("live")
+        .iter()
+        .map(|e| Entry {
+            id: e["id"].as_str().expect("id").to_owned(),
+            run: snapshot_run(e),
+            seq: snapshot_seq(&e["seq"]),
+            confirmation: match e["confirmation"].as_str() {
+                Some("none") => Confirmation::None,
+                Some("time") => Confirmation::AtTime,
+                Some("conf") => Confirmation::At(snapshot_time(&e["conf"])),
+                other => panic!("confirmation {other:?}"),
+            },
+            record: unhex(e["record"].as_str().expect("record")),
+        })
+        .collect();
+    let tombs = v["tombs"]
+        .as_array()
+        .expect("tombs")
+        .iter()
+        .map(|t| Tombstone {
+            id: t["id"].as_str().expect("id").to_owned(),
+            run: snapshot_run(t),
+            seq: snapshot_seq(&t["seq"]),
+        })
+        .collect();
+    (live, tombs)
+}
+
+fn snapshot_page(v: &Value) -> zenkey_model::collection::Page {
+    let (live, tombs) = snapshot_entries(v);
+    zenkey_model::collection::Page {
+        tag: zenkey_model::wire::Tag::new(u8::try_from(v["tag"].as_u64().expect("tag")).unwrap())
+            .expect("tag"),
+        run: snapshot_run(v).expect("the header's run"),
+        asof: snapshot_seq(&v["asof"]),
+        time: snapshot_time(&v["time"]),
+        index: u32::try_from(v["index"].as_u64().expect("index")).expect("index"),
+        more: v["more"].as_bool().expect("more"),
+        coll: u32::try_from(v["coll"].as_u64().expect("coll")).expect("coll"),
+        live,
+        tombs,
+    }
+}
+
+fn snapshot_of(v: &Value) -> zenkey_model::collection::Snapshot {
+    let mut page = v.clone();
+    page["index"] = json!(0);
+    page["more"] = json!(false);
+    let p = snapshot_page(&page);
+    zenkey_model::collection::Snapshot {
+        tag: p.tag,
+        run: p.run,
+        asof: p.asof,
+        time: p.time,
+        coll: p.coll,
+        live: p.live,
+        tombs: p.tombs,
+    }
+}
+
+/// A page as `snapshot/bodies.json`'s `reads` spell it.
+fn snapshot_page_json(p: &zenkey_model::collection::Page) -> Value {
+    use zenkey_model::collection::Confirmation;
+    let (run_width, run) = snapshot_run_json(Some(p.run));
+    let live: Vec<Value> = p
+        .live
+        .iter()
+        .map(|e| {
+            let (run_width, run) = snapshot_run_json(e.run);
+            let mut v = json!({
+                "id": e.id,
+                "run_width": run_width,
+                "run": run,
+                "seq": e.seq.get(),
+                "record": hex(&e.record),
+            });
+            match e.confirmation {
+                Confirmation::None => v["confirmation"] = json!("none"),
+                Confirmation::AtTime => v["confirmation"] = json!("time"),
+                Confirmation::At(t) => {
+                    v["confirmation"] = json!("conf");
+                    v["conf"] = snapshot_time_json(t);
+                }
+            }
+            v
+        })
+        .collect();
+    let tombs: Vec<Value> = p
+        .tombs
+        .iter()
+        .map(|t| {
+            let (run_width, run) = snapshot_run_json(t.run);
+            json!({"id": t.id, "run_width": run_width, "run": run, "seq": t.seq.get()})
+        })
+        .collect();
+    json!({
+        "tag": p.tag.get(),
+        "run_width": run_width,
+        "run": run,
+        "asof": p.asof.get(),
+        "time": snapshot_time_json(p.time),
+        "index": p.index,
+        "more": p.more,
+        "coll": p.coll,
+        "live": live,
+        "tombs": tombs,
+    })
+}
+
+/// `spec/conformance/snapshot/bodies.json` (core §7.5, 0.97; #977's E1): a
+/// page → its bytes and their size, or the writer's refusal (`writes`); a
+/// page's bytes → the page, or the reading's first refusal (`reads`); a
+/// snapshot and a page size → its pages' bytes and sizes (`pages`). Every
+/// page read writes back to its bytes, every page written reads back to
+/// its value, and every set of pages to its snapshot. Written by an
+/// independent reading of the text, checked, never blessed.
+#[test]
+fn snapshot_bodies() {
+    use zenkey_model::collection::{Page, PageRefusal, Snapshot};
+    let doc = read_json(&spec().join("conformance/snapshot/bodies.json"));
+
+    let writes = doc["writes"].as_array().expect("writes");
+    assert!(!writes.is_empty());
+    for case in writes {
+        let note = &case["note"];
+        let page = snapshot_page(&case["page"]);
+        let got = match page.write() {
+            Ok(bytes) => {
+                assert_eq!(page.size(), bytes.len(), "{note}: its size");
+                assert_eq!(Page::parse(&bytes), Ok(page.clone()), "{note}: reads back");
+                json!({"hex": hex(&bytes), "size": bytes.len()})
+            }
+            Err(r) => json!({"refused": r.token()}),
+        };
+        assert_eq!(case["expect"], got, "{note}");
+    }
+
+    let reads = doc["reads"].as_array().expect("reads");
+    assert!(!reads.is_empty());
+    let mut tokens = std::collections::BTreeSet::new();
+    for case in reads {
+        let note = &case["note"];
+        let bytes = unhex(case["hex"].as_str().expect("hex"));
+        let got = match Page::parse(&bytes) {
+            Ok(p) => {
+                assert_eq!(p.write().as_ref(), Ok(&bytes), "{note}: writes back");
+                snapshot_page_json(&p)
+            }
+            Err(PageRefusal::Body(r)) => {
+                tokens.insert(r.token());
+                json!({"refused": r.token()})
+            }
+            Err(r) => panic!("{note}: every case's envelope is a snapshot's: {r}"),
+        };
+        assert_eq!(case["expect"], got, "{note}");
+    }
+    assert_eq!(
+        tokens.into_iter().collect::<Vec<_>>(),
+        [
+            "flags", "id", "leb128", "order", "run", "short", "time", "trailing"
+        ],
+        "every refusal"
+    );
+
+    let pages = doc["pages"].as_array().expect("pages");
+    assert!(!pages.is_empty());
+    for case in pages {
+        let note = &case["note"];
+        let snapshot = snapshot_of(&case["snapshot"]);
+        let size = usize::try_from(case["page_bytes"].as_u64().expect("page_bytes")).unwrap();
+        let got = match snapshot.paginate(size) {
+            Ok(cut) => {
+                let bytes: Vec<Vec<u8>> = cut
+                    .iter()
+                    .map(|p| p.write().unwrap_or_else(|r| panic!("{note}: {r}")))
+                    .collect();
+                let read: Vec<Page> = bytes
+                    .iter()
+                    .map(|b| Page::parse(b).unwrap_or_else(|r| panic!("{note}: {r}")))
+                    .collect();
+                assert_eq!(read, cut, "{note}: each page reads back");
+                assert_eq!(
+                    Snapshot::complete(&read).as_ref(),
+                    Some(&snapshot),
+                    "{note}: the pages read back to the snapshot"
+                );
+                json!({
+                    "pages": bytes.iter().map(|b| hex(b)).collect::<Vec<_>>(),
+                    "sizes": bytes.iter().map(Vec::len).collect::<Vec<_>>(),
+                })
+            }
+            Err(r) => json!({"refused": r.token()}),
+        };
+        assert_eq!(case["expect"], got, "{note}");
     }
 }
