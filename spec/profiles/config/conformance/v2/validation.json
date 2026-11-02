@@ -1,0 +1,2453 @@
+{
+  "description": "config.v2 §2.5, §2.10, §2.13, §2.18: one request against the test contract `contracts/rfcfg.v1.toml` and an owner's state -> accepted, or the refusal the owner sends, before any act. Written by an independent reading of the text (Python, standard library), checked, never blessed. A case gives op (set, confirm, cancel, extend, persist), group (set's, the {g} of set/{g}), the request as `fields`, the JSON reading of its type (Set<T> for a set, Control otherwise; null where only bytes can say it), `hex`, the query's payload (core §7.5: CH, form 2, run width 0, the type's tag, then the record), and `state`: revision; pending, null or {token, applied: whether every group of the change is applied, deadline_passed: whether its deadline has come and its undo not yet run}; last, null or {token, set_sensitive}; persist, whether the owner has a persisted layer; in_flight, whether an act is in flight; writable, the groups the startup allowlist lets a set reach. Rows that need more state (an idempotency key held, the event's rate, a reach join near its deadline, the device) are lifecycle.json's. The order: persist without a layer, unavailable cause config, before the request is read; then a payload that does not parse as the request (core §7.5's refusals for a query, then §7.6's for the type: a value outside its bounds is an unused code) is invalid_request; then config.v1's rows without rows 3, 8 and 11. expect is {accepted: true}, or {refused: {code, cause, app}, reply_err}: code is core §5.2's, cause unavailable's alone, app the Error code app's alone, and reply_err the error form the owner sends (core §7.5, form 3) under `stamp`, the as-of mark the cases share, with Error's tag `error_tag`, no message and no detail. `desired`: a DesiredConfig (config.v1 §3) against the test contract and an allowlist -> {accepted: true} or {refused: {code, group, parameter}}: its revision above 4294967295 first (invalid_request, no group), then config.v1 §2.18's order, groups in the byte order of their names, each group's checks (not_found, contract, reach, unavailable), then each parameter in the byte order of its name (not_found, sensitive, invalid_request: not of its kind, a JSON integer with no fraction or exponent for an int, true or false for a bool, or outside its bounds). A group or parameter the contract does not declare is named null in the refusal, since the record carries indices.",
+  "contract": "contracts/rfcfg.v1.toml",
+  "stamp": {
+    "run_width": 16,
+    "run": 4660,
+    "seq": 41
+  },
+  "error_tag": 13,
+  "cases": [
+    {
+      "note": "a hot value in range",
+      "op": "set",
+      "group": "duty",
+      "fields": {
+        "fraction_ppm": 10000,
+        "dry_run": false
+      },
+      "hex": "4b81388000",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "note": "every parameter of a hot group",
+      "op": "set",
+      "group": "duty",
+      "fields": {
+        "fraction_ppm": 10000,
+        "period_s": 60,
+        "enforce": false,
+        "dry_run": false
+      },
+      "hex": "4b813884007700",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "note": "an empty change is a change of nothing (config.v1 §2.5)",
+      "op": "set",
+      "group": "duty",
+      "fields": {
+        "dry_run": false
+      },
+      "hex": "4b00",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "note": "a hot change with a window",
+      "op": "set",
+      "group": "duty",
+      "fields": {
+        "fraction_ppm": 1,
+        "confirm_s": 60,
+        "dry_run": false
+      },
+      "hex": "4b800009003b00",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "note": "a reach change with a window",
+      "op": "set",
+      "group": "radio",
+      "fields": {
+        "frequency_hz": 869525000,
+        "confirm_s": 120,
+        "dry_run": false
+      },
+      "hex": "4cd5c62911007700",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "note": "a reach dry run needs no window",
+      "op": "set",
+      "group": "radio",
+      "fields": {
+        "frequency_hz": 869525000,
+        "dry_run": true
+      },
+      "hex": "4cd5c6291010",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "note": "a reach change joining the pending change needs no window",
+      "op": "set",
+      "group": "radio",
+      "fields": {
+        "frequency_hz": 869525000,
+        "token": 305438723,
+        "dry_run": false
+      },
+      "hex": "4cd5c629108000091a500180",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": false,
+          "deadline_passed": false
+        },
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "note": "a hot change joining the pending change",
+      "op": "set",
+      "group": "duty",
+      "fields": {
+        "fraction_ppm": 1,
+        "token": 305438723,
+        "dry_run": false
+      },
+      "hex": "4b8000088000091a500180",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": true,
+          "deadline_passed": false
+        },
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "note": "expected_revision equal to the revision",
+      "op": "set",
+      "group": "duty",
+      "fields": {
+        "fraction_ppm": 1,
+        "expected_revision": 4,
+        "dry_run": false
+      },
+      "hex": "4b8000084000000100",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "note": "the maximum and the minimum, inclusive",
+      "op": "set",
+      "group": "duty",
+      "fields": {
+        "fraction_ppm": 1000000,
+        "period_s": 1,
+        "dry_run": false
+      },
+      "hex": "4bfa1204000000",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "note": "a reach group's bounds, inclusive",
+      "op": "set",
+      "group": "radio",
+      "fields": {
+        "frequency_hz": 960000000,
+        "confirm_s": 65535,
+        "dry_run": false
+      },
+      "hex": "4ce08f3d01fffe00",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "note": "a sensitive value, write-only",
+      "op": "set",
+      "group": "sim",
+      "fields": {
+        "pin": 1234,
+        "dry_run": false
+      },
+      "hex": "4789a400",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "note": "an idempotency key and every guard",
+      "op": "set",
+      "group": "duty",
+      "fields": {
+        "fraction_ppm": 1,
+        "confirm_s": 30,
+        "expected_revision": 4,
+        "idempotency_key": 7,
+        "dry_run": false
+      },
+      "hex": "4b800009001d4000000120000000e0",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "note": "the smallest and the largest idempotency keys are keys",
+      "op": "set",
+      "group": "link",
+      "fields": {
+        "net_id": 0,
+        "confirm_s": 1,
+        "idempotency_key": 4294967295,
+        "dry_run": false
+      },
+      "hex": "418040000ffffffff8",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "note": "a value past its maximum is an unused code: invalid_request, before an act in flight",
+      "op": "set",
+      "group": "duty",
+      "fields": null,
+      "hex": "4bfffff800",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": true,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "confirm_s's code 65535, which would be 65536: unused",
+      "op": "set",
+      "group": "duty",
+      "fields": null,
+      "hex": "4b1ffff0",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "another type's tag: set/radio's request on set/duty",
+      "op": "set",
+      "group": "duty",
+      "fields": null,
+      "hex": "4cd5c6291000",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "form 0 on a query: core §7.5's sample_kind",
+      "op": "set",
+      "group": "duty",
+      "fields": null,
+      "hex": "0b80000800",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "the run-width bit set: request_run",
+      "op": "set",
+      "group": "duty",
+      "fields": null,
+      "hex": "5b80000800",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "no byte at all",
+      "op": "set",
+      "group": "duty",
+      "fields": null,
+      "hex": "",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "CH alone: the record ends before dry_run",
+      "op": "set",
+      "group": "duty",
+      "fields": null,
+      "hex": "4b",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "a byte after the pad",
+      "op": "set",
+      "group": "duty",
+      "fields": null,
+      "hex": "4b8000080000",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "a pad bit set",
+      "op": "set",
+      "group": "duty",
+      "fields": null,
+      "hex": "4b80000801",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "config.v1's JSON request: `{` is form 3, which a query does not carry",
+      "op": "set",
+      "group": "duty",
+      "fields": null,
+      "hex": "7b2276616c756573223a207b226672616374696f6e5f70706d223a20317d7d",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "an act in flight: busy (row 1)",
+      "op": "set",
+      "group": "duty",
+      "fields": {
+        "fraction_ppm": 1,
+        "dry_run": false
+      },
+      "hex": "4b80000800",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": true,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d1234000029a0"
+      }
+    },
+    {
+      "note": "a group outside the allowlist: unavailable, cause config (row 4)",
+      "op": "set",
+      "group": "queue",
+      "fields": {
+        "tx_queue_len": 10,
+        "dry_run": false
+      },
+      "hex": "468120",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "unavailable",
+          "cause": "config",
+          "app": null
+        },
+        "reply_err": "6d123400002950"
+      }
+    },
+    {
+      "note": "outside the allowlist, before the pending change",
+      "op": "set",
+      "group": "queue",
+      "fields": {
+        "tx_queue_len": 10,
+        "dry_run": false
+      },
+      "hex": "468120",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": true,
+          "deadline_passed": false
+        },
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "unavailable",
+          "cause": "config",
+          "app": null
+        },
+        "reply_err": "6d123400002950"
+      }
+    },
+    {
+      "note": "outside the allowlist, a dry run too",
+      "op": "set",
+      "group": "queue",
+      "fields": {
+        "tx_queue_len": 10,
+        "dry_run": true
+      },
+      "hex": "468121",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "unavailable",
+          "cause": "config",
+          "app": null
+        },
+        "reply_err": "6d123400002950"
+      }
+    },
+    {
+      "note": "a change is pending and the request carries no token (row 5)",
+      "op": "set",
+      "group": "radio",
+      "fields": {
+        "frequency_hz": 869525000,
+        "confirm_s": 120,
+        "dry_run": false
+      },
+      "hex": "4cd5c62911007700",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": true,
+          "deadline_passed": false
+        },
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d1234000029a0"
+      }
+    },
+    {
+      "note": "a hot change without a window is a change of its own: busy",
+      "op": "set",
+      "group": "duty",
+      "fields": {
+        "fraction_ppm": 1,
+        "dry_run": false
+      },
+      "hex": "4b80000800",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": true,
+          "deadline_passed": false
+        },
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d1234000029a0"
+      }
+    },
+    {
+      "note": "another token while a change is pending: busy",
+      "op": "set",
+      "group": "duty",
+      "fields": {
+        "fraction_ppm": 1,
+        "token": 305438722,
+        "dry_run": false
+      },
+      "hex": "4b8000088000091a500100",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": true,
+          "deadline_passed": false
+        },
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d1234000029a0"
+      }
+    },
+    {
+      "note": "its token, after its deadline: busy until the undo has run",
+      "op": "set",
+      "group": "duty",
+      "fields": {
+        "fraction_ppm": 1,
+        "token": 305438723,
+        "dry_run": false
+      },
+      "hex": "4b8000088000091a500180",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": true,
+          "deadline_passed": true
+        },
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d1234000029a0"
+      }
+    },
+    {
+      "note": "a dry run runs row 5 too",
+      "op": "set",
+      "group": "duty",
+      "fields": {
+        "fraction_ppm": 1,
+        "dry_run": true
+      },
+      "hex": "4b80000810",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": true,
+          "deadline_passed": false
+        },
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d1234000029a0"
+      }
+    },
+    {
+      "note": "busy before a stale revision",
+      "op": "set",
+      "group": "duty",
+      "fields": {
+        "fraction_ppm": 1,
+        "expected_revision": 3,
+        "dry_run": false
+      },
+      "hex": "4b80000840000000c0",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": true,
+          "deadline_passed": false
+        },
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d1234000029a0"
+      }
+    },
+    {
+      "note": "a token and nothing pending: not_found (row 6)",
+      "op": "set",
+      "group": "radio",
+      "fields": {
+        "frequency_hz": 869525000,
+        "token": 305438723,
+        "dry_run": false
+      },
+      "hex": "4cd5c629108000091a500180",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002920"
+      }
+    },
+    {
+      "note": "not_found before a stale revision",
+      "op": "set",
+      "group": "duty",
+      "fields": {
+        "fraction_ppm": 1,
+        "token": 305438723,
+        "expected_revision": 1,
+        "dry_run": false
+      },
+      "hex": "4b8000088000091a5001c000000040",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002920"
+      }
+    },
+    {
+      "note": "a stale expected_revision: invalid_request (row 7)",
+      "op": "set",
+      "group": "duty",
+      "fields": {
+        "fraction_ppm": 1,
+        "expected_revision": 3,
+        "dry_run": false
+      },
+      "hex": "4b80000840000000c0",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "an expected_revision ahead of the revision",
+      "op": "set",
+      "group": "duty",
+      "fields": {
+        "fraction_ppm": 1,
+        "expected_revision": 5,
+        "dry_run": false
+      },
+      "hex": "4b8000084000000140",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "joining with a window of its own: invalid_request (row 9)",
+      "op": "set",
+      "group": "radio",
+      "fields": {
+        "frequency_hz": 869525000,
+        "confirm_s": 60,
+        "token": 305438723,
+        "dry_run": false
+      },
+      "hex": "4cd5c62911003b8000091a500180",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": true,
+          "deadline_passed": false
+        },
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "joining with a window, whatever the class",
+      "op": "set",
+      "group": "duty",
+      "fields": {
+        "fraction_ppm": 1,
+        "confirm_s": 60,
+        "token": 305438723,
+        "dry_run": false
+      },
+      "hex": "4b800009003b8000091a500180",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": true,
+          "deadline_passed": false
+        },
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "a reach change with neither window nor token: invalid_request (row 10)",
+      "op": "set",
+      "group": "radio",
+      "fields": {
+        "frequency_hz": 869525000,
+        "dry_run": false
+      },
+      "hex": "4cd5c6291000",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "link is reach too",
+      "op": "set",
+      "group": "link",
+      "fields": {
+        "net_id": 7,
+        "dry_run": false
+      },
+      "hex": "418380",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "an empty reach change still needs a window",
+      "op": "set",
+      "group": "link",
+      "fields": {
+        "dry_run": false
+      },
+      "hex": "4100",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "confirm, every group applied",
+      "op": "confirm",
+      "group": null,
+      "fields": {
+        "token": 305438723
+      },
+      "hex": "4800001234a00300",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": true,
+          "deadline_passed": false
+        },
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "note": "confirm before every group is applied: busy (config.v1 §2.10, 5)",
+      "op": "confirm",
+      "group": null,
+      "fields": {
+        "token": 305438723
+      },
+      "hex": "4800001234a00300",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": false,
+          "deadline_passed": false
+        },
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d1234000029a0"
+      }
+    },
+    {
+      "note": "confirm with a confirm_s: invalid_request (2)",
+      "op": "confirm",
+      "group": null,
+      "fields": {
+        "token": 305438723,
+        "confirm_s": 30
+      },
+      "hex": "4800001234a003800e80",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": true,
+          "deadline_passed": false
+        },
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "confirm with nothing pending: not_found (3)",
+      "op": "confirm",
+      "group": null,
+      "fields": {
+        "token": 305438723
+      },
+      "hex": "4800001234a00300",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002920"
+      }
+    },
+    {
+      "note": "confirm with another token: not_found",
+      "op": "confirm",
+      "group": null,
+      "fields": {
+        "token": 305438722
+      },
+      "hex": "4800001234a00200",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": true,
+          "deadline_passed": false
+        },
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002920"
+      }
+    },
+    {
+      "note": "confirm once the deadline has come, the undo not yet run: busy (4)",
+      "op": "confirm",
+      "group": null,
+      "fields": {
+        "token": 305438723
+      },
+      "hex": "4800001234a00300",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": true,
+          "deadline_passed": true
+        },
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d1234000029a0"
+      }
+    },
+    {
+      "note": "an act in flight: busy (1), before the confirm_s rule",
+      "op": "confirm",
+      "group": null,
+      "fields": {
+        "token": 305438723,
+        "confirm_s": 30
+      },
+      "hex": "4800001234a003800e80",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": true,
+          "deadline_passed": false
+        },
+        "last": null,
+        "persist": true,
+        "in_flight": true,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d1234000029a0"
+      }
+    },
+    {
+      "note": "cancel, not yet applied",
+      "op": "cancel",
+      "group": null,
+      "fields": {
+        "token": 305438723
+      },
+      "hex": "4800001234a00300",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": false,
+          "deadline_passed": false
+        },
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "note": "cancel with a confirm_s",
+      "op": "cancel",
+      "group": null,
+      "fields": {
+        "token": 305438723,
+        "confirm_s": 1
+      },
+      "hex": "4800001234a003800000",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": true,
+          "deadline_passed": false
+        },
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "extend, not yet applied",
+      "op": "extend",
+      "group": null,
+      "fields": {
+        "token": 305438723,
+        "confirm_s": 300
+      },
+      "hex": "4800001234a003809580",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": false,
+          "deadline_passed": false
+        },
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "note": "extend with no confirm_s: invalid_request",
+      "op": "extend",
+      "group": null,
+      "fields": {
+        "token": 305438723
+      },
+      "hex": "4800001234a00300",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": true,
+          "deadline_passed": false
+        },
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "extend with nothing pending",
+      "op": "extend",
+      "group": null,
+      "fields": {
+        "token": 305438723,
+        "confirm_s": 30
+      },
+      "hex": "4800001234a003800e80",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002920"
+      }
+    },
+    {
+      "note": "a Control cut short: the token needs 48 bits",
+      "op": "confirm",
+      "group": null,
+      "fields": null,
+      "hex": "48000012",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": true,
+          "deadline_passed": false
+        },
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "set/duty's request on confirm: another type's tag",
+      "op": "confirm",
+      "group": null,
+      "fields": null,
+      "hex": "4b80000800",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": true,
+          "deadline_passed": false
+        },
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "persist the last change",
+      "op": "persist",
+      "group": null,
+      "fields": {
+        "token": 305438721
+      },
+      "hex": "4800001234a00100",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": {
+          "token": 305438721,
+          "set_sensitive": false
+        },
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "note": "no persisted layer: unavailable, cause config, before the request is read",
+      "op": "persist",
+      "group": null,
+      "fields": null,
+      "hex": "ff",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": false,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "unavailable",
+          "cause": "config",
+          "app": null
+        },
+        "reply_err": "6d123400002950"
+      }
+    },
+    {
+      "note": "an act in flight",
+      "op": "persist",
+      "group": null,
+      "fields": {
+        "token": 305438721
+      },
+      "hex": "4800001234a00100",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": {
+          "token": 305438721,
+          "set_sensitive": false
+        },
+        "persist": true,
+        "in_flight": true,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d1234000029a0"
+      }
+    },
+    {
+      "note": "a confirm_s",
+      "op": "persist",
+      "group": null,
+      "fields": {
+        "token": 305438721,
+        "confirm_s": 10
+      },
+      "hex": "4800001234a001800480",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": {
+          "token": 305438721,
+          "set_sensitive": false
+        },
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "the pending change's token: busy, confirm it first",
+      "op": "persist",
+      "group": null,
+      "fields": {
+        "token": 305438723
+      },
+      "hex": "4800001234a00300",
+      "state": {
+        "revision": 4,
+        "pending": {
+          "token": 305438723,
+          "applied": true,
+          "deadline_passed": false
+        },
+        "last": {
+          "token": 305438721,
+          "set_sensitive": false
+        },
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "busy",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d1234000029a0"
+      }
+    },
+    {
+      "note": "a token older than the last change: not_found",
+      "op": "persist",
+      "group": null,
+      "fields": {
+        "token": 305438722
+      },
+      "hex": "4800001234a00200",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": {
+          "token": 305438721,
+          "set_sensitive": false
+        },
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002920"
+      }
+    },
+    {
+      "note": "no last change",
+      "op": "persist",
+      "group": null,
+      "fields": {
+        "token": 305438721
+      },
+      "hex": "4800001234a00100",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002920"
+      }
+    },
+    {
+      "note": "a last change that set a sensitive value: forbidden",
+      "op": "persist",
+      "group": null,
+      "fields": {
+        "token": 305438721
+      },
+      "hex": "4800001234a00100",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": {
+          "token": 305438721,
+          "set_sensitive": true
+        },
+        "persist": true,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "forbidden",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002960"
+      }
+    }
+  ],
+  "desired": [
+    {
+      "note": "hot values in range",
+      "document": {
+        "revision": 7,
+        "values": {
+          "duty": {
+            "fraction_ppm": 10000,
+            "period_s": 3600,
+            "enforce": true
+          }
+        }
+      },
+      "writable": [
+        "duty",
+        "radio",
+        "link",
+        "sim"
+      ],
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "note": "a revision above 32 bits: invalid_request before any group, no group named",
+      "document": {
+        "revision": 4294967296,
+        "values": {
+          "radio": {
+            "frequency_hz": 1
+          }
+        }
+      },
+      "writable": [
+        "duty",
+        "radio",
+        "link",
+        "sim"
+      ],
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "group": null,
+          "parameter": null
+        }
+      }
+    },
+    {
+      "note": "the largest revision the record holds",
+      "document": {
+        "revision": 4294967295,
+        "values": {
+          "duty": {
+            "fraction_ppm": 1
+          }
+        }
+      },
+      "writable": [
+        "duty",
+        "radio",
+        "link",
+        "sim"
+      ],
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "note": "a reach group",
+      "document": {
+        "revision": 7,
+        "values": {
+          "radio": {
+            "frequency_hz": 869525000
+          }
+        }
+      },
+      "writable": [
+        "duty",
+        "radio",
+        "link",
+        "sim"
+      ],
+      "expect": {
+        "refused": {
+          "code": "reach",
+          "group": "radio",
+          "parameter": null
+        }
+      }
+    },
+    {
+      "note": "a contract group",
+      "document": {
+        "revision": 7,
+        "values": {
+          "modulation": {
+            "spreading_factor": 8
+          }
+        }
+      },
+      "writable": [
+        "duty",
+        "radio",
+        "link",
+        "sim"
+      ],
+      "expect": {
+        "refused": {
+          "code": "contract",
+          "group": "modulation",
+          "parameter": null
+        }
+      }
+    },
+    {
+      "note": "a sensitive parameter",
+      "document": {
+        "revision": 7,
+        "values": {
+          "sim": {
+            "pin": 1234
+          }
+        }
+      },
+      "writable": [
+        "duty",
+        "radio",
+        "link",
+        "sim"
+      ],
+      "expect": {
+        "refused": {
+          "code": "sensitive",
+          "group": "sim",
+          "parameter": "pin"
+        }
+      }
+    },
+    {
+      "note": "a group the contract does not declare: not_found, named null",
+      "document": {
+        "revision": 7,
+        "values": {
+          "power": {
+            "level": 1
+          }
+        }
+      },
+      "writable": [
+        "duty",
+        "radio",
+        "link",
+        "sim"
+      ],
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "group": null,
+          "parameter": null
+        }
+      }
+    },
+    {
+      "note": "a parameter duty does not declare: its group, the parameter null",
+      "document": {
+        "revision": 7,
+        "values": {
+          "duty": {
+            "power": 1
+          }
+        }
+      },
+      "writable": [
+        "duty",
+        "radio",
+        "link",
+        "sim"
+      ],
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "group": "duty",
+          "parameter": null
+        }
+      }
+    },
+    {
+      "note": "a group outside the allowlist",
+      "document": {
+        "revision": 7,
+        "values": {
+          "queue": {
+            "tx_queue_len": 10
+          }
+        }
+      },
+      "writable": [
+        "duty",
+        "radio",
+        "link",
+        "sim"
+      ],
+      "expect": {
+        "refused": {
+          "code": "unavailable",
+          "group": "queue",
+          "parameter": null
+        }
+      }
+    },
+    {
+      "note": "text for an int: no text at 0.1",
+      "document": {
+        "revision": 7,
+        "values": {
+          "duty": {
+            "fraction_ppm": "10000"
+          }
+        }
+      },
+      "writable": [
+        "duty",
+        "radio",
+        "link",
+        "sim"
+      ],
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "group": "duty",
+          "parameter": "fraction_ppm"
+        }
+      }
+    },
+    {
+      "note": "a boolean for an int",
+      "document": {
+        "revision": 7,
+        "values": {
+          "duty": {
+            "period_s": true
+          }
+        }
+      },
+      "writable": [
+        "duty",
+        "radio",
+        "link",
+        "sim"
+      ],
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "group": "duty",
+          "parameter": "period_s"
+        }
+      }
+    },
+    {
+      "note": "an integer for a bool",
+      "document": {
+        "revision": 7,
+        "values": {
+          "duty": {
+            "enforce": 1
+          }
+        }
+      },
+      "writable": [
+        "duty",
+        "radio",
+        "link",
+        "sim"
+      ],
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "group": "duty",
+          "parameter": "enforce"
+        }
+      }
+    },
+    {
+      "note": "2.0 is not an integer",
+      "document": {
+        "revision": 7,
+        "values": {
+          "duty": {
+            "fraction_ppm": 2.0
+          }
+        }
+      },
+      "writable": [
+        "duty",
+        "radio",
+        "link",
+        "sim"
+      ],
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "group": "duty",
+          "parameter": "fraction_ppm"
+        }
+      }
+    },
+    {
+      "note": "outside the bounds",
+      "document": {
+        "revision": 7,
+        "values": {
+          "duty": {
+            "fraction_ppm": 1000001
+          }
+        }
+      },
+      "writable": [
+        "duty",
+        "radio",
+        "link",
+        "sim"
+      ],
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "group": "duty",
+          "parameter": "fraction_ppm"
+        }
+      }
+    },
+    {
+      "note": "groups in byte order: duty before radio, though radio's problem comes first in the document",
+      "document": {
+        "revision": 7,
+        "values": {
+          "radio": {
+            "frequency_hz": 1
+          },
+          "duty": {
+            "power": 1
+          }
+        }
+      },
+      "writable": [
+        "duty",
+        "radio",
+        "link",
+        "sim"
+      ],
+      "expect": {
+        "refused": {
+          "code": "not_found",
+          "group": "duty",
+          "parameter": null
+        }
+      }
+    },
+    {
+      "note": "parameters in byte order: enforce before fraction_ppm",
+      "document": {
+        "revision": 7,
+        "values": {
+          "duty": {
+            "fraction_ppm": -1,
+            "enforce": "yes"
+          }
+        }
+      },
+      "writable": [
+        "duty",
+        "radio",
+        "link",
+        "sim"
+      ],
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "group": "duty",
+          "parameter": "enforce"
+        }
+      }
+    },
+    {
+      "note": "a group's checks before its parameters: a reach group's bad value is reach",
+      "document": {
+        "revision": 7,
+        "values": {
+          "link": {
+            "net_id": 999
+          }
+        }
+      },
+      "writable": [
+        "duty",
+        "radio",
+        "link",
+        "sim"
+      ],
+      "expect": {
+        "refused": {
+          "code": "reach",
+          "group": "link",
+          "parameter": null
+        }
+      }
+    },
+    {
+      "note": "the allowlist binds desired state too",
+      "document": {
+        "revision": 7,
+        "values": {
+          "queue": {
+            "tx_queue_len": 10
+          }
+        }
+      },
+      "writable": [
+        "duty",
+        "radio",
+        "link",
+        "sim",
+        "queue"
+      ],
+      "expect": {
+        "accepted": true
+      }
+    }
+  ]
+}
