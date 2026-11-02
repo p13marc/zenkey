@@ -68,7 +68,7 @@
       "expect": false
     },
     {
-      "note": "an operation keeps its wire",
+      "note": "an operation's key carries no envelope: a call's reply carries a form, which its sample tells (core §5.1, vectors.json)",
       "key": "zk2/vehicle-01/nav/nav.v2/@op/reset",
       "encoding": "zenoh/bytes",
       "expect": false
