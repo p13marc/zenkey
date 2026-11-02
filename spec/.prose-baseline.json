@@ -94,6 +94,16 @@
     "over": 6,
     "tags": 0
   },
+  "spec/profiles/config/conformance/v2/README.md": {
+    "mean": 11.1,
+    "over": 0,
+    "tags": 0
+  },
+  "spec/profiles/config/scenarios-v2.md": {
+    "mean": 11.85,
+    "over": 0,
+    "tags": 0
+  },
   "spec/profiles/config/scenarios.md": {
     "mean": 11.16,
     "over": 0,
@@ -101,6 +111,11 @@
   },
   "spec/profiles/config/v1.md": {
     "mean": 17.92,
+    "over": 0,
+    "tags": 0
+  },
+  "spec/profiles/config/v2.md": {
+    "mean": 12.73,
     "over": 0,
     "tags": 0
   },

@@ -37,6 +37,11 @@ use zenkey_model::telemetry::{self, Datum, Declaration, MetricKind, TypeView};
 use zenkey_model::template::Template;
 use zenkey_model::timing::{self, Mono};
 
+/// `config.v2`'s runners (`config/conformance/v2/`, #985 G1), in a
+/// directory of their own so that no test binary is made of them alone.
+#[path = "profiles/config_v2.rs"]
+mod config_v2;
+
 /// The fixtures this crate runs, as (profile directory, file name).
 const KNOWN: &[(&str, &str)] = &[
     ("hostid", "vectors.json"),
@@ -54,6 +59,14 @@ const KNOWN: &[(&str, &str)] = &[
     ("config", "desired.json"),
     ("config", "redaction.json"),
     ("config", "lifecycle.json"),
+    ("config", "v2/derive.json"),
+    ("config", "v2/records.json"),
+    ("config", "v2/validation.json"),
+    ("config", "v2/window.json"),
+    ("config", "v2/lifecycle.json"),
+    ("config", "v2/redaction.json"),
+    ("config", "contracts/rfcfg.v1.toml"),
+    ("config", "contracts/rfcfg.json"),
     ("link", "exposure.json"),
     ("link", "plan.json"),
     ("link", "lints.json"),

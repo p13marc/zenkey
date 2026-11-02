@@ -1,0 +1,712 @@
+{
+  "description": "config.v2's test contract rfcfg.v1 (v2.md, scenarios-v2.md): six group types, then the eight types zk2 config derive writes from them",
+  "types": {
+    "Duty": {
+      "description": "The duty cycle the radio keeps",
+      "fields": [
+        {
+          "name": "fraction_ppm",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 1000000,
+          "description": "The share of time the transmitter may be on"
+        },
+        {
+          "name": "period_s",
+          "type": "int",
+          "minimum": 1,
+          "maximum": 86400,
+          "description": "The window the share is measured over"
+        },
+        {
+          "name": "enforce",
+          "type": "bool",
+          "description": "Whether the transmitter holds to the share"
+        }
+      ]
+    },
+    "Radio": {
+      "description": "What the radio transmits on",
+      "fields": [
+        {
+          "name": "frequency_hz",
+          "type": "int",
+          "minimum": 150000000,
+          "maximum": 960000000,
+          "description": "The carrier frequency"
+        }
+      ]
+    },
+    "Link": {
+      "description": "The network the radio joins",
+      "fields": [
+        {
+          "name": "net_id",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 255,
+          "description": "The network id"
+        }
+      ]
+    },
+    "Sim": {
+      "description": "The SIM",
+      "fields": [
+        {
+          "name": "pin",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 9999,
+          "description": "The SIM's PIN, write-only"
+        },
+        {
+          "name": "attempts",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 10,
+          "description": "How many times the modem tries the PIN at start"
+        }
+      ]
+    },
+    "Queue": {
+      "description": "The transmit queue",
+      "fields": [
+        {
+          "name": "tx_queue_len",
+          "type": "int",
+          "minimum": 1,
+          "maximum": 1024,
+          "description": "The queue's length"
+        }
+      ]
+    },
+    "Modulation": {
+      "description": "What the transport was started against",
+      "fields": [
+        {
+          "name": "spreading_factor",
+          "type": "int",
+          "minimum": 7,
+          "maximum": 12,
+          "description": "The LoRa spreading factor"
+        }
+      ]
+    },
+    "Record": {
+      "description": "config.v2's record, derived (v2.md 2.3, 3): state/config, every reply",
+      "fields": [
+        {
+          "name": "instance",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        {
+          "name": "revision",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        {
+          "name": "floor_s",
+          "type": "int",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        {
+          "name": "would_be",
+          "type": "bool"
+        },
+        {
+          "name": "pending_token",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 281474976710655,
+          "optional": true
+        },
+        {
+          "name": "pending_apply_at",
+          "type": "time",
+          "optional": true
+        },
+        {
+          "name": "pending_deadline",
+          "type": "time",
+          "optional": true
+        },
+        {
+          "name": "last_token",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 281474976710655,
+          "optional": true
+        },
+        {
+          "name": "desired",
+          "type": "enum",
+          "values": [
+            "converged",
+            "refused",
+            "failed"
+          ],
+          "escape": true,
+          "optional": true
+        },
+        {
+          "name": "desired_revision",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "optional": true
+        },
+        {
+          "name": "desired_code",
+          "type": "enum",
+          "values": [
+            "reach",
+            "contract",
+            "sensitive",
+            "not_found",
+            "invalid_request",
+            "unavailable",
+            "busy",
+            "device_refused"
+          ],
+          "escape": true,
+          "optional": true
+        },
+        {
+          "name": "desired_group",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 15,
+          "optional": true
+        },
+        {
+          "name": "desired_parameter",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 15,
+          "optional": true
+        },
+        {
+          "name": "duty__writable",
+          "type": "bool"
+        },
+        {
+          "name": "duty__pending",
+          "type": "bool"
+        },
+        {
+          "name": "duty__last",
+          "type": "bool"
+        },
+        {
+          "name": "duty__fraction_ppm__source",
+          "type": "enum",
+          "values": [
+            "default",
+            "file",
+            "overlay",
+            "runtime"
+          ],
+          "optional": true
+        },
+        {
+          "name": "duty__fraction_ppm__differs",
+          "type": "bool"
+        },
+        {
+          "name": "duty__fraction_ppm",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 1000000,
+          "optional": true
+        },
+        {
+          "name": "duty__period_s__source",
+          "type": "enum",
+          "values": [
+            "default",
+            "file",
+            "overlay",
+            "runtime"
+          ],
+          "optional": true
+        },
+        {
+          "name": "duty__period_s__differs",
+          "type": "bool"
+        },
+        {
+          "name": "duty__period_s",
+          "type": "int",
+          "minimum": 1,
+          "maximum": 86400,
+          "optional": true
+        },
+        {
+          "name": "duty__enforce__source",
+          "type": "enum",
+          "values": [
+            "default",
+            "file",
+            "overlay",
+            "runtime"
+          ],
+          "optional": true
+        },
+        {
+          "name": "duty__enforce__differs",
+          "type": "bool"
+        },
+        {
+          "name": "duty__enforce",
+          "type": "bool",
+          "optional": true
+        },
+        {
+          "name": "radio__writable",
+          "type": "bool"
+        },
+        {
+          "name": "radio__pending",
+          "type": "bool"
+        },
+        {
+          "name": "radio__last",
+          "type": "bool"
+        },
+        {
+          "name": "radio__frequency_hz__source",
+          "type": "enum",
+          "values": [
+            "default",
+            "file",
+            "overlay",
+            "runtime"
+          ],
+          "optional": true
+        },
+        {
+          "name": "radio__frequency_hz__differs",
+          "type": "bool"
+        },
+        {
+          "name": "radio__frequency_hz",
+          "type": "int",
+          "minimum": 150000000,
+          "maximum": 960000000,
+          "optional": true
+        },
+        {
+          "name": "link__writable",
+          "type": "bool"
+        },
+        {
+          "name": "link__pending",
+          "type": "bool"
+        },
+        {
+          "name": "link__last",
+          "type": "bool"
+        },
+        {
+          "name": "link__net_id__source",
+          "type": "enum",
+          "values": [
+            "default",
+            "file",
+            "overlay",
+            "runtime"
+          ],
+          "optional": true
+        },
+        {
+          "name": "link__net_id__differs",
+          "type": "bool"
+        },
+        {
+          "name": "link__net_id",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 255,
+          "optional": true
+        },
+        {
+          "name": "sim__writable",
+          "type": "bool"
+        },
+        {
+          "name": "sim__pending",
+          "type": "bool"
+        },
+        {
+          "name": "sim__last",
+          "type": "bool"
+        },
+        {
+          "name": "sim__pin__source",
+          "type": "enum",
+          "values": [
+            "default",
+            "file",
+            "overlay",
+            "runtime"
+          ],
+          "optional": true
+        },
+        {
+          "name": "sim__attempts__source",
+          "type": "enum",
+          "values": [
+            "default",
+            "file",
+            "overlay",
+            "runtime"
+          ],
+          "optional": true
+        },
+        {
+          "name": "sim__attempts__differs",
+          "type": "bool"
+        },
+        {
+          "name": "sim__attempts",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 10,
+          "optional": true
+        },
+        {
+          "name": "queue__writable",
+          "type": "bool"
+        },
+        {
+          "name": "queue__pending",
+          "type": "bool"
+        },
+        {
+          "name": "queue__last",
+          "type": "bool"
+        },
+        {
+          "name": "queue__tx_queue_len__source",
+          "type": "enum",
+          "values": [
+            "default",
+            "file",
+            "overlay",
+            "runtime"
+          ],
+          "optional": true
+        },
+        {
+          "name": "queue__tx_queue_len__differs",
+          "type": "bool"
+        },
+        {
+          "name": "queue__tx_queue_len",
+          "type": "int",
+          "minimum": 1,
+          "maximum": 1024,
+          "optional": true
+        },
+        {
+          "name": "modulation__spreading_factor__source",
+          "type": "enum",
+          "values": [
+            "default",
+            "file",
+            "overlay",
+            "runtime"
+          ],
+          "optional": true
+        },
+        {
+          "name": "modulation__spreading_factor__differs",
+          "type": "bool"
+        },
+        {
+          "name": "modulation__spreading_factor",
+          "type": "int",
+          "minimum": 7,
+          "maximum": 12,
+          "optional": true
+        },
+        "..."
+      ]
+    },
+    "SetDuty": {
+      "description": "set/duty's request, derived from Duty (v2.md 2.5, 3)",
+      "fields": [
+        {
+          "name": "fraction_ppm",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 1000000,
+          "optional": true
+        },
+        {
+          "name": "period_s",
+          "type": "int",
+          "minimum": 1,
+          "maximum": 86400,
+          "optional": true
+        },
+        {
+          "name": "enforce",
+          "type": "bool",
+          "optional": true
+        },
+        {
+          "name": "confirm_s",
+          "type": "int",
+          "minimum": 1,
+          "maximum": 65535,
+          "optional": true
+        },
+        {
+          "name": "token",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 281474976710655,
+          "optional": true
+        },
+        {
+          "name": "expected_revision",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "optional": true
+        },
+        {
+          "name": "idempotency_key",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "optional": true
+        },
+        {
+          "name": "dry_run",
+          "type": "bool"
+        }
+      ]
+    },
+    "SetRadio": {
+      "description": "set/radio's request, derived from Radio (v2.md 2.5, 3)",
+      "fields": [
+        {
+          "name": "frequency_hz",
+          "type": "int",
+          "minimum": 150000000,
+          "maximum": 960000000,
+          "optional": true
+        },
+        {
+          "name": "confirm_s",
+          "type": "int",
+          "minimum": 1,
+          "maximum": 65535,
+          "optional": true
+        },
+        {
+          "name": "token",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 281474976710655,
+          "optional": true
+        },
+        {
+          "name": "expected_revision",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "optional": true
+        },
+        {
+          "name": "idempotency_key",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "optional": true
+        },
+        {
+          "name": "dry_run",
+          "type": "bool"
+        }
+      ]
+    },
+    "SetLink": {
+      "description": "set/link's request, derived from Link (v2.md 2.5, 3)",
+      "fields": [
+        {
+          "name": "net_id",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 255,
+          "optional": true
+        },
+        {
+          "name": "confirm_s",
+          "type": "int",
+          "minimum": 1,
+          "maximum": 65535,
+          "optional": true
+        },
+        {
+          "name": "token",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 281474976710655,
+          "optional": true
+        },
+        {
+          "name": "expected_revision",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "optional": true
+        },
+        {
+          "name": "idempotency_key",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "optional": true
+        },
+        {
+          "name": "dry_run",
+          "type": "bool"
+        }
+      ]
+    },
+    "SetSim": {
+      "description": "set/sim's request, derived from Sim (v2.md 2.5, 3)",
+      "fields": [
+        {
+          "name": "pin",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 9999,
+          "optional": true
+        },
+        {
+          "name": "attempts",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 10,
+          "optional": true
+        },
+        {
+          "name": "confirm_s",
+          "type": "int",
+          "minimum": 1,
+          "maximum": 65535,
+          "optional": true
+        },
+        {
+          "name": "token",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 281474976710655,
+          "optional": true
+        },
+        {
+          "name": "expected_revision",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "optional": true
+        },
+        {
+          "name": "idempotency_key",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "optional": true
+        },
+        {
+          "name": "dry_run",
+          "type": "bool"
+        }
+      ]
+    },
+    "SetQueue": {
+      "description": "set/queue's request, derived from Queue (v2.md 2.5, 3)",
+      "fields": [
+        {
+          "name": "tx_queue_len",
+          "type": "int",
+          "minimum": 1,
+          "maximum": 1024,
+          "optional": true
+        },
+        {
+          "name": "confirm_s",
+          "type": "int",
+          "minimum": 1,
+          "maximum": 65535,
+          "optional": true
+        },
+        {
+          "name": "token",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 281474976710655,
+          "optional": true
+        },
+        {
+          "name": "expected_revision",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "optional": true
+        },
+        {
+          "name": "idempotency_key",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "optional": true
+        },
+        {
+          "name": "dry_run",
+          "type": "bool"
+        }
+      ]
+    },
+    "Control": {
+      "description": "confirm, cancel, extend and persist's request, derived (v2.md 2.10, 3)",
+      "fields": [
+        {
+          "name": "token",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 281474976710655
+        },
+        {
+          "name": "confirm_s",
+          "type": "int",
+          "minimum": 1,
+          "maximum": 65535,
+          "optional": true
+        }
+      ]
+    },
+    "Error": {
+      "description": "Every operation's error detail, derived (v2.md 2.5, 3)",
+      "fields": [
+        {
+          "name": "code",
+          "type": "enum",
+          "values": [
+            "device_refused"
+          ],
+          "escape": true,
+          "width": 4
+        }
+      ]
+    }
+  }
+}

@@ -11,6 +11,7 @@
 //! zk2 catalog add <catalog.json> <contract>...
 //! zk2 catalog id <catalog.json>
 //! zk2 catalog check <catalog.json> [--previous <catalog.json>] [<contract>...]
+//! zk2 config derive <file.toml>
 //! ```
 //!
 //! A `<contract>` is a `.toml` contract or a `.bundle.json` bundle, as a
@@ -18,6 +19,16 @@
 //! (core §8.6) to stdout as its JCS bytes: `new` a first catalog, and `add`
 //! the successor that appends what its input lacks, or that input unchanged
 //! when it lacks nothing.
+//!
+//! `config derive` reads a `config.v2` contract's `config.groups` and its
+//! packed files, and prints the types derived from them (config.v2 §3):
+//! `Record`, a `Set<T>` per hot or reach group, `Control` and `Error`, as
+//! a packed file's `types`, for the contract's packed file to hold. It reads
+//! the contract unlinted, since it lints only once they are there.
+//!
+//! `contract lint` runs a profile's contract lint where the profile has
+//! one the model implements: config.v2's (its §2.2), whose findings are
+//! errors.
 //!
 //! Exit codes follow zenctl's contract: 0 asked and clean, 1 asked and a
 //! finding (an invalid contract, a review or breaking change, a history
@@ -47,7 +58,8 @@ const USAGE: &str = "usage:
   zk2 catalog new [--epoch <secs>] [<contract>...]
   zk2 catalog add <catalog.json> <contract>...
   zk2 catalog id <catalog.json>
-  zk2 catalog check <catalog.json> [--previous <catalog.json>] [<contract>...]";
+  zk2 catalog check <catalog.json> [--previous <catalog.json>] [<contract>...]
+  zk2 config derive <file.toml>";
 
 fn no_verdict(msg: &str) -> ExitCode {
     eprintln!("zk2: {msg}");
@@ -71,6 +83,7 @@ fn main() -> ExitCode {
         }
         ["catalog", "id", file] => catalog_id(file),
         ["catalog", "check", file, rest @ ..] => catalog_check(file, rest),
+        ["config", "derive", file] => config_derive(file),
         ["--help" | "-h" | "help"] => {
             println!("{USAGE}");
             ExitCode::SUCCESS
@@ -92,7 +105,17 @@ fn lint(files: &[&str]) -> ExitCode {
     let mut bad = false;
     for f in files {
         match load(f) {
-            Some(c) => println!("{f}: {} {}", c.iface, Fingerprint::of(&c)),
+            // config.v2 §2.2: its lint's findings are errors.
+            Some(c) => match zenkey_model::config::v2::lint_contract(&c).as_slice() {
+                [] => println!("{f}: {} {}", c.iface, Fingerprint::of(&c)),
+                findings => {
+                    eprintln!("{f}:");
+                    for x in findings {
+                        eprintln!("  error[config.v2 {}] {}", x.reason.token(), x.at);
+                    }
+                    bad = true;
+                }
+            },
             None => bad = true,
         }
     }
@@ -425,5 +448,63 @@ fn catalog_check(file: &str, args: &[&str]) -> ExitCode {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+/// `config derive`: the types config.v2 derives from a contract's
+/// declaration (§3). 1 when the contract does not parse, declares no
+/// `config.groups` on `config`, or declares them invalid.
+fn config_derive(file: &str) -> ExitCode {
+    use zenkey_model::authoring::ContractFile;
+    use zenkey_model::config::v2::{CONFIG, GROUPS, Interface};
+    let text = match std::fs::read_to_string(file) {
+        Ok(t) => t,
+        Err(e) => return no_verdict(&format!("{file}: {e}")),
+    };
+    let c: ContractFile = match toml::from_str(&text) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{file}: {}", e.to_string().trim());
+            return ExitCode::from(1);
+        }
+    };
+    let Some(annotation) = c
+        .resources
+        .get(CONFIG)
+        .and_then(|r| r.annotations.get(GROUPS))
+    else {
+        eprintln!("{file}: no resource `{CONFIG}` declares `{GROUPS}`");
+        return ExitCode::from(1);
+    };
+    let dir = Path::new(file).parent().unwrap_or(Path::new("."));
+    let mut docs = Vec::new();
+    for f in &c.schemas.packed {
+        let path = dir.join(f);
+        let doc: serde_json::Value = match std::fs::read_to_string(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|t| serde_json::from_str(&t).map_err(|e| e.to_string()))
+        {
+            Ok(d) => d,
+            Err(e) => return no_verdict(&format!("{}: {e}", path.display())),
+        };
+        let base = f.rsplit('/').next().unwrap_or(f);
+        docs.push((base.strip_suffix(".json").unwrap_or(base).to_owned(), doc));
+    }
+    let files: Vec<(&str, &serde_json::Value)> =
+        docs.iter().map(|(s, d)| (s.as_str(), d)).collect();
+    match Interface::read(annotation, &files) {
+        Ok(i) => {
+            print!("{}", i.derived.to_text());
+            ExitCode::SUCCESS
+        }
+        Err(reasons) => {
+            for r in reasons {
+                match r.entry {
+                    Some(e) => eprintln!("{file}: {GROUPS}[{e}]: {}", r.reason.token()),
+                    None => eprintln!("{file}: {GROUPS}: {}", r.reason.token()),
+                }
+            }
+            ExitCode::from(1)
+        }
     }
 }

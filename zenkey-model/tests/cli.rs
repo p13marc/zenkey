@@ -223,3 +223,52 @@ fn a_published_review_is_accepted() {
     assert!(!out.contains("accepted"), "{out}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// `zk2 config derive` prints the types config.v2 derives from a contract's
+/// declaration (config.v2 §3): for the test contract `rfcfg.v1`, exactly
+/// the eight derived types its packed file holds.
+#[test]
+fn config_derive_writes_the_derived_types() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../spec/profiles/config/conformance");
+    let contract = dir.join("contracts/rfcfg.v1.toml");
+    let out = Command::new(env!("CARGO_BIN_EXE_zk2"))
+        .args(["config", "derive", &contract.display().to_string()])
+        .output()
+        .expect("runs");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let printed: serde_json::Value = serde_json::from_slice(&out.stdout).expect("JSON");
+    let packed: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.join("contracts/rfcfg.json")).expect("rfcfg.json"),
+    )
+    .expect("JSON");
+    let types = printed["types"].as_object().expect("types");
+    let names: Vec<&str> = types.keys().map(String::as_str).collect();
+    let mut want = vec![
+        "Control", "Error", "Record", "SetDuty", "SetLink", "SetQueue", "SetRadio", "SetSim",
+    ];
+    want.sort_unstable();
+    let mut got = names.clone();
+    got.sort_unstable();
+    assert_eq!(got, want);
+    for n in names {
+        assert_eq!(printed["types"][n], packed["types"][n], "{n}");
+    }
+    // `contract lint` runs config.v2's lint: the test contract has no finding.
+    assert_eq!(
+        zk2(&["contract", "lint", &contract.display().to_string()]),
+        0
+    );
+    assert_eq!(
+        zk2(&["config", "derive", &p("contracts/ok-minimal.toml")]),
+        1
+    );
+    assert_eq!(
+        zk2(&["config", "derive", &p("contracts/no-such-file.toml")]),
+        2
+    );
+}

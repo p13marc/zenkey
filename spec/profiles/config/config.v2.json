@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "config.v2.json",
+  "$comment": "config.v2's standard schema (spec/profiles/config/v2.md section 3; core section 10 point 1). A config contract lists this file, or a copy whose JCS bytes are equal, and its events/change carries ConfigChangeEvent from it. The type is the profile's by this artifact's id, never by its name alone. Objects are open: a reader ignores a member it does not know.",
+  "$defs": {
+    "ParamValue": {
+      "description": "One parameter's value, untagged: a boolean or an integer, as the parameter's kind says (v2.md 2.2).",
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "integer"
+        }
+      ]
+    },
+    "Edit": {
+      "description": "One parameter a change set (v2.md 2.17): its group and name, the value before the change and the value the change set. A sensitive parameter's edit is redacted, with neither value.",
+      "type": "object",
+      "properties": {
+        "group": {
+          "type": "string"
+        },
+        "parameter": {
+          "type": "string"
+        },
+        "old": {
+          "$ref": "#/$defs/ParamValue"
+        },
+        "new": {
+          "$ref": "#/$defs/ParamValue"
+        },
+        "redacted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "group",
+        "parameter"
+      ]
+    },
+    "ConfigChangeEvent": {
+      "description": "One change, as it ended (v2.md 2.17): config.v1's event, with the instance's first run and the token as the record writes them. The attribution is what the change's caller claimed, never authentication.",
+      "type": "object",
+      "properties": {
+        "service": {
+          "type": "string",
+          "minLength": 1
+        },
+        "instance": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "token": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 281474976710655
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "applied",
+            "confirmed",
+            "rolled-back",
+            "partial"
+          ]
+        },
+        "edits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Edit"
+          }
+        },
+        "actor": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "claimed_source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "service",
+        "instance",
+        "revision",
+        "token",
+        "outcome",
+        "edits"
+      ]
+    }
+  }
+}

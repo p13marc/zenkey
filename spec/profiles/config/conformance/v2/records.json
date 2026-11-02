@@ -1,0 +1,3367 @@
+{
+  "description": "config.v2 §2.3, §3: the record of the test contract `contracts/rfcfg.v1.toml`, whose derived Record derive.json gives. Written by an independent reading of the text (Python, standard library), checked, never blessed. `layout` is the Record's tag, the sha256 of its layout form's JCS bytes, and its shortest and longest record in bits. `writes`: an owner's `state`, as config.v2 reads a record, and the deployment `epoch` in seconds -> `fields`, the Record's JSON reading (core §7.6: a time in milliseconds since the Unix epoch, an absent optional field no member), `bits` before the pad, `hex` the record's bytes, `mutation` the put's payload under `stamp` {run_width, run, seq} (core §7.5, form 0), and `value` a reply's payload under the same stamp (form 2). A state is: instance (the instance's first run), revision, floor_s, would_be; pending, null or {token, groups (the contract's order), apply_at (null when no reach group waits), deadline, applied (true when apply_at is null)}; last, null or {token, groups}; desired, null or {outcome, observed_revision, refusal: null or {code, group (null for one the contract does not declare), parameter (null for a group's own check, or one the group does not declare)}}; groups, each {writable (a hot or reach group alone), params: each {source (null when the value is unknown), differs and value (null when unknown), both left out for a sensitive parameter}}. Instants are milliseconds since the Unix epoch, whole seconds. Every write reads back to its state. `reads`: a record's bytes, its CH tag and the epoch -> {state} or {refused: token}: first core §7.6's refusals (tag, length, code, extension, length, pad), then config.v2's, the first that applies: group (a group behind a marker whose writable, pending and last bits are not all present, or whose parameter has a value field and no differs bit; a group with none of its fields is absent, a writer of an earlier revision's), pending (pending_token and pending_deadline not both present or both absent; pending_apply_at, or a group's pending bit, with no pending_token; a pending_token with no group's pending bit), last (last_token with no group's last bit, or a last bit with no last_token), desired (desired_revision, desired_code, desired_group or desired_parameter without desired; desired without desired_revision; desired_code absent for refused or failed, or present for converged; desired_group without desired_code; desired_parameter without desired_group; an index the contract's groups, or that group's parameters, do not reach), parameter (a non-sensitive parameter's value without its source, its source without its value, or differs set with no value). `growth` reads two revisions of one contract: `groups` as derive.json declares each, `records` each revision writes, read by each, and `reads` of the later revision's records, read by it.",
+  "contract": "contracts/rfcfg.v1.toml",
+  "layout": {
+    "tag": 9,
+    "sha256": "6d7947ea9e8859b19d8b03e471d0de52cd8cc964221b3be67d96801aea2a07f9",
+    "min_bits": 131,
+    "max_bits": 448
+  },
+  "writes": [
+    {
+      "note": "an owner at its start: revision 0, nothing pending, no last change, every value from its startup layers; queue outside the allowlist; pin's source alone",
+      "epoch": 0,
+      "state": {
+        "instance": 4660,
+        "revision": 0,
+        "floor_s": 10,
+        "would_be": false,
+        "pending": null,
+        "last": null,
+        "desired": null,
+        "groups": {
+          "duty": {
+            "writable": true,
+            "params": {
+              "fraction_ppm": {
+                "source": "file",
+                "differs": false,
+                "value": 10000
+              },
+              "period_s": {
+                "source": "default",
+                "differs": false,
+                "value": 3600
+              },
+              "enforce": {
+                "source": "default",
+                "differs": false,
+                "value": true
+              }
+            }
+          },
+          "radio": {
+            "writable": true,
+            "params": {
+              "frequency_hz": {
+                "source": "file",
+                "differs": false,
+                "value": 868100000
+              }
+            }
+          },
+          "link": {
+            "writable": true,
+            "params": {
+              "net_id": {
+                "source": "default",
+                "differs": false,
+                "value": 1
+              }
+            }
+          },
+          "sim": {
+            "writable": true,
+            "params": {
+              "pin": {
+                "source": "file"
+              },
+              "attempts": {
+                "source": "default",
+                "differs": false,
+                "value": 3
+              }
+            }
+          },
+          "queue": {
+            "writable": false,
+            "params": {
+              "tx_queue_len": {
+                "source": "default",
+                "differs": false,
+                "value": 100
+              }
+            }
+          },
+          "modulation": {
+            "params": {
+              "spreading_factor": {
+                "source": "file",
+                "differs": false,
+                "value": 9
+              }
+            }
+          }
+        }
+      },
+      "stamp": {
+        "run_width": 16,
+        "run": 4660,
+        "seq": 41
+      },
+      "expect": {
+        "fields": {
+          "instance": 4660,
+          "revision": 0,
+          "floor_s": 10,
+          "would_be": false,
+          "duty__writable": true,
+          "duty__pending": false,
+          "duty__last": false,
+          "duty__fraction_ppm__source": "file",
+          "duty__fraction_ppm__differs": false,
+          "duty__fraction_ppm": 10000,
+          "duty__period_s__source": "default",
+          "duty__period_s__differs": false,
+          "duty__period_s": 3600,
+          "duty__enforce__source": "default",
+          "duty__enforce__differs": false,
+          "duty__enforce": true,
+          "radio__writable": true,
+          "radio__pending": false,
+          "radio__last": false,
+          "radio__frequency_hz__source": "file",
+          "radio__frequency_hz__differs": false,
+          "radio__frequency_hz": 868100000,
+          "link__writable": true,
+          "link__pending": false,
+          "link__last": false,
+          "link__net_id__source": "default",
+          "link__net_id__differs": false,
+          "link__net_id": 1,
+          "sim__writable": true,
+          "sim__pending": false,
+          "sim__last": false,
+          "sim__pin__source": "file",
+          "sim__attempts__source": "default",
+          "sim__attempts__differs": false,
+          "sim__attempts": 3,
+          "queue__writable": false,
+          "queue__pending": false,
+          "queue__last": false,
+          "queue__tx_queue_len__source": "default",
+          "queue__tx_queue_len__differs": false,
+          "queue__tx_queue_len": 100,
+          "modulation__spreading_factor__source": "file",
+          "modulation__spreading_factor__differs": false,
+          "modulation__spreading_factor": 9
+        },
+        "bits": "00000000000000000001001000110100000000000000000000000000000000000000000000001001000000000010010101000000100111000100001000100000111000001111100011100101011010101100110101010110001000001001000100000001100101100010011000100010001100011101010100",
+        "hex": "000012340000000000090025409c4220e0f8e56acd5620910196262231d500",
+        "bytes": 31,
+        "mutation": "091234000029000012340000000000090025409c4220e0f8e56acd5620910196262231d500",
+        "value": "491234000029000012340000000000090025409c4220e0f8e56acd5620910196262231d500"
+      }
+    },
+    {
+      "note": "idle with a last change: a hot set of duty, its value differing from the startup value",
+      "epoch": 0,
+      "state": {
+        "instance": 4660,
+        "revision": 1,
+        "floor_s": 10,
+        "would_be": false,
+        "pending": null,
+        "last": {
+          "token": 305438721,
+          "groups": [
+            "duty"
+          ]
+        },
+        "desired": null,
+        "groups": {
+          "duty": {
+            "writable": true,
+            "params": {
+              "fraction_ppm": {
+                "source": "runtime",
+                "differs": true,
+                "value": 20000
+              },
+              "period_s": {
+                "source": "default",
+                "differs": false,
+                "value": 3600
+              },
+              "enforce": {
+                "source": "default",
+                "differs": false,
+                "value": true
+              }
+            }
+          },
+          "radio": {
+            "writable": true,
+            "params": {
+              "frequency_hz": {
+                "source": "file",
+                "differs": false,
+                "value": 868100000
+              }
+            }
+          },
+          "link": {
+            "writable": true,
+            "params": {
+              "net_id": {
+                "source": "default",
+                "differs": false,
+                "value": 1
+              }
+            }
+          },
+          "sim": {
+            "writable": true,
+            "params": {
+              "pin": {
+                "source": "file"
+              },
+              "attempts": {
+                "source": "default",
+                "differs": false,
+                "value": 3
+              }
+            }
+          },
+          "queue": {
+            "writable": false,
+            "params": {
+              "tx_queue_len": {
+                "source": "default",
+                "differs": false,
+                "value": 100
+              }
+            }
+          },
+          "modulation": {
+            "params": {
+              "spreading_factor": {
+                "source": "file",
+                "differs": false,
+                "value": 9
+              }
+            }
+          }
+        }
+      },
+      "stamp": {
+        "run_width": 16,
+        "run": 4660,
+        "seq": 41
+      },
+      "expect": {
+        "fields": {
+          "instance": 4660,
+          "revision": 1,
+          "floor_s": 10,
+          "would_be": false,
+          "last_token": 305438721,
+          "duty__writable": true,
+          "duty__pending": false,
+          "duty__last": true,
+          "duty__fraction_ppm__source": "runtime",
+          "duty__fraction_ppm__differs": true,
+          "duty__fraction_ppm": 20000,
+          "duty__period_s__source": "default",
+          "duty__period_s__differs": false,
+          "duty__period_s": 3600,
+          "duty__enforce__source": "default",
+          "duty__enforce__differs": false,
+          "duty__enforce": true,
+          "radio__writable": true,
+          "radio__pending": false,
+          "radio__last": false,
+          "radio__frequency_hz__source": "file",
+          "radio__frequency_hz__differs": false,
+          "radio__frequency_hz": 868100000,
+          "link__writable": true,
+          "link__pending": false,
+          "link__last": false,
+          "link__net_id__source": "default",
+          "link__net_id__differs": false,
+          "link__net_id": 1,
+          "sim__writable": true,
+          "sim__pending": false,
+          "sim__last": false,
+          "sim__pin__source": "file",
+          "sim__attempts__source": "default",
+          "sim__attempts__differs": false,
+          "sim__attempts": 3,
+          "queue__writable": false,
+          "queue__pending": false,
+          "queue__last": false,
+          "queue__tx_queue_len__source": "default",
+          "queue__tx_queue_len__differs": false,
+          "queue__tx_queue_len": 100,
+          "modulation__spreading_factor__source": "file",
+          "modulation__spreading_factor__differs": false,
+          "modulation__spreading_factor": 9
+        },
+        "bits": "00000000000000000001001000110100000000000000000000000000000000010000000000001001000010000000000000000000100100011010010100000000000010000010111111000001001110001000001000100000111000001111100011100101011010101100110101010110001000001001000100000001100101100010011000100010001100011101010100",
+        "hex": "0000123400000001000908000091a500082fc1388220e0f8e56acd5620910196262231d500",
+        "bytes": 37,
+        "mutation": "0912340000290000123400000001000908000091a500082fc1388220e0f8e56acd5620910196262231d500",
+        "value": "4912340000290000123400000001000908000091a500082fc1388220e0f8e56acd5620910196262231d500"
+      }
+    },
+    {
+      "note": "a reach change armed and not applied: apply_at present, the reply a reach set gets",
+      "epoch": 0,
+      "state": {
+        "instance": 4660,
+        "revision": 0,
+        "floor_s": 10,
+        "would_be": false,
+        "pending": {
+          "token": 305438722,
+          "groups": [
+            "radio"
+          ],
+          "apply_at": 1001000,
+          "deadline": 1120000,
+          "applied": false
+        },
+        "last": null,
+        "desired": null,
+        "groups": {
+          "duty": {
+            "writable": true,
+            "params": {
+              "fraction_ppm": {
+                "source": "file",
+                "differs": false,
+                "value": 10000
+              },
+              "period_s": {
+                "source": "default",
+                "differs": false,
+                "value": 3600
+              },
+              "enforce": {
+                "source": "default",
+                "differs": false,
+                "value": true
+              }
+            }
+          },
+          "radio": {
+            "writable": true,
+            "params": {
+              "frequency_hz": {
+                "source": "file",
+                "differs": false,
+                "value": 868100000
+              }
+            }
+          },
+          "link": {
+            "writable": true,
+            "params": {
+              "net_id": {
+                "source": "default",
+                "differs": false,
+                "value": 1
+              }
+            }
+          },
+          "sim": {
+            "writable": true,
+            "params": {
+              "pin": {
+                "source": "file"
+              },
+              "attempts": {
+                "source": "default",
+                "differs": false,
+                "value": 3
+              }
+            }
+          },
+          "queue": {
+            "writable": false,
+            "params": {
+              "tx_queue_len": {
+                "source": "default",
+                "differs": false,
+                "value": 100
+              }
+            }
+          },
+          "modulation": {
+            "params": {
+              "spreading_factor": {
+                "source": "file",
+                "differs": false,
+                "value": 9
+              }
+            }
+          }
+        }
+      },
+      "stamp": {
+        "run_width": 16,
+        "run": 4660,
+        "seq": 41
+      },
+      "expect": {
+        "fields": {
+          "instance": 4660,
+          "revision": 0,
+          "floor_s": 10,
+          "would_be": false,
+          "pending_token": 305438722,
+          "pending_apply_at": 1001000,
+          "pending_deadline": 1120000,
+          "duty__writable": true,
+          "duty__pending": false,
+          "duty__last": false,
+          "duty__fraction_ppm__source": "file",
+          "duty__fraction_ppm__differs": false,
+          "duty__fraction_ppm": 10000,
+          "duty__period_s__source": "default",
+          "duty__period_s__differs": false,
+          "duty__period_s": 3600,
+          "duty__enforce__source": "default",
+          "duty__enforce__differs": false,
+          "duty__enforce": true,
+          "radio__writable": true,
+          "radio__pending": true,
+          "radio__last": false,
+          "radio__frequency_hz__source": "file",
+          "radio__frequency_hz__differs": false,
+          "radio__frequency_hz": 868100000,
+          "link__writable": true,
+          "link__pending": false,
+          "link__last": false,
+          "link__net_id__source": "default",
+          "link__net_id__differs": false,
+          "link__net_id": 1,
+          "sim__writable": true,
+          "sim__pending": false,
+          "sim__last": false,
+          "sim__pin__source": "file",
+          "sim__attempts__source": "default",
+          "sim__attempts__differs": false,
+          "sim__attempts": 3,
+          "queue__writable": false,
+          "queue__pending": false,
+          "queue__last": false,
+          "queue__tx_queue_len__source": "default",
+          "queue__tx_queue_len__differs": false,
+          "queue__tx_queue_len": 100,
+          "modulation__spreading_factor__source": "file",
+          "modulation__spreading_factor__differs": false,
+          "modulation__spreading_factor": 9
+        },
+        "bits": "000000000000000000010010001101000000000000000000000000000000000000000000000010010100000000000000000001001000110100101000000000001010000000000000000000000111110100110000000000000000000001000110000000000010010101000000100111000100001000100000111000001111100011110101011010101100110101010110001000001001000100000001100101100010011000100010001100011101010100",
+        "hex": "000012340000000000094000048d2800a000007d300000460025409c4220e0f8f56acd5620910196262231d500",
+        "bytes": 45,
+        "mutation": "091234000029000012340000000000094000048d2800a000007d300000460025409c4220e0f8f56acd5620910196262231d500",
+        "value": "491234000029000012340000000000094000048d2800a000007d300000460025409c4220e0f8f56acd5620910196262231d500"
+      }
+    },
+    {
+      "note": "the change applied, duty joined: the groups as bits in the contract's order, not the order they joined in",
+      "epoch": 0,
+      "state": {
+        "instance": 4660,
+        "revision": 2,
+        "floor_s": 10,
+        "would_be": false,
+        "pending": {
+          "token": 305438722,
+          "groups": [
+            "duty",
+            "radio"
+          ],
+          "apply_at": null,
+          "deadline": 1120000,
+          "applied": true
+        },
+        "last": null,
+        "desired": null,
+        "groups": {
+          "duty": {
+            "writable": true,
+            "params": {
+              "fraction_ppm": {
+                "source": "file",
+                "differs": false,
+                "value": 10000
+              },
+              "period_s": {
+                "source": "default",
+                "differs": false,
+                "value": 3600
+              },
+              "enforce": {
+                "source": "runtime",
+                "differs": true,
+                "value": false
+              }
+            }
+          },
+          "radio": {
+            "writable": true,
+            "params": {
+              "frequency_hz": {
+                "source": "runtime",
+                "differs": true,
+                "value": 869525000
+              }
+            }
+          },
+          "link": {
+            "writable": true,
+            "params": {
+              "net_id": {
+                "source": "default",
+                "differs": false,
+                "value": 1
+              }
+            }
+          },
+          "sim": {
+            "writable": true,
+            "params": {
+              "pin": {
+                "source": "file"
+              },
+              "attempts": {
+                "source": "default",
+                "differs": false,
+                "value": 3
+              }
+            }
+          },
+          "queue": {
+            "writable": false,
+            "params": {
+              "tx_queue_len": {
+                "source": "default",
+                "differs": false,
+                "value": 100
+              }
+            }
+          },
+          "modulation": {
+            "params": {
+              "spreading_factor": {
+                "source": "file",
+                "differs": false,
+                "value": 9
+              }
+            }
+          }
+        }
+      },
+      "stamp": {
+        "run_width": 16,
+        "run": 4660,
+        "seq": 41
+      },
+      "expect": {
+        "fields": {
+          "instance": 4660,
+          "revision": 2,
+          "floor_s": 10,
+          "would_be": false,
+          "pending_token": 305438722,
+          "pending_deadline": 1120000,
+          "duty__writable": true,
+          "duty__pending": true,
+          "duty__last": false,
+          "duty__fraction_ppm__source": "file",
+          "duty__fraction_ppm__differs": false,
+          "duty__fraction_ppm": 10000,
+          "duty__period_s__source": "default",
+          "duty__period_s__differs": false,
+          "duty__period_s": 3600,
+          "duty__enforce__source": "runtime",
+          "duty__enforce__differs": true,
+          "duty__enforce": false,
+          "radio__writable": true,
+          "radio__pending": true,
+          "radio__last": false,
+          "radio__frequency_hz__source": "runtime",
+          "radio__frequency_hz__differs": true,
+          "radio__frequency_hz": 869525000,
+          "link__writable": true,
+          "link__pending": false,
+          "link__last": false,
+          "link__net_id__source": "default",
+          "link__net_id__differs": false,
+          "link__net_id": 1,
+          "sim__writable": true,
+          "sim__pending": false,
+          "sim__last": false,
+          "sim__pin__source": "file",
+          "sim__attempts__source": "default",
+          "sim__attempts__differs": false,
+          "sim__attempts": 3,
+          "queue__writable": false,
+          "queue__pending": false,
+          "queue__last": false,
+          "queue__tx_queue_len__source": "default",
+          "queue__tx_queue_len__differs": false,
+          "queue__tx_queue_len": 100,
+          "modulation__spreading_factor__source": "file",
+          "modulation__spreading_factor__differs": false,
+          "modulation__spreading_factor": 9
+        },
+        "bits": "0000000000000000000100100011010000000000000000000000000000000010000000000000100101000000000000000000010010001101001010000000000010010000000000000000000001000110000000000011010101000000100111000100001000100000111000001111111110110111111010101110001100010100100010001001000100000001100101100010011000100010001100011101010100",
+        "hex": "000012340000000200094000048d2800900000460035409c4220e0ffb7eae31488910196262231d500",
+        "bytes": 41,
+        "mutation": "091234000029000012340000000200094000048d2800900000460035409c4220e0ffb7eae31488910196262231d500",
+        "value": "491234000029000012340000000200094000048d2800900000460035409c4220e0ffb7eae31488910196262231d500"
+      }
+    },
+    {
+      "note": "a dry run's record: would_be, the request's values at runtime, nothing else moved",
+      "epoch": 0,
+      "state": {
+        "instance": 4660,
+        "revision": 0,
+        "floor_s": 10,
+        "would_be": true,
+        "pending": null,
+        "last": null,
+        "desired": null,
+        "groups": {
+          "duty": {
+            "writable": true,
+            "params": {
+              "fraction_ppm": {
+                "source": "file",
+                "differs": false,
+                "value": 10000
+              },
+              "period_s": {
+                "source": "runtime",
+                "differs": true,
+                "value": 60
+              },
+              "enforce": {
+                "source": "default",
+                "differs": false,
+                "value": true
+              }
+            }
+          },
+          "radio": {
+            "writable": true,
+            "params": {
+              "frequency_hz": {
+                "source": "file",
+                "differs": false,
+                "value": 868100000
+              }
+            }
+          },
+          "link": {
+            "writable": true,
+            "params": {
+              "net_id": {
+                "source": "default",
+                "differs": false,
+                "value": 1
+              }
+            }
+          },
+          "sim": {
+            "writable": true,
+            "params": {
+              "pin": {
+                "source": "file"
+              },
+              "attempts": {
+                "source": "default",
+                "differs": false,
+                "value": 3
+              }
+            }
+          },
+          "queue": {
+            "writable": false,
+            "params": {
+              "tx_queue_len": {
+                "source": "default",
+                "differs": false,
+                "value": 100
+              }
+            }
+          },
+          "modulation": {
+            "params": {
+              "spreading_factor": {
+                "source": "file",
+                "differs": false,
+                "value": 9
+              }
+            }
+          }
+        }
+      },
+      "stamp": {
+        "run_width": 16,
+        "run": 4660,
+        "seq": 41
+      },
+      "expect": {
+        "fields": {
+          "instance": 4660,
+          "revision": 0,
+          "floor_s": 10,
+          "would_be": true,
+          "duty__writable": true,
+          "duty__pending": false,
+          "duty__last": false,
+          "duty__fraction_ppm__source": "file",
+          "duty__fraction_ppm__differs": false,
+          "duty__fraction_ppm": 10000,
+          "duty__period_s__source": "runtime",
+          "duty__period_s__differs": true,
+          "duty__period_s": 60,
+          "duty__enforce__source": "default",
+          "duty__enforce__differs": false,
+          "duty__enforce": true,
+          "radio__writable": true,
+          "radio__pending": false,
+          "radio__last": false,
+          "radio__frequency_hz__source": "file",
+          "radio__frequency_hz__differs": false,
+          "radio__frequency_hz": 868100000,
+          "link__writable": true,
+          "link__pending": false,
+          "link__last": false,
+          "link__net_id__source": "default",
+          "link__net_id__differs": false,
+          "link__net_id": 1,
+          "sim__writable": true,
+          "sim__pending": false,
+          "sim__last": false,
+          "sim__pin__source": "file",
+          "sim__attempts__source": "default",
+          "sim__attempts__differs": false,
+          "sim__attempts": 3,
+          "queue__writable": false,
+          "queue__pending": false,
+          "queue__last": false,
+          "queue__tx_queue_len__source": "default",
+          "queue__tx_queue_len__differs": false,
+          "queue__tx_queue_len": 100,
+          "modulation__spreading_factor__source": "file",
+          "modulation__spreading_factor__differs": false,
+          "modulation__spreading_factor": 9
+        },
+        "bits": "00000000000000000001001000110100000000000000000000000000000000000000000000001001100000000010010101000000100111000100001111100000000000111011100011100101011010101100110101010110001000001001000100000001100101100010011000100010001100011101010100",
+        "hex": "000012340000000000098025409c43e003b8e56acd5620910196262231d500",
+        "bytes": 31,
+        "mutation": "091234000029000012340000000000098025409c43e003b8e56acd5620910196262231d500",
+        "value": "491234000029000012340000000000098025409c43e003b8e56acd5620910196262231d500"
+      }
+    },
+    {
+      "note": "a 32-bit run: the instance and the token's run as the owner drew them; a sensitive value set at runtime shows its source alone",
+      "epoch": 0,
+      "state": {
+        "instance": 2671520369,
+        "revision": 7,
+        "floor_s": 10,
+        "would_be": false,
+        "pending": null,
+        "last": {
+          "token": 175080758902786,
+          "groups": [
+            "link",
+            "sim"
+          ]
+        },
+        "desired": null,
+        "groups": {
+          "duty": {
+            "writable": true,
+            "params": {
+              "fraction_ppm": {
+                "source": "file",
+                "differs": false,
+                "value": 10000
+              },
+              "period_s": {
+                "source": "default",
+                "differs": false,
+                "value": 3600
+              },
+              "enforce": {
+                "source": "default",
+                "differs": false,
+                "value": true
+              }
+            }
+          },
+          "radio": {
+            "writable": true,
+            "params": {
+              "frequency_hz": {
+                "source": "file",
+                "differs": false,
+                "value": 868100000
+              }
+            }
+          },
+          "link": {
+            "writable": true,
+            "params": {
+              "net_id": {
+                "source": "runtime",
+                "differs": true,
+                "value": 7
+              }
+            }
+          },
+          "sim": {
+            "writable": true,
+            "params": {
+              "pin": {
+                "source": "runtime"
+              },
+              "attempts": {
+                "source": "default",
+                "differs": false,
+                "value": 3
+              }
+            }
+          },
+          "queue": {
+            "writable": false,
+            "params": {
+              "tx_queue_len": {
+                "source": "default",
+                "differs": false,
+                "value": 100
+              }
+            }
+          },
+          "modulation": {
+            "params": {
+              "spreading_factor": {
+                "source": "file",
+                "differs": false,
+                "value": 9
+              }
+            }
+          }
+        }
+      },
+      "stamp": {
+        "run_width": 32,
+        "run": 2671520369,
+        "seq": 3
+      },
+      "expect": {
+        "fields": {
+          "instance": 2671520369,
+          "revision": 7,
+          "floor_s": 10,
+          "would_be": false,
+          "last_token": 175080758902786,
+          "duty__writable": true,
+          "duty__pending": false,
+          "duty__last": false,
+          "duty__fraction_ppm__source": "file",
+          "duty__fraction_ppm__differs": false,
+          "duty__fraction_ppm": 10000,
+          "duty__period_s__source": "default",
+          "duty__period_s__differs": false,
+          "duty__period_s": 3600,
+          "duty__enforce__source": "default",
+          "duty__enforce__differs": false,
+          "duty__enforce": true,
+          "radio__writable": true,
+          "radio__pending": false,
+          "radio__last": false,
+          "radio__frequency_hz__source": "file",
+          "radio__frequency_hz__differs": false,
+          "radio__frequency_hz": 868100000,
+          "link__writable": true,
+          "link__pending": false,
+          "link__last": true,
+          "link__net_id__source": "runtime",
+          "link__net_id__differs": true,
+          "link__net_id": 7,
+          "sim__writable": true,
+          "sim__pending": false,
+          "sim__last": true,
+          "sim__pin__source": "runtime",
+          "sim__attempts__source": "default",
+          "sim__attempts__differs": false,
+          "sim__attempts": 3,
+          "queue__writable": false,
+          "queue__pending": false,
+          "queue__last": false,
+          "queue__tx_queue_len__source": "default",
+          "queue__tx_queue_len__differs": false,
+          "queue__tx_queue_len": 100,
+          "modulation__spreading_factor__source": "file",
+          "modulation__spreading_factor__differs": false,
+          "modulation__spreading_factor": 9
+        },
+        "bits": "10011111001111000010101001110001000000000000000000000000000001110000000000001001000011001111100111100001010100111000100000000000000100000010010101000000100111000100001000100000111000001111100011100101011010101100110101010110001000001011111100000111101111100010011000100010001100011101010100",
+        "hex": "9f3c2a710000000700090cf9e15388001025409c4220e0f8e56acd5620bf07be262231d500",
+        "bytes": 37,
+        "mutation": "199f3c2a710000039f3c2a710000000700090cf9e15388001025409c4220e0f8e56acd5620bf07be262231d500",
+        "value": "599f3c2a710000039f3c2a710000000700090cf9e15388001025409c4220e0f8e56acd5620bf07be262231d500"
+      }
+    },
+    {
+      "note": "a desired document converged",
+      "epoch": 0,
+      "state": {
+        "instance": 4660,
+        "revision": 1,
+        "floor_s": 10,
+        "would_be": false,
+        "pending": null,
+        "last": null,
+        "desired": {
+          "outcome": "converged",
+          "observed_revision": 1,
+          "refusal": null
+        },
+        "groups": {
+          "duty": {
+            "writable": true,
+            "params": {
+              "fraction_ppm": {
+                "source": "runtime",
+                "differs": true,
+                "value": 20000
+              },
+              "period_s": {
+                "source": "default",
+                "differs": false,
+                "value": 3600
+              },
+              "enforce": {
+                "source": "default",
+                "differs": false,
+                "value": true
+              }
+            }
+          },
+          "radio": {
+            "writable": true,
+            "params": {
+              "frequency_hz": {
+                "source": "file",
+                "differs": false,
+                "value": 868100000
+              }
+            }
+          },
+          "link": {
+            "writable": true,
+            "params": {
+              "net_id": {
+                "source": "default",
+                "differs": false,
+                "value": 1
+              }
+            }
+          },
+          "sim": {
+            "writable": true,
+            "params": {
+              "pin": {
+                "source": "file"
+              },
+              "attempts": {
+                "source": "default",
+                "differs": false,
+                "value": 3
+              }
+            }
+          },
+          "queue": {
+            "writable": false,
+            "params": {
+              "tx_queue_len": {
+                "source": "default",
+                "differs": false,
+                "value": 100
+              }
+            }
+          },
+          "modulation": {
+            "params": {
+              "spreading_factor": {
+                "source": "file",
+                "differs": false,
+                "value": 9
+              }
+            }
+          }
+        }
+      },
+      "stamp": {
+        "run_width": 16,
+        "run": 4660,
+        "seq": 41
+      },
+      "expect": {
+        "fields": {
+          "instance": 4660,
+          "revision": 1,
+          "floor_s": 10,
+          "would_be": false,
+          "desired": "converged",
+          "desired_revision": 1,
+          "duty__writable": true,
+          "duty__pending": false,
+          "duty__last": false,
+          "duty__fraction_ppm__source": "runtime",
+          "duty__fraction_ppm__differs": true,
+          "duty__fraction_ppm": 20000,
+          "duty__period_s__source": "default",
+          "duty__period_s__differs": false,
+          "duty__period_s": 3600,
+          "duty__enforce__source": "default",
+          "duty__enforce__differs": false,
+          "duty__enforce": true,
+          "radio__writable": true,
+          "radio__pending": false,
+          "radio__last": false,
+          "radio__frequency_hz__source": "file",
+          "radio__frequency_hz__differs": false,
+          "radio__frequency_hz": 868100000,
+          "link__writable": true,
+          "link__pending": false,
+          "link__last": false,
+          "link__net_id__source": "default",
+          "link__net_id__differs": false,
+          "link__net_id": 1,
+          "sim__writable": true,
+          "sim__pending": false,
+          "sim__last": false,
+          "sim__pin__source": "file",
+          "sim__attempts__source": "default",
+          "sim__attempts__differs": false,
+          "sim__attempts": 3,
+          "queue__writable": false,
+          "queue__pending": false,
+          "queue__last": false,
+          "queue__tx_queue_len__source": "default",
+          "queue__tx_queue_len__differs": false,
+          "queue__tx_queue_len": 100,
+          "modulation__spreading_factor__source": "file",
+          "modulation__spreading_factor__differs": false,
+          "modulation__spreading_factor": 9
+        },
+        "bits": "000000000000000000010010001101000000000000000000000000000000000100000000000010010000010010000000000000000000000000000000100010011111000001001110001000001000100000111000001111100011100101011010101100110101010110001000001001000100000001100101100010011000100010001100011101010100",
+        "hex": "00001234000000010009048000000089f04e2088383e395ab3558824406589888c7540",
+        "bytes": 35,
+        "mutation": "09123400002900001234000000010009048000000089f04e2088383e395ab3558824406589888c7540",
+        "value": "49123400002900001234000000010009048000000089f04e2088383e395ab3558824406589888c7540"
+      }
+    },
+    {
+      "note": "a desired document refused for a sensitive parameter: the group's and the parameter's indices",
+      "epoch": 0,
+      "state": {
+        "instance": 4660,
+        "revision": 0,
+        "floor_s": 10,
+        "would_be": false,
+        "pending": null,
+        "last": null,
+        "desired": {
+          "outcome": "refused",
+          "observed_revision": 3,
+          "refusal": {
+            "code": "sensitive",
+            "group": "sim",
+            "parameter": "pin"
+          }
+        },
+        "groups": {
+          "duty": {
+            "writable": true,
+            "params": {
+              "fraction_ppm": {
+                "source": "file",
+                "differs": false,
+                "value": 10000
+              },
+              "period_s": {
+                "source": "default",
+                "differs": false,
+                "value": 3600
+              },
+              "enforce": {
+                "source": "default",
+                "differs": false,
+                "value": true
+              }
+            }
+          },
+          "radio": {
+            "writable": true,
+            "params": {
+              "frequency_hz": {
+                "source": "file",
+                "differs": false,
+                "value": 868100000
+              }
+            }
+          },
+          "link": {
+            "writable": true,
+            "params": {
+              "net_id": {
+                "source": "default",
+                "differs": false,
+                "value": 1
+              }
+            }
+          },
+          "sim": {
+            "writable": true,
+            "params": {
+              "pin": {
+                "source": "file"
+              },
+              "attempts": {
+                "source": "default",
+                "differs": false,
+                "value": 3
+              }
+            }
+          },
+          "queue": {
+            "writable": false,
+            "params": {
+              "tx_queue_len": {
+                "source": "default",
+                "differs": false,
+                "value": 100
+              }
+            }
+          },
+          "modulation": {
+            "params": {
+              "spreading_factor": {
+                "source": "file",
+                "differs": false,
+                "value": 9
+              }
+            }
+          }
+        }
+      },
+      "stamp": {
+        "run_width": 16,
+        "run": 4660,
+        "seq": 41
+      },
+      "expect": {
+        "fields": {
+          "instance": 4660,
+          "revision": 0,
+          "floor_s": 10,
+          "would_be": false,
+          "desired": "refused",
+          "desired_revision": 3,
+          "desired_code": "sensitive",
+          "desired_group": 3,
+          "desired_parameter": 0,
+          "duty__writable": true,
+          "duty__pending": false,
+          "duty__last": false,
+          "duty__fraction_ppm__source": "file",
+          "duty__fraction_ppm__differs": false,
+          "duty__fraction_ppm": 10000,
+          "duty__period_s__source": "default",
+          "duty__period_s__differs": false,
+          "duty__period_s": 3600,
+          "duty__enforce__source": "default",
+          "duty__enforce__differs": false,
+          "duty__enforce": true,
+          "radio__writable": true,
+          "radio__pending": false,
+          "radio__last": false,
+          "radio__frequency_hz__source": "file",
+          "radio__frequency_hz__differs": false,
+          "radio__frequency_hz": 868100000,
+          "link__writable": true,
+          "link__pending": false,
+          "link__last": false,
+          "link__net_id__source": "default",
+          "link__net_id__differs": false,
+          "link__net_id": 1,
+          "sim__writable": true,
+          "sim__pending": false,
+          "sim__last": false,
+          "sim__pin__source": "file",
+          "sim__attempts__source": "default",
+          "sim__attempts__differs": false,
+          "sim__attempts": 3,
+          "queue__writable": false,
+          "queue__pending": false,
+          "queue__last": false,
+          "queue__tx_queue_len__source": "default",
+          "queue__tx_queue_len__differs": false,
+          "queue__tx_queue_len": 100,
+          "modulation__spreading_factor__source": "file",
+          "modulation__spreading_factor__differs": false,
+          "modulation__spreading_factor": 9
+        },
+        "bits": "000000000000000000010010001101000000000000000000000000000000000000000000000010010000010110000000000000000000000000000001110010100111000010010101000000100111000100001000100000111000001111100011100101011010101100110101010110001000001001000100000001100101100010011000100010001100011101010100",
+        "hex": "000012340000000000090580000001ca70950271088383e395ab3558824406589888c754",
+        "bytes": 36,
+        "mutation": "091234000029000012340000000000090580000001ca70950271088383e395ab3558824406589888c754",
+        "value": "491234000029000012340000000000090580000001ca70950271088383e395ab3558824406589888c754"
+      }
+    },
+    {
+      "note": "refused for a reach group: a group's own check names no parameter",
+      "epoch": 0,
+      "state": {
+        "instance": 4660,
+        "revision": 0,
+        "floor_s": 10,
+        "would_be": false,
+        "pending": null,
+        "last": null,
+        "desired": {
+          "outcome": "refused",
+          "observed_revision": 2,
+          "refusal": {
+            "code": "reach",
+            "group": "radio",
+            "parameter": null
+          }
+        },
+        "groups": {
+          "duty": {
+            "writable": true,
+            "params": {
+              "fraction_ppm": {
+                "source": "file",
+                "differs": false,
+                "value": 10000
+              },
+              "period_s": {
+                "source": "default",
+                "differs": false,
+                "value": 3600
+              },
+              "enforce": {
+                "source": "default",
+                "differs": false,
+                "value": true
+              }
+            }
+          },
+          "radio": {
+            "writable": true,
+            "params": {
+              "frequency_hz": {
+                "source": "file",
+                "differs": false,
+                "value": 868100000
+              }
+            }
+          },
+          "link": {
+            "writable": true,
+            "params": {
+              "net_id": {
+                "source": "default",
+                "differs": false,
+                "value": 1
+              }
+            }
+          },
+          "sim": {
+            "writable": true,
+            "params": {
+              "pin": {
+                "source": "file"
+              },
+              "attempts": {
+                "source": "default",
+                "differs": false,
+                "value": 3
+              }
+            }
+          },
+          "queue": {
+            "writable": false,
+            "params": {
+              "tx_queue_len": {
+                "source": "default",
+                "differs": false,
+                "value": 100
+              }
+            }
+          },
+          "modulation": {
+            "params": {
+              "spreading_factor": {
+                "source": "file",
+                "differs": false,
+                "value": 9
+              }
+            }
+          }
+        }
+      },
+      "stamp": {
+        "run_width": 16,
+        "run": 4660,
+        "seq": 41
+      },
+      "expect": {
+        "fields": {
+          "instance": 4660,
+          "revision": 0,
+          "floor_s": 10,
+          "would_be": false,
+          "desired": "refused",
+          "desired_revision": 2,
+          "desired_code": "reach",
+          "desired_group": 1,
+          "duty__writable": true,
+          "duty__pending": false,
+          "duty__last": false,
+          "duty__fraction_ppm__source": "file",
+          "duty__fraction_ppm__differs": false,
+          "duty__fraction_ppm": 10000,
+          "duty__period_s__source": "default",
+          "duty__period_s__differs": false,
+          "duty__period_s": 3600,
+          "duty__enforce__source": "default",
+          "duty__enforce__differs": false,
+          "duty__enforce": true,
+          "radio__writable": true,
+          "radio__pending": false,
+          "radio__last": false,
+          "radio__frequency_hz__source": "file",
+          "radio__frequency_hz__differs": false,
+          "radio__frequency_hz": 868100000,
+          "link__writable": true,
+          "link__pending": false,
+          "link__last": false,
+          "link__net_id__source": "default",
+          "link__net_id__differs": false,
+          "link__net_id": 1,
+          "sim__writable": true,
+          "sim__pending": false,
+          "sim__last": false,
+          "sim__pin__source": "file",
+          "sim__attempts__source": "default",
+          "sim__attempts__differs": false,
+          "sim__attempts": 3,
+          "queue__writable": false,
+          "queue__pending": false,
+          "queue__last": false,
+          "queue__tx_queue_len__source": "default",
+          "queue__tx_queue_len__differs": false,
+          "queue__tx_queue_len": 100,
+          "modulation__spreading_factor__source": "file",
+          "modulation__spreading_factor__differs": false,
+          "modulation__spreading_factor": 9
+        },
+        "bits": "00000000000000000001001000110100000000000000000000000000000000000000000000001001000001011000000000000000000000000000000101000010001010010101000000100111000100001000100000111000001111100011100101011010101100110101010110001000001001000100000001100101100010011000100010001100011101010100",
+        "hex": "000012340000000000090580000001422950271088383e395ab3558824406589888c7540",
+        "bytes": 36,
+        "mutation": "091234000029000012340000000000090580000001422950271088383e395ab3558824406589888c7540",
+        "value": "491234000029000012340000000000090580000001422950271088383e395ab3558824406589888c7540"
+      }
+    },
+    {
+      "note": "refused for a group the contract does not declare: no index, since the record carries no name",
+      "epoch": 0,
+      "state": {
+        "instance": 4660,
+        "revision": 0,
+        "floor_s": 10,
+        "would_be": false,
+        "pending": null,
+        "last": null,
+        "desired": {
+          "outcome": "refused",
+          "observed_revision": 4,
+          "refusal": {
+            "code": "not_found",
+            "group": null,
+            "parameter": null
+          }
+        },
+        "groups": {
+          "duty": {
+            "writable": true,
+            "params": {
+              "fraction_ppm": {
+                "source": "file",
+                "differs": false,
+                "value": 10000
+              },
+              "period_s": {
+                "source": "default",
+                "differs": false,
+                "value": 3600
+              },
+              "enforce": {
+                "source": "default",
+                "differs": false,
+                "value": true
+              }
+            }
+          },
+          "radio": {
+            "writable": true,
+            "params": {
+              "frequency_hz": {
+                "source": "file",
+                "differs": false,
+                "value": 868100000
+              }
+            }
+          },
+          "link": {
+            "writable": true,
+            "params": {
+              "net_id": {
+                "source": "default",
+                "differs": false,
+                "value": 1
+              }
+            }
+          },
+          "sim": {
+            "writable": true,
+            "params": {
+              "pin": {
+                "source": "file"
+              },
+              "attempts": {
+                "source": "default",
+                "differs": false,
+                "value": 3
+              }
+            }
+          },
+          "queue": {
+            "writable": false,
+            "params": {
+              "tx_queue_len": {
+                "source": "default",
+                "differs": false,
+                "value": 100
+              }
+            }
+          },
+          "modulation": {
+            "params": {
+              "spreading_factor": {
+                "source": "file",
+                "differs": false,
+                "value": 9
+              }
+            }
+          }
+        }
+      },
+      "stamp": {
+        "run_width": 16,
+        "run": 4660,
+        "seq": 41
+      },
+      "expect": {
+        "fields": {
+          "instance": 4660,
+          "revision": 0,
+          "floor_s": 10,
+          "would_be": false,
+          "desired": "refused",
+          "desired_revision": 4,
+          "desired_code": "not_found",
+          "duty__writable": true,
+          "duty__pending": false,
+          "duty__last": false,
+          "duty__fraction_ppm__source": "file",
+          "duty__fraction_ppm__differs": false,
+          "duty__fraction_ppm": 10000,
+          "duty__period_s__source": "default",
+          "duty__period_s__differs": false,
+          "duty__period_s": 3600,
+          "duty__enforce__source": "default",
+          "duty__enforce__differs": false,
+          "duty__enforce": true,
+          "radio__writable": true,
+          "radio__pending": false,
+          "radio__last": false,
+          "radio__frequency_hz__source": "file",
+          "radio__frequency_hz__differs": false,
+          "radio__frequency_hz": 868100000,
+          "link__writable": true,
+          "link__pending": false,
+          "link__last": false,
+          "link__net_id__source": "default",
+          "link__net_id__differs": false,
+          "link__net_id": 1,
+          "sim__writable": true,
+          "sim__pending": false,
+          "sim__last": false,
+          "sim__pin__source": "file",
+          "sim__attempts__source": "default",
+          "sim__attempts__differs": false,
+          "sim__attempts": 3,
+          "queue__writable": false,
+          "queue__pending": false,
+          "queue__last": false,
+          "queue__tx_queue_len__source": "default",
+          "queue__tx_queue_len__differs": false,
+          "queue__tx_queue_len": 100,
+          "modulation__spreading_factor__source": "file",
+          "modulation__spreading_factor__differs": false,
+          "modulation__spreading_factor": 9
+        },
+        "bits": "0000000000000000000100100011010000000000000000000000000000000000000000000000100100000101100000000000000000000000000000100100110010010101000000100111000100001000100000111000001111100011100101011010101100110101010110001000001001000100000001100101100010011000100010001100011101010100",
+        "hex": "0000123400000000000905800000024c950271088383e395ab3558824406589888c754",
+        "bytes": 35,
+        "mutation": "0912340000290000123400000000000905800000024c950271088383e395ab3558824406589888c754",
+        "value": "4912340000290000123400000000000905800000024c950271088383e395ab3558824406589888c754"
+      }
+    },
+    {
+      "note": "refused for a parameter duty does not declare: its group, and no parameter",
+      "epoch": 0,
+      "state": {
+        "instance": 4660,
+        "revision": 0,
+        "floor_s": 10,
+        "would_be": false,
+        "pending": null,
+        "last": null,
+        "desired": {
+          "outcome": "refused",
+          "observed_revision": 5,
+          "refusal": {
+            "code": "not_found",
+            "group": "duty",
+            "parameter": null
+          }
+        },
+        "groups": {
+          "duty": {
+            "writable": true,
+            "params": {
+              "fraction_ppm": {
+                "source": "file",
+                "differs": false,
+                "value": 10000
+              },
+              "period_s": {
+                "source": "default",
+                "differs": false,
+                "value": 3600
+              },
+              "enforce": {
+                "source": "default",
+                "differs": false,
+                "value": true
+              }
+            }
+          },
+          "radio": {
+            "writable": true,
+            "params": {
+              "frequency_hz": {
+                "source": "file",
+                "differs": false,
+                "value": 868100000
+              }
+            }
+          },
+          "link": {
+            "writable": true,
+            "params": {
+              "net_id": {
+                "source": "default",
+                "differs": false,
+                "value": 1
+              }
+            }
+          },
+          "sim": {
+            "writable": true,
+            "params": {
+              "pin": {
+                "source": "file"
+              },
+              "attempts": {
+                "source": "default",
+                "differs": false,
+                "value": 3
+              }
+            }
+          },
+          "queue": {
+            "writable": false,
+            "params": {
+              "tx_queue_len": {
+                "source": "default",
+                "differs": false,
+                "value": 100
+              }
+            }
+          },
+          "modulation": {
+            "params": {
+              "spreading_factor": {
+                "source": "file",
+                "differs": false,
+                "value": 9
+              }
+            }
+          }
+        }
+      },
+      "stamp": {
+        "run_width": 16,
+        "run": 4660,
+        "seq": 41
+      },
+      "expect": {
+        "fields": {
+          "instance": 4660,
+          "revision": 0,
+          "floor_s": 10,
+          "would_be": false,
+          "desired": "refused",
+          "desired_revision": 5,
+          "desired_code": "not_found",
+          "desired_group": 0,
+          "duty__writable": true,
+          "duty__pending": false,
+          "duty__last": false,
+          "duty__fraction_ppm__source": "file",
+          "duty__fraction_ppm__differs": false,
+          "duty__fraction_ppm": 10000,
+          "duty__period_s__source": "default",
+          "duty__period_s__differs": false,
+          "duty__period_s": 3600,
+          "duty__enforce__source": "default",
+          "duty__enforce__differs": false,
+          "duty__enforce": true,
+          "radio__writable": true,
+          "radio__pending": false,
+          "radio__last": false,
+          "radio__frequency_hz__source": "file",
+          "radio__frequency_hz__differs": false,
+          "radio__frequency_hz": 868100000,
+          "link__writable": true,
+          "link__pending": false,
+          "link__last": false,
+          "link__net_id__source": "default",
+          "link__net_id__differs": false,
+          "link__net_id": 1,
+          "sim__writable": true,
+          "sim__pending": false,
+          "sim__last": false,
+          "sim__pin__source": "file",
+          "sim__attempts__source": "default",
+          "sim__attempts__differs": false,
+          "sim__attempts": 3,
+          "queue__writable": false,
+          "queue__pending": false,
+          "queue__last": false,
+          "queue__tx_queue_len__source": "default",
+          "queue__tx_queue_len__differs": false,
+          "queue__tx_queue_len": 100,
+          "modulation__spreading_factor__source": "file",
+          "modulation__spreading_factor__differs": false,
+          "modulation__spreading_factor": 9
+        },
+        "bits": "00000000000000000001001000110100000000000000000000000000000000000000000000001001000001011000000000000000000000000000001011001110000010010101000000100111000100001000100000111000001111100011100101011010101100110101010110001000001001000100000001100101100010011000100010001100011101010100",
+        "hex": "000012340000000000090580000002ce0950271088383e395ab3558824406589888c7540",
+        "bytes": 36,
+        "mutation": "091234000029000012340000000000090580000002ce0950271088383e395ab3558824406589888c7540",
+        "value": "491234000029000012340000000000090580000002ce0950271088383e395ab3558824406589888c7540"
+      }
+    },
+    {
+      "note": "failed, the rate spent; the largest revision the record holds",
+      "epoch": 0,
+      "state": {
+        "instance": 4660,
+        "revision": 0,
+        "floor_s": 10,
+        "would_be": false,
+        "pending": null,
+        "last": null,
+        "desired": {
+          "outcome": "failed",
+          "observed_revision": 4294967295,
+          "refusal": {
+            "code": "busy",
+            "group": "duty",
+            "parameter": null
+          }
+        },
+        "groups": {
+          "duty": {
+            "writable": true,
+            "params": {
+              "fraction_ppm": {
+                "source": "file",
+                "differs": false,
+                "value": 10000
+              },
+              "period_s": {
+                "source": "default",
+                "differs": false,
+                "value": 3600
+              },
+              "enforce": {
+                "source": "default",
+                "differs": false,
+                "value": true
+              }
+            }
+          },
+          "radio": {
+            "writable": true,
+            "params": {
+              "frequency_hz": {
+                "source": "file",
+                "differs": false,
+                "value": 868100000
+              }
+            }
+          },
+          "link": {
+            "writable": true,
+            "params": {
+              "net_id": {
+                "source": "default",
+                "differs": false,
+                "value": 1
+              }
+            }
+          },
+          "sim": {
+            "writable": true,
+            "params": {
+              "pin": {
+                "source": "file"
+              },
+              "attempts": {
+                "source": "default",
+                "differs": false,
+                "value": 3
+              }
+            }
+          },
+          "queue": {
+            "writable": false,
+            "params": {
+              "tx_queue_len": {
+                "source": "default",
+                "differs": false,
+                "value": 100
+              }
+            }
+          },
+          "modulation": {
+            "params": {
+              "spreading_factor": {
+                "source": "file",
+                "differs": false,
+                "value": 9
+              }
+            }
+          }
+        }
+      },
+      "stamp": {
+        "run_width": 16,
+        "run": 4660,
+        "seq": 41
+      },
+      "expect": {
+        "fields": {
+          "instance": 4660,
+          "revision": 0,
+          "floor_s": 10,
+          "would_be": false,
+          "desired": "failed",
+          "desired_revision": 4294967295,
+          "desired_code": "busy",
+          "desired_group": 0,
+          "duty__writable": true,
+          "duty__pending": false,
+          "duty__last": false,
+          "duty__fraction_ppm__source": "file",
+          "duty__fraction_ppm__differs": false,
+          "duty__fraction_ppm": 10000,
+          "duty__period_s__source": "default",
+          "duty__period_s__differs": false,
+          "duty__period_s": 3600,
+          "duty__enforce__source": "default",
+          "duty__enforce__differs": false,
+          "duty__enforce": true,
+          "radio__writable": true,
+          "radio__pending": false,
+          "radio__last": false,
+          "radio__frequency_hz__source": "file",
+          "radio__frequency_hz__differs": false,
+          "radio__frequency_hz": 868100000,
+          "link__writable": true,
+          "link__pending": false,
+          "link__last": false,
+          "link__net_id__source": "default",
+          "link__net_id__differs": false,
+          "link__net_id": 1,
+          "sim__writable": true,
+          "sim__pending": false,
+          "sim__last": false,
+          "sim__pin__source": "file",
+          "sim__attempts__source": "default",
+          "sim__attempts__differs": false,
+          "sim__attempts": 3,
+          "queue__writable": false,
+          "queue__pending": false,
+          "queue__last": false,
+          "queue__tx_queue_len__source": "default",
+          "queue__tx_queue_len__differs": false,
+          "queue__tx_queue_len": 100,
+          "modulation__spreading_factor__source": "file",
+          "modulation__spreading_factor__differs": false,
+          "modulation__spreading_factor": 9
+        },
+        "bits": "00000000000000000001001000110100000000000000000000000000000000000000000000001001000001101111111111111111111111111111111111011010000010010101000000100111000100001000100000111000001111100011100101011010101100110101010110001000001001000100000001100101100010011000100010001100011101010100",
+        "hex": "0000123400000000000906ffffffffda0950271088383e395ab3558824406589888c7540",
+        "bytes": 36,
+        "mutation": "0912340000290000123400000000000906ffffffffda0950271088383e395ab3558824406589888c7540",
+        "value": "4912340000290000123400000000000906ffffffffda0950271088383e395ab3558824406589888c7540"
+      }
+    },
+    {
+      "note": "a value unknown after an undo that failed: neither source nor value",
+      "epoch": 0,
+      "state": {
+        "instance": 4660,
+        "revision": 2,
+        "floor_s": 10,
+        "would_be": false,
+        "pending": null,
+        "last": null,
+        "desired": null,
+        "groups": {
+          "duty": {
+            "writable": true,
+            "params": {
+              "fraction_ppm": {
+                "source": "file",
+                "differs": false,
+                "value": 10000
+              },
+              "period_s": {
+                "source": "default",
+                "differs": false,
+                "value": 3600
+              },
+              "enforce": {
+                "source": "default",
+                "differs": false,
+                "value": true
+              }
+            }
+          },
+          "radio": {
+            "writable": true,
+            "params": {
+              "frequency_hz": {
+                "source": null,
+                "differs": false,
+                "value": null
+              }
+            }
+          },
+          "link": {
+            "writable": true,
+            "params": {
+              "net_id": {
+                "source": "default",
+                "differs": false,
+                "value": 1
+              }
+            }
+          },
+          "sim": {
+            "writable": true,
+            "params": {
+              "pin": {
+                "source": "file"
+              },
+              "attempts": {
+                "source": "default",
+                "differs": false,
+                "value": 3
+              }
+            }
+          },
+          "queue": {
+            "writable": false,
+            "params": {
+              "tx_queue_len": {
+                "source": "default",
+                "differs": false,
+                "value": 100
+              }
+            }
+          },
+          "modulation": {
+            "params": {
+              "spreading_factor": {
+                "source": "file",
+                "differs": false,
+                "value": 9
+              }
+            }
+          }
+        }
+      },
+      "stamp": {
+        "run_width": 16,
+        "run": 4660,
+        "seq": 41
+      },
+      "expect": {
+        "fields": {
+          "instance": 4660,
+          "revision": 2,
+          "floor_s": 10,
+          "would_be": false,
+          "duty__writable": true,
+          "duty__pending": false,
+          "duty__last": false,
+          "duty__fraction_ppm__source": "file",
+          "duty__fraction_ppm__differs": false,
+          "duty__fraction_ppm": 10000,
+          "duty__period_s__source": "default",
+          "duty__period_s__differs": false,
+          "duty__period_s": 3600,
+          "duty__enforce__source": "default",
+          "duty__enforce__differs": false,
+          "duty__enforce": true,
+          "radio__writable": true,
+          "radio__pending": false,
+          "radio__last": false,
+          "radio__frequency_hz__differs": false,
+          "link__writable": true,
+          "link__pending": false,
+          "link__last": false,
+          "link__net_id__source": "default",
+          "link__net_id__differs": false,
+          "link__net_id": 1,
+          "sim__writable": true,
+          "sim__pending": false,
+          "sim__last": false,
+          "sim__pin__source": "file",
+          "sim__attempts__source": "default",
+          "sim__attempts__differs": false,
+          "sim__attempts": 3,
+          "queue__writable": false,
+          "queue__pending": false,
+          "queue__last": false,
+          "queue__tx_queue_len__source": "default",
+          "queue__tx_queue_len__differs": false,
+          "queue__tx_queue_len": 100,
+          "modulation__spreading_factor__source": "file",
+          "modulation__spreading_factor__differs": false,
+          "modulation__spreading_factor": 9
+        },
+        "bits": "000000000000000000010010001101000000000000000000000000000000001000000000000010010000000000100101010000001001110001000010001000001110000011111000111000001001000100000001100101100010011000100010001100011101010100",
+        "hex": "000012340000000200090025409c4220e0f8e0910196262231d500",
+        "bytes": 27,
+        "mutation": "091234000029000012340000000200090025409c4220e0f8e0910196262231d500",
+        "value": "491234000029000012340000000200090025409c4220e0f8e0910196262231d500"
+      }
+    },
+    {
+      "note": "a deployment epoch: times count from it, so the same instants take small codes",
+      "epoch": 1800000000,
+      "state": {
+        "instance": 4660,
+        "revision": 0,
+        "floor_s": 10,
+        "would_be": false,
+        "pending": {
+          "token": 305438721,
+          "groups": [
+            "link"
+          ],
+          "apply_at": 1800000001000,
+          "deadline": 1800000060000,
+          "applied": false
+        },
+        "last": null,
+        "desired": null,
+        "groups": {
+          "duty": {
+            "writable": true,
+            "params": {
+              "fraction_ppm": {
+                "source": "file",
+                "differs": false,
+                "value": 10000
+              },
+              "period_s": {
+                "source": "default",
+                "differs": false,
+                "value": 3600
+              },
+              "enforce": {
+                "source": "default",
+                "differs": false,
+                "value": true
+              }
+            }
+          },
+          "radio": {
+            "writable": true,
+            "params": {
+              "frequency_hz": {
+                "source": "file",
+                "differs": false,
+                "value": 868100000
+              }
+            }
+          },
+          "link": {
+            "writable": true,
+            "params": {
+              "net_id": {
+                "source": "default",
+                "differs": false,
+                "value": 1
+              }
+            }
+          },
+          "sim": {
+            "writable": true,
+            "params": {
+              "pin": {
+                "source": "file"
+              },
+              "attempts": {
+                "source": "default",
+                "differs": false,
+                "value": 3
+              }
+            }
+          },
+          "queue": {
+            "writable": false,
+            "params": {
+              "tx_queue_len": {
+                "source": "default",
+                "differs": false,
+                "value": 100
+              }
+            }
+          },
+          "modulation": {
+            "params": {
+              "spreading_factor": {
+                "source": "file",
+                "differs": false,
+                "value": 9
+              }
+            }
+          }
+        }
+      },
+      "stamp": {
+        "run_width": 16,
+        "run": 4660,
+        "seq": 41
+      },
+      "expect": {
+        "fields": {
+          "instance": 4660,
+          "revision": 0,
+          "floor_s": 10,
+          "would_be": false,
+          "pending_token": 305438721,
+          "pending_apply_at": 1800000001000,
+          "pending_deadline": 1800000060000,
+          "duty__writable": true,
+          "duty__pending": false,
+          "duty__last": false,
+          "duty__fraction_ppm__source": "file",
+          "duty__fraction_ppm__differs": false,
+          "duty__fraction_ppm": 10000,
+          "duty__period_s__source": "default",
+          "duty__period_s__differs": false,
+          "duty__period_s": 3600,
+          "duty__enforce__source": "default",
+          "duty__enforce__differs": false,
+          "duty__enforce": true,
+          "radio__writable": true,
+          "radio__pending": false,
+          "radio__last": false,
+          "radio__frequency_hz__source": "file",
+          "radio__frequency_hz__differs": false,
+          "radio__frequency_hz": 868100000,
+          "link__writable": true,
+          "link__pending": true,
+          "link__last": false,
+          "link__net_id__source": "default",
+          "link__net_id__differs": false,
+          "link__net_id": 1,
+          "sim__writable": true,
+          "sim__pending": false,
+          "sim__last": false,
+          "sim__pin__source": "file",
+          "sim__attempts__source": "default",
+          "sim__attempts__differs": false,
+          "sim__attempts": 3,
+          "queue__writable": false,
+          "queue__pending": false,
+          "queue__last": false,
+          "queue__tx_queue_len__source": "default",
+          "queue__tx_queue_len__differs": false,
+          "queue__tx_queue_len": 100,
+          "modulation__spreading_factor__source": "file",
+          "modulation__spreading_factor__differs": false,
+          "modulation__spreading_factor": 9
+        },
+        "bits": "000000000000000000010010001101000000000000000000000000000000000000000000000010010100000000000000000001001000110100101000000000000110000000000000000000000000000000110000000000000000000000000011110000000010010101000000100111000100001000100000111000001111100011100101011010101100110101010110001000001101000100000001100101100010011000100010001100011101010100",
+        "hex": "000012340000000000094000048d28006000000030000003c025409c4220e0f8e56acd5620d10196262231d500",
+        "bytes": 45,
+        "mutation": "091234000029000012340000000000094000048d28006000000030000003c025409c4220e0f8e56acd5620d10196262231d500",
+        "value": "491234000029000012340000000000094000048d28006000000030000003c025409c4220e0f8e56acd5620d10196262231d500"
+      }
+    },
+    {
+      "note": "the same instants with no epoch: Unix seconds",
+      "epoch": 0,
+      "state": {
+        "instance": 4660,
+        "revision": 0,
+        "floor_s": 10,
+        "would_be": false,
+        "pending": {
+          "token": 305438721,
+          "groups": [
+            "link"
+          ],
+          "apply_at": 1800000001000,
+          "deadline": 1800000060000,
+          "applied": false
+        },
+        "last": null,
+        "desired": null,
+        "groups": {
+          "duty": {
+            "writable": true,
+            "params": {
+              "fraction_ppm": {
+                "source": "file",
+                "differs": false,
+                "value": 10000
+              },
+              "period_s": {
+                "source": "default",
+                "differs": false,
+                "value": 3600
+              },
+              "enforce": {
+                "source": "default",
+                "differs": false,
+                "value": true
+              }
+            }
+          },
+          "radio": {
+            "writable": true,
+            "params": {
+              "frequency_hz": {
+                "source": "file",
+                "differs": false,
+                "value": 868100000
+              }
+            }
+          },
+          "link": {
+            "writable": true,
+            "params": {
+              "net_id": {
+                "source": "default",
+                "differs": false,
+                "value": 1
+              }
+            }
+          },
+          "sim": {
+            "writable": true,
+            "params": {
+              "pin": {
+                "source": "file"
+              },
+              "attempts": {
+                "source": "default",
+                "differs": false,
+                "value": 3
+              }
+            }
+          },
+          "queue": {
+            "writable": false,
+            "params": {
+              "tx_queue_len": {
+                "source": "default",
+                "differs": false,
+                "value": 100
+              }
+            }
+          },
+          "modulation": {
+            "params": {
+              "spreading_factor": {
+                "source": "file",
+                "differs": false,
+                "value": 9
+              }
+            }
+          }
+        }
+      },
+      "stamp": {
+        "run_width": 16,
+        "run": 4660,
+        "seq": 41
+      },
+      "expect": {
+        "fields": {
+          "instance": 4660,
+          "revision": 0,
+          "floor_s": 10,
+          "would_be": false,
+          "pending_token": 305438721,
+          "pending_apply_at": 1800000001000,
+          "pending_deadline": 1800000060000,
+          "duty__writable": true,
+          "duty__pending": false,
+          "duty__last": false,
+          "duty__fraction_ppm__source": "file",
+          "duty__fraction_ppm__differs": false,
+          "duty__fraction_ppm": 10000,
+          "duty__period_s__source": "default",
+          "duty__period_s__differs": false,
+          "duty__period_s": 3600,
+          "duty__enforce__source": "default",
+          "duty__enforce__differs": false,
+          "duty__enforce": true,
+          "radio__writable": true,
+          "radio__pending": false,
+          "radio__last": false,
+          "radio__frequency_hz__source": "file",
+          "radio__frequency_hz__differs": false,
+          "radio__frequency_hz": 868100000,
+          "link__writable": true,
+          "link__pending": true,
+          "link__last": false,
+          "link__net_id__source": "default",
+          "link__net_id__differs": false,
+          "link__net_id": 1,
+          "sim__writable": true,
+          "sim__pending": false,
+          "sim__last": false,
+          "sim__pin__source": "file",
+          "sim__attempts__source": "default",
+          "sim__attempts__differs": false,
+          "sim__attempts": 3,
+          "queue__writable": false,
+          "queue__pending": false,
+          "queue__last": false,
+          "queue__tx_queue_len__source": "default",
+          "queue__tx_queue_len__differs": false,
+          "queue__tx_queue_len": 100,
+          "modulation__spreading_factor__source": "file",
+          "modulation__spreading_factor__differs": false,
+          "modulation__spreading_factor": 9
+        },
+        "bits": "000000000000000000010010001101000000000000000000000000000000000000000000000010010100000000000000000001001000110100101000000000000110110101101001001110100100000000110110101101001001110100100011110000000010010101000000100111000100001000100000111000001111100011100101011010101100110101010110001000001101000100000001100101100010011000100010001100011101010100",
+        "hex": "000012340000000000094000048d28006d693a4036b49d23c025409c4220e0f8e56acd5620d10196262231d500",
+        "bytes": 45,
+        "mutation": "091234000029000012340000000000094000048d28006d693a4036b49d23c025409c4220e0f8e56acd5620d10196262231d500",
+        "value": "491234000029000012340000000000094000048d28006d693a4036b49d23c025409c4220e0f8e56acd5620d10196262231d500"
+      }
+    },
+    {
+      "note": "each bound: the largest floor and revision, a value at its maximum and one at its minimum",
+      "epoch": 0,
+      "state": {
+        "instance": 4660,
+        "revision": 4294967295,
+        "floor_s": 65535,
+        "would_be": false,
+        "pending": null,
+        "last": null,
+        "desired": null,
+        "groups": {
+          "duty": {
+            "writable": true,
+            "params": {
+              "fraction_ppm": {
+                "source": "runtime",
+                "differs": true,
+                "value": 1000000
+              },
+              "period_s": {
+                "source": "default",
+                "differs": false,
+                "value": 3600
+              },
+              "enforce": {
+                "source": "default",
+                "differs": false,
+                "value": true
+              }
+            }
+          },
+          "radio": {
+            "writable": true,
+            "params": {
+              "frequency_hz": {
+                "source": "runtime",
+                "differs": true,
+                "value": 150000000
+              }
+            }
+          },
+          "link": {
+            "writable": true,
+            "params": {
+              "net_id": {
+                "source": "default",
+                "differs": false,
+                "value": 1
+              }
+            }
+          },
+          "sim": {
+            "writable": true,
+            "params": {
+              "pin": {
+                "source": "file"
+              },
+              "attempts": {
+                "source": "default",
+                "differs": false,
+                "value": 3
+              }
+            }
+          },
+          "queue": {
+            "writable": false,
+            "params": {
+              "tx_queue_len": {
+                "source": "default",
+                "differs": false,
+                "value": 100
+              }
+            }
+          },
+          "modulation": {
+            "params": {
+              "spreading_factor": {
+                "source": "file",
+                "differs": false,
+                "value": 9
+              }
+            }
+          }
+        }
+      },
+      "stamp": {
+        "run_width": 16,
+        "run": 4660,
+        "seq": 41
+      },
+      "expect": {
+        "fields": {
+          "instance": 4660,
+          "revision": 4294967295,
+          "floor_s": 65535,
+          "would_be": false,
+          "duty__writable": true,
+          "duty__pending": false,
+          "duty__last": false,
+          "duty__fraction_ppm__source": "runtime",
+          "duty__fraction_ppm__differs": true,
+          "duty__fraction_ppm": 1000000,
+          "duty__period_s__source": "default",
+          "duty__period_s__differs": false,
+          "duty__period_s": 3600,
+          "duty__enforce__source": "default",
+          "duty__enforce__differs": false,
+          "duty__enforce": true,
+          "radio__writable": true,
+          "radio__pending": false,
+          "radio__last": false,
+          "radio__frequency_hz__source": "runtime",
+          "radio__frequency_hz__differs": true,
+          "radio__frequency_hz": 150000000,
+          "link__writable": true,
+          "link__pending": false,
+          "link__last": false,
+          "link__net_id__source": "default",
+          "link__net_id__differs": false,
+          "link__net_id": 1,
+          "sim__writable": true,
+          "sim__pending": false,
+          "sim__last": false,
+          "sim__pin__source": "file",
+          "sim__attempts__source": "default",
+          "sim__attempts__differs": false,
+          "sim__attempts": 3,
+          "queue__writable": false,
+          "queue__pending": false,
+          "queue__last": false,
+          "queue__tx_queue_len__source": "default",
+          "queue__tx_queue_len__differs": false,
+          "queue__tx_queue_len": 100,
+          "modulation__spreading_factor__source": "file",
+          "modulation__spreading_factor__differs": false,
+          "modulation__spreading_factor": 9
+        },
+        "bits": "00000000000000000001001000110100111111111111111111111111111111111111111111111110000000000010011111111101000010010000001000100000111000001111100011100111110000000000000000000000000000001001000100000001100101100010011000100010001100011101010100",
+        "hex": "00001234fffffffffffe0027fd090220e0f8e7c0000000910196262231d500",
+        "bytes": 31,
+        "mutation": "09123400002900001234fffffffffffe0027fd090220e0f8e7c0000000910196262231d500",
+        "value": "49123400002900001234fffffffffffe0027fd090220e0f8e7c0000000910196262231d500"
+      }
+    }
+  ],
+  "reads": [
+    {
+      "note": "an owner at its start, read",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "000012340000000000090025409c4220e0f8e56acd5620910196262231d500",
+      "expect": {
+        "state": {
+          "instance": 4660,
+          "revision": 0,
+          "floor_s": 10,
+          "would_be": false,
+          "pending": null,
+          "last": null,
+          "desired": null,
+          "groups": {
+            "duty": {
+              "writable": true,
+              "params": {
+                "fraction_ppm": {
+                  "source": "file",
+                  "differs": false,
+                  "value": 10000
+                },
+                "period_s": {
+                  "source": "default",
+                  "differs": false,
+                  "value": 3600
+                },
+                "enforce": {
+                  "source": "default",
+                  "differs": false,
+                  "value": true
+                }
+              }
+            },
+            "radio": {
+              "writable": true,
+              "params": {
+                "frequency_hz": {
+                  "source": "file",
+                  "differs": false,
+                  "value": 868100000
+                }
+              }
+            },
+            "link": {
+              "writable": true,
+              "params": {
+                "net_id": {
+                  "source": "default",
+                  "differs": false,
+                  "value": 1
+                }
+              }
+            },
+            "sim": {
+              "writable": true,
+              "params": {
+                "pin": {
+                  "source": "file"
+                },
+                "attempts": {
+                  "source": "default",
+                  "differs": false,
+                  "value": 3
+                }
+              }
+            },
+            "queue": {
+              "writable": false,
+              "params": {
+                "tx_queue_len": {
+                  "source": "default",
+                  "differs": false,
+                  "value": 100
+                }
+              }
+            },
+            "modulation": {
+              "params": {
+                "spreading_factor": {
+                  "source": "file",
+                  "differs": false,
+                  "value": 9
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "note": "another type's tag",
+      "tag": 10,
+      "epoch": 0,
+      "hex": "000012340000000000090025409c4220e0f8e56acd5620910196262231d500",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "a byte short",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "000012340000000000090025409c4220e0f8e56acd5620910196262231d5",
+      "expect": {
+        "refused": "length"
+      }
+    },
+    {
+      "note": "a byte after the pad",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "000012340000000000090025409c4220e0f8e56acd5620910196262231d50000",
+      "expect": {
+        "refused": "length"
+      }
+    },
+    {
+      "note": "a pad bit set",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "000012340000000000090025409c4220e0f8e56acd5620910196262231d520",
+      "expect": {
+        "refused": "pad"
+      }
+    },
+    {
+      "note": "floor_s's code 65535, a value past its maximum: unused",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "0000123400000000ffff0025409c4220e0f8e56acd5620910196262231d500",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "a pending token and no deadline",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "000012340000000000094000048d28004025409c4220e0f8f56acd5620910196262231d500",
+      "expect": {
+        "refused": "pending"
+      }
+    },
+    {
+      "note": "a deadline and no pending token",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "0000123400000000000910000003c025409c4220e0f8e56acd5620910196262231d500",
+      "expect": {
+        "refused": "pending"
+      }
+    },
+    {
+      "note": "an apply_at and nothing pending",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "00001234000000000009200000002025409c4220e0f8e56acd5620910196262231d500",
+      "expect": {
+        "refused": "pending"
+      }
+    },
+    {
+      "note": "a group's pending bit and nothing pending",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "000012340000000000090035409c4220e0f8e56acd5620910196262231d500",
+      "expect": {
+        "refused": "pending"
+      }
+    },
+    {
+      "note": "a pending change of no group",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "000012340000000000094000048d280050000003c025409c4220e0f8e56acd5620910196262231d500",
+      "expect": {
+        "refused": "pending"
+      }
+    },
+    {
+      "note": "a last token and no group's last bit",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "0000123400000000000908000091a5000825409c4220e0f8e56acd5620910196262231d500",
+      "expect": {
+        "refused": "last"
+      }
+    },
+    {
+      "note": "a group's last bit and no last change",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "000012340000000000090025409c4220e0f8e56acd5620b10196262231d500",
+      "expect": {
+        "refused": "last"
+      }
+    },
+    {
+      "note": "a desired report with no revision",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "00001234000000000009040950271088383e395ab3558824406589888c7540",
+      "expect": {
+        "refused": "desired"
+      }
+    },
+    {
+      "note": "a desired revision and no report",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "00001234000000000009020000000625409c4220e0f8e56acd5620910196262231d500",
+      "expect": {
+        "refused": "desired"
+      }
+    },
+    {
+      "note": "converged with a code",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "000012340000000000090480000000d8950271088383e395ab3558824406589888c754",
+      "expect": {
+        "refused": "desired"
+      }
+    },
+    {
+      "note": "refused with no code",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "0000123400000000000905800000008950271088383e395ab3558824406589888c7540",
+      "expect": {
+        "refused": "desired"
+      }
+    },
+    {
+      "note": "failed with no code",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "0000123400000000000906800000008950271088383e395ab3558824406589888c7540",
+      "expect": {
+        "refused": "desired"
+      }
+    },
+    {
+      "note": "a group index and no code",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "000012340000000000090480000000a0950271088383e395ab3558824406589888c754",
+      "expect": {
+        "refused": "desired"
+      }
+    },
+    {
+      "note": "a parameter index and no group",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "000012340000000000090580000000cd0950271088383e395ab3558824406589888c7540",
+      "expect": {
+        "refused": "desired"
+      }
+    },
+    {
+      "note": "a group index past the contract's six groups",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "000012340000000000090580000000c2c950271088383e395ab3558824406589888c7540",
+      "expect": {
+        "refused": "desired"
+      }
+    },
+    {
+      "note": "a parameter index past radio's one parameter",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "000012340000000000090580000000d231950271088383e395ab3558824406589888c754",
+      "expect": {
+        "refused": "desired"
+      }
+    },
+    {
+      "note": "an outcome this revision does not name, the escape: read as such, its code unjudged",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "000012340000000000090780000004d8950271088383e395ab3558824406589888c754",
+      "expect": {
+        "state": {
+          "instance": 4660,
+          "revision": 0,
+          "floor_s": 10,
+          "would_be": false,
+          "pending": null,
+          "last": null,
+          "desired": {
+            "outcome": null,
+            "observed_revision": 9,
+            "refusal": {
+              "code": "busy",
+              "group": null,
+              "parameter": null
+            }
+          },
+          "groups": {
+            "duty": {
+              "writable": true,
+              "params": {
+                "fraction_ppm": {
+                  "source": "file",
+                  "differs": false,
+                  "value": 10000
+                },
+                "period_s": {
+                  "source": "default",
+                  "differs": false,
+                  "value": 3600
+                },
+                "enforce": {
+                  "source": "default",
+                  "differs": false,
+                  "value": true
+                }
+              }
+            },
+            "radio": {
+              "writable": true,
+              "params": {
+                "frequency_hz": {
+                  "source": "file",
+                  "differs": false,
+                  "value": 868100000
+                }
+              }
+            },
+            "link": {
+              "writable": true,
+              "params": {
+                "net_id": {
+                  "source": "default",
+                  "differs": false,
+                  "value": 1
+                }
+              }
+            },
+            "sim": {
+              "writable": true,
+              "params": {
+                "pin": {
+                  "source": "file"
+                },
+                "attempts": {
+                  "source": "default",
+                  "differs": false,
+                  "value": 3
+                }
+              }
+            },
+            "queue": {
+              "writable": false,
+              "params": {
+                "tx_queue_len": {
+                  "source": "default",
+                  "differs": false,
+                  "value": 100
+                }
+              }
+            },
+            "modulation": {
+              "params": {
+                "spreading_factor": {
+                  "source": "file",
+                  "differs": false,
+                  "value": 9
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "note": "a code this revision does not name, the escape",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "000012340000000000090680000004fe0950271088383e395ab3558824406589888c7540",
+      "expect": {
+        "state": {
+          "instance": 4660,
+          "revision": 0,
+          "floor_s": 10,
+          "would_be": false,
+          "pending": null,
+          "last": null,
+          "desired": {
+            "outcome": "failed",
+            "observed_revision": 9,
+            "refusal": {
+              "code": null,
+              "group": "duty",
+              "parameter": null
+            }
+          },
+          "groups": {
+            "duty": {
+              "writable": true,
+              "params": {
+                "fraction_ppm": {
+                  "source": "file",
+                  "differs": false,
+                  "value": 10000
+                },
+                "period_s": {
+                  "source": "default",
+                  "differs": false,
+                  "value": 3600
+                },
+                "enforce": {
+                  "source": "default",
+                  "differs": false,
+                  "value": true
+                }
+              }
+            },
+            "radio": {
+              "writable": true,
+              "params": {
+                "frequency_hz": {
+                  "source": "file",
+                  "differs": false,
+                  "value": 868100000
+                }
+              }
+            },
+            "link": {
+              "writable": true,
+              "params": {
+                "net_id": {
+                  "source": "default",
+                  "differs": false,
+                  "value": 1
+                }
+              }
+            },
+            "sim": {
+              "writable": true,
+              "params": {
+                "pin": {
+                  "source": "file"
+                },
+                "attempts": {
+                  "source": "default",
+                  "differs": false,
+                  "value": 3
+                }
+              }
+            },
+            "queue": {
+              "writable": false,
+              "params": {
+                "tx_queue_len": {
+                  "source": "default",
+                  "differs": false,
+                  "value": 100
+                }
+              }
+            },
+            "modulation": {
+              "params": {
+                "spreading_factor": {
+                  "source": "file",
+                  "differs": false,
+                  "value": 9
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "note": "a value with no source",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "0000123400000000000900210271088383e395ab3558824406589888c754",
+      "expect": {
+        "refused": "parameter"
+      }
+    },
+    {
+      "note": "a source with no value",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "000012340000000000090025409c4220e0f8e56acd56209096262231d500",
+      "expect": {
+        "refused": "parameter"
+      }
+    },
+    {
+      "note": "differs with no value",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "000012340000000000090025409c4220e0f8e2910196262231d500",
+      "expect": {
+        "refused": "parameter"
+      }
+    },
+    {
+      "note": "unknown and not differing: read",
+      "tag": 9,
+      "epoch": 0,
+      "hex": "000012340000000000090025409c4220e0f8e0910196262231d500",
+      "expect": {
+        "state": {
+          "instance": 4660,
+          "revision": 0,
+          "floor_s": 10,
+          "would_be": false,
+          "pending": null,
+          "last": null,
+          "desired": null,
+          "groups": {
+            "duty": {
+              "writable": true,
+              "params": {
+                "fraction_ppm": {
+                  "source": "file",
+                  "differs": false,
+                  "value": 10000
+                },
+                "period_s": {
+                  "source": "default",
+                  "differs": false,
+                  "value": 3600
+                },
+                "enforce": {
+                  "source": "default",
+                  "differs": false,
+                  "value": true
+                }
+              }
+            },
+            "radio": {
+              "writable": true,
+              "params": {
+                "frequency_hz": {
+                  "source": null,
+                  "differs": false,
+                  "value": null
+                }
+              }
+            },
+            "link": {
+              "writable": true,
+              "params": {
+                "net_id": {
+                  "source": "default",
+                  "differs": false,
+                  "value": 1
+                }
+              }
+            },
+            "sim": {
+              "writable": true,
+              "params": {
+                "pin": {
+                  "source": "file"
+                },
+                "attempts": {
+                  "source": "default",
+                  "differs": false,
+                  "value": 3
+                }
+              }
+            },
+            "queue": {
+              "writable": false,
+              "params": {
+                "tx_queue_len": {
+                  "source": "default",
+                  "differs": false,
+                  "value": 100
+                }
+              }
+            },
+            "modulation": {
+              "params": {
+                "spreading_factor": {
+                  "source": "file",
+                  "differs": false,
+                  "value": 9
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "growth": {
+    "groups": {
+      "1.0": [
+        {
+          "name": "duty",
+          "class": "hot",
+          "type": "Duty",
+          "settable": true,
+          "parameters": [
+            {
+              "name": "fraction_ppm",
+              "kind": "int",
+              "minimum": 0,
+              "maximum": 1000000,
+              "width": 20,
+              "unit": null,
+              "sensitive": false
+            },
+            {
+              "name": "period_s",
+              "kind": "int",
+              "minimum": 1,
+              "maximum": 86400,
+              "width": 17,
+              "unit": null,
+              "sensitive": false
+            },
+            {
+              "name": "enforce",
+              "kind": "bool",
+              "minimum": null,
+              "maximum": null,
+              "width": 1,
+              "unit": null,
+              "sensitive": false
+            }
+          ]
+        }
+      ],
+      "1.1": [
+        {
+          "name": "duty",
+          "class": "hot",
+          "type": "Duty",
+          "settable": true,
+          "parameters": [
+            {
+              "name": "fraction_ppm",
+              "kind": "int",
+              "minimum": 0,
+              "maximum": 1000000,
+              "width": 20,
+              "unit": null,
+              "sensitive": false
+            },
+            {
+              "name": "period_s",
+              "kind": "int",
+              "minimum": 1,
+              "maximum": 86400,
+              "width": 17,
+              "unit": null,
+              "sensitive": false
+            },
+            {
+              "name": "enforce",
+              "kind": "bool",
+              "minimum": null,
+              "maximum": null,
+              "width": 1,
+              "unit": null,
+              "sensitive": false
+            }
+          ]
+        },
+        "...",
+        {
+          "name": "queue",
+          "class": "hot",
+          "type": "Queue",
+          "settable": true,
+          "parameters": [
+            {
+              "name": "tx_queue_len",
+              "kind": "int",
+              "minimum": 1,
+              "maximum": 1024,
+              "width": 10,
+              "unit": null,
+              "sensitive": false
+            }
+          ]
+        }
+      ]
+    },
+    "records": [
+      {
+        "written_by": "1.0",
+        "read_by": "1.0",
+        "hex": "000012340000000000090025409c4220e0f8c0",
+        "expect": {
+          "state": {
+            "instance": 4660,
+            "revision": 0,
+            "floor_s": 10,
+            "would_be": false,
+            "pending": null,
+            "last": null,
+            "desired": null,
+            "groups": {
+              "duty": {
+                "writable": true,
+                "params": {
+                  "fraction_ppm": {
+                    "source": "file",
+                    "differs": false,
+                    "value": 10000
+                  },
+                  "period_s": {
+                    "source": "default",
+                    "differs": false,
+                    "value": 3600
+                  },
+                  "enforce": {
+                    "source": "default",
+                    "differs": false,
+                    "value": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "written_by": "1.0",
+        "read_by": "1.1",
+        "hex": "000012340000000000090025409c4220e0f8c0",
+        "expect": {
+          "state": {
+            "instance": 4660,
+            "revision": 0,
+            "floor_s": 10,
+            "would_be": false,
+            "pending": null,
+            "last": null,
+            "desired": null,
+            "groups": {
+              "duty": {
+                "writable": true,
+                "params": {
+                  "fraction_ppm": {
+                    "source": "file",
+                    "differs": false,
+                    "value": 10000
+                  },
+                  "period_s": {
+                    "source": "default",
+                    "differs": false,
+                    "value": 3600
+                  },
+                  "enforce": {
+                    "source": "default",
+                    "differs": false,
+                    "value": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "written_by": "1.1",
+        "read_by": "1.0",
+        "hex": "000012340000000000090025409c4220e0f8fd4a3180",
+        "expect": {
+          "state": {
+            "instance": 4660,
+            "revision": 0,
+            "floor_s": 10,
+            "would_be": false,
+            "pending": null,
+            "last": null,
+            "desired": null,
+            "groups": {
+              "duty": {
+                "writable": true,
+                "params": {
+                  "fraction_ppm": {
+                    "source": "file",
+                    "differs": false,
+                    "value": 10000
+                  },
+                  "period_s": {
+                    "source": "default",
+                    "differs": false,
+                    "value": 3600
+                  },
+                  "enforce": {
+                    "source": "default",
+                    "differs": false,
+                    "value": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "written_by": "1.1",
+        "read_by": "1.1",
+        "hex": "000012340000000000090025409c4220e0f8fd4a3180",
+        "expect": {
+          "state": {
+            "instance": 4660,
+            "revision": 0,
+            "floor_s": 10,
+            "would_be": false,
+            "pending": null,
+            "last": null,
+            "desired": null,
+            "groups": {
+              "duty": {
+                "writable": true,
+                "params": {
+                  "fraction_ppm": {
+                    "source": "file",
+                    "differs": false,
+                    "value": 10000
+                  },
+                  "period_s": {
+                    "source": "default",
+                    "differs": false,
+                    "value": 3600
+                  },
+                  "enforce": {
+                    "source": "default",
+                    "differs": false,
+                    "value": true
+                  }
+                }
+              },
+              "queue": {
+                "writable": true,
+                "params": {
+                  "tx_queue_len": {
+                    "source": "default",
+                    "differs": false,
+                    "value": 100
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    ],
+    "reads": [
+      {
+        "note": "1.1's queue written in part: its writable bit and not its pending bit",
+        "read_by": "1.1",
+        "hex": "000012340000000000090025409c4220e0f8fa946300",
+        "expect": {
+          "refused": "group"
+        }
+      },
+      {
+        "note": "1.1's queue written in part: a value with no differs bit",
+        "read_by": "1.1",
+        "hex": "000012340000000000090025409c4220e0f8fd446300",
+        "expect": {
+          "refused": "group"
+        }
+      },
+      {
+        "note": "1.1's queue not written at all: read as absent, a 1.0 writer's",
+        "read_by": "1.1",
+        "hex": "000012340000000000090025409c4220e0f8c0",
+        "expect": {
+          "state": {
+            "instance": 4660,
+            "revision": 0,
+            "floor_s": 10,
+            "would_be": false,
+            "pending": null,
+            "last": null,
+            "desired": null,
+            "groups": {
+              "duty": {
+                "writable": true,
+                "params": {
+                  "fraction_ppm": {
+                    "source": "file",
+                    "differs": false,
+                    "value": 10000
+                  },
+                  "period_s": {
+                    "source": "default",
+                    "differs": false,
+                    "value": 3600
+                  },
+                  "enforce": {
+                    "source": "default",
+                    "differs": false,
+                    "value": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}

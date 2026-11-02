@@ -29,6 +29,9 @@
 //! each [`Act`] on its device, writes the persisted layer, keeps the timers
 //! [`Owner::next_due`] names, and puts what [`Owner::view`],
 //! [`Owner::status`] and the events say.
+//!
+//! [`v2`] is `config.v2`'s half: the schema declared in each adopter's
+//! contract, one packed record, and an owner that runs this one.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -36,6 +39,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
+
+pub mod v2;
 
 /// The profile's id, which is also its standard contract's interface id.
 pub const PROFILE: &str = "config.v1";
@@ -482,6 +487,19 @@ impl Time {
     #[must_use]
     pub fn plus_secs(self, secs: u64) -> Self {
         self.plus(Duration::from_secs(secs))
+    }
+
+    /// The first whole second at or after this instant: itself on a whole
+    /// second, else the next one (`config.v2` §2.8, which rounds a deadline
+    /// and an `apply_at` up so that a window is never shorter than asked).
+    #[must_use]
+    pub fn ceil_second(self) -> Self {
+        let r = self.0.rem_euclid(1000);
+        if r == 0 {
+            self
+        } else {
+            Self(self.0.saturating_add(1000 - r))
+        }
     }
 
     /// Whether `self` is less than `d` after `earlier`.
@@ -2017,6 +2035,7 @@ pub struct Owner {
     events: Vec<Time>,
     flight: Option<Flight>,
     desired: Option<DesiredReport>,
+    whole_seconds: bool,
 }
 
 fn key(g: &str, p: &str) -> Key {
@@ -2159,7 +2178,28 @@ impl Owner {
             events: s.events,
             flight: None,
             desired: None,
+            whole_seconds: false,
         })
+    }
+
+    /// The owner with every deadline and `apply_at` it states rounded up
+    /// to the next whole second, acted on at that instant: `config.v2`'s
+    /// times (its §2.8), which [`v2::Owner`] runs this owner under.
+    /// `config.v1` keeps milliseconds.
+    #[must_use]
+    pub fn whole_seconds(mut self) -> Self {
+        self.whole_seconds = true;
+        self
+    }
+
+    /// An instant this owner states: rounded up under
+    /// [`Owner::whole_seconds`].
+    fn stated(&self, t: Time) -> Time {
+        if self.whole_seconds {
+            t.ceil_second()
+        } else {
+            t
+        }
     }
 
     /// The owner after a restart, as a new instance (§2.12): its startup
@@ -2184,7 +2224,7 @@ impl Owner {
                 .or_default()
                 .insert(p.clone(), v.clone());
         }
-        Self::start(Start {
+        let mut next = Self::start(Start {
             service: self.service.clone(),
             instance: instance.into(),
             schema: self.schema.clone(),
@@ -2195,7 +2235,9 @@ impl Owner {
             persist: self.persist,
             events: self.events.clone(),
         })
-        .expect("a start that succeeded once succeeds again")
+        .expect("a start that succeeded once succeeds again");
+        next.whole_seconds = self.whole_seconds;
+        next
     }
 
     /// The schema.
@@ -2235,6 +2277,14 @@ impl Owner {
     #[must_use]
     pub fn deadline(&self) -> Option<Time> {
         self.pending.as_ref().map(|c| c.deadline)
+    }
+
+    /// The `apply_at` of the last reach group to join the pending change
+    /// that has not applied yet, if one waits: `None` when the change is
+    /// applied, or when none is pending (`config.v2` §2.9).
+    #[must_use]
+    pub fn apply_at(&self) -> Option<Time> {
+        self.pending.as_ref()?.waiting.last().map(|w| w.apply_at)
     }
 
     /// Sets the desired report the view and the status carry (§2.18).
@@ -2707,7 +2757,7 @@ impl Owner {
                 })
             }
             Class::Reach => {
-                let apply_at = now.plus(self.apply_after);
+                let apply_at = self.stated(now.plus(self.apply_after));
                 if a.joins {
                     let deadline = self.pending.as_ref().map_or(now, |c| c.deadline);
                     if apply_at >= deadline {
@@ -2738,7 +2788,7 @@ impl Owner {
                 } else {
                     let w = window(req.confirm_s.expect("row 10: a window"), self.floor_s);
                     let token = self.mint();
-                    let deadline = deadline(now, w);
+                    let deadline = self.stated(deadline(now, w));
                     let mut edits = BTreeMap::new();
                     self.record(&mut edits, group, &a.values, false);
                     self.pending = Some(Change {
@@ -2795,8 +2845,9 @@ impl Owner {
             });
         }
         let w = window(req.confirm_s.expect("validated: a window"), self.floor_s);
+        let at = self.stated(deadline(now, w));
         if let Some(ch) = self.pending.as_mut() {
-            ch.deadline = deadline(now, w);
+            ch.deadline = at;
         }
         Step::Done(Done {
             reply: Some(Ok(self.control_reply(req.answer.unwrap_or_default()))),
@@ -3094,7 +3145,7 @@ impl Owner {
                 self.pending = Some(Change {
                     token,
                     groups,
-                    deadline: deadline(received, window(cs, self.floor_s)),
+                    deadline: self.stated(deadline(received, window(cs, self.floor_s))),
                     call: call.clone(),
                     edits,
                     waiting: Vec::new(),

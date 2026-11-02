@@ -1,0 +1,99 @@
+# config.v2's test contract (spec/profiles/config/v2.md, text 0.1): the
+# scenarios' rf owner (scenarios-v2.md). derive.json reads it whole, and
+# records.json, validation.json, lifecycle.json and redaction.json write
+# its records and its requests. Four hot groups, two
+# reach groups and a contract group; sim's pin is sensitive and queue is
+# the one the scenarios' allowlist leaves out. rfcfg.json holds the six
+# group types, then the eight types `zk2 config derive` writes from them.
+[interface]
+name    = "rfcfg"
+major   = 1
+minor   = 0
+summary = "config.v2's test radio: a duty cycle, a frequency, a network id, a SIM, a queue and a modulation"
+uses    = ["config.v2", "freshness.v2"]
+
+[schemas]
+packed     = ["rfcfg.json"]
+jsonschema = ["../../config.v2.json"]
+
+# No operation is idempotent, and none fans out (config.v2 2.21).
+[defaults.operation]
+idempotent = false
+fanout     = "forbidden"
+
+[resources.config]
+kind = "state"
+type = "packed:Record"
+doc  = "The record: the running values, the pending change, the last change and the floor (config.v2 2.3)."
+
+[resources.config.annotations]
+"freshness.ttl_s" = 60
+"config.groups"   = [
+  { name = "duty",       class = "hot",      type = "packed:Duty",  units = { fraction_ppm = "ppm", period_s = "s" } },
+  { name = "radio",      class = "reach",    type = "packed:Radio", units = { frequency_hz = "Hz" } },
+  { name = "link",       class = "reach",    type = "packed:Link" },
+  { name = "sim",        class = "hot",      type = "packed:Sim",   sensitive = ["pin"] },
+  { name = "queue",      class = "hot",      type = "packed:Queue", units = { tx_queue_len = "packets" } },
+  { name = "modulation", class = "contract", type = "packed:Modulation" },
+]
+
+[resources."set/duty"]
+kind     = "operation"
+request  = "packed:SetDuty"
+response = "packed:Record"
+error    = "packed:Error"
+
+[resources."set/radio"]
+kind     = "operation"
+request  = "packed:SetRadio"
+response = "packed:Record"
+error    = "packed:Error"
+
+[resources."set/link"]
+kind     = "operation"
+request  = "packed:SetLink"
+response = "packed:Record"
+error    = "packed:Error"
+
+[resources."set/sim"]
+kind     = "operation"
+request  = "packed:SetSim"
+response = "packed:Record"
+error    = "packed:Error"
+
+[resources."set/queue"]
+kind     = "operation"
+request  = "packed:SetQueue"
+response = "packed:Record"
+error    = "packed:Error"
+
+[resources.confirm]
+kind     = "operation"
+request  = "packed:Control"
+response = "packed:Record"
+error    = "packed:Error"
+
+[resources.cancel]
+kind     = "operation"
+request  = "packed:Control"
+response = "packed:Record"
+error    = "packed:Error"
+
+[resources.extend]
+kind     = "operation"
+request  = "packed:Control"
+response = "packed:Record"
+error    = "packed:Error"
+
+[resources.persist]
+kind     = "operation"
+request  = "packed:Control"
+response = "packed:Record"
+error    = "packed:Error"
+optional = true
+
+[resources.change]
+kind      = "event"
+type      = "json:ConfigChangeEvent"
+rate      = "burst(600/h)"
+retention = "7d"
