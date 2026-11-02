@@ -15,6 +15,11 @@
 //! - **A caller** gets an [`Outcome`] (O5: a value, a refusal, a malformed
 //!   refusal, or silence, each distinct) or, for a many-reply or fan-out
 //!   call, [`Replies`], attributed by replier (O3, O6).
+//! - **Both wires** (#980's C4b): a caller reads an owner's error from the
+//!   error form under `zenoh/bytes` and from the bare wire's envelope alike,
+//!   a [`Refusal`] carrying the form's as-of mark when it came in one
+//!   (core §5.1, §5.2), and keeps the transport's own error replies apart,
+//!   as silence ([`Transport`]).
 
 use std::fmt;
 use std::future::Future;
@@ -25,11 +30,12 @@ use serde::{Deserialize, Serialize};
 use zenkey_model::authoring::Encoding as WireEncoding;
 use zenkey_model::contract::Operation;
 use zenkey_model::descriptor::Cause;
-use zenkey_model::envelope::{Detail, Envelope, EnvelopeError};
+use zenkey_model::envelope::{Detail, Envelope, EnvelopeError, ErrorForm};
 use zenkey_model::grammar::Addr;
 use zenkey_model::template::Bindings;
+use zenkey_model::wire::{self, Stamp, Tag};
 
-use crate::codec::Codec;
+use crate::codec::{Codec, CodecKind};
 use crate::error::{Error, Result};
 
 /// The optional call metadata (O7): who claims to call, and the caller's
@@ -496,12 +502,165 @@ impl<T: Send + 'static, S: Send + 'static> Sink<T, S> {
     }
 }
 
-/// An error reply that claims an envelope encoding and is not an envelope
-/// (§5.2's decoding refusals): a broken server, not a silent one.
+/// An error reply under one of the bare wire's envelope encodings that
+/// does not decode as one (§5.2's decoding refusals): a broken server, not
+/// a silent one. An error form the parse refuses is the transport's
+/// ([`Transport`]), never this.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Malformed {
     pub encoding: String,
     pub error: EnvelopeError,
+}
+
+/// An owner's error (core §5.2), as a caller reads it from either wire
+/// (`client::classify`): the error form under `zenoh/bytes`, or
+/// the bare wire's envelope under its three encodings (§5.1, "The bare
+/// wire"). It reads as its [`Envelope`] (`Deref`): `code`, `message`,
+/// `cause` and `detail`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Refusal {
+    /// Its fields. From an error form, a message the owner sent none of
+    /// reads as empty ([`ErrorMark::message`] tells them apart), and a
+    /// detail is the `error` type's own bytes, [`Detail::Bytes`], never a
+    /// decoded value: JSON or CBOR on the operation's `encoding`, a
+    /// protobuf message, a raw type's bytes, or a packed record under
+    /// [`ErrorMark::tag`]. [`Refusal::detail_as`] reads either wire's.
+    pub envelope: Envelope,
+    /// The error form's CH tag and as-of mark; `None` for the bare wire's
+    /// envelope, which carries neither.
+    pub form: Option<ErrorMark>,
+}
+
+/// What an error form carries beside its fields (core §7.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ErrorMark {
+    /// CH's tag: the operation's `error` type's, 0 when it declares none.
+    pub tag: Tag,
+    /// The replying instance's as-of mark (core §5.1). It attributes
+    /// nothing: a `reply_err` carries no key, and a tool holding
+    /// descriptors may map the run to the instance that states it.
+    pub stamp: Stamp,
+    /// Whether the owner sent a message, an empty one included.
+    pub message: bool,
+}
+
+impl Refusal {
+    /// An error form, read: its code and cause by name, as the bare wire's
+    /// envelope spells them.
+    #[must_use]
+    pub fn of_form(f: &ErrorForm<'_>) -> Self {
+        Self {
+            envelope: Envelope {
+                code: f.code.as_str().to_owned(),
+                message: f.message.unwrap_or_default().to_owned(),
+                cause: f.cause.map(|c| c.as_str().to_owned()),
+                detail: f.detail.map(|d| Detail::Bytes(d.to_vec())),
+            },
+            form: Some(ErrorMark {
+                tag: f.tag,
+                stamp: f.stamp,
+                message: f.message.is_some(),
+            }),
+        }
+    }
+
+    /// The bare wire's envelope, decoded.
+    #[must_use]
+    pub fn of_envelope(envelope: Envelope) -> Self {
+        Self {
+            envelope,
+            form: None,
+        }
+    }
+
+    /// The replying instance's as-of mark, when the error came in its form.
+    #[must_use]
+    pub fn mark(&self) -> Option<Stamp> {
+        self.form.map(|m| m.stamp)
+    }
+
+    /// An `app` error's detail read as the operation's `error` type `C`, on
+    /// the operation's `encoding` `wire` (§5.2, "Reading one"), from either
+    /// wire: an error form's bytes as the type encodes them (a packed one
+    /// under CH's tag); the bare wire's JSON or CBOR value as carried, its
+    /// protobuf message, or a raw type's base64 text. `None` without a
+    /// detail; `Err` with why the type refuses it, which leaves the error
+    /// the owner's.
+    #[must_use]
+    pub fn detail_as<C: Codec>(
+        &self,
+        wire: Option<WireEncoding>,
+    ) -> Option<std::result::Result<C::Value, String>> {
+        let detail = self.envelope.detail.as_ref()?;
+        Some(match (self.form, detail) {
+            (Some(m), Detail::Bytes(b)) => C::decode_record(b, wire, Some(m.tag)),
+            (_, Detail::Bytes(b)) => C::decode(b, wire),
+            (_, d @ Detail::Value(v)) => match C::KIND {
+                CodecKind::Raw => d
+                    .raw_bytes()
+                    .ok_or_else(|| "a raw detail that is not base64 text".to_owned())
+                    .and_then(|b| C::decode(&b, wire)),
+                _ => serde_json::to_vec(v)
+                    .map_err(|e| format!("JSON: {e}"))
+                    .and_then(|b| C::decode(&b, Some(WireEncoding::Json))),
+            },
+        })
+    }
+}
+
+/// A refusal as its owner refused it, before any wire: what a test's `Api`
+/// double answers with.
+impl From<OpError> for Refusal {
+    fn from(e: OpError) -> Self {
+        Self::of_envelope(e.into_envelope())
+    }
+}
+
+impl std::ops::Deref for Refusal {
+    type Target = Envelope;
+    fn deref(&self) -> &Envelope {
+        &self.envelope
+    }
+}
+
+/// A reply error that is the transport's, never an owner's (core §5.2,
+/// "Transport errors"): a querier's own `Timeout` under `zenoh/string`, a
+/// router's under `zenoh/bytes`, any `zenoh/bytes` reply error the error
+/// form's parse refuses, or one under an `Encoding` that carries no error.
+/// A caller reads it as silence, and may retry after it (§5.1, "Retries").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Transport {
+    /// Its `Encoding`, as zenoh spells it.
+    pub encoding: String,
+    /// Its bytes, as they arrived.
+    pub payload: Vec<u8>,
+    /// Under `zenoh/bytes`, why it is no error form (`sample_kind` for a
+    /// router's `Timeout`); `None` under any other `Encoding`.
+    pub refusal: Option<wire::Refusal>,
+}
+
+/// `<encoding>: <bytes>`, the bytes as text when they are UTF-8 with no
+/// control character, else as `0x` and hex; then why a `zenoh/bytes` one
+/// is no error form: `zenoh/string: Timeout`, `zenoh/bytes: Timeout (no
+/// error form: sample_kind)`.
+impl fmt::Display for Transport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.encoding)?;
+        match std::str::from_utf8(&self.payload) {
+            Ok("") => write!(f, "(no bytes)")?,
+            Ok(text) if !text.chars().any(char::is_control) => write!(f, "{text}")?,
+            _ => {
+                write!(f, "0x")?;
+                for b in &self.payload {
+                    write!(f, "{b:02x}")?;
+                }
+            }
+        }
+        if let Some(r) = self.refusal {
+            write!(f, " (no error form: {})", r.token())?;
+        }
+        Ok(())
+    }
 }
 
 /// What presence says of a service that did not answer (O5).
@@ -543,13 +702,14 @@ impl Attribution {
     }
 }
 
-/// No answer (O5): no value and no envelope.
+/// No answer (O5): no value and no error, the transport's own error
+/// replies aside.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Silence {
     /// Calls made: more than one only for an idempotent operation (O4).
     pub attempts: u32,
     /// The transport's last error reply, such as `zenoh/string: Timeout`.
-    pub transport: Option<String>,
+    pub transport: Option<Transport>,
     pub presence: Attribution,
 }
 
@@ -559,10 +719,13 @@ pub struct Silence {
 /// response.
 #[derive(Debug, Clone)]
 pub enum Outcome<T> {
-    /// A value reply on the operation's concrete key.
+    /// A value reply on the operation's concrete key, in the value form or
+    /// on the bare wire (one the form's parse refuses included: it came on
+    /// the call's key, §5.1).
     Value(T),
-    /// A `reply_err` carrying a valid envelope (O3).
-    Refused(Envelope),
+    /// A `reply_err` carrying an owner's error, in its form or the bare
+    /// wire's envelope (O3, §5.2).
+    Refused(Refusal),
     /// A `reply_err` claiming an envelope encoding that does not decode.
     Malformed(Malformed),
     /// No answer.
@@ -580,7 +743,7 @@ impl<T> Outcome<T> {
     }
 
     #[must_use]
-    pub fn refusal(&self) -> Option<&Envelope> {
+    pub fn refusal(&self) -> Option<&Refusal> {
         match self {
             Self::Refused(e) => Some(e),
             _ => None,
@@ -642,12 +805,12 @@ pub struct Replies<V, S> {
     pub summary_declared: bool,
     /// One per concrete key, in the order of first arrival.
     pub repliers: Vec<Replier<V, S>>,
-    /// Envelopes. A `reply_err` carries no key, so a refusal is never
-    /// attributed to a replier.
-    pub refusals: Vec<Envelope>,
+    /// Owners' errors, from either wire. A `reply_err` carries no key, so a
+    /// refusal is never attributed to a replier.
+    pub refusals: Vec<Refusal>,
     pub malformed: Vec<Malformed>,
     /// The transport's error replies, such as a timeout.
-    pub transport: Vec<String>,
+    pub transport: Vec<Transport>,
     /// Value replies discarded: on a key that is not concrete (R6), or not
     /// a member of the operation called.
     pub discarded: u64,
@@ -675,7 +838,7 @@ impl<V, S> Replies<V, S> {
         }
     }
 
-    /// No value, no envelope, nothing malformed: silence (O5).
+    /// No value, no owner's error, nothing malformed: silence (O5).
     #[must_use]
     pub fn is_silent(&self) -> bool {
         self.repliers.is_empty() && self.refusals.is_empty() && self.malformed.is_empty()

@@ -43,7 +43,7 @@ impl thruster_v1::Api for Thrusters {
                 armed: true,
                 active_commander: String::new(),
             }),
-            "thruster-r" => Outcome::Refused(OpError::busy("interlocked").into_envelope()),
+            "thruster-r" => Outcome::Refused(OpError::busy("interlocked").into()),
             _ => Outcome::NoAnswer(zenkey::call::Silence {
                 attempts: 1,
                 transport: None,

@@ -138,6 +138,24 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   by its key (O6); `ownership::split_brain` is §6's token check. At most
   once holds only while one instance serves: exclusivity is
   `redundancy.v1`'s (#613).
+  Both wires (#985 C4b, no writer change): `client::classify` reads a
+  `reply_err` by `envelope::read_error` into `ErrorReply::{Refused,
+  Malformed, Transport}`; `call::Refusal` (an `Envelope` by `Deref`, a
+  form's detail its `Detail::Bytes`, `form: Option<ErrorMark>` with tag,
+  as-of mark and whether a message came, `detail_as::<C>(wire)` reading
+  either wire's, `From<OpError>` for an `Api` double) is `Outcome::Refused`
+  and `Replies::refusals`; `call::Transport` (`encoding`, `payload`,
+  `refusal`; `Display` `zenoh/bytes: Timeout (no error form:
+  sample_kind)`, hex for non-UTF-8) is `Silence::transport` and
+  `Replies::transport`, silence that an idempotent call retries after; an
+  `Answer` reads its value form (`Answer::new(addr, sample, op.encoding)`,
+  `form()` → `ReplyForm::{Bare, Value, Refused}`, `mark`, `tag`,
+  `record`, `record_encoding`, `value` on the contract's encoding), and
+  `typed::call` decodes the record by CH's tag. Owners still read a
+  request bare (C4c). `tests/common/forms_owner.rs` is a raw owner
+  answering in the forms, which `operations.rs`'s
+  `a_caller_reads_the_forms_and_the_bare_wire_alike`, the fleet's
+  `zk2_core.rs` and zenctl's `live_zk2.rs` include.
   Everything session-free stays in `zenkey-model`, including `decode`, the
   bundle-only decoder tools use (§7.2).
   Codegen's runtime half (#611, FI): `codec` (a Rust type and how it is

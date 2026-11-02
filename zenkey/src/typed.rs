@@ -757,13 +757,26 @@ fn op_check<Req: Codec, Resp: Codec, Sum: Codec>(op: &Operation, at: &str) -> Re
     kind_check::<Sum>(op.summary.as_ref(), &format!("{at} summary"))
 }
 
+/// A value reply decoded as `C`, from either wire (core §5.1, observer
+/// §7.3): a value form's record by CH's tag on the contract's `encoding`,
+/// a bare reply's payload on its `Encoding`. A value form refused does not
+/// decode.
 fn decode_answer<C: Codec>(a: &Answer, wire: Option<WireEncoding>) -> Result<C::Value> {
-    decode_sample::<C>(&a.sample, wire, None, EPOCH_WITHOUT_CATALOG).map_err(|e| {
+    let fail = |e: String| {
         Error::Payload(format!(
             "the reply on {} does not decode as its declared type: {e}",
             a.key()
         ))
-    })
+    };
+    let record = a.record().map_err(|r| fail(r.reason()))?;
+    let encoding = a.record_encoding();
+    C::decode_record_in(
+        &record,
+        wire_of(encoding.as_deref(), wire),
+        a.tag(),
+        EPOCH_WITHOUT_CATALOG,
+    )
+    .map_err(fail)
 }
 
 fn typed_replies<Resp: Codec, Sum: Codec>(
