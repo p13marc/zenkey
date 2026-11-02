@@ -91,10 +91,10 @@
 > four streams of §1 are `host` again: their readings cross in `frames/link`. §1's table, §3's
 > block and its downsampling rules are 3.1's, kept as the record.
 >
-> | Frame resource | Carries | Largest frame, its payload (32-bit run) |
+> | Frame resource | Carries | Largest frame, its payload (32-bit run; `link.v1` 0.16 §2.8) |
 > |---|---|---:|
 > | `frames/link` | the four link readings, 63 bits; `freshness.ttl_s = 150` | 22 B |
-> | `frames/sdu`, `sched`, `air`, `layer`, `if`, `radio`, `bearer` | each group of readings (`bearer` is `link/`'s), counters at 32 bits, a full record at least every 15 | 21 to 106 B |
+> | `frames/sdu`, `sched`, `air`, `layer`, `if`, `radio`, `bearer` | each group of readings (`bearer` is `link/`'s), counters at 32 bits, a full record at least every 15 | 22 to 109 B |
 > | `frames/message` | all 73, counters at 24 bits: one paid SBD message | 213 B |
 >
 > Under `link.v1`'s policies, whose faces list no frames, every exposed frame crosses a face that

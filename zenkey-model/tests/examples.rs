@@ -351,3 +351,47 @@ fn the_zenoh_modem_catalog_holds_its_contracts() {
         );
     }
 }
+
+/// Each adopter frame's largest frame, as `link.v1` §2.8 reads it for
+/// `frame_over_batch` (0.16, F-470): delta records that include every field
+/// where `keyframe_every` allows them. `examples/zk2/zenoh-modem/README.md`
+/// states `modem.v3`'s; zk2py's writer measured `frames/layer` and
+/// gendev's `frames/sample` so (round 99). `frames/message`, a full record
+/// every frame, still fits RF's 220-B batch.
+#[test]
+fn every_adopter_frame_has_its_largest_frame() {
+    use std::collections::BTreeMap;
+    let largest = |file: PathBuf| -> BTreeMap<String, u64> {
+        let c: Contract = load_path(&file).contract.expect("validated above");
+        c.resources
+            .iter()
+            .filter_map(|r| {
+                zenkey_model::frame::Layout::of_resource(&c, r)
+                    .expect("its layout reads")
+                    .map(|l| (r.template.as_str().to_owned(), l.largest_payload_bytes()))
+            })
+            .collect()
+    };
+    let modem = largest(examples().join("zenoh-modem/modem.v3.toml"));
+    let want: BTreeMap<String, u64> = [
+        ("frames/air", 50),
+        ("frames/bearer", 33),
+        ("frames/if", 60),
+        ("frames/layer", 109),
+        ("frames/link", 22),
+        ("frames/message", 213),
+        ("frames/radio", 22),
+        ("frames/sched", 33),
+        ("frames/sdu", 52),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v))
+    .collect();
+    assert_eq!(modem, want, "zenoh-modem/README.md's payloads");
+    assert!(modem["frames/message"] <= 220, "RF's batch");
+    let gendev = largest(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../docs/zk2/measurements/wire-baseline/contracts/gendev.v1.toml"),
+    );
+    assert_eq!(gendev["frames/sample"], 100);
+}

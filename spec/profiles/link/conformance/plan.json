@@ -3624,7 +3624,34 @@
       },
       "note": "frame resources across a face (§2.7, §2.8, §2.12, 0.13): every frame resource exposed link crosses and none is downsampled, the plain stream level alone has a rule; frames/link's horizon makes it liveness evidence, and frames/wide's too; frames/minute's period and frames/sample's span are shorter than interval_s (frame_over_interval); frames/wide's largest frame, four full records of sixteen 32-bit counters with three offsets, is 278 bytes against a batch of 220 (frame_over_batch), it declares history (history_on_frame), and its span of 240 s is above half its horizon of 300 s (interval_over_horizon, read from its interval, not interval_s); frames/unread's period of 30 s and horizon of 50 s draw neither frame_over_interval nor interval_over_horizon, and it is liveness evidence: its deadline does not read, so timing.v1 §2.2 reads its declaration invalid and its interval is unstated (core §7.7; 0.14, F-457); frames/home, not exposed, is denied by its own subtree",
       "policy": "# Frames across a face (link.v1 0.13)\nsystem   = \"lab\"\nservices = [\"modem\"]\n\n[face.rf]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 60\nmax_outage_s = 600\nbatch_bytes  = 220\nlink_bps     = 2400\n"
+    },
+    {
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "expect": {
+        "refused": [
+          {
+            "at": "nope.v1",
+            "code": "contract_unknown",
+            "face": null,
+            "severity": "error"
+          }
+        ]
+      },
+      "implements": {
+        "rf0": [
+          "modem.v3",
+          "config.v1",
+          "health.v1",
+          "nope.v1"
+        ]
+      },
+      "note": "an interface whose contract is not given, under a policy its linter warns of (`batch_over_lease`, §2.10; 0.16, F-468): the deployment's refusal lists its error alone, `contract_unknown`, without the policy's warning",
+      "policy": "# zenoh-modem's RF node (link.v1 Appendix B)\nsystem   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 60\nmax_outage_s = 3600\nbatch_bytes  = 220\nlink_bps     = 300\n"
     }
   ],
-  "description": "link.v1 §2.3, §2.5-§2.12: a face policy and a deployment -> each face's plan, or the findings that refuse it. policy is the face policy's TOML text (§2.1). implements maps each listed service's name to the interface ids it implements. The interfaces' resources are given inline in interfaces (interface id -> resources, each {template, token, annotations}, token one of stream, @stream, state, @state, events, @op, annotations resolved), or loaded from contracts, paths of authoring files relative to the repository root, loaded as core §9 loads them (defaults resolved, core §9.3). An inline resource declares no `history` and no `frame` table: a case about frame resources (core §7.7, 0.13) loads a contract, and the plan reads each frame resource's interval and largest frame from it. An interface inline is one revision's resources, or {revisions: [resources, ...]}, several revisions of one interface id (0.3, F-119); two files in contracts with one interface id are two revisions of it. The plan reads every revision of an interface together (§2.3). expect is {faces: [...]}, each face's plan as §2.3 states it, faces sorted by name: name, far, attach ({shape: client}, or {shape: south-region, region, gateway}), deny (each {id, flows, messages, key_exprs}: zk, adv, admin, then the exposure denies by kind token in the order stream, @stream, state, @state, events, each wholesale with id <token> or per listed interface with id <token>:<iface>, sorted by interface id, an empty one left out), downsampling ({id, link_protocols, flows, messages, rules: [{key_expr, freq}]}, or null), windows ([{service, min_s}]), liveness ([{service, evidence}]) and findings (warnings, each {code, severity, face, at}). Key expressions within a rule, rules, windows, liveness entries and evidence are sorted by their bytes; findings by face (null first), at, then code. freq is 1/interval_s as an IEEE 754 double. Or expect is {refused: [finding...]}: the policy's errors and warnings (§2.1), or the deployment's errors (service_unknown, contract_unknown), sorted the same way."
+  "description": "link.v1 §2.3, §2.5-§2.12: a face policy and a deployment -> each face's plan, or the findings that refuse it. policy is the face policy's TOML text (§2.1). implements maps each listed service's name to the interface ids it implements. The interfaces' resources are given inline in interfaces (interface id -> resources, each {template, token, annotations}, token one of stream, @stream, state, @state, events, @op, annotations resolved), or loaded from contracts, paths of authoring files relative to the repository root, loaded as core §9 loads them (defaults resolved, core §9.3). An inline resource declares no `history` and no `frame` table: a case about frame resources (core §7.7, 0.13) loads a contract, and the plan reads each frame resource's interval and largest frame from it. An interface inline is one revision's resources, or {revisions: [resources, ...]}, several revisions of one interface id (0.3, F-119); two files in contracts with one interface id are two revisions of it. The plan reads every revision of an interface together (§2.3). expect is {faces: [...]}, each face's plan as §2.3 states it, faces sorted by name: name, far, attach ({shape: client}, or {shape: south-region, region, gateway}), deny (each {id, flows, messages, key_exprs}: zk, adv, admin, then the exposure denies by kind token in the order stream, @stream, state, @state, events, each wholesale with id <token> or per listed interface with id <token>:<iface>, sorted by interface id, an empty one left out), downsampling ({id, link_protocols, flows, messages, rules: [{key_expr, freq}]}, or null), windows ([{service, min_s}]), liveness ([{service, evidence}]) and findings (warnings, each {code, severity, face, at}). Key expressions within a rule, rules, windows, liveness entries and evidence are sorted by their bytes; findings by face (null first), at, then code. freq is 1/interval_s as an IEEE 754 double. Or expect is {refused: [finding...]}: the policy's errors and warnings (§2.1), or the deployment's errors alone, no warning of the policy's or the plan's (service_unknown, contract_unknown; 0.16), sorted the same way."
 }
