@@ -1,5 +1,5 @@
 {
- "description": "An error envelope with its Zenoh encoding (text for JSON, hex bytes otherwise) \u2192 the decoded envelope, or the refusal tag (core.md \u00a75.2). A protobuf detail is shown as {\"bytes_hex\": \u2026}; a CBOR byte string inside a detail as base64 text. Cases written by an encoder independent of the reference implementation.",
+ "description": "The bare wire's envelope (core \u00a75.2, \"The envelope, on the bare wire\"), which a reader of the bare wire (\u00a75.1) decodes and no owner writes. An error envelope with its Zenoh encoding (text for JSON, hex bytes otherwise) \u2192 the decoded envelope, or the refusal tag (core.md \u00a75.2). A protobuf detail is shown as {\"bytes_hex\": \u2026}; a CBOR byte string inside a detail as base64 text. Cases written by an encoder independent of the reference implementation.",
  "cases": [
   {
    "name": "json-invalid-request",
