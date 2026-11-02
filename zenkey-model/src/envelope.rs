@@ -25,6 +25,11 @@
 //! by its `Encoding` first, and [`ErrorForm::write`] writes one, its
 //! message [`cut`] to 255 bytes. No rule at core 0.92 has an owner answer
 //! in it (C4c is the flip). `spec/conformance/errors/forms.json` pins it.
+//!
+//! **Reading both wires** (#980's C4b): [`read_error`] reads a reply error
+//! by its `Encoding` first, as an error form, the bare wire's envelope, or
+//! the transport's ([`ErrorReading`]), and [`crate::wire::read_value`] a
+//! reply as a value form or a bare record.
 
 use serde_json::{Map, Value};
 use thiserror::Error;
@@ -403,6 +408,42 @@ impl FormRefusal {
             FormRefusal::Encoding(_) => "encoding",
             FormRefusal::Form(r) => r.token(),
         }
+    }
+}
+
+/// What a call's reply error reads as, by its `Encoding` first (core
+/// §5.2, "Reading an error"), with the bare wire read beside it (§5.1,
+/// "The bare wire"): [`read_error`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum ErrorReading<'a> {
+    /// Under `zenoh/bytes`, an error form the parse accepts: the owner's.
+    Form(ErrorForm<'a>),
+    /// Under one of the envelope's three encodings ([`JSON`], [`CBOR`],
+    /// [`PROTOBUF`]), the bare wire's envelope: decoded, or refused by
+    /// [`decode`]. Either is the owner's answer.
+    Envelope(Result<Envelope, EnvelopeError>),
+    /// The transport's: under `zenoh/bytes`, bytes the parse refuses (its
+    /// refusal), such as a router's `Timeout` (`sample_kind`); under any
+    /// other `Encoding`, `None`, such as a querier's own `Timeout` under
+    /// `zenoh/string`. A caller reads either as silence (§5.1, "Retries").
+    Transport(Option<Refusal>),
+}
+
+/// A call's `reply_err` read by its `Encoding` (core §5.2): under
+/// `zenoh/bytes`, exactly, as the error form ([`ErrorForm::read`]), the
+/// transport's when the parse refuses it; under the envelope's three
+/// encodings as the bare wire's envelope ([`decode`]); under any other as
+/// the transport's. No contract is read: only a detail needs the `error`
+/// type, and it is taken unread.
+#[must_use]
+pub fn read_error<'a>(encoding: &str, payload: &'a [u8]) -> ErrorReading<'a> {
+    match ErrorForm::read(encoding, payload) {
+        Ok(form) => ErrorReading::Form(form),
+        Err(FormRefusal::Form(r)) => ErrorReading::Transport(Some(r)),
+        Err(FormRefusal::Encoding(_)) if [JSON, CBOR, PROTOBUF].contains(&encoding) => {
+            ErrorReading::Envelope(decode(encoding, payload))
+        }
+        Err(FormRefusal::Encoding(_)) => ErrorReading::Transport(None),
     }
 }
 
@@ -810,6 +851,56 @@ mod tests {
             "application/protobuf;other.Error",
         ] {
             assert_eq!(decode(enc, b"{}").map_err(|e| e.tag()), Err("encoding"));
+        }
+    }
+
+    /// Core §5.2, "Reading an error", with the bare wire beside it: the
+    /// error form under `zenoh/bytes` alone; a router's `Timeout` and a
+    /// form refused by its byte the transport's; the envelope under its
+    /// three encodings; any other `Encoding` the transport's, an error
+    /// form's bytes included (`operations.md` §9 steps 5 and 7).
+    #[test]
+    fn a_reply_error_is_read_by_its_encoding_first() {
+        let busy = hex("600001000007a0");
+        let ErrorReading::Form(f) = read_error(wire::ENCODING, &busy) else {
+            panic!("an error form")
+        };
+        assert_eq!(
+            (f.code, f.cause, f.message, f.detail),
+            (Code::Busy, None, None, None)
+        );
+        assert_eq!(f.stamp.seq.get(), 7);
+        assert_eq!(
+            read_error(wire::ENCODING, b"Timeout"),
+            ErrorReading::Transport(Some(Refusal::WrongSample {
+                form: Form::Value,
+                sample: wire::SampleKind::ReplyErr
+            }))
+        );
+        let ErrorReading::Transport(Some(r)) = read_error(wire::ENCODING, &hex("600001000007a8"))
+        else {
+            panic!("a cause on busy")
+        };
+        assert_eq!(r.token(), "cause");
+        assert_eq!(
+            read_error(JSON, br#"{"code":"busy","message":""}"#),
+            ErrorReading::Envelope(Ok(Envelope {
+                code: "busy".into(),
+                message: String::new(),
+                cause: None,
+                detail: None
+            }))
+        );
+        assert!(matches!(
+            read_error(JSON, b"{"),
+            ErrorReading::Envelope(Err(EnvelopeError::Decode(_)))
+        ));
+        for other in ["zenoh/string", "zenoh/bytes;x", "text/plain"] {
+            assert_eq!(
+                read_error(other, &busy),
+                ErrorReading::Transport(None),
+                "{other}"
+            );
         }
     }
 }
