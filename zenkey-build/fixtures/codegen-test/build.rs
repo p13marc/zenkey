@@ -3,7 +3,8 @@
 //! (`spec/profiles/health/`, #721), generated against their published
 //! history, with one name hint: the tcgui error detail is the hand-written
 //! `crate::model::TcError`. And `packed.v1` (`zenkey/tests/contracts/packed/`),
-//! the packed vectors' types (#979 B2).
+//! the packed vectors' types (#979 B2), and `linkframes.v1`
+//! (`zenkey/tests/contracts/frames/`), frame resources (#981 K3).
 //!
 //! One history root serves all three directories: `health.v1`'s revision
 //! 1.0 was published in `examples/zk2/.history` before the contract moved,
@@ -22,6 +23,9 @@ fn main() {
         .contracts_dir(examples.join("tcgui"))
         // core §7.6 (#979 B2): the packed vectors' types, generated.
         .contracts_dir(root.join("zenkey/tests/contracts/packed"))
+        // core §7.7 (#981 K3): linkframes.v1's frame resources, a frame
+        // writer each.
+        .contracts_dir(root.join("zenkey/tests/contracts/frames"))
         .history_dir(examples.join(".history"))
         .json_type("json:TcError", "crate::model::TcError")
         .generate()
