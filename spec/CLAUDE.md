@@ -488,6 +488,17 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   L5 adds zenoh-modem's five `link.v2` faces
   (`examples/zk2/zenoh-modem/faces/`, `v2/plan.json` cases 14–18), and
   `link.v2` stays experimental, since `modem.v3` lists `link.v1`.
+- **`config.v2`** (#985 G1, text 0.1, `experimental`, written against
+  core 0.92) sits beside `config.v1` in `spec/profiles/config/`: `v2.md`,
+  `scenarios-v2.md`, `config.v2.json` (the change event), and
+  `conformance/v2/{derive,records,validation,window,lifecycle,redaction}.json`,
+  computed by an independent Python reading, never blessed, with
+  `conformance/contracts/rfcfg.v1.toml` (and `rfcfg.json`, its six group
+  types then the eight derived ones) the scenarios' and fixtures'
+  contract. A parameter's `description` is no part of the wire (§9.8
+  compatible) but moves the fingerprint, since the packed file's id
+  hashes it (§2.2). Core Appendix D lists no `config` vocabulary, so W105
+  reads none.
 - **`freshness.v1`** is `experimental` since #978's F5 (a status entry in
   `freshness/CHANGELOG.md`, text still 0.5): the adopters' contracts and
   `nav.v2` moved to `freshness.v2`, each a `uses_changed` revision in
