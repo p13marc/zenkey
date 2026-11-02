@@ -134,6 +134,14 @@ pub struct ServiceConfig {
     /// Interfaces for which this service holds no interface token (§8.1,
     /// U22). Their descriptor entries say `"token": false`.
     pub tokenless: BTreeSet<IfaceId>,
+    /// The owner is on a first hop (core §8.1, #982): its session reaches
+    /// its router only across a constrained face, as that router's client.
+    /// At start every interface it implements joins the tokenless set, so
+    /// it holds its instance token alone; it holds no bundle (§8.4, §8.2
+    /// step 3), the deployment holding them on the near side; and step 2
+    /// refuses `archive.v1` and a governed interface, each of which needs
+    /// presence on its peers' side of the face.
+    pub first_hop: bool,
     /// The capabilities this instance holds (§3.3). A resource gated on one
     /// it does not hold is not exposed, and need not be listed unavailable.
     pub capabilities: BTreeSet<String>,
@@ -216,6 +224,8 @@ struct RawConfig {
     #[serde(default)]
     tokenless: BTreeSet<IfaceId>,
     #[serde(default)]
+    first_hop: bool,
+    #[serde(default)]
     capabilities: BTreeSet<String>,
     #[serde(default)]
     bindings: BTreeMap<String, Binding>,
@@ -249,6 +259,7 @@ impl TryFrom<RawConfig> for ServiceConfig {
         Ok(Self {
             address,
             tokenless: raw.tokenless,
+            first_hop: raw.first_hop,
             capabilities: raw.capabilities,
             bindings: raw.bindings,
             tombstone_window_s: raw.tombstone_window_s,
@@ -271,6 +282,7 @@ impl ServiceConfig {
         Self {
             address,
             tokenless: BTreeSet::new(),
+            first_hop: false,
             capabilities: BTreeSet::new(),
             bindings: BTreeMap::new(),
             tombstone_window_s: None,
@@ -304,6 +316,14 @@ impl ServiceConfig {
     #[must_use]
     pub fn tokenless(mut self, iface: IfaceId) -> Self {
         self.tokenless.insert(iface);
+        self
+    }
+
+    /// Marks the owner as on a first hop (core §8.1, #982): see
+    /// [`ServiceConfig::first_hop`](struct.ServiceConfig.html#structfield.first_hop).
+    #[must_use]
+    pub fn first_hop(mut self) -> Self {
+        self.first_hop = true;
         self
     }
 

@@ -3568,7 +3568,8 @@ fn outside_own(flow: &str) -> Vec<&'static str> {
 /// instance subtree on the eleven pairs outside the Own row, one deny per
 /// flow. So an instance key crosses on the Own row's seven pairs alone,
 /// and whose instance keys is the far principal's grants' to decide.
-fn zk_carve() -> Vec<Deny> {
+#[must_use]
+pub fn zk_carve() -> Vec<Deny> {
     let mut out = vec![Deny {
         id: "zk".to_owned(),
         flows: FLOWS.to_vec(),
