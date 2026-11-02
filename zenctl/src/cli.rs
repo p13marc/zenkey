@@ -4087,7 +4087,8 @@ pub(crate) struct AclGenArgs {
     /// per key; a south region gets `gateway.south` and the declarations of
     /// every queryable it may query. Router to router is refused. A
     /// `link.v2` policy adds the router's `transport` and `routing` blocks
-    /// (link.v2 §2.18).
+    /// (link.v2 §2.18). Given one --catalog, the far side's, a `link.v2`
+    /// plan refuses a crossing revision it does not list (link.v2 §2.18).
     #[arg(long, value_name = "FILE")]
     pub(crate) face_policy: Option<PathBuf>,
     /// Emit the far end's `transport` and `routing` blocks on stdout, for

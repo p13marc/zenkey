@@ -90,3 +90,44 @@ section, named after it. [`scenarios.md`](scenarios.md)'s sections are
    the silence.
 6. The tool reports `wait_under_lease` and `transport_differs`, both at
    `transport.wait_before_close_ms`.
+
+## §2 Frames per face (§2.7, §2.8; `link.v1` §2.9)
+
+**Setup.**
+- **The contract** is `probe.v1`
+  ([`conformance/contracts/probe.v1.toml`](conformance/contracts/probe.v1.toml)),
+  which lists `link.v2`. It exposes two frame resources, `frames/link`
+  and `frames/detail`, and a collection, `status`. It also exposes a
+  timed stream, `setpoint`, and a plain stream, `level`.
+- **The deployment.** `lab/probe-a` implements `probe.v1`, as the user
+  `probe-a`. The console, run by `ground` and `local`, binds every
+  stream, state and event of `probe.v1` from `lab/*`.
+- **The face policy** is the Conventions', its `services` set to
+  `["probe-a"]`. Its face lists one frame:
+
+  ```toml
+  frames = { "probe.v1/frames/link" = { every_s = 1 } }
+  ```
+
+**Steps.**
+1. The generator compiles N's block from the policy, the deployment and
+   the contract, and N starts with it.
+2. G, a client session as `ground`, attaches over the face. L, as
+   `local`, attaches on the near side. Each subscribes to what the
+   console is granted.
+3. The owner, a session as `probe-a`, puts at 20 Hz for 5 s on
+   `frames/link`, `frames/detail`, `setpoint` and `level`. It also puts
+   its heartbeat covering `probe.v1`, at 2 Hz.
+
+**Expected.**
+1. The plan lets `frames/link`, `status`, `level` and the heartbeat
+   cross. It denies `frames/detail` and `setpoint` by name.
+2. Its one downsampling rule is `level`'s. It warns `timed_downsampled`
+   at `setpoint` and `frame_unlisted` at `frames/detail`. It also warns
+   `keep_alive_not_suppressed`: a frame a second is above the 0.5 s
+   keep-alive interval.
+3. L receives every put.
+4. G receives every put of `frames/link` and of the heartbeat. Neither
+   is downsampled.
+5. G receives 4 to 6 puts of `level`, one a second.
+6. G receives no put of `frames/detail` or `setpoint`.

@@ -401,7 +401,163 @@
       "expect": [],
       "note": "the SBD router of Appendix B: no finding (§2.16)",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 2\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 271\nopen_timeout_ms      = 1000000\naccept_timeout_ms    = 1000000\ninterests_timeout_ms = 1000000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"none\"\nmax_outage_s     = 86400\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 1000000\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "arq",
+          "code": "no_arq",
+          "face": "radio",
+          "severity": "warning"
+        }
+      ],
+      "note": "a face's `frames` and `horizon_s`: no finding but `no_arq` (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nhorizon_s        = 300\nframes           = { \"probe.v1/frames/link\" = { every_s = 60, keyframe_s = 900 } }\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "arq",
+          "code": "no_arq",
+          "face": "radio",
+          "severity": "warning"
+        }
+      ],
+      "note": "an empty `frames` lists no frame: no finding but `no_arq` (§2.1, §2.7)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nframes           = {}\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "frames",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        },
+        {
+          "at": "horizon_s",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "`frames` and `horizon_s` on a face that exposes none: `bad_value` each, as its `interval_s` would be (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 2\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 271\nopen_timeout_ms      = 1000000\naccept_timeout_ms    = 1000000\ninterests_timeout_ms = 1000000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"none\"\nmax_outage_s     = 86400\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 1000000\nhorizon_s        = 900\nframes           = { \"probe.v1/frames/link\" = { every_s = 60 } }\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "arq",
+          "code": "no_arq",
+          "face": "radio",
+          "severity": "warning"
+        },
+        {
+          "at": "frames.frames/link",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        },
+        {
+          "at": "frames.probe.v1/peers/{p}",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "an entry keyed by no interface id, or by a template with a parameter, which names no frame resource: `bad_value` at `frames.<key>` (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nframes           = { \"frames/link\" = { every_s = 60 }, \"probe.v1/peers/{p}\" = { every_s = 60 } }\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "arq",
+          "code": "no_arq",
+          "face": "radio",
+          "severity": "warning"
+        },
+        {
+          "at": "frames.probe.v1/frames/link.cadence",
+          "code": "unknown_field",
+          "face": "radio",
+          "severity": "error"
+        },
+        {
+          "at": "frames.probe.v1/frames/link.every_s",
+          "code": "missing_field",
+          "face": "radio",
+          "severity": "error"
+        },
+        {
+          "at": "frames.probe.v1/frames/link.keyframe_s",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "an entry's own keys, each checked alone: no `every_s` is `missing_field`, a `keyframe_s` of 0 `bad_value`, another key `unknown_field` (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nframes           = { \"probe.v1/frames/link\" = { keyframe_s = 0, cadence = 60 } }\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "arq",
+          "code": "no_arq",
+          "face": "radio",
+          "severity": "warning"
+        },
+        {
+          "at": "frames",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        },
+        {
+          "at": "horizon_s",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "`frames` that is not a table and a `horizon_s` of 0: `bad_value` each (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nframes           = 60\nhorizon_s        = 0\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "arq",
+          "code": "no_arq",
+          "face": "radio",
+          "severity": "warning"
+        },
+        {
+          "at": "frames.probe.v1/frames/link",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "an entry that is not a table: `bad_value` at `frames.<key>` (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nframes           = { \"probe.v1/frames/link\" = 60 }\n"
+    },
+    {
+      "expect": [
+        {
+          "at": "frames",
+          "code": "unknown_field",
+          "face": "radio",
+          "severity": "error"
+        },
+        {
+          "at": "horizon_s",
+          "code": "unknown_field",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "a link.v1 policy knows neither `frames` nor `horizon_s`: `unknown_field` each (§2.1)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\nframes       = { \"probe.v1/frames/link\" = { every_s = 60 } }\nhorizon_s    = 300\n"
     }
   ],
-  "description": "link.v2's linter (v2.md §2.1, §2.4, §2.10, §2.16). Each case is a face policy, `policy`, and `expect`, every finding of it, sorted by face (none first), `at`, then `code`, as link.v1's lints.json writes them. A policy with no `profile` is link.v1's, read finding for finding as link.v1 §2.1 says."
+  "description": "link.v2's linter (v2.md §2.1, §2.4, §2.10, §2.16), a face's `frames` and `horizon_s` among it. Each case is a face policy, `policy`, and `expect`, every finding of it, sorted by face (none first), `at`, then `code`, as link.v1's lints.json writes them. A policy with no `profile` is link.v1's, read finding for finding as link.v1 §2.1 says."
 }

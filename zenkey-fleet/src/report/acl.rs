@@ -1237,6 +1237,7 @@ history   = true
                 evidence: vec![],
             }],
             reply_timeout_ms: None,
+            frames: None,
             findings: vec![],
         }];
         plan.downsampling = vec![Downsampling {

@@ -59,13 +59,14 @@ use zenoh::query::{ConsolidationMode, QueryTarget};
 use zenoh::sample::SampleKind;
 
 /// Every user N knows, password `<user>-pw`.
-const USERS: [&str; 6] = [
+const USERS: [&str; 7] = [
     "router",
     "radio-a",
     "radio-b",
     "local",
     "ground",
     "ground-router",
+    "probe-a",
 ];
 
 /// How long a reader waits for what must not arrive, once it has seen what
@@ -2757,6 +2758,214 @@ async fn v2_s1_the_router_runs_the_block() {
             ("wait_under_lease", "transport.wait_before_close_ms"),
         ]
     );
+    let _ = std::fs::remove_file(&dict);
+    let _ = std::fs::remove_file(&sock);
+}
+
+/// link.v2 scenarios §2's deployment: `lab/probe-a` implements `probe.v1`,
+/// and the console, run by `local` and `ground`, binds every stream, state
+/// and event of it.
+const PROBE_ENROLLMENT: &str = r#"
+[[principal]]
+user     = "probe-a"
+services = ["lab/probe-a"]
+
+[[principal]]
+user  = "local"
+tools = ["console"]
+
+[[principal]]
+user  = "ground"
+tools = ["console"]
+
+[[service]]
+address    = "lab/probe-a"
+implements = ["probe.v1"]
+
+[[tool]]
+name = "console"
+
+[tool.bindings.probe]
+interface = "probe.v1"
+providers = ["lab/*"]
+"#;
+
+/// link.v2 scenarios §2: a face that lists `frames/link` lets it across
+/// whole, denies `frames/detail` and the timed `setpoint` by name, lets the
+/// heartbeat covering `probe.v1` across, and downsamples `level` alone
+/// (link.v2 §2.7, §2.8; link.v1 §2.9).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn v2_s2_frames_per_face() {
+    let (contracts, problems) = ContractSet::load_path(
+        &util::zk2::profiles().join("link/conformance/contracts/probe.v1.toml"),
+    );
+    assert!(problems.is_empty(), "{problems:?}");
+    let enrollment: Enrollment = toml::from_str(PROBE_ENROLLMENT).unwrap();
+    let policy = V2_POLICY
+        .replace("services = [\"radio-a\"]", "services = [\"probe-a\"]")
+        .replace(
+            "reply_timeout_ms = 1000\n",
+            "reply_timeout_ms = 1000\nframes           = { \"probe.v1/frames/link\" = { every_s = 1 } }\n",
+        );
+    assert!(policy.contains("probe-a") && policy.contains("frames "));
+
+    // 1. The plan, and N running it.
+    let plan = plan_acl(
+        &enrollment,
+        &contracts,
+        &AclOptions {
+            face_policy: Some(link::parse(&policy)),
+            ..AclOptions::default()
+        },
+    )
+    .expect("the probe plans");
+    assert!(plan.refusals.is_empty(), "{:#?}", plan.refusals);
+    let face = &plan.faces[0];
+    let warned: Vec<(&str, &str)> = face
+        .findings
+        .iter()
+        .map(|f| (f.code.as_str(), f.at.as_str()))
+        .collect();
+    assert_eq!(
+        warned,
+        [
+            ("frame_unlisted", "probe.v1/stream/frames/detail"),
+            ("timed_downsampled", "probe.v1/stream/setpoint"),
+            ("keep_alive_not_suppressed", "transport.keep_alive"),
+        ]
+    );
+    let rules: Vec<&str> = face
+        .downsampling
+        .iter()
+        .flat_map(|d| &d.rules)
+        .map(|r| r.key_expr.as_str())
+        .collect();
+    assert_eq!(rules, ["zk2/lab/probe-a/probe.v1/stream/level"]);
+    let denied: Vec<&str> = face
+        .deny
+        .iter()
+        .flat_map(|d| &d.key_exprs)
+        .map(String::as_str)
+        .collect();
+    // Each a subtree with nothing crossing, denied whole (link.v1 §2.7).
+    for name in ["frames/detail", "setpoint"] {
+        let key = format!("zk2/*/*/probe.v1/stream/{name}/**");
+        assert!(
+            denied.contains(&key.as_str()),
+            "{key} denied by name: {denied:?}"
+        );
+    }
+    // N runs the block, its transport among it, and G the far end's.
+    let dict = scratch("v2-s2-near.txt");
+    std::fs::write(
+        &dict,
+        ["router", "local", "ground", "probe-a"]
+            .iter()
+            .map(|u| format!("{u}:{u}-pw\n"))
+            .collect::<String>(),
+    )
+    .unwrap();
+    let sock = scratch("v2-s2-face.sock");
+    let n = zenoh::open(config_of(
+        &acl_plan_json5(&plan),
+        &[
+            ("mode", "\"router\"".to_owned()),
+            (
+                "listen/endpoints",
+                format!(
+                    "[\"{}\", \"unixsock-stream/{}\"]",
+                    util::ANY_PORT,
+                    sock.display()
+                ),
+            ),
+            (
+                "transport/auth/usrpwd",
+                format!(
+                    "{{ user: \"router\", password: \"router-pw\", dictionary_file: {:?} }}",
+                    dict.display().to_string()
+                ),
+            ),
+        ],
+    ))
+    .await
+    .expect("N runs the block");
+    let tcp = util::bound(&n).await;
+
+    // 2. G across the face, L near, each on the console's grants.
+    let g = zenoh::open(config_of(
+        &acl_far_json5(&plan).expect("the far end's block"),
+        &[
+            ("mode", "\"client\"".to_owned()),
+            (
+                "connect/endpoints",
+                format!("[\"unixsock-stream/{}\"]", sock.display()),
+            ),
+            (
+                "transport/auth/usrpwd",
+                "{ user: \"ground\", password: \"ground-pw\" }".to_owned(),
+            ),
+        ],
+    ))
+    .await
+    .expect("G attaches to N over the face");
+    let l = client(&tcp, "local").await;
+    let gr = reader(&g, &plan, None).await;
+    let lr = reader(&l, &plan, None).await;
+
+    // 3. The owner's traffic, once both subscriptions stand.
+    let o = client(&tcp, "probe-a").await;
+    let key = |rel: &str| format!("zk2/lab/probe-a/probe.v1/{rel}");
+    let heartbeat = "zk2/lab/probe-a/freshness.v2/stream/heartbeat/probe.v1";
+    eventually("the readers' subscriptions stand", || async {
+        o.put(key("state/status"), "probe").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        gr.seen.puts("/state/status") > 0 && lr.seen.puts("/state/status") > 0
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    gr.seen.clear();
+    lr.seen.clear();
+    let start = tokio::time::Instant::now();
+    for i in 0..100u64 {
+        for rel in [
+            "stream/frames/link",
+            "stream/frames/detail",
+            "stream/setpoint",
+            "stream/level",
+        ] {
+            o.put(key(rel), i.to_string()).await.unwrap();
+        }
+        if i % 10 == 0 {
+            o.put(heartbeat, i.to_string()).await.unwrap();
+        }
+        tokio::time::sleep_until(start + Duration::from_millis(50 * (i + 1))).await;
+    }
+    tokio::time::sleep(SILENCE).await;
+
+    // 3. L receives every put.
+    for rel in [
+        "stream/frames/link",
+        "stream/frames/detail",
+        "stream/setpoint",
+        "stream/level",
+    ] {
+        let got = lr.seen.puts(&format!("probe.v1/{rel}"));
+        assert!(got >= 80, "L receives about 100 of {rel}: {got}");
+    }
+    assert_eq!(lr.seen.puts("heartbeat/probe.v1"), 10);
+    // 4. G receives every frame and every heartbeat: neither is thinned.
+    let frames = gr.seen.puts("probe.v1/stream/frames/link");
+    assert!(frames >= 80, "G receives about 100 frames: {frames}");
+    assert_eq!(gr.seen.puts("heartbeat/probe.v1"), 10);
+    // 5. `level`, downsampled to one a second.
+    let level = gr.seen.puts("probe.v1/stream/level");
+    assert!(
+        (4..=6).contains(&level),
+        "G receives `level` once a second: {level}"
+    );
+    // 6. Nothing of the unlisted frame or the timed stream.
+    assert_eq!(gr.seen.puts("probe.v1/stream/frames/detail"), 0);
+    assert_eq!(gr.seen.puts("probe.v1/stream/setpoint"), 0);
     let _ = std::fs::remove_file(&dict);
     let _ = std::fs::remove_file(&sock);
 }

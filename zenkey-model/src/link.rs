@@ -36,6 +36,22 @@
 //! policy, read as it was. A v2 face's `batch_bytes` and `lease_ms` are
 //! its `[transport]`'s, so the plan and §2.10 read both profiles alike.
 //!
+//! **link.v2's contract side** (#988 L3, v2 0.3): a contract that lists
+//! `link.v2` types every resource it exposes as packed ([`contract_findings`],
+//! `packed_required`, v2 §2.17); a face's `frames` lists the frame resources
+//! that cross it, each at its cadence, and its `horizon_s` is the shortest
+//! horizon it affords (v2 §2.1, §2.7, §2.12); and under a link.v2 policy the
+//! plan denies a timed stream rather than downsample it (v2 §2.8), refuses a
+//! crossing revision the deployment's catalog lacks (v2 §2.18), and weighs
+//! what crosses against the face (`not_packed`, `frame_unlisted`,
+//! `horizon_under_face`, `block_over_batch`, `keep_alive_not_suppressed`,
+//! `timed_downsampled`).
+//!
+//! ```text
+//! crossing_v2(token, shape, …)      ─▶ link.v2's reading of one resource
+//! contract_findings(contract)       ─▶ packed_required, per exposed resource
+//! ```
+//!
 //! ```text
 //! Transport::value(key)             ─▶ the value a generator writes at zenoh's key
 //! StatedTransport::read(config)     ─▶ the keys a router's configuration states
@@ -72,8 +88,20 @@ pub const EXPOSURE: &str = "link.exposure";
 /// in place of core Appendix D's interim row (core 0.29).
 pub const VOCABULARY: &[&str] = &["exposure"];
 
-/// `link.v2`'s id, as a face policy's `profile` names it (v2 §2.1).
+/// `link.v2`'s id, as a face policy's `profile` names it (v2 §2.1), and as
+/// a contract lists it in `uses` (v2 §2.17).
 pub const PROFILE_V2: &str = "link.v2";
+
+/// Whether a contract lists `link.v2` in `uses`: it then types every
+/// resource it exposes as packed (v2 §2.17).
+#[must_use]
+pub fn uses_v2(c: &Contract) -> bool {
+    c.uses.iter().any(|u| u.to_string() == PROFILE_V2)
+}
+
+/// The bytes of the envelope a packed record or a frame travels in, with a
+/// 32-bit run (core §7.5): CH, the run and the seq.
+pub const ENVELOPE_BYTES: u64 = 8;
 
 /// zenoh's transport lease, `transport.link.tx.lease`, when a face policy
 /// gives none (§2.1).
@@ -581,6 +609,12 @@ pub enum Reason {
     /// A stream whose template has a parameter: no rule names its members
     /// (§2.8).
     Templated,
+    /// link.v2's: a frame resource on a face whose `frames` does not list it
+    /// (v2 §2.7).
+    Unlisted,
+    /// link.v2's: a stream that would be downsampled, and declares
+    /// `timing.deadline_ms` (v2 §2.8).
+    Timed,
     /// It crosses.
     Exposed,
 }
@@ -595,6 +629,8 @@ impl Reason {
             Self::Host => "host",
             Self::FaceClosed => "face_closed",
             Self::Templated => "templated",
+            Self::Unlisted => "unlisted",
+            Self::Timed => "timed",
             Self::Exposed => "exposed",
         }
     }
@@ -652,6 +688,121 @@ pub fn crossing(
             reason: Reason::Exposed,
         },
     }
+}
+
+/// What link.v2 reads of a resource's own declaration, beside its exposure,
+/// to say whether it crosses (v2 §2.7, §2.8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Shape {
+    /// Its template has a parameter.
+    pub templated: bool,
+    /// It is a frame resource (core §7.7): never downsampled.
+    pub frame: bool,
+    /// Its resolved annotations hold `timing.deadline_ms`, whatever its
+    /// value ([`timed`]).
+    pub timed: bool,
+}
+
+impl Shape {
+    /// The shape of a resource of `token`: `templated` when its template
+    /// has a parameter, `frame` when it is a frame resource, and timed when
+    /// it is a stream whose `annotations` hold `timing.deadline_ms`.
+    #[must_use]
+    pub fn of(
+        token: KindToken,
+        templated: bool,
+        frame: bool,
+        annotations: &BTreeMap<String, Value>,
+    ) -> Self {
+        Shape {
+            templated,
+            frame,
+            timed: is_stream(token) && timed(annotations),
+        }
+    }
+}
+
+/// Whether resolved annotations hold `timing.deadline_ms` (v2 §2.8). Its
+/// value is not read: an invalid one still says the contract meant a
+/// deadline, and the plan fails closed.
+#[must_use]
+pub fn timed(annotations: &BTreeMap<String, Value>) -> bool {
+    annotations.contains_key(crate::timing::DEADLINE_MS)
+}
+
+/// link.v2's reading of whether a resource's pushes cross a face (v2 §2.7,
+/// §2.8): [`crossing`]'s, and then a frame resource crosses whole, never
+/// downsampled, unless the face's `frames` leaves it out (`listed`
+/// `Some(false)`; `None` for a face with no `frames`), and a stream that
+/// would be downsampled is denied when it is timed.
+#[must_use]
+pub fn crossing_v2(
+    token: KindToken,
+    shape: Shape,
+    exposure: &Exposure,
+    expose: Expose,
+    listed: Option<bool>,
+) -> Crossing {
+    let c = crossing(token, shape.templated, exposure, expose);
+    if c.pushes != Pushes::Downsampled {
+        return c;
+    }
+    let denied = |reason| Crossing {
+        pushes: Pushes::Denied,
+        reason,
+    };
+    if shape.frame {
+        if listed == Some(false) {
+            return denied(Reason::Unlisted);
+        }
+        return Crossing {
+            pushes: Pushes::Whole,
+            reason: Reason::Exposed,
+        };
+    }
+    if shape.timed {
+        return denied(Reason::Timed);
+    }
+    c
+}
+
+/// Whether a resource breaks link.v2's packed requirement (v2 §2.17): its
+/// contract lists `link.v2`, it is a stream, a state or an event exposed
+/// `link`, and its type is not packed.
+#[must_use]
+pub fn packed_required(uses_v2: bool, token: KindToken, exposure: &Exposure, packed: bool) -> bool {
+    uses_v2 && token != KindToken::Op && *exposure == Exposure::Link && !packed
+}
+
+/// A contract's findings under link.v2's contract side (v2 §2.17): for a
+/// contract that lists `link.v2`, `packed_required` at each resource it
+/// exposes `link` whose type is not packed, `at` its name (§0), with no
+/// face. None for any other contract.
+#[must_use]
+pub fn contract_findings(c: &Contract) -> Vec<Finding> {
+    let v2 = uses_v2(c);
+    let mut out: Vec<Finding> = c
+        .resources
+        .iter()
+        .map(|r| Res::of(c, r))
+        .filter(|r| {
+            packed_required(
+                v2,
+                r.token,
+                &exposure(kind_of(r.token), &r.annotations),
+                r.packed,
+            )
+        })
+        .map(|r| {
+            Finding::new(
+                Code::PackedRequired,
+                None,
+                res_name(&c.iface.to_string(), &r),
+            )
+        })
+        .collect();
+    sort_findings(&mut out);
+    out
 }
 
 fn is_stream(token: KindToken) -> bool {
@@ -781,6 +932,36 @@ pub enum Code {
     PeerDiffers,
     /// The catalog the far side holds is not the policy's (v2 §2.19).
     CatalogMismatch,
+    /// A contract that lists `link.v2` exposes a resource whose type is not
+    /// packed (v2 §2.17).
+    PackedRequired,
+    /// A crossing resource of a contract that does not list `link.v2`,
+    /// whose type is not packed (v2 §2.3, §2.17).
+    NotPacked,
+    /// A face's `frames` entry that names no frame resource of a listed
+    /// interface (v2 §2.7).
+    FrameUnknown,
+    /// An exposed frame resource of a listed interface that a face's
+    /// `frames` leaves out, and that crosses no face of the policy (v2
+    /// §2.7).
+    FrameUnlisted,
+    /// A listed frame whose `keyframe_s` its contract's `keyframe_every`
+    /// cannot reach at the face's `every_s` (v2 §2.7).
+    KeyframeUnreachable,
+    /// A crossing heartbeat or frame resource whose horizon is below the
+    /// face's `horizon_s` (v2 §2.12).
+    HorizonUnderFace,
+    /// A crossing `block` resource whose longest put is above the batch
+    /// (v2 §2.16).
+    BlockOverBatch,
+    /// A face whose shortest crossing cadence is above the keep-alive
+    /// interval (v2 §2.16).
+    KeepAliveNotSuppressed,
+    /// A timed stream, denied rather than downsampled (v2 §2.8).
+    TimedDownsampled,
+    /// A revision of an interface that crosses the face, which the
+    /// deployment's catalog does not list (v2 §2.18).
+    CatalogMissing,
 }
 
 impl Code {
@@ -828,6 +1009,16 @@ impl Code {
             Self::TransportDiffers => "transport_differs",
             Self::PeerDiffers => "peer_differs",
             Self::CatalogMismatch => "catalog_mismatch",
+            Self::PackedRequired => "packed_required",
+            Self::NotPacked => "not_packed",
+            Self::FrameUnknown => "frame_unknown",
+            Self::FrameUnlisted => "frame_unlisted",
+            Self::KeyframeUnreachable => "keyframe_unreachable",
+            Self::HorizonUnderFace => "horizon_under_face",
+            Self::BlockOverBatch => "block_over_batch",
+            Self::KeepAliveNotSuppressed => "keep_alive_not_suppressed",
+            Self::TimedDownsampled => "timed_downsampled",
+            Self::CatalogMissing => "catalog_missing",
         }
     }
 
@@ -849,7 +1040,13 @@ impl Code {
             | Self::OpenUnderHandshake
             | Self::ReplyTimeoutShort
             | Self::NoArq
-            | Self::PeerDiffers => Severity::Warning,
+            | Self::PeerDiffers
+            | Self::NotPacked
+            | Self::FrameUnlisted
+            | Self::HorizonUnderFace
+            | Self::BlockOverBatch
+            | Self::KeepAliveNotSuppressed
+            | Self::TimedDownsampled => Severity::Warning,
             _ => Severity::Error,
         }
     }
@@ -969,6 +1166,25 @@ pub struct Face {
     /// link.v2's: how long a caller across the face waits for a reply, the
     /// deployment's word to every caller.
     pub reply_timeout_ms: Option<u64>,
+    /// link.v2's `frames` (v2 §2.7): the frame resources that cross the
+    /// face, by their name (§0, `<iface>/stream/<template>`), each at its
+    /// cadence. `None` when the face lists none: every exposed frame
+    /// resource crosses, as `link.v1` §2.7 says.
+    pub frames: Option<BTreeMap<String, FrameCadence>>,
+    /// link.v2's `horizon_s` (v2 §2.12): the shortest horizon the face
+    /// affords a crossing heartbeat or frame resource.
+    pub horizon_s: Option<u64>,
+}
+
+/// A listed frame's cadence on a face (v2 §2.7): the deployment's word to
+/// the far side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct FrameCadence {
+    /// How often its owner puts a frame on this face, in seconds.
+    pub every_s: u64,
+    /// The longest the face accepts between two full records, in seconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keyframe_s: Option<u64>,
 }
 
 impl Face {
@@ -1415,7 +1631,86 @@ const FACE_KEYS_V2: &[&str] = &[
     "loss_ppm",
     "arq",
     "reply_timeout_ms",
+    "horizon_s",
+    "frames",
 ];
+
+/// A face's `frames` (v2 §2.1): a table of entries, each keyed
+/// `<iface>/<template>`, an interface id and a template with no parameter,
+/// and valued `{every_s, keyframe_s}`. Each wrong entry is reported once,
+/// `at` `frames.<entry>` or a key within it; `None` when any is wrong.
+fn parse_frames(
+    face: &str,
+    v: &toml::Value,
+    out: &mut Vec<Finding>,
+) -> Option<BTreeMap<String, FrameCadence>> {
+    let at = Some(face);
+    let toml::Value::Table(t) = v else {
+        out.push(Finding::new(Code::BadValue, at, "frames"));
+        return None;
+    };
+    let mut ok = true;
+    let mut frames = BTreeMap::new();
+    for (k, v) in t {
+        let entry = format!("frames.{k}");
+        let mut bad = |out: &mut Vec<Finding>, code: Code, key: String| {
+            out.push(Finding::new(code, at, key));
+            ok = false;
+        };
+        let name = k.split_once('/').and_then(|(i, rest)| {
+            let iface: crate::grammar::IfaceId = i.parse().ok()?;
+            let template = Template::parse(rest).ok().filter(|t| !t.has_params())?;
+            Some(format!("{iface}/stream/{}", template.as_str()))
+        });
+        if name.is_none() {
+            bad(out, Code::BadValue, entry.clone());
+        }
+        let toml::Value::Table(e) = v else {
+            if name.is_some() {
+                bad(out, Code::BadValue, entry);
+            }
+            continue;
+        };
+        for key in e.keys() {
+            if key != "every_s" && key != "keyframe_s" {
+                bad(out, Code::UnknownField, format!("{entry}.{key}"));
+            }
+        }
+        let every_s = match e.get("every_s") {
+            None => {
+                bad(out, Code::MissingField, format!("{entry}.every_s"));
+                None
+            }
+            Some(v) => {
+                let n = int_in(v, 1, MAX_U32);
+                if n.is_none() {
+                    bad(out, Code::BadValue, format!("{entry}.every_s"));
+                }
+                n
+            }
+        };
+        let keyframe_s = match e.get("keyframe_s") {
+            None => Some(None),
+            Some(v) => {
+                let n = int_in(v, 1, MAX_U32);
+                if n.is_none() {
+                    bad(out, Code::BadValue, format!("{entry}.keyframe_s"));
+                }
+                n.map(Some)
+            }
+        };
+        if let (Some(name), Some(every_s), Some(keyframe_s)) = (name, every_s, keyframe_s) {
+            frames.insert(
+                name,
+                FrameCadence {
+                    every_s,
+                    keyframe_s,
+                },
+            );
+        }
+    }
+    ok.then_some(frames)
+}
 
 /// What a face is read against: its profile, its binding's link protocols
 /// (`None` when the binding is not one: the check is skipped), and a
@@ -1581,6 +1876,7 @@ fn parse_face(
     if v2 {
         let loss_ppm = int("loss_ppm", 0, MAX_LOSS_PPM, true);
         let reply_timeout_ms = int("reply_timeout_ms", 1, MAX_U32, true);
+        let horizon_s = int("horizon_s", 1, MAX_U32, false);
         let arq = match t.get("arq") {
             None => {
                 bad(out, Code::MissingField, "arq");
@@ -1592,6 +1888,26 @@ fn parse_face(
                 None
             }
         };
+        let frames = match t.get("frames") {
+            None => Some(None),
+            Some(v) => {
+                let f = parse_frames(name, v, out);
+                if f.is_none() {
+                    ok = false;
+                }
+                f.map(Some)
+            }
+        };
+        // Like `interval_s`, a face that exposes none lets nothing cross,
+        // so it lists no frame and affords no horizon (v2 §2.1).
+        if expose == Some(Expose::None) {
+            for key in ["frames", "horizon_s"] {
+                if t.contains_key(key) {
+                    out.push(Finding::new(Code::BadValue, at, key));
+                    ok = false;
+                }
+            }
+        }
         face_lints_v2(
             name,
             ctx.transport,
@@ -1628,6 +1944,8 @@ fn parse_face(
             loss_ppm,
             arq,
             reply_timeout_ms,
+            frames: frames?,
+            horizon_s,
         });
     }
     let batch_bytes = int("batch_bytes", 1, MAX_BATCH, true);
@@ -1668,6 +1986,8 @@ fn parse_face(
         loss_ppm: None,
         arq: None,
         reply_timeout_ms: None,
+        frames: None,
+        horizon_s: None,
     })
 }
 
@@ -1877,7 +2197,10 @@ pub fn check_catalog(policy: &FacePolicy, held: &str) -> Vec<Finding> {
 
 /// One resource as the plan reads it: its template, its kind token, its
 /// resolved annotations, whether it declares `history` (core §2.5), and,
-/// for a frame resource (core §7.7), what the plan weighs of its frames.
+/// for a frame resource (core §7.7), what the plan weighs of its frames;
+/// and what link.v2 reads of it (v2 §2.16, §2.17): whether its type is
+/// packed, whether its congestion is `block`, its longest put, and whether
+/// its contract lists `link.v2`.
 #[derive(Debug, Clone)]
 pub struct Res {
     pub template: Template,
@@ -1885,6 +2208,47 @@ pub struct Res {
     pub annotations: BTreeMap<String, Value>,
     pub history: bool,
     pub frame: Option<FrameFacts>,
+    /// Its type is packed (core §7.6); a frame resource's always is.
+    pub packed: bool,
+    /// Its congestion is `block` (core §2.4).
+    pub block: bool,
+    /// Its longest put's payload, in bytes: a packed record's longest
+    /// (every optional field present) after an [`ENVELOPE_BYTES`] envelope,
+    /// or a frame resource's largest frame. `None` for any other type.
+    pub longest_bytes: Option<u64>,
+    /// The revision that declares it lists `link.v2` (v2 §2.17).
+    pub link_v2: bool,
+}
+
+impl Res {
+    /// A resource of `token` at `template`, with resolved `annotations`, and
+    /// nothing else stated: no history, no frame, a type that is not packed,
+    /// `drop`, in a revision that does not list `link.v2`.
+    #[must_use]
+    pub fn new(template: Template, token: KindToken, annotations: BTreeMap<String, Value>) -> Self {
+        Res {
+            template,
+            token,
+            annotations,
+            history: false,
+            frame: None,
+            packed: false,
+            block: false,
+            longest_bytes: None,
+            link_v2: false,
+        }
+    }
+
+    /// Its shape, as [`crossing_v2`] reads it.
+    #[must_use]
+    pub fn shape(&self) -> Shape {
+        Shape::of(
+            self.token,
+            self.template.has_params(),
+            self.frame.is_some(),
+            &self.annotations,
+        )
+    }
 }
 
 /// What the plan reads of a frame resource (§2.8): never downsampled, it
@@ -1898,6 +2262,9 @@ pub struct FrameFacts {
     /// ([`crate::frame::Layout::largest_payload_bytes`]); `None` when its
     /// record type's layout does not read.
     pub largest_bytes: Option<u64>,
+    /// Its `keyframe_every` (core §7.7): a full record at least once every
+    /// this many records. Across revisions, the least (v2 §2.7).
+    pub keyframe_every: u32,
 }
 
 impl Res {
@@ -1914,13 +2281,28 @@ impl Res {
                 .ok()
                 .flatten()
                 .map(|l| l.largest_payload_bytes()),
+            keyframe_every: p.keyframe_every,
         });
+        let packed = data.is_some_and(|d| d.type_.is_packed());
+        let longest_bytes = match (&frame, data) {
+            (Some(f), _) => f.largest_bytes,
+            (None, Some(d)) if packed => c
+                .packed_layout(&d.type_)
+                .ok()
+                .flatten()
+                .map(|l| ENVELOPE_BYTES + l.max_bits().div_ceil(8)),
+            _ => None,
+        };
         Res {
             template: r.template.clone(),
             token: r.token,
             annotations: r.annotations.clone(),
             history: data.is_some_and(|d| d.history.is_some()),
             frame,
+            packed,
+            block: data.is_some_and(|d| d.congestion == crate::authoring::Congestion::Block),
+            longest_bytes,
+            link_v2: uses_v2(c),
         }
     }
 }
@@ -1941,15 +2323,27 @@ pub struct Deployment {
     /// their owners send a heartbeat covering them (`freshness.v2` §2.4),
     /// which crosses where a collection it covers does (§2.9).
     pub heartbeats: BTreeSet<String>,
+    /// An interface id → the fingerprints of the revisions given of it as
+    /// contracts, which link.v2's catalog check reads (v2 §2.18). A
+    /// revision given as its resources alone has none.
+    pub fingerprints: BTreeMap<String, BTreeSet<crate::canonical::Fingerprint>>,
+    /// The catalog the far side decodes with (core §8.6), when the
+    /// deployment gives it: a link.v2 plan then refuses a crossing revision
+    /// it does not list (v2 §2.18).
+    pub catalog: Option<crate::catalog::Catalog>,
 }
 
 impl Deployment {
-    /// Adds a contract's resources as a revision of its interface id, and
-    /// its heartbeat when it uses `freshness.v2`.
+    /// Adds a contract's resources as a revision of its interface id, its
+    /// heartbeat when it uses `freshness.v2`, and its fingerprint.
     pub fn add_contract(&mut self, c: &Contract) {
         if freshness::uses_v2(c) {
             self.heartbeats.insert(c.iface.to_string());
         }
+        self.fingerprints
+            .entry(c.iface.to_string())
+            .or_default()
+            .insert(crate::canonical::Fingerprint::of(c));
         self.add_revision(
             c.iface.to_string(),
             c.resources.iter().map(|r| Res::of(c, r)).collect(),
@@ -1997,8 +2391,19 @@ fn merge(revisions: &[Vec<Res>]) -> (Vec<Res>, BTreeSet<usize>) {
             .count();
         // A frame's `history` is warned of where any revision declares it
         // (§2.8); its `frame` table is one in every revision of a major,
-        // since a change to it is breaking (core §9.8).
+        // since a change to it is breaking (core §9.8), but for
+        // `keyframe_every`, a review, of which the least binds (v2 §2.7).
         out[i].history = rs.iter().any(|r| r.history);
+        if let Some(f) = &mut out[i].frame {
+            f.keyframe_every = rs
+                .iter()
+                .filter_map(|r| r.frame.map(|f| f.keyframe_every))
+                .min()
+                .unwrap_or(f.keyframe_every);
+        }
+        // A packed type grows by a minor (core §7.6): the longest put of any
+        // revision.
+        out[i].longest_bytes = rs.iter().filter_map(|r| r.longest_bytes).max();
         if links > 0 && links < rs.len() {
             disagree.insert(i);
             out[i]
@@ -2110,7 +2515,31 @@ pub struct FacePlan {
     /// caller across it (v2 §2.18); absent for a `link.v1` face.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reply_timeout_ms: Option<u64>,
+    /// A link.v2 face's listed frames that cross it, each at its cadence,
+    /// sorted by name: the deployment's word to the far side (v2 §2.7,
+    /// §2.18). Absent for a face with no `frames`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frames: Option<Vec<ListedFrame>>,
     pub findings: Vec<Finding>,
+}
+
+/// A listed frame that crosses, as the plan carries it (v2 §2.18).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ListedFrame {
+    /// Its name (§0).
+    pub resource: String,
+    #[serde(flatten)]
+    pub cadence: FrameCadence,
+}
+
+/// What [`plan_face`] found that the policy's other faces need: the
+/// resources crossing it, the exposed frames it leaves unlisted, and the
+/// interfaces with something crossing it (v2 §2.7, §2.18).
+#[derive(Debug, Default)]
+struct FaceFacts {
+    crossing: BTreeSet<String>,
+    unlisted: BTreeSet<String>,
+    ifaces: BTreeSet<String>,
 }
 
 /// A resource's name in a plan, `<iface>/<token>/<template>` (§0).
@@ -2152,17 +2581,78 @@ pub fn plan(policy: &FacePolicy, deployment: &Deployment) -> Result<Vec<FacePlan
         .iter()
         .map(|i| ((*i).to_owned(), merge(&deployment.interfaces[*i])))
         .collect();
-    Ok(policy
+    let v2 = policy.profile == Profile::V2;
+    // link.v2's contract side, read per revision given (v2 §2.17).
+    if v2 {
+        for i in &listed {
+            for r in deployment.interfaces[*i].iter().flatten() {
+                let e = exposure(kind_of(r.token), &r.annotations);
+                if packed_required(r.link_v2, r.token, &e, r.packed) {
+                    errors.push(Finding::new(Code::PackedRequired, None, res_name(i, r)));
+                }
+            }
+        }
+    }
+    let mut faces: Vec<(FacePlan, FaceFacts)> = policy
         .faces
         .iter()
-        .map(|(name, face)| plan_face(policy, deployment, &view, &services, &listed, name, face))
-        .collect())
+        .map(|(name, face)| {
+            plan_face(
+                policy,
+                deployment,
+                &view,
+                &services,
+                &listed,
+                name,
+                face,
+                &mut errors,
+            )
+        })
+        .collect();
+    if v2 {
+        // An exposed frame no face lets across (v2 §2.7).
+        let crossing: BTreeSet<String> = faces
+            .iter()
+            .flat_map(|(_, f)| f.crossing.iter().cloned())
+            .collect();
+        for (p, f) in &mut faces {
+            for n in f.unlisted.iter().filter(|n| !crossing.contains(*n)) {
+                p.findings
+                    .push(Finding::new(Code::FrameUnlisted, Some(&p.name), n.clone()));
+            }
+            sort_findings(&mut p.findings);
+        }
+        // Every crossing revision is one the far side can decode (v2 §2.18).
+        if let Some(cat) = &deployment.catalog {
+            let ifaces: BTreeSet<&String> = faces.iter().flat_map(|(_, f)| &f.ifaces).collect();
+            for i in ifaces {
+                let Ok(id) = i.parse::<crate::grammar::IfaceId>() else {
+                    continue;
+                };
+                for fp in deployment.fingerprints.get(i).into_iter().flatten() {
+                    if cat.index_of(&id, fp).is_none() {
+                        errors.push(Finding::new(
+                            Code::CatalogMissing,
+                            None,
+                            format!("{i}@{fp}"),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    if !errors.is_empty() {
+        sort_findings(&mut errors);
+        return Err(errors);
+    }
+    Ok(faces.into_iter().map(|(p, _)| p).collect())
 }
 
 /// Each listed interface's resources across its revisions, and the ones
 /// they disagree on ([`merge`]).
 type View = BTreeMap<String, (Vec<Res>, BTreeSet<usize>)>;
 
+#[allow(clippy::too_many_arguments)]
 fn plan_face(
     policy: &FacePolicy,
     deployment: &Deployment,
@@ -2171,27 +2661,56 @@ fn plan_face(
     listed: &BTreeSet<&str>,
     name: &str,
     face: &Face,
-) -> FacePlan {
+    errors: &mut Vec<Finding>,
+) -> (FacePlan, FaceFacts) {
     let mut findings = Vec::new();
+    let mut facts = FaceFacts::default();
+    let v2 = policy.profile == Profile::V2;
     let resources_of = |iface: &str| -> &[Res] { &view[iface].0 };
-    // Whether each resource of each listed interface crosses (§2.7).
-    let crossing_of = |r: &Res| {
-        crossing(
-            r.token,
-            r.template.has_params(),
-            &exposure(kind_of(r.token), &r.annotations),
-            face.expose,
-        )
+    // Whether each resource of each listed interface crosses (§2.7; v2
+    // §2.7, §2.8).
+    let crossing_of = |iface: &str, r: &Res| {
+        let e = exposure(kind_of(r.token), &r.annotations);
+        if v2 {
+            let listed = face
+                .frames
+                .as_ref()
+                .map(|f| f.contains_key(&res_name(iface, r)));
+            crossing_v2(r.token, r.shape(), &e, face.expose, listed)
+        } else {
+            crossing(r.token, r.template.has_params(), &e, face.expose)
+        }
     };
+    // A listed frame's entry names a frame resource of a listed interface
+    // (v2 §2.7).
+    for entry in face.frames.iter().flat_map(BTreeMap::keys) {
+        let known = listed.iter().any(|i| {
+            resources_of(i)
+                .iter()
+                .any(|r| r.frame.is_some() && &res_name(i, r) == entry)
+        });
+        if !known {
+            errors.push(Finding::new(Code::FrameUnknown, Some(name), entry.clone()));
+        }
+    }
     for iface in listed {
         let (resources, disagree) = &view[*iface];
         for (i, r) in resources.iter().enumerate() {
-            if crossing_of(r).reason == Reason::Templated {
-                findings.push(Finding::new(
+            match crossing_of(iface, r).reason {
+                Reason::Templated => findings.push(Finding::new(
                     Code::TemplatedExposure,
                     Some(name),
                     res_name(iface, r),
-                ));
+                )),
+                Reason::Timed => findings.push(Finding::new(
+                    Code::TimedDownsampled,
+                    Some(name),
+                    res_name(iface, r),
+                )),
+                Reason::Unlisted => {
+                    facts.unlisted.insert(res_name(iface, r));
+                }
+                _ => {}
             }
             if face.expose == Expose::Link && disagree.contains(&i) {
                 findings.push(Finding::new(
@@ -2220,7 +2739,7 @@ fn plan_face(
         let token = PUSH_TOKENS[t];
         if token == KindToken::Stream {
             heartbeat_crosses = heartbeats_of(deployment, listed, view, &|i: &str, r: &Res| {
-                crossing_of(r).crosses() && !overlapped.contains(&res_name(i, r))
+                crossing_of(i, r).crosses() && !overlapped.contains(&res_name(i, r))
             });
         }
         // The listed interfaces' templates of the token, and, for
@@ -2254,7 +2773,7 @@ fn plan_face(
                     .filter(|r| r.token == token)
                     .map(|r| Item {
                         template: &r.template,
-                        crosses: crossing_of(r).crosses(),
+                        crosses: crossing_of(iface, r).crosses(),
                     })
                     .collect(),
             );
@@ -2312,7 +2831,7 @@ fn plan_face(
 
     // The resources that cross, overlapped ones set aside.
     let crosses = |iface: &str, r: &Res| {
-        crossing_of(r).crosses() && !overlapped.contains(&res_name(iface, r))
+        crossing_of(iface, r).crosses() && !overlapped.contains(&res_name(iface, r))
     };
 
     // Downsampling (§2.8), the interval against the horizon (§2.12).
@@ -2359,14 +2878,33 @@ fn plan_face(
         }
     }
     // A crossing frame resource (§2.8, §2.12): its own cadence, against
-    // the face's interval, its batch and its horizon, and its history.
+    // the face's interval, its batch and its horizon, and its history. A
+    // listed frame's cadence is its entry's `every_s` (v2 §2.8).
+    let mut listed_frames = Vec::new();
+    let mut cadences: Vec<u64> = Vec::new();
     for iface in listed {
         for r in resources_of(iface) {
             let Some(f) = r.frame.filter(|_| crosses(iface, r)) else {
                 continue;
             };
             let at = || res_name(iface, r);
-            if let (Some(i), Some(n)) = (f.interval_ms, face.interval_s)
+            let entry = face.frames.as_ref().and_then(|l| l.get(&at())).copied();
+            let cadence_ms = entry.map_or(f.interval_ms, |e| Some(e.every_s * 1000));
+            cadences.extend(cadence_ms);
+            if let Some(e) = entry {
+                listed_frames.push(ListedFrame {
+                    resource: at(),
+                    cadence: e,
+                });
+                // The owner may write full records more often than its contract says,
+                // never less (v2 §2.7).
+                if let Some(k) = e.keyframe_s
+                    && u128::from(k) > u128::from(f.keyframe_every) * u128::from(e.every_s)
+                {
+                    errors.push(Finding::new(Code::KeyframeUnreachable, Some(name), at()));
+                }
+            }
+            if let (Some(i), Some(n)) = (cadence_ms, face.interval_s)
                 && u128::from(i) < u128::from(n) * 1000
             {
                 findings.push(Finding::new(Code::FrameOverInterval, Some(name), at()));
@@ -2377,13 +2915,72 @@ fn plan_face(
             if r.history {
                 findings.push(Finding::new(Code::HistoryOnFrame, Some(name), at()));
             }
-            if let (Some(ttl), Some(i)) = (horizon(r).ttl(), f.interval_ms)
+            if let (Some(ttl), Some(i)) = (horizon(r).ttl(), cadence_ms)
                 && u128::from(i) * 2 > ttl.as_millis()
             {
                 findings.push(Finding::new(Code::IntervalOverHorizon, Some(name), at()));
             }
+            if let (true, Some(ttl), Some(h)) = (v2, horizon(r).ttl(), face.horizon_s)
+                && ttl.as_secs() < h
+            {
+                findings.push(Finding::new(Code::HorizonUnderFace, Some(name), at()));
+            }
         }
     }
+    // What else link.v2 weighs of each crossing resource (v2 §2.3, §2.16).
+    if v2 {
+        for iface in listed {
+            for r in resources_of(iface).iter().filter(|r| crosses(iface, r)) {
+                facts.crossing.insert(res_name(iface, r));
+                facts.ifaces.insert((*iface).to_owned());
+                if !r.packed {
+                    findings.push(Finding::new(
+                        Code::NotPacked,
+                        Some(name),
+                        res_name(iface, r),
+                    ));
+                }
+                if r.block && r.longest_bytes.is_some_and(|b| b > face.batch_bytes) {
+                    findings.push(Finding::new(
+                        Code::BlockOverBatch,
+                        Some(name),
+                        res_name(iface, r),
+                    ));
+                }
+            }
+        }
+        // A crossing heartbeat: its horizon, the shortest of its
+        // collections', and its period, half that (`freshness.v2` §2.4).
+        for (iface, crosses) in &heartbeat_crosses {
+            if !crosses {
+                continue;
+            }
+            facts.ifaces.insert(iface.clone());
+            let Some(ttl) = heartbeat_horizon(view, iface) else {
+                continue;
+            };
+            cadences.push(ttl.as_secs() * 500);
+            if face.horizon_s.is_some_and(|h| ttl.as_secs() < h) {
+                findings.push(Finding::new(
+                    Code::HorizonUnderFace,
+                    Some(name),
+                    format!("{}/stream/heartbeat/{iface}", freshness::PROFILE_V2),
+                ));
+            }
+        }
+        // Data more often than the keep-alive interval spares the uplink
+        // its keep-alives (v2 §2.16).
+        if let (Some(t), Some(c)) = (&policy.transport, cadences.iter().min())
+            && u128::from(*c) * u128::from(t.keep_alive) > u128::from(t.lease_ms)
+        {
+            findings.push(Finding::new(
+                Code::KeepAliveNotSuppressed,
+                Some(name),
+                TransportKey::KeepAlive.at(),
+            ));
+        }
+    }
+    listed_frames.sort_by(|a, b| a.resource.cmp(&b.resource));
     let downsampling = (!rules.is_empty()).then(|| Downsampling {
         id: name.to_owned(),
         link_protocols: face.link_protocols.clone(),
@@ -2429,7 +3026,7 @@ fn plan_face(
     }
 
     sort_findings(&mut findings);
-    FacePlan {
+    let plan = FacePlan {
         name: name.to_owned(),
         far: face.far.clone(),
         attach: match &face.attach {
@@ -2444,12 +3041,25 @@ fn plan_face(
         windows,
         liveness,
         reply_timeout_ms: face.reply_timeout_ms,
+        frames: face.frames.as_ref().map(|_| listed_frames),
         findings,
-    }
+    };
+    (plan, facts)
 }
 
 fn horizon(r: &Res) -> Horizon {
     freshness::horizon(kind_of(r.token), &r.annotations)
+}
+
+/// A heartbeat's horizon: the shortest of the collections of `iface` it
+/// covers (`freshness.v2` §2.9).
+fn heartbeat_horizon(view: &View, iface: &str) -> Option<std::time::Duration> {
+    view.get(iface)?
+        .0
+        .iter()
+        .filter(|r| is_state(r.token))
+        .filter_map(|r| horizon(r).ttl())
+        .min()
 }
 
 /// Each listed interface whose owners send a heartbeat covering it
@@ -3177,13 +3787,11 @@ mod tests {
     }
 
     fn res(template: &str, annotations: Value) -> Res {
-        Res {
-            template: Template::parse(template).unwrap(),
-            token: KindToken::Stream,
-            annotations: serde_json::from_value(annotations).unwrap(),
-            history: false,
-            frame: None,
-        }
+        Res::new(
+            Template::parse(template).unwrap(),
+            KindToken::Stream,
+            serde_json::from_value(annotations).unwrap(),
+        )
     }
 
     /// Two revisions read together (§2.3, 0.3): exposed only where every
@@ -3244,6 +3852,8 @@ mod tests {
             loss_ppm: None,
             arq: None,
             reply_timeout_ms: None,
+            frames: None,
+            horizon_s: None,
         }
     }
 

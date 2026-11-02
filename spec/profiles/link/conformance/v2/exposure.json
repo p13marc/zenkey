@@ -1,0 +1,387 @@
+{
+  "cases": [
+    {
+      "annotations": {
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "link",
+        "finding": null,
+        "pushes": "whole",
+        "reason": "exposed"
+      },
+      "expose": "link",
+      "frame": true,
+      "listed": true,
+      "note": "a link.v2 contract's frame resource, packed and exposed, on a face that lists it: it crosses whole, never downsampled (§2.7, §2.17)",
+      "template": "frames/link",
+      "token": "stream",
+      "type": "packed",
+      "uses": [
+        "link.v2"
+      ]
+    },
+    {
+      "annotations": {
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "link",
+        "finding": null,
+        "pushes": "denied",
+        "reason": "unlisted"
+      },
+      "expose": "link",
+      "frame": true,
+      "listed": false,
+      "note": "the same frame on a face whose `frames` leaves it out: denied (§2.7)",
+      "template": "frames/link",
+      "token": "stream",
+      "type": "packed",
+      "uses": [
+        "link.v2"
+      ]
+    },
+    {
+      "annotations": {
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "link",
+        "finding": null,
+        "pushes": "whole",
+        "reason": "exposed"
+      },
+      "expose": "link",
+      "frame": true,
+      "listed": null,
+      "note": "the same frame on a face with no `frames`: link.v1's rule, every exposed frame crosses (§2.7)",
+      "template": "frames/link",
+      "token": "stream",
+      "type": "packed",
+      "uses": [
+        "link.v2"
+      ]
+    },
+    {
+      "annotations": {
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "link",
+        "finding": null,
+        "pushes": "downsampled",
+        "reason": "exposed"
+      },
+      "expose": "link",
+      "frame": false,
+      "listed": null,
+      "note": "a packed plain stream, exposed: downsampled, as link.v1 says (§2.8)",
+      "template": "level",
+      "token": "stream",
+      "type": "packed",
+      "uses": [
+        "link.v2"
+      ]
+    },
+    {
+      "annotations": {
+        "link.exposure": "link",
+        "timing.deadline_ms": 2000,
+        "timing.period_ms": 500
+      },
+      "expect": {
+        "exposure": "link",
+        "finding": null,
+        "pushes": "denied",
+        "reason": "timed"
+      },
+      "expose": "link",
+      "frame": false,
+      "listed": null,
+      "note": "a timed stream, `timing.deadline_ms` among its annotations: denied, never downsampled (§2.8)",
+      "template": "setpoint",
+      "token": "stream",
+      "type": "packed",
+      "uses": [
+        "link.v2"
+      ]
+    },
+    {
+      "annotations": {
+        "link.exposure": "link",
+        "timing.deadline_ms": "2000"
+      },
+      "expect": {
+        "exposure": "link",
+        "finding": null,
+        "pushes": "denied",
+        "reason": "timed"
+      },
+      "expose": "link",
+      "frame": false,
+      "listed": null,
+      "note": "a deadline whose value is no value is still a deadline meant: denied, failing closed (§2.8)",
+      "template": "setpoint",
+      "token": "stream",
+      "type": "packed",
+      "uses": [
+        "link.v2"
+      ]
+    },
+    {
+      "annotations": {
+        "link.exposure": "link",
+        "timing.deadline_ms": 100
+      },
+      "expect": {
+        "exposure": "link",
+        "finding": null,
+        "pushes": "denied",
+        "reason": "timed"
+      },
+      "expose": "link",
+      "frame": false,
+      "listed": null,
+      "note": "a timed `@stream` of a contract that does not list link.v2: denied too (§2.8)",
+      "template": "raw",
+      "token": "@stream",
+      "type": "raw",
+      "uses": [
+        "link.v1"
+      ]
+    },
+    {
+      "annotations": {
+        "link.exposure": "link",
+        "timing.deadline_ms": 120000
+      },
+      "expect": {
+        "exposure": "link",
+        "finding": null,
+        "pushes": "whole",
+        "reason": "exposed"
+      },
+      "expose": "link",
+      "frame": true,
+      "listed": true,
+      "note": "a timed frame resource: a frame is never downsampled, so its deadline denies nothing (§2.8)",
+      "template": "frames/link",
+      "token": "stream",
+      "type": "packed",
+      "uses": [
+        "link.v2"
+      ]
+    },
+    {
+      "annotations": {
+        "link.exposure": "link",
+        "timing.deadline_ms": 2000
+      },
+      "expect": {
+        "exposure": "link",
+        "finding": null,
+        "pushes": "denied",
+        "reason": "face_closed"
+      },
+      "expose": "none",
+      "frame": false,
+      "listed": null,
+      "note": "a timed stream on a face that exposes none: the face closes first (§2.7)",
+      "template": "setpoint",
+      "token": "stream",
+      "type": "packed",
+      "uses": [
+        "link.v2"
+      ]
+    },
+    {
+      "annotations": {
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "link",
+        "finding": "packed_required",
+        "pushes": "downsampled",
+        "reason": "exposed"
+      },
+      "expose": "link",
+      "frame": false,
+      "listed": null,
+      "note": "a link.v2 contract's JSON stream, exposed: `packed_required` (§2.17); its reading is link.v1's",
+      "template": "level",
+      "token": "stream",
+      "type": "jsonschema",
+      "uses": [
+        "link.v2"
+      ]
+    },
+    {
+      "annotations": {
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "link",
+        "finding": "packed_required",
+        "pushes": "denied",
+        "reason": "face_closed"
+      },
+      "expose": "none",
+      "frame": false,
+      "listed": null,
+      "note": "a link.v2 contract's raw state, exposed: `packed_required`, whatever the face (§2.17)",
+      "template": "oper",
+      "token": "state",
+      "type": "raw",
+      "uses": [
+        "link.v2"
+      ]
+    },
+    {
+      "annotations": {
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "link",
+        "finding": "packed_required",
+        "pushes": "whole",
+        "reason": "exposed"
+      },
+      "expose": "link",
+      "frame": false,
+      "listed": null,
+      "note": "a link.v2 contract's protobuf event, exposed: `packed_required` (§2.17)",
+      "template": "fault",
+      "token": "events",
+      "type": "protobuf",
+      "uses": [
+        "link.v2"
+      ]
+    },
+    {
+      "annotations": {
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "link",
+        "finding": "packed_required",
+        "pushes": "downsampled",
+        "reason": "exposed"
+      },
+      "expose": "link",
+      "frame": false,
+      "listed": null,
+      "note": "a link.v2 contract's `@stream`, exposed: never packed, since an explicit stream carries no envelope (§2.17)",
+      "template": "raw",
+      "token": "@stream",
+      "type": "raw",
+      "uses": [
+        "link.v2"
+      ]
+    },
+    {
+      "annotations": {},
+      "expect": {
+        "exposure": "host",
+        "finding": null,
+        "pushes": "denied",
+        "reason": "host"
+      },
+      "expose": "link",
+      "frame": false,
+      "listed": null,
+      "note": "a link.v2 contract's JSON stream kept home: not exposed, so not bound (§2.17)",
+      "template": "debug",
+      "token": "stream",
+      "type": "jsonschema",
+      "uses": [
+        "link.v2"
+      ]
+    },
+    {
+      "annotations": {
+        "link.exposure": "LINK"
+      },
+      "expect": {
+        "exposure": "invalid",
+        "finding": null,
+        "pushes": "denied",
+        "reason": "invalid"
+      },
+      "expose": "link",
+      "frame": false,
+      "listed": null,
+      "note": "an exposure that is no exposure is host: not bound (§2.17; link.v1 §2.2)",
+      "template": "debug",
+      "token": "stream",
+      "type": "jsonschema",
+      "uses": [
+        "link.v2"
+      ]
+    },
+    {
+      "annotations": {
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "ignored",
+        "finding": null,
+        "pushes": "none",
+        "reason": "requests_only"
+      },
+      "expose": "link",
+      "frame": false,
+      "listed": null,
+      "note": "an operation's exposure is ignored: an operation crosses by grant, and is not bound (§2.17)",
+      "template": "reset",
+      "token": "@op",
+      "type": "raw",
+      "uses": [
+        "link.v2"
+      ]
+    },
+    {
+      "annotations": {
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "link",
+        "finding": null,
+        "pushes": "downsampled",
+        "reason": "exposed"
+      },
+      "expose": "link",
+      "frame": false,
+      "listed": null,
+      "note": "a link.v1 contract's JSON stream, exposed: not bound; the plan warns `not_packed` (§2.17)",
+      "template": "air/dropped_total",
+      "token": "stream",
+      "type": "raw",
+      "uses": [
+        "link.v1"
+      ]
+    },
+    {
+      "annotations": {
+        "link.exposure": "link"
+      },
+      "expect": {
+        "exposure": "link",
+        "finding": null,
+        "pushes": "denied",
+        "reason": "templated"
+      },
+      "expose": "link",
+      "frame": false,
+      "listed": null,
+      "note": "a packed stream with a parameter: `templated`, as link.v1 says (§2.8)",
+      "template": "peers/{peer}/rssi",
+      "token": "stream",
+      "type": "packed",
+      "uses": [
+        "link.v2"
+      ]
+    }
+  ],
+  "description": "link.v2 §2.7, §2.8, §2.17: one resource, as link.v2 reads it on a face of a link.v2 policy. `uses` is its contract's `uses`; token, template and annotations (resolved, core §9.3) as link.v1's exposure.json writes them; `type` is its type's kind (`packed`, `jsonschema`, `protobuf` or `raw`); `frame` whether it is a frame resource (core §7.7); `expose` the face's; `listed` null for a face with no `frames`, else whether the face's `frames` names it. expect.exposure and expect.pushes are link.v1's tokens; a frame resource that crosses is `whole`. expect.reason is the first of these that holds, in this order: requests_only, invalid, host, face_closed, templated, unlisted (a frame resource the face's `frames` leaves out), timed (a stream, not a frame resource, whose annotations hold `timing.deadline_ms`, whatever its value), exposed. expect.finding is the contract side's (§2.17): `packed_required` for a resource of a contract that lists link.v2, a stream, a state or an event exposed `link`, whose type is not packed; else null."
+}

@@ -151,6 +151,31 @@ pub(crate) fn load_peer(path: &Path) -> Result<zenkey_model::link::StatedTranspo
     Ok(zenkey_model::link::StatedTransport::read(&stated))
 }
 
+/// The far side's catalog, `--catalog` beside a `link.v2` --face-policy
+/// (link.v2 §2.18): one at most, read as core §8.6 reads one, a file it
+/// refuses refused with its token named.
+fn far_catalog(paths: &[std::path::PathBuf]) -> Result<Option<zenkey_model::catalog::Catalog>> {
+    match paths {
+        [] => Ok(None),
+        [one] => {
+            let text = std::fs::read_to_string(one)
+                .map_err(|e| unaskable!("--catalog {}: {e}", one.display()))?;
+            zenkey_model::catalog::Catalog::parse(&text)
+                .map(Some)
+                .map_err(|r| {
+                    unaskable!(
+                        "--catalog {}: core §8.6 refuses it as a catalog: {r} (link.v2 §2.18)",
+                        one.display()
+                    )
+                })
+        }
+        several => Err(unaskable!(
+            "{} catalogs given: the far side holds one --catalog (link.v2 §2.18)",
+            several.len()
+        )),
+    }
+}
+
 /// The plan's warnings and refusals as stderr notes, for the modes that
 /// render something *other* than the plan (`--json5`, `--explain`, the
 /// check), so the honesty rides every path.
@@ -242,11 +267,26 @@ pub async fn run(cli: crate::cli::AclGenArgs) -> Result<()> {
     )?;
     let dep = ask(check, Deployment::resolve(&ns))?;
     let enrollment = ask(check, load_enrollment(&enrollment))?;
+    let catalog = ask(check, far_catalog(&contracts.catalog))?;
     let contracts = ask(check, zk2::load_contracts(&contracts))?;
     let face_policy = match &face_policy {
         None => None,
         Some(p) => Some(ask(check, load_face_policy(p))?),
     };
+    // The far side's catalog is a link.v2 face's (link.v2 §2.18).
+    let v2 = face_policy
+        .as_ref()
+        .and_then(|p| p.policy.as_ref())
+        .is_some_and(|p| p.profile == zenkey_model::link::Profile::V2);
+    if catalog.is_some() && !v2 {
+        ask(
+            check,
+            Err::<(), _>(unaskable!(
+                "--catalog needs a link.v2 --face-policy (`profile = \"link.v2\"`, link.v2 \
+                 §2.18): the catalog is what a face's far side decodes with"
+            )),
+        )?;
+    }
     let opts = zenkey_fleet::AclOptions {
         namespace: enrollment
             .namespace
@@ -254,6 +294,7 @@ pub async fn run(cli: crate::cli::AclGenArgs) -> Result<()> {
             .unwrap_or_else(|| dep.namespace().to_owned()),
         default_permission: permission(default_permission),
         face_policy,
+        catalog,
     };
     let plan = ask(
         check,

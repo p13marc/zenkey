@@ -57,8 +57,20 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   `[transport]`, `FacePlan::reply_timeout_ms`, the lints
   `transport_missing` … `no_arq` (`keep_alive_flaps` exact in
   `num-bigint`), and `StatedTransport`, `check_transport` and
-  `check_catalog`/`catalog_id` for v2 §2.19), `health.v1`'s §5 clock
-  question (`health::clock_ahead`, text 0.9, #978 F6: over `Heard`'s
+  `check_catalog`/`catalog_id` for v2 §2.19; and v2 0.3, #988 L3:
+  `uses_v2`, `Shape`/`crossing_v2` (`Reason::Unlisted`, `Timed`; a
+  crossing frame `Whole`), `packed_required`/`contract_findings`,
+  `Face::frames` (`FrameCadence`) and `horizon_s`, `Res::new` and its
+  `packed`, `block`, `longest_bytes` (`ENVELOPE_BYTES` + a packed
+  record's `max_bits`, or the largest frame), `link_v2`,
+  `FrameFacts::keyframe_every` (the least across revisions),
+  `Deployment::fingerprints` and `catalog`, `FacePlan::frames`
+  (`ListedFrame`), and a v2 plan's refusals `packed_required`,
+  `frame_unknown`, `keyframe_unreachable`, `catalog_missing` and
+  warnings `not_packed`, `timed_downsampled`, `frame_unlisted` (read
+  across the policy's faces), `horizon_under_face`, `block_over_batch`,
+  `keep_alive_not_suppressed`; a v1 policy's plan is unchanged),
+  `health.v1`'s §5 clock question (`health::clock_ahead`, text 0.9, #978 F6: over `Heard`'s
   `Heartbeat` (time known), `HeartbeatHeld`, `StatusPut`, a fault; yes on
   a fault no `Heartbeat` followed, no when the last heartbeat is
   `Heartbeat`, else `time_unknown` or `nothing_heard`; `clock.json`),
