@@ -406,7 +406,7 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   `transport_differs`, `wait_under_lease`, `peer_differs`,
   `catalog_mismatch`). §2.20 and §2.21 are left for #988's L4. Appendix
   B's four media are `examples/zk2/link/media/*.face.toml`. Text 0.3
-  (#988 L3) restates `link.v1` 0.13 and adds the contract side: §2.17 (a
+  (#988 L3) restates `link.v1` 0.14 and adds the contract side: §2.17 (a
   contract listing `link.v2` exposes only packed resources,
   `packed_required`, an error, in `v2/exposure.json`; a `link.v1`
   contract's unpacked crossing resource draws the plan's `not_packed`),
