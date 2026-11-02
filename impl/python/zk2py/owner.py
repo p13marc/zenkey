@@ -709,6 +709,8 @@ class Owner:
         self._framers: dict[str, Any] = {}
         self._frames_lost: set[str] = set()
         self._frames_lock = threading.RLock()
+        #: covered members whose write the clock guard held (F-461's reading)
+        self._guard_unvouched: set[str] = set()
         #: telemetry.v2's meters (§2.19), by frame key: None where none applies
         self._meters: dict[str, Any] = {}
         #: the wall clock less the monotonic one, read at the first frame
@@ -1551,6 +1553,7 @@ class Owner:
             self._refuse_standby_write(key)
             self._member_publisher(key)
             if self.ahead and self._stamped(key):
+                self._unvouch_held(key)
                 raise ClockAhead(f"{key}: the clock guard holds the state writes that carry a Zenoh timestamp "
                                  "(core §4.3)")
             held = self._held.get(key)
@@ -1576,11 +1579,25 @@ class Owner:
                 # vouches for it later.
                 held.confirm = self.mint()
             self._held[key] = held
-            if key in self.closed_writers:
-                # a new writer's put: a writer closed had cleared its bit
+            if key in self.closed_writers or key in self._guard_unvouched:
+                # a new writer's put: a writer closed had cleared its bit; or
+                # the first put the guard lets through after holding one
                 self.unvouched.discard(key)
             self.closed_writers.discard(key)
+            self._guard_unvouched.discard(key)
             return stamp if stamp is not None else ib
+
+    def _unvouch_held(self, key: str) -> None:
+        """F-461's reading (round 98): a ``freshness.v2`` member whose write
+        the guard holds, on a session that stamps every write (a
+        ``redundancy.v1`` candidate's, core §8.2), holds a value it can no
+        longer keep current. Its bit is cleared until a put of it goes
+        through (``freshness.v2`` §2.4, "Only a value it holds current"),
+        so the heartbeat that goes on (§2.10) never vouches for the value
+        the application asked to replace."""
+        if self._covered(key) is not None and self._held.get(key) is not None:
+            self.unvouched.add(key)
+            self._guard_unvouched.add(key)
 
     def delete_state(self, key: str, elapsed_s: float = 0.0) -> Any:
         """Delete a state key, stamped (S1); answered with ``reply_del`` within
@@ -1593,6 +1610,7 @@ class Owner:
             self._refuse_standby_write(key)
             self._member_publisher(key)
             if self.ahead and self._stamped(key):
+                self._unvouch_held(key)
                 raise ClockAhead(f"{key}: the clock guard holds the state writes that carry a Zenoh timestamp "
                                  "(core §4.3)")
             # S1 (0.73): a delete's in-band stamp is its attachment.
