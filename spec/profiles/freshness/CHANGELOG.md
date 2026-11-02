@@ -5,6 +5,70 @@ entry naming its text. Each entry records what changed, what deliberately
 did not, and why. A breaking change is a new major, a new file, never an
 entry here ([`../README.md`](../README.md)).
 
+## `v2.md` 0.6 — 2026-11-02: a GET reader ages a snapshot's entry (#977)
+
+Core 0.97 (#977's E3) answers a state GET by snapshot, one collection per
+reply, in place of a reply per key. A member of this text then carries
+its confirmation in band, in its entry, where its reply carried the
+26-byte Zenoh timestamp of its last confirmation. Core §4.3's table drops
+its row. This text, written against core 0.97, follows.
+
+**Changed: §2.4's "Its stamps".**
+- **Before:** a GET reply carries the member's last confirmation as its
+  Zenoh timestamp.
+- **Now:** each live entry carries a confirmation. It is 1, vouched for
+  at the snapshot's time, while the owner vouches for the member, as a
+  heartbeat sent then would. Otherwise it is 2, with the member's last
+  confirmation. Both times are minted as before, and kept to the
+  millisecond from the deployment epoch.
+- **Why one per entry.** A collection has no single confirmation once
+  one member's bit is clear. So the snapshot's time is when it was
+  built, and a value the owner stopped vouching for never reads fresh
+  from a snapshot.
+
+**Changed: §2.6.** A GET reader MUST age an entry from its confirmation
+as v1 §2.6 ages a reply from its stamp: its trust rules, its band and its
+order of checks. `[F: judgements.json]` `[Sc: §3]`
+- **The time** is the snapshot's for confirmation 1, the entry's conf
+  for 2. An unknown time is no stamp.
+- **The clock** is the owner's, which built the snapshot.
+- **Confirmation 0** on a member with a horizon breaks core S2: no stamp.
+- **A tombstone** is a `reply_del`, deleted. A member a complete
+  snapshot omits is deleted too, by core §4.2's omission rule. One an
+  incomplete snapshot omits is silent.
+
+**Changed: §2.5's re-read.** It is a collection read, the snapshot key
+followed by `/**`. A member a complete snapshot left out leaves the view
+by core §4.2's omission rule, and an incomplete one removes nothing. A
+re-read costs a reply per page, no longer one per member.
+
+**Changed: §2.10 and §5.** A snapshot's times come from the clock ahead,
+as its replies' stamps did, and no router reads them. A tool shows a
+snapshot's confirmation as its time.
+
+**The evidence.**
+- **`judgements.json`:** 88 cases, 27 new over a snapshot's entry: each
+  confirmation, its band's edges, an unknown time, confirmation 0, a
+  tombstone, a member a complete or an incomplete snapshot omits, ttl 0,
+  and three combinations. The observation is `{"via": "snapshot",
+  "complete", "entry", "clock"}`. Written by an independent reading of
+  the text, which also gives the 61 earlier cases, checked, never
+  blessed.
+- **`scenarios-v2.md`:** §3 reads both confirmations, and a collection
+  read with one of each. §2 step 4's reply is a snapshot's entry, and §5
+  seeds by a collection read. §6's leftover leaves by the omission rule.
+
+**Deliberately not changed.**
+- **v1 §2.6** and every `freshness.v1` text. A state of a contract that
+  uses `freshness.v1` keeps a reply per key, with its Zenoh timestamp
+  (core §4.2's per-key resources).
+- **The heartbeat**, its body, the subscriber's age (§2.5's rule) and the
+  digest. An entry carries each member's run where it is not the
+  header's, so a reader rebuilds its digest from a snapshot.
+- **The trust grounds.** The deployment's word, or a measurement of the
+  owner's clock, as v1 §2.6 states them.
+- **No contract or fingerprint moves.**
+
 ## `v2.md` 0.5 — 2026-11-02: a candidate's held write clears its bit (#978)
 
 zk2py's round 98 found §2.10 contradicting core §4.3 for a
