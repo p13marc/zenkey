@@ -51,3 +51,14 @@ v1's `zenkey-build` (0.11.x on crates.io) is the `v1` branch's, and that branch'
   generates `packedops.v1` (`zenkey/tests/contracts/packed-ops/`), and
   `tests/bus.rs`'s `packed_operations_are_served_and_called_in_the_forms`
   calls it under a catalog's epoch, its `app` refusal a packed `Mode`.
+- **config.v2** (#985 G2): `generate` runs `config::v2::lint_contract` on
+  every contract that uses `config.v2`, a finding a lint error (v2.md
+  §2.2); the derived types (`Record`, `Set<T>`, `Control`, `Error`) live in
+  the contract's packed file, so they are generated as any packed type:
+  a field keeps its packed name, `duty__writable` included (the
+  `__packed` module allows `non_snake_case`), and a type's module never
+  takes `error`, typify's own module in every JSON Schema module, which
+  `types` re-exports beside it (`Error`'s is `error_2`).
+  `codegen-test` generates the spec's `rfcfg.v1`, and `tests/config_v2.rs`
+  reads `records.json`'s records and `validation.json`'s requests through
+  them, agreeing with the model's codec, refusals included.

@@ -2,7 +2,9 @@
 //! schema, and a simulated device a black box can make refuse an apply,
 //! fail an undo, or fail its persisted layer. Compiled into the example
 //! (`examples/owner.rs`, `--config`) and into `tests/profile_config.rs`,
-//! whose scenarios run on the same device.
+//! whose scenarios run on the same device. And `config.v2`'s (#985 G2):
+//! `scenarios-v2.md`'s `rfcfg.v1`, embedded, and its startup, on the same
+//! device (`--config-v2`, `tests/profile_config_v2.rs`).
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -204,16 +206,17 @@ impl SimDevice {
     /// The device as a restart leaves it (§2.12): running the startup
     /// values, its persisted layer kept; what it did and was told kept too.
     pub fn restart(&self, startup: &Startup) {
+        self.restart_layers(&startup.defaults, &startup.file, startup.persisted.as_ref());
+    }
+
+    /// [`SimDevice::restart`] from a startup's three layers.
+    fn restart_layers(&self, defaults: &Values, file: &Values, persisted: Option<&Values>) {
         let mut s = self.sim.lock().expect("not poisoned");
         if s.persisted.is_none() {
-            s.persisted.clone_from(&startup.persisted);
+            s.persisted = persisted.cloned();
         }
         let mut held = Values::new();
-        let layers = [
-            Some(&startup.defaults),
-            Some(&startup.file),
-            s.persisted.as_ref(),
-        ];
+        let layers = [Some(defaults), Some(file), s.persisted.as_ref()];
         for layer in layers.into_iter().flatten() {
             for (g, ps) in layer {
                 for (p, v) in ps {
@@ -342,4 +345,117 @@ impl Device for SimDevice {
             })
         })
     }
+}
+
+// --- config.v2 (#985 G2) ------------------------------------------------------------
+
+/// `rfcfg.v1`, config.v2's test contract, as the spec keeps it, with its
+/// packed file and the profile's standard schema two directories up.
+pub const RFCFG_TOML: &str =
+    include_str!("../../../spec/profiles/config/conformance/contracts/rfcfg.v1.toml");
+pub const RFCFG_JSON: &str =
+    include_str!("../../../spec/profiles/config/conformance/contracts/rfcfg.json");
+pub const CONFIG_V2_JSON: &str = include_str!("../../../spec/profiles/config/config.v2.json");
+
+/// `rfcfg.v1`, embedded: its files written where the TOML's paths find
+/// them.
+pub fn rfcfg() -> Result<zenkey::model::contract::Contract, String> {
+    let root = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let dir = root.path().join("conformance/contracts");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    for (path, text) in [
+        (dir.join("rfcfg.v1.toml"), RFCFG_TOML),
+        (dir.join("rfcfg.json"), RFCFG_JSON),
+        (root.path().join("config.v2.json"), CONFIG_V2_JSON),
+    ] {
+        std::fs::write(path, text).map_err(|e| e.to_string())?;
+    }
+    let l = zenkey::model::contract::load_path(&dir.join("rfcfg.v1.toml"));
+    l.contract
+        .ok_or_else(|| format!("rfcfg.v1, embedded:\n{}", l.report))
+}
+
+/// The startup `scenarios-v2.md`'s owner runs from, `conformance/v2/
+/// lifecycle.json`'s: `fraction_ppm` 10000, `frequency_hz` 868100000, `pin`
+/// 0 and `spreading_factor` 9 from its file; `period_s` 3600, `enforce`
+/// true, `net_id` 1, `attempts` 3 and `tx_queue_len` 100 by default; every
+/// settable group but `queue` in the allowlist; a persisted layer, empty,
+/// unless `persist` is false.
+#[must_use]
+pub fn rfcfg_startup(
+    floor_s: u16,
+    apply_after: Duration,
+    persist: bool,
+) -> zenkey::config_v2::Startup {
+    let values = |vs: &[(&str, &str, Value)]| {
+        let mut out = Values::new();
+        for (g, p, v) in vs {
+            out.entry((*g).to_owned())
+                .or_default()
+                .insert((*p).to_owned(), v.clone());
+        }
+        out
+    };
+    zenkey::config_v2::Startup {
+        file: values(&[
+            ("duty", "fraction_ppm", Value::Integer(10_000)),
+            ("radio", "frequency_hz", Value::Integer(868_100_000)),
+            ("sim", "pin", Value::Integer(0)),
+            ("modulation", "spreading_factor", Value::Integer(9)),
+        ]),
+        defaults: values(&[
+            ("duty", "period_s", Value::Integer(3600)),
+            ("duty", "enforce", Value::Bool(true)),
+            ("link", "net_id", Value::Integer(1)),
+            ("sim", "attempts", Value::Integer(3)),
+            ("queue", "tx_queue_len", Value::Integer(100)),
+        ]),
+        persisted: persist.then(Values::new),
+        floor_s,
+        apply_after,
+        writable: Some(
+            ["duty", "radio", "link", "sim"]
+                .map(str::to_owned)
+                .into_iter()
+                .collect(),
+        ),
+        events: Vec::new(),
+        device_schema: None,
+    }
+}
+
+impl SimDevice {
+    /// A device holding a `config.v2` startup's values, as
+    /// [`SimDevice::new`] holds a `config.v1` one's.
+    #[must_use]
+    pub fn new_v2(startup: &zenkey::config_v2::Startup) -> Self {
+        let d = Self::default();
+        d.restart_v2(startup);
+        d
+    }
+
+    /// [`SimDevice::restart`] from a `config.v2` startup.
+    pub fn restart_v2(&self, startup: &zenkey::config_v2::Startup) {
+        self.restart_layers(&startup.defaults, &startup.file, startup.persisted.as_ref());
+    }
+
+    /// [`SimDevice::next_startup`] of a `config.v2` startup.
+    #[must_use]
+    pub fn next_startup_v2(
+        &self,
+        startup: &zenkey::config_v2::Startup,
+        events: Vec<SystemTime>,
+    ) -> zenkey::config_v2::Startup {
+        zenkey::config_v2::Startup {
+            persisted: self.with(|s| s.persisted.clone()),
+            events,
+            ..startup.clone()
+        }
+    }
+}
+
+/// `rfcfg.v1`'s interface id.
+#[must_use]
+pub fn rfcfg_iface() -> zenkey::model::grammar::IfaceId {
+    "rfcfg.v1".parse().expect("an interface id")
 }

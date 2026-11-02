@@ -2162,10 +2162,33 @@ impl TargetInner {
 
 // --- config.v1 as a target (§2.16) ----------------------------------------------
 
-/// `config.v1`'s owner as a target (§2.16): a put converges the document
-/// on the owner, a delete reverts what the documents set.
+/// `config.v1`'s owner as a target (§2.16), or `config.v2`'s, which its
+/// text feeds so too (`config.v2` §2.18): a put converges the document on
+/// the owner, a delete reverts what the documents set.
 pub(crate) struct ConfigHandler {
-    pub(crate) cfg: crate::config_v1::Configuration,
+    pub(crate) cfg: Configured,
+}
+
+/// The owner a [`ConfigHandler`] acts on.
+pub(crate) enum Configured {
+    V1(crate::config_v1::Configuration),
+    V2(crate::config_v2::Configuration),
+}
+
+impl Configured {
+    async fn converge_desired(&self, doc: crate::config_v1::DesiredConfig) -> DesiredEnd {
+        match self {
+            Self::V1(c) => c.converge_desired(doc).await,
+            Self::V2(c) => c.converge_desired(doc).await,
+        }
+    }
+
+    async fn revert_desired(&self) -> std::result::Result<(), DesiredEnd> {
+        match self {
+            Self::V1(c) => c.revert_desired().await,
+            Self::V2(c) => c.revert_desired().await,
+        }
+    }
 }
 
 /// An RFC 6901 escape of one name.

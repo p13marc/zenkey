@@ -245,7 +245,7 @@ pub fn emit(u: &Unit<'_>) -> Result<String, Error> {
     if !u.packed_files.is_empty() {
         let _ = writeln!(
             s,
-            "/// The packed types (core §7.6), one module per listed packed file: a struct\n/// per type and its straight-line codec.\n{ALLOW}\n#[allow(unused_variables, unused_mut, unused_assignments, unused_labels)]\npub mod __packed {{"
+            "/// The packed types (core §7.6), one module per listed packed file: a struct\n/// per type and its straight-line codec.\n{ALLOW}\n#[allow(unused_variables, unused_mut, unused_assignments, unused_labels, non_snake_case)]\npub mod __packed {{"
         );
         let docs: std::collections::BTreeMap<&str, (&str, &str, Option<&str>)> = u
             .packed

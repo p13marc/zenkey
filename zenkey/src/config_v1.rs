@@ -289,7 +289,7 @@ pub trait Device: Send + Sync + 'static {
 }
 
 /// The instant `t` on the owner's clock (§2.8).
-fn time_of(t: SystemTime) -> Time {
+pub(crate) fn time_of(t: SystemTime) -> Time {
     let ms = t
         .duration_since(UNIX_EPOCH)
         .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
@@ -297,10 +297,49 @@ fn time_of(t: SystemTime) -> Time {
     Time::from_millis(ms)
 }
 
-fn system_of(t: Time) -> SystemTime {
+pub(crate) fn system_of(t: Time) -> SystemTime {
     match u64::try_from(t.millis()) {
         Ok(ms) => UNIX_EPOCH + Duration::from_millis(ms),
         Err(_) => UNIX_EPOCH - Duration::from_millis(t.millis().unsigned_abs()),
+    }
+}
+
+/// Performs one act on `device`, on a task of its own, and says what the
+/// device said: a device that panics is a refused apply, or a failed undo
+/// with nothing read back, never an owner left busy. `config.v2`'s owner
+/// performs its acts so too ([`crate::config_v2`]).
+pub(crate) async fn perform(device: &Arc<dyn Device>, act: &Act) -> DeviceResult {
+    let device = Arc::clone(device);
+    let owned = act.clone();
+    let joined = tokio::spawn(async move {
+        match &owned {
+            Act::Apply { group, values } => device
+                .apply(group, values)
+                .await
+                .map_err(DeviceResult::Refused),
+            Act::Undo { restore } => device
+                .undo(restore)
+                .await
+                .map_err(|f| DeviceResult::Failed {
+                    words: f.words,
+                    readback: f.readback,
+                }),
+        }
+    })
+    .await;
+    match joined {
+        Ok(Ok(())) => DeviceResult::Ok,
+        Ok(Err(r)) => r,
+        Err(e) => {
+            let words = format!("the device's act did not complete: {e}");
+            match act {
+                Act::Apply { .. } => DeviceResult::Refused(words),
+                Act::Undo { .. } => DeviceResult::Failed {
+                    words,
+                    readback: Values::new(),
+                },
+            }
+        }
     }
 }
 
@@ -321,7 +360,7 @@ fn envelope(r: Refusal) -> OpError {
 }
 
 /// The call metadata a call claims (core O7), as the model takes it.
-fn claimed(call: &Call) -> model::Call {
+pub(crate) fn claimed(call: &Call) -> model::Call {
     let m = call.metadata();
     model::Call {
         actor: m.and_then(|m| m.actor.clone()),
@@ -724,40 +763,7 @@ impl Inner {
                 "config.v1: undo"
             ),
         }
-        let device = Arc::clone(&self.device);
-        let owned = act.clone();
-        let joined = tokio::spawn(async move {
-            match &owned {
-                Act::Apply { group, values } => device
-                    .apply(group, values)
-                    .await
-                    .map_err(DeviceResult::Refused),
-                Act::Undo { restore } => {
-                    device
-                        .undo(restore)
-                        .await
-                        .map_err(|f| DeviceResult::Failed {
-                            words: f.words,
-                            readback: f.readback,
-                        })
-                }
-            }
-        })
-        .await;
-        let result = match joined {
-            Ok(Ok(())) => DeviceResult::Ok,
-            Ok(Err(r)) => r,
-            Err(e) => {
-                let words = format!("the device's act did not complete: {e}");
-                match act {
-                    Act::Apply { .. } => DeviceResult::Refused(words),
-                    Act::Undo { .. } => DeviceResult::Failed {
-                        words,
-                        readback: Values::new(),
-                    },
-                }
-            }
-        };
+        let result = perform(&self.device, act).await;
         if let DeviceResult::Refused(words) | DeviceResult::Failed { words, .. } = &result {
             let words = device_words(&self.schema, act, words).unwrap_or(model::REDACTED);
             tracing::warn!(

@@ -927,11 +927,39 @@ impl EventWriter {
         attachment: Option<impl Into<ZBytes>>,
         at: SystemTime,
     ) -> Result<String> {
+        self.put_under(payload.into(), attachment.map(Into::into), at, None)
+            .await
+    }
+
+    /// Publishes one occurrence now, its record `record` sealed under
+    /// `stamp`, a seq its profile's model minted through the service's
+    /// minter (`config.v2`, #985 G2: the owner writes each event under the
+    /// stamp its model's output gives it). Otherwise as [`EventWriter::put`].
+    pub(crate) async fn put_sealed(
+        &self,
+        record: &[u8],
+        stamp: zenkey_model::wire::Stamp,
+    ) -> Result<String> {
+        self.put_under(
+            ZBytes::from(record.to_vec()),
+            None,
+            SystemTime::now(),
+            Some(stamp),
+        )
+        .await
+    }
+
+    async fn put_under(
+        &self,
+        payload: ZBytes,
+        attachment: Option<ZBytes>,
+        at: SystemTime,
+        stamp: Option<zenkey_model::wire::Stamp>,
+    ) -> Result<String> {
         let _write = match &self.gate {
             Some(g) => Some(g.write().await?),
             None => None,
         };
-        let payload: ZBytes = payload.into();
         // Core §7.6 (#979): a packed record its layout refuses is refused,
         // nothing published.
         if let Some(p) = &self.packed {
@@ -941,11 +969,19 @@ impl EventWriter {
             b.admit(&self.prefix, Instant::now())?;
         }
         let key = format!("{}/{}", self.prefix, ulid(at));
-        let attachment: Option<ZBytes> = attachment.map(Into::into);
-        // Core §4.3: the occurrence under the owner's next seq, sealed in
-        // §7.5's envelope; a Zenoh timestamp only where its session stamps
-        // (§8.2).
-        let stamped = self.minter.mint_event(false);
+        // Core §4.3: the occurrence under the owner's next seq, or the one
+        // given, sealed in §7.5's envelope; a Zenoh timestamp only where its
+        // session stamps (§8.2).
+        let stamped = match stamp {
+            None => self.minter.mint_event(false),
+            Some(stamp) => crate::state::Stamped {
+                stamp,
+                time: self
+                    .minter
+                    .session_timestamping()
+                    .then(|| self.minter.time()),
+            },
+        };
         self.session
             .put(&key, stamped.seal_tagged(self.tag(), &payload.to_bytes()))
             .attachment(attachment)
