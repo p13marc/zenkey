@@ -13,12 +13,15 @@
 # - `sensor`, `describe`, `introspect` and the two `alive` tokens: the descriptor, the contract
 #   bundle and the instance/interface tokens (r3 §3.10).
 #
-# Counts: 86 resources (73 streams, 7 states, 4 events, 2 operations); 80 of them
-# optional with a `capability:` gate. With config.v1's 8, that is v1's 88 gated entries.
+# Counts: 95 resources (82 streams, 7 states, 4 events, 2 operations); 89 of them optional.
+# v1's 86 are 73 streams, 7 states, 4 events and 2 operations, 80 of them optional with a
+# `capability:` gate; with config.v1's 8, that is v1's 88 gated entries. Revision 3.2 adds the
+# 9 frame resources, each optional with a `config:` gate (#983 T4).
 #
 # QoS comes from the interface defaults (draft 1, D2; README gap 4), expanded before
 # canonicalization, so writing a value out per resource would not change the fingerprint:
 # - telemetry keeps v1's `sampled` profile: best_effort, drop (the stream built-ins) and data_low;
+#   the frame resources, since revision 3.2, are `data` (below);
 # - states keep v1's `refreshed` profile: best_effort, drop, data. Each document is put on change
 #   and vouched for by the owner's heartbeat every ttl_s/2, never re-put (freshness.v2, since
 #   revision 3.1, #978's F5): a reader that lost a put sees its collection's digest diverge and
@@ -26,18 +29,21 @@
 # - the events keep v1's `transition` profile: reliable, block, data, the events kind's built-ins
 #   (D3: each occurrence on …/events/<template>/<ulid>, cardinality = rate x retention).
 #
-# Exposure: link.v1's default is `host` (never crosses a constrained face). Only the four v1
-# `exposure = "link"` streams say otherwise; the faces and their rates are deployment (link.md).
+# Exposure: link.v1's default is `host` (never crosses a constrained face). Only the frame
+# resources say otherwise, since revision 3.2 (#983 T4): the four v1 `exposure = "link"` streams
+# are `host` again, their readings crossing in `frames/link`. The faces and their rates are
+# deployment (link.md).
 
 [interface]
 name    = "modem"
 major   = 3
-minor   = 1
+minor   = 2
 summary = "One modem device on a host: what its medium carries and loses, what it measures, what it is"
-uses    = ["telemetry.v1", "freshness.v2", "link.v1"]
+uses    = ["telemetry.v2", "freshness.v2", "link.v1"]
 
 [schemas]
 jsonschema = ["schemas/modem.json"]
+packed     = ["schemas/modem-frames.json"]
 
 [defaults.stream]
 priority = "data_low"
@@ -79,13 +85,13 @@ gate        = "capability:sdu"
 annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "By" }
 doc         = "payload bytes across delivered SDUs"
 
-# v1 exposure = "link": may cross an RF face, downsampled (link.md)
+# v1 exposure = "link"; `host` since revision 3.2, its reading crossing in frames/link (link.md)
 [resources."sdu/dropped_total"]
 kind        = "stream"
 type        = "json:Counter"
 optional    = true
 gate        = "capability:sdu"
-annotations = { "telemetry.kind" = "counter", "link.exposure" = "link" }
+annotations = { "telemetry.kind" = "counter", "link.exposure" = "host" }
 doc         = "SDUs the medium accepted and then failed to deliver, where it can tell"
 
 [resources."sdu/tx_failed_total"]
@@ -144,13 +150,13 @@ gate        = "capability:sdu"
 annotations = { "telemetry.kind" = "counter" }
 doc         = "batches the medium delivered for a lane with no transport attached"
 
-# v1 exposure = "link": may cross an RF face, downsampled (link.md)
+# v1 exposure = "link"; `host` since revision 3.2, its reading crossing in frames/link (link.md)
 [resources."sched/queue_depth"]
 kind        = "stream"
 type        = "json:Gauge"
 optional    = true
 gate        = "capability:sdu"
-annotations = { "telemetry.kind" = "gauge", "link.exposure" = "link" }
+annotations = { "telemetry.kind" = "gauge", "link.exposure" = "host" }
 doc         = "batches accepted from Zenoh and not yet handed to the medium — the pipeline M3 sized"
 
 # gate: a driver that reads its own end of each lane socket
@@ -454,23 +460,23 @@ annotations = { "telemetry.kind" = "counter" }
 doc         = "frames the medium received and could not accept: collision, overrun, CRC or header failure. Distinct from sdu/dropped_total, which is accepted-then-lost on transmit"
 
 # gate: a medium under a duty-cycle or contact-window budget
-# v1 exposure = "link": may cross an RF face, downsampled (link.md)
+# v1 exposure = "link"; `host` since revision 3.2, its reading crossing in frames/link (link.md)
 [resources."air/duty_cycle_available"]
 kind        = "stream"
 type        = "json:Gauge"
 optional    = true
 gate        = "capability:duty_cycle"
-annotations = { "telemetry.kind" = "gauge", "link.exposure" = "link" }
+annotations = { "telemetry.kind" = "gauge", "link.exposure" = "host" }
 doc         = "1 when the medium would take an SDU now, 0 when it is waiting for a window or a duty-cycle budget"
 
 # gate: a medium under a duty-cycle or contact-window budget
-# v1 exposure = "link": may cross an RF face, downsampled (link.md)
+# v1 exposure = "link"; `host` since revision 3.2, its reading crossing in frames/link (link.md)
 [resources."air/duty_cycle_wait_ms"]
 kind        = "stream"
 type        = "json:Gauge"
 optional    = true
 gate        = "capability:duty_cycle"
-annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "ms", "link.exposure" = "link" }
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "ms", "link.exposure" = "host" }
 doc         = "milliseconds until the medium would transmit again, when it would not now — the number that tells duty-cycle-limited apart from radio-dead; absent when the snapshot has expired"
 
 # --- telemetry: what the medium measures -------------------------------------------------------
@@ -709,6 +715,300 @@ optional    = true
 gate        = "capability:link_quality"
 annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "%" }
 doc         = "relative transmit link quality, percent"
+
+# --- telemetry: frames (telemetry.v2, since revision 3.2; #983 T4, #991) ---------------------
+# Core §7.7's frame resources: the readings above in packed records (schemas/modem-frames.json),
+# for the media whose rate a JSON stream per reading cannot afford. Each field is a series of
+# telemetry.v2 (§2.16), named by its `telemetry.series` mirror, which lends it its kind and unit;
+# the series is the frame key and the field, never the mirrored stream (§2.17). The epoch is the
+# frame's run, in band across a face (§2.19), so a decrease of a counter within one run is no
+# longer read as a reset there (README gap 1).
+# - One record a frame, its time measured and its cadence the owner's configuration (#981 §1.2):
+#   rf0 every minute, LoRa SF9 every 2, SF12 every 15 (#991's per-medium table).
+# - Priority `data`, not the readings' `data_low`: no QoS extension on the wire, and the frames
+#   share batches with freshness.v2's heartbeat.
+# - Every frame resource is optional, gated by the owner's configuration (`config:frames.<name>`):
+#   #991's table picks which ones a device publishes, so a device lists the others unavailable.
+# - Exposed `link`, so each crosses a face that exposes, whole and never downsampled (link.v1
+#   §2.8); the four link streams went back to `host` in 3.2.
+# - The ranges and widths are illustrative, and #991 fixes them.
+
+[resources."frames/link"]
+kind        = "stream"
+type        = "packed:modem-frames#LinkReadings"
+priority    = "data"
+optional    = true
+gate        = "config:frames.link"
+frame       = { records = 1, keyframe_every = 1 }
+doc         = "the four link readings, which crossed RF as four streams before 3.2"
+
+[resources."frames/link".annotations]
+"link.exposure" = "link"
+"freshness.ttl_s" = 150
+
+[resources."frames/link".annotations."telemetry.series"]
+dropped        = "sdu/dropped_total"
+queue_depth    = "sched/queue_depth"
+duty_available = "air/duty_cycle_available"
+duty_wait_ms   = "air/duty_cycle_wait_ms"
+
+[resources."frames/sdu"]
+kind        = "stream"
+type        = "packed:modem-frames#Sdu"
+priority    = "data"
+optional    = true
+gate        = "config:frames.sdu"
+frame       = { records = 1, keyframe_every = 15 }
+doc         = "the SDU plane's nine counters"
+
+[resources."frames/sdu".annotations]
+"link.exposure" = "link"
+
+[resources."frames/sdu".annotations."telemetry.series"]
+tx_sdus_total       = "sdu/tx_sdus_total"
+tx_bytes_total      = "sdu/tx_bytes_total"
+rx_sdus_total       = "sdu/rx_sdus_total"
+rx_bytes_total      = "sdu/rx_bytes_total"
+dropped_total       = "sdu/dropped_total"
+tx_failed_total     = "sdu/tx_failed_total"
+rx_unroutable_total = "sdu/rx_unroutable_total"
+rx_oversize_total   = "sdu/rx_oversize_total"
+tx_oversize_total   = "sdu/tx_oversize_total"
+
+[resources."frames/sched"]
+kind        = "stream"
+type        = "packed:modem-frames#Sched"
+priority    = "data"
+optional    = true
+gate        = "config:frames.sched"
+frame       = { records = 1, keyframe_every = 15, deadband = { queue_depth = { delta = "4", max_records = 5 }, lane_backlog_bytes = { delta = "1024", max_records = 5 } } }
+doc         = "the scheduler's counters, its queue and the lane backlog"
+
+[resources."frames/sched".annotations]
+"link.exposure" = "link"
+
+[resources."frames/sched".annotations."telemetry.series"]
+dropped_total         = "sched/dropped_total"
+stale_total           = "sched/stale_total"
+peerless_total        = "sched/peerless_total"
+queue_depth           = "sched/queue_depth"
+lane_backlog_bytes    = "sched/lane_backlog_bytes"
+lane_backlog_drain_ms = "sched/lane_backlog_drain_ms"
+
+[resources."frames/air"]
+kind        = "stream"
+type        = "packed:modem-frames#Air"
+priority    = "data"
+optional    = true
+gate        = "config:frames.air"
+frame       = { records = 1, keyframe_every = 15 }
+doc         = "what the module frames and the medium spends: frames, listen-before-talk, airtime, ARQ, slot waste, receive errors, the duty cycle"
+
+[resources."frames/air".annotations]
+"link.exposure" = "link"
+
+[resources."frames/air".annotations."telemetry.series"]
+tx_frames_total      = "air/tx_frames_total"
+rx_frames_total      = "air/rx_frames_total"
+cad_deferrals_total  = "air/cad_deferrals_total"
+cad_forced_total     = "air/cad_forced_total"
+airtime_ms_total     = "air/airtime_ms_total"
+retransmits_total    = "air/retransmits_total"
+bytes_wasted_total   = "air/bytes_wasted_total"
+rx_errors_total      = "air/rx_errors_total"
+duty_cycle_available = "air/duty_cycle_available"
+duty_cycle_wait_ms   = "air/duty_cycle_wait_ms"
+
+[resources."frames/layer"]
+kind        = "stream"
+type        = "packed:modem-frames#Layer"
+priority    = "data"
+optional    = true
+gate        = "config:frames.layer"
+frame       = { records = 1, keyframe_every = 15 }
+doc         = "what each configured layer refuses and does: aead, address, fec, fragment, compress"
+
+[resources."frames/layer".annotations]
+"link.exposure" = "link"
+
+[resources."frames/layer".annotations."telemetry.series"]
+aead_auth_failures_total           = "layer/aead/auth_failures_total"
+aead_replays_total                 = "layer/aead/replays_total"
+aead_unknown_key_total             = "layer/aead/unknown_key_total"
+aead_send_key_id                   = "layer/aead/send_key_id"
+address_foreign_total              = "layer/address/foreign_total"
+address_unknown_source_total       = "layer/address/unknown_source_total"
+fec_repair_frames_total            = "layer/fec/repair_frames_total"
+fec_repaired_total                 = "layer/fec/repaired_total"
+fec_unrecoverable_total            = "layer/fec/unrecoverable_total"
+fec_late_repair_total              = "layer/fec/late_repair_total"
+fec_unused_repair_total            = "layer/fec/unused_repair_total"
+fec_malformed_total                = "layer/fec/malformed_total"
+fragment_fragments_total           = "layer/fragment/fragments_total"
+fragment_reassembled_total         = "layer/fragment/reassembled_total"
+fragment_rcs_failures_total        = "layer/fragment/rcs_failures_total"
+fragment_timeouts_total            = "layer/fragment/timeouts_total"
+fragment_oversize_total            = "layer/fragment/oversize_total"
+fragment_malformed_total           = "layer/fragment/malformed_total"
+compress_compressed_total          = "layer/compress/compressed_total"
+compress_stored_total              = "layer/compress/stored_total"
+compress_bytes_saved_total         = "layer/compress/bytes_saved_total"
+compress_dictionary_mismatch_total = "layer/compress/dictionary_mismatch_total"
+compress_malformed_total           = "layer/compress/malformed_total"
+
+[resources."frames/if"]
+kind        = "stream"
+type        = "packed:modem-frames#If"
+priority    = "data"
+optional    = true
+gate        = "config:frames.if"
+frame       = { records = 1, keyframe_every = 15, deadband = { qdisc_backlog_bytes = { delta = "4096", max_records = 5 }, qdisc_backlog_pkts = { delta = "4", max_records = 5 } } }
+doc         = "the kernel's interface counters and its queue disciplines"
+
+[resources."frames/if".annotations]
+"link.exposure" = "link"
+
+[resources."frames/if".annotations."telemetry.series"]
+in_octets           = "if/in_octets"
+out_octets          = "if/out_octets"
+in_errors           = "if/in_errors"
+out_errors          = "if/out_errors"
+in_discards         = "if/in_discards"
+out_discards        = "if/out_discards"
+in_multicast_pkts   = "if/in_multicast_pkts"
+in_pkts             = "if/in_pkts"
+out_pkts            = "if/out_pkts"
+qdisc_backlog_bytes = "if/qdisc_backlog_bytes"
+qdisc_backlog_pkts  = "if/qdisc_backlog_pkts"
+
+[resources."frames/radio"]
+kind        = "stream"
+type        = "packed:modem-frames#Radio"
+priority    = "data"
+optional    = true
+gate        = "config:frames.radio"
+frame       = { records = 1, keyframe_every = 15, deadband = { rssi = { delta = "1", max_records = 5 }, snr = { delta = "1", max_records = 5 } } }
+doc         = "what the radio measures: bars, RSSI, RSRP, RSRQ, SNR, error rate"
+
+[resources."frames/radio".annotations]
+"link.exposure" = "link"
+
+[resources."frames/radio".annotations."telemetry.series"]
+signal_bars = "radio/signal_bars"
+rssi        = "radio/rssi"
+rsrp        = "radio/rsrp"
+rsrq        = "radio/rsrq"
+snr         = "radio/snr"
+error_rate  = "radio/error_rate"
+
+[resources."frames/bearer"]
+kind        = "stream"
+type        = "packed:modem-frames#Bearer"
+priority    = "data"
+optional    = true
+gate        = "config:frames.bearer"
+frame       = { records = 1, keyframe_every = 15 }
+doc         = "what a bearer reports of its link (DLEP RFC 8175 section 13): rates, latency, resources, quality"
+
+[resources."frames/bearer".annotations]
+"link.exposure" = "link"
+
+[resources."frames/bearer".annotations."telemetry.series"]
+rx_rate     = "link/rx_rate"
+tx_rate     = "link/tx_rate"
+rx_max_rate = "link/rx_max_rate"
+tx_max_rate = "link/tx_max_rate"
+latency     = "link/latency"
+resources   = "link/resources"
+rx_quality  = "link/rx_quality"
+tx_quality  = "link/tx_quality"
+
+[resources."frames/message"]
+kind        = "stream"
+type        = "packed:modem-frames#Message"
+priority    = "data"
+optional    = true
+gate        = "config:frames.message"
+frame       = { records = 1, keyframe_every = 1 }
+doc         = "all 73 readings in one record, its counters at 24 bits: one paid message"
+
+[resources."frames/message".annotations]
+"link.exposure" = "link"
+
+[resources."frames/message".annotations."telemetry.series"]
+sdu_tx_sdus_total                        = "sdu/tx_sdus_total"
+sdu_tx_bytes_total                       = "sdu/tx_bytes_total"
+sdu_rx_sdus_total                        = "sdu/rx_sdus_total"
+sdu_rx_bytes_total                       = "sdu/rx_bytes_total"
+sdu_dropped_total                        = "sdu/dropped_total"
+sdu_tx_failed_total                      = "sdu/tx_failed_total"
+sdu_rx_unroutable_total                  = "sdu/rx_unroutable_total"
+sdu_rx_oversize_total                    = "sdu/rx_oversize_total"
+sdu_tx_oversize_total                    = "sdu/tx_oversize_total"
+sched_dropped_total                      = "sched/dropped_total"
+sched_stale_total                        = "sched/stale_total"
+sched_peerless_total                     = "sched/peerless_total"
+sched_queue_depth                        = "sched/queue_depth"
+sched_lane_backlog_bytes                 = "sched/lane_backlog_bytes"
+sched_lane_backlog_drain_ms              = "sched/lane_backlog_drain_ms"
+air_tx_frames_total                      = "air/tx_frames_total"
+air_rx_frames_total                      = "air/rx_frames_total"
+air_cad_deferrals_total                  = "air/cad_deferrals_total"
+air_cad_forced_total                     = "air/cad_forced_total"
+layer_aead_auth_failures_total           = "layer/aead/auth_failures_total"
+layer_aead_replays_total                 = "layer/aead/replays_total"
+layer_aead_unknown_key_total             = "layer/aead/unknown_key_total"
+layer_aead_send_key_id                   = "layer/aead/send_key_id"
+layer_address_foreign_total              = "layer/address/foreign_total"
+layer_address_unknown_source_total       = "layer/address/unknown_source_total"
+layer_fec_repair_frames_total            = "layer/fec/repair_frames_total"
+layer_fec_repaired_total                 = "layer/fec/repaired_total"
+layer_fec_unrecoverable_total            = "layer/fec/unrecoverable_total"
+layer_fec_late_repair_total              = "layer/fec/late_repair_total"
+layer_fec_unused_repair_total            = "layer/fec/unused_repair_total"
+layer_fec_malformed_total                = "layer/fec/malformed_total"
+layer_fragment_fragments_total           = "layer/fragment/fragments_total"
+layer_fragment_reassembled_total         = "layer/fragment/reassembled_total"
+layer_fragment_rcs_failures_total        = "layer/fragment/rcs_failures_total"
+layer_fragment_timeouts_total            = "layer/fragment/timeouts_total"
+layer_fragment_oversize_total            = "layer/fragment/oversize_total"
+layer_fragment_malformed_total           = "layer/fragment/malformed_total"
+layer_compress_compressed_total          = "layer/compress/compressed_total"
+layer_compress_stored_total              = "layer/compress/stored_total"
+layer_compress_bytes_saved_total         = "layer/compress/bytes_saved_total"
+layer_compress_dictionary_mismatch_total = "layer/compress/dictionary_mismatch_total"
+layer_compress_malformed_total           = "layer/compress/malformed_total"
+air_airtime_ms_total                     = "air/airtime_ms_total"
+air_retransmits_total                    = "air/retransmits_total"
+air_bytes_wasted_total                   = "air/bytes_wasted_total"
+air_rx_errors_total                      = "air/rx_errors_total"
+air_duty_cycle_available                 = "air/duty_cycle_available"
+air_duty_cycle_wait_ms                   = "air/duty_cycle_wait_ms"
+radio_signal_bars                        = "radio/signal_bars"
+if_in_octets                             = "if/in_octets"
+if_out_octets                            = "if/out_octets"
+if_in_errors                             = "if/in_errors"
+if_out_errors                            = "if/out_errors"
+if_in_discards                           = "if/in_discards"
+if_out_discards                          = "if/out_discards"
+if_in_multicast_pkts                     = "if/in_multicast_pkts"
+if_in_pkts                               = "if/in_pkts"
+if_out_pkts                              = "if/out_pkts"
+if_qdisc_backlog_bytes                   = "if/qdisc_backlog_bytes"
+if_qdisc_backlog_pkts                    = "if/qdisc_backlog_pkts"
+radio_rssi                               = "radio/rssi"
+radio_rsrp                               = "radio/rsrp"
+radio_rsrq                               = "radio/rsrq"
+radio_snr                                = "radio/snr"
+radio_error_rate                         = "radio/error_rate"
+link_rx_rate                             = "link/rx_rate"
+link_tx_rate                             = "link/tx_rate"
+link_rx_max_rate                         = "link/rx_max_rate"
+link_tx_max_rate                         = "link/tx_max_rate"
+link_latency                             = "link/latency"
+link_resources                           = "link/resources"
+link_rx_quality                          = "link/rx_quality"
+link_tx_quality                          = "link/tx_quality"
 
 # --- state -------------------------------------------------------------------------------------
 [resources."sdu/link"]
