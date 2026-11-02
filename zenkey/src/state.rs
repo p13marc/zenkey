@@ -500,14 +500,17 @@ impl Minter {
         self.next_seq(&mut r)
     }
 
-    /// Takes a new run within the instance now (core §4.3's MAY): the
-    /// descriptor put stating it once the service runs, then every seq from
-    /// 0. `config.v2`'s owner takes one before its token counter passes
-    /// 65,535 (§2.6).
-    pub(crate) fn new_run(&self) {
+    /// Takes a new run within the instance now (core §4.3's MAY) and
+    /// returns it: the descriptor put stating it once the service runs,
+    /// under the runs lock, so nothing is written under it before; then
+    /// every seq from 0. `config.v2`'s owner takes one before its token
+    /// counter passes 65,535 (§2.6), and [`crate::Service::new_run`] is an
+    /// owner's own.
+    pub(crate) fn new_run(&self) -> wire::Run {
         let mut r = self.runs.lock().expect("not poisoned");
         self.ensure(&mut r);
         self.switch(&mut r);
+        r.run.expect("switched")
     }
 
     /// The session's clock now, offset as [`Minter::simulate_offset`] says.

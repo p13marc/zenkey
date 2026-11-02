@@ -26,6 +26,10 @@
 
 mod common;
 
+#[allow(dead_code)]
+#[path = "../examples/owner/config.rs"]
+mod sim;
+
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -103,10 +107,16 @@ struct Owner {
 async fn start(ep: &str, runs: Option<&Path>) -> Owner {
     let session = client(ep).await;
     let mut b = ServiceBuilder::new(&session, config(SVC));
-    b.implement(Implementation::new(meterframe())).unwrap();
     if let Some(p) = runs {
         b.run_store(Arc::new(FileRunStore::new(p))).unwrap();
     }
+    owner_of(session, b).await
+}
+
+/// O on `session`, from `b`, which may implement more beside
+/// `meterframe.v1`.
+async fn owner_of(session: zenoh::Session, mut b: ServiceBuilder) -> Owner {
+    b.implement(Implementation::new(meterframe())).unwrap();
     let mut frames = BTreeMap::new();
     for r in [LINK, TOTALS, BYTES] {
         let w = b
@@ -932,6 +942,372 @@ async fn a_restarted_counter_takes_a_new_run() {
         None
     );
     assert!(bytes.flush().await.unwrap().is_some());
+    o.end().await;
+}
+
+/// #1055: a `config.v1` owner whose device resets, its counters with it,
+/// mints a new instance (core §1.5), which restarts its configuration
+/// (`config.v1` §2.12, "A re-mint is a restart"): its pending change
+/// cancelled, its device returned to its startup values, revision 0. R
+/// reads a reset across, in band on each frame series (§2.19) and by
+/// presence on the bare counter (v1 §2.9), never a decrease.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_config_v1_owners_device_reset_is_a_new_instance() {
+    use zenkey::config_v1::{self, ConfigView};
+    use zenkey::model::config::{ConfigChangeEvent, Outcome as Ending, Source};
+    use zenkey::model::telemetry::Presence;
+    use zenkey::{CallMetadata, Client, Outcome};
+
+    /// A call of `config.v1`'s `resource` at O, as `ops`.
+    async fn call(s: &zenoh::Session, resource: &str, group: Option<&str>, body: Value) -> Outcome {
+        let c = Client::new(s, config_v1::implementation().shared_contract(), &[SVC])
+            .unwrap()
+            .with_timeout(Duration::from_secs(2))
+            .with_metadata(CallMetadata::new("ops", resource));
+        let values: Bindings = group
+            .map(|g| [("group".to_owned(), vec![g.to_owned()])].into())
+            .unwrap_or_default();
+        c.call_value(&SVC.parse().unwrap(), resource, &values, &body)
+            .await
+            .unwrap()
+    }
+    fn value(o: Outcome) -> Value {
+        match o {
+            Outcome::Value(a) => a.value::<Value>().unwrap(),
+            other => panic!("a value reply, not {other:?}"),
+        }
+    }
+    let param = |v: &ConfigView, g: &str, p: &str| {
+        let x = v.groups.iter().find(|x| x.name == g).unwrap();
+        let x = x.parameters.iter().find(|x| x.name == p).unwrap();
+        (x.value.clone(), x.source)
+    };
+    let int = |n: i64| Some(config_v1::Value::Integer(n));
+
+    let (_r1, ep) = router(None).await;
+    let rs = client(&ep).await;
+    let r = reader(&rs).await;
+    // R's presence view: each instance token's put and delete, as it
+    // arrived; and what it hears of O's configuration.
+    type Log<T> = Arc<Mutex<Vec<T>>>;
+    let tokens: Log<(Instant, bool, String)> = Arc::default();
+    let configs: Log<(String, Vec<u8>)> = Arc::default();
+    let (t1, c1) = (Arc::clone(&tokens), Arc::clone(&configs));
+    let _tokens = rs
+        .liveliness()
+        .declare_subscriber("zk2/lab/meterframe/@zk/instance/*")
+        .callback(move |x: Sample| {
+            let id = x.key_expr().as_str().rsplit('/').next().unwrap().to_owned();
+            let put = x.kind() == zenoh::sample::SampleKind::Put;
+            t1.lock().unwrap().push((Instant::now(), put, id));
+        })
+        .await
+        .unwrap();
+    let _configs = rs
+        .declare_subscriber("zk2/lab/meterframe/config.v1/**")
+        .callback(move |x: Sample| {
+            let key = x.key_expr().as_str().to_owned();
+            c1.lock().unwrap().push((key, common::record(&x)));
+        })
+        .await
+        .unwrap();
+    let heard_token = |id: &str, put: bool| {
+        tokens
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, p, i)| *p == put && i == id)
+    };
+    let views = || -> Vec<ConfigView> {
+        configs
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(k, _)| k.ends_with("/state/view"))
+            .map(|(_, b)| serde_json::from_slice(b).unwrap())
+            .collect()
+    };
+    let events = || -> Vec<ConfigChangeEvent> {
+        configs
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(k, _)| k.contains("/events/change/"))
+            .map(|(_, b)| serde_json::from_slice(b).unwrap())
+            .collect()
+    };
+
+    // O: meterframe.v1's frames and its bare counter, and config.v1 on the
+    // owner example's simulated device.
+    let session = client(&ep).await;
+    let mut b = ServiceBuilder::new(&session, config(SVC));
+    let startup = sim::rf_startup(false, 10, Duration::from_secs(1), false);
+    let device = Arc::new(sim::SimDevice::new(&startup));
+    let cfg = b
+        .config_v1(startup, Arc::clone(&device) as Arc<dyn config_v1::Device>)
+        .await
+        .unwrap();
+    let mut o = owner_of(session, b).await;
+    let old = o.svc.instance().to_string();
+    eventually("R sees O's instance token", || async {
+        heard_token(&old, true)
+    })
+    .await;
+
+    // 1. A runtime change made permanent (duty, hot, no window), then one
+    // pending, applied (radio, reach, a 60 s window).
+    let applied = value(
+        call(
+            &rs,
+            config_v1::SET,
+            Some("duty"),
+            json!({"values": {"fraction_ppm": 20000}}),
+        )
+        .await,
+    );
+    assert!(applied.get("applied").is_some(), "{applied}");
+    let pending = value(
+        call(
+            &rs,
+            config_v1::SET,
+            Some("radio"),
+            json!({"values": {"frequency_hz": 869525000}, "confirm_s": 60}),
+        )
+        .await,
+    );
+    let token = pending["pending"]["token"].as_str().unwrap().to_owned();
+    eventually("the reach change applied", || async {
+        cfg.view().await.pending.is_some_and(|p| p.applied)
+    })
+    .await;
+    assert_eq!(device.holds("radio", "frequency_hz"), int(869_525_000));
+
+    // 2. Its counters, in instance I1: 100 then 120, rx 100 left in the
+    // open frame, the bare counter 40 then 50.
+    let t = Instant::now();
+    let r0 = o.totals(100, "21.5", t).await.run;
+    o.totals(120, "21.5", t + s(1)).await;
+    assert_eq!(o.record(BYTES, json!({"rx": 100}), t).await, None);
+    for v in [40u64, 50] {
+        o.dropped.put_value(&v).await.unwrap();
+    }
+    r.wait(DROPPED, 2).await;
+
+    // 3. The device resets, its counters from 0: within I1 each is below
+    // its last, refused (v1 §2.7, v2 §2.19).
+    let below = json!({"frames_total": 5, "temperature": "21.5"});
+    let e = o.w(TOTALS).record_json_at(&below, t + s(2)).await;
+    assert!(matches!(
+        refusal(e.unwrap_err()),
+        Reason::FieldDecreased { .. }
+    ));
+    let e = o.dropped.put_value(&3u64).await.unwrap_err();
+    assert!(matches!(refusal(e), Reason::Decreased { .. }));
+
+    // 4. The open frame flushed under I1's run, then a new instance, I2.
+    assert_eq!(o.w(BYTES).flush().await.unwrap().expect("rx 100").run, r0);
+    let new = o.svc.new_epoch().await.unwrap().to_string();
+    assert_ne!(new, old);
+    let r1 = o.svc.minter().run();
+    assert_ne!(r1, r0, "a new instance takes a new run (core §4.3)");
+    eventually("R sees I1's token withdrawn", || async {
+        heard_token(&old, false)
+    })
+    .await;
+
+    // 5. The restarted counts, in I2.
+    let b = o.totals(5, "21.5", t + s(2)).await;
+    assert_eq!((b.run, b.seq.get()), (r1, 0));
+    o.totals(9, "21.5", t + s(3)).await;
+    assert_eq!(o.record(BYTES, json!({"rx": 5}), t + s(2)).await, None);
+    assert_eq!(o.w(BYTES).flush().await.unwrap().expect("rx 5").run, r1);
+    for v in [3u64, 4] {
+        o.dropped.put_value(&v).await.unwrap();
+    }
+    r.wait(TOTALS, 4).await;
+    r.wait(BYTES, 2).await;
+    r.wait(DROPPED, 4).await;
+
+    // R, the frames: 120 → 5 and rx 100 → 5 resets in band, with no
+    // rate; I2's first frame another run's, a keyframe; no decrease.
+    let f = r.fold(TOTALS);
+    let p = f.pair("frames_total", 100, 120);
+    assert_eq!((p.continuity, p.basis), (Continuity::SameEpoch, IN_BAND));
+    let (_, frame, folded) = &f.frames[2];
+    assert_eq!(folded.applied.follows, Follows::Run);
+    assert!(frame.records[0].full);
+    let p = f.pair("frames_total", 120, 5);
+    assert_eq!((p.continuity, p.basis), (Continuity::Reset, IN_BAND));
+    assert_eq!(p.rate, Err(NoRate::Reset));
+    let p = f.pair("frames_total", 5, 9);
+    assert_eq!((p.continuity, p.basis), (Continuity::SameEpoch, IN_BAND));
+    let bytes = r.fold(BYTES);
+    let p = bytes.pair("rx", 100, 5);
+    assert_eq!((p.continuity, p.basis), (Continuity::Reset, IN_BAND));
+    for (field, x) in [("frames_total", &f), ("rx", &bytes)] {
+        assert!(
+            x.pairs(field)
+                .iter()
+                .all(|(_, _, p)| p.continuity != Continuity::Decreased),
+            "{field}: {:?}",
+            x.pairs(field)
+        );
+    }
+
+    // R, the bare counter, by v1's rules with its presence view: 50 → 3 a
+    // reset, I1 alone at 50's arrival and I2 at 3's; within each instance,
+    // the same epoch.
+    let at = |i: Instant| i128::try_from(i.duration_since(r.origin).as_nanos()).unwrap();
+    let marks: Vec<(i128, bool, String)> = tokens
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(i, p, id)| (at(*i), *p, id.clone()))
+        .collect();
+    let present = |ns: i128| {
+        let mut held: Vec<&str> = Vec::new();
+        for (when, put, id) in &marks {
+            if *when <= ns {
+                if *put {
+                    held.push(id);
+                } else {
+                    held.retain(|h| h != id);
+                }
+            }
+        }
+        held
+    };
+    let only = |ns: i128| match present(ns)[..] {
+        [one] => Some(one.to_owned()),
+        _ => None,
+    };
+    let samples = r.bare();
+    let mut pairs = Vec::new();
+    for w in samples.windows(2) {
+        let ((a, a_at), (b, b_at)) = (&w[0], &w[1]);
+        let (earlier, later) = (only(*a_at), only(*b_at));
+        let moved = marks
+            .iter()
+            .any(|(when, ..)| *when > *a_at && *when <= *b_at);
+        let presence = Presence {
+            alone_throughout: earlier.is_some() && earlier == later && !moved,
+            earlier: earlier.as_deref(),
+            later: later.as_deref(),
+        };
+        fn sampled(m: &Measure, at: i128) -> Sampled<'_> {
+            Sampled {
+                value: m,
+                epoch: None,
+                timestamp_ms: None,
+                stamp_ns: None,
+                arrival_ns: at,
+                record: None,
+            }
+        }
+        let p = pair(
+            &sampled(a, *a_at),
+            &sampled(b, *b_at),
+            Some("1"),
+            Some(&presence),
+        );
+        pairs.push((counter(a.clone()), counter(b.clone()), p));
+    }
+    let by_presence = Some(Basis::Established(Via::Presence));
+    let verdicts: Vec<(u64, u64, Continuity, Option<Basis>)> = pairs
+        .iter()
+        .map(|(a, b, p)| (*a, *b, p.continuity, p.basis))
+        .collect();
+    assert_eq!(
+        verdicts,
+        [
+            (40, 50, Continuity::SameEpoch, by_presence),
+            (50, 3, Continuity::Reset, by_presence),
+            (3, 4, Continuity::SameEpoch, by_presence),
+        ]
+    );
+
+    // config.v1 restarted in I2 (§2.12): the pending change cancelled, its
+    // undo run and its event published; the device returned to its
+    // startup values (duty), then revision 0 from them, nothing pending,
+    // no last change.
+    let v = cfg.view().await;
+    assert_eq!((v.instance.as_str(), v.revision), (new.as_str(), 0));
+    assert_eq!((&v.pending, &v.last_change), (&None, &None));
+    assert_eq!(
+        param(&v, "duty", "fraction_ppm"),
+        (int(10_000), Some(Source::File))
+    );
+    assert_eq!(
+        param(&v, "radio", "frequency_hz"),
+        (int(868_100_000), Some(Source::File))
+    );
+    assert_eq!(device.holds("duty", "fraction_ppm"), int(10_000));
+    assert_eq!(device.holds("radio", "frequency_hz"), int(868_100_000));
+    let (undos, restores) = device.with(|d| (d.undos.len(), d.restores.clone()));
+    assert_eq!(undos, 1, "the cancel's undo");
+    assert_eq!(
+        restores.len(),
+        1,
+        "one return, of what runs off its startup value"
+    );
+    assert_eq!(
+        restores[0]
+            .1
+            .iter()
+            .map(|x| (x.group.as_str(), x.parameter.as_str(), x.value.clone()))
+            .collect::<Vec<_>>(),
+        [("duty", "fraction_ppm", config_v1::Value::Integer(10_000))]
+    );
+    eventually("R hears the cancel's event and I2's view", || async {
+        events()
+            .iter()
+            .any(|e| e.token == token && e.outcome == Ending::RolledBack)
+            && views().iter().any(|v| v.instance == new && v.revision == 0)
+    })
+    .await;
+    // A late confirm of I1's token names nothing (§2.6); I2 mints its own.
+    match call(&rs, config_v1::CONFIRM, None, json!({"token": token})).await {
+        Outcome::Refused(e) => assert_eq!(e.code, "not_found"),
+        other => panic!("a refusal, not {other:?}"),
+    }
+    let applied = value(
+        call(
+            &rs,
+            config_v1::SET,
+            Some("duty"),
+            json!({"values": {"fraction_ppm": 30000}}),
+        )
+        .await,
+    );
+    let v: ConfigView = serde_json::from_value(applied["applied"].clone()).unwrap();
+    assert_eq!(v.last_change.map(|l| l.token), Some(format!("{new}-1")));
+    o.end().await;
+}
+
+/// A new run within the instance (core §4.3's MAY, [`Service::new_run`]):
+/// no counter restarted, no instance minted. The descriptor states the
+/// run, and R reads the pair across as a reset, in band, with no rate
+/// (§2.19, "A new run within an instance").
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_new_run_within_the_instance_reads_as_a_reset() {
+    let (_r1, ep) = router(None).await;
+    let rs = client(&ep).await;
+    let r = reader(&rs).await;
+    let o = start(&ep, None).await;
+    let instance = o.svc.instance().clone();
+    let t = Instant::now();
+    let r0 = o.totals(100, "21.5", t).await.run;
+    let r1 = o.svc.new_run();
+    assert_ne!(r1, r0);
+    let d: Value = serde_json::from_slice(&o.svc.descriptor_bytes()).unwrap();
+    assert_eq!(d["run"], r1.hex(), "the descriptor states it (core §3.3)");
+    assert_eq!(o.svc.instance(), &instance, "no new instance");
+    let b = o.totals(101, "21.5", t + s(1)).await;
+    assert_eq!((b.run, b.seq.get()), (r1, 0));
+    r.wait(TOTALS, 2).await;
+    let p = r.fold(TOTALS).pair("frames_total", 100, 101);
+    assert_eq!((p.continuity, p.basis), (Continuity::Reset, IN_BAND));
+    assert_eq!(p.rate, Err(NoRate::Reset));
     o.end().await;
 }
 

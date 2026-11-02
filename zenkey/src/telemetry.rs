@@ -97,7 +97,7 @@
 //! | §2.16 an invalid `telemetry.series` | logged as a warning when the service implements it; its writers meter nothing (a reader reads nothing of it) |
 //! | §2.18 a reserved code, an absent field, an enum's escape are no value | written as given: none is refused, the owner said what it knew |
 //! | §2.19 within one run, no counter field's count below one written before on the key, before §2.20's reduction | refused, [`Reason::FieldDecreased`], against the last count the writer took in the run |
-//! | §2.19 a restarted counter written under a new run | the run moves with a new instance ([`crate::Service::new_epoch`], a process's start) or the minter's own (core §4.3); a count taken under another run is compared with nothing |
+//! | §2.19 a restarted counter written under a new run | the run moves with a new instance ([`crate::Service::new_epoch`], a `config.v1` service's included, or a process's start), the minter's own, or a new run within the instance ([`crate::Service::new_run`], no restart) (core §4.3); a count taken under another run is compared with nothing |
 //! | §2.20 a counter of width w carries its count modulo 2^w | the writer takes the count unwrapped and reduces it; a §7.6 record's bytes carry only the code, so a narrow counter's count is unwrapped by the least increase from the last |
 //! | §2.20 SHOULD: an increase between two samples below 2^(w−1) | an increase at or past it since the last record is logged as a warning, and written |
 //!
@@ -117,7 +117,8 @@
 //! count of its field unless that count was put under a run that is no
 //! longer the minter's. So an owner whose counter restarts flushes its
 //! open frames ([`crate::frame::FrameWriter::flush`]), then takes a new
-//! run ([`crate::Service::new_epoch`]), then records: a record still open
+//! run with a new instance ([`crate::Service::new_epoch`], core §1.5), then
+//! records: a record still open
 //! when the run moves is put under the new run, before the restarted
 //! count, and the restarted count is refused. A frame never sent (a put
 //! refused, a frame lost) keeps its counts as the last: a counter only

@@ -11,12 +11,13 @@
 //! frame lose <resource>                       the next frame is lost on its way: its seqs taken, nothing put
 //! frame mutation <resource>                   asks for a plain writer, which the runtime refuses
 //! frame new-epoch                             Service::new_epoch: a new instance, a new run (core §4.3)
+//! frame new-run                               Service::new_run: a new run, the same instance (core §4.3)
 //! ```
 //!
 //! `telemetry frame …` takes the same verbs on `meterframe.v1`, its records
 //! metered (`telemetry.v2` §2.19: a counter field's count given unwrapped,
-//! refused below its last within the run, written modulo its width), and
-//! one more:
+//! refused below its last within the run, written modulo its width; a
+//! restarted one written after `flush`, then `new-epoch`), and one more:
 //!
 //! ```text
 //! telemetry frame raw <resource> <json>      a frame of one full record, from the session, unchecked,
@@ -27,7 +28,10 @@
 //! JSON line: `{"frame": "record", "resource", "put": {"run", "seq",
 //! "records"} | null, "open"}`, the frame the record completed and put,
 //! and how many records the open frame holds after it. `frame flush`
-//! answers the same shape, and `raw` too, with no `open`. A refusal is
+//! answers the same shape, and `raw` too, with no `open`. `new-epoch`
+//! answers `{"frame": "new-epoch", "instance", "run"}`, and `new-run`
+//! `{"frame": "new-run", "instance", "run"}`, its instance unchanged. A
+//! refusal is
 //! `refused <line>: <why>`, a metered one's `<why>` as `telemetry put`'s:
 //! `telemetry.v2 decreased field=<f> before=<n> after=<n>: <words>` or
 //! `telemetry.v2 code field=<f> code=<n>: <words>`.
@@ -284,12 +288,21 @@ async fn answer(
             .to_string(),
             Err(e) => refused(e.to_string()),
         },
+        ["frame", "new-run"] => {
+            let run = svc.new_run();
+            serde_json::json!({
+                "frame": "new-run", "instance": svc.instance().to_string(), "run": run.hex(),
+            })
+            .to_string()
+        }
         _ if session.is_some() => refused(
             "telemetry frame record|flush|lose|raw|mutation <resource>, or telemetry frame \
-             new-epoch"
+             new-epoch|new-run"
                 .to_owned(),
         ),
-        _ => refused("frame record|flush|lose|mutation <resource>, or frame new-epoch".to_owned()),
+        _ => refused(
+            "frame record|flush|lose|mutation <resource>, or frame new-epoch|new-run".to_owned(),
+        ),
     }
 }
 

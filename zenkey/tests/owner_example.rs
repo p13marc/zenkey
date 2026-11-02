@@ -2892,6 +2892,7 @@ fn the_help_documents_the_frames_surface() {
         "frame lose <resource>",
         "frame mutation <resource>",
         "frame new-epoch",
+        "frame new-run",
     ] {
         assert!(owner::HELP.contains(piece), "--help names {piece:?}");
     }
@@ -3040,6 +3041,20 @@ async fn the_owner_example_meters_telemetry_frames() {
     )
     .await;
     assert_eq!(a["put"]["run"], n["run"], "{a}");
+    // A new run in the same instance, no restart (core §4.3): the next
+    // count written under it.
+    let r = ask_json(&o, "telemetry frame new-run").await;
+    assert_eq!(
+        (&r["frame"], &r["instance"]),
+        (&serde_json::json!("new-run"), &n["instance"])
+    );
+    assert_ne!(r["run"], n["run"]);
+    let a = ask_json(
+        &o,
+        &format!("telemetry frame record frames/totals {}", totals(4)),
+    )
+    .await;
+    assert_eq!(a["put"]["run"], r["run"], "{a}");
     // The bare counter, a telemetry.v1 resource of the same contract.
     let put = o.ask("telemetry put sdu/dropped_total 7").await;
     assert!(
@@ -3069,6 +3084,7 @@ fn the_help_documents_the_telemetry_v2_surface() {
         "telemetry frame lose <resource>",
         "telemetry frame mutation <resource>",
         "telemetry frame new-epoch",
+        "telemetry frame new-run",
         "telemetry frame raw <resource> <json>",
         "refused <line>: telemetry.v2 <why>: <words>",
         "decreased field=<f> before=<n> after=<n>",

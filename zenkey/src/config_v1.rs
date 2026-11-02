@@ -30,7 +30,7 @@
 //! | §2.6–§2.11 changes, tokens, joining, the window, hot and reach, the undo once | [`Owner`]; each [`Act`] performed once on the [`Device`], its result reported with [`Owner::finish`] |
 //! | §2.7 one act at a time, `busy` meanwhile | the owner is unlocked while the device acts, so a call that arrives meanwhile is answered `busy` by the model, never queued |
 //! | §2.8 the deadline; §2.9 `apply_at` | the timer sleeps until [`Owner::next_due`] and calls [`Owner::due`]; every call wakes it |
-//! | §2.12 a restart is a rollback | a new service is a new instance: [`Owner::start`] from the startup values, nothing pending, no key held; [`crate::Service::new_epoch`] is refused (below) |
+//! | §2.12 a restart is a rollback; a re-mint is a restart | a new service is a new instance: [`Owner::start`] from the startup values, nothing pending, no key held; [`crate::Service::new_epoch`] restarts the configuration in place: a pending change cancelled, the device returned ([`Device::restore_startup`]), then [`Owner::restart`] (below) |
 //! | §2.13 persist | [`Device::persist_ready`] first (`unavailable`, cause `config`), then [`Owner::persist_plan`] (the values the last change set, text 0.2), the write ([`Device::persist`]; a failure is `internal`), then [`Owner::persisted`]; the owner stays locked through the write |
 //! | §2.14 idempotency keys | [`Owner::set`] keeps each first answer 300 s; a restart forgets them |
 //! | §2.15 sensitive values | the model's view, status, replies and edits; each request logged by [`log_request`], the device's words logged by [`device_words`] |
@@ -55,11 +55,31 @@
 //! bounds each member of the template, `events/change` is one member per
 //! service, and a re-mint does not reset it (core §2.7), so an application
 //! that keeps no such record lets a restarted owner publish up to 600 more
-//! change events within the hour. A re-mint within one running service
-//! ([`crate::Service::new_epoch`]) is refused: it would be a restart (a new
-//! instance, the revision from 0) whose device still runs the old
-//! instance's values, and the view would then show values the device does
-//! not hold.
+//! change events within the hour.
+//!
+//! **A re-mint is a restart** (§2.12): [`crate::Service::new_epoch`] on a
+//! running service restarts its configuration in the new instance, with
+//! its device running its startup values first:
+//!
+//! ```text
+//! new_epoch ─▶ Configuration::restarting: a pending change cancelled, as `cancel` does
+//!                 (its undo, its event); then Owner::restart_plan, each parameter off
+//!                 its startup value ─▶ Device::restore_startup, once, if any; the owner held
+//!          ─▶ the new instance's descriptor and run ─▶ Restarting::start: Owner::restart
+//!                 (revision 0, nothing pending, no last change, no key held, the last
+//!                 hour's events kept), the view and the status put ─▶ the tokens
+//! ```
+//!
+//! Refused, the instance running on, while an act is in flight, when a
+//! parameter set at runtime starts unknown (nothing returns it), when the
+//! device refuses to return (by default it cannot, so a device that does
+//! not implement it re-mints only while it runs its startup values), and
+//! for an owner fed through `desired.v1`, which would act again on its
+//! document (`desired.v1` §2.16). A cancel made before a refusal stays
+//! made. A late confirm with a token of the old instance is `not_found`:
+//! the new instance mints `<instance>-<n>` of its own (§2.6). A new run
+//! within the instance ([`crate::Service::new_run`], core §4.3) restarts
+//! nothing.
 //!
 //! **The contract is the published bundle**, revision 1.1
 //! ([`FINGERPRINT`]), the one that uses `freshness.v2` (text 0.9, #978's
@@ -286,6 +306,29 @@ pub trait Device: Send + Sync + 'static {
         let _ = entries;
         Box::pin(async { Err("this device has no persisted layer".to_owned()) })
     }
+
+    /// Returns the device to its startup values before its service
+    /// re-mints (§2.12, "A re-mint is a restart";
+    /// [`crate::Service::new_epoch`]): each entry is a parameter whose
+    /// running value is not its startup value, at that value
+    /// ([`Owner::restart_plan`]). Called once, with nothing pending, and
+    /// only when some parameter must move. `Err`, in the device's words,
+    /// refuses the re-mint, and the instance runs on. By default it
+    /// cannot, so a re-mint is refused while a runtime change stands.
+    ///
+    /// A device that reset on its own, its runtime values lost, is told
+    /// only what the owner's view says runs off its startup values: one
+    /// that must apply its startup layer again after a reset does so as it
+    /// does at a process's start, which is the application's.
+    fn restore_startup<'a>(
+        &'a self,
+        restore: &'a [Restore],
+    ) -> BoxFuture<'a, std::result::Result<(), String>> {
+        let _ = restore;
+        Box::pin(async {
+            Err("this device cannot return to its startup values in place".to_owned())
+        })
+    }
 }
 
 /// The instant `t` on the owner's clock (§2.8).
@@ -368,6 +411,59 @@ pub(crate) fn claimed(call: &Call) -> model::Call {
     }
 }
 
+/// How many times a re-mint cancels a pending change before it gives up: a
+/// call can start another while the cancel acts.
+const RESTART_TRIES: usize = 4;
+
+/// A configuration readied to restart in a new instance (§2.12), from
+/// [`Configuration::restarting`]: nothing pending, its device at its
+/// startup values, its owner held so that no call lands before
+/// [`Restarting::start`]. Dropped unstarted (the re-mint failed after it),
+/// the old instance runs on, and says so.
+pub(crate) struct Restarting<'a> {
+    inner: &'a Inner,
+    core: Option<tokio::sync::MutexGuard<'a, Core>>,
+}
+
+impl Restarting<'_> {
+    /// The configuration restarts in `instance` (§2.12): from its startup
+    /// values and persisted layer, revision 0, nothing pending, no last
+    /// change, no idempotency key held, the last hour's change events still
+    /// counted (§2.17); a document given by [`Configuration::set_desired`]
+    /// acted on again, as a restart's is. Its view and status are put now,
+    /// under the run written now, before the new instance's tokens (§2.3).
+    pub(crate) async fn start(mut self, instance: &str) {
+        let Some(mut c) = self.core.take() else {
+            return;
+        };
+        c.owner = c.owner.restart(instance);
+        c.first.clear();
+        c.acted = None;
+        c.named.clear();
+        c.enqueue(&[]);
+        *self.inner.instance.write().expect("not poisoned") = instance.to_owned();
+        drop(c);
+        tracing::info!(
+            service = %self.inner.service, instance = %instance,
+            "config.v1: restarted in a new instance, from its startup values (§2.12)"
+        );
+        self.inner.flush().await;
+        self.inner.wake.notify_one();
+    }
+}
+
+impl Drop for Restarting<'_> {
+    fn drop(&mut self) {
+        if self.core.is_some() {
+            tracing::warn!(
+                service = %self.inner.service, instance = %self.inner.instance(),
+                "config.v1: the re-mint failed after the device returned to its startup values; \
+                 the view may name values it no longer runs: close this service and start another"
+            );
+        }
+    }
+}
+
 /// What a step left to publish, in order: the view after it, and the events
 /// it ended changes with.
 struct Out {
@@ -436,7 +532,12 @@ struct Inner {
     iface: IfaceId,
     /// The owner's address, `<system>/<service>`, as the view names it.
     service: String,
-    instance: String,
+    /// The instance id it runs in: the service's, moved at a re-mint
+    /// ([`Restarting::start`]).
+    instance: std::sync::RwLock<String>,
+    /// Fed through `desired.v1` ([`crate::ServiceBuilder::desired_config`]):
+    /// its re-mint is refused (`desired.v1` §2.16).
+    fed: std::sync::atomic::AtomicBool,
     schema: Schema,
     device: Arc<dyn Device>,
     core: tokio::sync::Mutex<Core>,
@@ -482,7 +583,8 @@ impl Configuration {
         let inner = Arc::new(Inner {
             iface: iface.clone(),
             service: addr.to_string(),
-            instance,
+            instance: std::sync::RwLock::new(instance),
+            fed: std::sync::atomic::AtomicBool::new(false),
             schema: startup.schema.clone(),
             device,
             core: tokio::sync::Mutex::new(Core {
@@ -572,8 +674,96 @@ impl Configuration {
 
     /// The instance id the configuration runs in (§2.3), the service's.
     #[must_use]
-    pub fn instance(&self) -> &str {
-        &self.inner.instance
+    pub fn instance(&self) -> String {
+        self.inner.instance()
+    }
+
+    /// Fed through `desired.v1` from now on
+    /// ([`crate::ServiceBuilder::desired_config`]).
+    pub(crate) fn fed_by_desired(&self) {
+        self.inner.fed.store(true, Ordering::Relaxed);
+    }
+
+    /// Readies a re-mint (§2.12, "A re-mint is a restart";
+    /// [`crate::Service::new_epoch`]): nothing pending, a pending change
+    /// cancelled as `cancel` does, its event published; the device
+    /// returned to its startup values where a runtime change left a
+    /// parameter elsewhere ([`Device::restore_startup`]); then the owner
+    /// held, so that no call lands until the new instance starts it
+    /// ([`Restarting::start`]).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Contract`], the instance running on (a cancel made stays
+    /// made): fed through `desired.v1`; an act in flight (§2.7); a
+    /// parameter set at runtime that starts unknown; the device's refusal
+    /// to return; a change pending again at every try.
+    pub(crate) async fn restarting(&self) -> Result<Restarting<'_>> {
+        let i = &*self.inner;
+        if i.fed.load(Ordering::Relaxed) {
+            return Err(Error::Contract(
+                "config.v1: a re-mint is a restart (config.v1 §2.12), which an owner fed through \
+                 desired.v1 refuses while it runs (desired.v1 §2.16): close this service and \
+                 start another"
+                    .to_owned(),
+            ));
+        }
+        // A call can start another change while the cancel acts, so it is
+        // tried a few times.
+        for _ in 0..RESTART_TRIES {
+            let mut c = i.core.lock().await;
+            if c.owner.in_flight() {
+                return Err(Error::Contract(
+                    "config.v1: an act is in flight (config.v1 §2.7), so the re-mint is \
+                     refused: try again once it ends"
+                        .to_owned(),
+                ));
+            }
+            let pending = c.owner.view().pending.map(|p| p.token);
+            let Some(token) = pending else {
+                let plan = c.owner.restart_plan().map_err(|(g, p)| {
+                    Error::Contract(format!(
+                        "config.v1 §2.12: {g}.{p} runs a runtime value and starts unknown, so \
+                         nothing returns the device to its startup values: close this service \
+                         and start another"
+                    ))
+                })?;
+                if !plan.is_empty() {
+                    i.restore(&plan).await?;
+                }
+                return Ok(Restarting {
+                    inner: i,
+                    core: Some(c),
+                });
+            };
+            tracing::info!(
+                service = %i.service, instance = %i.instance(),
+                token = %token,
+                "config.v1: the pending change is cancelled, for a re-mint (§2.12)"
+            );
+            let req = ControlRequest {
+                token,
+                confirm_s: None,
+                answer: None,
+            };
+            let step = c.owner.cancel(i.now(), &req, &model::Call::default());
+            c.after(&step);
+            drop(c);
+            let done = i.drive(step).await;
+            i.flush().await;
+            i.wake.notify_one();
+            if let Some(Err(r)) = done.reply {
+                return Err(Error::Contract(format!(
+                    "config.v1: the pending change was not cancelled for a re-mint: {} ({})",
+                    r.message,
+                    r.code.as_str()
+                )));
+            }
+        }
+        Err(Error::Contract(
+            "config.v1: a change was pending again at every try, so the re-mint is refused"
+                .to_owned(),
+        ))
     }
 
     /// The schema served (§2.2).
@@ -739,6 +929,43 @@ impl Configuration {
 }
 
 impl Inner {
+    /// The instance id it runs in now.
+    fn instance(&self) -> String {
+        self.instance.read().expect("not poisoned").clone()
+    }
+
+    /// [`Device::restore_startup`], on a task of its own, as an act is
+    /// ([`Inner::perform`]): its refusal, or its panic, refuses the re-mint.
+    async fn restore(&self, plan: &[Restore]) -> Result<()> {
+        tracing::info!(
+            service = %self.service, instance = %self.instance(),
+            parameters = plan.len(),
+            "config.v1: the device returns to its startup values, for a re-mint (§2.12)"
+        );
+        let device = Arc::clone(&self.device);
+        let owned = plan.to_vec();
+        let joined = tokio::spawn(async move { device.restore_startup(&owned).await }).await;
+        let words = match joined {
+            Ok(Ok(())) => return Ok(()),
+            Ok(Err(words)) => words,
+            Err(e) => format!("the device's act did not complete: {e}"),
+        };
+        let act = Act::Undo {
+            restore: plan.to_vec(),
+        };
+        let words = device_words(&self.schema, &act, &words).unwrap_or(model::REDACTED);
+        tracing::warn!(
+            service = %self.service, instance = %self.instance(),
+            words = %words,
+            "config.v1: the device did not return to its startup values, so the re-mint is \
+             refused (config.v1 §2.12)"
+        );
+        Err(Error::Contract(format!(
+            "config.v1 §2.12: the device did not return to its startup values ({words}), so \
+             the re-mint is refused"
+        )))
+    }
+
     fn now(&self) -> Time {
         let t = time_of(SystemTime::now());
         Time::from_millis(
@@ -752,13 +979,13 @@ impl Inner {
     async fn perform(&self, act: &Act) -> DeviceResult {
         match act {
             Act::Apply { group, values } => tracing::info!(
-                service = %self.service, instance = %self.instance,
+                service = %self.service, instance = %self.instance(),
                 group = %group,
                 parameters = values.len(),
                 "config.v1: apply"
             ),
             Act::Undo { restore } => tracing::info!(
-                service = %self.service, instance = %self.instance,
+                service = %self.service, instance = %self.instance(),
                 parameters = restore.len(),
                 "config.v1: undo"
             ),
@@ -767,7 +994,7 @@ impl Inner {
         if let DeviceResult::Refused(words) | DeviceResult::Failed { words, .. } = &result {
             let words = device_words(&self.schema, act, words).unwrap_or(model::REDACTED);
             tracing::warn!(
-                service = %self.service, instance = %self.instance,
+                service = %self.service, instance = %self.instance(),
                 words = %words,
                 "config.v1: the device {} (config.v1 §2.9, §2.11)",
                 if matches!(act, Act::Apply { .. }) {
@@ -807,10 +1034,10 @@ impl Inner {
             if last.as_ref() != Some(&out.view) {
                 let status = ConfigStatus::of(&out.view);
                 if let Err(e) = self.view.put_value(&out.view).await {
-                    tracing::warn!(service = %self.service, instance = %self.instance, "config.v1: the view was not put: {e}");
+                    tracing::warn!(service = %self.service, instance = %self.instance(), "config.v1: the view was not put: {e}");
                 }
                 if let Err(e) = self.status.put_value(&status).await {
-                    tracing::warn!(service = %self.service, instance = %self.instance, "config.v1: the status was not put: {e}");
+                    tracing::warn!(service = %self.service, instance = %self.instance(), "config.v1: the status was not put: {e}");
                 }
                 *last = Some(out.view);
             }
@@ -845,7 +1072,7 @@ impl Inner {
             },
             Some(Err(r)) => {
                 tracing::info!(
-                    service = %self.service, instance = %self.instance,
+                    service = %self.service, instance = %self.instance(),
                     code = r.code.as_str(),
                     why = %r.message,
                     "config.v1: refused"
@@ -887,7 +1114,7 @@ impl Inner {
         let req: SetRequest = call.request()?;
         let who = claimed(&call);
         tracing::info!(
-            service = %self.service, instance = %self.instance,
+            service = %self.service, instance = %self.instance(),
             group = %group,
             request = %log_request(&self.schema, &group, &req),
             actor = who.actor.as_deref().unwrap_or("-"),
@@ -934,7 +1161,7 @@ impl Inner {
         let req: ControlRequest = call.request()?;
         let who = claimed(&call);
         tracing::info!(
-            service = %self.service, instance = %self.instance,
+            service = %self.service, instance = %self.instance(),
             token = %req.token,
             actor = who.actor.as_deref().unwrap_or("-"),
             request_id = who.request_id.as_deref().unwrap_or("-"),
@@ -971,7 +1198,7 @@ impl Inner {
         }
         let req: ControlRequest = call.request()?;
         tracing::info!(
-            service = %self.service, instance = %self.instance,
+            service = %self.service, instance = %self.instance(),
             token = %req.token,
             "config.v1: persist"
         );
@@ -987,7 +1214,7 @@ impl Inner {
                 Ok(plan) => {
                     if let Err(why) = self.device.persist(&plan.entries).await {
                         tracing::warn!(
-                            service = %self.service, instance = %self.instance,
+                            service = %self.service, instance = %self.instance(),
                             "config.v1: the persisted layer was not written: {why}"
                         );
                         return Err(OpError::internal(format!(
@@ -1075,7 +1302,7 @@ impl Inner {
                         });
                         if let Some(why) = why {
                             tracing::warn!(
-                                service = %self.service, instance = %self.instance,
+                                service = %self.service, instance = %self.instance(),
                                 revision = doc.revision,
                                 "config.v1: a desired document gave up waiting (desired.v1): {why}"
                             );
@@ -1095,7 +1322,7 @@ impl Inner {
                     }
                     Converge::Refused(r) | Converge::Converged(r) => {
                         tracing::info!(
-                            service = %self.service, instance = %self.instance,
+                            service = %self.service, instance = %self.instance(),
                             revision = doc.revision,
                             report = %serde_json::to_string(&r).unwrap_or_default(),
                             "config.v1: a desired document acted on (desired.v1)"
@@ -1121,7 +1348,7 @@ impl Inner {
             if let Some(Err(refusal)) = &done.reply {
                 let r = model::desired_failed(doc.revision, &group, refusal);
                 tracing::info!(
-                    service = %self.service, instance = %self.instance,
+                    service = %self.service, instance = %self.instance(),
                     revision = doc.revision,
                     report = %serde_json::to_string(&r).unwrap_or_default(),
                     "config.v1: a desired document failed (desired.v1)"
@@ -1151,7 +1378,7 @@ impl Inner {
                     Converge::Wait => return,
                     Converge::Refused(report) | Converge::Converged(report) => {
                         tracing::info!(
-                            service = %self.service, instance = %self.instance,
+                            service = %self.service, instance = %self.instance(),
                             revision = doc.revision,
                             report = %serde_json::to_string(&report).unwrap_or_default(),
                             "config.v1: a desired document acted on"
@@ -1176,7 +1403,7 @@ impl Inner {
             if let Some(Err(refusal)) = &done.reply {
                 let report = model::desired_failed(revision, &group, refusal);
                 tracing::info!(
-                    service = %self.service, instance = %self.instance,
+                    service = %self.service, instance = %self.instance(),
                     revision,
                     report = %serde_json::to_string(&report).unwrap_or_default(),
                     "config.v1: a desired document failed"

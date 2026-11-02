@@ -177,6 +177,11 @@ pub struct Sim {
     pub applies: Vec<(Instant, String, BTreeMap<String, Value>)>,
     /// Each undo it was asked for, when and what, whether or not it failed.
     pub undos: Vec<(Instant, Vec<Restore>)>,
+    /// Each return to its startup values it was asked for, for a re-mint
+    /// (§2.12), when and what.
+    pub restores: Vec<(Instant, Vec<Restore>)>,
+    /// Its next return to its startup values is refused, in these words.
+    pub refuse_restore: Option<String>,
     /// Its next apply is refused, in these words.
     pub refuse_apply: Option<String>,
     /// Its next undo fails.
@@ -312,6 +317,27 @@ impl Device for SimDevice {
                         Ok(())
                     }
                 }
+            })
+        })
+    }
+
+    fn restore_startup<'a>(
+        &'a self,
+        restore: &'a [Restore],
+    ) -> zenkey::call::BoxFuture<'a, Result<(), String>> {
+        Box::pin(async move {
+            self.with(|s| {
+                if let Some(words) = s.refuse_restore.take() {
+                    return Err(words);
+                }
+                s.restores.push((Instant::now(), restore.to_vec()));
+                for r in restore {
+                    s.held
+                        .entry(r.group.clone())
+                        .or_default()
+                        .insert(r.parameter.clone(), r.value.clone());
+                }
+                Ok(())
             })
         })
     }

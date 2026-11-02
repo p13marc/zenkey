@@ -351,10 +351,10 @@
 //! (`spec/profiles/telemetry/conformance/contracts/`), unless a contract
 //! file given implements it, and writes its frame resources through a
 //! frame writer each, from `telemetry frame` lines: `record`, `flush`,
-//! `lose`, `mutation` and `new-epoch` as `frame`'s (below), and `raw
-//! <resource> <json>`, a frame of one full record put from the owner's
-//! session under the writer's run at its key's next seq, unchecked, as an
-//! owner the text does not allow would. Its bare counter
+//! `lose`, `mutation`, `new-epoch` and `new-run` as `frame`'s (below),
+//! and `raw <resource> <json>`, a frame of one full record put from the
+//! owner's session under the writer's run at its key's next seq,
+//! unchecked, as an owner the text does not allow would. Its bare counter
 //! `sdu/dropped_total` is a `telemetry put` resource. A metered refusal is
 //! `refused <line>: telemetry.v2 decreased field=<f> before=<n> after=<n>:
 //! <words>` or `telemetry.v2 code field=<f> code=<n>: <words>`
@@ -536,8 +536,8 @@
 //! `linkframes.v1`, the contract of `spec/scenarios/frames.md`, and writes
 //! its frame resources through a `FrameWriter` each, from `frame record
 //! <resource> <json> [at=<ms>]` lines; `frame flush`, `frame lose` (the
-//! scenarios' lost frame), `frame mutation` (refused) and `frame new-epoch`
-//! beside them (`owner/frames.rs`).
+//! scenarios' lost frame), `frame mutation` (refused), `frame new-epoch`
+//! and `frame new-run` beside them (`owner/frames.rs`).
 //!
 //! **`timing.v1`** (`spec/profiles/timing/v1.md`, #908) is the runtime's
 //! ([`zenkey::timing`]): with `--timing` the owner implements `pace.v1`,
@@ -1004,6 +1004,7 @@ telemetry.v2 (spec/profiles/telemetry/v2.md)
   telemetry frame lose <resource>
   telemetry frame mutation <resource>
   telemetry frame new-epoch       as frame's (below), on meterframe.v1
+  telemetry frame new-run         as frame's (below), on meterframe.v1
   telemetry frame raw <resource> <json>
                                   a frame of one full record, its time this
                                   host's clock now, from the owner's session
@@ -1180,6 +1181,7 @@ Frames (spec/core.md §7.7, spec/scenarios/frames.md)
                                   taken, nothing put (frames.md's lost frame)
   frame mutation <resource>       asks for a plain writer, which is refused
   frame new-epoch                 a new instance and a new run (core §4.3)
+  frame new-run                   a new run, the same instance (core §4.3)
 
 timing.v1 (spec/profiles/timing/v1.md)
   --timing implements pace.v1, the scenarios' contract
