@@ -12,9 +12,13 @@ and reads no presence, as the scenarios' R does:
   consecutive conforming samples paired with no presence read, so an epoch
   carried by nothing in band is assumed (v1 §2.9, §2.14).
 
-Every put is read inside the subscriber's callback; one that raises is
-recorded ``{"undecodable": why}``, never lost silently (review-bot's note on
-round 97's ``frame_live``).
+Every put is read inside the subscriber's callback, and every one is
+recorded. A payload R cannot read is ``{"undecodable": why}``, as the
+readers name it; an exception raised in zk2py's own code is
+``{"error": why}``, apart (:meth:`SeriesSubscriber.errors`), so that a bug
+of R's is never counted as the owner's bytes (review-bot's notes on round
+97's ``frame_live`` and on round 98's R). A bare stream's sample is
+conformed outside the lock, and only what R holds is changed under it.
 """
 
 from __future__ import annotations
@@ -61,29 +65,38 @@ class SeriesSubscriber:
         key = str(sample.key_expr)
         try:
             read = zk2c.read_sample(sample)
+            c = self._v1_conform(key, read) if key in self.v1 else None
             with self.lock:
                 if key in self.readers:
                     got = self.readers[key].read_put(read, arrival, self.epoch)
-                elif key in self.v1:
-                    got = self._v1(key, read, arrival)
+                elif c is not None:
+                    got = self._v1_pair(key, c, arrival)
                 else:
                     got = {"not_a_metric": True}
-        except Exception as e:  # noqa: BLE001 - recorded, never lost inside zenoh's callback
-            got = {"undecodable": f"{type(e).__name__}: {e}"}
+                self.heard.append((arrival, key, got))
+            return
+        except Exception as e:  # noqa: BLE001 - zk2py's own error: recorded, never lost inside zenoh's callback
+            got = {"error": f"{type(e).__name__}: {e}"}
         with self.lock:
             self.heard.append((arrival, key, got))
 
-    def _v1(self, key: str, read: Any, arrival: int) -> dict[str, Any]:
+    def _v1_conform(self, key: str, read: Any) -> tm.Conformance:
+        """A bare metric stream's sample, conformed (v1 §2.6): pure, read
+        outside the lock. A payload that is not JSON is undecodable."""
         d = self.v1[key]
         if read.refused or read.record is None:
-            c = tm.conform(d, tm.Sample(undecodable=True))
-        else:
-            try:
-                c = tm.conform(d, tm.Sample(tm.decode_json(read.record)))
-            except tm.Undecodable:
-                c = tm.conform(d, tm.Sample(undecodable=True))
+            return tm.conform(d, tm.Sample(undecodable=True))
+        try:
+            return tm.conform(d, tm.Sample(tm.decode_json(read.record)))
+        except tm.Undecodable:
+            return tm.conform(d, tm.Sample(undecodable=True))
+
+    def _v1_pair(self, key: str, c: tm.Conformance, arrival: int) -> dict[str, Any]:
+        """What R holds of a bare stream's conformed sample, under the lock:
+        the sample, and its pair with the last conforming one (v1 §2.10)."""
+        d = self.v1[key]
         rd = tm.read_of(c, arrival_ns=arrival) if c.conformance == tm.CONFORMS else None
-        got: dict[str, Any] = {"conformance": c.expect() if hasattr(c, "expect") else c.conformance}
+        got: dict[str, Any] = {"conformance": c.expect()}
         earlier = next((x for _, x in reversed(self.v1_samples.get(key, [])) if x is not None), None)
         self.v1_samples.setdefault(key, []).append((c, rd))
         if rd is not None and earlier is not None:
@@ -113,8 +126,15 @@ class SeriesSubscriber:
         return self.of(key)
 
     def undecodable(self) -> list[str]:
+        """The puts whose payload R could not read, each named."""
         with self.lock:
             return [g["undecodable"] for _, _, g in self.heard if "undecodable" in g]
+
+    def errors(self) -> list[str]:
+        """The puts on which zk2py's own code raised, each named: R's
+        failures, never the owner's."""
+        with self.lock:
+            return [g["error"] for _, _, g in self.heard if "error" in g]
 
     def series(self) -> list[tuple[str, str, str]]:
         """Each series R holds, (key, field or None, label): a frame key's

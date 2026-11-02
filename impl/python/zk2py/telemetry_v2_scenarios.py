@@ -23,9 +23,12 @@ reader is given.
   ``telemetry frame`` commands, ``--run-file`` for §6), and zk2py's R;
 - ``py-zenctl``: zk2py's owner, and ``zenctl watch`` (one per resource,
   given the contract) as R, with ``zenctl get`` reading the frames the
-  runner captured, one reply each. zenctl's telemetry verbs read no frame
-  yet (#983's T2): it shows each record's field states, and judges no
-  series, pair or rate. Each step it cannot judge is named ``not judged``.
+  runner captured, one reply each; and since #983's T2 (round 99) ``zenctl
+  telemetry`` over the section's window (:class:`TelemetryTool`, across
+  the face in §5), which reads a frame resource's series: each step about
+  a series, a pair or a rate is judged on its member rows (:func:`zpairs`).
+  zenctl reads presence where R reads none, so a pair's ``presence`` is
+  named beside it, never judged.
 
 **The wire.** Beside R, the runner subscribes to ``zk2/lab/**`` and reads
 each frame's body itself, so the owner's rules (the counts modulo each
@@ -66,7 +69,7 @@ BLACKBOX = Path(os.environ.get("ZK2PY_BLACKBOX", "/srv/dev/scratch/zenkey/bin/cu
 IFACE, ADDRESS = "meterframe.v1", "lab/meterframe"
 LINK, TOTALS, BYTES, BARE = "frames/link", "frames/totals", "frames/bytes", "sdu/dropped_total"
 PAIRINGS = ("py-py", "rust-py", "py-zenctl")
-NOT_JUDGED = "not judged: zenctl reads no frame's series yet (#983 T2)"
+NOT_JUDGED = "not judged: zenctl does not show it"
 
 
 def key_of(res: str) -> str:
@@ -279,7 +282,11 @@ class PyReader:
         self.s = SeriesSubscriber(session, ADDRESS, contract())
 
     def frames(self, res: str, n: int, timeout: float = 5.0) -> list[dict[str, Any]]:
-        return [g for g in self.s.wait(key_of(res), n, timeout) if "undecodable" not in g]
+        got = self.s.wait(key_of(res), n, timeout)
+        if self.s.errors():
+            # R's own failure (round 99's mend): never read as the owner's.
+            raise RuntimeError(f"zk2py's R raised: {self.s.errors()}")
+        return [g for g in got if "undecodable" not in g]
 
     def pairs(self, res: str) -> list[t2.Pair]:
         return self.s.pairs(key_of(res))
@@ -360,12 +367,13 @@ def make_reader(impl: str, session: Any, ep: str) -> Any:
 
 class TelemetryTool:
     """``zenctl telemetry zk2/lab/meterframe/**`` for ``for_s`` seconds, in
-    json, given the contract: its window opens at its "listening" line,
-    which this waits for."""
+    json, given the contract (``--across-face`` with ``across``): its window
+    opens at its "listening" line, which this waits for."""
 
-    def __init__(self, ep: str, for_s: float) -> None:
+    def __init__(self, ep: str, for_s: float, across: bool = False) -> None:
         self.proc = subprocess.Popen([str(BLACKBOX / "zenctl"), "telemetry", f"zk2/{ADDRESS}/**", "--for",
-                                      f"{for_s:g}", "--format", "json", "-c", ep, "--contracts", str(CONTRACT)],
+                                      f"{for_s:g}", "--format", "json", "-c", ep, "--contracts", str(CONTRACT),
+                                      *(["--across-face"] if across else [])],
                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.err: list[str] = []
         threading.Thread(target=lambda: self.err.extend(self.proc.stderr), daemon=True).start()
@@ -383,6 +391,39 @@ class TelemetryTool:
             return json.loads(out)
         except ValueError:
             return None
+
+
+def zmember(doc: dict[str, Any] | None, res: str, fld: str | None = None) -> dict[str, Any] | None:
+    """zenctl telemetry's member row of ``res``'s key, a frame's ``fld`` (a
+    bare stream's row has no field)."""
+    for x in (doc or {}).get("rows", []):
+        if x.get("row") == "member" and x.get("key") == key_of(res) and x.get("field") == fld:
+            return x
+    return None
+
+
+def zpairs(doc: dict[str, Any] | None, res: str, fld: str | None = None) -> list[dict[str, Any]]:
+    """Every pair zenctl telemetry formed of one member, oldest first."""
+    m = zmember(doc, res, fld)
+    return list((m or {}).get("pairs") or [])
+
+
+def zp(q: dict[str, Any]) -> str:
+    rate = "" if q.get("rate") is None else f" {q['rate']:g} {q.get('rate_unit')} over {q.get('elapsed_s')} s " \
+        f"{q.get('time_basis')}" + ("" if q.get("jitter_ms") is None else f" ±{q['jitter_ms']} ms")
+    return (f"{q.get('earlier')} → {q.get('later')} {q.get('continuity')} {q.get('epoch')}/{q.get('via')}"
+            f" presence {q.get('presence')}" + rate + ("" if q.get("no_rate") is None else f" no rate ({q['no_rate']})"))
+
+
+def zrated(q: dict[str, Any], d: int, nominal_s: float, basis: str, exact: bool = False) -> bool:
+    """:func:`rated` over a zenctl pair: same_epoch, established in band, its
+    basis, its elapsed seconds within the jitter of ``nominal_s`` (exactly
+    with ``exact``), and its rate v1 §2.11's formula over ``d`` and them."""
+    e = q.get("elapsed_s")
+    return (q.get("continuity"), q.get("epoch"), q.get("via"), q.get("time_basis")) \
+        == ("same_epoch", "established", "in_band", basis) and isinstance(e, (int, float)) and e > 0 \
+        and abs(e - nominal_s) <= (1e-9 if exact else JITTER_NS / 1e9) \
+        and isinstance(q.get("rate"), (int, float)) and abs(q["rate"] - d / e) <= 1e-9 * max(1.0, abs(d / e))
 
 
 class Wire:
@@ -634,6 +675,7 @@ def section1(report: Report, pairing: str) -> None:
         o = make_owner(owner_impl, bus.endpoint)
         bus.closers.append(o)
         time.sleep(1.0)
+        tool = TelemetryTool(bus.endpoint, 8) if reader_impl == "zenctl" else None
         t = o.now_ms() + 200
         got: list[Any] = []
         _steps(o, t, [
@@ -674,13 +716,36 @@ def section1(report: Report, pairing: str) -> None:
             report.check(pairing, sec, "zenctl get, each frame read alone (one reply each): every field known",
                          len(alone) == 2 and all(g["records"][0]["fields"]["dropped"].get("state") == "known"
                                                  for g in alone), f"{how}, {len(alone)} of {len(payloads)}")
-            for step in ("expected 1: dropped 10 → 20 same_epoch in band, 5 in 1/s over 2,000 ms, measured",
-                         "expected 2: rx paired within the frame by offsets, 500 and 600 By/s, scheduled ±100 and "
-                         "±200 ms",
-                         "expected 3: rx 2100 → 2600 across two frames by instants, 500 By/s, scheduled ±100 ms",
-                         "expected 4: each scheduled rate shown as scheduled with its bound",
-                         "expected 5: the gauges form no pair"):
-                report.not_judged(pairing, sec, step)
+            assert tool is not None
+            doc = tool.result()
+            zl, zb = zpairs(doc, LINK, "dropped"), zpairs(doc, BYTES, "rx")
+            report.check(pairing, sec, "expected 1, zenctl telemetry: dropped 10 → 20 same_epoch, established in "
+                                       "band, 5 in 1/s over 2,000 ms, measured",
+                         len(zl) == 1 and (zl[0]["earlier"], zl[0]["later"]) == (10, 20)
+                         and zrated(zl[0], 10, 2.0, "measured") and zl[0].get("rate_unit") == "1/s",
+                         "; ".join(zp(q) for q in zl))
+            report.check(pairing, sec, "expected 2, zenctl telemetry: rx paired within the frame by the records' "
+                                       "offsets, 1000 → 1500 at 500 By/s and 1500 → 2100 at 600 By/s, each over "
+                                       "1,000 ms, scheduled ±100 and ±200 ms",
+                         len(zb) == 3 and [(q["earlier"], q["later"], q.get("jitter_ms")) for q in zb[:2]]
+                         == [(1000, 1500, 100), (1500, 2100, 200)]
+                         and all(zrated(q, d, 1.0, "scheduled", exact=True) and q.get("rate_unit") == "By/s"
+                                 for q, d in zip(zb[:2], (500, 600))), "; ".join(zp(q) for q in zb[:2]))
+            report.check(pairing, sec, "expected 3, zenctl telemetry: rx 2100 → 2600 across the two frames by their "
+                                       "instants, 500 By/s over 1,000 ms, scheduled ±100 ms",
+                         len(zb) == 3 and (zb[2]["earlier"], zb[2]["later"]) == (2100, 2600)
+                         and zrated(zb[2], 500, 1.0, "scheduled") and zb[2].get("jitter_ms") == 100,
+                         "; ".join(zp(q) for q in zb[2:]))
+            report.check(pairing, sec, "expected 4, zenctl telemetry: each scheduled rate shown as scheduled, with its "
+                                       "bound, never as measured",
+                         len(zb) == 3 and all(q.get("time_basis") == "scheduled" and q.get("jitter_ms") is not None
+                                              for q in zb), f"{[(q.get('time_basis'), q.get('jitter_ms')) for q in zb]}")
+            gauges = [zmember(doc, LINK, n) for n in ("queue_depth", "duty_available", "duty_wait_ms")]
+            report.check(pairing, sec, "expected 5, zenctl telemetry: queue_depth, duty_available and duty_wait_ms "
+                                       "are gauges, two samples each, and no pair",
+                         all(m is not None and m.get("kind") == "gauge" and not m.get("pairs")
+                             and (m.get("samples") or {}).get("received") == 2 for m in gauges),
+                         f"{[(None if m is None else (m.get('kind'), (m.get('samples') or {}).get('received'), m.get('pairs'))) for m in gauges]}")
             return
         fl, fb = r.frames(LINK, 2), r.frames(BYTES, 2)
         report.check(pairing, sec, "expected 1: R reads every series field of frames/link as a sample",
@@ -730,6 +795,7 @@ def section2(report: Report, pairing: str) -> None:
         o = make_owner(owner_impl, bus.endpoint)
         bus.closers.append(o)
         time.sleep(1.0)
+        tool = TelemetryTool(bus.endpoint, 9) if reader_impl == "zenctl" else None
         t = o.now_ms() + 200
         _steps(o, t, [(0, lambda at: o.record(TOTALS, {"frames_total": 100, "temperature": "21.5"}, at)),
                       (1000, lambda at: o.record(TOTALS, {"frames_total": 140, "temperature": "21.5"}, at))])
@@ -755,10 +821,24 @@ def section2(report: Report, pairing: str) -> None:
                          len(g) == 4 and g[2].get("follows") == "run"
                          and zstate(g[2], 0, "frames_total") == "known 3",
                          f"{[(x.get('follows'), zstate(x, 0, 'frames_total')) for x in g]}")
-            for step in ("expected 1: 100 → 140 same_epoch, established in band, with a rate",
-                         "expected 3: 140 → 3 reset, established in band, no rate, no finding",
-                         "expected 4: 3 → 9 same_epoch again, with a rate"):
-                report.not_judged(pairing, sec, step)
+            assert tool is not None
+            doc = tool.result()
+            zf = zpairs(doc, TOTALS, "frames_total")
+            report.check(pairing, sec, "expected 1, zenctl telemetry: 100 → 140 same_epoch, established in band, with "
+                                       "a rate", len(zf) >= 1 and (zf[0]["earlier"], zf[0]["later"]) == (100, 140)
+                         and zrated(zf[0], 40, 1.0, "measured"), "; ".join(zp(q) for q in zf[:1]))
+            report.check(pairing, sec, "expected 3, zenctl telemetry: 140 → 3 reset, established in band, no rate, "
+                                       "no finding",
+                         len(zf) >= 2 and (zf[1]["earlier"], zf[1]["later"], zf[1].get("continuity"),
+                                           zf[1].get("epoch"), zf[1].get("via"), zf[1].get("no_rate"))
+                         == (140, 3, "reset", "established", "in_band", "reset")
+                         and (doc or {}).get("judgement", {}).get("answer") != "established",
+                         "; ".join(zp(q) for q in zf[1:2]) + f"; judgement {(doc or {}).get('judgement')}")
+            report.check(pairing, sec, "expected 4, zenctl telemetry: 3 → 9 same_epoch again, with a rate",
+                         len(zf) == 3 and (zf[2]["earlier"], zf[2]["later"]) == (3, 9)
+                         and zrated(zf[2], 6, 1.0, "measured"), "; ".join(zp(q) for q in zf[2:]))
+            report.note(pairing, sec, "zenctl reads presence, where R reads none: its pairs' presence "
+                                      f"{[q.get('presence') for q in zf]}")
             return
         p = r.pairs(TOTALS)
         f = [x for x in p if x.field == "frames_total"]
@@ -795,6 +875,7 @@ def section3(report: Report, pairing: str) -> None:
         o = make_owner(owner_impl, bus.endpoint)
         bus.closers.append(o)
         time.sleep(1.0)
+        tool = TelemetryTool(bus.endpoint, 6) if reader_impl == "zenctl" else None
         t = o.now_ms() + 200
         got: list[Any] = []
         _steps(o, t, [(0, lambda at: got.append(o.record(BYTES, {"rx": 16_777_000}, at))),
@@ -814,9 +895,21 @@ def section3(report: Report, pairing: str) -> None:
                          len(g) == 1 and [zstate(g[0], i, "rx") for i in range(3)]
                          == ["known 16777000", "known 100", "known 9000100"],
                          f"{[zstate(g[0], i, 'rx') for i in range(len(g[0]['records']))] if g else None}")
-            for step in ("expected 2: 16,777,000 → 100 same_epoch, an increase of 316 at 316 By/s, scheduled",
-                         "expected 3: 100 → 9,000,100 unobservable (wrap_or_decrease), no rate"):
-                report.not_judged(pairing, sec, step)
+            assert tool is not None
+            doc = tool.result()
+            zb = zpairs(doc, BYTES, "rx")
+            report.check(pairing, sec, "expected 2, zenctl telemetry: 16,777,000 → 100 same_epoch, an increase of "
+                                       "316 at 316 By/s, scheduled",
+                         len(zb) >= 1 and (zb[0]["earlier"], zb[0]["later"], zb[0].get("continuity"),
+                                           zb[0].get("rate"), zb[0].get("rate_unit"), zb[0].get("time_basis"))
+                         == (16_777_000, 100, "same_epoch", 316.0, "By/s", "scheduled"), "; ".join(zp(q) for q in zb[:1]))
+            report.check(pairing, sec, "expected 3, zenctl telemetry: 100 → 9,000,100 unobservable "
+                                       "(wrap_or_decrease), no rate: no decrease, no finding, no rate of billions",
+                         len(zb) == 2 and (zb[1]["earlier"], zb[1]["later"], zb[1].get("continuity"),
+                                           zb[1].get("no_rate"), zb[1].get("rate"))
+                         == (100, 9_000_100, "unobservable", "wrap_or_decrease", None)
+                         and (doc or {}).get("judgement", {}).get("answer") != "established",
+                         "; ".join(zp(q) for q in zb[1:]) + f"; judgement {(doc or {}).get('judgement')}")
             return
         r.frames(BYTES, 1)
         p = r.pairs(BYTES)
@@ -847,6 +940,7 @@ def section4(report: Report, pairing: str) -> None:
         o = make_owner(owner_impl, bus.endpoint)
         bus.closers.append(o)
         time.sleep(1.0)
+        tool = TelemetryTool(bus.endpoint, 7) if reader_impl == "zenctl" else None
         t = o.now_ms() + 200
         _steps(o, t, [
             (0, lambda at: o.record(TOTALS, {"frames_total": 10, "temperature": "20"}, at)),
@@ -873,8 +967,18 @@ def section4(report: Report, pairing: str) -> None:
                          and zstate(g[2], 0, "temperature") == 'known "21"'
                          and zstate(g[3], 0, "frames_total") == "known 18",
                          f"{[(x.get('follows'), zstate(x, 0, 'frames_total'), zstate(x, 0, 'temperature')) for x in g]}")
-            report.not_judged(pairing, sec, "expected 3: 10 → 18 same_epoch over the 4 s between the instants, "
-                                            "2 in 1/s, measured")
+            assert tool is not None
+            doc = tool.result()
+            zf, m = zpairs(doc, TOTALS, "frames_total"), zmember(doc, TOTALS, "frames_total")
+            report.check(pairing, sec, "expected 1 and 2, zenctl telemetry: frames_total sampled twice, records 1 "
+                                       "and 5: record 2's held value and record 4's unknown are no sample, never 0",
+                         m is not None and (m.get("samples") or {}).get("received") == 2,
+                         f"{None if m is None else m.get('samples')}")
+            report.check(pairing, sec, "expected 3, zenctl telemetry: record 5's 18 paired with record 1's 10: "
+                                       "same_epoch, established in band, 2 in 1/s over the 4 s between the instants, "
+                                       "measured",
+                         len(zf) == 1 and (zf[0]["earlier"], zf[0]["later"]) == (10, 18)
+                         and zrated(zf[0], 8, 4.0, "measured"), "; ".join(zp(q) for q in zf))
             return
         report.check(pairing, sec, "expected 1: R reads record 2's frames_total as held, known 10: no sample",
                      len(g) == 4 and rd(g[1], 0, "frames_total") == "held known 10",
@@ -908,6 +1012,7 @@ def section5(report: Report, pairing: str) -> None:
         o = make_owner(owner_impl, bus.endpoint)
         bus.closers.append(o)
         time.sleep(1.5)
+        tool = TelemetryTool(bus.r_endpoint, 6, across=True) if reader_impl == "zenctl" else None
         t = o.now_ms() + 200
         refused: list[Any] = []
         _steps(o, t, [
@@ -934,9 +1039,21 @@ def section5(report: Report, pairing: str) -> None:
                          len(g) == 2 and g[1].get("follows") == "continues"
                          and [zstate(x, 0, "frames_total") for x in g] == ["known 500", "known 480"],
                          f"{[(x.get('follows'), zstate(x, 0, 'frames_total')) for x in g]}")
-            for step in ("expected 1: 500 → 480 decreased, established in band, the finding, with no presence",
-                         "expected 3: the bare JSON counter's same decrease an assumed reset across the face"):
-                report.not_judged(pairing, sec, step)
+            assert tool is not None
+            doc = tool.result()
+            zf, zbare = zpairs(doc, TOTALS, "frames_total"), zpairs(doc, BARE)
+            report.check(pairing, sec, "expected 1, zenctl telemetry across the face: 500 → 480 decreased, "
+                                       "established in band, the finding (judgement established), with no presence",
+                         len(zf) == 1 and (zf[0]["earlier"], zf[0]["later"], zf[0].get("continuity"),
+                                           zf[0].get("epoch"), zf[0].get("via"), zf[0].get("presence"))
+                         == (500, 480, "decreased", "established", "in_band", "none")
+                         and (doc or {}).get("judgement", {}).get("answer") == "established",
+                         "; ".join(zp(q) for q in zf) + f"; judgement {(doc or {}).get('judgement')}")
+            report.check(pairing, sec, "expected 3, zenctl telemetry across the face: the bare JSON counter's same "
+                                       "decrease, no in-band epoch, an assumed reset (v1 §2.14)",
+                         len(zbare) == 1 and (zbare[0]["earlier"], zbare[0]["later"], zbare[0].get("continuity"),
+                                              zbare[0].get("epoch"), zbare[0].get("via"))
+                         == (500, 480, "reset", "assumed", None), "; ".join(zp(q) for q in zbare))
             return
         r.frames(TOTALS, 2)
         p = [x for x in r.pairs(TOTALS) if x.field == "frames_total"]
@@ -978,6 +1095,7 @@ def section6(report: Report, pairing: str) -> None:
         o = make_owner(owner_impl, bus.endpoint, run_file=run_file)
         bus.closers.append(o)
         time.sleep(1.0)
+        tool = TelemetryTool(bus.endpoint, 9) if reader_impl == "zenctl" else None
         t = o.now_ms() + 200
         _steps(o, t, [(0, lambda at: o.record(TOTALS, {"frames_total": 1000, "temperature": "21.5"}, at)),
                       (1000, lambda at: o.record(TOTALS, {"frames_total": 1010, "temperature": "21.5"}, at))])
@@ -1004,7 +1122,16 @@ def section6(report: Report, pairing: str) -> None:
                          len(g) == 3 and g[2].get("follows") == "rewind"
                          and zstate(g[2], 0, "frames_total") == "known 4",
                          f"{[(x.get('follows'), zstate(x, 0, 'frames_total')) for x in g]}")
-            report.not_judged(pairing, sec, "expected 2: 1010 → 4 reset, established in band, never decreased")
+            assert tool is not None
+            doc = tool.result()
+            zf = zpairs(doc, TOTALS, "frames_total")
+            report.check(pairing, sec, "expected 2, zenctl telemetry: 1010 → 4 reset, established in band, never "
+                                       "decreased, no finding",
+                         len(zf) == 2 and (zf[1]["earlier"], zf[1]["later"], zf[1].get("continuity"),
+                                           zf[1].get("epoch"), zf[1].get("via")) == (1010, 4, "reset", "established",
+                                                                                     "in_band")
+                         and (doc or {}).get("judgement", {}).get("answer") != "established",
+                         "; ".join(zp(q) for q in zf) + f"; judgement {(doc or {}).get('judgement')}")
             return
         report.check(pairing, sec, "expected 1: R reads I2's first frame as a rewind (a seq of the run it holds, "
                                    "older than expected); that keyframe makes each field known again",
@@ -1055,25 +1182,26 @@ def section7(report: Report, pairing: str) -> None:
                          f"bare {b}, frames {[zstate(x, 0, 'dropped') for x in g]}")
             assert tool is not None
             doc = tool.result()
-            rows = [x for x in (doc or {}).get("rows", []) if x.get("row") == "resource"]
-            members = [x for x in (doc or {}).get("rows", []) if x.get("row") == "member"]
-            pairs = [q for m in members for q in m.get("pairs", [])]
-            report.check(pairing, sec, "zenctl telemetry (telemetry.v1's reader) reads the bare counter of this "
-                                       "telemetry.v2 contract by v1's rules, 7 → 9 same_epoch, and no frame resource "
-                                       "as a metric resource (v2 §2.1 to §2.15 by reference; #983 T2 to come)",
-                         [x.get("resource") for x in rows] == [f"stream/{BARE}"]
-                         and [(q.get("earlier"), q.get("later"), q.get("continuity")) for q in pairs]
-                         == [(7, 9, "same_epoch")],
-                         f"resources {[x.get('resource') for x in rows]}; pairs "
-                         f"{[(q.get('earlier'), q.get('later'), q.get('continuity'), q.get('epoch'), q.get('via')) for q in pairs]}; "
-                         f"judgement {(doc or {}).get('judgement')}")
-            report.note(pairing, sec, "zenctl telemetry reads presence, so its pair's epoch is established by "
-                                      "presence; R reads none, and v1 §2.9 assumes it")
-            for step in ("expected 1: two series, the frame's labelled \"sdu/dropped_total (frames/link)\"",
-                         "expected 2: the frame's series has the mirror's kind and unit, counter in 1",
-                         "expected 3: the bare 7 → 9 by v1, its epoch assumed; the frame's 7 → 9 established in band; "
-                         "never one with the other"):
-                report.not_judged(pairing, sec, step)
+            mb, md = zmember(doc, BARE), zmember(doc, LINK, "dropped")
+            report.check(pairing, sec, "expected 1, zenctl telemetry: two series, the key …/sdu/dropped_total and "
+                                       "dropped of …/frames/link, the second naming its mirror sdu/dropped_total",
+                         mb is not None and md is not None and md.get("mirrors") in (BARE, f"stream/{BARE}",
+                                                                                    [BARE], [f"stream/{BARE}"]),
+                         f"bare {mb is not None}, frame's dropped mirrors {None if md is None else md.get('mirrors')}")
+            report.check(pairing, sec, "expected 2, zenctl telemetry: the frame's series has the mirror's kind and "
+                                       "unit, counter in 1",
+                         md is not None and (md.get("kind"), md.get("unit")) == ("counter", "1"),
+                         f"{None if md is None else (md.get('kind'), md.get('kind_from'), md.get('unit'), md.get('unit_from'))}")
+            zb, zd = zpairs(doc, BARE), zpairs(doc, LINK, "dropped")
+            report.check(pairing, sec, "expected 3, zenctl telemetry: the bare 7 → 9 by v1's rules; the frame's "
+                                       "7 → 9 established in band; never one with the other",
+                         [(q["earlier"], q["later"], q.get("continuity")) for q in zb] == [(7, 9, "same_epoch")]
+                         and len(zd) == 1 and (zd[0]["earlier"], zd[0]["later"]) == (7, 9)
+                         and zrated(zd[0], 2, 1.0, "measured"),
+                         f"bare {[zp(q) for q in zb]}; frame {[zp(q) for q in zd]}")
+            report.note(pairing, sec, "zenctl telemetry reads presence, so the bare pair's epoch is "
+                                      f"{[(q.get('epoch'), q.get('via')) for q in zb]}; R reads none, and v1 §2.9 "
+                                      "assumes it")
             return
         r.frames(LINK, 2)
         deadline = time.monotonic() + 5

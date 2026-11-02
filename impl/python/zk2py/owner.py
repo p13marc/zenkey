@@ -232,7 +232,10 @@ def keeps_timestamp(c: Contract, r: dict[str, Any]) -> bool:
             return True
         if "desired.target_param" in ann:
             return True
-        if "telemetry.kind" in ann and "telemetry.v1" in c.canonical["uses"]:
+        # Core 0.90 (F-462's answer): "A state that is a metric resource of
+        # telemetry.v1, or of telemetry.v2 and no frame resource". A state is
+        # never a frame resource (core §7.7: a plain stream).
+        if "telemetry.kind" in ann and ({"telemetry.v1", "telemetry.v2"} & set(c.canonical["uses"])):
             return True
     if r["kind"] == "stream":
         d = timing.declaration("stream", ann)
@@ -1974,7 +1977,19 @@ class Owner:
                 with self._writes:
                     held = self._held.get(key)
                     if self._stop.is_set() or self.session is None or held is None or held.payload is None \
-                            or key in self.closed_writers or (self.ahead and self._stamped(key)):
+                            or key in self.closed_writers:
+                        continue
+                    if self.ahead and self._stamped(key):
+                        # Core 0.90 "A candidate's" and freshness.v2 0.5
+                        # §2.10 (F-461's answer): the guard holds the re-put
+                        # as it holds a put, and a covered member's bit is
+                        # cleared until a write of it goes on (review-bot on
+                        # round 98). A freshness.v2 member is never in
+                        # self.horizons (its §2.4: no re-put to confirm it),
+                        # so this clears nothing today; it keeps the three
+                        # held writes alike, as the reference's StateWriter
+                        # does.
+                        self._unvouch_held(key)
                         continue
                     if (time.monotonic() - held.at) * 1e9 < due:
                         continue
@@ -2047,8 +2062,23 @@ class Owner:
                 meter.check(run, values)
             ready = fr_.record(values, mono, wall)
             if meter is not None:
-                meter.accept(run, values)
-            return [self._put_frame(key, fr_, r) for r in ready]
+                meter.gather(run, values)
+            return [self._put_metered(key, fr_, r, meter) for r in ready]
+
+    def _put_metered(self, key: str, fr_: Any, ready: Any, meter: Any) -> dict[str, Any]:
+        """A ready frame put, its records' counts accepted by the meter once
+        the put went through, and forgotten if it raised (review-bot on round
+        98: "Accept after the put succeeds")."""
+        n = len(ready.records)
+        try:
+            out = self._put_frame(key, fr_, ready)
+        except BaseException:
+            if meter is not None:
+                meter.unsent(n)
+            raise
+        if meter is not None:
+            meter.put(n)
+        return out
 
     def _meter(self, key: str) -> Any:
         """``telemetry.v2``'s meter of a frame key (§2.19), or None where its
@@ -2075,7 +2105,7 @@ class Owner:
         fr_ = self._framer(key)
         with self._frames_lock:
             ready = fr_.end()
-            return None if ready is None else self._put_frame(key, fr_, ready)
+            return None if ready is None else self._put_metered(key, fr_, ready, self._meter(key))
 
     def _frame_wall(self, mono: int) -> dict[str, int] | None:
         """A record's wall time (core §7.7 "Times") for its instant ``mono``
@@ -2147,15 +2177,23 @@ class Owner:
             n = len(value["records"])
             seq = self._stream_seq.get(key, 0)
             self._stream_seq[key] = (seq + n) % 2**24
-        body = fr_.layout.write(value, self.writing_epoch())
-        payload = zk2c.write("frame", run[0], run[1], seq, fr_.layout.tag, body)
         lost = key in self._frames_lost
+        try:
+            body = fr_.layout.write(value, self.writing_epoch())
+            payload = zk2c.write("frame", run[0], run[1], seq, fr_.layout.tag, body)
+            if not lost:
+                if key not in self._publishers:
+                    self._member_publisher(key)
+                self._publishers[key].put(payload, encoding=zk2c.ENCODING)
+        except BaseException:
+            # A frame never sent gives its seqs back, where no later put took
+            # the ones after them, so that its reader reads no gap.
+            with self._seq_lock:
+                if self._stream_seq.get(key) == (seq + n) % 2**24:
+                    self._stream_seq[key] = seq
+            raise
         if lost:
             self._frames_lost.discard(key)
-        else:
-            if key not in self._publishers:
-                self._member_publisher(key)
-            self._publishers[key].put(payload, encoding=zk2c.ENCODING)
         out = {"run": zk2c.InBand(run[0], run[1], 0).run_hex(), "seq": seq, "records": value,
                "bytes": len(payload), "lost": lost}
         self.frames_put.append((key, out))
@@ -2227,7 +2265,8 @@ class Owner:
         return [f"zk2/{p}/{iface}/{face.resource_scope(rid, bound)}" for p in self.resolved_bindings.get(role, [])]
 
     def subscribe_role(self, role: str, iface: str, rid: str, sink: Any, discarded: Any = None,
-                       record: Any = None, epoch: int | None = None) -> None:
+                       record: Any = None, epoch: int | None = None, across: Any = None,
+                       horizon_s: float | None = None) -> list[Any]:
         """Subscribe through a role's resolved bindings, handing ``sink``
         each sample's (key, payload). A sample whose key expression is not
         concrete is discarded (R6), and its key handed to ``discarded``.
@@ -2240,8 +2279,16 @@ class Owner:
         handed on. Its ``time`` fields are read under ``epoch``, the
         deployment's, 0 where none is stated. A delete carries no record, so
         it hands ``sink`` (key, None), never bytes; its envelope, in the
-        delete's attachment, is read as every delete's is."""
-        from . import packed
+        delete's attachment, is read as every delete's is.
+
+        ``across``, a :class:`zk2py.far_side.FarSide` (core §8.5, 0.91):
+        where the face's medium repairs no lost frame, each subscription with
+        a horizon, ``horizon_s`` (:func:`zk2py.far_side.resource_horizon_s`
+        of the provider's resource), is declared again after two horizons of
+        silence while the session's transport stayed up
+        (:class:`zk2py.far_side.Redeclaring`). Returns the subscriptions,
+        each undeclared by ``.undeclare()``."""
+        from . import far_side, packed
 
         assert self.session is not None
 
@@ -2269,8 +2316,10 @@ class Owner:
             elif discarded is not None:
                 discarded(key)
 
-        for k in self.role_keys(role, iface, rid):
-            self._entities.append(self.session.declare_subscriber(k, zenoh.handlers.Callback(received)))
+        subs = [far_side.subscribe(self.session, k, received, horizon_s, across)
+                for k in self.role_keys(role, iface, rid)]
+        self._entities += subs
+        return subs
 
     # -- handlers ---------------------------------------------------------
 

@@ -1,0 +1,16 @@
+# zk2py's consumer across a constrained face for constrained.md §9 (core
+# §8.5, 0.91; #609, round 99): a role bound to the owner of the reference's
+# `faced.v1` (zenkey/tests/contracts/faced.v1.toml), whose stream `level`
+# it reads by its exact key. It must load with no finding at all.
+[interface]
+name    = "zk2py_faced_reader"
+major   = 1
+minor   = 0
+summary = "zk2py's reader of faced.v1 across a constrained face"
+
+[resources.health]
+kind = "state"
+type = { raw = "text/plain" }
+
+[requires.src]
+interface = "faced.v1"

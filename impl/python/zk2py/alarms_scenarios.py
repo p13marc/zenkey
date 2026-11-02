@@ -539,7 +539,7 @@ def section3(report: Report, mode: Any, ctx: dict[str, Any], reraise: bool = Fal
     sec = f"§4 (ttl {ttl} s)" if reraise else "§3"
     bus = Bus(mode)
     try:
-        o = bus.owner(contract=al.load(None if ttl == al.TTL_S or ctx["full"] else ttl))
+        o = bus.owner(contract=al.load(None if ctx["full"] else ttl))
         k = key(A)
         # Beyond scenarios.md, for 0.3's §2.14 step 5: a second reader R,
         # whose subscription hears A firing and closes before the resolve.

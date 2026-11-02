@@ -818,14 +818,17 @@ def _link_lints(path: Path) -> list[Result]:
 
 
 def _link_v2(path: Path) -> list[Result]:
-    """``conformance/v2/`` (link.v2 text 0.1, #988 L1 and L2), every file, an
-    unknown one failing, through :mod:`zk2py.link_v2`. ``lints.json``: a
-    policy -> every finding. ``plan.json``: a policy and a deployment -> the
-    binding, the catalog, the transport and each face's plan with its reply
-    timeout, or the refusal; ``narrow``'s principals -> the link protocols a
-    subject bound to each is selected by. ``transport.json``: a policy, a
-    router's and a far end's configuration, and a catalog -> what a generator
-    emits, and every finding."""
+    """``conformance/v2/`` (link.v2 text 0.1, #988 L1 and L2; text 0.3, L3),
+    every file, an unknown one failing, through :mod:`zk2py.link_v2`.
+    ``lints.json``: a policy -> every finding. ``plan.json``: a policy, a
+    deployment and the far side's catalog -> the binding, the catalog, the
+    transport and each face's plan with its reply timeout and its frames, or
+    the refusal; ``narrow``'s principals -> the link protocols a subject bound
+    to each is selected by. ``exposure.json`` (0.3): one resource on a face of
+    a link.v2 policy -> link.v1's reading as link.v2 reads it, and the
+    contract side's finding. ``transport.json``: a policy, a router's and a
+    far end's configuration, and a catalog -> what a generator emits, and
+    every finding."""
     from . import link_v2
 
     out: list[Result] = []
@@ -834,9 +837,12 @@ def _link_v2(path: Path) -> list[Result]:
         if f.name == "lints.json":
             for c in data["cases"]:
                 out.append(_check(f"v2 lints: {c['note']}", link_v2.lint(c["policy"]), c["expect"]))
+        elif f.name == "exposure.json":
+            for c in data["cases"]:
+                out.append(_check(f"v2 exposure: {c['note']}", link_v2.exposure(c), c["expect"]))
         elif f.name == "plan.json":
             for c in data["cases"]:
-                got = link_v2.plan(c["policy"], c["implements"], _link_interfaces(c))
+                got = link_v2.plan(c["policy"], c["implements"], _link_interfaces(c), c.get("catalog"))
                 if "narrow" in c:
                     pol, _ = link_v2.parse_policy(c["policy"])
                     got["narrowed"] = None if pol is None else {n: link_v2.narrowed(pol, n) for n in c["narrow"]}
@@ -910,6 +916,11 @@ def _telemetry_v2(path: Path) -> list[Result]:
                 rd = t2.SeriesReader(layout, decl)
                 got_r, want_r, bodies = [], [], []
                 for fr_ in c["frames"]:
+                    # telemetry.v2 0.2: "A frame names its own layout where it
+                    # is read under another than the case's".
+                    layout, decl = layouts[fr_.get("layout", c["layout"])]
+                    if layout is not rd.layout:
+                        rd.under(layout, decl)
                     try:
                         read = layout.read(layout.tag, bytes.fromhex(fr_["hex"]))
                     except (frame.Refused, packed.Refused) as e:
@@ -3656,7 +3667,7 @@ def family_readings(root: Path) -> list[Result]:
         + _round91_readings(root) + _round92_readings(root) + _mend93_readings(root) + _round93_readings(root) \
         + _mend_after_round93_readings(root) + _round94_readings(root) + _mend_after_round94_readings(root) \
         + _round95_readings(root) + _round96_readings(root) + _round96_k1_readings(root) + _round97_readings(root) \
-        + _round98_readings(root)
+        + _round98_readings(root) + _round99_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -4011,6 +4022,260 @@ def _round98_readings(root: Path) -> list[tuple[str, Any, Any]]:
     return out + _round98_t2_readings(root) + _round98_mend_readings(root) + _round98_answers(root)
 
 
+def _round99_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.90 and 0.91, observer 0.23, freshness.v2 0.5, telemetry.v2 0.2,
+    link.v2 0.3 and 0.4 (#609, round 99; #988 L3 and L4, round 98's
+    F-461 to F-464 answered): each text at its version with its entry; each
+    answer as it reads, and zk2py's reading of it offline; the far side
+    (core §8.1, §8.5, observer §7.5) through :mod:`zk2py.far_side` on a fake
+    session and a fake clock; and review-bot's notes on round 98 mended. The
+    live halves are ``far_side_live`` (constrained.md §8, §9) and
+    ``freshness_v2_scenarios`` §2 step 6."""
+    import re
+
+    from . import far_side, telemetry_v2 as t2
+    from .contract import load_contract
+    from .owner import keeps_timestamp
+
+    spec = root.parent
+    repo = spec.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def kept(text: str, *quotes: str) -> list[str]:
+        return [f"still: {q}" for q in quotes if q in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, obs, fv2, tv2, l2 = (flat("core.md"), flat("observer.md"), flat("profiles/freshness/v2.md"),
+                               flat("profiles/telemetry/v2.md"), flat("profiles/link/v2.md"))
+    cm = flat("scenarios/constrained.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.91 or later, observer 0.23, freshness.v2 0.5, telemetry.v2 0.2, link.v2 0.3 and 0.4, each with its "
+         "entry (round 98 answered; #988 L3, L4)",
+         [core_v >= (0, 91)] + entry("CHANGELOG.md", "0.90", "round 98") + entry("CHANGELOG.md", "0.91", "far side")
+         + entry("observer-CHANGELOG.md", "0.23", "declares again")
+         + entry("profiles/freshness/CHANGELOG.md", "`v2.md` 0.5", "held write")
+         + entry("profiles/telemetry/CHANGELOG.md", "telemetry.v2 0.2", "incomparable")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 0.3", "contract side")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 0.4", "far side"),
+         [True]),
+        ("F-461 answered (core 0.90 §4.3 \"A candidate's\", freshness.v2 0.5 §2.10): the guard holds a "
+         "candidate's freshness.v2 members' writes, and a held write clears the member's bit until a write of it "
+         "goes on; zk2py's owner since round 98 (Owner._unvouch_held), its re-put path too since round 99 "
+         "(freshness_v2_scenarios §2 step 6, live)",
+         missing(core, "A `redundancy.v1` candidate's session stamps every write (§8.2), so the guard holds every "
+                       "write of its `freshness.v2` members too.",
+                 "On a session without timestamping, a state of a contract that uses `freshness.v2` is one")
+         + missing(fv2, "Where the guard holds a member's write (a candidate's session stamps every write), the "
+                        "owner clears its bit until a write of it goes on."), []),
+        ("F-463 answered (core 0.90 §10 point 2): W105 reads the table of the major the contract uses; zk2py since "
+         "round 98 (contracts' w105-telemetry-series and ok-telemetry-v2-series)",
+         missing(core, "W105 reads the table of the major the contract uses"), []),
+        ("F-464 answered (telemetry.v2 0.2 §2.20, §5): an incomparable pair states no epoch; zk2py since round 98, "
+         "and continuity.json's 14th case, a frame naming its own layout (SeriesReader.under)",
+         missing(tv2, "That is v1 §2.10's second answer, before the epoch. So the pair states no epoch, as in v1.",
+                 "An incomparable pair's is not asked (§2.20).")
+         + kept(tv2, "Every pair of a frame's series is established, so its epoch is never assumed."), []),
+    ]
+    # F-462: a telemetry.v2 contract's state metric resource is on the table.
+    probe = load_contract(repo / "impl" / "python" / "zk2py_r99_meter.v1.toml", text="""
+[interface]
+name  = "zk2py_r99_meter"
+major = 1
+minor = 0
+uses  = ["telemetry.v2"]
+
+[resources.count]
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "1" }
+""")
+    by = {r["template"]: r for r in probe.canonical["resources"]} if probe.canonical else {}
+    out.append(("F-462 answered (core 0.90 §4.3's table): \"A state that is a metric resource of telemetry.v1, or "
+                "of telemetry.v2 and no frame resource\"; zk2py's owner now stamps a telemetry.v2 contract's state "
+                "counter (keeps_timestamp), as the reference did",
+                missing(core, "| A state that is a metric resource of `telemetry.v1`, or of `telemetry.v2` and no "
+                              "frame resource |")
+                + [probe.codes, keeps_timestamp(probe, by.get("count", {"kind": "state", "annotations": {}}))],
+                [[], True]))
+    # core §8.1, §5.1 (0.91): the reply timeout across a face.
+    faced = load_contract(repo / "zenkey" / "tests" / "contracts" / "faced.v1.toml")
+    fr_ = {r["template"]: r for r in faced.canonical["resources"]}
+    pol = (repo / "impl" / "python" / "zk2py" / "far_side_live.py")
+    from .far_side_live import policy
+
+    radio, repaired = far_side.far_side(policy(False), "radio"), far_side.far_side(policy(True), "radio")
+    out.append(("core §8.1 (0.91) \"Across a constrained face\" and §5.1: a call that sets no timeout waits the "
+                "operation's timeout_ms, across the face at least the face's reply timeout; one it sets is taken at "
+                "its word; a GET's and a seed's are floored at the face's (far_side, zk2py's reading)",
+                missing(core, "A caller, a consumer or a tool across a constrained face whose face policy states a "
+                              "reply timeout",
+                        "Across a constrained face, it waits at least the face's reply timeout (§8.1).")
+                + missing(l2, "A face's `reply_timeout_ms` is core §8.1's reply timeout.")
+                + [pol.is_file(), fr_["slow"].get("timeout_ms"),
+                   far_side.call_timeout_s(None, 1000, None), far_side.call_timeout_s(None, 1000, radio),
+                   far_side.call_timeout_s(None, None, None), far_side.call_timeout_s(0.5, 1000, radio),
+                   radio.get_timeout_s(1.0), radio.get_timeout_s(5.0)],
+                [True, 1000, 1.0, 3.0, 10.0, 0.5, 3.0, 5.0]))
+    # core §8.5, observer §7.5 (0.91, 0.23): a subscription's horizon.
+    beacon = load_contract(repo / "impl" / "python" / "interop" / "freshness" / "beacon.v2.toml")
+    fv2c = load_contract(spec / "profiles" / "freshness" / "freshness.v2.toml")
+    hz = far_side.scope_horizons([beacon, fv2c], ["lab/beacon"])
+    out.append(("core §8.5 (0.91): a subscription's horizon is its resource's freshness.ttl_s, or a heartbeat's, "
+                "the shortest of its collections; a freshness.v2 state has none of its own; observer §7.5: a scope's, "
+                "the shortest of the resources it reads that have one",
+                missing(core, "A consumer or a tool across a constrained face whose medium repairs no lost frame "
+                              "SHOULD declare a subscription again",
+                        "A state of a contract that uses `freshness.v2` has none of its own")
+                + missing(obs, "A tool across a constrained face whose medium repairs no lost frame SHOULD declare a "
+                               "scope again", "A tool given none takes the medium for one that repairs.")
+                + [far_side.resource_horizon_s(faced, fr_["level"]),
+                   hz.get("zk2/lab/beacon/beacon.v2/state/status"),
+                   hz.get("zk2/lab/beacon/freshness.v2/stream/heartbeat/*"),
+                   radio.redeclares, repaired.redeclares],
+                [1.0, None, 2.0, True, False]))
+
+    # Redeclaring on a fake session and a fake clock.
+    class Sub:
+        def __init__(self, log: list[str], key: str) -> None:
+            self.log, self.key = log, key
+            log.append(f"declare {key}")
+
+        def undeclare(self) -> None:
+            self.log.append(f"undeclare {self.key}")
+
+    class Info:
+        def __init__(self) -> None:
+            self.up = [object()]
+
+        def transports(self) -> list[Any]:
+            return self.up
+
+        def declare_transport_events_listener(self, *a: Any, **k: Any) -> Any:
+            return type("L", (), {"undeclare": lambda _s: None})()
+
+    class Session:
+        def __init__(self) -> None:
+            self.log: list[str] = []
+            self.info = Info()
+
+        def declare_subscriber(self, key: str, handler: Any) -> Sub:
+            return Sub(self.log, key)
+
+    def run(horizon: float | None, steps: list[float], up: bool = True, redeclare: bool = True) -> list[str]:
+        sess, now = Session(), [0.0]
+        sess.info.up = [object()] if up else []
+        r = far_side.Redeclaring(sess, "k", lambda _s: None, horizon, redeclare=redeclare, clock=lambda: now[0])
+        for t in steps:
+            now[0] = t
+            time.sleep(0.25)
+        r.undeclare()
+        return sess.log
+
+    import time
+
+    out.append(("core §8.5 (0.91): declared again after two horizons of silence, its transport up, undeclared and "
+                "then declared anew; never at 1.9 horizons, never with no open transport, never with arq true or no "
+                "horizon (far_side.Redeclaring, a fake session and clock)",
+                missing(core, "**Declaring again** undeclares the subscription, then declares it anew.",
+                        "Through a session cut off from every router nothing is declared.")
+                + [run(1.0, [1.9]), run(1.0, [2.0]), run(1.0, [2.0], up=False), run(1.0, [2.0], redeclare=False),
+                   run(None, [5.0])],
+                [["declare k", "undeclare k"], ["declare k", "undeclare k", "declare k", "undeclare k"],
+                 ["declare k", "undeclare k"], ["declare k", "undeclare k"], ["declare k", "undeclare k"]]))
+
+    # link.v2 0.3's scenarios-v2.md §2, expected 1 and 2: the plan alone.
+    import textwrap
+
+    from . import link, link_v2
+
+    sc2 = (spec / "profiles" / "link" / "scenarios-v2.md").read_text(encoding="utf-8")
+    blk = re.search(r"```toml\n(.*?)```", sc2, re.S)
+    pv1 = load_contract(spec / "profiles" / "link" / "conformance" / "contracts" / "probe.v1.toml")
+    face_plan: dict[str, Any] = {}
+    if blk is not None:
+        pol2 = textwrap.dedent(blk.group(1)).replace('services = ["radio-a"]', 'services = ["probe-a"]') \
+            + 'frames = { "probe.v1/frames/link" = { every_s = 1 } }\n'
+        got2 = link_v2.plan(pol2, {"probe-a": ["probe.v1"]}, {"probe.v1": {"revisions": [link.revision_of(pv1)]}})
+        face_plan = (got2.get("faces") or [{}])[0]
+    out.append(("link.v2 scenarios-v2.md §2 (0.3), expected 1 and 2, the plan alone: frames/link, status, level "
+                "and the heartbeat cross, frames/detail and setpoint denied by name, level's one downsampling rule, "
+                "and timed_downsampled, frame_unlisted and keep_alive_not_suppressed (steps 3 to 6, on routers, "
+                "not run)",
+                missing(flat("profiles/link/scenarios-v2.md"), "It denies `frames/detail` and `setpoint` by name.")
+                + [[(d["id"], d["key_exprs"]) for d in face_plan.get("deny", [])[3:4]],
+                   [r["key_expr"] for r in (face_plan.get("downsampling") or {}).get("rules", [])],
+                   [(x["code"], x["at"]) for x in face_plan.get("findings", [])],
+                   [e for x in face_plan.get("liveness", []) for e in x["evidence"]]],
+                [[("stream:probe.v1", ["zk2/*/*/probe.v1/stream/frames/detail/**",
+                                       "zk2/*/*/probe.v1/stream/setpoint/**"])],
+                 ["zk2/lab/probe-a/probe.v1/stream/level"],
+                 [("frame_unlisted", "probe.v1/stream/frames/detail"), ("timed_downsampled", "probe.v1/stream/setpoint"),
+                  ("keep_alive_not_suppressed", "transport.keep_alive")],
+                 ["freshness.v2/stream/heartbeat/probe.v1", "probe.v1/state/status", "probe.v1/stream/frames/link"]]))
+
+    # #983's last "Done when" item (main 2ed6d968, the coordinator's addition
+    # to round 99): modem.v3 3.2's frames and gendev.v1's frames/sample,
+    # written by zk2py's Framer and read back through its reader and R.
+    from . import adopter_frames
+
+    rows = adopter_frames.run()
+    sizes = {f"{x['interface']}/{x['resource']}": x for x in rows}
+    out.append(("#983 T4: modem.v3 3.2's nine frame resources and gendev.v1 1.1's frames/sample, each declared, "
+                "written by zk2py's Framer under a 32-bit run, read back envelope first, written again byte for byte, "
+                "and every series field of every record a sample of the value written; link.v1 §2.8's largest frame "
+                "measured at frame_facts' size, frames/link 22 B, frames/message 213 B and frames/sample 97 B as the "
+                "Rust side measured",
+                [len(rows), all(x["declared"] == "declared" and x["read_back"] and x["samples"]
+                                and x["follows"] == ["first", "continues"] for x in rows),
+                 all(x["full_frame_bytes"] == x["largest_bytes"] for x in rows),
+                 [sizes.get(k, {}).get("full_frame_bytes")
+                  for k in ("modem.v3/frames/link", "modem.v3/frames/message", "gendev.v1/frames/sample")]],
+                [10, True, True, [22, 213, 97]]))
+    out.append(("F-470: a frame whose keyframe_every is above 1 puts delta records; one that includes every field "
+                "(\"Including an unchanged field is never wrong\") is a bit a field longer than link.v1 §2.8's full "
+                "record, so zk2py's writer puts frames/layer at 109 B and frames/sample at 100 B",
+                missing(core, "Including an unchanged field is never wrong.")
+                + [{k: (x["largest_bytes"], x["delta_frame_bytes"]) for k, x in sizes.items()
+                    if x["delta_frame_bytes"] != x["largest_bytes"]}],
+                [{"modem.v3/frames/air": (49, 50), "modem.v3/frames/bearer": (32, 33), "modem.v3/frames/if": (58, 60),
+                  "modem.v3/frames/layer": (106, 109), "modem.v3/frames/radio": (21, 22),
+                  "modem.v3/frames/sched": (32, 33), "modem.v3/frames/sdu": (51, 52),
+                  "gendev.v1/frames/sample": (97, 100)}]))
+
+    # Review-bot on round 98 (PR #1041): the meter accepts after the put.
+    mf = spec / "profiles" / "telemetry" / "conformance" / "contracts" / "meterframe.v1.toml"
+    decl = t2.contract_declarations(load_contract(mf))["frames/totals"]
+    mt, got = t2.Meter(decl), []
+    run1 = (16, 1)
+    mt.check(run1, {"frames_total": 100})
+    mt.gather(run1, {"frames_total": 100})
+    try:
+        mt.check(run1, {"frames_total": 90})
+        got.append("90 taken while 100 pends")
+    except t2.Decreased:
+        got.append("90 refused while 100 pends")
+    mt.unsent(1)
+    mt.check(run1, {"frames_total": 90})
+    got.append(dict(mt.counts))
+    mt.gather(run1, {"frames_total": 90})
+    mt.put(1)
+    got.append(dict(mt.counts))
+    out.append(("review-bot on round 98: the meter checks against a record gathered and not yet put, forgets it with "
+                "a put that raised, and accepts it once its frame's put goes through (Meter.gather, put, unsent; "
+                "Owner._put_metered gives a failed frame's seqs back)",
+                got, ["90 refused while 100 pends", {}, {"frames_total": 90}]))
+    return out
+
+
 def _round98_answers(root: Path) -> list[tuple[str, Any, Any]]:
     """Core 0.89, observer 0.22, link.v1 0.14 and alarms.v1 0.13: round 97's
     F-455 to F-460 answered (main f42e9742, round 98). Each answer's text,
@@ -4064,6 +4329,8 @@ def _round98_t2_readings(root: Path) -> list[tuple[str, Any, Any]]:
     """telemetry.v2 0.1 (#983; #609, round 98), offline: its text at its
     version; W105 under its vocabulary; §2.16's linter warning; the owner's
     meter (§2.19, §2.20); and zk2py's R surviving a put it cannot read."""
+    import re
+
     from . import frame, packed, telemetry_v2 as t2, zk2c
     from .contract import load_contract
     from .telemetry_v2_live import SeriesSubscriber
@@ -4082,8 +4349,13 @@ def _round98_t2_readings(root: Path) -> list[tuple[str, Any, Any]]:
     bad = load_contract(mf.parent / "zk2py-meterframe-bad.toml",
                         text=text.replace('rx = { kind = "counter", unit = "By" }', 'rx = { kind = "gauge", unit = "By" }'))
     out: list[tuple[str, Any, Any]] = [
-        ("telemetry.v2 0.1 with its entry, experimental, written against core 0.87",
-         missing(v2, "| **Text version** | 0.1", "| **Status** | experimental |", "core 0.87")
+        # Re-keyed in round 99: the text moves on (0.2, core 0.90), and on
+        # main 2ed6d968 its status to draft, used by zenoh-modem (its entry
+        # "telemetry.v2 draft"); its 0.1 entry stands.
+        ("telemetry.v2 at 0.1 or later, experimental or, with its entry, draft, with its 0.1 entry",
+         ([] if "| **Status** | experimental |" in v2 else missing(v2, "| **Status** | draft |")
+          + missing(flat("profiles/telemetry/CHANGELOG.md"), "## telemetry.v2 draft"))
+         + ([] if re.search(r"\| \*\*Text version\*\* \| 0\.[1-9]\d* ", v2) else ["no text version 0.1 or later"])
          + missing(flat("profiles/telemetry/CHANGELOG.md"), "## telemetry.v2 0.1"), []),
         ("telemetry.v2 §1, §4: W105 reads its table, series beside v1's four keys; the same contract under "
          "telemetry.v1 draws W105 for each telemetry.series (v1 §4's four keys), and v1 reads no frame resource as "
@@ -4141,8 +4413,11 @@ def _round98_t2_readings(root: Path) -> list[tuple[str, Any, Any]]:
 
     sub = SeriesSubscriber(Fake(), "lab/meterframe", load_contract(mf))
     sub._heard(Smp())
-    out.append(("zk2py's R (round 98): a put whose reading raises inside zenoh's callback is recorded undecodable, "
-                "named", sub.undecodable(), ["RuntimeError: a payload that cannot be read"]))
+    # Mended in round 99 (review-bot on round 98): an exception in zk2py's
+    # own code is recorded as R's error, apart from an undecodable payload.
+    out.append(("zk2py's R (rounds 98, 99): a put whose reading raises inside zenoh's callback is recorded, named, "
+                "as zk2py's own error and never as an undecodable payload",
+                [sub.errors(), sub.undecodable()], [["RuntimeError: a payload that cannot be read"], []]))
     return out
 
 

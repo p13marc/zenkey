@@ -24514,3 +24514,199 @@ what the changelogs state.**
 - **Resolved: F-455 to F-460**, as the answers above say.
 - **Open:** F-436 (not re-run), F-437 to F-441, F-461 to F-464. F-365
   stays open as #965's.
+
+## At core 0.91, observer 0.23 and link.v2 0.4 (#988 L3–L4)
+
+Round 99 read, cold, the texts at main bdb12e5e, and then at 2ed6d968
+(#1048) when the round rebased: core 0.90 and 0.91, observer 0.23,
+`freshness.v2` 0.5, `telemetry.v2` 0.2 and its move to draft, `link.v2`
+0.3 to 0.5 and `link.v1` 0.15, each changelog entry first. Then `link.v2`
+§2.3 to §2.21 whole, core §8.1 and §8.5 with Appendix B's new facts,
+observer §7.5, and `constrained.md` §8 and §9. Its evidence:
+`link/conformance/v2/` (lints 40, plan 19 at 2ed6d968, exposure 18,
+transport), `conformance/contracts/probe.v1.toml`,
+`telemetry/conformance/v2/continuity.json`'s 14th case,
+`freshness/scenarios-v2.md` §2 step 6, `telemetry/scenarios-v2.md` §1 to §7
+with `zenctl telemetry`, `constrained.md` §8 and §9 run in process, and
+`modem.v3` 3.2's and `gendev.v1` 1.1's frames (the coordinator's addition).
+
+**Round 98's answers.**
+- **F-461 holds** in the texts and in zk2py: core 0.90 §4.3 "A
+  candidate's" and `freshness.v2` 0.5 §2.10 say the guard holds every write
+  of a candidate's members, and a held write clears the member's bit until
+  a write of it goes on. zk2py's owner did so since round 98, its re-put
+  path too now. §2 step 6 passes with zk2py's owner and zk2py's readers
+  (5/5) and with `zenctl watch` (2/2). **The owner example of bdb12e5e
+  does not keep it** (F-467): 2 of 5.
+- **F-462 holds:** the row reads "A state that is a metric resource of
+  `telemetry.v1`, or of `telemetry.v2` and no frame resource". zk2py's
+  owner now stamps such a state, as the reference did.
+- **F-463 holds:** W105 reads the table of the major the contract uses,
+  as zk2py did since round 98; `w105-telemetry-series` and
+  `ok-telemetry-v2-series` pass.
+- **F-464 holds:** an incomparable pair states no epoch. zk2py read it so;
+  the 14th case, its frames naming their own layout, passes.
+
+**The rules changed.** zk2py diffed every keyword sentence of `core.md`,
+`observer.md`, `freshness.v2`, `telemetry.v1`/`v2`, `link.v1`/`v2` and the
+scenarios changed, between f42e9742 (round 98's texts), bdb12e5e and
+2ed6d968. New: core §8.1's SHOULD to wait the face's reply timeout, §8.5's
+SHOULD to declare again and its MAY to open the session again (0.91);
+observer §7.5's SHOULD (0.23); `link.v2` §2.7's and §2.17's MUSTs, §2.8's
+MUST NOT and §2.18's MUST to refuse a catalog's missing revision (0.3).
+Core 0.90, `freshness.v2` 0.5, `telemetry.v2` 0.2 and #1048's texts state
+no keyword rule. `RULES.md` lists 230. **No rule changed beyond what the
+changelogs state.**
+
+### F-465 · ambiguity · `link.v2` §2.1, §2.3 and §2.7: an empty `frames`
+
+> §2.1: "Each entry of `frames` is checked alone. … An empty `frames`
+> lists no frame." §2.7: "On a face with `frames`, a generator MUST let a
+> frame resource of a listed interface cross only when the face lists it
+> … A face with no `frames` keeps `link.v1`'s rule: every frame resource
+> exposed `link` crosses." §2.3: "It is absent for a face with no
+> `frames`."
+
+- **The ambiguity.** `frames = {}` is a face *with* `frames` that lists
+  none, so no frame crosses and every exposed frame is `frame_unlisted`;
+  or it is a face with no frames, `link.v1`'s rule, every exposed frame
+  crossing. The plan's `frames` member is then `[]` or absent. Only
+  `lints.json` has the case, and it reads no plan.
+- **What zk2py does:** a face with the key is a face with `frames`: no
+  frame crosses, `frame_unlisted` for each, `frames: []`. The reference
+  reads it so: `zenctl acl gen` over `probe.v1` with `frames = {}` denies
+  `stream/frames/**` and warns `frame_unlisted` at both frames.
+- **Fix:** §2.7: "An empty `frames` lets no frame cross", and a plan case.
+- **Changes:** what crosses a face whose policy writes `frames = {}`.
+
+### F-466 · contradiction · `link.v1` §2.7 step 2 and §2.9 beside `v2/plan.json`: an implied `freshness.v2`'s other denies
+
+> `link.v1` §2.7, the exposure denies: "2. **Otherwise**, one deny per
+> listed interface *I* … *I* has no crossing resource of token *K*:
+> `zk2/*/*/I/K/**`, whole". §2.9: "**`freshness.v2` is listed with it.**
+> An interface with a heartbeat makes `freshness.v2` a listed interface of
+> each service that implements it … That holds where the deployment does
+> not name it. Its stream denies are carved from the heartbeats alone."
+
+- **The contradiction.** `probe.v1` uses `freshness.v2` and has a
+  collection, so `freshness.v2` is listed; its states cross, so `state`
+  takes step 2, and `freshness.v2`, which has no state, draws
+  `state:freshness.v2`, `zk2/*/*/freshness.v2/state/**`. `v2/plan.json`'s
+  cases 5, 6, 8, 9, 10 and 12 (10 a `link.v1` policy) have none. Where the
+  deployment names `freshness.v2`, `link.v1`'s `plan.json` cases 12 and 14
+  have it, and so does `zenctl acl gen` (measured). The fixtures read an
+  implied `freshness.v2` as listed for `stream` alone, which no sentence
+  says.
+- **What zk2py does:** follows the fixtures: an implied `freshness.v2`
+  takes its stream deny, and no other. The deny it leaves out covers keys
+  no contract declares.
+- **Fix:** §2.9: "An implied `freshness.v2` takes part in the stream
+  denies alone", or the fixtures gain the deny.
+- **Changes:** the far principal's policy, by one rule.
+
+### F-467 · bug · the owner example as a `redundancy.v1` candidate: its puts carry no stamp of its own (`freshness.v2` scenarios-v2.md §2 step 6)
+
+> Core §4.3 (0.90): "**A candidate's.** A `redundancy.v1` candidate's
+> session stamps every write (§8.2), so the guard holds every write of its
+> `freshness.v2` members too." Its table: "Every put of a `redundancy.v1`
+> candidate | which instance is the incumbent | by the candidate
+> session's HLC". `scenarios-v2.md` §2 step 6: "The second put is
+> refused, since it would carry a Zenoh timestamp."
+
+- **The bug.** The owner example of bdb12e5e, run `--standby --election
+  claim` (and `--hlc`) on `beacon-governed.v2`, its clock 2 s ahead, says
+  its guard holds ("its timed state writes stop"). Its put of `status`
+  then goes on, and its heartbeats go on vouching for the new value, its
+  digest moving. Every put of its, before and while the guard holds,
+  reaches a subscriber stamped with the router's id: it carries no stamp
+  of its own. The same holds for `ledger.v1`'s `balance`, a governed
+  contract with no `freshness.v2`. So the incumbent cannot be told by the
+  candidate's HLC from its puts, and step 6 fails: 2 of 5.
+- **What zk2py does:** its candidate stamps every put (`Owner.hlc`); the
+  guard holds the second put, and step 6 passes.
+- **Aside:** `zenkey/tests/contracts/beacon-governed.v2.toml`'s comment
+  names "§2 step 5"; the scenario is step 6.
+- **Fix:** the owner example's candidate session stamps its puts, or the
+  scenario says how a black box drives a candidate.
+- **Changes:** a candidate's puts and its guard, in the owner example.
+
+### F-468 · gap · `link.v1` §2.3 "Refusals" and `link.v2` §2.3 "More refusals": what `{refused}` lists for a deployment's refusal
+
+> `link.v1` §2.3: "**Refusals.** A policy with an error has no plan.
+> Neither has a deployment that names no interfaces for a listed service
+> (`service_unknown`) … Both are errors, with no face." `link.v2` §2.3:
+> "**More refusals.** Each is an error, and no plan is derived."
+> `v2/plan.json`: "`expect` is `{refused}`, the findings that refuse it".
+
+- **The gap.** A policy's refusal lists every finding of the policy, its
+  warnings too (case 3: `transport_missing` beside `no_arq`). A
+  deployment's refusal lists its errors alone (case 11: `packed_required`,
+  without the policy's `no_arq`). No sentence says which, and `link.v1`'s
+  `service_unknown` cases have policies with no warning.
+- **What zk2py does:** the fixtures': `link.v2`'s four refusals list their
+  errors alone. Its `service_unknown` and `contract_unknown` keep the
+  policy's warnings beside them; no case tells.
+- **Fix:** §2.3: "A deployment's refusal lists its errors alone."
+- **Changes:** a refused plan's findings.
+
+### F-469 · gap · `link.v2` §2.16 and §2.17: the contract side, read across revisions
+
+> `link.v1` §2.3: "**Revisions read together.** The plan reads each listed
+> interface once, over every revision of it the generator is given." It
+> says how an exposure and a horizon read across them. `link.v2` §2.7:
+> "Across revisions, the plan reads the least `keyframe_every`." §2.17:
+> "The plan warns of each crossing one whose type is not packed
+> (`not_packed`)." §2.16: "a crossing `block` resource whose longest put is
+> above `batch_bytes`".
+
+- **The gap.** Whether a resource is packed, `block`, timed, and its
+  longest put, can differ between revisions. The text reads one revision.
+- **The two implementations disagree.** Over `twin.v1` minor 0, a raw
+  stream and a raw state, and minor 1, both packed, `zenctl acl gen` warns
+  `not_packed` for minor 0 alone, `block_over_batch` for minor 1 alone,
+  and only `block_over_batch` for both together; it reads both, since a
+  disagreeing exposure draws `exposure_disagrees`. zk2py warns
+  `not_packed` for both, beside `block_over_batch`.
+- **What zk2py does:** packed only where every declaring revision types it
+  packed; `block` and timed where any is; the longest put the longest any
+  packed revision writes. A service running the older minor puts raw bytes
+  across the face.
+- **Fix:** §2.3: one sentence each, as for the exposure and the horizon.
+- **Changes:** the plan's warnings over a history.
+
+### F-470 · gap · `link.v1` §2.8's largest frame beside core §7.7's delta records
+
+> `link.v1` §2.8: "**`frame_over_batch`:** its largest frame's payload is
+> above `batch_bytes`. That frame is `records` full records, every
+> optional field present, every record after record 0 with its offset".
+> `link.v2` §2.16: "A frame resource's [longest put] is its largest frame
+> (`link.v1` §2.8)." Core §7.7: "In a delta record, an owner MUST include
+> each field with no deadband whose code or presence differs … Including
+> an unchanged field is never wrong."
+
+- **The gap.** A delta record carries one inclusion bit per field (core
+  §7.7's body), so one that includes every field is that many bits longer
+  than a full record. An owner whose `keyframe_every` is above 1 writes one
+  whenever every field changed, or MAY. The largest frame §2.8 names is
+  not the largest an owner puts.
+- **Measured** with zk2py's writer: `modem.v3`'s `frames/layer` 106 B by
+  §2.8, 109 B as a delta of its 23 fields; `gendev.v1`'s `frames/sample`
+  97 B, 100 B with records 1 and 2 deltas of every field. `frames/link` and
+  `frames/message` (`keyframe_every = 1`) are 22 B and 213 B either way.
+  No adopter's face crosses its batch by it today.
+- **What zk2py does:** §2.8's figure, as the fixtures require.
+- **Fix:** §2.8: "each record a delta record that includes every field,
+  record 0 too where `keyframe_every` is above 1", or core §7.7: "a delta
+  record longer than a full record is written full".
+- **Changes:** `frame_over_batch` and `block_over_batch` near a batch.
+
+### Counts at core 0.91, observer 0.23 and link.v2 0.4
+
+470 entries.
+- **New: F-465 to F-470,** six: a contradiction (F-466), an ambiguity
+  (F-465), a bug of the owner example (F-467) and three gaps (F-468 to
+  F-470). None is a blocker.
+- **Resolved: F-461 to F-464**, as the answers above say; F-461's runtime
+  half is open in the owner example as F-467.
+- **Open:** F-436 (not re-run), F-437 to F-441, F-465 to F-470. F-365
+  stays open as #965's.

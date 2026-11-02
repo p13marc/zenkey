@@ -388,6 +388,22 @@ class SeriesReader:
         self.samples: dict[str, list[tuple[int, int, Any]]] = {s.field: [] for s in decl.series}
         self.undecodable: list[str] = []
 
+    def under(self, layout: frame.Layout, decl: FrameDeclaration) -> None:
+        """Read the frames that follow under another revision of the
+        resource (telemetry.v2 0.2, ``continuity.json``: "A frame names its
+        own layout where it is read under another than the case's, as a tool
+        holding two revisions of the resource reads them, a series being its
+        field's name across the two"). Each field's state and each series'
+        last sample are kept by name; a pair across two widths is then
+        incomparable (§2.20)."""
+        self.layout, self.decl = layout, decl
+        self.frames.layout = layout
+        for f in layout.fields:
+            self.frames.fields.setdefault(f.name, frame.FieldState())
+        self.fields = {f.name: f for f in layout.fields}
+        for sr in decl.series:
+            self.samples.setdefault(sr.field, [])
+
     def read(self, run: str, seq: int, value: dict[str, Any], arrival_ns: int = 0) -> dict[str, Any]:
         """One frame, its body's value read: ``readings.json``'s ``expect``
         (``follows``, ``lost`` with a gap, and each record's ``seq`` and
@@ -488,11 +504,19 @@ class Meter:
     record whose count is below one written before in that run, before
     any reduction; :meth:`accept` records the counts of a record put. A new
     run starts the counts again: "An owner MUST write a counter field's
-    samples under a new run from the moment the counter restarts"."""
+    samples under a new run from the moment the counter restarts".
+
+    **Gathered, then put** (review-bot on round 98): a record gathered into
+    an open frame is :meth:`gather`-ed, pending, and checked against; its
+    counts are accepted only once its frame's put goes through
+    (:meth:`put`), and forgotten with a put that raised (:meth:`unsent`), so
+    no count is recorded for a frame never sent."""
 
     decl: FrameDeclaration
     run: Any = None
     counts: dict[str, int] = field(default_factory=dict)
+    #: the records gathered and not yet put, (run, values), in order
+    pending: list[tuple[Any, dict[str, Any]]] = field(default_factory=list)
     #: §2.20's SHOULD broken: "An owner SHOULD declare each counter field
     #: wide enough that its increase between two samples of its series stays
     #: below 2^(w-1)", each increase at or past it named (the owner writes it
@@ -506,8 +530,32 @@ class Meter:
             if s.kind != "counter" or s.field not in values:
                 continue
             v = values[s.field]
-            if isinstance(v, int) and not isinstance(v, bool) and s.field in self.counts and v < self.counts[s.field]:
-                raise Decreased(s.field, self.counts[s.field], v)
+            if not isinstance(v, int) or isinstance(v, bool):
+                continue
+            # what it wrote: the counts put, and those of the records
+            # gathered in this run and not yet put
+            written = [self.counts[s.field]] if s.field in self.counts else []
+            written += [w[s.field] for r, w in self.pending if r == run and isinstance(w.get(s.field), int)
+                        and not isinstance(w.get(s.field), bool)]
+            if written and v < max(written):
+                raise Decreased(s.field, max(written), v)
+
+    def gather(self, run: Any, values: dict[str, Any]) -> None:
+        """A record checked and gathered into the open frame, pending until
+        its frame's put goes through."""
+        self.pending.append((run, dict(values)))
+
+    def put(self, n: int) -> None:
+        """A frame of the first ``n`` pending records put: their counts
+        accepted, in order."""
+        done, self.pending = self.pending[:n], self.pending[n:]
+        for run, values in done:
+            self.accept(run, values)
+
+    def unsent(self, n: int) -> None:
+        """A frame of the first ``n`` pending records whose put raised:
+        they were never sent, and their counts are forgotten."""
+        self.pending = self.pending[n:]
 
     def accept(self, run: Any, values: dict[str, Any]) -> None:
         if run != self.run:

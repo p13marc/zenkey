@@ -250,28 +250,38 @@ def close(session: Any) -> None:
 
 
 def open_client(endpoint: str, auth: tuple[str, str] | None = None, *, namespace: str | None = None,
-                interests_timeout_s: float = INTERESTS_TIMEOUT_S) -> zenoh.Session:
+                interests_timeout_s: float = INTERESTS_TIMEOUT_S,
+                transport: dict[str, Any] | None = None) -> zenoh.Session:
     """A *client* session to one router endpoint, multicast scouting off: a
     tool that sees exactly the router it is pointed at. ``auth`` is a
     usrpwd (user, password), the principal's binding (§11.3). ``namespace``
     is zenoh's session namespace (§1.6), and ``interests_timeout_s`` its
     ``routing/interests/timeout``, 120 s unless asked (observer §3.3, 0.41); both are
-    recorded, since zenoh-python reads neither back."""
+    recorded, since zenoh-python reads neither back. ``transport``, a far
+    side's (:meth:`zk2py.far_side.FarSide.config`), is each zenoh key and its
+    value: the session then runs the face's ``[transport]`` (link.v2 §2.20,
+    observer §7.5, 0.23), its interests timeout among them."""
     _prune()
-    s = _open_client(endpoint, auth, namespace=namespace, interests_timeout_s=interests_timeout_s)
+    if transport is not None and "routing/interests/timeout" in transport:
+        interests_timeout_s = transport["routing/interests/timeout"] / 1000
+    s = _open_client(endpoint, auth, namespace=namespace, interests_timeout_s=interests_timeout_s,
+                     transport=transport)
     _OPENED[id(s)] = (s, endpoint, auth)
     _CONF[id(s)] = (s, namespace, interests_timeout_s)
     return s
 
 
 def _open_client(endpoint: str, auth: tuple[str, str] | None = None, *, namespace: str | None = None,
-                 interests_timeout_s: float = INTERESTS_TIMEOUT_S) -> zenoh.Session:
+                 interests_timeout_s: float = INTERESTS_TIMEOUT_S,
+                 transport: dict[str, Any] | None = None) -> zenoh.Session:
     conf = zenoh.Config()
     conf.insert_json5("mode", json.dumps("client"))
     conf.insert_json5("connect/endpoints", json.dumps([endpoint]))
     conf.insert_json5("scouting/multicast/enabled", "false")
     # zenoh's value is in milliseconds (measured: 300 ends a stalled read at 0.30 s)
     conf.insert_json5("routing/interests/timeout", json.dumps(int(round(interests_timeout_s * 1000))))
+    for path, value in (transport or {}).items():
+        conf.insert_json5(path, json.dumps(value))
     if namespace is not None:
         conf.insert_json5("namespace", json.dumps(namespace))
     if auth is not None:
@@ -1970,11 +1980,15 @@ class StateReading:
         return not self.replies and not self.errors
 
 
-def get_state(session: zenoh.Session, selector: str, timeout: float = GET_TIMEOUT_S) -> StateReading:
+def get_state(session: zenoh.Session, selector: str, timeout: float = GET_TIMEOUT_S,
+              across: Any = None) -> StateReading:
     """S4: "a state GET MUST be addressed to the owner's keys, with target
     All and consolidation Latest set explicitly." Current state is the
     owner's answer (S6). §3.2 R6: a reply on a key that is not concrete is
-    discarded."""
+    discarded. ``across``, a :class:`zk2py.far_side.FarSide`: the GET waits
+    at least the face's reply timeout (core §8.1, 0.91)."""
+    if across is not None:
+        timeout = across.get_timeout_s(timeout)
     q: queue.Queue = queue.Queue()
     session.get(selector, zenoh.handlers.Callback(q.put, lambda: q.put(_DONE)),
                 target=zenoh.QueryTarget.ALL, consolidation=zenoh.ConsolidationMode.LATEST,
@@ -2039,9 +2053,15 @@ class CallResult:
 
 
 def call(session: zenoh.Session, key: str, payload: bytes = b"", *, fanout: bool = False,
-         encoding: str | None = None, timeout: float = GET_TIMEOUT_S, first: bool = False,
-         attachment: bytes | None = None) -> CallResult:
+         encoding: str | None = None, timeout: float | None = GET_TIMEOUT_S, first: bool = False,
+         attachment: bytes | None = None, recommended_ms: int | None = None, across: Any = None) -> CallResult:
     """Call an operation (§5.1).
+
+    - **The timeout** (§5.1, §8.1 at 0.91): ``timeout``, the caller's, at
+      its word; ``None`` sets none, and the call waits the operation's
+      ``timeout_ms`` (``recommended_ms``), else 10 s, and across a face
+      (``across``, a :class:`zk2py.far_side.FarSide`) at least the face's
+      reply timeout (:func:`zk2py.far_side.call_timeout_s`).
 
     - A concrete call uses target ``BestMatching`` (O1); a call to a fan-out
       operation, target ``All`` and consolidation ``None`` (O2).
@@ -2059,8 +2079,9 @@ def call(session: zenoh.Session, key: str, payload: bytes = b"", *, fanout: bool
     - No reply is silence, never a verdict (O5).
     - ``attachment``: the call metadata (O7), ``{"actor", "request_id"}``.
     """
-    from . import envelope
+    from . import envelope, far_side
 
+    timeout = far_side.call_timeout_s(timeout, recommended_ms, across)
     q: queue.Queue = queue.Queue()
     kwargs: dict[str, Any] = {
         "target": zenoh.QueryTarget.ALL if fanout else zenoh.QueryTarget.BEST_MATCHING,
