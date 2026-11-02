@@ -342,16 +342,15 @@ async fn the_tcgui_backend_is_called_fanned_out_and_read() {
     assert!(resp.new_state);
     assert_eq!(resp.message.as_deref(), Some("default eth0"));
 
-    // The app detail rides the JSON envelope as the hinted type (§5.2).
+    // The app detail rides the error form as the hinted type's JSON (core
+    // §5.2), read back through its codec.
     let refused = tc_netif_v1::Api::interfaces_set(&tool, &h1, "default", "eth9", enable())
         .await
         .unwrap();
     let env = refused.refusal().unwrap();
     assert_eq!(env.code, "app");
-    let Some(Detail::Value(v)) = &env.detail else {
-        panic!("{env:?}")
-    };
-    let detail: TcError = serde_json::from_value(v.clone()).unwrap();
+    assert!(matches!(env.detail, Some(Detail::Bytes(_))), "{env:?}");
+    let detail: TcError = env.detail_as::<Json<TcError>>(None).unwrap().unwrap();
     assert_eq!(detail.kind, TcErrorKind::NotFound);
 
     // A fan-out (O2): every host answers, attributed.
@@ -801,4 +800,144 @@ async fn frames_are_written_through_the_generated_code() {
     let s = samples.lock().unwrap()[0].clone();
     assert_eq!(s.applied.records.len(), 3);
     assert_eq!(s.field(2, "rssi"), Some(FieldState::Known(60)));
+}
+
+/// Packed operation types through the generated code (core §5.1, §5.2,
+/// §7.6; #985 C4c): `packedops.v1`'s `calibrate` (a `Sensor` request, a
+/// `Clock` response, a `Mode` error) and `scan` (a `Status` request, two
+/// `Sensor` values and a `Clock` summary). Each request, value and error
+/// travels in its form behind its type's tag, the `time` fields under the
+/// catalog's epoch on both sides, and an `app` refusal carries its `Mode`
+/// detail as a packed record, read back through the codec.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn packed_operations_are_served_and_called_in_the_forms() {
+    use zenkey::codec::{Codec, Packed};
+    use zenkey::model::catalog::Catalog;
+    use zenkey::packed::{Decimal, Open};
+    use zenkey_codegen_test::zk2::packedops_v1;
+    use zenkey_codegen_test::zk2::packedops_v1::types::{
+        Clock, Mode, Sensor, Status, mode, status,
+    };
+
+    let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../examples/zk2/zenoh-modem/catalog.json");
+    let catalog = Catalog::parse_bytes(&std::fs::read(file).unwrap()).unwrap();
+    let epoch = catalog.epoch();
+    let clock = Clock {
+        at: 1_800_000_000_000,
+        at_ms: 1_800_000_000_123,
+        valid: true,
+    };
+    let refusal = Mode {
+        mode: Open::Known(mode::Mode::Off),
+        wide: Open::Escape,
+    };
+
+    struct Ops {
+        clock: Clock,
+        refusal: Mode,
+        calls: std::sync::atomic::AtomicU64,
+    }
+    impl packedops_v1::Handlers for Ops {
+        fn calibrate(
+            &self,
+            request: Sensor,
+            _call: CallInfo,
+        ) -> impl Future<Output = Result<Clock, OpError>> + Send {
+            let (clock, refusal) = (self.clock.clone(), self.refusal.clone());
+            // The first call is answered, every later one refused `app`.
+            let n = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let _ = request;
+            async move {
+                if n > 0 {
+                    return Err(OpError::app_as::<Packed<Mode>>("too hot", &refusal));
+                }
+                Ok(clock)
+            }
+        }
+        fn scan(
+            &self,
+            request: Status,
+            _call: CallInfo,
+            out: Sink<Sensor, Clock>,
+        ) -> impl Future<Output = Result<(), OpError>> + Send {
+            let clock = self.clock.clone();
+            async move {
+                for _ in 0..request.signal_bars {
+                    out.send(Sensor {
+                        temperature: Decimal::from_f64(20.0).unwrap(),
+                        humidity: "50".parse().unwrap(),
+                        pressure: "1000".parse().unwrap(),
+                        battery: "3.3".parse().unwrap(),
+                    })
+                    .await?;
+                }
+                out.summary(clock).await?;
+                Ok(())
+            }
+        }
+    }
+
+    let (_r, ep) = router().await;
+    let (owner, caller) = (client(&ep).await, client(&ep).await);
+    let mut b = ServiceBuilder::new(&owner, ServiceConfig::new(addr("lab/ops")));
+    b.catalog(catalog.clone()).unwrap();
+    let _server = packedops_v1::Server::declare(
+        &mut b,
+        Arc::new(Ops {
+            clock: clock.clone(),
+            refusal: refusal.clone(),
+            calls: std::sync::atomic::AtomicU64::new(0),
+        }),
+    )
+    .await
+    .unwrap();
+    let _svc = b.start().await.unwrap();
+    let tool = packedops_v1::Client::from_inner(
+        zenkey::Client::new(&caller, packedops_v1::contract(), &["lab/ops"])
+            .unwrap()
+            .with_deployment_epoch(epoch),
+    )
+    .unwrap();
+    let lab = addr("lab/ops");
+    let sensor = |t: &str| Sensor {
+        temperature: t.parse().unwrap(),
+        humidity: "40".parse().unwrap(),
+        pressure: "1013.2".parse().unwrap(),
+        battery: "3.7".parse().unwrap(),
+    };
+    let out = eventually("lab/ops answers", || async {
+        let out = packedops_v1::Api::calibrate(&tool, &lab, sensor("21.5"))
+            .await
+            .unwrap();
+        (out.silence().is_none()).then_some(out)
+    })
+    .await;
+    assert_eq!(out.answer(), Some(&clock), "read under the catalog's epoch");
+
+    let refused = packedops_v1::Api::calibrate(&tool, &lab, sensor("85"))
+        .await
+        .unwrap();
+    let r = refused.refusal().expect("refused app");
+    assert_eq!(r.code, "app");
+    let tag = Packed::<Mode>::tag().unwrap();
+    assert_eq!(r.form.map(|m| m.tag), Some(tag), "CH holds Mode's tag");
+    assert_eq!(r.detail_as::<Packed<Mode>>(None), Some(Ok(refusal)));
+
+    let replies = packedops_v1::Api::scan(
+        &tool,
+        &lab,
+        Status {
+            duty_available: "12.5".parse().unwrap(),
+            signal_bars: 2,
+            oper: status::Oper::Up,
+            admin: status::Admin::Up,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(replies.repliers.len(), 1);
+    let replier = &replies.repliers[0];
+    assert_eq!(replier.values.len(), 2);
+    assert_eq!(replier.summary(), Some(&clock));
 }

@@ -43,3 +43,11 @@ v1's `zenkey-build` (0.11.x on crates.io) is the `v1` branch's, and that branch'
   typed record. `codegen-test` generates `linkframes.v1`
   (`zenkey/tests/contracts/frames/`), and `tests/bus.rs`'s
   `frames_are_written_through_the_generated_code` runs it on a bus.
+- **Packed operation types** (#985 C4c, core §5.1, §7.6): an operation's
+  packed request, response, summary or error type is `Packed<T>` like any
+  other (its `Handlers` method and `Api` call typed by it), carried in
+  the forms behind its tag; the runtime reads and writes its `time`
+  fields under the service's or client's deployment epoch. `codegen-test`
+  generates `packedops.v1` (`zenkey/tests/contracts/packed-ops/`), and
+  `tests/bus.rs`'s `packed_operations_are_served_and_called_in_the_forms`
+  calls it under a catalog's epoch, its `app` refusal a packed `Mode`.
