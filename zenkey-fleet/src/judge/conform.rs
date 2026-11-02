@@ -3754,7 +3754,7 @@ fn operation(
         }
     };
     match &report.answer {
-        OperationAnswer::Value { reply } => match response(reply) {
+        OperationAnswer::Value { reply, .. } => match response(reply) {
             Some(why) => ConformCase::failed(C, name, why),
             None => ConformCase::passed(
                 C,
@@ -4198,6 +4198,7 @@ mod tests {
             op,
             OperationAnswer::Value {
                 reply: render_with(&rev, &key, Member::Response, Some("application/json"), body),
+                mark: None,
             },
         )
     }
@@ -4224,6 +4225,7 @@ mod tests {
                         values: BTreeMap::new(),
                         replies: vec![r(Member::Response)],
                         summaries: (0..summaries).map(|_| r(Member::Summary)).collect(),
+                        marks: vec![],
                         possibly_partial: Some(summaries != 1),
                     }],
                     refusals: vec![],

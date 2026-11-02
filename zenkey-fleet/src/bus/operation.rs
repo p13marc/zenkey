@@ -9,6 +9,13 @@
 //! it turns what came back into an [`OperationReport`], rendering every
 //! payload through the revision in hand ([`crate::model::render`]).
 //!
+//! **Both wires** (#980's C4b): the runtime reads each reply by its
+//! `Encoding`, a value form's record and an error form's fields under
+//! `zenoh/bytes` and the bare wire's under any other (core §5.1, §5.2).
+//! The report carries a form's as-of mark beside its value or error
+//! (observer §7.3, "A call's forms first"), and a transport error with its
+//! `Encoding` and bytes.
+//!
 //! **Silence is attributed through presence** (O5). For one address the
 //! runtime reads it ([`zenkey::Client::attribute`]); for a fan-out or a
 //! many-reply call it reads the selection's interface tokens too —
@@ -22,7 +29,6 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 
 use zenkey_model::contract::{Replies as RepliesKind, Resource};
-use zenkey_model::envelope::Envelope;
 use zenoh::Session;
 
 use crate::model::catalog::Revision;
@@ -145,9 +151,10 @@ fn one_reply(revision: &Revision, r: &Resource, outcome: zenkey::Outcome) -> Ope
     match outcome {
         zenkey::call::Outcome::Value(a) => OperationAnswer::Value {
             reply: reply(revision, &a, Member::Response),
+            mark: a.mark().map(Into::into),
         },
-        zenkey::call::Outcome::Refused(env) => OperationAnswer::Refused {
-            envelope: envelope_view(revision, r, &env),
+        zenkey::call::Outcome::Refused(refusal) => OperationAnswer::Refused {
+            envelope: envelope_view(revision, r, &refusal),
         },
         zenkey::call::Outcome::Malformed(m) => OperationAnswer::Malformed {
             malformed: malformed(&m),
@@ -155,7 +162,7 @@ fn one_reply(revision: &Revision, r: &Resource, outcome: zenkey::Outcome) -> Ope
         zenkey::call::Outcome::NoAnswer(s) => OperationAnswer::Silent {
             silence: SilenceView {
                 attempts: s.attempts,
-                transport: s.transport,
+                transport: s.transport.as_ref().map(ToString::to_string),
                 presence: attribution(s.presence),
             },
         },
@@ -174,7 +181,8 @@ pub fn attribution(a: zenkey::call::Attribution) -> PresenceAttribution {
     }
 }
 
-/// One reply, rendered through the contract's `member` type.
+/// One reply, rendered through the contract's `member` type: a value
+/// form's record, or a bare reply's payload (observer §7.3).
 fn reply(revision: &Revision, a: &zenkey::client::Answer, member: Member) -> PayloadRendering {
     let encoding = a.sample.encoding().to_string();
     render_with(
@@ -186,12 +194,24 @@ fn reply(revision: &Revision, a: &zenkey::client::Answer, member: Member) -> Pay
     )
 }
 
-fn envelope_view(revision: &Revision, r: &Resource, env: &Envelope) -> EnvelopeView {
+/// An owner's error, from either wire: its fields, its detail rendered
+/// through the operation's `error` type (an error form's by CH's tag), and
+/// an error form's as-of mark.
+fn envelope_view(
+    revision: &Revision,
+    r: &Resource,
+    refusal: &zenkey::call::Refusal,
+) -> EnvelopeView {
+    let tag = refusal.form.map(|m| m.tag);
     EnvelopeView {
-        code: env.code.clone(),
-        message: env.message.clone(),
-        cause: env.cause.clone(),
-        detail: env.detail.as_ref().map(|d| render_detail(revision, r, d)),
+        code: refusal.code.clone(),
+        message: refusal.message.clone(),
+        cause: refusal.cause.clone(),
+        detail: refusal
+            .detail
+            .as_ref()
+            .map(|d| render_detail(revision, r, d, tag)),
+        mark: refusal.mark().map(Into::into),
     }
 }
 
@@ -230,6 +250,7 @@ fn replies_view(
                     .iter()
                     .map(|a| reply(revision, a, Member::Summary))
                     .collect(),
+                marks: marks(p),
                 possibly_partial: declared.then(|| p.summary().is_none()),
             })
             .collect(),
@@ -239,9 +260,25 @@ fn replies_view(
             .map(|e| envelope_view(revision, r, e))
             .collect(),
         malformed: replies.malformed.iter().map(malformed).collect(),
-        transport: replies.transport,
+        transport: replies.transport.iter().map(ToString::to_string).collect(),
         discarded: replies.discarded,
         presence,
+    }
+}
+
+/// Each value's as-of mark, then each summary's, in their order (core
+/// §5.1): none at all when no reply came in the value form.
+fn marks(p: &zenkey::client::Replier) -> Vec<Option<crate::report::InbandStamp>> {
+    let marks: Vec<_> = p
+        .values
+        .iter()
+        .chain(&p.summaries)
+        .map(|a| a.mark().map(Into::into))
+        .collect();
+    if marks.iter().all(Option::is_none) {
+        Vec::new()
+    } else {
+        marks
     }
 }
 

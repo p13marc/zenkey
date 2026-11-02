@@ -26,6 +26,7 @@ use zenkey_model::canonical::Fingerprint;
 use zenkey_model::decode::{self, Rendered as Decoded};
 use zenkey_model::grammar::{IfaceId, ZkKey};
 use zenkey_model::template::resolve;
+use zenkey_model::wire::{self, Reading};
 
 use crate::model::catalog::{Catalog, ContractState, Contracts, Revision};
 use crate::model::deployment::Epoch;
@@ -215,11 +216,24 @@ pub fn render_frame(
     )
 }
 
-/// A payload of `member` on `key`, its envelope read (a type member's
-/// alone: an attachment and an operation's members carry none).
+/// A payload of `member` on `key`, its envelope read: a type member's
+/// (core §7.5), and a reply's, the `response` or the `summary`, as the
+/// value form under `zenoh/bytes` and a bare record under any other
+/// `Encoding` (observer §7.3, "A call's forms first"; core §5.1, "The bare
+/// wire"). An attachment carries none, and a request is read bare until
+/// callers write its form (#980's C4c).
 fn read<'a>(key: &str, member: Member, encoding: Option<&str>, bytes: &'a [u8]) -> Payload<'a> {
-    match member {
-        Member::Type => inband::payload(key, encoding, bytes),
+    match (member, encoding) {
+        (Member::Type, _) => inband::payload(key, encoding, bytes),
+        (Member::Response | Member::Summary, Some(e)) => match wire::read_value(e, bytes) {
+            Reading::Enveloped(v) => Payload::Record {
+                record: v.record,
+                stamp: v.stamp,
+                tag: v.tag,
+            },
+            Reading::Refused(r) => Payload::Refused(r),
+            _ => Payload::Plain(bytes),
+        },
         _ => Payload::Plain(bytes),
     }
 }
@@ -567,16 +581,20 @@ fn rendered(ty: &serde_json::Value, d: Decoded, epoch_assumed: Option<i64>) -> R
     }
 }
 
-/// An `app` envelope's detail (§5.2), rendered through operation `r`'s
-/// declared `error` type: a JSON or CBOR envelope's value as carried, a
-/// protobuf envelope's bytes decoded as the message, a raw type's base64
-/// text shown as its media type. An operation that declares no `error`
-/// type has no detail to send, and one that arrives anyway is rendered
-/// structurally, saying so.
+/// An `app` error's detail (§5.2), rendered through operation `r`'s
+/// declared `error` type. From an error form (`form` its CH tag): the
+/// type's own bytes, decoded as the type says on the contract's
+/// `encoding`, a packed one under that tag, a raw one shown as its media
+/// type. From the bare wire's envelope (`form` `None`): a JSON or CBOR
+/// envelope's value as carried, a protobuf envelope's bytes decoded as the
+/// message, a raw type's base64 text shown as its media type. An operation
+/// that declares no `error` type has no detail to send, and one that
+/// arrives anyway is rendered structurally, saying so.
 pub fn render_detail(
     revision: &Revision,
     r: &zenkey_model::contract::Resource,
     detail: &zenkey_model::envelope::Detail,
+    form: Option<zenkey_model::wire::Tag>,
 ) -> Rendered {
     use zenkey_model::envelope::Detail;
     let ty = decode::type_of(
@@ -586,6 +604,11 @@ pub fn render_detail(
         Member::Error.as_str(),
     );
     match (ty, detail) {
+        (Some(ty), Detail::Bytes(bytes)) if form.is_some() => {
+            let (decoded, assumed) =
+                decode_under(revision.bundle(), ty, None, bytes, form, Epoch::Assumed);
+            rendered(ty, decoded, assumed)
+        }
         (Some(ty), Detail::Bytes(bytes)) => rendered(
             ty,
             decode::decode(revision.bundle(), ty, Some("application/protobuf"), bytes),

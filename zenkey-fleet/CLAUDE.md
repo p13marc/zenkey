@@ -336,6 +336,17 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `open_timeout_ms`); `Monitor::watch_across(selector, horizon)` declares
   through `zenkey::redeclare::Redeclaring` (`Monitor::redeclared`),
   `tests/redeclare.rs` is `constrained.md` §9 step 2 through a lossy relay.
+  A call's both wires (#985 C4b): `model::render`'s `read` reads a
+  `response` or `summary` under `zenoh/bytes` as the value form
+  (`Payload::Record`, or `Refused`, never sniffed), `render_detail` takes
+  the error form's tag (`None` for the bare wire) and decodes a form's
+  detail as the `error` type on the contract's encoding, and
+  `report::operation` carries the as-of mark (`OperationAnswer::Value`'s
+  and `EnvelopeView`'s `mark`, `ReplierView::marks`, each omitted on the
+  bare wire); `bus::conform`'s fan-out probe and `tape::bench` classify by
+  the runtime's `classify`, and `bus::config`'s refusal reads a
+  `ConfigError` from either wire (`Refusal::detail_as`); `zk2_core.rs`'s
+  `a_call_is_read_from_its_form_or_the_bare_wire` runs them.
   `link.v2` (#988 L2) runs through `model::acl`: a v2 face policy's
   `Transport`, `Binding` and catalog id ride `AclPlan::{transport,
   binding, catalog}` (absent for `link.v1`, so its pinned plans did not
