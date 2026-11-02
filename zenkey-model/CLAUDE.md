@@ -76,7 +76,9 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   §2.15's watch after a window, as observer §5.2 says, under a version of
   its own (round 86's F-326), and inline history out, no other rule
   changed; text 0.10, #935: round 87's F-337 and F-338 rewritten, no
-  rule changed), and
+  rule changed; text 0.11, #978 F4: revision 1.1 uses `freshness.v2`, and
+  `Window::in_step` makes a `freshness.v2` owner's `window` wait for its
+  latest heartbeat in step with the view, else `window_unconfirmed`), and
   `telemetry.v1`'s (`telemetry`, #819 TA: the vocabulary, published by
   core 0.35; the standard schema `spec/profiles/telemetry/telemetry.v1.json`,
   whose types are the profile's by artifact id (`PUBLISHED`: ZenSight's

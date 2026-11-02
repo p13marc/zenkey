@@ -559,7 +559,8 @@ pub fn agrees(judged: Judged, checks_read: bool) -> Agreement {
 /// §5's last question reads it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Heard {
-    /// A put of `state/status`, a change or a re-put: a confirmation.
+    /// A put of `state/status`, a change or a re-put, or a heartbeat that
+    /// vouched for it (`freshness.v2` §2.5): a confirmation.
     Status,
     /// A delete of `state/status`, which §2.3 forbids: no confirmation.
     StatusDeleted,
