@@ -4,24 +4,28 @@
 # with this file as --face-policy.
 #
 # The transport: at 60 s with 2, the keep-alive interval was 30 s, so one
-# frame a minute still left a keep-alive between every two. 240 s with 4
-# puts the interval at 60 s, which frames/link at one a minute replaces:
-# 2,880 keep-alives a day idle, 0.36 false closes a day at 5 % loss.
+# frame a minute still left a keep-alive between every two. 480 s with 4
+# puts the interval at 120 s, which frames/fast at one every 2 minutes
+# replaces: 1,440 keep-alives a day idle, 0.18 false closes a day at 5 %
+# loss. (#988 L5 ran 240 s, for frames/link every minute; #991's 3.3 puts
+# the readings in one frame every 2.)
 #
-# Across the face: frames/link every minute, where zk2c fits the four link
-# readings in 473 s of air a day, and the group frames every two minutes.
-# frames/message is SBD's (`frame_unlisted`), and the chip has no ARQ
-# (`no_arq`).
+# Across the face: frames/fast every two minutes, a full record every 15
+# minutes (`keyframe_s`, #991's table): all 73 readings in 534 s of air a
+# day, lora0's own in 281 s. Its 207 B full record is above the chip's
+# 117 B batch (`frame_over_batch`), and fragments into two frames every 15
+# minutes. frames/slow and frames/paid are SF12's and SBD's
+# (`frame_unlisted`), and the chip has no ARQ (`no_arq`).
 profile  = "link.v2"
 system   = "h-c2a95e41d7f0"
 services = ["lora0"]
 binding  = "zm-1.10.2-r1"
-catalog  = "8c808dff"
+catalog  = "e3a529fe"
 
 [transport]
-lease_ms             = 240000
+lease_ms             = 480000
 keep_alive           = 4
-wait_before_close_ms = 240000
+wait_before_close_ms = 480000
 sequence             = "16bit"
 batch_bytes          = 117          # the chip's 115 B frame and 2 B of stream framing
 open_timeout_ms      = 10000
@@ -43,11 +47,4 @@ reply_timeout_ms = 15000            # 16 full batches take 8.5 s
 horizon_s        = 120
 
 [face.lora.frames]
-"modem.v3/frames/link"   = { every_s = 60 }
-"modem.v3/frames/sdu"    = { every_s = 120 }
-"modem.v3/frames/sched"  = { every_s = 120 }
-"modem.v3/frames/air"    = { every_s = 120 }
-"modem.v3/frames/layer"  = { every_s = 120 }
-"modem.v3/frames/if"     = { every_s = 120 }
-"modem.v3/frames/radio"  = { every_s = 120 }
-"modem.v3/frames/bearer" = { every_s = 120 }
+"modem.v3/frames/fast" = { every_s = 120, keyframe_s = 900 }

@@ -8,16 +8,19 @@
 # day. The service retries, so a keep-alive is late rather than lost: no
 # loss, and ARQ.
 #
-# Across the face: frames/message alone, all 73 readings in one paid
-# message (213 B of payload), once a keep-alive interval, so that it replaces
-# a keep-alive the link pays anyway. It has no horizon, so liveness across
-# SBD stays unobservable. The plan warns `frame_unlisted` of the other
-# eight frames: sat0 does not publish them.
+# Across the face: frames/paid alone (modem.v3 3.3, #991), all 73 readings
+# in one paid message (207 B of payload, a full record every frame), once a
+# keep-alive interval, so that it replaces a keep-alive the link pays
+# anyway: 48 messages up and 48 keep-alives down, 96 a day, as idle. Its
+# 3,600 s horizon is the face's `horizon_s`, so liveness across SBD is
+# observable, as it was not under 3.2's frames/message. The plan warns
+# `frame_unlisted` of frames/fast and frames/slow: sat0 does not publish
+# them.
 profile  = "link.v2"
 system   = "h-71c0e2a9d4b3"
 services = ["sat0"]
 binding  = "zm-1.10.2-r1"
-catalog  = "8c808dff"
+catalog  = "e3a529fe"
 
 [transport]
 lease_ms             = 3600000
@@ -44,4 +47,4 @@ reply_timeout_ms = 1000000
 horizon_s        = 3600
 
 [face.sbd.frames]
-"modem.v3/frames/message" = { every_s = 1800 }
+"modem.v3/frames/paid" = { every_s = 1800 }
