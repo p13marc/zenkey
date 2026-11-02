@@ -200,7 +200,9 @@ pub(crate) struct AcrossFaceArgs {
     /// With --face, the face policy (TOML, `link.v2` §2.1) whose face the
     /// tool reads across (#988 L4). Its session runs the face's
     /// `[transport]` (`link.v2` §2.16), so both ends run one lease and
-    /// keep_alive; the default --timeout is the face's `reply_timeout_ms`
+    /// keep_alive, but a key the --zenoh-config file states wins, and the
+    /// interests timeout stays at least the tool's 120 s; the default
+    /// --timeout is the face's `reply_timeout_ms`
     /// (core §8.1); and where the face says `arq = false`, each selector
     /// with a horizon in the contracts in hand is declared again after two
     /// horizons of silence while the transport stays up, which repairs a
@@ -1612,7 +1614,9 @@ pub(crate) enum CheckCmd {
     ///
     /// `link.v1` §2.15 (#769): for each face of the policy (`--face-policy`),
     /// the router config's block as it guards that face, read from the FILE
-    /// through zenoh's own loader:
+    /// through zenoh's own loader; under a link.v2 binding other than
+    /// zenoh-1.10.1, as data in zenoh's shapes, since stock zenoh refuses
+    /// the fork's link protocols, each key that does not read named (#1044):
     ///
     ///   zk_not_denied              a pair of the nine messages and both
     ///                              flows that no deny of the far principal's
@@ -4114,7 +4118,8 @@ pub(crate) struct AclGenArgs {
     #[arg(long, requires = "against", conflicts_with = "explain")]
     pub(crate) check: bool,
     /// With --check: the router's JSON5 config file, read through zenoh's
-    /// own loader so what is compared is what zenohd would run.
+    /// own loader so what is compared is what zenohd would run; as data
+    /// under a --face-policy whose binding is not stock zenoh (#1044).
     #[arg(long, value_name = "FILE", requires = "check")]
     pub(crate) against: Option<PathBuf>,
     /// Does PRINCIPAL (a subject id, user or CN) hold MESSAGE on KEY (the
@@ -4168,7 +4173,9 @@ pub(crate) enum DefaultPermission {
 #[derive(clap::Args)]
 pub(crate) struct CheckFaceArgs {
     /// The router's JSON5 config file, read through zenoh's own loader: its
-    /// `access_control`, `downsampling` and `gateway` blocks.
+    /// `access_control`, `downsampling` and `gateway` blocks. Under a
+    /// binding whose zenoh is not stock (`link.v2` §2.4), read as data in
+    /// zenoh's shapes: stock zenoh refuses the fork's link protocols.
     #[arg(value_name = "ROUTER-CONFIG")]
     pub(crate) router: PathBuf,
     /// The router's face policy (TOML, `link.v1` §2.1).
@@ -4191,7 +4198,7 @@ pub(crate) struct CheckFaceArgs {
     #[arg(long, value_name = "ADDRESS=SECS")]
     pub(crate) window: Vec<String>,
     /// The far end's config file, the far router's or the gateway client's,
-    /// read as zenoh reads it: its lease and keep_alive against the
+    /// read as the router's is: its lease and keep_alive against the
     /// router's (`link.v2` §2.19, `peer_differs`). Needs a link.v2 policy.
     #[arg(long, value_name = "FAR-CONFIG")]
     pub(crate) peer_config: Option<PathBuf>,

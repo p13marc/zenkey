@@ -334,8 +334,10 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `[transport]` (a stated key stands, the interests timeout at least
   `TOOL_INTERESTS_TIMEOUT`, the deadline `OPEN_TIMEOUT` past the face's
   `open_timeout_ms`); `Monitor::watch_across(selector, horizon)` declares
-  through `zenkey::redeclare::Redeclaring` (`Monitor::redeclared`),
-  `tests/redeclare.rs` is `constrained.md` §9 step 2 through a lossy relay.
+  through `zenkey::redeclare::Redeclaring` (`Monitor::redeclared`,
+  `redeclare_failed`), `tests/redeclare.rs` is `constrained.md` §9 step 2
+  through a lossy relay, and #1047's `unwatch` returning while a re-declare
+  waits behind a stalled relay (no QoS, blocking puts).
   A call's both wires (#985 C4b): `model::render`'s `read` reads a
   `response` or `summary` under `zenoh/bytes` as the value form
   (`Payload::Record`, or `Refused`, never sniffed), `render_detail` takes
@@ -358,7 +360,14 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `from_file` picks by extension with the very parsers it uses,
   `ConfigDialect`, json5 0.4.1 and toml 0.9 beside serde_yaml, each
   stated key's value the one zenoh's loader read; `RouterConfig::read`,
-  `stated_tree`, `from_json5`): `check_acl(plan, &config, against)`
+  `stated_tree`, `from_json5`). Under a binding whose zenoh is not stock
+  (#1044, `report::ConfigRead::of`) it is read as data instead,
+  `RouterConfig::read_data` (`model/acl/data.rs`): zenoh 1.10.1's shapes
+  mirrored with `deny_unknown_fields`, required fields, non-empty lists,
+  canonical key exprs and the binding's link protocols, every key that
+  does not read named at its path; `from_json5_for(text, binding)` picks
+  the path, and `AclCheck`/`FaceCheck::read` say which (`"data"` only):
+  `check_acl(plan, &config, against)`
   compares the transport key by key (`AclFindingKind::TransportDiffers`,
   an omitted key at the binding's default), and `check_face(plan,
   policy, &config, &FaceAsk { windows, peer, catalog }, against)` adds
@@ -366,7 +375,8 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `FaceCheck::{binding, transport, catalog}` rows. `tests/acl_plans.rs`
   pins the four media of `examples/zk2/link/media/`
   (`link-v2.<medium>.json5`) and flags a hand-edited `wait_before_close`
-  on each, and its tcgui and walkthrough plans grant each bound
+  on each, self-checks zenoh-modem's five fork-binding faces read as data
+  (not pinned: zenoh's loader refuses them), and its tcgui and walkthrough plans grant each bound
   `freshness.v2` heartbeat since #978 F5 moved those contracts (bless with
   `ACL_BLESS=1`). Since F5 no tcgui state is on core §4.3's table: a test
   that needs row 1 reads `zenkey/tests/contracts/beacon.v1.toml` or runs

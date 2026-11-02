@@ -8,9 +8,12 @@
 //! other one that opens no session. What a router runs is not on the bus
 //! (core §11.3, `link.v1` §2.14): the block judged is the config **file**,
 //! read through `zenoh::Config::from_file`, so what is judged is what
-//! `zenohd` would parse. The face policy, the enrollment and the contracts
-//! compile the plan `acl gen --face-policy` writes, and the block is checked
-//! against both §2.15's rules and that plan.
+//! `zenohd` would parse. Under a binding whose zenoh is not stock
+//! (`link.v2` §2.4), stock zenoh's loader refuses the fork's link
+//! protocols, so the file is read as data instead, in zenoh's shapes, each
+//! key that does not read named (#1044). The face policy, the enrollment
+//! and the contracts compile the plan `acl gen --face-policy` writes, and
+//! the block is checked against both §2.15's rules and that plan.
 //!
 //! Every judgement is `zenkey_fleet::check_face`'s; what is here is what only
 //! a CLI has: the files, the `--window` spellings, the rendering and the
@@ -163,9 +166,13 @@ pub async fn run(cli: crate::cli::CheckFaceArgs) -> Result<()> {
             )));
         }
     }
-    let peer = peer_config.as_ref().map(|p| ASKING.ask(acl::load_peer(p)));
+    // Read as the policy's binding has it read (#1044): stock zenoh's
+    // loader refuses a fork's link protocols.
+    let peer = peer_config
+        .as_ref()
+        .map(|p| ASKING.ask(acl::load_peer(p, policy.binding)));
     let held = catalog.as_ref().map(|p| ASKING.ask(catalog_id(p)));
-    let observed = ASKING.ask(acl::load_against(&router));
+    let observed = ASKING.ask(acl::load_against(&router, policy.binding));
     let report = zenkey_fleet::check_face(
         &plan,
         policy,

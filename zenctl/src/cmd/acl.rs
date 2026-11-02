@@ -32,7 +32,8 @@
 //!   router's running block is not observable on the bus (§11.3), so the
 //!   observed side is the config *file*, read through
 //!   `zenoh::Config::from_file`, zenoh's own loader: what is compared is
-//!   what `zenohd` would parse. Every failure before the comparison lands on
+//!   what `zenohd` would parse. Under a face policy whose binding is not
+//!   stock zenoh, as data (#1044, [`load_against`]). Every failure before the comparison lands on
 //!   the reserved 2 through [`ASKING`]; the verdict exits through
 //!   [`crate::exit::verdict`].
 //! * **`--explain <principal> <key> <message>`** is pure over the plan and
@@ -42,7 +43,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use zenkey_fleet::RouterConfig;
-use zenkey_fleet::report::AclPermission;
+use zenkey_fleet::report::{AclPermission, Binding, ConfigRead};
 
 use crate::bus::Deployment;
 use crate::cmd::zk2;
@@ -106,12 +107,13 @@ pub(crate) fn load_enrollment(path: &Path) -> Result<zenkey_fleet::report::Enrol
     })
 }
 
-/// A config file's own text as a JSON tree, once zenoh's loader accepted
-/// it: the keys it *states*, which `link.v2` §2.19 reads apart from the
-/// defaults zenoh fills in. The dialect is the one zenoh 1.10.1's
-/// `Config::from_file` picks by the extension, read with the parser it
-/// used (`zenkey_fleet::ConfigDialect`), so a file zenoh accepts reads here.
-fn stated_tree(path: &Path) -> Result<serde_json::Value> {
+/// A config file's own text as a JSON tree: the keys it *states*, which
+/// `link.v2` §2.19 reads apart from the defaults zenoh fills in. The dialect
+/// is the one zenoh 1.10.1's `Config::from_file` picks by the extension,
+/// read with the parser it used (`zenkey_fleet::ConfigDialect`), so a file
+/// zenoh accepts reads here. `read` says whether zenoh's loader read it
+/// first, or the tree is all there is (#1044).
+fn stated_tree(path: &Path, read: ConfigRead) -> Result<serde_json::Value> {
     let text = std::fs::read_to_string(path)
         .with_context(|| format!("{}", path.display()))
         .map_err(|e| unaskable!("{e:#}"))?;
@@ -121,11 +123,15 @@ fn stated_tree(path: &Path) -> Result<serde_json::Value> {
             path.display()
         )
     })?;
-    RouterConfig::stated_tree(&text, dialect).map_err(|e| {
-        unaskable!(
+    RouterConfig::stated_tree(&text, dialect).map_err(|e| match read {
+        ConfigRead::Zenoh => unaskable!(
             "{}: zenoh read this file, but which keys it states could not be read: {e}",
             path.display()
-        )
+        ),
+        ConfigRead::Data => unaskable!(
+            "{}: the file does not parse, so none of its keys can be read as data: {e}",
+            path.display()
+        ),
     })
 }
 
@@ -133,21 +139,38 @@ fn stated_tree(path: &Path) -> Result<serde_json::Value> {
 fn load_config(path: &Path) -> Result<(zenoh::Config, serde_json::Value)> {
     let config = zenoh::Config::from_file(path)
         .map_err(|e| unaskable!("{}: zenoh refused the config: {e}", path.display()))?;
-    Ok((config, stated_tree(path)?))
+    Ok((config, stated_tree(path, ConfigRead::Zenoh)?))
 }
 
 /// The router config's `access_control`, `downsampling` and `gateway`
-/// blocks, as zenoh's loader parsed them, and the transport keys it states
-/// (`link.v2` §2.19).
-pub(crate) fn load_against(path: &Path) -> Result<RouterConfig> {
-    let (config, stated) = load_config(path)?;
-    RouterConfig::read(&config, &stated).map_err(|e| unaskable!("{}: {e}", path.display()))
+/// blocks, and the transport keys it states (`link.v2` §2.19), read as a
+/// router of `binding` has them read (#1044, `ConfigRead::of`): through
+/// zenoh's own loader under stock zenoh, so what is judged is what `zenohd`
+/// would parse; as data under any other binding, whose link protocols
+/// stock zenoh's loader refuses (`link.v2` §2.4). A key that does not read
+/// as data is named, every one.
+pub(crate) fn load_against(path: &Path, binding: Binding) -> Result<RouterConfig> {
+    let observed = match ConfigRead::of(binding) {
+        ConfigRead::Zenoh => {
+            let (config, stated) = load_config(path)?;
+            RouterConfig::read(&config, &stated)
+        }
+        ConfigRead::Data => RouterConfig::read_data(&stated_tree(path, ConfigRead::Data)?, binding),
+    };
+    observed.map_err(|e| unaskable!("{}: {e}", path.display()))
 }
 
 /// The transport keys a far end's config file states (`link.v2` §2.19):
-/// the far router's, or the gateway client's session config.
-pub(crate) fn load_peer(path: &Path) -> Result<zenkey_model::link::StatedTransport> {
-    let (_, stated) = load_config(path)?;
+/// the far router's, or the gateway client's session config, read as
+/// [`load_against`] reads the near router's.
+pub(crate) fn load_peer(
+    path: &Path,
+    binding: Binding,
+) -> Result<zenkey_model::link::StatedTransport> {
+    let stated = match ConfigRead::of(binding) {
+        ConfigRead::Zenoh => load_config(path)?.1,
+        ConfigRead::Data => stated_tree(path, ConfigRead::Data)?,
+    };
     Ok(zenkey_model::link::StatedTransport::read(&stated))
 }
 
@@ -306,7 +329,7 @@ pub async fn run(cli: crate::cli::AclGenArgs) -> Result<()> {
 
     if check {
         let against = against.expect("clap: --check requires --against");
-        let observed = ASKING.ask(load_against(&against));
+        let observed = ASKING.ask(load_against(&against, plan.binding.unwrap_or_default()));
         let report = zenkey_fleet::check_acl(&plan, &observed, &against.display().to_string());
         plan_notes(&plan);
         crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;

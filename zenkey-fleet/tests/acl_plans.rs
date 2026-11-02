@@ -3,8 +3,10 @@
 //! the tcgui pilot's contracts, under both postures (§11.2); the
 //! walkthrough's vehicle router with its constrained face to the ground in
 //! both attachments (§8.5, U23), from its face policy
-//! (`examples/zk2/acl/walkthrough.face.toml`, `link.v1`); and `link.v1`'s
-//! own example, `examples/zk2/link/`, under both postures (#769, LB).
+//! (`examples/zk2/acl/walkthrough.face.toml`, `link.v1`); `link.v1`'s
+//! own example, `examples/zk2/link/`, under both postures (#769, LB); and
+//! zenoh-modem's faces on the fork's binding, each block passing its own
+//! checks read as data (#988 L5, #1044).
 //!
 //! Each plan is pinned as the JSON5 fragment `zenctl acl gen --json5` writes,
 //! in `tests/fixtures/acl/`, and each fragment is read back by zenoh's own
@@ -268,17 +270,19 @@ fn self_check(plan: &AclPlan, policy: &str) -> (Vec<link::Finding>, usize) {
 }
 
 /// [`self_check`] over the block's text as given, a hand edit of what the
-/// generator wrote, with what `ask` asks.
+/// generator wrote, with what `ask` asks. The block is read as the
+/// policy's binding has it read (#1044): through zenoh's own loader under
+/// stock zenoh, as data under a fork.
 fn check_block(
     block: &str,
     plan: &AclPlan,
     policy: &str,
     ask: &zenkey_fleet::FaceAsk<'_>,
 ) -> (Vec<link::Finding>, usize) {
-    let config = RouterConfig::from_json5(&format!("{{\n{block}}}")).unwrap();
     let parsed = link::parse(policy);
-    let report =
-        zenkey_fleet::check_face(plan, parsed.policy.as_ref().unwrap(), &config, ask, "self");
+    let policy = parsed.policy.as_ref().unwrap();
+    let config = RouterConfig::from_json5_for(&format!("{{\n{block}}}"), policy.binding).unwrap();
+    let report = zenkey_fleet::check_face(plan, policy, &config, ask, "self");
     (report.findings, report.comparison.findings.len())
 }
 
@@ -428,6 +432,96 @@ fn link_v2_check_face_flags_wait_before_close_under_the_lease() {
             codes.contains(&"peer_differs"),
             "{medium}: a far end at zenoh's 10 s lease: {codes:?}"
         );
+    }
+}
+
+/// zenoh-modem's faces (`examples/zk2/zenoh-modem/faces/`, #988 L5): five
+/// link.v2 policies on binding `zm-1.10.2-r1`, the lora0 three each an
+/// alternative for one router.
+const MODEM_FACES: [&str; 5] = ["rf0", "lora0-sf7", "lora0-sf9", "lora0-sf12", "sat0"];
+
+fn modem_policy(face: &str) -> String {
+    std::fs::read_to_string(root().join(format!(
+        "examples/zk2/zenoh-modem/faces/zenohd-{face}.face.toml"
+    )))
+    .unwrap()
+}
+
+fn modem_catalog() -> String {
+    std::fs::read_to_string(root().join("examples/zk2/zenoh-modem/catalog.json")).unwrap()
+}
+
+/// zenoh-modem's plan over `face`'s policy, as its policies' header writes
+/// it: the enrollment beside them, zenoh-modem's contracts with config.v1
+/// and health.v1, and the catalog the ground holds.
+fn modem_plan(face: &str, default_permission: AclPermission) -> AclPlan {
+    let dir = root().join("examples/zk2/zenoh-modem");
+    let (mut set, problems) = ContractSet::load_path(&dir);
+    assert!(problems.is_empty(), "{problems:?}");
+    for beside in [
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml",
+    ] {
+        let (more, problems) = ContractSet::load_path(&root().join(beside));
+        assert!(problems.is_empty(), "{beside}: {problems:?}");
+        set.extend(more);
+    }
+    let enrollment: Enrollment = toml::from_str(
+        &std::fs::read_to_string(dir.join("faces/zenoh-modem.enrollment.toml")).unwrap(),
+    )
+    .unwrap();
+    plan_acl(
+        &enrollment,
+        &set,
+        &AclOptions {
+            namespace: String::new(),
+            default_permission,
+            face_policy: Some(link::parse(&modem_policy(face))),
+            catalog: Some(zenkey_model::catalog::Catalog::parse(&modem_catalog()).unwrap()),
+        },
+    )
+    .expect("a zenoh-modem face plans")
+}
+
+/// Each of zenoh-modem's router blocks passes its own checks in both
+/// postures, the far end and the catalog beside it (link.v2 §2.19). Its
+/// subjects are narrowed over the fork's link protocols (link.v2 §2.4), so
+/// they name `unixsock-dgram`, which stock zenoh's loader refuses: the
+/// block is read as data (#1044).
+#[test]
+fn zenoh_modem_faces_pass_their_own_checks() {
+    let catalog = link::catalog_id(&modem_catalog()).unwrap();
+    for face in MODEM_FACES {
+        let policy = modem_policy(face);
+        for posture in [AclPermission::Deny, AclPermission::Allow] {
+            let plan = modem_plan(face, posture);
+            assert!(plan.refusals.is_empty(), "{face}: {:#?}", plan.refusals);
+            assert_eq!(plan.binding, Some(link::Binding::Zm1_10_2R1), "{face}");
+            let block = acl_plan_json5(&plan);
+            assert!(block.contains("\"unixsock-dgram\""), "{face}, {posture:?}");
+            assert!(
+                zenoh::Config::from_json5(&format!("{{\n{block}}}")).is_err(),
+                "{face}: stock zenoh refuses the fork's link protocol"
+            );
+            let far = zenkey_fleet::acl_far_json5(&plan).expect("the far end's block");
+            let peer = link::StatedTransport::read(
+                &RouterConfig::stated_tree(
+                    &format!("{{\n{far}}}"),
+                    zenkey_fleet::ConfigDialect::Json5,
+                )
+                .unwrap(),
+            );
+            let ask = zenkey_fleet::FaceAsk {
+                peer: Some(&peer),
+                catalog: Some(&catalog),
+                ..Default::default()
+            };
+            assert_eq!(
+                check_block(&block, &plan, &policy, &ask),
+                (Vec::new(), 0),
+                "{face}, {posture:?}"
+            );
+        }
     }
 }
 

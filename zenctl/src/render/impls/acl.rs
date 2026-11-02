@@ -14,7 +14,8 @@
 //! that drifts.
 
 use zenkey_fleet::report::{
-    AclCheck, AclDecision, AclDirection, AclExplain, AclPermission, AclPlan, FaceCheck, FacePlan,
+    AclCheck, AclDecision, AclDirection, AclExplain, AclPermission, AclPlan, ConfigRead, FaceCheck,
+    FacePlan,
 };
 use zenkey_model::link::AttachPlan;
 
@@ -253,6 +254,34 @@ impl Render for AclPlan {
     }
 }
 
+/// How a check read the config file (#1044), in its coverage note: through
+/// zenoh's own loader, what `zenohd` would parse; or, under a binding whose
+/// zenoh is not stock, as data.
+fn read_as(read: ConfigRead, binding: Option<zenkey_fleet::report::Binding>) -> String {
+    match read {
+        ConfigRead::Zenoh => "through zenoh's own loader".to_owned(),
+        ConfigRead::Data => format!(
+            "read as data, in zenoh 1.10.1's shapes and {}'s link protocols",
+            binding_name(binding)
+        ),
+    }
+}
+
+/// What a file read as data leaves unchecked (#1044): no zenoh loaded it.
+fn unloaded(read: ConfigRead, binding: Option<zenkey_fleet::report::Binding>) -> Option<Note> {
+    (read == ConfigRead::Data).then(|| {
+        Note::coverage(format!(
+            "stock zenoh's loader refuses {}'s link protocols, so no zenoh loaded the file: \
+             whether the router's own loader accepts it is not checked (link.v2 §2.4)",
+            binding_name(binding)
+        ))
+    })
+}
+
+fn binding_name(binding: Option<zenkey_fleet::report::Binding>) -> String {
+    binding.map_or_else(|| "the binding".to_owned(), |b| b.to_string())
+}
+
 impl Render for AclCheck {
     const FAMILY: &'static str = "acl-check";
 
@@ -301,16 +330,18 @@ impl Render for AclCheck {
     }
 
     fn notes(&self) -> Vec<Note> {
-        vec![
+        let mut notes = vec![
             Note::coverage(format!(
-                "compared against the config file {} through zenoh's own loader: access \
-                 control is enforced per hop and the running configuration is not observable \
-                 on the bus, so a file that differs from what the router was started with is \
-                 invisible here",
-                self.against
+                "compared against the config file {} {}: access control is enforced per hop \
+                 and the running configuration is not observable on the bus, so a file that \
+                 differs from what the router was started with is invisible here",
+                self.against,
+                read_as(self.read, None)
             ))
             .cite("spec §11.3"),
-        ]
+        ];
+        notes.extend(unloaded(self.read, None));
+        notes
     }
 }
 
@@ -636,13 +667,15 @@ impl Render for FaceCheck {
             .collect();
         notes.push(
             Note::coverage(format!(
-                "judged against the config file {} through zenoh's own loader: what a router \
-                 runs is not observable on the bus, so a file that differs from what it was \
-                 started with is invisible here",
-                self.against
+                "judged against the config file {} {}: what a router runs is not observable \
+                 on the bus, so a file that differs from what it was started with is \
+                 invisible here",
+                self.against,
+                read_as(self.read, self.binding)
             ))
             .cite("core §11.3, link.v1 §2.14"),
         );
+        notes.extend(unloaded(self.read, self.binding));
         notes.push(match self.windows.as_option() {
             None => Note::coverage(
                 "tombstone windows not asked: pass --window ADDRESS=SECS for each listed owner \

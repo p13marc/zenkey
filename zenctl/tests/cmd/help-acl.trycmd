@@ -139,7 +139,7 @@ Options:
           A file, not the bus: access control is enforced per hop and the running configuration is not observable (spec §11.3).
 
       --against <FILE>
-          With --check: the router's JSON5 config file, read through zenoh's own loader so what is compared is what zenohd would run
+          With --check: the router's JSON5 config file, read through zenoh's own loader so what is compared is what zenohd would run; as data under a --face-policy whose binding is not stock zenoh (#1044)
 
       --explain <PRINCIPAL> <KEY> <MESSAGE>
           Does PRINCIPAL (a subject id, user or CN) hold MESSAGE on KEY (the wire key, namespace included), via which rules, in which direction? Inclusion by zenoh-keyexpr. Exit 0

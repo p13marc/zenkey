@@ -636,8 +636,42 @@ pub struct AclRefusal {
 
 // ── The observed block ────────────────────────────────────────────────────
 
+/// How a router's configuration file was read (#1044). Under stock zenoh's
+/// binding, through zenoh 1.10.1's own loader, so what is judged is what
+/// `zenohd` would parse. Under another binding (`link.v2` §2.4), as data,
+/// by the keys the check reads: stock zenoh's loader refuses the fork's
+/// link protocols, and the fork's loader is not this crate's.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigRead {
+    /// Through zenoh 1.10.1's own loader.
+    #[default]
+    Zenoh,
+    /// As data: the file's own tree, read by the keys checked.
+    Data,
+}
+
+impl ConfigRead {
+    /// How the configuration of a router of `binding` is read: stock
+    /// zenoh's through its loader, any other as data.
+    #[must_use]
+    pub fn of(binding: Binding) -> ConfigRead {
+        match binding {
+            Binding::Zenoh1_10_1 => ConfigRead::Zenoh,
+            Binding::Zm1_10_2R1 => ConfigRead::Data,
+        }
+    }
+
+    /// Whether zenoh's own loader read it.
+    #[must_use]
+    pub fn is_zenoh(&self) -> bool {
+        *self == ConfigRead::Zenoh
+    }
+}
+
 /// The `access_control` block as zenoh's own loader parsed it: the observed
-/// side of `--check --against <router.json5>`.
+/// side of `--check --against <router.json5>`, or, read as data
+/// ([`ConfigRead::Data`]), the file's own block with zenoh's defaults.
 ///
 /// Field for field `AclConfig` (`zenoh-config-1.10.1/src/lib.rs`), so what
 /// is compared is what `zenohd` would run. Read from the router's config
@@ -754,6 +788,9 @@ pub struct AclCheck {
     pub namespace: String,
     /// Where the observed block came from.
     pub against: String,
+    /// How it was read (#1044): absent through zenoh's own loader.
+    #[serde(default, skip_serializing_if = "ConfigRead::is_zenoh")]
+    pub read: ConfigRead,
     pub planned_rules: usize,
     pub observed_rules: usize,
     pub planned_subjects: usize,
@@ -859,6 +896,10 @@ pub struct FaceCheck {
     pub namespace: String,
     /// Where the block came from.
     pub against: String,
+    /// How it was read (#1044): absent through zenoh's own loader, `data`
+    /// under a binding whose zenoh is not stock (`link.v2` §2.4).
+    #[serde(default, skip_serializing_if = "ConfigRead::is_zenoh")]
+    pub read: ConfigRead,
     /// What of the block was read for each face of the policy.
     pub faces: Vec<FaceBlock>,
     /// The findings of `link.v1` §2.15 over each face's block, and of
@@ -1413,6 +1454,7 @@ history   = true
         let check = AclCheck {
             namespace: String::new(),
             against: "router.json5".into(),
+            read: ConfigRead::Zenoh,
             planned_rules: 3,
             observed_rules: 2,
             planned_subjects: 1,
@@ -1476,6 +1518,7 @@ history   = true
         let comparison = AclCheck {
             namespace: String::new(),
             against: "router.json5".into(),
+            read: ConfigRead::Zenoh,
             planned_rules: 2,
             observed_rules: 2,
             planned_subjects: 1,
@@ -1488,6 +1531,7 @@ history   = true
         let check = FaceCheck {
             namespace: String::new(),
             against: "router.json5".into(),
+            read: ConfigRead::Zenoh,
             faces: vec![FaceBlock {
                 face: "radio".into(),
                 far: "ground".into(),
@@ -1538,7 +1582,21 @@ history   = true
                 },
                 "judgement": { "answer": "established" },
             }),
-            "windows not asked: absent"
+            "windows not asked: absent; read through zenoh's loader: absent"
+        );
+        // Read as data (#1044): said, beside the comparison's own.
+        let data = FaceCheck {
+            read: ConfigRead::Data,
+            comparison: AclCheck {
+                read: ConfigRead::Data,
+                ..check.comparison.clone()
+            },
+            ..check.clone()
+        };
+        let v = serde_json::to_value(&data).unwrap();
+        assert_eq!(
+            (&v["read"], &v["comparison"]["read"]),
+            (&json!("data"), &json!("data"))
         );
         let asked = FaceCheck {
             windows: Asked::Asked(vec![FaceWindow {

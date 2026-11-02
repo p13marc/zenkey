@@ -1557,6 +1557,15 @@ impl Subscription {
             .map_or(0, crate::redeclare::Redeclaring::redeclared)
     }
 
+    /// How many times declaring one of its subscribers again failed, each
+    /// retried at the next check and warned of once a horizon (#1047).
+    #[must_use]
+    pub fn redeclare_failed(&self) -> u64 {
+        self.redeclaring
+            .as_ref()
+            .map_or(0, crate::redeclare::Redeclaring::failed)
+    }
+
     /// Samples discarded as expired (`timing.v1` §2.6): older than their
     /// lifespan on a stated ε, never delivered, and no arrival.
     #[must_use]

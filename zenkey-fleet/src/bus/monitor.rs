@@ -1028,6 +1028,14 @@ impl Monitor {
             .map_or(0, zenkey::redeclare::Redeclaring::redeclared)
     }
 
+    /// How many times declaring a watch across a face again failed, each
+    /// retried at the next check and warned of once a horizon (#1047).
+    pub fn redeclare_failed(&self) -> u64 {
+        self.redeclaring
+            .get()
+            .map_or(0, zenkey::redeclare::Redeclaring::failed)
+    }
+
     /// Undeclares one watch's subscriber, acknowledged.
     async fn undeclare(&self, declared: Declared) -> std::result::Result<(), String> {
         match declared {

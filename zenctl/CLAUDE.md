@@ -116,10 +116,13 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   an omitted one at the binding's default (`cmd::acl::load_against` reads
   the file twice: zenoh's loader, then its own tree for what it states,
   in the dialect and with the parser zenoh used, `ConfigDialect`, into
-  `zenkey_fleet::RouterConfig`), with `--peer-config
+  `zenkey_fleet::RouterConfig`; under a fork binding, as data, #1044,
+  `load_against(path, binding)`, `load_peer` alike), with `--peer-config
   <FAR-CONFIG>` and `--catalog <FILE>` (both refused, exit 2, beside a
   `link.v1` policy); `check-face.trycmd` runs the RF router of
-  `examples/zk2/link/media/` and a hand-edited `wait_before_close`.
+  `examples/zk2/link/media/` and a hand-edited `wait_before_close`, and
+  zenoh-modem's rf0 router on the fork's binding, read as data, with a
+  hand edit that does not read (exit 2).
   FJ8a's writes and captures: `gen <address>` and `serve <address> <iface>
   <operation>` are mock owners — real zk2 services through
   `zenkey::ServiceBuilder` (`zenkey_fleet::tape::{generate, mock}`), refused
