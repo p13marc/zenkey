@@ -265,13 +265,22 @@ impl<C: Codec> FrameWriter<C> {
 
     /// Records a value, measured now: the stamp of the frame it completed
     /// and put, if it completed one. It is encoded before the future
-    /// starts, so the value need not outlive the call.
+    /// starts, so the value need not outlive the call. A `counter` field
+    /// holds its count unwrapped: the writer meters it (`telemetry.v2`
+    /// §2.19) and writes it modulo its width.
     pub fn record(
         &self,
         value: &C::Value,
     ) -> impl Future<Output = Result<Option<zenkey_model::wire::Stamp>>> + Send + use<'_, C> {
         let bytes = C::encode_in(value, None, self.epoch).map_err(Error::Payload);
-        async move { self.inner.record(&bytes?).await }
+        let reading = C::json_reading(value);
+        async move {
+            let bytes = bytes?;
+            match &reading {
+                Some(r) => self.inner.record_counted(&bytes, r).await,
+                None => self.inner.record(&bytes).await,
+            }
+        }
     }
 
     /// Puts the open frame now, if it holds a record.

@@ -113,6 +113,14 @@ pub trait Codec: Send + Sync + 'static {
     fn detail(value: &Self::Value) -> Result<Detail, String> {
         Self::encode(value, None).map(Detail::Bytes)
     }
+    /// Core §7.6's JSON reading of a packed record, which keeps each
+    /// `counter` field's count before its reduction modulo the field's
+    /// width: a frame writer meters the count (`telemetry.v2` §2.19).
+    /// `None` for every other codec.
+    fn json_reading(value: &Self::Value) -> Option<serde_json::Value> {
+        let _ = value;
+        None
+    }
 }
 
 /// A prost message: `application/protobuf` (§7.2). `()` is
@@ -213,6 +221,9 @@ impl<T: PackedRecord> Codec for Packed<T> {
     }
     fn tag() -> Option<Tag> {
         Tag::new(T::TAG)
+    }
+    fn json_reading(value: &T) -> Option<serde_json::Value> {
+        Some(value.to_json())
     }
 }
 

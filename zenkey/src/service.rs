@@ -67,9 +67,10 @@ use crate::hostid::{HostIdError, HostIdMinter, Minted};
 use crate::implementation::{Implementation, missing_capability, resource_name};
 use crate::qos;
 use crate::state::{ClockGuard, DEFAULT_WINDOW, Minter, StateWriter, Store};
-use crate::telemetry::{Epochs, Meter, Metric};
+use crate::telemetry::{Epochs, Meter, Metric, frame_series};
 use crate::writer::{EventWriter, Writer};
 use zenkey_model::catalog::{Catalog, EPOCH_WITHOUT_CATALOG};
+use zenkey_model::telemetry::frames::FieldSeries;
 
 /// One implemented interface, and what this instance does with it.
 #[derive(Debug, Clone)]
@@ -87,6 +88,9 @@ pub(crate) struct ImplState {
     /// Each metric resource's declaration (`telemetry.v1`, #819), keyed as
     /// `cardinality`: what every writer of it checks.
     pub(crate) metrics: BTreeMap<String, Arc<Metric>>,
+    /// Each frame resource's series (`telemetry.v2` §2.16, #983 T3), keyed
+    /// as `cardinality`: what every frame writer of it meters.
+    pub(crate) series: BTreeMap<String, Arc<[FieldSeries]>>,
     /// A governed interface's gate (`redundancy.v1` §2.4, #841): every
     /// resource of it declared only while the instance serves it.
     pub(crate) gate: Option<Arc<Gate>>,
@@ -827,6 +831,12 @@ impl ServiceBuilder {
             .iter()
             .filter_map(|r| Some((resource_name(r), Arc::new(Metric::of(imp.contract(), r)?))))
             .collect();
+        let series = imp
+            .contract()
+            .resources
+            .iter()
+            .filter_map(|r| Some((resource_name(r), frame_series(imp.contract(), r)?)))
+            .collect();
         // redundancy.v1 §2.2: a contract listing the profile in `uses`
         // governs its interface, whose resources are born standing by.
         let gate = zenkey_model::redundancy::is_governed(imp.contract())
@@ -847,6 +857,7 @@ impl ServiceBuilder {
             cardinality: BTreeMap::new(),
             budgets,
             metrics,
+            series,
             gate,
             heartbeat: heartbeat.clone(),
         });
@@ -1095,6 +1106,7 @@ impl ServiceBuilder {
         let layout = s.frame_layout_of(&r)?;
         let budget = s.budget(&r);
         let gate = s.gate.clone();
+        let series = s.series.get(&resource_name(&r)).cloned();
         let epoch = self.deployment_epoch();
         self.expose(iface, resource)?;
         let w = Writer::declare_framed(&self.session, &self.minter, key.into_keyexpr(), &r, gate)
@@ -1105,6 +1117,7 @@ impl ServiceBuilder {
             layout,
             &self.minter,
             epoch,
+            series,
         ))
     }
 
@@ -1805,6 +1818,7 @@ impl Service {
             layout,
             &self.minter,
             self.deployment_epoch(),
+            s.series.get(&resource_name(&r)).cloned(),
         ))
     }
 
