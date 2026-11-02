@@ -1340,7 +1340,10 @@ async fn s7_an_owner_ahead_stops_its_timed_state_writes() {
         status.delete().await,
         Err(zenkey::Error::ClockAhead)
     ));
-    let put = w.put("on time").await.expect("an untimed state write goes on");
+    let put = w
+        .put("on time")
+        .await
+        .expect("an untimed state write goes on");
     assert!(put.time.is_none(), "it carries no Zenoh timestamp");
     w.delete().await.expect("and so does its delete");
     assert!(mgr.minter().is_ahead(), "the guard still holds");

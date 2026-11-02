@@ -848,7 +848,11 @@ mod tests {
         assert_eq!(a(&[Heartbeat, ClockAhead]), Answer::Yes);
         assert_eq!(a(&[ClockAhead, Heartbeat]), Answer::No);
         assert_eq!(a(&[ClockAhead, StatusDeleted]), Answer::Yes);
-        assert_eq!(a(&[ClockAhead, StatusPut]), Answer::Yes, "the guard holds no put");
+        assert_eq!(
+            a(&[ClockAhead, StatusPut]),
+            Answer::Yes,
+            "the guard holds no put"
+        );
         assert_eq!(a(&[ClockAhead, HeartbeatHeld]), Answer::Yes);
         assert_eq!(a(&[Heartbeat]), Answer::No);
         assert_eq!(a(&[StatusPut]), Answer::Unobservable);
