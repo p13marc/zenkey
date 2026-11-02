@@ -1164,9 +1164,9 @@ fn free_port() -> u16 {
 /// A peer instance's sessions (§5): each a peer whose only endpoint is
 /// `ep`, listening on loopback and gossiping, as core §8.1 asks of peers
 /// that read each other (0.40, F-206), its connect retry period 0.5 s at
-/// most (F-205).
+/// most (F-205); the claim's stamping every write (§2.10).
 async fn peer_candidate(ep: &str, o: Opts) -> Candidate {
-    let claim = common::peer(ep, true, true).await;
+    let claim = common::stamping_peer(ep, true, true).await;
     let watch = common::peer(ep, true, true).await;
     let reader = common::peer(ep, true, true).await;
     with_sessions(claim, watch, reader, o).await.unwrap()
@@ -2580,6 +2580,25 @@ async fn a_stream_keys_seq_continues_across_a_takeover() {
     for s in [claim, reader] {
         s.close().await.unwrap();
     }
+}
+
+/// §2.10 (F-467): a candidate's session stamps every write, so that each
+/// sample carries its own id, so a service whose session runs without
+/// timestamping is refused at `ServiceBuilder::redundancy`, before its
+/// claim: its unstamped puts would carry their router's id.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_candidate_on_a_session_without_timestamping_is_refused() {
+    let (_r1, ep) = router(None).await;
+    let plain = client(&ep).await;
+    let mut b = ServiceBuilder::new(&plain, ServiceConfig::new(LEDGER.parse().unwrap()));
+    b.implement(common::imp("ledger.v1")).unwrap();
+    let refused = b
+        .redundancy(RedundancyStartup::new(session(&ep, None).await))
+        .expect_err("refused");
+    assert!(
+        matches!(&refused, Error::Contract(m) if m.contains("§2.10") && m.contains("timestamping")),
+        "{refused}"
+    );
 }
 
 /// Core §4.3: a candidate of a governed interface draws 32-bit runs, so a

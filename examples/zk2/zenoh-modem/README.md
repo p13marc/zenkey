@@ -229,18 +229,20 @@ No v1 entry: v1 had no frame. Since revision 3.2 (#983 T4, with #991), `modem.v3
 
 Every field is optional, as `modem_device::Report` is all `Option`: absent is not zero. The
 ranges and widths are illustrative, and #991 fixes them. A payload below is the largest frame's,
-every field present, after an envelope with a 32-bit run (`link.v1` §2.8's `frame_over_batch`).
+every field present, after an envelope with a 32-bit run (`link.v1` §2.8's `frame_over_batch`):
+where `keyframe_every` is above 1, its record may be a delta that includes every field, a bit per
+field longer than a full record (`link.v1` 0.16).
 
 | Frame resource | Record type · fields | Frame | Payload |
 |---|---|---|---:|
 | `frames/link` | `LinkReadings` · `sdu/dropped_total` (a 32-bit counter), `sched/queue_depth`, `air/duty_cycle_available`, `air/duty_cycle_wait_ms`: 63 bits, core §7.7's fixtures' `Link` | `keyframe_every = 1`; `freshness.ttl_s = 150` | 22 B |
-| `frames/sdu` | `Sdu` · the 9 `sdu/` counters | `keyframe_every = 15` | 51 B |
-| `frames/sched` | `Sched` · the 6 `sched/` readings | `keyframe_every = 15`; deadbands on `queue_depth` (4) and `lane_backlog_bytes` (1,024 B) | 32 B |
-| `frames/air` | `Air` · the 10 `air/` readings | `keyframe_every = 15` | 49 B |
-| `frames/layer` | `Layer` · the 23 `layer/` readings | `keyframe_every = 15` | 106 B |
-| `frames/if` | `If` · the 11 `if/` readings, `in_octets` and `out_octets` at 40 bits | `keyframe_every = 15`; deadbands on `qdisc_backlog_bytes` (4,096 B) and `qdisc_backlog_pkts` (4) | 58 B |
-| `frames/radio` | `Radio` · the 6 `radio/` readings | `keyframe_every = 15`; deadbands on `rssi` and `snr` (1 dB) | 21 B |
-| `frames/bearer` | `Bearer` · the 8 `link/` readings: `frames/link` is the four link readings' | `keyframe_every = 15` | 32 B |
+| `frames/sdu` | `Sdu` · the 9 `sdu/` counters | `keyframe_every = 15` | 52 B |
+| `frames/sched` | `Sched` · the 6 `sched/` readings | `keyframe_every = 15`; deadbands on `queue_depth` (4) and `lane_backlog_bytes` (1,024 B) | 33 B |
+| `frames/air` | `Air` · the 10 `air/` readings | `keyframe_every = 15` | 50 B |
+| `frames/layer` | `Layer` · the 23 `layer/` readings | `keyframe_every = 15` | 109 B |
+| `frames/if` | `If` · the 11 `if/` readings, `in_octets` and `out_octets` at 40 bits | `keyframe_every = 15`; deadbands on `qdisc_backlog_bytes` (4,096 B) and `qdisc_backlog_pkts` (4) | 60 B |
+| `frames/radio` | `Radio` · the 6 `radio/` readings | `keyframe_every = 15`; deadbands on `rssi` and `snr` (1 dB) | 22 B |
+| `frames/bearer` | `Bearer` · the 8 `link/` readings: `frames/link` is the four link readings' | `keyframe_every = 15` | 33 B |
 | `frames/message` | `Message` · all 73, counters at 24 bits | `keyframe_every = 1` | 213 B |
 
 A group frame's counters are 32 bits, a declared loss (`telemetry.v2` §2.20): a 32-bit counter

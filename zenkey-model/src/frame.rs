@@ -1424,20 +1424,26 @@ impl Layout {
             .collect()
     }
 
-    /// The bits of the largest frame an owner writes: `records` full
-    /// records, every optional field present, and every record after
-    /// record 0 measured, with its offset (link.v1 §2.3's
-    /// `frame_over_batch`).
+    /// The bits of the largest frame an owner writes (link.v1 §2.8's
+    /// `frame_over_batch`, 0.16, F-470): `records` records, every optional
+    /// field present, and every record after record 0 measured, with its
+    /// offset. As many of them as `keyframe_every` allows are delta records
+    /// that include every field, each a bit per field longer than a full
+    /// record (core §7.7): a full record comes at least once every
+    /// `keyframe_every`, so `records` − ⌊`records` / `keyframe_every`⌋ of
+    /// them, none at 1. The rest are full.
     #[must_use]
     pub fn largest_body_bits(&self) -> u64 {
-        let record: u64 = 1 + self
-            .fields
-            .iter()
-            .map(|f| u64::from(f.width) + u64::from(f.optional))
-            .sum::<u64>();
+        let mut fields = 0u64;
+        let mut record = 1u64;
+        for f in &self.fields {
+            fields += 1;
+            record += u64::from(f.width) + u64::from(f.optional);
+        }
         let n = u64::from(self.params.records);
+        let deltas = n - n / u64::from(self.params.keyframe_every.max(1));
         let later = n.saturating_sub(1) * (1 + u64::from(self.offset_bits().unwrap_or(0)));
-        42 + u64::from(self.count_bits()) + n * record + later
+        42 + u64::from(self.count_bits()) + n * record + deltas * fields + later
     }
 
     /// The payload of that largest frame, in bytes: its body after an
@@ -2098,6 +2104,40 @@ mod tests {
                 .collect(),
         };
         assert_eq!(frame.write(&l).unwrap().bits, l.largest_body_bits());
+        // keyframe_every 3 (F-470): two of the three records may be delta
+        // records that include every field, a bit per field longer.
+        let p = params(FrameSpec {
+            records: Some(3),
+            step_ms: Some(10_000),
+            keyframe_every: Some(3),
+            ..FrameSpec::default()
+        });
+        let k3 = Layout::of(&sample(), &p).unwrap();
+        assert_eq!(k3.largest_body_bits(), 136 + 2 * 4);
+        let deltas = Frame {
+            records: frame
+                .records
+                .iter()
+                .enumerate()
+                .map(|(i, r)| Record {
+                    full: i == 0,
+                    ..r.clone()
+                })
+                .collect(),
+            ..frame.clone()
+        };
+        assert_eq!(deltas.write(&k3).unwrap().bits, k3.largest_body_bits());
+        // One record a frame, at keyframe_every 15: that record may be a
+        // delta, 4 bits longer than a keyframe's.
+        let p = params(FrameSpec {
+            keyframe_every: Some(15),
+            ..FrameSpec::default()
+        });
+        let k15 = Layout::of(&link(), &p).unwrap();
+        assert_eq!(
+            (k15.largest_body_bits(), k15.largest_payload_bytes()),
+            (110, 22)
+        );
         // A record's bytes read into its slots as its JSON does.
         let record = sample().write(&all, None).unwrap();
         assert_eq!(l.slots_of(&record.bytes).unwrap(), slots);

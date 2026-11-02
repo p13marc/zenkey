@@ -318,7 +318,9 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   each elector first (F-209). A governed interface without
   `redundancy()`, an invalid declaration, or a governed interface in the
   tokenless set is refused at start, nothing declared; `zenctl gen` and
-  `serve` elect (RC). Its scenarios §1–§11
+  `serve` elect (RC). `redundancy()` refuses a service whose session runs
+  without timestamping (§2.10, core 0.93, F-467): tests open candidates'
+  sessions stamping (`common::stamping_peer`). Its scenarios §1–§11
   are `tests/profile_redundancy.rs`, and the owner example's `--standby`
   drives it from stdin (`redundancy role|reads|lock|calls|hold-heal|wait|
   new-epoch|zid`, one JSON line each; `reads` gives each poll's `poll_log`;
@@ -356,7 +358,8 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   `--no-hlc`) drives `pace.v1` from stdin, and `consume --timing` is
   scenarios.md's C as a black box, one JSON line per event. Since core
   0.73 the owner example's session runs without timestamping unless
-  `--hlc` or `--standby` (§8.2), `--run-file PATH` takes its runs from a
+  `--hlc` or `--standby` (§8.2; `--standby` whatever `--clock-offset-ms`,
+  F-467), `--run-file PATH` takes its runs from a
   `FileRunStore`, and a `seq <n>` line sets the next seq (`state.md` §7
   step 3).
   `arbitration` (#909, BB) is `arbitration.v1`'s runtime over

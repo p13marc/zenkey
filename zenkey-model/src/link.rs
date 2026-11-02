@@ -2350,13 +2350,18 @@ pub struct Res {
     pub annotations: BTreeMap<String, Value>,
     pub history: bool,
     pub frame: Option<FrameFacts>,
-    /// Its type is packed (core §7.6); a frame resource's always is.
+    /// Its type is packed (core §7.6); a frame resource's always is. Read
+    /// across revisions, packed only where every one types it packed (v2
+    /// §2.3).
     pub packed: bool,
-    /// Its congestion is `block` (core §2.4).
+    /// Its congestion is `block` (core §2.4); across revisions, where any
+    /// one declares it so.
     pub block: bool,
     /// Its longest put's payload, in bytes: a packed record's longest
     /// (every optional field present) after an [`ENVELOPE_BYTES`] envelope,
     /// or a frame resource's largest frame. `None` for any other type.
+    /// Across revisions, the longest of those that declare it `block`, or
+    /// of every one where none does.
     pub longest_bytes: Option<u64>,
     /// The revision that declares it lists `link.v2` (v2 §2.17).
     pub link_v2: bool,
@@ -2506,8 +2511,14 @@ impl Deployment {
 /// template, first revision first. A resource several revisions declare is
 /// exposed only where every one of them reads `link` (§2.2 fails closed),
 /// and has a horizon only where every one gives it a horizon above 0, the
-/// least of them (§2.12). The set holds the indices of the resources the
-/// revisions disagree on: one reads `link`, another does not.
+/// least of them (§2.12). What link.v2 weighs is judged revision by
+/// revision (v2 §2.3, 0.6, F-469), and so never hangs on their order: a
+/// resource is packed only where every revision types it packed, timed
+/// where any declares a deadline, and its longest put, for
+/// `block_over_batch`, the longest a revision that declares it `block`
+/// writes. A frame's largest frame is the largest any revision writes
+/// (§2.3). The set holds the indices of the resources the revisions
+/// disagree on: one reads `link`, another does not.
 fn merge(revisions: &[Vec<Res>]) -> (Vec<Res>, BTreeSet<usize>) {
     let mut out: Vec<Res> = Vec::new();
     let mut readings: Vec<Vec<&Res>> = Vec::new();
@@ -2542,10 +2553,35 @@ fn merge(revisions: &[Vec<Res>]) -> (Vec<Res>, BTreeSet<usize>) {
                 .filter_map(|r| r.frame.map(|f| f.keyframe_every))
                 .min()
                 .unwrap_or(f.keyframe_every);
+            // Each revision's largest frame, with its own record type and
+            // `keyframe_every`: the largest of them.
+            f.largest_bytes = rs
+                .iter()
+                .filter_map(|r| r.frame.and_then(|f| f.largest_bytes))
+                .max();
         }
-        // A packed type grows by a minor (core §7.6): the longest put of any
-        // revision.
-        out[i].longest_bytes = rs.iter().filter_map(|r| r.longest_bytes).max();
+        // Each revision judged alone (v2 §2.3): a raw type in one draws
+        // `not_packed`, a deadline in one makes it timed, and a `block`
+        // one's longest put draws `block_over_batch`. A packed type grows
+        // by a minor (core §7.6), so the longest is any revision's where
+        // none is `block`.
+        out[i].packed = rs.iter().all(|r| r.packed);
+        if !timed(&out[i].annotations)
+            && let Some(d) = rs
+                .iter()
+                .find_map(|r| r.annotations.get(crate::timing::DEADLINE_MS))
+        {
+            out[i]
+                .annotations
+                .insert(crate::timing::DEADLINE_MS.to_owned(), d.clone());
+        }
+        let block = rs.iter().any(|r| r.block);
+        out[i].block = block;
+        out[i].longest_bytes = rs
+            .iter()
+            .filter(|r| r.block || !block)
+            .filter_map(|r| r.longest_bytes)
+            .max();
         if links > 0 && links < rs.len() {
             disagree.insert(i);
             out[i]
@@ -3971,6 +4007,39 @@ mod tests {
         assert_eq!(read("z"), (Exposure::Link, None));
         // Two readings of host, one invalid: no disagreement to report.
         assert_eq!(disagree, BTreeSet::from([0]));
+    }
+
+    /// What link.v2 weighs, each revision judged alone, in either order
+    /// (v2 §2.3, 0.6, F-469): one raw revision makes it not packed, one
+    /// deadline timed, and the longest put is a `block` revision's.
+    #[test]
+    fn link_v2_judges_each_revision_alone() {
+        let raw = res("s", serde_json::json!({"link.exposure": "link"}));
+        let mut packed = raw.clone();
+        packed.packed = true;
+        packed.block = true;
+        packed.longest_bytes = Some(300);
+        let mut timed = raw.clone();
+        timed.packed = true;
+        timed.longest_bytes = Some(400);
+        timed
+            .annotations
+            .insert(crate::timing::DEADLINE_MS.to_owned(), Value::from(2000));
+        for revs in [
+            [vec![raw.clone()], vec![packed.clone()], vec![timed.clone()]],
+            [vec![timed.clone()], vec![packed.clone()], vec![raw.clone()]],
+        ] {
+            let (m, _) = merge(&revs);
+            let r = &m[0];
+            assert!(!r.packed, "one revision's raw type");
+            assert!(r.shape().timed, "one revision's deadline");
+            assert!(r.block);
+            assert_eq!(r.longest_bytes, Some(300), "the block revision's");
+        }
+        let (m, _) = merge(&[vec![packed.clone()], vec![timed.clone()]]);
+        assert!(m[0].packed, "packed in every revision");
+        let (m, _) = merge(&[vec![timed.clone()], vec![raw]]);
+        assert_eq!(m[0].longest_bytes, Some(400), "none block: the longest");
     }
 
     fn exposure_of_res(r: &Res) -> Exposure {

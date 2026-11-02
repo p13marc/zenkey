@@ -7,6 +7,137 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.6 — 2026-11-02: zk2py round 99's findings answered (#609, #988)
+
+zk2py's round 99 read this text's 0.3 to 0.5 and `link.v1` 0.15 cold.
+It filed F-465 to F-470, none a blocker. This version answers F-465,
+F-469 and this text's half of F-468. `link.v1` 0.16 answers F-466,
+F-468 and F-470, and core 0.93 F-467.
+
+**Stated: §2.7, an empty `frames` (F-465).** §2.1 said "An empty
+`frames` lists no frame", and §2.7 kept `link.v1`'s rule for "a face
+with no `frames`". `frames = {}` could read as either.
+- **Now:** it is a face with `frames` that lists none, so no frame
+  resource crosses it. Each exposed one is denied by name, and draws
+  `frame_unlisted` where no face of the policy lets it cross. §2.3 says
+  the plan's `frames` is then empty.
+- **Both readers** read it so: zk2py, and `zenctl acl gen` over
+  `probe.v1`, which denied `stream/frames/**` by name and warned
+  `frame_unlisted` at both frames. `v2/plan.json` gains the case.
+
+**Stated: §2.3, revisions read together (F-469).** Whether a resource
+is packed, timed or `block`, and its longest put, can differ between
+the revisions given. The text read one. `zenctl acl gen` took a
+resource's type and congestion from the first revision given that
+declares it. Over `twin.v1`'s minor 0, raw, and minor 1, packed, it
+warned `block_over_batch` alone. zk2py warned `not_packed` beside it.
+- **Now:** what this text weighs is judged revision by revision, and
+  the plan draws a warning that one revision would. A resource is packed
+  only where every revision types it packed. It is timed where any
+  declares `timing.deadline_ms`. Its longest put is weighed in each
+  revision that declares it `block` (`block_over_batch`).
+- **Why.** A service running the older minor puts raw bytes, or timed
+  samples, across the face, whatever a later minor declares. §2.18
+  looks up each revision in the catalog alone, for the same reason.
+- **The reference** judged them so as of this version
+  (`zenkey_model::link`'s merge, unit test
+  `link_v2_judges_each_revision_alone`, both orders). zk2py read packed
+  so already, and `block` and timed where any revision is. It took the
+  longest put from any packed revision, `block` or not, where the
+  reference weighs a `block` revision's.
+- **`v2/plan.json`** gains `probe.v1` beside an inline revision in which
+  `level` and `config` are raw: both draw `not_packed`, and `config`
+  still draws `block_over_batch` from the packed revision.
+
+**Stated: §2.3, "More refusals" lists the deployment's errors alone
+(F-468).** As `link.v1` 0.16 §2.3 now says, neither the policy's
+warnings nor the plan's come with a refusal. `v2/plan.json`'s case 12
+already refused `packed_required` without the policy's `no_arq`; a case
+is added for `service_unknown` under the same policy. zk2py kept the
+policy's warnings beside its `service_unknown` and `contract_unknown`,
+which no case told; its next round reads the text. `zenctl acl gen`
+names the errors alone, as it did.
+
+**Changed: the header** restates `link.v1` text 0.16, whose largest
+frame now holds delta records (F-470). `block_over_batch` reads a frame
+resource's longest put so. No case of `v2/plan.json` moves: `probe.v1`'s
+frames and zenoh-modem's grow by at most 3 B, none across a batch.
+
+**Deliberately not changed.**
+- **No rule.** §2.7's MUST, §2.17's and §2.18's are 0.3's. The three
+  answers state what the plan already does, or what it does now under
+  §2.3's MUST to derive as the fixture does.
+- **The status** stays `experimental`, as 0.5 says.
+
+## 0.16 — 2026-11-02: zk2py round 99's findings answered (#609, #988)
+
+zk2py's round 99 read this text's 0.15 beside `link.v2` 0.3 to 0.5. This
+version answers F-466, F-470 and this text's half of F-468. `link.v2`
+0.6 answers F-465, F-469 and the rest of F-468, and core 0.93 F-467.
+
+**Changed: §2.8, the largest frame holds delta records (F-470).**
+`frame_over_batch` read a frame of `records` full records. A delta
+record that includes every field is a bit per field longer than a full
+record (core §7.7's body), and an owner may write one: "Including an
+unchanged field is never wrong".
+- **Measured** by zk2py's writer: `modem.v3`'s `frames/layer` was 106 B
+  by 0.15's figure, and 109 B as a delta of its 23 fields. gendev.v1's
+  `frames/sample` was 97 B, and 100 B with records 1 and 2 deltas.
+- **Now:** a full record comes at least once every `keyframe_every`
+  records, so the largest frame holds `records` − ⌊`records` /
+  `keyframe_every`⌋ delta records that include every field, and full
+  records for the rest. At a `keyframe_every` of 1 every record is full,
+  as before.
+- **The reference.** `frame::Layout::largest_body_bits` counts them, and
+  so `frame_over_batch` and `link.v2`'s `block_over_batch` read them. Its
+  `Framer` writes full a delta that would include every field, but one
+  that includes all fields but one is still longer than a full record,
+  so the bound is the delta's.
+- **What moved.** No case of `plan.json` or `v2/plan.json`: no frame of
+  theirs crosses its batch by the delta records.
+- **RF's batch.** `modem.v3`'s `frames/message` writes a full record in
+  every frame (`keyframe_every = 1`), so it is 213 B either way, within
+  RF's 220-B batch. Its group frames grow by 1 to 3 B, none near a
+  batch. `examples/zk2/zenoh-modem/README.md` states the new sizes, and
+  `zenkey-model/tests/examples.rs`'s `every_adopter_frame_has_its_largest_frame`
+  pins them.
+
+**Stated: §2.9 and §2.7's step 2, an implied `freshness.v2` (F-466).**
+Step 2 gives a deny of each token to every listed interface, and §2.9
+lists `freshness.v2` beside an interface with a heartbeat. So, by the
+words, an implied `freshness.v2` drew `state:freshness.v2` wherever a
+state crossed. `v2/plan.json`'s `probe.v1` cases have none, where
+`plan.json`'s heartbeat cases, whose deployments name `freshness.v2`,
+have it.
+- **Now:** an implied `freshness.v2` is listed for `stream` alone. Its
+  heartbeats are all it puts, so step 2 gives it no deny of another
+  token. Named by the deployment, its contract given, it is listed as
+  any interface is.
+- **The reference and zk2py** read it so already; no plan changes. The
+  deny left out covers keys no contract declares, which cross under
+  `allow` as every such key does (§2.7).
+
+**Stated: §2.3, what a refusal lists (F-468).** A refused policy lists
+every finding its linter reports, its warnings among them (§2.1), as
+`plan.json` and `v2/plan.json` had it. A refused deployment lists its
+errors alone, and the plan's warnings come with a plan, never with a
+refusal. `plan.json` gains a `contract_unknown` case under a policy that
+draws `batch_over_lease`. The reference and `zenctl acl gen` list the
+errors alone.
+
+**Stated: §2.3, a frame's largest frame across revisions.** The plan
+read the first revision's, as `link.v2` 0.6's F-469 found of a type. It
+now reads the largest any revision writes, each with its own record type
+and `keyframe_every`. No case moves.
+
+**Deliberately not changed.**
+- **Core §7.7.** F-470's other fix would have an owner write full a
+  delta record longer than a full record. It binds every owner to save
+  bits the generator can bound instead, and core §7.7 keeps "never
+  wrong".
+- **No rule.** §2.3's MUST to derive the plan as the fixture does is
+  0.3's. The answers state what the plan does.
+
 ## link.v2 0.5 — 2026-11-02: editorial: Appendix B gives zenoh-modem's faces, no rule changed (#988 L5)
 
 #988's L5 moves zenoh-modem's routers onto this text. Five face policies,

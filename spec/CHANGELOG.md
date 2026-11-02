@@ -3,6 +3,57 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.93 — 2026-11-02: zk2py round 99's findings answered (#609, #988)
+
+zk2py's round 99 read `link.v2` 0.3 to 0.5, core 0.90 and 0.91,
+observer 0.23 and round 98's answers cold. It filed F-465 to F-470, none
+a blocker. This version answers F-467, a bug of the reference's owner
+example, in §8.2's words and in the reference. `link.v1` 0.16 answers
+F-466, F-468 and F-470, and `link.v2` 0.6 F-465, F-468 and F-469.
+
+**Stated: §8.2, a candidate's session stamps whatever its clock
+(F-467).** Run as a `redundancy.v1` candidate with its clock 2 s ahead,
+the owner example's puts reached a subscriber stamped by its router,
+with no stamp of its own, on `ledger.v1` too. So its guard held
+nothing, and `freshness.v2` scenarios-v2.md §2 step 6 failed with it as
+the candidate (2 of 5). The text was right; the example was not.
+- **The cause.** The owner example left the session's timestamping off
+  under a simulated clock offset, a candidate's too. A session's HLC
+  re-stamps a stamp beyond its delta before it leaves, as
+  `zenkey/tests/profile_health.rs` measured, and the offset stamps were
+  meant to reach the router. A candidate's session must stamp all the
+  same (`redundancy.v1` §2.10).
+- **Now:** "The exception" says that a candidate's session stamps every
+  write while its clock is ahead too, and what is lost without it: its
+  puts carry its router's stamp or none, which a consumer following the
+  incumbent discards.
+- **The reference.** `ServiceBuilder::redundancy` refuses a candidate
+  whose session runs without timestamping, before its claim, naming
+  `redundancy.v1` §2.10. zenoh fixes timestamping when a session opens,
+  so the runtime cannot turn it on itself, and a deployment cannot forget
+  it silently. The owner example's `--standby` session stamps whatever
+  `--clock-offset-ms`. Its HLC re-stamps an offset stamp at its own
+  time, under its own id, and its guard reads the offset clock.
+  `--no-hlc` beside `--standby` is the runtime's refusal.
+- **Evidence.** `zenkey/tests/owner_example.rs`'s
+  `the_owner_example_as_a_candidate_stamps_every_put` drives the example
+  as zk2py did: `--standby --election claim`, 2 s ahead, on
+  `beacon-governed.v2`. Every put a subscriber hears carries the
+  candidate's zid. Once the guard holds, a put of `status` is refused,
+  and set right, it puts again. With `--no-hlc` it is refused at start.
+  `profile_redundancy.rs`'s
+  `a_candidate_on_a_session_without_timestamping_is_refused` pins the
+  runtime's refusal. `beacon-governed.v2.toml`'s comment names §2 step
+  6, not step 5.
+
+**Deliberately not changed.**
+- **No rule.** §8.2's posture and `redundancy.v1` §2.10's MUST are
+  0.90's; the sentences say what follows from them.
+- **The scenario.** `freshness.v2` scenarios-v2.md §2 step 6 already
+  says the candidate's session stamps every write. A black box runs it
+  as zk2py did, and the owner example now keeps it.
+- **`RULES.md`** lists the rules 0.92 lists.
+
 ## 0.92 — 2026-11-02: a call's value and error forms defined (#980, #985)
 
 Epic #975, zk2c, makes the wire bandwidth-first. A call is still answered

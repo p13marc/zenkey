@@ -37,7 +37,7 @@
 //! | §2.8 a withdrawal heard live is a read, never a vacancy | the watch's withdrawal, once no other holder is heard, is the [`Elector`](zenkey_model::redundancy::Elector)'s event; its read waits 0.1 s for the burst |
 //! | §2.9 the heal: two reads a grace apart; the higher steps down in reverse order | [`RedundancyStartup::grace`], 2 s; writes stop, then the tokens, the resources, the descriptor put marked; the interface's state forgotten |
 //! | §2.9 a candidate's own re-mint is no appearance (0.2, F-209) | [`crate::Service::new_epoch`] tells every elector before the new tokens, and re-mints a serving interface's token make-before-break |
-//! | §2.10 every sample stamped with its own id; `meta.zid` | the service's session, its HLC on; `meta.zid` as every descriptor states it |
+//! | §2.10 every sample stamped with its own id; `meta.zid` | the service's session, its HLC on: one whose timestamping is off is refused at [`crate::ServiceBuilder::redundancy`] (F-467), since its unstamped puts would carry their router's id; `meta.zid` as every descriptor states it |
 //! | §2.11 `external`: serve only with the lock, never by ids, step down when it is lost; refuse or stand by without it | [`Lock`], asked at the start, every [`RedundancyStartup::lock_period`], and on [`Redundancy::lock_changed`]; [`RedundancyStartup::refuse_without_lock`] |
 //! | §2.14 a governed interface never tokenless | refused at start, `tokenless` |
 //!
@@ -480,6 +480,14 @@ impl Redundancy {
         startup: RedundancyStartup,
     ) -> Result<Self> {
         let claim = builder_session.zid();
+        if !crate::state::timestamping(builder_session) {
+            return Err(Error::Contract(
+                "redundancy.v1 §2.10: a candidate's session stamps every write, so that each \
+                 sample carries its own id (core §8.2's exception), and this service's session \
+                 runs without timestamping: open it with `timestamping/enabled` true (F-467)"
+                    .to_owned(),
+            ));
+        }
         if startup.reader.zid() == claim {
             return Err(Error::Contract(
                 "redundancy.v1 §2.5 step 1: the reader is the service's own session, which \
