@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Text version** | 0.20 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.21 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
 | **Written against** | core 0.85 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
@@ -1081,6 +1081,8 @@ This is core §7.1's and §7.2's tool half; type identity and the sample's
     its envelope's CH carried (core §7.6). One its layout refuses is
     undecodable, and the tool names the refusal. One that came in no
     envelope has no tag, so it is undecodable too.
+  - **A frame** (core §7.7) is read with its frame resource's
+    declaration, never as one record of its type: §7.6.
   - **A packed record's `time` fields** are read under the deployment
     epoch, which no contract carries yet. A tool takes the one its
     deployment states, and 0, the Unix epoch, where it states none (core
@@ -1134,6 +1136,44 @@ This is core §8.5's "Keys across the face", for a tool.
     reconnect.
 
 `[Sc: constrained.md §7]`
+
+### 7.6 Frames
+
+This is core §7.7's reader, for a tool. A tool reads a frame's body with
+its frame resource's declaration, and each field by core §7.7's field
+states, over the frames of its key in the order they arrived.
+
+- **A frame's records.** A tool shows a frame as its records, each at its
+  seq and its time, with every field in its state.
+  - `known` shows its value.
+  - `within` shows the last value included and its `delta`.
+  - `unknown` and `absent` show their state's name, and no value.
+- **Scheduled time.** A tool MUST show a scheduled record's time as
+  scheduled, with its `jitter_ms`, never as a measured or exact time.
+  That time is an instant and a bound. `[F: frame/apply.json]`
+  `[Sc: frames.md §3]`
+- **Within.** A tool MUST show a `within` field with its `delta`, never as
+  its value alone. `[F: frame/apply.json]` `[Sc: frames.md §4]`
+- **Measured time.** Record 0's time is on the owner's wall clock, and a
+  measured offset on its monotonic clock from record 0 (§8.3).
+  - All 42 bits set say the owner's clock was unknown. The tool shows
+    that, never the epoch, and still shows each later record's offset.
+- **Why unknown.** A tool says why a field is unknown: records lost, a
+  run it did not hold, a rewind, `max_records` passed, or an inclusion
+  that was no value.
+- **One frame alone.** A tool that reads a frame with nothing before it
+  reads it as a reader's first frame. That is one reply of a GET, or one
+  row of a recording read alone. Each field its records omit is then
+  `unknown`.
+- **A recording** replays its frames through the same reader, in the
+  order they were recorded. So a frame read from a file reads as it did
+  live.
+- **A frame it cannot read.** A frame whose declaration the tool does not
+  hold is shown by its envelope: its run, its seq and its size.
+  - Its body is never sniffed as a record (§7.3).
+  - A frame on a resource with no `frame` table is undecodable. So are a
+    mutation on a frame resource and a body its layout refuses. The tool
+    names why.
 
 ---
 
@@ -1254,6 +1294,7 @@ tooling guide's rules that carry evidence were promoted with text 0.1.
 | `conformance/keys.json` | §8.1 |
 | `conformance/heartbeat/bodies.json` | §7.3, a heartbeat's body |
 | `conformance/envelope/carries.json` | §7.3, the envelope first |
+| `conformance/frame/apply.json` | §7.6 |
 | `scenarios/presence.md` §4, §6–§10 | §1, §2, §3 |
 | `conformance/seed/` (`inband.json`, `merge.json`) | §4.1 |
 | `scenarios/state.md` §1, §7, §11, §12, §13 | §4.1 (§7 steps 4 and 5: a tool's merge across two runs, after its seed and inside it; §13 a stream key's serial order), §4.3, §4.4 (§1), §8.1, §8.3 |

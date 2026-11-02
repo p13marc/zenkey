@@ -261,7 +261,14 @@ fn select(
     sub.fields.forget_subject();
     sub.why.forget_subject();
     sub.consumers.forget_subject();
-    sub.refresh_series(work.replay.identity_cache(&dep.identity));
+    let replaying = work.replay.replay.is_some();
+    sub.refresh_series(work.replay.identity_cache(&dep.identity), &|a| {
+        if replaying {
+            zenkey_fleet::DeploymentEpoch::Assumed
+        } else {
+            dep.epoch_of(a)
+        }
+    });
 
     match &sub.current {
         // Lazy value-on-demand: one read per subject, nothing ambient

@@ -179,6 +179,8 @@ fn line_of(a: &FleetAnswer, bytes: Vec<u8>, lens: &Lens<'_>, structural_only: bo
         member,
         lens,
         structural_only,
+        // One reply alone: a frame reads as a reader's first (observer §7.6).
+        None,
     )
 }
 

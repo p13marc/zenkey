@@ -35,7 +35,7 @@ use zenoh::sample::{Sample, SampleKind};
 use crate::model::catalog::Revision;
 use crate::model::deployment::Epoch;
 use crate::model::lens::{Resolved, declared_qos, observed_qos, qos_mismatch, sample_conformance};
-use crate::model::render::{Member, render_record, render_with, render_with_in};
+use crate::model::render::{Member, render_frame, render_record, render_with, render_with_in};
 use crate::model::target::Target;
 use crate::report::{
     Conformance, InbandStamp, Stamp, StateReading, StateReport, StateRow, StateValue, WatchEvent,
@@ -450,6 +450,45 @@ fn payload(
     )
 }
 
+/// A frame the runtime's reader of its key read (core §7.7,
+/// `zenkey::consumer::Delivery::frame`), rendered as its reading: each
+/// record's seq, time and field states (observer §7.6).
+fn frame_payload(
+    revision: &Revision,
+    r: &Resource,
+    key: &str,
+    values: &Bindings,
+    frame: &zenkey::consumer::FrameRead,
+    size: usize,
+    epoch: Epoch,
+) -> crate::report::PayloadRendering {
+    let ty = zenkey_model::decode::type_of(
+        revision.bundle(),
+        r.token.as_str(),
+        r.template.as_str(),
+        "type",
+    );
+    let declared =
+        crate::model::frame::declared(&ty.map(zenkey_model::decode::declared).unwrap_or_default());
+    let resource = crate::report::ResolvedResource {
+        iface: revision.iface().to_string(),
+        fingerprint: revision.fingerprint().to_string(),
+        resource: zenkey::implementation::resource_name(r),
+        member: Member::Type.as_str().to_owned(),
+        values: values.clone(),
+    };
+    crate::model::frame::applied_rendering(
+        key,
+        Some(resource),
+        declared,
+        &frame.layout,
+        &frame.applied,
+        size,
+        epoch,
+    )
+    .0
+}
+
 /// How many delivered samples a [`Watch`] holds for its reader before it
 /// counts the rest as lagged.
 pub const WATCH_BUFFER: usize = 4096;
@@ -530,7 +569,7 @@ pub async fn watch_in(
         .iter()
         .map(|k| k.as_str().to_owned())
         .collect();
-    let (rev, lag) = (revision.clone(), Arc::clone(&lagged));
+    let (rev, lag, res) = (revision.clone(), Arc::clone(&lagged), r.clone());
     let (ctx, confirmations) = tokio::sync::mpsc::channel(WATCH_BUFFER);
     let covered = revision.iface().clone();
     let on_confirm = move |c: zenkey::consumer::Confirmation| {
@@ -550,15 +589,24 @@ pub async fn watch_in(
             &name,
             move |d: zenkey::consumer::Delivery| {
                 let key = d.sample.key_expr().as_str().to_owned();
-                let rendered = (d.sample.kind() == SampleKind::Put).then(|| {
-                    payload(
+                let rendered = (d.sample.kind() == SampleKind::Put).then(|| match &d.frame {
+                    Some(f) => frame_payload(
+                        &rev,
+                        &res,
+                        &key,
+                        &d.values,
+                        f,
+                        d.sample.payload().len(),
+                        epoch,
+                    ),
+                    None => payload(
                         &rev,
                         &key,
                         &d.sample,
                         Member::Type,
                         d.inband.zip(d.tag),
                         epoch,
-                    )
+                    ),
                 });
                 let sample = watch_sample(
                     &rev,
@@ -670,6 +718,11 @@ fn refused_sample(
             Some(&sample.encoding().to_string()),
             &sample.payload().to_bytes(),
         ),
+        // A frame its layout refused, or on a resource with no `frame`
+        // table (core §7.7): its body read as a frame, the refusal named.
+        Read::Framed { sample, stamp, tag } => {
+            render_frame(rev, &key, &sample.payload().to_bytes(), *stamp, *tag, epoch)
+        }
         // A heartbeat where a record was read (core §7.5's form 6; #978's
         // F2): its body, never decoded as the resource's type.
         Read::Heartbeat { sample, .. } => crate::report::PayloadRendering {

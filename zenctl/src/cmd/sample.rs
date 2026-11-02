@@ -48,12 +48,16 @@ impl Line {
     /// `member` is what the payload is of its resource: a sample's `Type`,
     /// or an operation's `Response` when a GET's reply answered one.
     /// `structural_only` (`--no-decode`, `--raw`) asks nothing of the lens
-    /// beyond the key's identity, and every payload says so.
+    /// beyond the key's identity, and every payload says so. `frames` is a
+    /// window's readers, one per frame key (core §7.7): `echo` hands its
+    /// own, so a key's frames read in the order they arrived; `None` reads
+    /// a frame alone, as a reader's first (observer §7.6), as `get` does.
     pub fn of(
         p: Payload<'_>,
         member: Member,
         lens: &zenkey_fleet::Lens<'_>,
         structural_only: bool,
+        frames: Option<&mut zenkey_fleet::model::frame::Readers>,
     ) -> Line {
         let Payload {
             key,
@@ -93,6 +97,19 @@ impl Line {
                     };
                     (r, c)
                 }
+                // A frame's body is never sniffed (observer §7.6): its
+                // envelope and size.
+                inband::Payload::Frame { body, stamp, .. } => (
+                    zenkey_fleet::model::frame::unread_rendering(
+                        key,
+                        Unresolved::DecodeNotAsked,
+                        stamp,
+                        body.len(),
+                    ),
+                    Conformance::NotChecked {
+                        reason: Unresolved::DecodeNotAsked.words(),
+                    },
+                ),
                 inband::Payload::Plain(record) | inband::Payload::Record { record, .. } => (
                     PayloadRendering {
                         key: key.to_owned(),
@@ -130,7 +147,10 @@ impl Line {
         }
         // A metric resource's sample is read by telemetry.v1 too, its
         // attachment with it: a bare counter's epoch rides there (#819, TC).
-        let c = lens.check_sample(key, member, encoding, &bytes, attachment);
+        let c = match frames {
+            Some(readers) => lens.check_frames(key, member, encoding, &bytes, attachment, readers),
+            None => lens.check_sample(key, member, encoding, &bytes, attachment),
+        };
         let attachment = attachment.map(|a| lens.render(key, Member::Attachment, None, a));
         Line {
             identity: c.identity,

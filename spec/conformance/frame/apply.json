@@ -1,0 +1,3917 @@
+{
+  "description": "core §7.7's \"The reader's fields\": one key's frames, read in the order they arrive, by one reader that held nothing before the first. Written by an independent reading of the text (Python, standard library), checked, never blessed. Each case names a layout of `layouts.json`. Each frame is its envelope's `run` (as a descriptor spells it: 4 or 8 lowercase hex digits, so a 16-bit and a 32-bit run are two runs) and `seq` (record 0's), its body (`hex`, under the layout's tag) and that body's value (`bodies.json`'s spelling) → `expect`, the frame as the reader reads it: `run`, `seq`, `follows` (`first`: the reader held no run; `continues`: the seq after the last record it read, in the run it holds; `gap`, with `lost`, the records lost: a newer seq by core §4.3's serial order; `rewind`: any other seq of that run, one exactly 2^23 ahead included; `run`: another run), then each record's `seq` (record 0's plus its index, modulo 2^24), `time` (`measured`, `scheduled` or, for record 0 of a frame whose time is unknown, `unknown`), `after_ms` (record 1 on: its offset, or `step_ms` × its index when scheduled), `jitter_ms` (scheduled only), `at` (`{s, ms}` from the deployment epoch, record 0's time plus `after_ms`; none when that time is unknown) and `fields`, every field of the type by name: `{state: known, value}`, `{state: within, value, delta}` (the last value included, and the deadband's delta in its shortest form), `{state: absent}` or `{state: unknown, why}`. `why` names the case of the text's table: `first`, `run`, `gap` or `rewind` (every field turned unknown there and not included since), `deadband` (max_records records after its inclusion), `no_value` (omitted under a deadband after an inclusion that was absent or a reserved code). A field omitted with no deadband holds what it held in the record before, absent included: an owner includes it whenever its code or presence differs. Values are §7.6's JSON reading.",
+  "cases": [
+    {
+      "note": "a keyframe read first: every field known",
+      "layout": "link",
+      "frames": [
+        {
+          "run": "0001",
+          "seq": 12,
+          "hex": "00000e103eb00000007819c003c0",
+          "value": {
+            "time": {
+              "s": 3600,
+              "ms": 250
+            },
+            "records": [
+              {
+                "full": true,
+                "values": {
+                  "dropped": 7,
+                  "queue_depth": 12,
+                  "duty_available": 1,
+                  "duty_wait_ms": "1500"
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 12,
+            "follows": "first",
+            "records": [
+              {
+                "seq": 12,
+                "time": "measured",
+                "at": {
+                  "s": 3600,
+                  "ms": 250
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 12
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "note": "a keyframe then a delta frame: the queue and the wait included, the others carried",
+      "layout": "link",
+      "frames": [
+        {
+          "run": "0001",
+          "seq": 12,
+          "hex": "00000e103eb00000007819c003c0",
+          "value": {
+            "time": {
+              "s": 3600,
+              "ms": 250
+            },
+            "records": [
+              {
+                "full": true,
+                "values": {
+                  "dropped": 7,
+                  "queue_depth": 12,
+                  "duty_available": 1,
+                  "duty_wait_ms": "1500"
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 12,
+            "follows": "first",
+            "records": [
+              {
+                "seq": 12,
+                "time": "measured",
+                "at": {
+                  "s": 3600,
+                  "ms": 250
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 12
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 13,
+          "hex": "00000e4c3e8b07a00320",
+          "value": {
+            "time": {
+              "s": 3660,
+              "ms": 250
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {
+                  "queue_depth": 30,
+                  "duty_wait_ms": "2500"
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 13,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 13,
+                "time": "measured",
+                "at": {
+                  "s": 3660,
+                  "ms": 250
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 30
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "2500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 14,
+          "hex": "00000e883e80",
+          "value": {
+            "time": {
+              "s": 3720,
+              "ms": 250
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 14,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 14,
+                "time": "measured",
+                "at": {
+                  "s": 3720,
+                  "ms": 250
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 30
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "2500"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "note": "a delta frame lost: the next one's omitted fields unknown, its included one known, healed by the keyframe after it",
+      "layout": "link",
+      "frames": [
+        {
+          "run": "0001",
+          "seq": 12,
+          "hex": "00000e1000300000007819c003c0",
+          "value": {
+            "time": {
+              "s": 3600,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": true,
+                "values": {
+                  "dropped": 7,
+                  "queue_depth": 12,
+                  "duty_available": 1,
+                  "duty_wait_ms": "1500"
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 12,
+            "follows": "first",
+            "records": [
+              {
+                "seq": 12,
+                "time": "measured",
+                "at": {
+                  "s": 3600,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 12
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 14,
+          "hex": "00000e88000907c0",
+          "value": {
+            "time": {
+              "s": 3720,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {
+                  "queue_depth": 31
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 14,
+            "follows": "gap",
+            "lost": 1,
+            "records": [
+              {
+                "seq": 14,
+                "time": "measured",
+                "at": {
+                  "s": 3720,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "unknown",
+                    "why": "gap"
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 31
+                  },
+                  "duty_available": {
+                    "state": "unknown",
+                    "why": "gap"
+                  },
+                  "duty_wait_ms": {
+                    "state": "unknown",
+                    "why": "gap"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 15,
+          "hex": "00000ec40000",
+          "value": {
+            "time": {
+              "s": 3780,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 15,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 15,
+                "time": "measured",
+                "at": {
+                  "s": 3780,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "unknown",
+                    "why": "gap"
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 31
+                  },
+                  "duty_available": {
+                    "state": "unknown",
+                    "why": "gap"
+                  },
+                  "duty_wait_ms": {
+                    "state": "unknown",
+                    "why": "gap"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 16,
+          "hex": "00000f0000300000007843c003c0",
+          "value": {
+            "time": {
+              "s": 3840,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": true,
+                "values": {
+                  "dropped": 7,
+                  "queue_depth": 33,
+                  "duty_available": 1,
+                  "duty_wait_ms": "1500"
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 16,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 16,
+                "time": "measured",
+                "at": {
+                  "s": 3840,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 33
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "note": "absent fields: a keyframe with two absent, a delta that omits them, then one included absent",
+      "layout": "link",
+      "frames": [
+        {
+          "run": "0001",
+          "seq": 0,
+          "hex": "0000000a00280b00",
+          "value": {
+            "time": {
+              "s": 10,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": true,
+                "values": {
+                  "queue_depth": 5,
+                  "duty_available": 0
+                },
+                "absent": [
+                  "dropped",
+                  "duty_wait_ms"
+                ]
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 0,
+            "follows": "first",
+            "records": [
+              {
+                "seq": 0,
+                "time": "measured",
+                "at": {
+                  "s": 10,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "absent"
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 5
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 0
+                  },
+                  "duty_wait_ms": {
+                    "state": "absent"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 1,
+          "hex": "000000460000",
+          "value": {
+            "time": {
+              "s": 70,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 1,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 1,
+                "time": "measured",
+                "at": {
+                  "s": 70,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "absent"
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 5
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 0
+                  },
+                  "duty_wait_ms": {
+                    "state": "absent"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 2,
+          "hex": "0000008200190000000900",
+          "value": {
+            "time": {
+              "s": 130,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {
+                  "dropped": 9
+                },
+                "absent": [
+                  "queue_depth"
+                ]
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 2,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 2,
+                "time": "measured",
+                "at": {
+                  "s": 130,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 9
+                  },
+                  "queue_depth": {
+                    "state": "absent"
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 0
+                  },
+                  "duty_wait_ms": {
+                    "state": "absent"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 3,
+          "hex": "000000be0000",
+          "value": {
+            "time": {
+              "s": 190,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 3,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 3,
+                "time": "measured",
+                "at": {
+                  "s": 190,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 9
+                  },
+                  "queue_depth": {
+                    "state": "absent"
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 0
+                  },
+                  "duty_wait_ms": {
+                    "state": "absent"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "note": "a late joiner: its first frame a delta, the omitted fields unknown until a full record",
+      "layout": "link",
+      "frames": [
+        {
+          "run": "0001",
+          "seq": 500,
+          "hex": "00000fa0001100000046",
+          "value": {
+            "time": {
+              "s": 4000,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {
+                  "dropped": 70
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 500,
+            "follows": "first",
+            "records": [
+              {
+                "seq": 500,
+                "time": "measured",
+                "at": {
+                  "s": 4000,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 70
+                  },
+                  "queue_depth": {
+                    "state": "unknown",
+                    "why": "first"
+                  },
+                  "duty_available": {
+                    "state": "unknown",
+                    "why": "first"
+                  },
+                  "duty_wait_ms": {
+                    "state": "unknown",
+                    "why": "first"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 501,
+          "hex": "00000fdc0000",
+          "value": {
+            "time": {
+              "s": 4060,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 501,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 501,
+                "time": "measured",
+                "at": {
+                  "s": 4060,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 70
+                  },
+                  "queue_depth": {
+                    "state": "unknown",
+                    "why": "first"
+                  },
+                  "duty_available": {
+                    "state": "unknown",
+                    "why": "first"
+                  },
+                  "duty_wait_ms": {
+                    "state": "unknown",
+                    "why": "first"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 502,
+          "hex": "0000101800300000007819c003c0",
+          "value": {
+            "time": {
+              "s": 4120,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": true,
+                "values": {
+                  "dropped": 7,
+                  "queue_depth": 12,
+                  "duty_available": 1,
+                  "duty_wait_ms": "1500"
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 502,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 502,
+                "time": "measured",
+                "at": {
+                  "s": 4120,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 12
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "note": "another run: every field unknown, then the frame read",
+      "layout": "link",
+      "frames": [
+        {
+          "run": "0001",
+          "seq": 40,
+          "hex": "0000006400300000007819c003c0",
+          "value": {
+            "time": {
+              "s": 100,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": true,
+                "values": {
+                  "dropped": 7,
+                  "queue_depth": 12,
+                  "duty_available": 1,
+                  "duty_wait_ms": "1500"
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 40,
+            "follows": "first",
+            "records": [
+              {
+                "seq": 40,
+                "time": "measured",
+                "at": {
+                  "s": 100,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 12
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0002",
+          "seq": 0,
+          "hex": "000000c800090040",
+          "value": {
+            "time": {
+              "s": 200,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {
+                  "queue_depth": 1
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0002",
+            "seq": 0,
+            "follows": "run",
+            "records": [
+              {
+                "seq": 0,
+                "time": "measured",
+                "at": {
+                  "s": 200,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "unknown",
+                    "why": "run"
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_available": {
+                    "state": "unknown",
+                    "why": "run"
+                  },
+                  "duty_wait_ms": {
+                    "state": "unknown",
+                    "why": "run"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0002",
+          "seq": 1,
+          "hex": "000001040000",
+          "value": {
+            "time": {
+              "s": 260,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0002",
+            "seq": 1,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 1,
+                "time": "measured",
+                "at": {
+                  "s": 260,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "unknown",
+                    "why": "run"
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_available": {
+                    "state": "unknown",
+                    "why": "run"
+                  },
+                  "duty_wait_ms": {
+                    "state": "unknown",
+                    "why": "run"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "note": "a run's width is part of it: 0001 and 00000001 are two runs",
+      "layout": "link",
+      "frames": [
+        {
+          "run": "0001",
+          "seq": 7,
+          "hex": "0000006400300000007819c003c0",
+          "value": {
+            "time": {
+              "s": 100,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": true,
+                "values": {
+                  "dropped": 7,
+                  "queue_depth": 12,
+                  "duty_available": 1,
+                  "duty_wait_ms": "1500"
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 7,
+            "follows": "first",
+            "records": [
+              {
+                "seq": 7,
+                "time": "measured",
+                "at": {
+                  "s": 100,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 12
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "00000001",
+          "seq": 8,
+          "hex": "000000a00000",
+          "value": {
+            "time": {
+              "s": 160,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "00000001",
+            "seq": 8,
+            "follows": "run",
+            "records": [
+              {
+                "seq": 8,
+                "time": "measured",
+                "at": {
+                  "s": 160,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "unknown",
+                    "why": "run"
+                  },
+                  "queue_depth": {
+                    "state": "unknown",
+                    "why": "run"
+                  },
+                  "duty_available": {
+                    "state": "unknown",
+                    "why": "run"
+                  },
+                  "duty_wait_ms": {
+                    "state": "unknown",
+                    "why": "run"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "note": "a rewind: the seq read again, then an older one",
+      "layout": "link",
+      "frames": [
+        {
+          "run": "0001",
+          "seq": 20,
+          "hex": "0000006400300000007819c003c0",
+          "value": {
+            "time": {
+              "s": 100,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": true,
+                "values": {
+                  "dropped": 7,
+                  "queue_depth": 12,
+                  "duty_available": 1,
+                  "duty_wait_ms": "1500"
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 20,
+            "follows": "first",
+            "records": [
+              {
+                "seq": 20,
+                "time": "measured",
+                "at": {
+                  "s": 100,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 12
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 20,
+          "hex": "000000a0000500",
+          "value": {
+            "time": {
+              "s": 160,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {
+                  "duty_available": 0
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 20,
+            "follows": "rewind",
+            "records": [
+              {
+                "seq": 20,
+                "time": "measured",
+                "at": {
+                  "s": 160,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "unknown",
+                    "why": "rewind"
+                  },
+                  "queue_depth": {
+                    "state": "unknown",
+                    "why": "rewind"
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 0
+                  },
+                  "duty_wait_ms": {
+                    "state": "unknown",
+                    "why": "rewind"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 21,
+          "hex": "000000dc0000",
+          "value": {
+            "time": {
+              "s": 220,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 21,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 21,
+                "time": "measured",
+                "at": {
+                  "s": 220,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "unknown",
+                    "why": "rewind"
+                  },
+                  "queue_depth": {
+                    "state": "unknown",
+                    "why": "rewind"
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 0
+                  },
+                  "duty_wait_ms": {
+                    "state": "unknown",
+                    "why": "rewind"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 3,
+          "hex": "00000118001100000001",
+          "value": {
+            "time": {
+              "s": 280,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {
+                  "dropped": 1
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 3,
+            "follows": "rewind",
+            "records": [
+              {
+                "seq": 3,
+                "time": "measured",
+                "at": {
+                  "s": 280,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "queue_depth": {
+                    "state": "unknown",
+                    "why": "rewind"
+                  },
+                  "duty_available": {
+                    "state": "unknown",
+                    "why": "rewind"
+                  },
+                  "duty_wait_ms": {
+                    "state": "unknown",
+                    "why": "rewind"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "note": "serial order: a key's seq wraps from 2^24 - 1 to 0, and continues",
+      "layout": "link",
+      "frames": [
+        {
+          "run": "0001",
+          "seq": 16777215,
+          "hex": "0000006400300000007819c003c0",
+          "value": {
+            "time": {
+              "s": 100,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": true,
+                "values": {
+                  "dropped": 7,
+                  "queue_depth": 12,
+                  "duty_available": 1,
+                  "duty_wait_ms": "1500"
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 16777215,
+            "follows": "first",
+            "records": [
+              {
+                "seq": 16777215,
+                "time": "measured",
+                "at": {
+                  "s": 100,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 12
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 0,
+          "hex": "000000a00000",
+          "value": {
+            "time": {
+              "s": 160,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 0,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 0,
+                "time": "measured",
+                "at": {
+                  "s": 160,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 12
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 1,
+          "hex": "000000dc0000",
+          "value": {
+            "time": {
+              "s": 220,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 1,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 1,
+                "time": "measured",
+                "at": {
+                  "s": 220,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 12
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "note": "serial order: 2^23 - 1 records lost is a gap, 2^23 ahead is unordered, so a rewind",
+      "layout": "link",
+      "frames": [
+        {
+          "run": "0001",
+          "seq": 10,
+          "hex": "0000006400300000007819c003c0",
+          "value": {
+            "time": {
+              "s": 100,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": true,
+                "values": {
+                  "dropped": 7,
+                  "queue_depth": 12,
+                  "duty_available": 1,
+                  "duty_wait_ms": "1500"
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 10,
+            "follows": "first",
+            "records": [
+              {
+                "seq": 10,
+                "time": "measured",
+                "at": {
+                  "s": 100,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 12
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 8388618,
+          "hex": "000000a00000",
+          "value": {
+            "time": {
+              "s": 160,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 8388618,
+            "follows": "gap",
+            "lost": 8388607,
+            "records": [
+              {
+                "seq": 8388618,
+                "time": "measured",
+                "at": {
+                  "s": 160,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "unknown",
+                    "why": "gap"
+                  },
+                  "queue_depth": {
+                    "state": "unknown",
+                    "why": "gap"
+                  },
+                  "duty_available": {
+                    "state": "unknown",
+                    "why": "gap"
+                  },
+                  "duty_wait_ms": {
+                    "state": "unknown",
+                    "why": "gap"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 11,
+          "hex": "000000dc0000",
+          "value": {
+            "time": {
+              "s": 220,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 11,
+            "follows": "rewind",
+            "records": [
+              {
+                "seq": 11,
+                "time": "measured",
+                "at": {
+                  "s": 220,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "unknown",
+                    "why": "rewind"
+                  },
+                  "queue_depth": {
+                    "state": "unknown",
+                    "why": "rewind"
+                  },
+                  "duty_available": {
+                    "state": "unknown",
+                    "why": "rewind"
+                  },
+                  "duty_wait_ms": {
+                    "state": "unknown",
+                    "why": "rewind"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "note": "the owner's clock unknown: its records' fields read as ever, their time unknown",
+      "layout": "link",
+      "frames": [
+        {
+          "run": "0001",
+          "seq": 1,
+          "hex": "fffffffffff00000007819c003c0",
+          "value": {
+            "time": null,
+            "records": [
+              {
+                "full": true,
+                "values": {
+                  "dropped": 7,
+                  "queue_depth": 12,
+                  "duty_available": 1,
+                  "duty_wait_ms": "1500"
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 1,
+            "follows": "first",
+            "records": [
+              {
+                "seq": 1,
+                "time": "unknown",
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 12
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 2,
+          "hex": "ffffffffffc90080",
+          "value": {
+            "time": null,
+            "records": [
+              {
+                "full": false,
+                "values": {
+                  "queue_depth": 2
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 2,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 2,
+                "time": "unknown",
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 2
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "note": "a deadband: queue_depth within 4 for four records after its inclusion, unknown at the fifth",
+      "layout": "link-deadband",
+      "frames": [
+        {
+          "run": "0001",
+          "seq": 100,
+          "hex": "0000000000300000007819c003c0",
+          "value": {
+            "time": {
+              "s": 0,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": true,
+                "values": {
+                  "dropped": 7,
+                  "queue_depth": 12,
+                  "duty_available": 1,
+                  "duty_wait_ms": "1500"
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 100,
+            "follows": "first",
+            "records": [
+              {
+                "seq": 100,
+                "time": "measured",
+                "at": {
+                  "s": 0,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 12
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 101,
+          "hex": "0000003c0000",
+          "value": {
+            "time": {
+              "s": 60,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 101,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 101,
+                "time": "measured",
+                "at": {
+                  "s": 60,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "within",
+                    "value": 12,
+                    "delta": "4"
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 102,
+          "hex": "000000780000",
+          "value": {
+            "time": {
+              "s": 120,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 102,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 102,
+                "time": "measured",
+                "at": {
+                  "s": 120,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "within",
+                    "value": 12,
+                    "delta": "4"
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 103,
+          "hex": "000000b40000",
+          "value": {
+            "time": {
+              "s": 180,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 103,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 103,
+                "time": "measured",
+                "at": {
+                  "s": 180,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "within",
+                    "value": 12,
+                    "delta": "4"
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 104,
+          "hex": "000000f00000",
+          "value": {
+            "time": {
+              "s": 240,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 104,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 104,
+                "time": "measured",
+                "at": {
+                  "s": 240,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "within",
+                    "value": 12,
+                    "delta": "4"
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 105,
+          "hex": "0000012c0000",
+          "value": {
+            "time": {
+              "s": 300,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 105,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 105,
+                "time": "measured",
+                "at": {
+                  "s": 300,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "unknown",
+                    "why": "deadband"
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 106,
+          "hex": "0000016800090500",
+          "value": {
+            "time": {
+              "s": 360,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {
+                  "queue_depth": 20
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 106,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 106,
+                "time": "measured",
+                "at": {
+                  "s": 360,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 20
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 107,
+          "hex": "000001a40000",
+          "value": {
+            "time": {
+              "s": 420,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 107,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 107,
+                "time": "measured",
+                "at": {
+                  "s": 420,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "within",
+                    "value": 20,
+                    "delta": "4"
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "note": "a deadband: an inclusion restarts its count",
+      "layout": "link-deadband",
+      "frames": [
+        {
+          "run": "0001",
+          "seq": 0,
+          "hex": "0000000000300000007819c003c0",
+          "value": {
+            "time": {
+              "s": 0,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": true,
+                "values": {
+                  "dropped": 7,
+                  "queue_depth": 12,
+                  "duty_available": 1,
+                  "duty_wait_ms": "1500"
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 0,
+            "follows": "first",
+            "records": [
+              {
+                "seq": 0,
+                "time": "measured",
+                "at": {
+                  "s": 0,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 12
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 1,
+          "hex": "0000003c0000",
+          "value": {
+            "time": {
+              "s": 60,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 1,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 1,
+                "time": "measured",
+                "at": {
+                  "s": 60,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "within",
+                    "value": 12,
+                    "delta": "4"
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 2,
+          "hex": "000000780000",
+          "value": {
+            "time": {
+              "s": 120,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 2,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 2,
+                "time": "measured",
+                "at": {
+                  "s": 120,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "within",
+                    "value": 12,
+                    "delta": "4"
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 3,
+          "hex": "000000b400090380",
+          "value": {
+            "time": {
+              "s": 180,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {
+                  "queue_depth": 14
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 3,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 3,
+                "time": "measured",
+                "at": {
+                  "s": 180,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 14
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 4,
+          "hex": "000000f00000",
+          "value": {
+            "time": {
+              "s": 240,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 4,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 4,
+                "time": "measured",
+                "at": {
+                  "s": 240,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "within",
+                    "value": 14,
+                    "delta": "4"
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 5,
+          "hex": "0000012c0000",
+          "value": {
+            "time": {
+              "s": 300,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 5,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 5,
+                "time": "measured",
+                "at": {
+                  "s": 300,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "within",
+                    "value": 14,
+                    "delta": "4"
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 6,
+          "hex": "000001680000",
+          "value": {
+            "time": {
+              "s": 360,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 6,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 6,
+                "time": "measured",
+                "at": {
+                  "s": 360,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "within",
+                    "value": 14,
+                    "delta": "4"
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 7,
+          "hex": "000001a40000",
+          "value": {
+            "time": {
+              "s": 420,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 7,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 7,
+                "time": "measured",
+                "at": {
+                  "s": 420,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "within",
+                    "value": 14,
+                    "delta": "4"
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "note": "a deadband: an inclusion that was no value, a reserved code or absent, gives no within",
+      "layout": "link-deadband",
+      "frames": [
+        {
+          "run": "0001",
+          "seq": 0,
+          "hex": "0000000000300000007fffc003c0",
+          "value": {
+            "time": {
+              "s": 0,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": true,
+                "values": {
+                  "dropped": 7,
+                  "queue_depth": "out_of_range",
+                  "duty_available": 1,
+                  "duty_wait_ms": "1500"
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 0,
+            "follows": "first",
+            "records": [
+              {
+                "seq": 0,
+                "time": "measured",
+                "at": {
+                  "s": 0,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": "out_of_range"
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 1,
+          "hex": "0000003c0000",
+          "value": {
+            "time": {
+              "s": 60,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 1,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 1,
+                "time": "measured",
+                "at": {
+                  "s": 60,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "unknown",
+                    "why": "no_value"
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 2,
+          "hex": "000000780008",
+          "value": {
+            "time": {
+              "s": 120,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": [
+                  "queue_depth"
+                ]
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 2,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 2,
+                "time": "measured",
+                "at": {
+                  "s": 120,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "absent"
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 3,
+          "hex": "000000b40000",
+          "value": {
+            "time": {
+              "s": 180,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 3,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 3,
+                "time": "measured",
+                "at": {
+                  "s": 180,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "unknown",
+                    "why": "no_value"
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 4,
+          "hex": "000000f000090200",
+          "value": {
+            "time": {
+              "s": 240,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {
+                  "queue_depth": 8
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 4,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 4,
+                "time": "measured",
+                "at": {
+                  "s": 240,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 8
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 5,
+          "hex": "0000012c0000",
+          "value": {
+            "time": {
+              "s": 300,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 5,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 5,
+                "time": "measured",
+                "at": {
+                  "s": 300,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "within",
+                    "value": 8,
+                    "delta": "4"
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "note": "a deadband: a gap ends the within, whatever the count",
+      "layout": "link-deadband",
+      "frames": [
+        {
+          "run": "0001",
+          "seq": 0,
+          "hex": "0000000000300000007819c003c0",
+          "value": {
+            "time": {
+              "s": 0,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": true,
+                "values": {
+                  "dropped": 7,
+                  "queue_depth": 12,
+                  "duty_available": 1,
+                  "duty_wait_ms": "1500"
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 0,
+            "follows": "first",
+            "records": [
+              {
+                "seq": 0,
+                "time": "measured",
+                "at": {
+                  "s": 0,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "known",
+                    "value": 12
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 1,
+          "hex": "0000003c0000",
+          "value": {
+            "time": {
+              "s": 60,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 1,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 1,
+                "time": "measured",
+                "at": {
+                  "s": 60,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "known",
+                    "value": 7
+                  },
+                  "queue_depth": {
+                    "state": "within",
+                    "value": 12,
+                    "delta": "4"
+                  },
+                  "duty_available": {
+                    "state": "known",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "state": "known",
+                    "value": "1500"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 3,
+          "hex": "000000b40000",
+          "value": {
+            "time": {
+              "s": 180,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 3,
+            "follows": "gap",
+            "lost": 1,
+            "records": [
+              {
+                "seq": 3,
+                "time": "measured",
+                "at": {
+                  "s": 180,
+                  "ms": 0
+                },
+                "fields": {
+                  "dropped": {
+                    "state": "unknown",
+                    "why": "gap"
+                  },
+                  "queue_depth": {
+                    "state": "unknown",
+                    "why": "gap"
+                  },
+                  "duty_available": {
+                    "state": "unknown",
+                    "why": "gap"
+                  },
+                  "duty_wait_ms": {
+                    "state": "unknown",
+                    "why": "gap"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "note": "three records a frame: scheduled within its jitter, and a late record with its offset",
+      "layout": "sample3",
+      "frames": [
+        {
+          "run": "0001",
+          "seq": 30,
+          "hex": "00001c20002bdb7d61f0a21c8c80",
+          "value": {
+            "time": {
+              "s": 7200,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": true,
+                "values": {
+                  "temperature": "21.5",
+                  "rssi": -85,
+                  "link_up": true,
+                  "mode": "rx"
+                },
+                "absent": []
+              },
+              {
+                "full": false,
+                "at": "scheduled",
+                "values": {
+                  "temperature": "22"
+                },
+                "absent": []
+              },
+              {
+                "full": false,
+                "at": 20750,
+                "values": {
+                  "rssi": -90
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 30,
+            "follows": "first",
+            "records": [
+              {
+                "seq": 30,
+                "time": "measured",
+                "at": {
+                  "s": 7200,
+                  "ms": 0
+                },
+                "fields": {
+                  "temperature": {
+                    "state": "known",
+                    "value": "21.5"
+                  },
+                  "rssi": {
+                    "state": "known",
+                    "value": -85
+                  },
+                  "link_up": {
+                    "state": "known",
+                    "value": true
+                  },
+                  "mode": {
+                    "state": "known",
+                    "value": "rx"
+                  }
+                }
+              },
+              {
+                "seq": 31,
+                "time": "scheduled",
+                "after_ms": 10000,
+                "jitter_ms": 500,
+                "at": {
+                  "s": 7210,
+                  "ms": 0
+                },
+                "fields": {
+                  "temperature": {
+                    "state": "known",
+                    "value": "22"
+                  },
+                  "rssi": {
+                    "state": "known",
+                    "value": -85
+                  },
+                  "link_up": {
+                    "state": "known",
+                    "value": true
+                  },
+                  "mode": {
+                    "state": "known",
+                    "value": "rx"
+                  }
+                }
+              },
+              {
+                "seq": 32,
+                "time": "measured",
+                "after_ms": 20750,
+                "at": {
+                  "s": 7220,
+                  "ms": 750
+                },
+                "fields": {
+                  "temperature": {
+                    "state": "known",
+                    "value": "22"
+                  },
+                  "rssi": {
+                    "state": "known",
+                    "value": -90
+                  },
+                  "link_up": {
+                    "state": "known",
+                    "value": true
+                  },
+                  "mode": {
+                    "state": "known",
+                    "value": "rx"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 33,
+          "hex": "00001c3e00111100",
+          "value": {
+            "time": {
+              "s": 7230,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {
+                  "link_up": false
+                },
+                "absent": []
+              },
+              {
+                "full": false,
+                "at": "scheduled",
+                "values": {},
+                "absent": [
+                  "mode"
+                ]
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 33,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 33,
+                "time": "measured",
+                "at": {
+                  "s": 7230,
+                  "ms": 0
+                },
+                "fields": {
+                  "temperature": {
+                    "state": "known",
+                    "value": "22"
+                  },
+                  "rssi": {
+                    "state": "known",
+                    "value": -90
+                  },
+                  "link_up": {
+                    "state": "known",
+                    "value": false
+                  },
+                  "mode": {
+                    "state": "known",
+                    "value": "rx"
+                  }
+                }
+              },
+              {
+                "seq": 34,
+                "time": "scheduled",
+                "after_ms": 10000,
+                "jitter_ms": 500,
+                "at": {
+                  "s": 7240,
+                  "ms": 0
+                },
+                "fields": {
+                  "temperature": {
+                    "state": "known",
+                    "value": "22"
+                  },
+                  "rssi": {
+                    "state": "known",
+                    "value": -90
+                  },
+                  "link_up": {
+                    "state": "known",
+                    "value": false
+                  },
+                  "mode": {
+                    "state": "absent"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 35,
+          "hex": "00001c520020e1388020",
+          "value": {
+            "time": {
+              "s": 7250,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {
+                  "mode": "tx"
+                },
+                "absent": []
+              },
+              {
+                "full": false,
+                "at": 10000,
+                "values": {},
+                "absent": []
+              },
+              {
+                "full": false,
+                "at": "scheduled",
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 35,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 35,
+                "time": "measured",
+                "at": {
+                  "s": 7250,
+                  "ms": 0
+                },
+                "fields": {
+                  "temperature": {
+                    "state": "known",
+                    "value": "22"
+                  },
+                  "rssi": {
+                    "state": "known",
+                    "value": -90
+                  },
+                  "link_up": {
+                    "state": "known",
+                    "value": false
+                  },
+                  "mode": {
+                    "state": "known",
+                    "value": "tx"
+                  }
+                }
+              },
+              {
+                "seq": 36,
+                "time": "measured",
+                "after_ms": 10000,
+                "at": {
+                  "s": 7260,
+                  "ms": 0
+                },
+                "fields": {
+                  "temperature": {
+                    "state": "known",
+                    "value": "22"
+                  },
+                  "rssi": {
+                    "state": "known",
+                    "value": -90
+                  },
+                  "link_up": {
+                    "state": "known",
+                    "value": false
+                  },
+                  "mode": {
+                    "state": "known",
+                    "value": "tx"
+                  }
+                }
+              },
+              {
+                "seq": 37,
+                "time": "scheduled",
+                "after_ms": 20000,
+                "jitter_ms": 500,
+                "at": {
+                  "s": 7270,
+                  "ms": 0
+                },
+                "fields": {
+                  "temperature": {
+                    "state": "known",
+                    "value": "22"
+                  },
+                  "rssi": {
+                    "state": "known",
+                    "value": -90
+                  },
+                  "link_up": {
+                    "state": "known",
+                    "value": false
+                  },
+                  "mode": {
+                    "state": "known",
+                    "value": "tx"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "note": "three records a frame: a frame lost, three seqs, the next's omitted fields unknown",
+      "layout": "sample3",
+      "frames": [
+        {
+          "run": "0001",
+          "seq": 0,
+          "hex": "00000000002bdb7d4100",
+          "value": {
+            "time": {
+              "s": 0,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": true,
+                "values": {
+                  "temperature": "21.5",
+                  "rssi": -85,
+                  "link_up": true,
+                  "mode": "rx"
+                },
+                "absent": []
+              },
+              {
+                "full": false,
+                "at": "scheduled",
+                "values": {},
+                "absent": []
+              },
+              {
+                "full": false,
+                "at": "scheduled",
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 0,
+            "follows": "first",
+            "records": [
+              {
+                "seq": 0,
+                "time": "measured",
+                "at": {
+                  "s": 0,
+                  "ms": 0
+                },
+                "fields": {
+                  "temperature": {
+                    "state": "known",
+                    "value": "21.5"
+                  },
+                  "rssi": {
+                    "state": "known",
+                    "value": -85
+                  },
+                  "link_up": {
+                    "state": "known",
+                    "value": true
+                  },
+                  "mode": {
+                    "state": "known",
+                    "value": "rx"
+                  }
+                }
+              },
+              {
+                "seq": 1,
+                "time": "scheduled",
+                "after_ms": 10000,
+                "jitter_ms": 500,
+                "at": {
+                  "s": 10,
+                  "ms": 0
+                },
+                "fields": {
+                  "temperature": {
+                    "state": "known",
+                    "value": "21.5"
+                  },
+                  "rssi": {
+                    "state": "known",
+                    "value": -85
+                  },
+                  "link_up": {
+                    "state": "known",
+                    "value": true
+                  },
+                  "mode": {
+                    "state": "known",
+                    "value": "rx"
+                  }
+                }
+              },
+              {
+                "seq": 2,
+                "time": "scheduled",
+                "after_ms": 20000,
+                "jitter_ms": 500,
+                "at": {
+                  "s": 20,
+                  "ms": 0
+                },
+                "fields": {
+                  "temperature": {
+                    "state": "known",
+                    "value": "21.5"
+                  },
+                  "rssi": {
+                    "state": "known",
+                    "value": -85
+                  },
+                  "link_up": {
+                    "state": "known",
+                    "value": true
+                  },
+                  "mode": {
+                    "state": "known",
+                    "value": "rx"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 6,
+          "hex": "0000003c001246dedbe8",
+          "value": {
+            "time": {
+              "s": 60,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {
+                  "rssi": -70
+                },
+                "absent": []
+              },
+              {
+                "full": true,
+                "at": "scheduled",
+                "values": {
+                  "temperature": "21.5",
+                  "rssi": -85,
+                  "link_up": true,
+                  "mode": "rx"
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 6,
+            "follows": "gap",
+            "lost": 3,
+            "records": [
+              {
+                "seq": 6,
+                "time": "measured",
+                "at": {
+                  "s": 60,
+                  "ms": 0
+                },
+                "fields": {
+                  "temperature": {
+                    "state": "unknown",
+                    "why": "gap"
+                  },
+                  "rssi": {
+                    "state": "known",
+                    "value": -70
+                  },
+                  "link_up": {
+                    "state": "unknown",
+                    "why": "gap"
+                  },
+                  "mode": {
+                    "state": "unknown",
+                    "why": "gap"
+                  }
+                }
+              },
+              {
+                "seq": 7,
+                "time": "scheduled",
+                "after_ms": 10000,
+                "jitter_ms": 500,
+                "at": {
+                  "s": 70,
+                  "ms": 0
+                },
+                "fields": {
+                  "temperature": {
+                    "state": "known",
+                    "value": "21.5"
+                  },
+                  "rssi": {
+                    "state": "known",
+                    "value": -85
+                  },
+                  "link_up": {
+                    "state": "known",
+                    "value": true
+                  },
+                  "mode": {
+                    "state": "known",
+                    "value": "rx"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "note": "three records a frame, no jitter: a scheduled record is exactly on its instant, its jitter 0; the owner's clock unknown, its records' offsets still read",
+      "layout": "sample3-exact",
+      "frames": [
+        {
+          "run": "0001",
+          "seq": 9,
+          "hex": "ffffffffffebdb7d40c3510fc0",
+          "value": {
+            "time": null,
+            "records": [
+              {
+                "full": true,
+                "values": {
+                  "temperature": "21.5",
+                  "rssi": -85,
+                  "link_up": true,
+                  "mode": "rx"
+                },
+                "absent": []
+              },
+              {
+                "full": false,
+                "at": "scheduled",
+                "values": {},
+                "absent": []
+              },
+              {
+                "full": false,
+                "at": 25000,
+                "values": {
+                  "temperature": "23"
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 9,
+            "follows": "first",
+            "records": [
+              {
+                "seq": 9,
+                "time": "unknown",
+                "fields": {
+                  "temperature": {
+                    "state": "known",
+                    "value": "21.5"
+                  },
+                  "rssi": {
+                    "state": "known",
+                    "value": -85
+                  },
+                  "link_up": {
+                    "state": "known",
+                    "value": true
+                  },
+                  "mode": {
+                    "state": "known",
+                    "value": "rx"
+                  }
+                }
+              },
+              {
+                "seq": 10,
+                "time": "scheduled",
+                "after_ms": 10000,
+                "jitter_ms": 0,
+                "fields": {
+                  "temperature": {
+                    "state": "known",
+                    "value": "21.5"
+                  },
+                  "rssi": {
+                    "state": "known",
+                    "value": -85
+                  },
+                  "link_up": {
+                    "state": "known",
+                    "value": true
+                  },
+                  "mode": {
+                    "state": "known",
+                    "value": "rx"
+                  }
+                }
+              },
+              {
+                "seq": 11,
+                "time": "measured",
+                "after_ms": 25000,
+                "fields": {
+                  "temperature": {
+                    "state": "known",
+                    "value": "23"
+                  },
+                  "rssi": {
+                    "state": "known",
+                    "value": -85
+                  },
+                  "link_up": {
+                    "state": "known",
+                    "value": true
+                  },
+                  "mode": {
+                    "state": "known",
+                    "value": "rx"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "note": "a record's seq wraps inside a frame",
+      "layout": "tick-five",
+      "frames": [
+        {
+          "run": "0001",
+          "seq": 16777214,
+          "hex": "0000000a00140180a0",
+          "value": {
+            "time": {
+              "s": 10,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": true,
+                "values": {
+                  "n": 0
+                },
+                "absent": []
+              },
+              {
+                "full": false,
+                "at": "scheduled",
+                "values": {
+                  "n": 1
+                },
+                "absent": []
+              },
+              {
+                "full": false,
+                "at": "scheduled",
+                "values": {},
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 16777214,
+            "follows": "first",
+            "records": [
+              {
+                "seq": 16777214,
+                "time": "measured",
+                "at": {
+                  "s": 10,
+                  "ms": 0
+                },
+                "fields": {
+                  "n": {
+                    "state": "known",
+                    "value": 0
+                  }
+                }
+              },
+              {
+                "seq": 16777215,
+                "time": "scheduled",
+                "after_ms": 1000,
+                "jitter_ms": 100,
+                "at": {
+                  "s": 11,
+                  "ms": 0
+                },
+                "fields": {
+                  "n": {
+                    "state": "known",
+                    "value": 1
+                  }
+                }
+              },
+              {
+                "seq": 0,
+                "time": "scheduled",
+                "after_ms": 2000,
+                "jitter_ms": 100,
+                "at": {
+                  "s": 12,
+                  "ms": 0
+                },
+                "fields": {
+                  "n": {
+                    "state": "known",
+                    "value": 1
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "run": "0001",
+          "seq": 1,
+          "hex": "0000000f000204",
+          "value": {
+            "time": {
+              "s": 15,
+              "ms": 0
+            },
+            "records": [
+              {
+                "full": false,
+                "values": {
+                  "n": 2
+                },
+                "absent": []
+              }
+            ]
+          },
+          "expect": {
+            "run": "0001",
+            "seq": 1,
+            "follows": "continues",
+            "records": [
+              {
+                "seq": 1,
+                "time": "measured",
+                "at": {
+                  "s": 15,
+                  "ms": 0
+                },
+                "fields": {
+                  "n": {
+                    "state": "known",
+                    "value": 2
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

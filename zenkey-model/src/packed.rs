@@ -1593,8 +1593,11 @@ impl Field {
         }
     }
 
-    /// The reserved code's name, when `code` is one this field declares.
-    fn reserved_name(&self, code: u64) -> Option<&'static str> {
+    /// The reserved code's name, when `code` is one this field declares:
+    /// a code that is no value (core §7.6), as a frame's deadband reads it
+    /// (§7.7).
+    #[must_use]
+    pub fn reserved_name(&self, code: u64) -> Option<&'static str> {
         let list = match &self.kind {
             FieldKind::Int { reserved, .. } | FieldKind::Fixed { reserved, .. } => reserved,
             _ => return None,

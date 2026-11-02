@@ -319,6 +319,16 @@ impl Deployment {
         }
     }
 
+    /// The epoch in force for `addr`'s packed `time` fields (core §8.6), as
+    /// the lens over this deployment's inputs reads it; a replay's lens
+    /// holds no catalog, so its caller assumes it.
+    pub(crate) fn epoch_of(
+        &self,
+        addr: &zenkey_model::grammar::Addr,
+    ) -> zenkey_fleet::DeploymentEpoch {
+        self.lens_inputs().lens().epoch_of(addr)
+    }
+
     /// Resolve `wire` into the identity cache, through the lens over this
     /// deployment's inputs — the cache's one insert point. Split borrows:
     /// the lens reads the catalog, the store and the contracts while the

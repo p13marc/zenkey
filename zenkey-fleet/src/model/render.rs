@@ -190,6 +190,31 @@ pub fn render_record(
     )
 }
 
+/// A frame the runtime already read out of its envelope (a consumer's
+/// refusal of one), rendered through one revision in hand as core §7.7
+/// reads it, alone (observer §7.6): its body read with the frame
+/// resource's layout under CH's tag, its record type's `time` fields under
+/// `epoch` (§8.6), or undecodable with why.
+pub fn render_frame(
+    revision: &Revision,
+    key: &str,
+    body: &[u8],
+    stamp: zenkey_model::wire::Stamp,
+    tag: zenkey_model::wire::Tag,
+    epoch: Epoch,
+) -> PayloadRendering {
+    let payload = Payload::Frame { body, stamp, tag };
+    render_read(
+        revision,
+        key,
+        Member::Type,
+        None,
+        payload,
+        body.len(),
+        epoch,
+    )
+}
+
 /// A payload of `member` on `key`, its envelope read (a type member's
 /// alone: an attachment and an operation's members carry none).
 fn read<'a>(key: &str, member: Member, encoding: Option<&str>, bytes: &'a [u8]) -> Payload<'a> {
@@ -210,6 +235,9 @@ fn fallback_rendering(
     match payload {
         Payload::Refused(refusal) => inband::refused_rendering(key, size, None, None, refusal),
         Payload::Heartbeat { body, .. } => inband::heartbeat_rendering(key, why, body.len()),
+        Payload::Frame { body, stamp, .. } => {
+            crate::model::frame::unread_rendering(key, why, stamp, body.len())
+        }
         Payload::Plain(b) | Payload::Record { record: b, .. } => structural_rendering(key, why, b),
     }
 }
@@ -281,6 +309,23 @@ fn render_read(
         member: member.as_str().to_owned(),
         values,
     };
+    // Core §7.7: a frame resource's put is a frame, read alone here, as a
+    // reader's first (observer §7.6); a frame anywhere else, and a
+    // mutation on a frame resource, have no reading.
+    if member == Member::Type
+        && let Some(framed) = frame_rendering(
+            contract,
+            r,
+            key,
+            Some(resource.clone()),
+            ty,
+            payload,
+            size,
+            epoch,
+        )
+    {
+        return framed;
+    }
     let (bytes, tag) = match payload {
         Payload::Refused(refusal) => {
             return inband::refused_rendering(
@@ -293,6 +338,17 @@ fn render_read(
         }
         Payload::Plain(b) => (b, None),
         Payload::Record { record, tag, .. } => (record, Some(tag)),
+        // A frame's every case is [`frame_rendering`]'s, answered above.
+        Payload::Frame { .. } => {
+            return crate::model::frame::undecodable(
+                key,
+                Some(resource),
+                decode::declared(ty),
+                size,
+                crate::model::frame::FRAME_AS_RECORD.to_owned(),
+            )
+            .0;
+        }
         // A heartbeat on a key whose resource has a type (core §7.5's form
         // 6): a body, never a record of the type.
         Payload::Heartbeat { .. } => {
@@ -319,6 +375,90 @@ fn render_read(
         size: bytes.len(),
         resource: Some(resource),
         rendered,
+    }
+}
+
+/// A frame resource's payload, or a frame on any resource, as core §7.7
+/// reads it: a frame on a frame resource read alone, by a reader that held
+/// nothing (observer §7.6), and undecodable on a resource with no `frame`
+/// table; a mutation, or a sample with no envelope, on a frame resource
+/// undecodable. `None` for any other payload, which the type reads.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn frame_rendering(
+    contract: &zenkey_model::contract::Contract,
+    r: &zenkey_model::contract::Resource,
+    key: &str,
+    resource: Option<ResolvedResource>,
+    ty: &serde_json::Value,
+    payload: Payload<'_>,
+    size: usize,
+    epoch: Epoch,
+) -> Option<PayloadRendering> {
+    frame_check(
+        contract,
+        r,
+        key,
+        resource,
+        ty,
+        payload,
+        size,
+        &mut zenkey_model::frame::Reader::new(),
+        epoch,
+    )
+    .map(|(r, _)| r)
+}
+
+/// [`frame_rendering`] with the key's reader, and its conformance.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn frame_check(
+    contract: &zenkey_model::contract::Contract,
+    r: &zenkey_model::contract::Resource,
+    key: &str,
+    resource: Option<ResolvedResource>,
+    ty: &serde_json::Value,
+    payload: Payload<'_>,
+    size: usize,
+    reader: &mut zenkey_model::frame::Reader,
+    epoch: Epoch,
+) -> Option<(PayloadRendering, crate::report::Conformance)> {
+    use crate::model::frame;
+    let layout = zenkey_model::frame::Layout::of_resource(contract, r);
+    let declared = decode::declared(ty);
+    match (payload, layout) {
+        (Payload::Frame { body, stamp, tag }, Ok(Some(l))) => Some(frame::frame_check(
+            key,
+            resource,
+            frame::declared(&declared),
+            &l,
+            stamp,
+            tag,
+            body,
+            reader,
+            epoch,
+        )),
+        (Payload::Frame { .. }, Ok(None)) => Some(frame::undecodable(
+            key,
+            resource,
+            declared,
+            size,
+            frame::FRAME_AS_RECORD.to_owned(),
+        )),
+        (Payload::Frame { .. }, Err(why))
+        | (Payload::Plain(_) | Payload::Record { .. }, Err(why)) => Some(frame::undecodable(
+            key,
+            resource,
+            frame::declared(&declared),
+            size,
+            format!("the frame resource's layout does not read: {why}"),
+        )),
+        (Payload::Plain(_) | Payload::Record { .. }, Ok(Some(_))) => Some(frame::undecodable(
+            key,
+            resource,
+            frame::declared(&declared),
+            size,
+            frame::MUTATION_ON_FRAME.to_owned(),
+        )),
+        _ => None,
     }
 }
 

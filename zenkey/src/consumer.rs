@@ -61,6 +61,16 @@
 //! with what it heard since it asked; a late joiner seeds the views from
 //! its own GET ([`Subscription::seed`]). A re-read delivers nothing: it
 //! makes the view whole, so the next heartbeat confirms.
+//!
+//! **Frames** (core §7.7, #981's K2): a subscription to a frame resource
+//! reads each put as a frame, its body parsed with the resource's layout
+//! ([`crate::inband::admit_frame`]), and keeps one
+//! `zenkey_model::frame::Reader` per key, so [`Delivery::frame`] carries
+//! each record's seq, time and field states: `known`, `within` its delta,
+//! `absent`, or `unknown` at a gap, a rewind, a run it does not hold and
+//! past a deadband, never a value nor 0 (core §7.7's MUST NOT). A body its
+//! layout refuses, a mutation on a frame resource and a frame on any other
+//! are undecodable, refused as any other sample.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -219,6 +229,45 @@ pub struct Delivery {
     /// unobservable or not asked with why. An expired sample is never
     /// delivered.
     pub lifespan: LifespanSample,
+    /// A frame's records, as the subscription's reader of its key read
+    /// them (core §7.7): `None` for a sample of any other resource, and
+    /// for a delete. `sample`'s payload is then the frame's body.
+    pub frame: Option<FrameRead>,
+}
+
+/// A frame as a subscription's reader of its key read it (core §7.7,
+/// "The reader's fields"; #981's K2): its layout, which names its fields,
+/// each record's seq, time and field states, and the deployment epoch its
+/// record type's `time` fields count from.
+#[derive(Debug, Clone)]
+pub struct FrameRead {
+    pub layout: Arc<zenkey_model::frame::Layout>,
+    pub applied: zenkey_model::frame::Applied,
+    /// The consumer's deployment epoch ([`Consumer::with_deployment_epoch`],
+    /// core §8.6), which a packed record's `time` fields read under too.
+    pub epoch: i64,
+}
+
+impl FrameRead {
+    /// The frame as `spec/conformance/frame/apply.json` spells a reading
+    /// (`zenkey_model::frame::Applied::reading`), its `time` fields under
+    /// [`FrameRead::epoch`].
+    ///
+    /// # Errors
+    /// A `time` field's instant past an `i64` of milliseconds under it.
+    pub fn reading(
+        &self,
+    ) -> std::result::Result<serde_json::Value, zenkey_model::frame::ReadRefusal> {
+        self.applied.reading(&self.layout, Some(self.epoch))
+    }
+
+    /// Field `name`'s state in record `index`: `None` for no such record
+    /// or field. An `unknown` or `absent` field holds no code.
+    #[must_use]
+    pub fn field(&self, index: usize, name: &str) -> Option<zenkey_model::frame::FieldState> {
+        let i = self.layout.fields().iter().position(|f| f.name == name)?;
+        self.applied.records.get(index)?.fields.get(i).copied()
+    }
 }
 
 impl Delivery {
@@ -338,6 +387,8 @@ struct Seen {
     rereading: Mutex<std::collections::BTreeSet<Addr>>,
     rereads: AtomicU64,
     last_reread: Mutex<Option<Instant>>,
+    /// For a frame resource, each key's reader (core §7.7).
+    frames: Mutex<BTreeMap<String, zenkey_model::frame::Reader>>,
 }
 
 /// What a heartbeat confirmed of a subscription's collection (#978's F2):
@@ -722,6 +773,10 @@ impl Consumer {
         let r = self.resource(resource)?.clone();
         let name = format!("{}/{}", r.token, r.template);
         let layout = self.packed_layout(&r)?;
+        let frame_layout = self.frame_layout(&r)?;
+        // A frame's `time` fields count from the deployment epoch, as a
+        // packed record's do (core §7.6, §8.6).
+        let epoch = self.epoch;
         let seen = Arc::new(Seen::default());
         let plan = timing::Plan::new(
             &r,
@@ -742,7 +797,7 @@ impl Consumer {
         };
         let mut subs = Vec::new();
         for ke in self.selectors(resource)? {
-            let (seen, callback, r, name, engine, layout, followed) = (
+            let (seen, callback, r, name, engine, layout, followed, frame_layout) = (
                 Arc::clone(&seen),
                 Arc::clone(&callback),
                 r.clone(),
@@ -750,6 +805,7 @@ impl Consumer {
                 engine.clone(),
                 layout.clone(),
                 followed.clone(),
+                frame_layout.clone(),
             );
             let iface = self.contract.iface.clone();
             let providers = self.providers.clone();
@@ -794,25 +850,64 @@ impl Consumer {
                         // delivered, never an arrival.
                         let read = crate::inband::read(sample);
                         let (inband, tag) = (read.stamp(), read.tag());
-                        if let Err(why) = crate::inband::admit(&read, layout.as_deref()) {
-                            seen.undecodable.fetch_add(1, Ordering::Relaxed);
-                            tracing::debug!(
-                                key = %read.sample().key_expr(),
-                                reason = %why.reason(),
-                                "an undecodable sample"
-                            );
-                            if let Some(f) = &on_refused {
-                                f(Refused {
-                                    provider: addr,
-                                    resource: name.clone(),
-                                    values,
-                                    read,
-                                    why,
-                                    arrival,
-                                });
+                        // Core §7.7: a frame resource's put is a frame, read
+                        // with its layout by the key's reader.
+                        let admitted = match &frame_layout {
+                            Some(fl) => crate::inband::admit_frame(&read, fl).map(|f| {
+                                f.zip(inband).map(|(frame, stamp)| {
+                                    let key = read.sample().key_expr().as_str().to_owned();
+                                    let applied = seen
+                                        .frames
+                                        .lock()
+                                        .expect("not poisoned")
+                                        .entry(key)
+                                        .or_default()
+                                        .apply(fl, stamp, &frame);
+                                    FrameRead {
+                                        layout: Arc::clone(fl),
+                                        applied,
+                                        epoch,
+                                    }
+                                })
+                            }),
+                            None => crate::inband::admit(&read, layout.as_deref()).map(|()| None),
+                        };
+                        let frame = match admitted {
+                            Ok(frame) => frame,
+                            Err(why) => {
+                                seen.undecodable.fetch_add(1, Ordering::Relaxed);
+                                // A frame its layout refused is never applied:
+                                // its key's reader notes it, so the next frame
+                                // follows a gap that counts and names it.
+                                if let (Some(_), crate::inband::Read::Framed { stamp, .. }) =
+                                    (&frame_layout, &read)
+                                {
+                                    let key = read.sample().key_expr().as_str().to_owned();
+                                    seen.frames
+                                        .lock()
+                                        .expect("not poisoned")
+                                        .entry(key)
+                                        .or_default()
+                                        .refuse(*stamp);
+                                }
+                                tracing::debug!(
+                                    key = %read.sample().key_expr(),
+                                    reason = %why.reason(),
+                                    "an undecodable sample"
+                                );
+                                if let Some(f) = &on_refused {
+                                    f(Refused {
+                                        provider: addr,
+                                        resource: name.clone(),
+                                        values,
+                                        read,
+                                        why,
+                                        arrival,
+                                    });
+                                }
+                                return;
                             }
-                            return;
-                        }
+                        };
                         let sample = read.into_sample();
                         let key = sample.key_expr().as_str();
                         let lifespan = match &engine {
@@ -869,6 +964,7 @@ impl Consumer {
                             inband,
                             tag,
                             lifespan,
+                            frame,
                         });
                     })
                     .await
@@ -1086,6 +1182,7 @@ impl Consumer {
                         inband,
                         tag,
                         lifespan: premise,
+                        frame: None,
                     });
                 }
             }
@@ -1207,6 +1304,15 @@ impl Consumer {
             tags,
             undecodable,
         })
+    }
+
+    /// The frame layout of `r`, when it is a frame resource (core §7.7):
+    /// what reads each frame ([`crate::inband::admit_frame`]). A frame
+    /// resource whose layout does not read is refused, [`Error::Contract`].
+    fn frame_layout(&self, r: &Resource) -> Result<Option<Arc<zenkey_model::frame::Layout>>> {
+        zenkey_model::frame::Layout::of_resource(&self.contract, r)
+            .map(|l| l.map(Arc::new))
+            .map_err(|e| Error::Contract(format!("{}/{}: {e}", r.token, r.template)))
     }
 
     /// The layout of `r`'s type, when it is packed (core §7.6): what admits

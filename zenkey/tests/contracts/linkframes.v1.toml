@@ -1,0 +1,25 @@
+# Frame resources (core §7.7) for a consumer's reader (#981's K2,
+# zenkey/tests/frame_reader.rs): zenoh-modem's link readings, one record a
+# frame with a deadband on the queue, a sampler's three records a frame,
+# and a plain packed stream of the same record type, which takes no frame.
+[interface]
+name  = "linkframes"
+major = 1
+minor = 0
+
+[schemas]
+packed = ["schemas/linkframes.json"]
+
+[resources."frames/link"]
+kind  = "stream"
+type  = "packed:linkframes#Link"
+frame = { keyframe_every = 15, deadband = { queue_depth = { delta = "4", max_records = 5 } } }
+
+[resources."frames/sample"]
+kind  = "stream"
+type  = "packed:linkframes#Sample"
+frame = { records = 3, step_ms = 10000, jitter_ms = 500, keyframe_every = 3 }
+
+[resources.level]
+kind = "stream"
+type = "packed:linkframes#Link"

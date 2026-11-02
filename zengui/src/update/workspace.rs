@@ -254,7 +254,13 @@ pub(crate) fn update(
             let slot = if role == DockRole::Inspector
                 && sub.follow.current != crate::message::Subject::None
             {
-                sub.pin_current(work.replay.identity_cache(&dep.identity))
+                sub.pin_current(work.replay.identity_cache(&dep.identity), &|a| {
+                    if work.replay.replay.is_some() {
+                        zenkey_fleet::DeploymentEpoch::Assumed
+                    } else {
+                        dep.epoch_of(a)
+                    }
+                })
             } else {
                 crate::message::SlotId::FOLLOW
             };

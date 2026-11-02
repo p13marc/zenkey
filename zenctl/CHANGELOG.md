@@ -6,6 +6,20 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — frames read: records and field states (#981, K2)
+
+Core 0.83 §7.7 defines frames: one packed type's records under one
+envelope and one time, a record holding every field or only those that
+changed. Observer text 0.21 §7.6 says how a tool shows them. No owner
+writes one yet (K3).
+
+| Before | Now | Notes |
+|---|---|---|
+| a frame (core §7.5's form 5): undecodable, `zk2c envelope refused: form` | on a frame resource, `zk2c frame of packed:<type>`: its value is the reading `spec/conformance/frame/apply.json` spells (`run`, `seq`, `follows`, and each record's `seq`, `time`, `after_ms`, `jitter_ms`, `at` and `fields`, each `{state, value, delta, why}`) | `watch` through the runtime's reader of the key; `echo` through one reader per key for the window's life, so a lost frame's successors read their omitted fields `unknown`; `get` reads each reply alone, a reader's first |
+| — | the table form: `run 0007, seq 13, 1 record lost before it \| #13 t=280.000 measured: dropped unknown (records lost) · queue_depth 31 ±4 (within) · …` | a scheduled record reads `scheduled ±<jitter> ms`, never as measured; `unknown` and `absent` show no value |
+| — | undecodable, named: a body its layout refuses (`a zk2c frame refused by its layout, tag: …; its records, from seq 16, read as lost at the key's next frame`), a frame on a resource with no `frame` table, a record that came in no frame on a frame resource | observer §7.6. A refused frame is never applied: the next frame's gap counts its records, and its value's `refused` lists each refused frame's seq (`… 2 records lost before it (refused by its layout: the frame at seq 16)`) |
+| a frame with no contract in hand | `<zk2c frame, run 0007, seq 13, 14 bytes>`, its body never sniffed; `--raw` and `--no-decode` alike | |
+
 ## Unreleased (`main`, zk2) — `check face --catalog` reads a catalog as core §8.6 does (#988, link.v2 0.2)
 
 `link.v2` 0.2 §2.19 reads the catalog the far side holds as core §8.6

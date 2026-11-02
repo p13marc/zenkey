@@ -49,6 +49,15 @@ pub fn metered_contract_paths() -> Vec<PathBuf> {
     paths
 }
 
+/// The framed world's contracts (#981 K2): [`contract_paths`] and the
+/// runtime's frame reader's contract, `linkframes.v1`.
+pub fn framed_contract_paths() -> Vec<PathBuf> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut paths = contract_paths();
+    paths.push(root.join("../zenkey/tests/contracts/linkframes.v1.toml"));
+    paths
+}
+
 /// The packed world's contracts (#979 B2): [`contract_paths`] and the
 /// runtime's packed vectors' contract, `packed.v1`.
 pub fn packed_contract_paths() -> Vec<PathBuf> {
@@ -255,6 +264,9 @@ pub struct World {
     /// `lab/packed`'s packed sensor stream beside the rest
     /// ([`World::packed`], #979 B2).
     packed: bool,
+    /// `lab/modem`'s two frame resources beside the rest
+    /// ([`World::framed`], #981 K2).
+    framed: bool,
     /// What the last tick published, as [`World::verdicts`] checks it.
     last: Vec<Published>,
 }
@@ -662,6 +674,78 @@ fn synth(
         .bytes
 }
 
+/// `lab/modem`'s link frames (#981 K2): `linkframes.v1`'s `frames/link`,
+/// one record a frame, the queue under a deadband of 4.
+pub const FRAME_LINK: &str = "zk2/lab/modem/linkframes.v1/stream/frames/link";
+/// `lab/modem`'s sampler frames: `frames/sample`, three records a frame,
+/// every 10 s ±500 ms.
+pub const FRAME_SAMPLE: &str = "zk2/lab/modem/linkframes.v1/stream/frames/sample";
+
+/// A frame resource of `linkframes.v1`'s layout, read from its contract.
+pub fn frame_layout(template: &str) -> zenkey_model::frame::Layout {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../zenkey/tests/contracts/linkframes.v1.toml");
+    let c = zenkey_model::contract::load_path(&path)
+        .contract
+        .expect("linkframes.v1 loads");
+    let r = c
+        .resources
+        .iter()
+        .find(|r| r.template.as_str() == template)
+        .expect("the frame resource");
+    zenkey_model::frame::Layout::of_resource(&c, r)
+        .expect("a layout")
+        .expect("a frame resource")
+}
+
+/// A frame in core §7.5's envelope (form 5, the layout's tag), `value` in
+/// `spec/conformance/frame/bodies.json`'s spelling, record 0 at `seq` of
+/// run `0001`.
+pub fn frame_envelope(
+    l: &zenkey_model::frame::Layout,
+    seq: u32,
+    value: &serde_json::Value,
+) -> Vec<u8> {
+    use zenkey_model::wire::{Run, Seq, Stamp};
+    zenkey_model::frame::Frame::from_json(value, l, None)
+        .expect("a frame")
+        .envelope(
+            l,
+            Stamp {
+                run: Run::U16(1),
+                seq: Seq::new(seq).expect("a seq"),
+            },
+        )
+        .expect("an envelope")
+}
+
+/// What `lab/modem` puts at tick `n` ([`World::framed`]): on `frames/link`
+/// a keyframe every eighth tick, the wait absent, a delta of `dropped`
+/// alone otherwise, and nothing at each tick 5 mod 8, a frame lost, so the
+/// next one's omitted fields read `unknown`; on `frames/sample` three
+/// records a tick, the second scheduled and the third measured late.
+fn frame_feeds(n: u32) -> Vec<(&'static str, Vec<u8>)> {
+    use serde_json::json;
+    let mut out = Vec::new();
+    let link = frame_layout("frames/link");
+    let t = json!({"s": 3600 + 60 * n, "ms": 0});
+    if n.is_multiple_of(8) {
+        let v = json!({"time": t, "records": [{"full": true, "values": {
+            "dropped": n, "queue_depth": 12, "duty_available": 1}}]});
+        out.push((FRAME_LINK, frame_envelope(&link, n, &v)));
+    } else if n % 8 != 5 {
+        let v = json!({"time": t, "records": [{"full": false, "values": {"dropped": n}}]});
+        out.push((FRAME_LINK, frame_envelope(&link, n, &v)));
+    }
+    let sample = frame_layout("frames/sample");
+    let v = json!({"time": {"s": 7200 + 30 * n, "ms": 0}, "records": [
+        {"full": true, "values": {"temperature": "21.5", "rssi": -85, "link_up": true, "mode": "rx"}},
+        {"full": false, "at": "scheduled", "values": {"temperature": "22"}},
+        {"full": false, "at": 20750, "values": {"rssi": -90}}]});
+    out.push((FRAME_SAMPLE, frame_envelope(&sample, 3 * n, &v)));
+    out
+}
+
 /// A packed record at tick `n` in core §7.5's envelope, CH carrying
 /// `packed:Sensor`'s tag, as the runtime's writer seals it (#979 B2).
 pub fn packed_envelope(n: u32, record: &[u8]) -> Vec<u8> {
@@ -797,6 +881,20 @@ impl World {
         w
     }
 
+    /// The world with `lab/modem` beside it (#981 K2): its two frame
+    /// resources placed by presence and publishing each tick, as core §7.7
+    /// frames hand-written in their envelopes ([`frame_envelope`]).
+    pub fn framed() -> World {
+        let contracts = Arc::new(zengui::services::contracts::load_all(
+            &framed_contract_paths(),
+        ));
+        let mut addresses = World::ADDRESSES.to_vec();
+        addresses.push(("lab/modem", "linkframes.v1"));
+        let mut w = World::build(contracts, &addresses, false);
+        w.framed = true;
+        w
+    }
+
     fn build(
         contracts: Arc<zengui::services::contracts::LoadedContracts>,
         addresses: &[(&str, &str)],
@@ -813,6 +911,7 @@ impl World {
             .chain(METERED_FEEDS.iter().map(|(key, ..)| *key))
             .chain(TIMED_FEEDS.iter().map(|(key, ..)| *key))
             .chain(PACKED_FEEDS.iter().map(|(key, ..)| *key))
+            .chain([FRAME_LINK, FRAME_SAMPLE])
             .map(|key| (key, Axes::declared(&lens, key)))
             .collect();
         World {
@@ -833,6 +932,7 @@ impl World {
             timed: false,
             sealed: None,
             packed: false,
+            framed: false,
             last: Vec::new(),
         }
     }
@@ -1405,6 +1505,11 @@ impl World {
             for (key, iface, token, template, encoding) in PACKED_FEEDS {
                 let record = synth(&self.contracts.set, iface, token, template, n);
                 out.push((key, packed_envelope(n, &record), encoding, None));
+            }
+        }
+        if self.framed {
+            for (key, bytes) in frame_feeds(n) {
+                out.push((key, bytes, "zenoh/bytes", None));
             }
         }
         out.extend(

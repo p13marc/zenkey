@@ -13,6 +13,10 @@
 //!     → its body, its key's stamp and its covered revision's tag
 //!       (Payload::Heartbeat), read with that revision ([`heartbeat_value`]),
 //!       never as a record of the key's type
+//! a put whose envelope is a frame (core §7.5's form 5, §7.7, 0.83)
+//!     → its body, record 0's run and seq and its frame form's tag
+//!       (Payload::Frame), read with its frame resource's declaration
+//!       ([`crate::model::frame`]), never as one record of the key's type
 //! every other sample
 //!     → read with no envelope (Payload::Plain)
 //! ```
@@ -56,7 +60,9 @@ pub type Envelope = Option<Result<wire::Stamp, Refusal>>;
 pub fn envelope_of(read: &Read) -> Envelope {
     match read {
         Read::Plain(_) => None,
-        Read::Enveloped { stamp, .. } | Read::Heartbeat { stamp, .. } => Some(Ok(*stamp)),
+        Read::Enveloped { stamp, .. }
+        | Read::Heartbeat { stamp, .. }
+        | Read::Framed { stamp, .. } => Some(Ok(*stamp)),
         Read::Refused { refusal, .. } => Some(Err(*refusal)),
     }
 }
@@ -93,6 +99,15 @@ pub enum Payload<'a> {
         stamp: wire::Stamp,
         tag: wire::Tag,
     },
+    /// A frame (core §7.5's form 5, §7.7): its body, record 0's run and
+    /// seq, and CH's tag, its frame form's. Read with its frame resource's
+    /// declaration ([`crate::model::frame`]), never as one record of the
+    /// key's type.
+    Frame {
+        body: &'a [u8],
+        stamp: wire::Stamp,
+        tag: wire::Tag,
+    },
 }
 
 impl<'a> Payload<'a> {
@@ -100,14 +115,16 @@ impl<'a> Payload<'a> {
     pub fn bytes(&self) -> Option<&'a [u8]> {
         match *self {
             Payload::Plain(b) | Payload::Record { record: b, .. } => Some(b),
-            Payload::Refused(_) | Payload::Heartbeat { .. } => None,
+            Payload::Refused(_) | Payload::Heartbeat { .. } | Payload::Frame { .. } => None,
         }
     }
 
     /// The in-band stamp, when the bytes carried an envelope.
     pub fn stamp(&self) -> Option<wire::Stamp> {
         match self {
-            Payload::Record { stamp, .. } | Payload::Heartbeat { stamp, .. } => Some(*stamp),
+            Payload::Record { stamp, .. }
+            | Payload::Heartbeat { stamp, .. }
+            | Payload::Frame { stamp, .. } => Some(*stamp),
             Payload::Plain(_) | Payload::Refused(_) => None,
         }
     }
@@ -115,7 +132,9 @@ impl<'a> Payload<'a> {
     /// CH's tag, when the bytes carried an envelope.
     pub fn tag(&self) -> Option<wire::Tag> {
         match self {
-            Payload::Record { tag, .. } | Payload::Heartbeat { tag, .. } => Some(*tag),
+            Payload::Record { tag, .. }
+            | Payload::Heartbeat { tag, .. }
+            | Payload::Frame { tag, .. } => Some(*tag),
             Payload::Plain(_) | Payload::Refused(_) => None,
         }
     }
@@ -124,7 +143,10 @@ impl<'a> Payload<'a> {
     pub fn refusal(&self) -> Option<Refusal> {
         match self {
             Payload::Refused(r) => Some(*r),
-            Payload::Plain(_) | Payload::Record { .. } | Payload::Heartbeat { .. } => None,
+            Payload::Plain(_)
+            | Payload::Record { .. }
+            | Payload::Heartbeat { .. }
+            | Payload::Frame { .. } => None,
         }
     }
 
@@ -134,7 +156,10 @@ impl<'a> Payload<'a> {
     pub fn encoding<'e>(&self, sample: Option<&'e str>) -> Option<&'e str> {
         match self {
             Payload::Plain(_) => sample,
-            Payload::Record { .. } | Payload::Refused(_) | Payload::Heartbeat { .. } => None,
+            Payload::Record { .. }
+            | Payload::Refused(_)
+            | Payload::Heartbeat { .. }
+            | Payload::Frame { .. } => None,
         }
     }
 }
@@ -159,10 +184,11 @@ pub fn payload<'a>(key: &str, encoding: Option<&str>, bytes: &'a [u8]) -> Payloa
             stamp: e.stamp,
             tag: e.tag,
         },
-        // A frame (core 0.83 §7.7) is read as before core 0.83 defined it,
-        // undecodable as a reserved form, until #981's K2 brings the frame
-        // reader: never decoded as a record of the key's type.
-        Reading::Framed(_) => Payload::Refused(Refusal::Reserved(wire::Form::Frame)),
+        Reading::Framed(e) => Payload::Frame {
+            body: e.record,
+            stamp: e.stamp,
+            tag: e.tag,
+        },
         Reading::Refused(r) => Payload::Refused(r),
     }
 }
@@ -433,7 +459,9 @@ pub fn record<'a>(
     let from = match payload(key, encoding, &bytes) {
         Payload::Plain(_) => return Ok(bytes),
         Payload::Refused(r) => return Err(r),
-        Payload::Record { stamp, .. } | Payload::Heartbeat { stamp, .. } => stamp.envelope_bytes(),
+        Payload::Record { stamp, .. }
+        | Payload::Heartbeat { stamp, .. }
+        | Payload::Frame { stamp, .. } => stamp.envelope_bytes(),
     };
     Ok(after(bytes, from))
 }
@@ -457,9 +485,9 @@ pub fn read_parts<'a>(
     match payload(key, encoding, &bytes) {
         Payload::Plain(_) => (bytes, None),
         Payload::Refused(r) => (bytes, Some(Err(r))),
-        Payload::Record { stamp, .. } | Payload::Heartbeat { stamp, .. } => {
-            (after(bytes, stamp.envelope_bytes()), Some(Ok(stamp)))
-        }
+        Payload::Record { stamp, .. }
+        | Payload::Heartbeat { stamp, .. }
+        | Payload::Frame { stamp, .. } => (after(bytes, stamp.envelope_bytes()), Some(Ok(stamp))),
     }
 }
 
@@ -536,6 +564,7 @@ pub fn structural_text(key: &str, encoding: Option<&str>, bytes: &[u8]) -> Strin
         Payload::Heartbeat { body, .. } => {
             format!("<{}, {} bytes>", heartbeat_declared(key), body.len())
         }
+        Payload::Frame { body, stamp, .. } => crate::model::frame::unread_text(stamp, body.len()),
         Payload::Plain(b) | Payload::Record { record: b, .. } => structural::structural(b),
     }
 }

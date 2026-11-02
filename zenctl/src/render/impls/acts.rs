@@ -41,10 +41,18 @@ pub fn rendered_text(r: &Rendered, size: usize) -> String {
         Rendered::Value {
             declared, value, ..
         } => {
-            let line = format!(
-                "{declared} {}",
-                serde_json::to_string(value).unwrap_or_default()
-            );
+            // A frame's reading, as observer §7.6 says a person reads it:
+            // each record at its seq and time, every field in its state.
+            let frame = zenkey_fleet::model::frame::is_frame_declared(declared)
+                .then(|| zenkey_fleet::model::frame::reading_lines(value))
+                .flatten();
+            let line = match frame {
+                Some(lines) => format!("{declared}: {}", lines.join(" | ")),
+                None => format!(
+                    "{declared} {}",
+                    serde_json::to_string(value).unwrap_or_default()
+                ),
+            };
             match r.epoch_note() {
                 Some(note) => format!("{line}  ({note})"),
                 None => line,

@@ -55,9 +55,9 @@ The owner, consumer and caller sections each point to them.
 | [Consumer](#consumer) | 20 |
 | [Caller](#caller) | 13 |
 | [Deployment](#deployment) | 17 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 61, 25 of them a reader's |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 63, 25 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 61 |
-| Every rule, once | 224 |
+| Every rule, once | 226 |
 | [Rule ids](#rule-ids) | 84 |
 
 ## Owner
@@ -612,6 +612,13 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§7.5](observer.md#75-subscribing-across-a-face) | A tool across a constrained face SHOULD subscribe as core §8.5 says, by the scopes the contracts in hand give for the addresses it reads. | `[Sc: constrained.md §7]` |
+
+### [observer §7.6 Frames](observer.md#76-frames)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§7.6](observer.md#76-frames) | A tool MUST show a scheduled record's time as scheduled, with its `jitter_ms`, never as a measured or exact time. | `[F: frame/apply.json]` `[Sc: frames.md §3]` |
+| [§7.6](observer.md#76-frames) | A tool MUST show a `within` field with its `delta`, never as its value alone. | `[F: frame/apply.json]` `[Sc: frames.md §4]` |
 
 ## Implementation: the static rules
 

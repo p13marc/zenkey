@@ -33,7 +33,13 @@ pub(crate) fn update(
     match msg {
         DetailMsg::LeafSelected(path) => {
             slot.series_leaf = Some(path);
-            slot.refresh_series(replay.identity_cache(&dep.identity));
+            slot.refresh_series(replay.identity_cache(&dep.identity), &|a| {
+                if replaying {
+                    zenkey_fleet::DeploymentEpoch::Assumed
+                } else {
+                    dep.epoch_of(a)
+                }
+            });
             Task::none()
         }
         DetailMsg::LastKnown(archive) => {

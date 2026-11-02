@@ -28,7 +28,9 @@
 //! by its key and Encoding, and its record read, its run and seq what
 //! orders it, in one place every reader goes through ([`inband`]). The
 //! deployment catalogs a tool is given (core §8.6) say which epoch an
-//! owner's packed `time` fields count from ([`deployment`], #980 C1c).
+//! owner's packed `time` fields count from ([`deployment`], #980 C1c). A
+//! frame's records are read by a reader per key into their field states
+//! ([`frame`], core §7.7).
 //!
 //! The rest is generation-neutral: a stream of samples becomes rates and
 //! latencies ([`stats`]) or a tree ([`tree`]), two payloads become a diff
@@ -73,6 +75,7 @@ pub mod deployment;
 pub mod desired;
 pub mod diff;
 pub mod examples;
+pub mod frame;
 pub mod health;
 pub mod identity;
 pub mod inband;
