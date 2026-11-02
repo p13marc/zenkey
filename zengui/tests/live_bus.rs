@@ -70,6 +70,10 @@ impl Bus {
                 env!("CARGO_MANIFEST_DIR"),
                 "/../zenkey/tests/contracts/meter.v1.toml"
             )),
+            frames: PathBuf::from(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../zenkey/tests/contracts/frames/linkframes.v1.toml"
+            )),
         };
         let up = spray::Spray::start(&args)
             .await

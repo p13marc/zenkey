@@ -4,6 +4,15 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — the spray writes frames (#981, K3)
+
+Core 0.87 has owners write frames (§7.7), through the runtime's frame
+writer, which `zenctl gen` and the spray's owners use.
+
+| Before | Now | Notes |
+|---|---|---|
+| no owner in the spray writes a frame | `lab/modem` implements `linkframes.v1` (`--frames`, `zenkey/tests/contracts/frames/linkframes.v1.toml` by default): `frames/link` one record a frame, `frames/sample` three records 10 s apart | the shots scenes keep `World::framed`'s hand-written frames, so a scene renders the same twice |
+
 ## Unreleased (`main`, zk2) — the Inspector shows a frame's fields (#981, K2)
 
 Core 0.83 §7.7 defines frames, and observer text 0.21 §7.6 says how a tool
@@ -13,7 +22,7 @@ shows them.
 |---|---|---|
 | a frame (core §7.5's form 5): undecodable, `form` | the lens reads it with its frame resource's layout, one frame alone as a reader's first | a value read, a replayed row and the verdicts alike |
 | — | a FRAME section for a key resolving to a frame resource: its type and table, then the newest frame's head, each record's seq and time (a scheduled one `scheduled ±<jitter> ms`), and a chip per field, `known <v>`, `within <v> ±<delta>`, `absent` or `unknown (<why>)`, read over the slot's history ring by one reader (`zengui::frame`) | the window's own view: the ring's oldest kept frame is the reader's first, and a frame the ring lacks turns the next one's omitted fields `unknown` |
-| — | the shots scenes `inspector-frame-lost` and `inspector-frame-scheduled` (`World::framed`, `lab/modem` on `zenkey/tests/contracts/linkframes.v1.toml`) | |
+| — | the shots scenes `inspector-frame-lost` and `inspector-frame-scheduled` (`World::framed`, `lab/modem` on `zenkey/tests/contracts/frames/linkframes.v1.toml`) | |
 
 ## Unreleased (`main`, zk2) — `--catalog`: the deployment catalog (#980, C1c)
 
