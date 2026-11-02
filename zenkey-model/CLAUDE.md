@@ -285,7 +285,8 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   below 64 bits (`NoRate::WrapOrDecrease`, `Pair::unobservable`), and `Sampled::record`, a frame
   record's `RecordTime`: timed by offsets within one frame, instants across two, else arrivals,
   `Rate::{elapsed_ns, basis}` (`TimeBasis::{Measured, Scheduled { jitter_ms }, Arrival}`, `None`
-  for a v1 pair). `telemetry::frames`: `series`/`series_of`/`mirror_in` (`Series`, `FieldSeries`,
+  for a v1 pair); `telemetry::elapsed` is public (#983 T2), what a tool times a pair with no
+  rate by. `telemetry::frames`: `series`/`series_of`/`mirror_in` (`Series`, `FieldSeries`,
   `Reason` in v2 §2.16's order, `Problem`), `carries`, `reading_of` (`FieldReading`: sample, held,
   absent, owner_error, beyond_range, unnamed, unknown) and `Fold`, one key's `frame::Reader` whose
   epoch is the run (a new one at a first frame, another run and a rewind, never at a gap), pairing

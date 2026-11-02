@@ -14,6 +14,12 @@
 //! asked answered without one, 2 no verdict. A verdict verb: every failure
 //! before the run is the reserved 2.
 //!
+//! **Frames** (`telemetry.v2`, #983 T2): a frame resource's series are
+//! read the same way, each its own member row, its key and its `field`,
+//! the resource it `mirrors` a label beside it; its pairs' epoch the run,
+//! a scheduled rate said so with its bound, and a narrow counter's step
+//! outside its serial window `wrap_or_decrease`, could not tell.
+//!
 //! **Why a root judgement, beside `health` and `alarms`.** "Did a counter go
 //! backwards within an epoch?" is a question whose finding is the yes, in
 //! three states, so it is exit-coded; and it reads one profile across the

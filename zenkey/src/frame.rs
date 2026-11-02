@@ -207,7 +207,8 @@ impl FrameWriter {
                 Some(count) if count & top_code(f.width) == code => *slot = Slot::Code(count),
                 _ => {
                     return Err(Error::Payload(format!(
-                        "{}: the record's JSON reading gives {} no count its code {code} carries",
+                        "{}: the JSON reading's count for {} does not reduce to the record's \
+                         code {code}",
                         self.key, f.name
                     )));
                 }

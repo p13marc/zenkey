@@ -25,6 +25,13 @@
 //!   pairs whose epoch was assumed, could not tell;
 //! - "what is this counter's rate over the pair?" ([`rate`]): informative.
 //!
+//! A frame resource's series (`telemetry.v2`, #983 T2) answer the same
+//! questions, each its own member: its declaration is its
+//! `telemetry.series` ([`frame_declaration_row`]), a sample an included
+//! value, which conforms, and a narrow counter's pair outside its serial
+//! window `wrap_or_decrease`, unobservable ([`unobservable_words`]), so the
+//! series could not tell ([`member_decreased`], v2 §5).
+//!
 //! The two unestablished kinds stay apart in every one (core O5). Of the
 //! five, only a sample that does not conform and a decrease are the run's
 //! findings, and a member whose continuity could not be told, or a sample
@@ -33,16 +40,19 @@
 //! ([`TelemetryReport::judgement`]).
 
 use zenkey_model::telemetry::{
-    Basis, Checked, Conformance, Continuity, Declaration, Measure, NoRate, Pair, Via,
+    Basis, Checked, Conformance, Continuity, Declaration, Measure, NoRate, Pair, TimeBasis, Via,
 };
 
 use crate::bus::telemetry::TelemetryObservation;
 use crate::model::presence_live::PresenceBasis;
-use crate::model::telemetry::{MemberBook, MetricResource, PairPresence, PairSeen, invalid_words};
+use crate::model::telemetry::{
+    FrameMetric, MemberBook, MetricResource, PairPresence, PairSeen, invalid_words,
+};
 use crate::report::{
     ContinuityToken, DeclarationToken, EpochToken, Judgement, PairPresenceToken,
     TelemetryContinuity, TelemetryDeclaration, TelemetryMember, TelemetryPair, TelemetryPresence,
-    TelemetryRate, TelemetryReport, TelemetryResource, TelemetrySamples, TelemetryTotals,
+    TelemetryRate, TelemetryRateBound, TelemetryReport, TelemetryResource, TelemetrySamples,
+    TelemetrySeries, TelemetrySeriesProblem, TelemetryTotals,
 };
 
 /// "Is this resource's declaration invalid?" (§2.2, §2.4): `invalid` is the
@@ -111,9 +121,24 @@ pub fn decreased(p: &Pair) -> Judgement {
             reason: format!("{} ({})", p.continuity.as_str(), basis_words(p.basis)),
         },
         Continuity::Unobservable => Judgement::Unobservable {
-            reason: "incomparable: the kinds, or a histogram's bounds or length, differ".to_owned(),
+            reason: unobservable_words(p).to_owned(),
         },
         Continuity::NotAsked => Judgement::NotAsked,
+    }
+}
+
+/// Why an unobservable pair is (`Pair::unobservable`), in words: a narrow
+/// counter's change outside its serial window (`telemetry.v2` §2.20), or
+/// two samples that cannot be compared (§2.10).
+pub fn unobservable_words(p: &Pair) -> &'static str {
+    match p.unobservable() {
+        Some("wrap_or_decrease") => {
+            "wrap_or_decrease: a narrow counter's change outside its serial window, a wrap or a \
+             decrease its two values cannot tell apart (telemetry.v2 §2.20)"
+        }
+        _ => {
+            "incomparable: the kinds, a counter's widths, or a histogram's bounds or length, differ"
+        }
     }
 }
 
@@ -134,19 +159,32 @@ pub fn member_decreased(m: &MemberBook, reads_presence: bool) -> Judgement {
     if t.decreased > 0 {
         return Judgement::Established;
     }
-    if let Declaration::Invalid(why) = &m.metric.ty.declaration {
-        return Judgement::Unobservable {
-            reason: format!(
-                "its declaration is invalid ({}): no question of its members is answered \
-                 (telemetry.v1 §2.2)",
-                invalid_words(why)
-            ),
-        };
+    if let Some(reason) = m.metric.invalid_words() {
+        return Judgement::Unobservable { reason };
     }
     let cumulative =
         m.kind.is_some_and(|(k, _)| k.is_cumulative()) || t.asked() + t.unobservable > 0;
     if !cumulative {
         return Judgement::NotAsked;
+    }
+    // A wrap or a decrease within one run, which a narrow counter's values
+    // cannot tell apart: an established pair beside it answers nothing of
+    // it (telemetry.v2 §5).
+    if t.wrap_or_decrease > 0 {
+        let width = m
+            .field
+            .as_ref()
+            .and_then(|f| f.width)
+            .map_or(String::new(), |w| format!(" {w}-bit"));
+        return Judgement::Unobservable {
+            reason: format!(
+                "{} of its {} pair(s) wrap_or_decrease: the{width} counter's change lay outside \
+                 its serial window, a wrap or a decrease its values cannot tell apart, and none \
+                 decreased (telemetry.v2 §2.20)",
+                t.wrap_or_decrease,
+                t.total()
+            ),
+        };
     }
     let established = t.in_band + t.by_presence;
     if established > 0 {
@@ -158,7 +196,15 @@ pub fn member_decreased(m: &MemberBook, reads_presence: bool) -> Judgement {
             ),
         };
     }
-    let reason = if t.total() == 0 {
+    let reason = if t.total() == 0 && m.field.is_some() {
+        // A frame's series (telemetry.v2 §5): fewer than two samples, or
+        // unknown throughout.
+        format!(
+            "no pair formed: {} sample(s) of it in the window, and a pair needs two{}",
+            m.conforming,
+            no_sample_words(m)
+        )
+    } else if t.total() == 0 {
         format!(
             "no pair formed: {} conforming sample(s) of it in the window, and a pair needs two",
             m.conforming
@@ -175,11 +221,59 @@ pub fn member_decreased(m: &MemberBook, reads_presence: bool) -> Judgement {
         )
     } else {
         format!(
-            "its {} pair(s) incomparable: the kinds, or a histogram's bounds or length, differ",
+            "its {} pair(s) incomparable: the kinds, a counter's widths, or a histogram's bounds \
+             or length, differ",
             t.unobservable
         )
     };
     Judgement::Unobservable { reason }
+}
+
+/// A frame series' records that were no sample, as a clause: `""` when
+/// none, else "; 4 of its records were no sample: 1 held, 3 unknown"
+/// (`telemetry.v2` §2.18), the readings' tokens.
+fn no_sample_words(m: &MemberBook) -> String {
+    if m.no_sample.is_empty() {
+        return String::new();
+    }
+    format!(
+        "; {} of its records were no sample: {}",
+        m.no_sample.values().sum::<u64>(),
+        m.no_sample
+            .iter()
+            .map(|(t, n)| format!("{n} {t}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+/// A `scheduled` rate's bound (`telemetry.v2` §2.21): the rate over the
+/// elapsed time plus its jitter, and over it less its jitter, `None` past
+/// it. `None` for any other basis.
+pub fn rate_bound(r: &zenkey_model::telemetry::Rate) -> Option<TelemetryRateBound> {
+    let Some(TimeBasis::Scheduled { jitter_ms }) = r.basis else {
+        return None;
+    };
+    let e = r.elapsed_ns as f64;
+    let j = jitter_ms as f64 * 1e6;
+    Some(TelemetryRateBound {
+        low: r.per_s * e / (e + j),
+        high: (e > j).then(|| r.per_s * e / (e - j)),
+    })
+}
+
+/// A time basis' token and a `scheduled` one's jitter (v2 §2.21).
+fn basis_row(b: Option<TimeBasis>) -> (Option<String>, Option<u64>) {
+    match b {
+        None => (None, None),
+        Some(b) => (
+            Some(b.as_str().to_owned()),
+            match b {
+                TimeBasis::Scheduled { jitter_ms } => Some(jitter_ms),
+                _ => None,
+            },
+        ),
+    }
 }
 
 /// "What is this counter's rate over the pair?" (§2.11): informative. A
@@ -245,6 +339,84 @@ pub fn declaration_says(d: &Declaration) -> String {
     }
 }
 
+/// A frame resource's `telemetry.series` in words (v2 §2.16).
+pub fn frame_declaration_says(f: &FrameMetric) -> String {
+    match (&f.series, f.declared()) {
+        (_, Some(series)) => format!(
+            "declared (telemetry.v2): a frame's {} series, {}; each epoch its run, in band",
+            series.len(),
+            series
+                .iter()
+                .map(|s| {
+                    let mut w = format!("{} a {}", s.field, s.kind);
+                    if let Some(b) = s.width.filter(|b| *b < 64) {
+                        w.push_str(&format!(" of {b} bits"));
+                    }
+                    match &s.unit {
+                        Some(u) => w.push_str(&format!(" in {u}")),
+                        None => w.push_str(", unit unknown"),
+                    }
+                    if let Some(m) = &s.mirror {
+                        w.push_str(&format!(", mirroring {m}"));
+                    }
+                    w
+                })
+                .collect::<Vec<_>>()
+                .join("; ")
+        ),
+        _ => format!(
+            "invalid: {} — no field of it is read, so its series' samples and continuity are \
+             unobservable (telemetry.v2 §2.16)",
+            f.problems()
+                .map(crate::model::telemetry::series_problem_words)
+                .unwrap_or_default()
+        ),
+    }
+}
+
+/// A frame resource's declaration, as the report spells it (v2 §2.16).
+pub fn frame_declaration_row(f: &FrameMetric) -> TelemetryDeclaration {
+    let says = frame_declaration_says(f);
+    let problems: Vec<TelemetrySeriesProblem> = f
+        .problems()
+        .unwrap_or_default()
+        .iter()
+        .map(|p| TelemetrySeriesProblem {
+            entry: p.entry.clone(),
+            reason: p.reason.as_str().to_owned(),
+        })
+        .collect();
+    TelemetryDeclaration {
+        answer: if f.declared().is_some() {
+            DeclarationToken::Declared
+        } else {
+            DeclarationToken::Invalid
+        },
+        reasons: problems.iter().map(|p| p.reason.clone()).collect(),
+        carrier: f.declared().map(|_| "frame".to_owned()),
+        kind: None,
+        unit: None,
+        buckets: None,
+        semantic: None,
+        epoch_in: None,
+        series: f
+            .declared()
+            .unwrap_or_default()
+            .iter()
+            .map(|s| TelemetrySeries {
+                field: s.field.clone(),
+                kind: s.kind.as_str().to_owned(),
+                unit: s.unit.clone(),
+                semantic: s.semantic.map(|x| x.as_str().to_owned()),
+                mirrors: s.mirror.clone(),
+                width: s.width,
+            })
+            .collect(),
+        problems,
+        says,
+    }
+}
+
 /// One resource's declaration, as the report spells it.
 pub fn declaration_row(d: &Declaration) -> TelemetryDeclaration {
     let says = declaration_says(d);
@@ -258,6 +430,8 @@ pub fn declaration_row(d: &Declaration) -> TelemetryDeclaration {
             buckets: x.buckets.clone(),
             semantic: x.semantic.map(|s| s.as_str().to_owned()),
             epoch_in: x.epoch.map(|e| e.as_str().to_owned()),
+            series: Vec::new(),
+            problems: Vec::new(),
             says,
         },
         Declaration::Invalid(why) => TelemetryDeclaration {
@@ -269,6 +443,8 @@ pub fn declaration_row(d: &Declaration) -> TelemetryDeclaration {
             buckets: None,
             semantic: None,
             epoch_in: None,
+            series: Vec::new(),
+            problems: Vec::new(),
             says,
         },
         // No resource that is neither reaches a reader's rows.
@@ -281,6 +457,8 @@ pub fn declaration_row(d: &Declaration) -> TelemetryDeclaration {
             buckets: None,
             semantic: None,
             epoch_in: None,
+            series: Vec::new(),
+            problems: Vec::new(),
             says,
         },
     }
@@ -330,6 +508,8 @@ pub fn pair_row(p: &PairSeen) -> TelemetryPair {
         no_rate: p.pair.rate.as_ref().err().map(|n| n.as_str().to_owned()),
         base: p.base.to_owned(),
         elapsed_s: p.elapsed_ns as f64 / 1e9,
+        time_basis: basis_row(p.basis).0,
+        jitter_ms: basis_row(p.basis).1,
     }
 }
 
@@ -342,6 +522,8 @@ pub fn member_row(key: &str, m: &MemberBook, reads_presence: bool) -> TelemetryM
         address: r.address.to_string(),
         iface: r.iface.to_string(),
         resource: r.resource.clone(),
+        field: m.field.as_ref().map(|f| f.field.clone()),
+        mirrors: m.field.as_ref().and_then(|f| f.mirror.clone()),
         kind: m.kind.map(|(k, _)| k.as_str().to_owned()),
         kind_from: m.kind.map(|(_, f)| f.as_str().to_owned()),
         unit: m.unit.as_ref().map(|(u, _)| u.clone()),
@@ -365,8 +547,16 @@ pub fn member_row(key: &str, m: &MemberBook, reads_presence: bool) -> TelemetryM
                 .flatten()
                 .map(|p| p.as_str().to_owned())
                 .collect(),
+            no_sample: m
+                .no_sample
+                .iter()
+                .map(|(t, n)| ((*t).to_owned(), *n))
+                .collect(),
         },
-        latest: m.latest.as_ref().map(|r| measure_json(&r.value)),
+        latest: m
+            .latest_json
+            .clone()
+            .or_else(|| m.latest.as_ref().map(|r| measure_json(&r.value))),
         continuity: TelemetryContinuity {
             answer: member_decreased(m, reads_presence),
             pairs: m.tally.total(),
@@ -375,6 +565,7 @@ pub fn member_row(key: &str, m: &MemberBook, reads_presence: bool) -> TelemetryM
             reset: m.tally.reset,
             decreased: m.tally.decreased,
             unobservable: m.tally.unobservable,
+            wrap_or_decrease: m.tally.wrap_or_decrease,
             not_asked: m.tally.not_asked,
             in_band: m.tally.in_band,
             by_presence: m.tally.by_presence,
@@ -384,6 +575,9 @@ pub fn member_row(key: &str, m: &MemberBook, reads_presence: bool) -> TelemetryM
         rate: m.rate.as_ref().map(|r| TelemetryRate {
             per_s: r.per_s,
             unit: r.unit.clone(),
+            time_basis: basis_row(r.basis).0,
+            jitter_ms: basis_row(r.basis).1,
+            bound: rate_bound(r),
         }),
     }
 }
@@ -415,7 +609,10 @@ pub fn judge(obs: &TelemetryObservation) -> TelemetryReport {
                 .scope
                 .subscription(r)
                 .unwrap_or_else(|| r.selector.clone()),
-            declaration: declaration_row(&r.ty.declaration),
+            declaration: match &r.frame {
+                Some(f) => frame_declaration_row(f),
+                None => declaration_row(&r.ty.declaration),
+            },
             members: book
                 .members()
                 .filter(|(_, m)| same_resource(&m.metric, r))
@@ -593,6 +790,7 @@ mod tests {
             stamp: None,
             at: t0 + Duration::from_millis(ms),
             via: SampleVia::Subscription,
+            frame: None,
         };
         let book = |presence: bool| {
             let mut b = TelemetryBook::new(
@@ -769,6 +967,7 @@ mod tests {
             stamp: None,
             at: t0 + Duration::from_millis(ms),
             via: SampleVia::Subscription,
+            frame: None,
         };
         let judged = |book: TelemetryBook| {
             let mut spec = TelemetrySpec::new(Duration::from_secs(1), Duration::from_secs(2));

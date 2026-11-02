@@ -787,9 +787,9 @@ mod meter {
                 if s.kind != MetricKind::Counter {
                     // §2.18: a code its field reads, a value of its kind or
                     // a reserved code it declares; an escape is a code too.
-                    if (field.width < 64 && code >> field.width != 0)
-                        || field.check_code(code).is_err()
-                    {
+                    // A code past the field's width is the framer's `range`,
+                    // its one width guard (`Framer::push`).
+                    if field.check_code(code).is_err() {
                         return Err(Reason::FieldCode {
                             field: s.field.clone(),
                             code,
@@ -855,6 +855,73 @@ mod meter {
 #[cfg(all(test, feature = "zenoh"))]
 mod tests {
     use zenoh::time::{NTP64, Timestamp, TimestampId};
+
+    /// A series field's code past its width (§2.18, core §7.7), in the
+    /// order `FrameWriter::take` asks: the meter's `check_code`, then the
+    /// framer. A gauge's code past its width is past its range, so the
+    /// meter refuses it (`FieldCode`). A boolean's and an escape enum's
+    /// `check_code` read every code, so the meter passes them and the
+    /// framer refuses them, `range`, its one width guard.
+    #[test]
+    fn a_series_fields_code_past_its_width_is_refused() {
+        use super::{Counts, FrameMeter, Reason};
+        use std::collections::BTreeMap;
+        use zenkey_model::frame::{FrameParams, Framer, Layout, Measured, Slot, WriteRefusal};
+        use zenkey_model::telemetry::frames;
+        let doc = serde_json::json!({"types": {"Rec": {"fields": [
+            {"name": "level", "type": "int", "minimum": 0, "maximum": 1},
+            {"name": "up", "type": "bool"},
+            {"name": "mode", "type": "enum", "values": ["idle", "busy"], "escape": true},
+        ]}}});
+        let read = zenkey_model::packed::PackedDoc::read(&doc);
+        assert!(read.findings.is_empty(), "{:?}", read.findings);
+        let record = read.types["Rec"].clone().expect("Rec's layout");
+        let params = FrameParams::resolve(&zenkey_model::authoring::FrameSpec::default())
+            .expect("one record a frame");
+        let layout = Layout::of(&record, &params).expect("a frame layout");
+        let ann = BTreeMap::from([(
+            zenkey_model::telemetry::SERIES.to_owned(),
+            serde_json::json!({
+                "level": {"kind": "gauge", "unit": "1"},
+                "up": {"kind": "boolean"},
+                "mode": {"kind": "text"},
+            }),
+        )]);
+        let series = frames::series(layout.fields(), &ann, &|_| None);
+        let meter = FrameMeter::new(series.declared().expect("declared").to_vec().into());
+        let run = || zenkey_model::wire::Run::U16(1);
+        let fields = layout.fields();
+        let width = |name: &str| fields.iter().find(|f| f.name == name).unwrap().width;
+        let past = |name: &str| 1u64 << width(name);
+        let slots = |level, up, mode| vec![Slot::Code(level), Slot::Code(up), Slot::Code(mode)];
+        assert!(
+            meter
+                .check(fields, &slots(1, 1, 1), Counts::Unwrapped, &run)
+                .is_ok()
+        );
+        assert_eq!(
+            meter
+                .check(fields, &slots(past("level"), 1, 1), Counts::Unwrapped, &run)
+                .unwrap_err(),
+            Reason::FieldCode {
+                field: "level".into(),
+                code: past("level"),
+            }
+        );
+        let mut framer = Framer::new(layout.clone());
+        for s in [slots(1, past("up"), 1), slots(1, 1, past("mode"))] {
+            assert!(
+                meter.check(fields, &s, Counts::Unwrapped, &run).is_ok(),
+                "{s:?}: the meter leaves the width to the framer"
+            );
+            let m = Measured {
+                slots: s.clone(),
+                at: zenkey_model::timing::Mono::after(std::time::Duration::ZERO),
+                wall: None,
+            };
+            assert_eq!(framer.push(m), Err(WriteRefusal::Range), "{s:?}");
+        }
+    }
 
     /// The runtime's stamp nanoseconds are zenoh's, and the model's
     /// statement of them (§2.11, 0.2).

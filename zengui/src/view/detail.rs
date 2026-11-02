@@ -438,6 +438,12 @@ pub struct SeriesData {
     /// and field states, the window's own view over the recorded history
     /// (`crate::frame`).
     pub frame: Option<std::sync::Arc<crate::frame::FrameRead>>,
+    /// The key's frame series (telemetry.v2, #983 T2): each series field's
+    /// plotted value and a counter's rate, one point per record, read by
+    /// the fleet's book over the recorded history (`crate::metric`).
+    pub frame_metric: Option<std::sync::Arc<crate::metric::FrameMetricRead>>,
+    /// Retained geometry for each frame series' charts, in field order.
+    pub frame_caches: Vec<FieldCaches>,
     /// Retained geometry for the two charts (#178).
     ///
     /// A `canvas::Cache` has to outlive the frame to be worth anything, and
@@ -450,6 +456,13 @@ pub struct SeriesData {
     /// but that is the rate the *data* changes at, and a canvas redraws with
     /// the frame.
     pub caches: SeriesCaches,
+}
+
+/// One frame series' retained geometry: its value and its rate.
+#[derive(Default)]
+pub struct FieldCaches {
+    pub value: iced::widget::canvas::Cache,
+    pub rate: iced::widget::canvas::Cache,
 }
 
 /// The retained geometry, one per chart.
@@ -496,6 +509,7 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
             col = col.push(identity_section(
                 r,
                 data.series.and_then(|s| s.metric.as_deref()),
+                data.series.and_then(|s| s.frame_metric.as_deref()),
                 data.series.and_then(|s| s.timing.as_deref()),
                 sp,
             ));
@@ -578,6 +592,9 @@ fn series_section<'a>(
     slot: SlotId,
     sp: Spacing,
 ) -> Option<Element<'a, Message>> {
+    if let Some(f) = data.frame_metric.as_deref() {
+        return Some(frame_metric_section(f, data, sp));
+    }
     if let Some(m) = data.metric.as_deref().filter(|m| m.declared()) {
         return Some(metric_section(m, data, sp));
     }
@@ -746,6 +763,128 @@ fn metric_section<'a>(
     }
     if cumulative {
         col = col.push(pairs(m, sp));
+    }
+    col = col.push(message_rate(data, sp));
+    col.into()
+}
+
+/// A frame's series (telemetry.v2, #983 T2): each series field's value,
+/// one point per record, a counter's rate under its time basis, and its
+/// pairs' continuity, the epoch the run — each the fleet's reading
+/// (`crate::metric::FrameFold`). A record that did not include the field,
+/// or held no value, is a gap, its reading named, never 0 (§2.18).
+fn frame_metric_section<'a>(
+    f: &'a crate::metric::FrameMetricRead,
+    data: &'a SeriesData,
+    sp: Spacing,
+) -> Element<'a, Message> {
+    use crate::view::theme::SeverityTone;
+    use zenkey_model::telemetry::TimeBasis;
+    let mut col = Column::new().spacing(sp.xs);
+    col = col.push(kit::section_header("Series", None));
+    if let Some(why) = &f.invalid {
+        col = col.push(kit::muted(format!("telemetry.v2: {why}")));
+        col = col.push(message_rate(data, sp));
+        return col.into();
+    }
+    col = col.push(kit::muted(format!(
+        "read by telemetry.v2 over the recorded history: {} · one point per record, \
+         each series its key and its field (§2.17); a record with no sample of a field \
+         is a gap, never 0 (§2.18)",
+        match f.unread {
+            0 => kit::plural(f.frames as usize, "frame"),
+            n => format!(
+                "{}, {} unreadable (a gap in every chart)",
+                kit::plural(f.frames as usize, "frame"),
+                n
+            ),
+        }
+    )));
+    for (field, caches) in f.fields.iter().zip(&data.frame_caches) {
+        let unit = field.unit();
+        let mut line = format!(
+            "{}: {} · {}",
+            field.series.field,
+            kit::plural(field.samples as usize, "sample"),
+            field.identity_words()
+        );
+        let none = field.no_sample_words();
+        if !none.is_empty() {
+            line.push_str(&format!(" · no sample: {none}"));
+        }
+        if let Some(v) = &field.latest {
+            line.push_str(&format!(" · latest {v}"));
+        }
+        match field.plotted_label() {
+            Some(label) => {
+                col = col.push(kit::muted(line));
+                col = col.push(spark::chart(
+                    &label,
+                    &field.value,
+                    SeriesTone::Value,
+                    unit.unit(),
+                    &caches.value,
+                    sp,
+                ));
+            }
+            None => {
+                col = col.push(kit::muted(format!(
+                    "{line} · a {} series is not plotted",
+                    field.series.kind
+                )));
+            }
+        }
+        if let Some(rate) = &field.rate {
+            col = col.push(spark::chart(
+                &format!("{} rate (§2.21)", field.series.field),
+                rate,
+                SeriesTone::Value,
+                field.rate_unit.as_deref(),
+                &caches.rate,
+                sp,
+            ));
+            col = col.push(kit::muted(match field.basis {
+                Some(TimeBasis::Measured) => {
+                    "timed by its records' measured times on the owner's clock (§2.21)".to_owned()
+                }
+                Some(TimeBasis::Scheduled { jitter_ms }) => format!(
+                    "timed by its frames' schedule, exact to ±{jitter_ms} ms: a scheduled rate, \
+                     never a measured one (§2.21)"
+                ),
+                Some(TimeBasis::Arrival) => "timed by arrival on this reader's clock: a record's \
+                                             time was unknown (§2.21)"
+                    .to_owned(),
+                None => "no rate yet: a pair needs two samples (§2.18)".to_owned(),
+            }));
+            for d in &field.decreases {
+                col = col.push(kit::finding(
+                    SeverityTone::Error,
+                    "decreased",
+                    format!(
+                        "{} → {}",
+                        crate::metric::measure_words(&d.earlier),
+                        crate::metric::measure_words(&d.later)
+                    ),
+                    "a 64-bit counter's decrease within one run, its epoch in band: the \
+                     finding, never a reset (§2.19)",
+                ));
+            }
+            let t = &field.tally;
+            let mut pairs = format!(
+                "pairs: {} same epoch · {} reset (another run, or a rewind) · {} decreased",
+                t.same_epoch, t.reset, t.decreased
+            );
+            if t.wrap_or_decrease > 0 {
+                pairs.push_str(&format!(
+                    " · {} wrap_or_decrease: outside the {}-bit serial window, a wrap or a \
+                     decrease its values cannot tell apart, with no rate (§2.20)",
+                    t.wrap_or_decrease,
+                    field.series.width.unwrap_or(64)
+                ));
+            }
+            pairs.push_str(" — every epoch the run, in band (§2.19)");
+            col = col.push(kit::muted(pairs));
+        }
     }
     col = col.push(message_rate(data, sp));
     col.into()
@@ -1357,6 +1496,7 @@ fn last_known_section<'a>(data: &DetailData<'a>) -> Element<'a, Message> {
 pub(crate) fn identity_section<'a>(
     resolution: &'a Resolution,
     metric: Option<&'a MetricRead>,
+    frame_metric: Option<&'a crate::metric::FrameMetricRead>,
     timing: Option<&'a crate::timing::TimingRead>,
     sp: Spacing,
 ) -> Element<'a, Message> {
@@ -1397,6 +1537,25 @@ pub(crate) fn identity_section<'a>(
         if let Some(m) = metric {
             grid.push(kit::field("METRIC KIND", kit::mono(m.kind_words())));
             grid.push(kit::field("UNIT", kit::mono(m.unit().words())));
+            // The frames that carry the same quantity (telemetry.v2 §2.17):
+            // a series apart, never paired with this one.
+            for (frame, field) in &m.carried_by {
+                grid.push(kit::field(
+                    "ALSO CARRIED BY",
+                    kit::mono(format!("{frame} ({field}), a series apart")),
+                ));
+            }
+        }
+        // A frame's series (telemetry.v2 §2.16): each field's kind, unit
+        // and mirror, from its entry.
+        for f in frame_metric
+            .map(|f| f.fields.as_slice())
+            .unwrap_or_default()
+        {
+            grid.push(kit::field(
+                "SERIES",
+                kit::mono(format!("{} · {}", f.series.field, f.identity_words())),
+            ));
         }
         // A timed stream's values (#908, MC; timing.v1 §2.2), beside the
         // type they time, each with where it came from: a value appears

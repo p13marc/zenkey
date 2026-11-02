@@ -620,6 +620,60 @@ telemetry under every metric resource in namespace "acme" — 4 metric resource(
     }
 }
 
+/// `zenctl telemetry` over `telemetry.v2`'s frames (#983 T2): each series a
+/// member of its own, its key and its field, the mirror said beside it; a
+/// narrow counter's step outside its serial window `unobservable
+/// (wrap_or_decrease)`, never `(incomparable)`, so the member could not
+/// tell; a gauge's records with no sample counted by their reading; and a
+/// scheduled rate with its bound, never shown as measured.
+#[test]
+fn a_telemetry_reading_of_frames_names_each_series() {
+    let report = fx::telemetry_frames_report();
+    assert_data_eq!(
+        table(&report),
+        str![[r#"
+telemetry under zk2/lab/meterframe/** in namespace "acme" — 2 metric resource(s), 3 member(s): 8 sample(s), 8 conform, 0 do not; 4 pair(s), 0 decreased (4 established, 0 assumed); 1 member(s) could not tell whether they went backwards
+✓  lab/meterframe meterframe.v1 stream/frames/bytes  declared (telemetry.v2): a frame's 1 series, rx a counter of 24 bits in By; each epoch its run, in band; 1 member(s) heard
+✓  lab/meterframe meterframe.v1 stream/frames/link   declared (telemetry.v2): a frame's 2 series, dropped a counter of 32 bits in 1, mirroring sdu/dropped_total; queue_depth a gauge in 1; each epoch its run, in band; 2 member(s) heard
+·  zk2/lab/meterframe/meterframe.v1/stream/frames/bytes field rx          counter, unit By; 3 sample(s), 3 conform; latest 700; rate 300 By/s (scheduled ±200 ms, never a measured rate), between 250 and 375
+    2 pair(s): 2 same_epoch, 0 reset, 0 decreased, 0 incomparable, 0 not asked — epochs 2 in-band, 0 by presence, 0 assumed
+    100 → 400  same_epoch, established in-band; 300 By/s by record (scheduled ±100 ms, never a measured rate) over 1.000s
+    400 → 700  same_epoch, established in-band; 300 By/s by record (scheduled ±200 ms, never a measured rate) over 1.000s
+?  zk2/lab/meterframe/meterframe.v1/stream/frames/link field dropped      counter, unit 1; 3 sample(s), 3 conform; latest 15; rate 10 1/s (measured); mirrors sdu/dropped_total, a series apart: a sum over both counts it twice
+    2 pair(s): 1 same_epoch, 0 reset, 0 decreased, 0 incomparable, 1 wrap_or_decrease, 0 not asked — epochs 2 in-band, 0 by presence, 0 assumed
+    could not tell whether it went backwards within one epoch: 1 of its 2 pair(s) wrap_or_decrease: the 32-bit counter's change lay outside its serial window, a wrap or a decrease its values cannot tell apart, and none decreased (telemetry.v2 §2.20)
+    10 → 20  same_epoch, established in-band; 10 1/s by record (measured) over 1.000s
+    20 → 15  unobservable (wrap_or_decrease), established in-band; no rate (wrap_or_decrease)
+·  zk2/lab/meterframe/meterframe.v1/stream/frames/link field queue_depth  gauge, unit 1; 2 sample(s), 2 conform; records with no sample: beyond_range ×1; latest 6
+
+"#]]
+    );
+    let lines: Vec<serde_json::Value> = ndjson(&report)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("one object per line"))
+        .collect();
+    let rows = &lines[1..];
+    let dropped = rows
+        .iter()
+        .find(|r| r["field"] == "dropped")
+        .expect("dropped");
+    assert_eq!(dropped["mirrors"], "sdu/dropped_total");
+    assert_eq!(dropped["continuity"]["wrap_or_decrease"], 1);
+    assert_eq!(dropped["pairs"][1]["no_rate"], "wrap_or_decrease");
+    let rx = rows.iter().find(|r| r["field"] == "rx").expect("rx");
+    assert_eq!(rx["rate"]["time_basis"], "scheduled");
+    assert_eq!(rx["rate"]["bound"]["low"], 250.0);
+    let link = rows
+        .iter()
+        .find(|r| r["row"] == "resource" && r["resource"] == "stream/frames/link")
+        .expect("frames/link");
+    assert_eq!(link["declaration"]["carrier"], "frame");
+    assert_eq!(link["declaration"]["series"][0]["width"], 32);
+    let said = notes(&report);
+    assert!(said.contains("never a measured rate"), "{said}");
+    assert!(said.contains("a series apart"), "{said}");
+}
+
 /// `zenctl alarms` (#800, AC): one row per owner and per alarm key, every
 /// answer of §5's questions spelled apart in every medium — a mark and a
 /// word in the table, the profile's own tokens in `owner` and `alarm` rows

@@ -881,6 +881,8 @@ pub fn telemetry_report() -> TelemetryReport {
             buckets: None,
             semantic: None,
             epoch_in: epoch_in.map(Into::into),
+            series: vec![],
+            problems: vec![],
             says: says.into(),
         }
     };
@@ -906,6 +908,7 @@ pub fn telemetry_report() -> TelemetryReport {
             .map(|(p, n)| ((*p).to_owned(), *n))
             .collect::<BTreeMap<_, _>>(),
         latest_does_not: does_not.iter().map(|(p, _)| (*p).to_owned()).collect(),
+        no_sample: BTreeMap::new(),
     };
     let continuity =
         |same, reset, decreased, not_asked, in_band, by_presence, assumed| TelemetryContinuity {
@@ -916,6 +919,7 @@ pub fn telemetry_report() -> TelemetryReport {
             reset,
             decreased,
             unobservable: 0,
+            wrap_or_decrease: 0,
             not_asked,
             in_band,
             by_presence,
@@ -942,12 +946,16 @@ pub fn telemetry_report() -> TelemetryReport {
         no_rate: no_rate.map(Into::into),
         base: base.into(),
         elapsed_s: 1.0,
+        time_basis: None,
+        jitter_ms: None,
     };
     let member = |resource: &str, kind: &str, unit: Option<&str>| TelemetryMember {
         key: format!("zk2/lab/meter/meter.v1/{resource}"),
         address: "lab/meter".into(),
         iface: "meter.v1".into(),
         resource: resource.into(),
+        field: None,
+        mirrors: None,
         kind: Some(kind.into()),
         kind_from: Some("declared".into()),
         unit: unit.map(Into::into),
@@ -995,6 +1003,9 @@ pub fn telemetry_report() -> TelemetryReport {
     frames.rate = Some(TelemetryRate {
         per_s: 10.0,
         unit: Some("1/s".into()),
+        time_basis: None,
+        jitter_ms: None,
+        bound: None,
     });
     let mut drops = member("stream/drops", "counter", None);
     drops.samples = samples(3, 3, &[]);
@@ -1029,6 +1040,9 @@ pub fn telemetry_report() -> TelemetryReport {
     drops.rate = Some(TelemetryRate {
         per_s: 5.0,
         unit: None,
+        time_basis: None,
+        jitter_ms: None,
+        bound: None,
     });
     let mut level = member("stream/level", "gauge", Some("dBm"));
     level.samples = samples(3, 2, &[("wrong_type", 1)]);
@@ -1046,6 +1060,8 @@ pub fn telemetry_report() -> TelemetryReport {
         no_rate: Some("kind".into()),
         base: "arrival".into(),
         elapsed_s: 1.0,
+        time_basis: None,
+        jitter_ms: None,
     }];
     level.continuity.pairs_listed = 1;
     TelemetryReport {
@@ -1130,6 +1146,8 @@ pub fn telemetry_report() -> TelemetryReport {
                     buckets: None,
                     semantic: None,
                     epoch_in: None,
+                    series: vec![],
+                    problems: vec![],
                     says: "invalid: the type cannot carry the declared kind (not_a_carrier) — its \
                            members' kind, conformance and continuity are unobservable \
                            (telemetry.v1 §2.2)"
@@ -1145,6 +1163,216 @@ pub fn telemetry_report() -> TelemetryReport {
         skipped: vec![],
         unobservable: None,
     }
+}
+
+/// `zenctl telemetry` over `telemetry.v2`'s frames (#983 T2): one frame
+/// resource's series, each a member of its own — a 32-bit counter
+/// mirroring a bare stream, its step back within the run outside its
+/// serial window (`wrap_or_decrease`, could not tell), a gauge whose
+/// `out_of_range` is no sample — and a 24-bit counter's scheduled rate
+/// with its bound.
+pub fn telemetry_frames_report() -> TelemetryReport {
+    use serde_json::json;
+    use std::collections::BTreeMap;
+    let mut r = telemetry_report();
+    let key = |t: &str| format!("zk2/lab/meterframe/meterframe.v1/stream/{t}");
+    let series = |field: &str, kind: &str, unit: Option<&str>, mirrors: Option<&str>, width| {
+        TelemetrySeries {
+            field: field.into(),
+            kind: kind.into(),
+            unit: unit.map(Into::into),
+            semantic: None,
+            mirrors: mirrors.map(Into::into),
+            width,
+        }
+    };
+    let row = |t: &str, series: Vec<TelemetrySeries>, says: &str, members| TelemetryResource {
+        address: "lab/meterframe".into(),
+        iface: "meterframe.v1".into(),
+        fingerprint: "sha256:9a0c41e2".into(),
+        resource: format!("stream/{t}"),
+        selector: key(t),
+        declaration: TelemetryDeclaration {
+            answer: DeclarationToken::Declared,
+            reasons: vec![],
+            carrier: Some("frame".into()),
+            kind: None,
+            unit: None,
+            buckets: None,
+            semantic: None,
+            epoch_in: None,
+            series,
+            problems: vec![],
+            says: says.into(),
+        },
+        members,
+    };
+    let base = |t: &str, field: &str, kind: &str, unit: Option<&str>| TelemetryMember {
+        key: key(t),
+        address: "lab/meterframe".into(),
+        iface: "meterframe.v1".into(),
+        resource: format!("stream/{t}"),
+        field: Some(field.into()),
+        mirrors: None,
+        kind: Some(kind.into()),
+        kind_from: Some("declared".into()),
+        unit: unit.map(Into::into),
+        unit_from: unit.map(|_| "declared".into()),
+        samples: TelemetrySamples {
+            received: 0,
+            conforms: 0,
+            does_not: 0,
+            unobservable: 0,
+            unobservable_reason: None,
+            not_kept: 0,
+            deletes: 0,
+            problems: BTreeMap::new(),
+            latest_does_not: vec![],
+            no_sample: BTreeMap::new(),
+        },
+        latest: None,
+        continuity: TelemetryContinuity {
+            answer: Judgement::NotAsked,
+            pairs: 0,
+            pairs_listed: 0,
+            same_epoch: 0,
+            reset: 0,
+            decreased: 0,
+            unobservable: 0,
+            wrap_or_decrease: 0,
+            not_asked: 0,
+            in_band: 0,
+            by_presence: 0,
+            assumed: 0,
+        },
+        pairs: vec![],
+        rate: None,
+    };
+    let pair = |a: u64, b: u64, continuity, rate: Option<f64>, unit: &str| TelemetryPair {
+        earlier: json!(a),
+        later: json!(b),
+        continuity,
+        epoch: Some(EpochToken::Established),
+        via: Some("in_band".into()),
+        presence: PairPresenceToken::None,
+        rate,
+        rate_unit: rate.map(|_| unit.into()),
+        no_rate: match continuity {
+            ContinuityToken::Unobservable => Some("wrap_or_decrease".into()),
+            _ => None,
+        },
+        base: "record".into(),
+        elapsed_s: 1.0,
+        time_basis: Some("measured".into()),
+        jitter_ms: None,
+    };
+    let mut dropped = base("frames/link", "dropped", "counter", Some("1"));
+    dropped.mirrors = Some("sdu/dropped_total".into());
+    dropped.samples.received = 3;
+    dropped.samples.conforms = 3;
+    dropped.latest = Some(json!(15));
+    dropped.pairs = vec![
+        pair(10, 20, ContinuityToken::SameEpoch, Some(10.0), "1/s"),
+        pair(20, 15, ContinuityToken::Unobservable, None, "1/s"),
+    ];
+    let c = &mut dropped.continuity;
+    (c.pairs, c.pairs_listed, c.same_epoch, c.unobservable) = (2, 2, 1, 1);
+    (c.wrap_or_decrease, c.in_band) = (1, 2);
+    c.answer = Judgement::Unobservable {
+        reason: "1 of its 2 pair(s) wrap_or_decrease: the 32-bit counter's change lay outside \
+                 its serial window, a wrap or a decrease its values cannot tell apart, and none \
+                 decreased (telemetry.v2 §2.20)"
+            .into(),
+    };
+    dropped.rate = Some(TelemetryRate {
+        per_s: 10.0,
+        unit: Some("1/s".into()),
+        time_basis: Some("measured".into()),
+        jitter_ms: None,
+        bound: None,
+    });
+    let mut queue = base("frames/link", "queue_depth", "gauge", Some("1"));
+    queue.samples.received = 2;
+    queue.samples.conforms = 2;
+    queue.samples.no_sample = BTreeMap::from([("beyond_range".to_owned(), 1)]);
+    queue.latest = Some(json!(6));
+    let mut rx = base("frames/bytes", "rx", "counter", Some("By"));
+    rx.samples.received = 3;
+    rx.samples.conforms = 3;
+    rx.latest = Some(json!(700));
+    let mut scheduled = pair(100, 400, ContinuityToken::SameEpoch, Some(300.0), "By/s");
+    scheduled.time_basis = Some("scheduled".into());
+    scheduled.jitter_ms = Some(100);
+    let mut both = pair(400, 700, ContinuityToken::SameEpoch, Some(300.0), "By/s");
+    both.time_basis = Some("scheduled".into());
+    both.jitter_ms = Some(200);
+    rx.pairs = vec![scheduled, both];
+    let c = &mut rx.continuity;
+    (c.pairs, c.pairs_listed, c.same_epoch, c.in_band) = (2, 2, 2, 2);
+    c.answer = Judgement::NotEstablished {
+        reason: "2 pair(s) whose epoch was established (2 in-band, 0 by presence), none \
+                 decreased; 0 assumed, 0 reset"
+            .into(),
+    };
+    rx.rate = Some(TelemetryRate {
+        per_s: 300.0,
+        unit: Some("By/s".into()),
+        time_basis: Some("scheduled".into()),
+        jitter_ms: Some(200),
+        bound: Some(TelemetryRateBound {
+            low: 250.0,
+            high: Some(375.0),
+        }),
+    });
+    r.selector = Some("zk2/lab/meterframe/**".into());
+    r.asked = vec![
+        "zk2/lab/meterframe/@zk/**".into(),
+        "zk2/lab/meterframe/@zk/instance/*".into(),
+        "zk2/lab/meterframe/@zk/member/**".into(),
+        key("frames/bytes"),
+        key("frames/link"),
+    ];
+    r.totals = TelemetryTotals {
+        resources: 2,
+        invalid: 0,
+        members: 3,
+        samples: 8,
+        conforms: 8,
+        does_not: 0,
+        unobservable: 0,
+        pairs: 4,
+        decreased: 0,
+        established: 4,
+        assumed: 0,
+        unanswered: 1,
+    };
+    r.resources = vec![
+        row(
+            "frames/bytes",
+            vec![series("rx", "counter", Some("By"), None, Some(24))],
+            "declared (telemetry.v2): a frame's 1 series, rx a counter of 24 bits in By; each \
+             epoch its run, in band",
+            1,
+        ),
+        row(
+            "frames/link",
+            vec![
+                series(
+                    "dropped",
+                    "counter",
+                    Some("1"),
+                    Some("sdu/dropped_total"),
+                    Some(32),
+                ),
+                series("queue_depth", "gauge", Some("1"), None, None),
+            ],
+            "declared (telemetry.v2): a frame's 2 series, dropped a counter of 32 bits in 1, \
+             mirroring sdu/dropped_total; queue_depth a gauge in 1; each epoch its run, in band",
+            2,
+        ),
+    ];
+    r.members = vec![rx, dropped, queue];
+    r
 }
 
 /// `zenctl alarms` (#800, AC): §5's answers in every token — a firing

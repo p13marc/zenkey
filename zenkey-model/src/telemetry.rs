@@ -1592,8 +1592,10 @@ fn change(earlier: &Measure, later: &Measure) -> Option<Change> {
 
 /// The elapsed time between two samples, in nanoseconds, and what it is
 /// timed by: two frame records by their times (v2 §2.21), else the first
-/// time base of §2.11's list both have.
-fn elapsed(a: &Sampled<'_>, b: &Sampled<'_>) -> (i128, Option<TimeBasis>) {
+/// time base of §2.11's list both have. [`pair`] times a rate by it; a
+/// reader shows it for a pair with no rate too.
+#[must_use]
+pub fn elapsed(a: &Sampled<'_>, b: &Sampled<'_>) -> (i128, Option<TimeBasis>) {
     const MS: i128 = 1_000_000;
     if let (Some(x), Some(y)) = (&a.record, &b.record) {
         let timed = if x.scheduled() || y.scheduled() {

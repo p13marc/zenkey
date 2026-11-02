@@ -935,6 +935,67 @@ async fn a_restarted_counter_takes_a_new_run() {
     o.end().await;
 }
 
+/// A record that lies past the open frame's span opens the next frame
+/// (core §7.7): the open frame is put first, under the run then, and the
+/// record is metered after it, so its count is of the run its own frame
+/// takes. Across a new run before that frame is put, a count below it is
+/// refused: it is the new run's, never the run of the frame put before it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_record_past_the_span_opens_the_next_frame() {
+    let (_r1, ep) = router(None).await;
+    let rs = client(&ep).await;
+    let r = reader(&rs).await;
+    let mut o = start(&ep, None).await;
+    let t = Instant::now();
+    // frames/bytes: three records a frame, 1 s apart, so a span of 3 s.
+    assert_eq!(o.record(BYTES, json!({"rx": 10}), t).await, None);
+    assert_eq!(o.record(BYTES, json!({"rx": 20}), t + s(1)).await, None);
+    let first = o
+        .record(BYTES, json!({"rx": 30}), t + s(5))
+        .await
+        .expect("past the span: the open frame put first");
+    assert_eq!(
+        o.w(BYTES).open().await,
+        1,
+        "the record opens the next frame"
+    );
+    r.wait(BYTES, 1).await;
+    let f = r.fold(BYTES);
+    assert_eq!(f.frames.len(), 1);
+    assert_eq!(f.frames[0].0, first);
+    assert_eq!(f.frames[0].1.records.len(), 2, "10 and 20, not 30");
+    // A new run while 30 is in the open frame: 30 is the new run's.
+    o.svc.new_epoch().await.unwrap();
+    let e = o.w(BYTES).record_json_at(&json!({"rx": 5}), t + s(6)).await;
+    assert_eq!(
+        refusal(e.unwrap_err()),
+        Reason::FieldDecreased {
+            field: "rx".into(),
+            before: 30,
+            after: 5,
+        }
+    );
+    assert_eq!(o.record(BYTES, json!({"rx": 40}), t + s(6)).await, None);
+    let second = o.w(BYTES).flush().await.unwrap().expect("30 and 40");
+    assert_ne!(second.run, first.run, "put under the new run");
+    r.wait(BYTES, 2).await;
+    let f = r.fold(BYTES);
+    assert_eq!(f.frames[1].1.records.len(), 2);
+    assert_eq!(
+        f.pairs("rx")
+            .iter()
+            .map(|(a, b, _)| (*a, *b))
+            .collect::<Vec<_>>(),
+        [(10, 20), (20, 30), (30, 40)]
+    );
+    assert_eq!(
+        f.pair("rx", 20, 30).continuity,
+        Continuity::Reset,
+        "across the run"
+    );
+    o.end().await;
+}
+
 /// A record's bytes carry a counter modulo its width (§2.20): a 24-bit one
 /// is read by its increase from the last count, so its wrap is written; a
 /// 64-bit one is its count, refused below the last. A series field's code

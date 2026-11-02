@@ -31,6 +31,16 @@ fn kind_unit(m: &TelemetryMember) -> String {
     format!("{kind}, {unit}")
 }
 
+/// How a frame series' rate was timed (`telemetry.v2` §2.21): its basis,
+/// and a scheduled one's bound, never shown as a measured rate.
+fn basis_words(basis: Option<&str>, jitter_ms: Option<u64>) -> String {
+    match (basis, jitter_ms) {
+        (Some("scheduled"), Some(j)) => format!(" (scheduled ±{j} ms, never a measured rate)"),
+        (Some(b), _) => format!(" ({b})"),
+        (None, _) => String::new(),
+    }
+}
+
 /// One pair in words: its values, its continuity and how its epoch was had,
 /// and its rate or why it has none.
 fn pair_words(p: &TelemetryPair) -> String {
@@ -38,6 +48,9 @@ fn pair_words(p: &TelemetryPair) -> String {
         ContinuityToken::SameEpoch => "same_epoch",
         ContinuityToken::Reset => "reset",
         ContinuityToken::Decreased => "decreased",
+        ContinuityToken::Unobservable if p.no_rate.as_deref() == Some("wrap_or_decrease") => {
+            "unobservable (wrap_or_decrease)"
+        }
         ContinuityToken::Unobservable => "unobservable (incomparable)",
         ContinuityToken::NotAsked => "not asked",
     };
@@ -54,9 +67,10 @@ fn pair_words(p: &TelemetryPair) -> String {
     };
     let rate = match (p.rate, &p.no_rate) {
         (Some(r), _) => format!(
-            "; {r} {} by {} over {:.3}s",
+            "; {r} {} by {}{} over {:.3}s",
             p.rate_unit.as_deref().unwrap_or("/s (unit unknown)"),
             p.base,
+            basis_words(p.time_basis.as_deref(), p.jitter_ms),
             p.elapsed_s
         ),
         (None, Some(why)) if why != "kind" => format!("; no rate ({why})"),
@@ -175,27 +189,57 @@ impl Render for TelemetryReport {
                     s.not_kept
                 ));
             }
+            if !s.no_sample.is_empty() {
+                what.push_str(&format!(
+                    "; records with no sample: {}",
+                    s.no_sample
+                        .iter()
+                        .map(|(t, n)| format!("{t} ×{n}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
             if let Some(v) = &m.latest {
                 what.push_str(&format!("; latest {v}"));
             }
             if let Some(r) = &m.rate {
                 what.push_str(&format!(
-                    "; rate {} {}",
+                    "; rate {} {}{}",
                     r.per_s,
-                    r.unit.as_deref().unwrap_or("/s (unit unknown)")
+                    r.unit.as_deref().unwrap_or("/s (unit unknown)"),
+                    basis_words(r.time_basis.as_deref(), r.jitter_ms)
+                ));
+                if let Some(b) = &r.bound {
+                    what.push_str(&match b.high {
+                        Some(h) => format!(", between {} and {h}", b.low),
+                        None => format!(", at least {}", b.low),
+                    });
+                }
+            }
+            if let Some(mirror) = &m.mirrors {
+                what.push_str(&format!(
+                    "; mirrors {mirror}, a series apart: a sum over both counts it twice"
                 ));
             }
-            members.row([Cell::styled(mark, st), Cell::text(&m.key), Cell::text(what)]);
+            members.row([
+                Cell::styled(mark, st),
+                Cell::text(m.series_name()),
+                Cell::text(what),
+            ]);
             let mut detail = Vec::new();
             if c.pairs > 0 {
                 detail.push(format!(
-                    "    {} pair(s): {} same_epoch, {} reset, {} decreased, {} incomparable, {} \
+                    "    {} pair(s): {} same_epoch, {} reset, {} decreased, {} incomparable, {}{} \
                      not asked — epochs {} in-band, {} by presence, {} assumed",
                     c.pairs,
                     c.same_epoch,
                     c.reset,
                     c.decreased,
-                    c.unobservable,
+                    c.unobservable - c.wrap_or_decrease,
+                    match c.wrap_or_decrease {
+                        0 => String::new(),
+                        n => format!("{n} wrap_or_decrease, "),
+                    },
                     c.not_asked,
                     c.in_band,
                     c.by_presence,
@@ -284,6 +328,29 @@ impl Render for TelemetryReport {
                      an owner that writes an in-band epoch closes the risk",
                 )
                 .cite("telemetry.v1 §2.9"),
+            );
+        }
+        if self.members.iter().any(|m| {
+            m.rate.as_ref().and_then(|r| r.time_basis.as_deref()) == Some("scheduled")
+                || m.pairs
+                    .iter()
+                    .any(|p| p.time_basis.as_deref() == Some("scheduled"))
+        }) {
+            notes.push(
+                Note::caveat(
+                    "a scheduled rate is timed by its frame's schedule, exact to within its \
+                     records' jitter either way, and is never a measured rate",
+                )
+                .cite("telemetry.v2 §2.21"),
+            );
+        }
+        if self.members.iter().any(|m| m.mirrors.is_some()) {
+            notes.push(
+                Note::coverage(
+                    "a frame's series is its key and its field: one that mirrors another \
+                     resource is a series apart from that resource's, never paired with it",
+                )
+                .cite("telemetry.v2 §2.17"),
             );
         }
         if self.totals.assumed > 0 {

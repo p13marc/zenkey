@@ -6,6 +6,22 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `telemetry` reads a frame's series (#983, T2)
+
+`telemetry.v2` 0.1 binds a frame resource's fields to metric series
+(§2.16–§2.21). A contract that uses it reads every other resource as
+`telemetry.v1` does, so nothing that read before reads differently.
+
+| Before | Now | Notes |
+|---|---|---|
+| a frame resource: no metric resource, its frames unread | each series field of its `telemetry.series` a member of its own: the frame key and its `field`, the `mirrors` it borrows its kind and unit from a label beside it | §2.17: a series apart from the mirrored stream's, never paired with it |
+| — | a record that includes the field with a value is a sample, and conforms; every other record is counted in the member's `samples.no_sample` by its reading (`held`, `absent`, `owner_error`, `beyond_range`, `unnamed`, `unknown`), never 0 | §2.18 |
+| — | a counter series' pairs: the epoch the run, in band, with no presence; a reset across a run or a rewind; `decreased` only at 64 bits; a narrow counter's change outside its serial window `unobservable` with `no_rate: wrap_or_decrease`, counted in `continuity.wrap_or_decrease`, and the member could not tell | §2.19, §2.20; the table says `unobservable (wrap_or_decrease)`, never `(incomparable)` |
+| — | a frame pair's `base` is `record` or `arrival`, and its `time_basis` `measured`, `scheduled` or `arrival`, a scheduled one with `jitter_ms`; a member's `rate` the same, a scheduled one with its `bound` (`low`, `high`) | §2.21: a scheduled rate is never shown as measured; the table says `(scheduled ±J ms, never a measured rate)` |
+| — | a frame resource's row: `carrier: "frame"`, its `series` (field, kind, unit, semantic, mirrors, width), or invalid with its `problems` (entry and reason) | §2.16 |
+| `doctor`'s `telemetry-declaration`: v1's declarations | also each frame resource's `telemetry.series`, an invalid one a warning naming each entry's reason | |
+| `check conform`'s `telemetry-*` cases: v1's metric resources | also each frame resource exposed: its declaration, its series' samples, and its counter series' continuity, a frame with none `not_asked` | |
+
 ## Unreleased (`main`, zk2) — frames written: `gen` and `acl gen` (#981, K3)
 
 Core 0.87 has owners write frames (§7.7), and `link.v1` 0.13 lets a frame

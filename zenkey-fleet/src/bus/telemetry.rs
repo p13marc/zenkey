@@ -47,6 +47,14 @@
 //! Nothing is judged here: every sample is read and paired by
 //! `zenkey_model::telemetry` inside the book ([`crate::model::telemetry`]),
 //! and judged by [`crate::judge::telemetry`].
+//!
+//! **Frames** (`telemetry.v2`, #983 T2): a frame resource whose contract
+//! uses `telemetry.v2` and declares its `telemetry.series` is a metric
+//! resource like any other here. It has no parameter, so its subscription
+//! is its one key, exactly (core §8.5); each frame's body reaches the book
+//! with CH's tag ([`MetricSample::frame`]), which reads it by its layout
+//! and folds it per key, each series field a member ([`TelemetryBook::frame`]).
+//! Its epoch is the run, so presence plays no part in its pairs.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -200,6 +208,12 @@ impl Queue {
 fn sample_of(s: &Sample, via: SampleVia) -> (MetricSample, Envelope) {
     let read = crate::model::inband::read(s.clone());
     let envelope = crate::model::inband::envelope_of(&read);
+    // A frame's body is its payload, read by its resource's layout under
+    // CH's tag (core §7.7, telemetry.v2 §2.18).
+    let frame = match &read {
+        crate::model::inband::Read::Framed { tag, .. } => Some(*tag),
+        _ => None,
+    };
     let s = read.sample();
     (
         MetricSample {
@@ -210,6 +224,7 @@ fn sample_of(s: &Sample, via: SampleVia) -> (MetricSample, Envelope) {
             stamp: s.timestamp().copied(),
             at: Instant::now(),
             via,
+            frame,
         },
         envelope,
     )

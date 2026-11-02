@@ -58,6 +58,16 @@ pub fn framed_contract_paths() -> Vec<PathBuf> {
     paths
 }
 
+/// The meterframe world's contracts (#983 T2): [`contract_paths`] and
+/// `telemetry.v2`'s scenarios' contract, `meterframe.v1`, whose frame
+/// resources declare their fields' series.
+pub fn meterframe_contract_paths() -> Vec<PathBuf> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut paths = contract_paths();
+    paths.push(root.join("../spec/profiles/telemetry/conformance/contracts/meterframe.v1.toml"));
+    paths
+}
+
 /// The packed world's contracts (#979 B2): [`contract_paths`] and the
 /// runtime's packed vectors' contract, `packed.v1`.
 pub fn packed_contract_paths() -> Vec<PathBuf> {
@@ -267,6 +277,9 @@ pub struct World {
     /// `lab/modem`'s two frame resources beside the rest
     /// ([`World::framed`], #981 K2).
     framed: bool,
+    /// `lab/meterframe`'s `telemetry.v2` frames beside the rest
+    /// ([`World::meterframed`], #983 T2).
+    meterframed: bool,
     /// What the last tick published, as [`World::verdicts`] checks it.
     last: Vec<Published>,
 }
@@ -698,6 +711,65 @@ pub fn frame_layout(template: &str) -> zenkey_model::frame::Layout {
         .expect("a frame resource")
 }
 
+/// `lab/meterframe`'s link readings (#983 T2): `meterframe.v1`'s
+/// `frames/link`, one record a frame, its four fields `telemetry.v2`
+/// series, `dropped` a 32-bit counter mirroring `sdu/dropped_total`.
+pub const METERFRAME_LINK: &str = "zk2/lab/meterframe/meterframe.v1/stream/frames/link";
+/// `lab/meterframe`'s byte counter: `frames/bytes`, three scheduled
+/// records a frame, every 1 s ±100 ms, `rx` a 24-bit counter.
+pub const METERFRAME_BYTES: &str = "zk2/lab/meterframe/meterframe.v1/stream/frames/bytes";
+
+/// A frame resource of `meterframe.v1`'s layout, read from its contract.
+pub fn meterframe_layout(template: &str) -> zenkey_model::frame::Layout {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../spec/profiles/telemetry/conformance/contracts/meterframe.v1.toml");
+    let c = zenkey_model::contract::load_path(&path)
+        .contract
+        .expect("meterframe.v1 loads");
+    let r = c
+        .resources
+        .iter()
+        .find(|r| r.template.as_str() == template)
+        .expect("the frame resource");
+    zenkey_model::frame::Layout::of_resource(&c, r)
+        .expect("a layout")
+        .expect("a frame resource")
+}
+
+/// What `lab/meterframe` puts at tick `n` ([`World::meterframed`]): on
+/// `frames/link` one full record a minute, `dropped` up 3 a tick but at
+/// tick 20, where it goes back by 10 (outside its 32-bit serial window: a
+/// wrap or a decrease, no rate), the queue beyond its range every seventh
+/// tick and the wait absent every fifth; on `frames/bytes` three records a
+/// frame, each scheduled after record 0, `rx` up 300 a record across its
+/// 24-bit wrap.
+fn meterframe_feeds(n: u32) -> Vec<(&'static str, Vec<u8>)> {
+    use serde_json::json;
+    let mut out = Vec::new();
+    let link = meterframe_layout("frames/link");
+    let dropped = if n == 20 { 3 * n - 10 } else { 3 * n };
+    let mut values = json!({"dropped": dropped, "duty_available": n % 2});
+    values["queue_depth"] = if n % 7 == 3 {
+        json!("out_of_range")
+    } else {
+        json!(10 + n % 5)
+    };
+    if n % 5 != 4 {
+        values["duty_wait_ms"] = json!(format!("{}", 1500 + 100 * (n % 3)));
+    }
+    let v = json!({"time": {"s": 3600 + 60 * n, "ms": 0},
+                   "records": [{"full": true, "values": values}]});
+    out.push((METERFRAME_LINK, frame_envelope(&link, n, &v)));
+    let bytes = meterframe_layout("frames/bytes");
+    let rx = |i: u32| (16_776_000 + 300 * (3 * n + i)) % (1 << 24);
+    let v = json!({"time": {"s": 7200 + 3 * n, "ms": 0}, "records": [
+        {"full": true, "values": {"rx": rx(0)}},
+        {"full": true, "at": "scheduled", "values": {"rx": rx(1)}},
+        {"full": true, "at": "scheduled", "values": {"rx": rx(2)}}]});
+    out.push((METERFRAME_BYTES, frame_envelope(&bytes, 3 * n, &v)));
+    out
+}
+
 /// A frame in core §7.5's envelope (form 5, the layout's tag), `value` in
 /// `spec/conformance/frame/bodies.json`'s spelling, record 0 at `seq` of
 /// run `0001`.
@@ -895,6 +967,21 @@ impl World {
         w
     }
 
+    /// The world with `lab/meterframe` beside it (#983 T2): its
+    /// `telemetry.v2` frame resources placed by presence and publishing
+    /// each tick, hand-written frames in their envelopes
+    /// ([`meterframe_feeds`]).
+    pub fn meterframed() -> World {
+        let contracts = Arc::new(zengui::services::contracts::load_all(
+            &meterframe_contract_paths(),
+        ));
+        let mut addresses = World::ADDRESSES.to_vec();
+        addresses.push(("lab/meterframe", "meterframe.v1"));
+        let mut w = World::build(contracts, &addresses, false);
+        w.meterframed = true;
+        w
+    }
+
     fn build(
         contracts: Arc<zengui::services::contracts::LoadedContracts>,
         addresses: &[(&str, &str)],
@@ -911,7 +998,7 @@ impl World {
             .chain(METERED_FEEDS.iter().map(|(key, ..)| *key))
             .chain(TIMED_FEEDS.iter().map(|(key, ..)| *key))
             .chain(PACKED_FEEDS.iter().map(|(key, ..)| *key))
-            .chain([FRAME_LINK, FRAME_SAMPLE])
+            .chain([FRAME_LINK, FRAME_SAMPLE, METERFRAME_LINK, METERFRAME_BYTES])
             .map(|key| (key, Axes::declared(&lens, key)))
             .collect();
         World {
@@ -933,6 +1020,7 @@ impl World {
             sealed: None,
             packed: false,
             framed: false,
+            meterframed: false,
             last: Vec::new(),
         }
     }
@@ -1509,6 +1597,11 @@ impl World {
         }
         if self.framed {
             for (key, bytes) in frame_feeds(n) {
+                out.push((key, bytes, "zenoh/bytes", None));
+            }
+        }
+        if self.meterframed {
+            for (key, bytes) in meterframe_feeds(n) {
                 out.push((key, bytes, "zenoh/bytes", None));
             }
         }

@@ -166,7 +166,24 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   read (undecodable, or of a member whose declaration is invalid, whose
   every question is then unanswered) leaves the run without a verdict, its
   reason naming the first (text 0.5, #819 TF, F-157). `judge::telemetry` and
-  `report::telemetry` complete it.
+  `report::telemetry` complete it. `telemetry.v2` (#983 T2) reads a frame
+  resource's series: `MetricResource::frame` (`FrameMetric`, its layout and
+  `telemetry.series`, declared or invalid, for a contract that uses v2;
+  `MetricType::of` none there), `MetricSample::frame` (CH's tag, the bus's
+  `sample_of` filling it), and `TelemetryBook::frame`, one `frames::Fold`
+  per key and one `MemberBook` per (key, field) (`field`, `no_sample`,
+  `latest_json`), each included value a conforming sample, each counter
+  pair by `pair` with no presence, timed by `tm::elapsed` (`PairSeen::basis`,
+  base `record` or `arrival`), returning `FrameSeen` (`Folded` and each
+  `FramePair`); a refused body, a mutation or no envelope unobservable for
+  every series, an invalid declaration one member `declaration_invalid`.
+  `PairTally::wrap_or_decrease`, and `member_decreased` could not tell past
+  one; `decreased()` says `unobservable_words`. The report adds `field`,
+  `mirrors`, `samples.no_sample`, `continuity.wrap_or_decrease`, a pair's
+  `time_basis`/`jitter_ms`, a rate's and its scheduled `bound`, and a frame
+  resource's `carrier: "frame"`, `series` and `problems`, each omitted when
+  absent. The doctor's `telemetry-declaration` and `check conform`'s
+  `telemetry-*` cases (`frame_cases`) read frames.
   `desired.v1` (#840, DD) runs through all four layers too.
   `bus::desired`'s `run_desired` makes one reading, or with a window one
   every 500 ms while an answer may move: presence on the deployment's

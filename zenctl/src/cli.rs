@@ -1064,6 +1064,18 @@ pub(crate) enum Command {
     /// run that could not start; its reason names the first member that
     /// could not tell, and a narrower selector asks the rest.
     ///
+    /// telemetry.v2 (spec/profiles/telemetry/v2.md §2.16–§2.21, #983): a
+    /// frame resource of a contract that uses it reads by its
+    /// telemetry.series, each series field a member of its own, the frame
+    /// key and the field, beside any stream it mirrors and never paired with
+    /// it. A record that includes the field with a value is a sample; every
+    /// other reading is none, never 0. A counter's pairs are of one epoch
+    /// within one run, in band, with no presence: a 64-bit one's decrease is
+    /// the finding, a narrower one read in its serial window, a step outside
+    /// it unobservable (wrap_or_decrease) and the member could not tell. Its
+    /// rate is timed by its records, its basis named; a scheduled one is
+    /// reported with its bound, never as measured.
+    ///
     /// --format json is one document: `report` ("telemetry"), `namespace`,
     /// `selector`, `presence` (the seed's `selector`, `complete`, `services`
     /// and `basis`; absent across a face), `across_face`, `window_s` (from
@@ -1078,10 +1090,13 @@ pub(crate) enum Command {
     /// `address`, `iface`, `fingerprint`, `resource`, `selector`,
     /// `declaration` (`answer` `declared` or `invalid`, its `reasons`, and the
     /// `carrier`, `kind`, `unit`, `buckets`, `semantic` and `epoch_in` it
-    /// declares, `says` in words) and `members` heard. A `member` row:
-    /// `key`, `address`, `iface`, `resource`, `kind` and `kind_from`, `unit`
-    /// and `unit_from` (absent when unknown, never dimensionless), `samples`
-    /// (`received`, `conforms`, `does_not`, `unobservable`, `problems`, …),
+    /// declares, a frame resource's carrier `frame` with its `series` or its
+    /// `problems`, `says` in words) and `members` heard. A `member` row:
+    /// `key`, `address`, `iface`, `resource`, a frame's `field` and the
+    /// `mirrors` it borrows its kind and unit from, `kind` and `kind_from`,
+    /// `unit` and `unit_from` (absent when unknown, never dimensionless),
+    /// `samples` (`received`, `conforms`, `does_not`, `unobservable`,
+    /// `problems`, a frame's `no_sample` by reading, …),
     /// `latest`, `rate`, `continuity` and `pairs`. `continuity` is the
     /// member's answer in the judgement's tokens (`answer`, `reason`;
     /// `not_asked` for neither a counter nor a histogram), `pairs` (every
@@ -1094,8 +1109,10 @@ pub(crate) enum Command {
     /// absent when assumed), `presence` (`observed`; `spans_loss`, a loss
     /// between the two arrivals; `none`, no presence at either, as across a
     /// face), `rate` and `rate_unit` or `no_rate` (`reset`, `decreased`,
-    /// `elapsed`, `kind`), `base` (the rate's time base: `timestamp`,
-    /// `stamp` or `arrival`) and `elapsed_s`. A field absent is a question
+    /// `elapsed`, `kind`, `wrap_or_decrease`), `base` (the rate's time base:
+    /// `timestamp`, `stamp` or `arrival`, a frame's `record` or `arrival`),
+    /// `elapsed_s`, and a frame's `time_basis` (`measured`, `scheduled` with
+    /// its `jitter_ms`, `arrival`). A field absent is a question
     /// not asked, never null; ndjson carries the same, the envelope first,
     /// then a line per row.
     Telemetry(TelemetryArgs),

@@ -16,8 +16,9 @@ use zengui::prefs::{Density, LayoutPreset, Prefs, ThemeChoice};
 use zengui::view::palette::{Overlay, PaletteMsg};
 
 use super::{
-    BYTES, DROPS, ETH0, FRAME_LINK, FRAME_SAMPLE, FRAMES, HEALTH, LATENCY, PACKED_READING,
-    PACKED_SENSOR, POSITION, TWIST_CMD, TX_BYTES, USED, World, send, window,
+    BYTES, DROPS, ETH0, FRAME_LINK, FRAME_SAMPLE, FRAMES, HEALTH, LATENCY, METERFRAME_BYTES,
+    METERFRAME_LINK, PACKED_READING, PACKED_SENSOR, POSITION, TWIST_CMD, TX_BYTES, USED, World,
+    send, window,
 };
 
 pub struct Scene {
@@ -296,6 +297,30 @@ pub const ALL: &[Scene] = &[
         size: DESKTOP,
         build: frame_scheduled,
         landmark: "#25 t=7450.000 scheduled ±500 ms",
+    },
+    // telemetry.v2 in the Inspector (#983 T2): a frame's fields as metric
+    // series, one chart per field, one point per record. `dropped` is a
+    // 32-bit counter mirroring `sdu/dropped_total`, its rate measured by
+    // its records' times, its step back at tick 20 a wrap_or_decrease
+    // with no rate; the queue's `out_of_range` and the wait's absence are
+    // gaps, never 0.
+    Scene {
+        name: "inspector-frame-series",
+        // Tall, so the Series sits on screen below Detail and the FRAME
+        // section: a scene cannot scroll a pane.
+        size: (1440.0, 2400.0),
+        build: frame_series,
+        landmark: "dropped · counter · 1 · declared · mirrors sdu/dropped_total",
+    },
+    // A frame of three scheduled records: its 24-bit byte counter's rate
+    // across its wrap, timed by the schedule, two scheduled records ±200
+    // ms, never a measured rate.
+    Scene {
+        name: "inspector-frame-series-scheduled",
+        size: (1440.0, 2000.0),
+        build: frame_series_scheduled,
+        landmark: "timed by its frames' schedule, exact to ±200 ms: a scheduled rate, never a \
+                   measured one (§2.21)",
     },
     // telemetry.v1 in the Inspector (#819, TD). A Point counter, unit `1`,
     // its epoch in the Point: the plotted leaf is `value.value`, its §2.11
@@ -1391,6 +1416,35 @@ fn framed(theme: ThemeChoice, key: &str, ticks: u32) -> Zengui {
     world.verdicts(&mut app);
     preset(&mut app, LayoutPreset::Explore);
     app
+}
+
+/// `lab/meterframe`'s `key` (#983 T2) selected before its traffic, so
+/// its history holds `ticks` of it, in the Explore layout.
+fn meterframed(theme: ThemeChoice, key: &str, ticks: u32) -> Zengui {
+    let mut app = window(prefs(theme));
+    let mut world = World::meterframed();
+    world.connect(&mut app);
+    world.tick(&mut app);
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::Reveal(key.into())),
+    );
+    send(
+        &mut app,
+        Message::Subject(SubjectMsg::Select(Subject::Key(key.into()))),
+    );
+    world.ticks(&mut app, ticks);
+    world.verdicts(&mut app);
+    preset(&mut app, LayoutPreset::Explore);
+    app
+}
+
+fn frame_series(theme: ThemeChoice) -> Zengui {
+    meterframed(theme, METERFRAME_LINK, 24)
+}
+
+fn frame_series_scheduled(theme: ThemeChoice) -> Zengui {
+    meterframed(theme, METERFRAME_BYTES, 8)
 }
 
 fn frame_lost(theme: ThemeChoice) -> Zengui {

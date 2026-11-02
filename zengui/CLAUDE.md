@@ -92,6 +92,17 @@ Claude Code loads this file when working in `zengui/`; the root `CLAUDE.md` is t
   load plus `t`. `World::metered` (`lab/meter` on
   `zenkey/tests/contracts/meter.v1.toml`, `site-a/rf0` on modem.v3) feeds
   seven scenes, and the spray runs `lab/meter` (`--meter`) and, since #981 K3, `lab/modem`'s frames on `linkframes.v1` (`--frames`, through `run_gen`'s frame writer).
+  **Frame series (#983 T2)**: a key resolving to a `telemetry.v2` frame
+  resource is folded by `metric::FrameFold` through the fleet's
+  `TelemetryBook::frame` (one book per slot, each ring entry a frame,
+  folded once): the Series section draws one chart per series field, one
+  point per record, a record with no sample a gap, a counter's rate under
+  its time basis (a scheduled one said so, never measured) and its pairs
+  (`wrap_or_decrease` counted, `NoRates::wrap_or_decrease`); the identity
+  shows SERIES per field, and a mirrored stream ALSO CARRIED BY
+  (`MetricRead::carried_by`). `World::meterframed` (`lab/meterframe` on the
+  spec's `meterframe.v1`) feeds `inspector-frame-series` and
+  `inspector-frame-series-scheduled`.
   **Timing (#908, MC)**: a key resolving to a `timing.v1` stream shows
   PERIOD, DEADLINE and LIFESPAN beside TYPE, each the contract's (an
   invalid declaration said so), and a Timing section, `zengui::timing`'s

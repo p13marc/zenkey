@@ -204,7 +204,11 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   clock), the doctor's `telemetry-declaration` (a warning, from contracts)
   and `telemetry-sample` (`--deep`), and `check conform`'s
   `telemetry-declaration`, `telemetry-sample` and `telemetry-continuity`
-  (24 cases); `gen` and `serve` open an owner's session (#825), since core
+  (24 cases); since #983 T2 each reads `telemetry.v2`'s frame series too,
+  a member per (frame key, field) with its `mirrors`, a pair's
+  `time_basis` (a scheduled one `±J ms, never a measured rate`) and a
+  narrow counter's `wrap_or_decrease` (`live_zk2.rs`'s
+  `telemetry_reads_a_frames_series`); `gen` and `serve` open an owner's session (#825), since core
   0.73 with timestamping off, a governed interface's candidate's on (§8.2),
   and `--run-file PATH` gives each instance its next 16-bit run from a
   `FileRunStore`, refused beside a governed interface before any session,

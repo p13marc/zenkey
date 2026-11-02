@@ -55,9 +55,10 @@ use zenkey_model::authoring::{Encoding, Kind};
 use zenkey_model::grammar::{Addr, IfaceId, InstanceId, ZkKey};
 use zenkey_model::schema::TypeId;
 use zenkey_model::seed::Held;
+use zenkey_model::telemetry::frames::{self, FieldReading, FieldSeries, Fold, Folded, Series};
 use zenkey_model::telemetry::{
     self as tm, Checked, Conformance, Datum, Declaration, Measure, MetricKind, Pair, Payload,
-    Problem, Reading, Source,
+    Problem, Reading, RecordTime, Source, TimeBasis,
 };
 use zenkey_model::template::Segment;
 use zenoh::key_expr::{KeyExpr, OwnedKeyExpr};
@@ -92,6 +93,17 @@ pub struct MetricType {
 }
 
 impl MetricType {
+    /// A frame resource's: none of v1's (`not_this_profiles`), its series
+    /// [`FrameMetric`]'s.
+    pub fn frame() -> Self {
+        MetricType {
+            declaration: Declaration::NotThisProfiles,
+            wire: None,
+            attachment_wire: None,
+            raw: false,
+        }
+    }
+
     /// The metric type of `r`, a resource of `c`: `None` when it is no
     /// metric resource (§2.1) — not this profile's, or an event or an
     /// operation, whose annotations are ignored (§2.2).
@@ -103,6 +115,12 @@ impl MetricType {
             return None;
         };
         if !matches!(r.kind, Kind::Stream | Kind::State) {
+            return None;
+        }
+        // A frame resource of a `telemetry.v2` contract: v1's four keys mean
+        // nothing there, wherever they resolve from (v2 §2.16); its series
+        // are [`FrameMetric`]'s.
+        if d.frame.is_some() && tm::uses_v2(c) {
             return None;
         }
         let declaration = tm::declaration_of(c, r);
@@ -140,6 +158,68 @@ impl MetricType {
         };
         tm::check(&self.declaration, &p)
     }
+}
+
+/// A frame resource's series (`telemetry.v2` §2.16, #983 T2): its layout,
+/// by which a frame of its key is read (core §7.7), and its
+/// `telemetry.series`, declared or invalid. A frame resource with no
+/// series (`ignored`, `not_this_profiles`) has none: it is no metric
+/// resource.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FrameMetric {
+    pub layout: Arc<zenkey_model::frame::Layout>,
+    /// [`Series::Declared`] or [`Series::Invalid`].
+    pub series: Series,
+}
+
+impl FrameMetric {
+    /// `r`'s series, when `r` is a frame resource of a contract that uses
+    /// `telemetry.v2` and its `telemetry.series` is declared or invalid
+    /// (`zenkey_model::telemetry::frames::series_of`, its mirrors read in
+    /// `c`). A frame resource of a `telemetry.v1` contract is v1's to read
+    /// ([`MetricType::of`]), which reads none of its fields (v2 §1).
+    pub fn of(
+        c: &zenkey_model::contract::Contract,
+        r: &zenkey_model::contract::Resource,
+    ) -> Option<FrameMetric> {
+        if !tm::uses_v2(c) || r.kind != Kind::Stream {
+            return None;
+        }
+        let layout = zenkey_model::frame::Layout::of_resource(c, r)
+            .ok()
+            .flatten()?;
+        let series = frames::series_of(c, r)?;
+        matches!(series, Series::Declared(_) | Series::Invalid(_)).then(|| FrameMetric {
+            layout: Arc::new(layout),
+            series,
+        })
+    }
+
+    /// Its series, when its declaration is valid.
+    pub fn declared(&self) -> Option<&[FieldSeries]> {
+        self.series.declared()
+    }
+
+    /// Its declaration's problems, when it is invalid.
+    pub fn problems(&self) -> Option<&[frames::Problem]> {
+        match &self.series {
+            Series::Invalid(p) => Some(p),
+            _ => None,
+        }
+    }
+}
+
+/// An invalid `telemetry.series`' problems (v2 §2.16) in a tool's words:
+/// `<entry>: <why> (<token>)`, the annotation whole with no entry.
+pub fn series_problem_words(problems: &[frames::Problem]) -> String {
+    problems
+        .iter()
+        .map(|p| match &p.entry {
+            Some(e) => format!("{e}: {} ({})", p.reason.says(), p.reason.as_str()),
+            None => format!("{} ({})", p.reason.says(), p.reason.as_str()),
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 /// A reason of §2.6 in a tool's words: `telemetry.v1 §2.6 <token>: <why>`.
@@ -328,7 +408,13 @@ pub struct MetricResource {
     pub resource: String,
     /// `Stream` or `State`.
     pub kind: Kind,
+    /// Its `telemetry.v1` declaration and carriage. A frame resource of a
+    /// `telemetry.v2` contract has none of v1's (`not_this_profiles`): its
+    /// series are [`MetricResource::frame`]'s.
     pub ty: MetricType,
+    /// A frame resource's series (`telemetry.v2` §2.16): its fields' metric
+    /// series, each its own member ([`TelemetryBook::frame`]).
+    pub frame: Option<Arc<FrameMetric>>,
     /// The resource chunk the template's `epoch` parameter sits at, when it
     /// declares one (core §2.2): that member's tokens are its presence
     /// (§2.9).
@@ -344,7 +430,10 @@ impl MetricResource {
     pub fn of(address: &Addr, revision: &Revision, index: usize) -> Option<MetricResource> {
         let c = revision.contract();
         let r = c.resources.get(index)?;
-        let ty = MetricType::of(c, r)?;
+        let (ty, frame) = match FrameMetric::of(c, r) {
+            Some(f) => (MetricType::frame(), Some(Arc::new(f))),
+            None => (MetricType::of(c, r)?, None),
+        };
         let epoch_at = r.epoch.as_ref().and_then(|p| {
             r.template
                 .segments()
@@ -376,6 +465,7 @@ impl MetricResource {
             resource: zenkey::implementation::resource_name(r),
             kind: r.kind,
             ty,
+            frame,
             epoch_at,
             selector,
         })
@@ -403,6 +493,7 @@ impl MetricResource {
             resource: resource.to_owned(),
             kind,
             ty,
+            frame: None,
             epoch_at,
         }
     }
@@ -419,9 +510,33 @@ impl MetricResource {
         })
     }
 
-    /// Whether the resource's declaration is valid.
+    /// Whether the resource's declaration is valid: its `telemetry.series`
+    /// for a frame resource (v2 §2.16), else its v1 declaration (§2.2).
     pub fn declared(&self) -> bool {
-        matches!(self.ty.declaration, Declaration::Declared(_))
+        match &self.frame {
+            Some(f) => f.declared().is_some(),
+            None => matches!(self.ty.declaration, Declaration::Declared(_)),
+        }
+    }
+
+    /// Why its declaration is invalid, in a tool's words, the text that
+    /// says so cited; `None` when it is valid.
+    pub fn invalid_words(&self) -> Option<String> {
+        match (&self.frame, &self.ty.declaration) {
+            (Some(f), _) => f.problems().map(|p| {
+                format!(
+                    "its telemetry.series is invalid ({}): no field of it is read \
+                     (telemetry.v2 §2.16)",
+                    series_problem_words(p)
+                )
+            }),
+            (None, Declaration::Invalid(why)) => Some(format!(
+                "its declaration is invalid ({}): no question of its members is answered \
+                 (telemetry.v1 §2.2)",
+                invalid_words(why)
+            )),
+            _ => None,
+        }
     }
 }
 
@@ -453,6 +568,10 @@ pub struct MetricSample {
     /// Its arrival, on this host's monotonic clock.
     pub at: Instant,
     pub via: SampleVia,
+    /// CH's tag, when its envelope is a frame's (core §7.5's form 5): the
+    /// payload is then the frame's body, read by its resource's layout
+    /// ([`TelemetryBook::frame`]). `None` for every other sample.
+    pub frame: Option<zenkey_model::wire::Tag>,
 }
 
 // ─── presence, as one sample saw it ─────────────────────────────────────────
@@ -515,10 +634,17 @@ pub struct PairSeen {
     pub earlier: Measure,
     pub later: Measure,
     /// The elapsed time the rate was timed over, in nanoseconds, and which
-    /// base it was taken from: `timestamp`, `stamp` or `arrival`.
+    /// base it was taken from: `timestamp`, `stamp` or `arrival` (§2.11),
+    /// and for a frame's series `record` (its records' times) or `arrival`
+    /// (v2 §2.21).
     pub elapsed_ns: i128,
     pub base: &'static str,
+    /// A frame series' time basis (v2 §2.21): `measured`, `scheduled` with
+    /// its bound, or `arrival`, named whether or not the pair has a rate.
+    /// `None` for a v1 pair.
+    pub basis: Option<TimeBasis>,
     pub pair: Pair,
+    /// A frame series' pair consults none (v2 §2.19): always `None`.
     pub presence: PairPresence,
 }
 
@@ -528,8 +654,12 @@ pub struct PairTally {
     pub same_epoch: u64,
     pub reset: u64,
     pub decreased: u64,
-    /// Incomparable (§2.10, 2).
+    /// Incomparable (§2.10, 2), or a narrow counter's change outside its
+    /// serial window (v2 §2.20), which `wrap_or_decrease` counts apart.
     pub unobservable: u64,
+    /// Of `unobservable`: a wrap or a decrease, which a narrow counter's
+    /// two values cannot tell apart (v2 §2.20).
+    pub wrap_or_decrease: u64,
     /// Neither sample a counter or a histogram (§2.10, 1).
     pub not_asked: u64,
     pub in_band: u64,
@@ -549,13 +679,16 @@ impl PairTally {
         self.in_band + self.by_presence + self.assumed
     }
 
-    fn add(&mut self, p: &Pair) {
+    pub fn add(&mut self, p: &Pair) {
         match p.continuity {
             tm::Continuity::SameEpoch => self.same_epoch += 1,
             tm::Continuity::Reset => self.reset += 1,
             tm::Continuity::Decreased => self.decreased += 1,
             tm::Continuity::Unobservable => self.unobservable += 1,
             tm::Continuity::NotAsked => self.not_asked += 1,
+        }
+        if p.unobservable() == Some("wrap_or_decrease") {
+            self.wrap_or_decrease += 1;
         }
         match p.basis {
             Some(tm::Basis::Established(tm::Via::InBand)) => self.in_band += 1,
@@ -566,10 +699,46 @@ impl PairTally {
     }
 }
 
-/// One metric member, as this reader read it.
+/// A frame series' last sample, held to pair with the next (v2 §2.18):
+/// its value, its record's time and its frame's arrival.
+#[derive(Debug, Clone)]
+struct FrameLast {
+    measure: Measure,
+    time: RecordTime,
+    arrival_ns: i128,
+}
+
+impl FrameLast {
+    /// As a pair reads it (v2 §2.21): its epoch the fold's, never asked here.
+    fn sampled(&self) -> tm::Sampled<'_> {
+        tm::Sampled {
+            value: &self.measure,
+            epoch: None,
+            timestamp_ms: None,
+            stamp_ns: None,
+            arrival_ns: self.arrival_ns,
+            record: Some(self.time),
+        }
+    }
+}
+
+/// One metric member, as this reader read it: a v1 member (one key), or
+/// one series of a frame (its key and its field, v2 §2.17).
 #[derive(Debug, Clone)]
 pub struct MemberBook {
     pub metric: Arc<MetricResource>,
+    /// The series this member is, for a frame resource: its field, kind,
+    /// unit and mirror (v2 §2.16). `None` for a v1 member, and for a frame
+    /// key whose `telemetry.series` is invalid, read as one member whose
+    /// every frame is unobservable.
+    pub field: Option<FieldSeries>,
+    /// A frame series' records that were no sample (v2 §2.18), by the
+    /// reading's token: `held`, `absent`, `owner_error`, `beyond_range`,
+    /// `unnamed`, `unknown`. Empty for a v1 member.
+    pub no_sample: BTreeMap<&'static str, u64>,
+    /// A frame series' latest sample as core §7.6's JSON reading, a `fixed`
+    /// gauge's exact decimal string included; `None` for a v1 member.
+    pub latest_json: Option<serde_json::Value>,
     /// The member's kind and unit as its latest sample gave them (§2.5):
     /// the declared ones, else the latest conforming Point's; `None` when
     /// unobservable or unknown — never dimensionless.
@@ -601,12 +770,16 @@ pub struct MemberBook {
     pub rate: Option<tm::Rate>,
     merged: Held,
     last: Option<Last>,
+    frame_last: Option<FrameLast>,
 }
 
 impl MemberBook {
     fn new(metric: Arc<MetricResource>) -> MemberBook {
         MemberBook {
             metric,
+            field: None,
+            no_sample: BTreeMap::new(),
+            latest_json: None,
             kind: None,
             unit: None,
             samples: 0,
@@ -624,7 +797,20 @@ impl MemberBook {
             rate: None,
             merged: Held::Nothing,
             last: None,
+            frame_last: None,
         }
+    }
+
+    /// One series of a frame, its kind and unit its entry's (v2 §2.17); or,
+    /// with no series, the frame key whose declaration is invalid.
+    fn of_series(metric: Arc<MetricResource>, field: Option<FieldSeries>) -> MemberBook {
+        let mut m = MemberBook::new(metric);
+        if let Some(f) = &field {
+            m.kind = Some((f.kind, Source::Declared));
+            m.unit = f.unit.clone().map(|u| (u, Source::Declared));
+        }
+        m.field = field;
+        m
     }
 }
 
@@ -643,6 +829,12 @@ pub struct TelemetryBook {
     held_instances: BTreeMap<Addr, BTreeSet<InstanceId>>,
     held_members: BTreeMap<(Addr, MemberId), Vec<InstanceId>>,
     members: BTreeMap<String, MemberBook>,
+    /// Each frame key's series, by its key and its field's index (v2
+    /// §2.17); the frame key whose declaration is invalid by its key alone.
+    series: BTreeMap<(String, Option<usize>), MemberBook>,
+    /// Each frame key's fold: its reader, the epoch it reads samples
+    /// under, each counter series' last sample (v2 §2.18–§2.21).
+    folds: BTreeMap<String, Fold>,
     refused: u64,
 }
 
@@ -660,6 +852,8 @@ impl TelemetryBook {
             held_instances: BTreeMap::new(),
             held_members: BTreeMap::new(),
             members: BTreeMap::new(),
+            series: BTreeMap::new(),
+            folds: BTreeMap::new(),
             refused: 0,
         }
     }
@@ -689,14 +883,36 @@ impl TelemetryBook {
         self.refused
     }
 
-    /// Every member, by key.
+    /// Every member, by key, a frame key's series after one another in
+    /// their fields' order (v2 §2.17).
     pub fn members(&self) -> impl Iterator<Item = (&String, &MemberBook)> {
-        self.members.iter()
+        let mut all: Vec<(&String, Option<usize>, &MemberBook)> = self
+            .members
+            .iter()
+            .map(|(k, m)| (k, None, m))
+            .chain(self.series.iter().map(|((k, i), m)| (k, *i, m)))
+            .collect();
+        all.sort_by_key(|(k, i, _)| (*k, *i));
+        all.into_iter().map(|(k, _, m)| (k, m))
     }
 
     /// One member.
     pub fn member(&self, key: &str) -> Option<&MemberBook> {
         self.members.get(key)
+    }
+
+    /// One series of a frame key: its key and its field's name (v2 §2.17).
+    pub fn series_member(&self, key: &str, field: &str) -> Option<&MemberBook> {
+        self.series
+            .range((key.to_owned(), None)..)
+            .take_while(|((k, _), _)| k == key)
+            .map(|(_, m)| m)
+            .find(|m| m.field.as_ref().is_some_and(|f| f.field == field))
+    }
+
+    /// Members held, a frame's series each one.
+    fn held(&self) -> usize {
+        self.members.len() + self.series.len()
     }
 
     /// A presence seed (one liveliness read of the scope), then the token
@@ -869,7 +1085,11 @@ impl TelemetryBook {
         s: MetricSample,
         envelope: crate::model::inband::Envelope,
     ) -> Option<PairSeen> {
-        if !self.members.contains_key(&s.key) && self.members.len() >= MAX_MEMBERS {
+        if metric.frame.is_some() {
+            self.frame(metric, s, envelope);
+            return None;
+        }
+        if !self.members.contains_key(&s.key) && self.held() >= MAX_MEMBERS {
             self.refused += 1;
             return None;
         }
@@ -971,6 +1191,7 @@ impl TelemetryBook {
             later: now.reading.value.clone(),
             elapsed_ns,
             base,
+            basis: None,
             pair,
             presence,
         };
@@ -980,6 +1201,204 @@ impl TelemetryBook {
         entry.pairs.push_back(seen.clone());
         Some(seen)
     }
+
+    /// `f` on each of a frame key's series members.
+    fn each_series(&mut self, key: &str, indices: &[Option<usize>], f: impl Fn(&mut MemberBook)) {
+        for i in indices {
+            if let Some(m) = self.series.get_mut(&(key.to_owned(), *i)) {
+                f(m);
+            }
+        }
+    }
+
+    /// Every series member of a frame key, made when the book holds none:
+    /// one per series field, or the key alone when its declaration is
+    /// invalid. `false` when making them would pass [`MAX_MEMBERS`].
+    fn frame_members(
+        &mut self,
+        metric: &Arc<MetricResource>,
+        key: &str,
+        slots: &[(Option<usize>, Option<&FieldSeries>)],
+    ) -> bool {
+        let new = slots
+            .iter()
+            .filter(|(i, _)| !self.series.contains_key(&(key.to_owned(), *i)))
+            .count();
+        if new > 0 && self.held() + new > MAX_MEMBERS {
+            self.refused += 1;
+            return false;
+        }
+        for (i, f) in slots {
+            self.series
+                .entry((key.to_owned(), *i))
+                .or_insert_with(|| MemberBook::of_series(Arc::clone(metric), f.cloned()));
+        }
+        true
+    }
+
+    /// One sample of a frame resource's key (`telemetry.v2` §2.18–§2.21,
+    /// #983 T2), the next received: its body read by the resource's layout
+    /// under CH's tag (core §7.7), then folded by the key's
+    /// [`Fold`], whose reader gives each record's field states and whose
+    /// epoch is the run. Each series member takes what its record says:
+    /// an included value is a sample, which conforms (§2.18: core §7.7's
+    /// reader checked its code), every other reading no sample, counted by
+    /// its token; and a counter's sample after another of its series is a
+    /// pair, judged by `zenkey_model::telemetry::pair` with no presence
+    /// (§2.19), its time the records' (§2.21).
+    ///
+    /// A frame that cannot be read is unobservable for every series of its
+    /// key: a body its layout refuses (noted by the fold's reader, so its
+    /// records read as lost at the next frame), a mutation or a put with
+    /// no envelope on a frame resource, a refused envelope. Under an invalid
+    /// `telemetry.series` no field is read (§2.16): every frame is one
+    /// unobservable sample of the key, `declaration_invalid`.
+    pub fn frame(
+        &mut self,
+        metric: &Arc<MetricResource>,
+        s: MetricSample,
+        envelope: crate::model::inband::Envelope,
+    ) -> FrameSeen {
+        let Some(fm) = metric.frame.clone() else {
+            return FrameSeen::default();
+        };
+        let key = s.key.clone();
+        let series = fm.declared();
+        let slots: Vec<(Option<usize>, Option<&FieldSeries>)> = match series {
+            Some(d) => d.iter().map(|f| (Some(f.index), Some(f))).collect(),
+            None => vec![(None, None)],
+        };
+        // A key that would take a fold past the folds' bound is refused
+        // before any member is made for it, so none is left holding nothing.
+        if series.is_some() && !self.folds.contains_key(&key) && self.folds.len() >= MAX_MEMBERS {
+            self.refused += 1;
+            return FrameSeen::default();
+        }
+        if !self.frame_members(metric, &key, &slots) {
+            return FrameSeen::default();
+        }
+        let indices: Vec<Option<usize>> = slots.iter().map(|(i, _)| *i).collect();
+        if s.delete {
+            self.each_series(&key, &indices, |m| m.deletes += 1);
+            return FrameSeen::default();
+        }
+        let unread = |book: &mut TelemetryBook, why: tm::Unasked| {
+            book.each_series(&key, &indices, |m| {
+                m.samples += 1;
+                m.unobservable += 1;
+                m.unobservable_why = Some(why);
+            });
+            FrameSeen {
+                folded: None,
+                pairs: Vec::new(),
+                unread: Some(why),
+            }
+        };
+        let Some(series) = series else {
+            return unread(self, tm::Unasked::DeclarationInvalid);
+        };
+        let (Some(Ok(stamp)), Some(tag)) = (envelope, s.frame) else {
+            return unread(self, tm::Unasked::Undecodable);
+        };
+        let frame = match zenkey_model::frame::Frame::parse(tag, &s.payload, &fm.layout) {
+            Ok(f) => f,
+            Err(_) => {
+                self.folds.entry(key.clone()).or_default().refuse(stamp);
+                return unread(self, tm::Unasked::Undecodable);
+            }
+        };
+        let arrival_ns = self.arrival_ns(s.at);
+        let folded = self
+            .folds
+            .entry(key.clone())
+            .or_default()
+            .apply(&fm.layout, series, stamp, &frame, arrival_ns);
+        let mut pairs = Vec::new();
+        for (at, rec) in folded.records.iter().enumerate() {
+            for read in &rec.fields {
+                let Some(f) = series.get(read.series) else {
+                    continue;
+                };
+                let Some(m) = self.series.get_mut(&(key.clone(), Some(f.index))) else {
+                    continue;
+                };
+                let FieldReading::Sample(v) = &read.reading else {
+                    *m.no_sample.entry(read.reading.as_str()).or_default() += 1;
+                    continue;
+                };
+                m.samples += 1;
+                m.conforming += 1;
+                m.latest = Some(Reading {
+                    value: v.measure.clone(),
+                    timestamp_ms: None,
+                    epoch: Some(stamp.run.hex()),
+                });
+                m.latest_json = Some(v.json.clone());
+                let now = FrameLast {
+                    measure: v.measure.clone(),
+                    time: rec.time,
+                    arrival_ns,
+                };
+                let before = m.frame_last.replace(now.clone());
+                let (Some((_, pair)), Some(before)) = (&read.pair, before) else {
+                    continue;
+                };
+                let (elapsed_ns, basis) = tm::elapsed(&before.sampled(), &now.sampled());
+                m.tally.add(pair);
+                if let Ok(r) = &pair.rate {
+                    m.rate = Some(r.clone());
+                }
+                let seen = PairSeen {
+                    earlier: before.measure,
+                    later: now.measure,
+                    elapsed_ns,
+                    base: match basis {
+                        Some(TimeBasis::Arrival) | None => "arrival",
+                        Some(_) => "record",
+                    },
+                    basis,
+                    pair: pair.clone(),
+                    presence: PairPresence::None,
+                };
+                if m.pairs.len() == PAIRS_KEPT {
+                    m.pairs.pop_front();
+                }
+                m.pairs.push_back(seen.clone());
+                pairs.push(FramePair {
+                    record: at,
+                    series: read.series,
+                    seen,
+                });
+            }
+        }
+        FrameSeen {
+            folded: Some(folded),
+            pairs,
+            unread: None,
+        }
+    }
+}
+
+/// What [`TelemetryBook::frame`] read of one frame.
+#[derive(Debug, Clone, Default)]
+pub struct FrameSeen {
+    /// The frame, folded: each record's seq and time, and each series'
+    /// reading (v2 §2.18). `None` when it was not read.
+    pub folded: Option<Folded>,
+    /// The pairs it closed, in record order.
+    pub pairs: Vec<FramePair>,
+    /// Why the frame was not read: undecodable, or its declaration invalid.
+    pub unread: Option<tm::Unasked>,
+}
+
+/// A pair a frame closed (v2 §2.18): the record of the frame its later
+/// sample is in, the series' index among the resource's declared series,
+/// and the pair as the book judged it.
+#[derive(Debug, Clone)]
+pub struct FramePair {
+    pub record: usize,
+    pub series: usize,
+    pub seen: PairSeen,
 }
 
 /// A held sample as a pair reads it (§2.10, §2.11).
@@ -1236,6 +1655,7 @@ mod tests {
                     stamp: stamp(&case[which]),
                     at: at(&case[which]),
                     via: SampleVia::Subscription,
+                    frame: None,
                 }
             };
             assert!(book.sample(&metric, sample("earlier")).is_none(), "{note}");
@@ -1315,6 +1735,7 @@ mod tests {
             stamp,
             at,
             via,
+            frame: None,
         }
     }
 
@@ -1462,5 +1883,257 @@ mod tests {
             p.presence
         );
         assert_eq!(p.pair.continuity, Continuity::Decreased, "by presence");
+    }
+
+    /// `spec/profiles/telemetry/conformance/v2/continuity.json` through
+    /// the book (#983 T2): each case's frames, their bodies under their
+    /// layout's tag and their run and seq, folded by `TelemetryBook::frame`
+    /// over `meterframe.v1`'s frame resources, the scenarios' contract, and
+    /// a frame naming its own `layout` over that layout, another revision's
+    /// resource on the same key; every pair the book reads is the
+    /// fixture's, in order, and each series member keeps it.
+    #[test]
+    fn v2_continuity_cases_read_through_the_book() {
+        use zenkey_model::wire::{Run, Seq, Stamp};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../spec/profiles");
+        let doc: Value = serde_json::from_slice(
+            &std::fs::read(root.join("telemetry/conformance/v2/continuity.json")).unwrap(),
+        )
+        .unwrap();
+        let (set, problems) = crate::model::catalog::ContractSet::load_path(
+            &root.join("telemetry/conformance/contracts/meterframe.v1.toml"),
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        let rev = set.iter().next().expect("meterframe.v1");
+        let addr: Addr = "lab/meterframe".parse().unwrap();
+        let metric = |name: &str| {
+            let template = format!("frames/{name}");
+            let i = rev
+                .contract()
+                .resources
+                .iter()
+                .position(|r| r.template.as_str() == template)
+                .expect("a frame resource");
+            Arc::new(MetricResource::of(&addr, rev, i).expect("a metric resource"))
+        };
+        let unhex = |h: &str| -> Vec<u8> {
+            (0..h.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap())
+                .collect()
+        };
+        // A frame naming its own `layout` is another revision's frame of the
+        // same key (v2 §2.20): the fixture's layout of that name, its series
+        // mirroring meterframe.v1's streams, as a tool holding both
+        // revisions resolves that frame (`tests/profiles.rs` reads it so).
+        let packed = zenkey_model::packed::PackedDoc::read(&doc["schema"]);
+        assert!(packed.findings.is_empty(), "{:?}", packed.findings);
+        let own = |m: &Arc<MetricResource>, name: &str| -> Arc<MetricResource> {
+            let l = doc["layouts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|l| l["name"] == name)
+                .expect("a layout of the fixture's");
+            let record = packed.types[l["record"].as_str().unwrap()]
+                .as_ref()
+                .expect("its record's layout");
+            let spec: zenkey_model::authoring::FrameSpec =
+                serde_json::from_value(l["frame"].clone()).unwrap();
+            let params = zenkey_model::frame::FrameParams::resolve(&spec).unwrap();
+            let layout = zenkey_model::frame::Layout::of(record, &params).unwrap();
+            let ann = BTreeMap::from([(tm::SERIES.to_owned(), l["series"].clone())]);
+            let series = frames::series(layout.fields(), &ann, &|n| {
+                frames::mirror_in(rev.contract(), n)
+            });
+            assert!(series.declared().is_some(), "{name}: {series:?}");
+            Arc::new(MetricResource {
+                frame: Some(Arc::new(FrameMetric {
+                    layout: Arc::new(layout),
+                    series,
+                })),
+                ..(**m).clone()
+            })
+        };
+        let mut owned = 0;
+        for case in doc["cases"].as_array().unwrap() {
+            let note = case["note"].as_str().unwrap();
+            let m = metric(case["layout"].as_str().unwrap());
+            let f = m.frame.clone().expect("its series");
+            let series = f.declared().expect("declared");
+            let key = format!("zk2/lab/meterframe/meterframe.v1/{}", m.resource);
+            let t0 = Instant::now();
+            let mut book = TelemetryBook::new(None, t0);
+            let mut got = Vec::new();
+            for frame in case["frames"].as_array().unwrap() {
+                let stamp = Stamp {
+                    run: Run::from_hex(frame["run"].as_str().unwrap()).unwrap(),
+                    seq: Seq::new(u32::try_from(frame["seq"].as_u64().unwrap()).unwrap()).unwrap(),
+                };
+                let arrival = frame["arrival_ns"].as_u64().unwrap_or(0);
+                let fm = match frame["layout"].as_str() {
+                    Some(name) => {
+                        owned += 1;
+                        own(&m, name)
+                    }
+                    None => Arc::clone(&m),
+                };
+                let f = fm.frame.clone().expect("its series");
+                let series = f.declared().expect("declared");
+                let seen = book.frame(
+                    &fm,
+                    MetricSample {
+                        key: key.clone(),
+                        delete: false,
+                        payload: unhex(frame["hex"].as_str().unwrap()),
+                        attachment: None,
+                        stamp: None,
+                        at: t0 + Duration::from_nanos(arrival),
+                        via: SampleVia::Subscription,
+                        frame: Some(f.layout.tag()),
+                    },
+                    Some(Ok(stamp)),
+                );
+                assert!(seen.unread.is_none(), "{note}: {seen:?}");
+                for p in seen.pairs {
+                    let pair = &p.seen.pair;
+                    let (epoch, via) = match pair.basis {
+                        None => (None, None),
+                        Some(Basis::Assumed) => (Some("assumed"), None),
+                        Some(Basis::Established(v)) => (Some("established"), Some(v.as_str())),
+                    };
+                    let rate = pair.rate.as_ref().ok();
+                    got.push(json!({
+                        "field": series[p.series].field,
+                        "continuity": pair.continuity.as_str(),
+                        "why": pair.unobservable(),
+                        "epoch": epoch,
+                        "via": via,
+                        "rate": rate.map(|r| r.per_s),
+                        "rate_unit": rate.and_then(|r| r.unit.clone()),
+                        "elapsed_ns": rate.map(|r| i64::try_from(r.elapsed_ns).unwrap()),
+                        "time_basis": rate.and_then(|r| r.basis).map(|b| b.as_str()),
+                        "jitter_ms": rate.and_then(|r| match r.basis {
+                            Some(TimeBasis::Scheduled { jitter_ms }) => Some(jitter_ms),
+                            _ => None,
+                        }),
+                        "no_rate": pair.rate.as_ref().err().map(|n| n.as_str()),
+                    }));
+                    assert_eq!(p.seen.presence, PairPresence::None, "{note}: in band");
+                    if let Ok(r) = &pair.rate {
+                        assert_eq!(p.seen.elapsed_ns, r.elapsed_ns, "{note}");
+                        assert_eq!(p.seen.basis, r.basis, "{note}");
+                    }
+                }
+            }
+            let want: Vec<Value> = case["expect"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|e| {
+                    let mut e = e.clone();
+                    let o = e.as_object_mut().unwrap();
+                    o.remove("earlier");
+                    o.remove("later");
+                    e
+                })
+                .collect();
+            assert_eq!(got, want, "{note}");
+            for s in series {
+                let member = book
+                    .series_member(&key, &s.field)
+                    .expect("a member a series");
+                assert_eq!(member.kind, Some((s.kind, Source::Declared)), "{note}");
+                let fixture = want
+                    .iter()
+                    .filter(|e| e["field"] == s.field.as_str())
+                    .count();
+                assert_eq!(member.tally.total(), fixture as u64, "{note}: {}", s.field);
+            }
+        }
+        assert!(
+            owned > 0,
+            "a frame of another revision, read under its own layout"
+        );
+    }
+
+    /// A frame its layout refuses, a mutation on a frame resource and a
+    /// frame under an invalid `telemetry.series` are unobservable, never a
+    /// sample (#983 T2; telemetry.v2 §2.16, §2.18): the first for every
+    /// series of its key, which reads its records as lost at the next
+    /// frame; the last as one member of the key, `declaration_invalid`.
+    #[test]
+    fn an_unreadable_frame_is_no_sample() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../spec/profiles");
+        let (set, _) = crate::model::catalog::ContractSet::load_path(
+            &root.join("telemetry/conformance/contracts/meterframe.v1.toml"),
+        );
+        let rev = set.iter().next().expect("meterframe.v1");
+        let addr: Addr = "lab/meterframe".parse().unwrap();
+        let i = rev
+            .contract()
+            .resources
+            .iter()
+            .position(|r| r.template.as_str() == "frames/link")
+            .unwrap();
+        let m = Arc::new(MetricResource::of(&addr, rev, i).unwrap());
+        let key = "zk2/lab/meterframe/meterframe.v1/stream/frames/link".to_owned();
+        let stamp = zenkey_model::wire::Stamp {
+            run: zenkey_model::wire::Run::U16(1),
+            seq: zenkey_model::wire::Seq::new(0).unwrap(),
+        };
+        let t0 = Instant::now();
+        let sample = |payload: Vec<u8>, frame| MetricSample {
+            key: key.clone(),
+            delete: false,
+            payload,
+            attachment: None,
+            stamp: None,
+            at: t0,
+            via: SampleVia::Subscription,
+            frame,
+        };
+        let mut book = TelemetryBook::new(None, t0);
+        let tag = m.frame.as_ref().unwrap().layout.tag();
+        let seen = book.frame(&m, sample(vec![0xff], Some(tag)), Some(Ok(stamp)));
+        assert_eq!(seen.unread, Some(tm::Unasked::Undecodable));
+        let seen = book.frame(&m, sample(b"7".to_vec(), None), Some(Ok(stamp)));
+        assert_eq!(seen.unread, Some(tm::Unasked::Undecodable), "a mutation");
+        let dropped = book.series_member(&key, "dropped").unwrap();
+        assert_eq!((dropped.samples, dropped.unobservable), (2, 2));
+        assert_eq!(book.members().count(), 4, "one member a series");
+        assert_eq!(
+            book.member(&key).map(|m| m.samples),
+            None,
+            "no v1 member of a frame key"
+        );
+
+        // An invalid telemetry.series: one member, every frame unobservable.
+        let mut c = rev.contract().clone();
+        let r = c
+            .resources
+            .iter_mut()
+            .find(|r| r.template.as_str() == "frames/link")
+            .unwrap();
+        r.annotations
+            .insert(tm::SERIES.into(), json!({"nope": {"kind": "counter"}}));
+        let r = c
+            .resources
+            .iter()
+            .find(|r| r.template.as_str() == "frames/link")
+            .unwrap();
+        let f = FrameMetric::of(&c, r).expect("a frame resource with series");
+        assert!(f.declared().is_none());
+        let mut bad = (*m).clone();
+        bad.frame = Some(Arc::new(f));
+        let bad = Arc::new(bad);
+        assert!(!bad.declared());
+        assert!(bad.invalid_words().unwrap().contains("series_field"));
+        let mut book = TelemetryBook::new(None, t0);
+        let seen = book.frame(&bad, sample(vec![0], Some(tag)), Some(Ok(stamp)));
+        assert_eq!(seen.unread, Some(tm::Unasked::DeclarationInvalid));
+        let (_, only) = book.members().next().unwrap();
+        assert!(only.field.is_none());
+        assert_eq!(only.unobservable, 1);
     }
 }
