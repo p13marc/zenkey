@@ -7,6 +7,27 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `telemetry.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## telemetry.v2 0.3 — 2026-11-02: editorial: Appendix B reads `modem.v3` 3.3, no rule changed (#991)
+
+`modem.v3` 3.3 (#991) carries its 73 readings in three frame resources
+over one record, `frames/fast`, `frames/slow` and `frames/paid`, at
+zenoh-modem's own ranges, and deprecates 3.2's nine, now `host`.
+Appendix B described 3.2's nine alone, their ranges "modem.v3's own to
+fix".
+
+**Changed: Appendix B, which states no rule.** It gives the twelve frame
+resources' 369 series, 3.3's three and what each is for, and how 3.3
+chose each counter's width: its worst rate between two frames of the
+slowest cadence a face lists, within its serial window (§2.20). 3.2's
+nine stay as the record, deprecated.
+
+**Deliberately not changed.**
+- **No rule and no fixture.** `conformance/v2/` reads `meterframe.v1`,
+  never `modem.v3`.
+- **Written against core 0.90**, still.
+- **It restates `telemetry.v1` text 0.7**, and stays correct: 0.8
+  changed no rule.
+
 ## 0.8 — 2026-11-02: editorial: Appendix B's zenoh-modem row reads `modem.v3` 3.2, no rule changed (#983 T4, #988 L5)
 
 #983's T4 moved `modem.v3` to `telemetry.v2` in its revision 3.2.
