@@ -182,9 +182,10 @@ Two runs, `w2-rf-bare-3` and `w2-rf-lean-1` (the lean stack with
   asks for: `owner --health --alarms --config --desired-target fleet/desired
   --desired-watch --desired-reread-ms 300000 h-3fa9c2d41b7e/rf0
   contracts/gendev.v1.toml`. [`gendev.v1`](contracts/gendev.v1.toml) has 8
-  gauges and 4 counters (telemetry.v1, the built-in stream QoS), which
-  w2-drive.py puts every 10 s, and `oper_change` events. The device raises 3
-  alarms at start; health.v1 and config.v1 are the example's own.
+  gauges and 4 counters (revision 1.0: telemetry.v1, the built-in stream
+  QoS), which w2-drive.py puts every 10 s, and `oper_change` events. The
+  device raises 3 alarms at start; health.v1 and config.v1 are the example's
+  own.
 - **The far side**, on router B, is one `zenctl echo --no-decode` subscriber
   on `zk2/**`, which reads every element the device puts, and the desired
   author (`owner --desired-author fleet/desired`), which puts the device's
@@ -626,7 +627,7 @@ lossy-setup runs (`w2-smoke-1`, `w2-smoke-2`, `w2-rf-bare-1`,
 | `wire.sh` | brings a path up (`up <medium> <stack>`), lists it (`status`), stops it (`down`), and tells the relay to `cut`, `restore` or take a `loss` |
 | `measure.sh` | one W1 run: the idle window, W1's setup, the W1 window, `marks.json` |
 | `measure-w2.sh`, `w2-drive.py` | one W2 run: the device and the author through the owner example, the steady window, the acts, the reconnect, the config changes |
-| `contracts/gendev.v1.toml`, `gendev.json` | W2's device: 8 gauges, 4 counters, `oper_change` (lint clean) |
+| `contracts/gendev.v1.toml`, `gendev.json`, `gendev-frames.json` | W2's device: 8 gauges, 4 counters, `oper_change` (lint clean); since revision 1.1, `frames/sample`, the twelve readings as one packed record, three a frame, for #989's zk2c run (telemetry.v2, #983 T4) |
 | `relay.py` | the userspace netem between the two drivers, and a JSON line per datagram |
 | `stamp.py` | stamps each `zenctl echo` row with the wall clock |
 | `zdecode.py` | decodes a bare run's SDUs as the fork's codec writes them, and gives each zk2 element its bytes |
