@@ -3445,7 +3445,230 @@
       },
       "note": "two revisions of beacon.v2, the same resources, one using freshness.v2 and one freshness.v1 (§2.3, §2.9, §2.12): the heartbeat is the interface's, as the revision using freshness.v2 and the two read together give it a collection, and lab/b1's evidence lists it, whichever revision b1 runs; the plan is the one-revision case's",
       "policy": "# freshness.v2's heartbeats across a face (link.v1 0.11)\nsystem   = \"lab\"\nservices = [\"b1\", \"b2\"]\n\n[face.rf]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 60\nmax_outage_s = 600\nbatch_bytes  = 1000\nlink_bps     = 2400\n"
+    },
+    {
+      "contracts": [
+        "spec/profiles/link/conformance/contracts/sampler.v1.toml"
+      ],
+      "expect": {
+        "faces": [
+          {
+            "attach": {
+              "shape": "client"
+            },
+            "deny": [
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "zk",
+                "key_exprs": [
+                  "zk2/**/@zk/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "adv",
+                "key_exprs": [
+                  "zk2/**/@adv/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "admin",
+                "key_exprs": [
+                  "@/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:sampler.v1",
+                "key_exprs": [
+                  "zk2/*/*/sampler.v1/stream/frames/home/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@stream",
+                "key_exprs": [
+                  "zk2/*/*/*/@stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "state",
+                "key_exprs": [
+                  "zk2/*/*/*/state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@state",
+                "key_exprs": [
+                  "zk2/*/*/*/@state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events",
+                "key_exprs": [
+                  "zk2/*/*/*/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              }
+            ],
+            "downsampling": {
+              "flows": [
+                "egress"
+              ],
+              "id": "rf",
+              "link_protocols": [
+                "unixsock-stream"
+              ],
+              "messages": [
+                "put"
+              ],
+              "rules": [
+                {
+                  "freq": 0.016666666666666666,
+                  "key_expr": "zk2/lab/modem/sampler.v1/stream/level"
+                }
+              ]
+            },
+            "far": "ground",
+            "findings": [
+              {
+                "at": "sampler.v1/stream/frames/minute",
+                "code": "frame_over_interval",
+                "face": "rf",
+                "severity": "warning"
+              },
+              {
+                "at": "sampler.v1/stream/frames/sample",
+                "code": "frame_over_interval",
+                "face": "rf",
+                "severity": "warning"
+              },
+              {
+                "at": "sampler.v1/stream/frames/wide",
+                "code": "frame_over_batch",
+                "face": "rf",
+                "severity": "warning"
+              },
+              {
+                "at": "sampler.v1/stream/frames/wide",
+                "code": "history_on_frame",
+                "face": "rf",
+                "severity": "warning"
+              },
+              {
+                "at": "sampler.v1/stream/frames/wide",
+                "code": "interval_over_horizon",
+                "face": "rf",
+                "severity": "warning"
+              }
+            ],
+            "liveness": [
+              {
+                "evidence": [
+                  "sampler.v1/stream/frames/link",
+                  "sampler.v1/stream/frames/wide"
+                ],
+                "service": "lab/modem"
+              }
+            ],
+            "name": "rf",
+            "windows": []
+          }
+        ]
+      },
+      "implements": {
+        "modem": [
+          "sampler.v1"
+        ]
+      },
+      "note": "frame resources across a face (§2.7, §2.8, §2.12, 0.13): every frame resource exposed link crosses and none is downsampled, the plain stream level alone has a rule; frames/link's horizon makes it liveness evidence, and frames/wide's too; frames/minute's period and frames/sample's span are shorter than interval_s (frame_over_interval); frames/wide's largest frame, four full records of sixteen 32-bit counters with three offsets, is 278 bytes against a batch of 220 (frame_over_batch), it declares history (history_on_frame), and its span of 240 s is above half its horizon of 300 s (interval_over_horizon, read from its interval, not interval_s); frames/home, not exposed, is denied by its own subtree",
+      "policy": "# Frames across a face (link.v1 0.13)\nsystem   = \"lab\"\nservices = [\"modem\"]\n\n[face.rf]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 60\nmax_outage_s = 600\nbatch_bytes  = 220\nlink_bps     = 2400\n"
     }
   ],
-  "description": "link.v1 §2.3, §2.5-§2.12: a face policy and a deployment -> each face's plan, or the findings that refuse it. policy is the face policy's TOML text (§2.1). implements maps each listed service's name to the interface ids it implements. The interfaces' resources are given inline in interfaces (interface id -> resources, each {template, token, annotations}, token one of stream, @stream, state, @state, events, @op, annotations resolved), or loaded from contracts, paths of authoring files relative to the repository root, loaded as core §9 loads them (defaults resolved, core §9.3). An interface inline is one revision's resources, or {revisions: [resources, ...]}, several revisions of one interface id (0.3, F-119); two files in contracts with one interface id are two revisions of it. The plan reads every revision of an interface together (§2.3). expect is {faces: [...]}, each face's plan as §2.3 states it, faces sorted by name: name, far, attach ({shape: client}, or {shape: south-region, region, gateway}), deny (each {id, flows, messages, key_exprs}: zk, adv, admin, then the exposure denies by kind token in the order stream, @stream, state, @state, events, each wholesale with id <token> or per listed interface with id <token>:<iface>, sorted by interface id, an empty one left out), downsampling ({id, link_protocols, flows, messages, rules: [{key_expr, freq}]}, or null), windows ([{service, min_s}]), liveness ([{service, evidence}]) and findings (warnings, each {code, severity, face, at}). Key expressions within a rule, rules, windows, liveness entries and evidence are sorted by their bytes; findings by face (null first), at, then code. freq is 1/interval_s as an IEEE 754 double. Or expect is {refused: [finding...]}: the policy's errors and warnings (§2.1), or the deployment's errors (service_unknown, contract_unknown), sorted the same way."
+  "description": "link.v1 §2.3, §2.5-§2.12: a face policy and a deployment -> each face's plan, or the findings that refuse it. policy is the face policy's TOML text (§2.1). implements maps each listed service's name to the interface ids it implements. The interfaces' resources are given inline in interfaces (interface id -> resources, each {template, token, annotations}, token one of stream, @stream, state, @state, events, @op, annotations resolved), or loaded from contracts, paths of authoring files relative to the repository root, loaded as core §9 loads them (defaults resolved, core §9.3). An inline resource declares no `history` and no `frame` table: a case about frame resources (core §7.7, 0.13) loads a contract, and the plan reads each frame resource's interval and largest frame from it. An interface inline is one revision's resources, or {revisions: [resources, ...]}, several revisions of one interface id (0.3, F-119); two files in contracts with one interface id are two revisions of it. The plan reads every revision of an interface together (§2.3). expect is {faces: [...]}, each face's plan as §2.3 states it, faces sorted by name: name, far, attach ({shape: client}, or {shape: south-region, region, gateway}), deny (each {id, flows, messages, key_exprs}: zk, adv, admin, then the exposure denies by kind token in the order stream, @stream, state, @state, events, each wholesale with id <token> or per listed interface with id <token>:<iface>, sorted by interface id, an empty one left out), downsampling ({id, link_protocols, flows, messages, rules: [{key_expr, freq}]}, or null), windows ([{service, min_s}]), liveness ([{service, evidence}]) and findings (warnings, each {code, severity, face, at}). Key expressions within a rule, rules, windows, liveness entries and evidence are sorted by their bytes; findings by face (null first), at, then code. freq is 1/interval_s as an IEEE 754 double. Or expect is {refused: [finding...]}: the policy's errors and warnings (§2.1), or the deployment's errors (service_unknown, contract_unknown), sorted the same way."
 }

@@ -1,0 +1,51 @@
+# link.v1 §2.3, §2.7, §2.8, §2.12 (text 0.13): frame resources (core §7.7)
+# across a face, for plan.json. Each frame resource exposed `link` crosses
+# and is never downsampled: frames/link with a horizon is liveness
+# evidence; frames/sample's span and frames/minute's period are shorter
+# than a face's minute; frames/wide's largest frame passes a 220-byte
+# batch, it declares history, and its span is above half its horizon, as
+# W108 warns too. frames/home stays home, and level, a plain stream, is
+# downsampled.
+[interface]
+name  = "sampler"
+major = 1
+minor = 0
+uses  = ["link.v1", "freshness.v1", "timing.v1"]
+
+[schemas]
+packed = ["sampler.json"]
+
+[resources."frames/link"]
+kind        = "stream"
+type        = "packed:sampler#Link"
+frame       = { records = 1 }
+annotations = { "link.exposure" = "link", "freshness.ttl_s" = 150 }
+
+[resources."frames/sample"]
+kind        = "stream"
+type        = "packed:sampler#Sample"
+frame       = { records = 3, step_ms = 10000, jitter_ms = 500, keyframe_every = 3 }
+annotations = { "link.exposure" = "link" }
+
+[resources."frames/minute"]
+kind        = "stream"
+type        = "packed:sampler#Link"
+frame       = { records = 1, keyframe_every = 4 }
+annotations = { "link.exposure" = "link", "timing.period_ms" = 30000 }
+
+[resources."frames/wide"]
+kind        = "stream"
+type        = "packed:sampler#Wide"
+frame       = { records = 4, step_ms = 60000 }
+history     = true
+annotations = { "link.exposure" = "link", "freshness.ttl_s" = 300 }
+
+[resources."frames/home"]
+kind  = "stream"
+type  = "packed:sampler#Link"
+frame = { records = 1 }
+
+[resources.level]
+kind        = "stream"
+type        = "packed:sampler#Link"
+annotations = { "link.exposure" = "link" }

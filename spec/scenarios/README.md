@@ -18,6 +18,7 @@ with these scenarios written, and the reference runtime's tests run them.
 | [`security.md`](security.md) | §11, a tool's inspection; §4.2's admin space; the admin read admitting no GET of a node's declaration records |
 | [`constrained.md`](constrained.md) | §1.6, R7, §8.5, §12 |
 | [`budget.md`](budget.md) | §2.7: what a path drops and a reader sees, a stalled reader; an owner keeping its bound and its rate |
+| [`frames.md`](frames.md) | §4.3, §7.7: an owner's frames, their seqs, keyframes, delta records, deadbands and times; a reader's field states at a gap, a new run and a late join |
 
 The reader's rules among them are
 [`../observer.md`](../observer.md)'s: a scenario's core section leads there

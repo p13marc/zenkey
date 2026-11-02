@@ -51,14 +51,14 @@ The owner, consumer and caller sections each point to them.
 
 | Role | Rules |
 |---|---|
-| [Owner](#owner) | 70 |
+| [Owner](#owner) | 71 |
 | [Consumer](#consumer) | 20 |
 | [Caller](#caller) | 13 |
 | [Deployment](#deployment) | 17 |
 | [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 63, 25 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 61 |
-| Every rule, once | 226 |
-| [Rule ids](#rule-ids) | 84 |
+| Every rule, once | 227 |
+| [Rule ids](#rule-ids) | 85 |
 
 ## Owner
 
@@ -204,6 +204,7 @@ The owner, consumer and caller sections each point to them.
 
 | Rule | Sentence | Evidence |
 |---|---|---|
+| [§7.7](core.md#77-frames) | An owner MUST NOT put a mutation (§7.5) on a frame resource's key: a reader has no reading of one (below). | `[Sc: frames.md §1]` |
 | [§7.7](core.md#77-frames) | An owner MUST give a frame the seq of its record 0, and the frame after it the seq that follows its last record's. | `[Sc: frames.md §1]` |
 | [§7.7](core.md#77-frames) | An owner MUST start a key's first frame in a run with a full record. | `[Sc: frames.md §1, §5]` |
 | [§7.7](core.md#77-frames) | **Full records.** … An owner MUST write a full record at least once every `keyframe_every` records. | `[Sc: frames.md §1, §5]` |
@@ -283,9 +284,9 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§7.7](core.md#77-frames) | A consumer or a tool MUST turn every field `unknown` at a gap, at a rewind, and at a frame of a run other than the one it holds, its first frame included. | `[Sc: frames.md §2, §5, §6]` |
-| [§7.7](core.md#77-frames) | A consumer or a tool MUST turn a field with a deadband `unknown` at the `max_records`-th record after the one that included it, when that record omits it too. | `[Sc: frames.md §4]` |
-| [§7.7](core.md#77-frames) | A consumer or a tool MUST NOT show or use an `unknown` or `absent` field as a value, its last value or 0 among them. | `[Sc: frames.md §2, §6]` |
+| [§7.7](core.md#77-frames) | A consumer or a tool MUST turn every field `unknown` at a gap, at a rewind, and at a frame of a run other than the one it holds, its first frame included. | `[F: frame/apply.json]` `[Sc: frames.md §2, §5, §6]` |
+| [§7.7](core.md#77-frames) | A consumer or a tool MUST turn a field with a deadband `unknown` at the `max_records`-th record after the one that included it, when that record omits it too. | `[F: frame/apply.json]` `[Sc: frames.md §4]` |
+| [§7.7](core.md#77-frames) | A consumer or a tool MUST NOT show or use an `unknown` or `absent` field as a value, its last value or 0 among them. | `[F: frame/apply.json]` `[Sc: frames.md §2, §6]` |
 
 ### [core §8.1 Tokens](core.md#81-tokens)
 
@@ -456,9 +457,9 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§7.7](core.md#77-frames) | A consumer or a tool MUST turn every field `unknown` at a gap, at a rewind, and at a frame of a run other than the one it holds, its first frame included. | `[Sc: frames.md §2, §5, §6]` |
-| [§7.7](core.md#77-frames) | A consumer or a tool MUST turn a field with a deadband `unknown` at the `max_records`-th record after the one that included it, when that record omits it too. | `[Sc: frames.md §4]` |
-| [§7.7](core.md#77-frames) | A consumer or a tool MUST NOT show or use an `unknown` or `absent` field as a value, its last value or 0 among them. | `[Sc: frames.md §2, §6]` |
+| [§7.7](core.md#77-frames) | A consumer or a tool MUST turn every field `unknown` at a gap, at a rewind, and at a frame of a run other than the one it holds, its first frame included. | `[F: frame/apply.json]` `[Sc: frames.md §2, §5, §6]` |
+| [§7.7](core.md#77-frames) | A consumer or a tool MUST turn a field with a deadband `unknown` at the `max_records`-th record after the one that included it, when that record omits it too. | `[F: frame/apply.json]` `[Sc: frames.md §4]` |
+| [§7.7](core.md#77-frames) | A consumer or a tool MUST NOT show or use an `unknown` or `absent` field as a value, its last value or 0 among them. | `[F: frame/apply.json]` `[Sc: frames.md §2, §6]` |
 
 ### [core §8.1 Tokens](core.md#81-tokens)
 
@@ -901,4 +902,5 @@ MAY, and a row with no keyword, are listed here alone.
 | [W104](core.md#92-the-lints) | implementation | core §9.2 The lints | `minor` is absent |
 | [W105](core.md#92-the-lints) | implementation | core §9.2 The lints | an annotation key outside its profile's vocabulary … |
 | [W107](core.md#92-the-lints) | implementation | core §9.2 The lints | the file is not named `<name>.v<major>.toml` |
+| [W108](core.md#92-the-lints) | implementation | core §9.2 The lints | a frame resource whose interval (§7.7) is above half its `freshness.ttl_s` ([`freshness.v1`](profiles/freshness/v1.md) §2.4) … |
 

@@ -357,7 +357,21 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   `freshness.v2` owner needs its latest heartbeat in the window in step
   with the view (`window_unconfirmed`, four `conclusions.json` cases), and
   §2.14 step 5 attributes only a stamp the owner set; `freshness.v2` is
-  draft, used by the adopters and zenwatch.
+  draft, used by the adopters and zenwatch. Core 0.87 (#981's K3) has
+  owners write frames: `scenarios/frames.md` §1–§6 (each frame alone, a
+  lost delta frame, scheduled and measured time, the deadband, a new run,
+  a late joiner; a lost frame is one whose seqs the owner takes and never
+  puts), §7.7's "Never a mutation" (an owner MUST NOT put one on a frame
+  resource) and its MAY to end a frame early, a "History" paragraph (the
+  seed's merge hands the reader the cache's frames first, no rule new),
+  the reader MUSTs citing `frame/apply.json` too, and W108 (a frame's
+  interval above ttl/2, `contracts/w108-frame-horizon`); 227 rules.
+  `link.v1` 0.13: §2.8 a frame never downsampled (MUST NOT), the plan's
+  `frame_over_interval`, `frame_over_batch` and `history_on_frame`,
+  §2.12's `interval_over_horizon` reading a frame's interval;
+  `plan.json`'s case loads `conformance/contracts/sampler.v1.toml`, a
+  directory `zenkey-model/tests/profiles.rs`'s walker reads as it reads
+  `v2/`.
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`

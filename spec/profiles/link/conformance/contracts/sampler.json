@@ -1,0 +1,162 @@
+{
+  "description": "link.v1 §2.8 (text 0.13): sampler.v1's record types. Link is zenoh-modem's four link readings, Sample a sampler's record, and Wide sixteen 32-bit counters, whose four-record frame passes a 220-byte batch.",
+  "types": {
+    "Link": {
+      "fields": [
+        {
+          "name": "dropped",
+          "type": "counter",
+          "width": 32,
+          "optional": true
+        },
+        {
+          "name": "queue_depth",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 1022,
+          "reserved": [
+            "out_of_range"
+          ],
+          "optional": true
+        },
+        {
+          "name": "duty_available",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 1,
+          "optional": true
+        },
+        {
+          "name": "duty_wait_ms",
+          "type": "fixed",
+          "minimum": "0",
+          "maximum": "3600000",
+          "resolution": "100",
+          "reserved": [
+            "out_of_range"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    "Sample": {
+      "fields": [
+        {
+          "name": "temperature",
+          "type": "fixed",
+          "minimum": "-40",
+          "maximum": "85",
+          "resolution": "0.5"
+        },
+        {
+          "name": "rssi",
+          "type": "int",
+          "minimum": -140,
+          "maximum": -20,
+          "reserved": [
+            "not_available"
+          ]
+        },
+        {
+          "name": "link_up",
+          "type": "bool"
+        },
+        {
+          "name": "mode",
+          "type": "enum",
+          "values": [
+            "idle",
+            "rx",
+            "tx"
+          ],
+          "escape": true,
+          "optional": true
+        }
+      ]
+    },
+    "Wide": {
+      "fields": [
+        {
+          "name": "c0",
+          "type": "counter",
+          "width": 32
+        },
+        {
+          "name": "c1",
+          "type": "counter",
+          "width": 32
+        },
+        {
+          "name": "c2",
+          "type": "counter",
+          "width": 32
+        },
+        {
+          "name": "c3",
+          "type": "counter",
+          "width": 32
+        },
+        {
+          "name": "c4",
+          "type": "counter",
+          "width": 32
+        },
+        {
+          "name": "c5",
+          "type": "counter",
+          "width": 32
+        },
+        {
+          "name": "c6",
+          "type": "counter",
+          "width": 32
+        },
+        {
+          "name": "c7",
+          "type": "counter",
+          "width": 32
+        },
+        {
+          "name": "c8",
+          "type": "counter",
+          "width": 32
+        },
+        {
+          "name": "c9",
+          "type": "counter",
+          "width": 32
+        },
+        {
+          "name": "c10",
+          "type": "counter",
+          "width": 32
+        },
+        {
+          "name": "c11",
+          "type": "counter",
+          "width": 32
+        },
+        {
+          "name": "c12",
+          "type": "counter",
+          "width": 32
+        },
+        {
+          "name": "c13",
+          "type": "counter",
+          "width": 32
+        },
+        {
+          "name": "c14",
+          "type": "counter",
+          "width": 32
+        },
+        {
+          "name": "c15",
+          "type": "counter",
+          "width": 32
+        }
+      ]
+    }
+  }
+}
