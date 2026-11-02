@@ -7,6 +7,61 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.6 — 2026-11-02: editorial: Appendix B reads `modem.v3` 3.3's frames, no rule changed (#991)
+
+#991 gives `modem.v3` revision 3.3. Its readings cross in three frame
+resources over one record of all 73, one per horizon a medium can carry:
+`frames/fast` (300 s), `frames/slow` (1,800 s) and `frames/paid`
+(3,600 s). 3.2's nine are deprecated and `host`. zenoh-modem's faces
+each list one, and two of their routers run a longer lease.
+
+**Changed: Appendix B, which states no rule.**
+- **The media table's SF9 row**, zenoh-modem's alone, is 480 s with 4
+  keep-alives: the interval is the frame's 2 minutes, where 240 s put it
+  at 3.2's minute. 1,440 keep-alives a day, 0.18 false closes.
+- **zenoh-modem's faces**: RF and SF7 list `frames/fast` at 60 s, SF9 at
+  120 s with a full record every 15 minutes, SF12 `frames/slow` at 900 s,
+  and SBD `frames/paid` at 1,800 s.
+  - SF12's router runs 3,600 s with 4 keep-alives, so its interval is the
+    frame's. The reference's SF12 example keeps its 1,080 s row.
+  - SF12's `interval_over_horizon`, `horizon_under_face` and
+    `keep_alive_not_suppressed` are gone. SF9 draws `frame_over_batch`:
+    the 207 B full record is above its 117 B batch.
+  - Every face's frame is liveness evidence, SBD's among them.
+
+**Deliberately not changed.**
+- **No rule or scenario changed.** `plan.json`'s last five cases take
+  the new policies, and their plans are the reference's again once
+  re-derived. No other case moves.
+- **The status stays `experimental`.** `modem.v3` 3.3 still lists
+  `link.v1`, so no adopter's mapping uses this text (`../README.md`).
+  Whether it should is the maintainer's call.
+- **The reference's media examples** (`examples/zk2/link/media/`) are
+  unchanged, SF12's 1,080 s among them.
+- **It restates `link.v1` text 0.14 still.** 0.15 and 0.16 changed no
+  rule.
+
+## 0.16 — 2026-11-02: editorial: Appendix B reads `modem.v3` 3.3, no rule changed (#991)
+
+`modem.v3` 3.3 (#991) exposes three frame resources over one record of
+all 73 readings, and deprecates 3.2's nine, now `host`. This text's
+Appendix B and its head example described 3.2.
+
+**Changed: wording that states no rule.**
+- **Appendix B's RF plan** is the one `plan.json`'s first case derives
+  from 3.3. `stream:modem.v3` denies 3.2's nine frames by name beside the
+  seven reading subtrees. `frames/fast`, `frames/slow` and `frames/paid`
+  cross whole, and each is liveness evidence, its horizon at least twice
+  the face's interval. The packed states are under `state`, denied
+  wholesale with the rest.
+- **The head's contract example** is `frames/fast`, in place of 3.2's
+  `frames/link`.
+
+**Deliberately not changed.**
+- **No rule, fixture case or scenario changed.** `plan.json`'s first
+  two cases and `lints.json`'s zenoh-modem cases read the contract from
+  `examples/`, so their outputs follow it once re-derived.
+
 ## link.v2 0.5 — 2026-11-02: editorial: Appendix B gives zenoh-modem's faces, no rule changed (#988 L5)
 
 #988's L5 moves zenoh-modem's routers onto this text. Five face policies,
