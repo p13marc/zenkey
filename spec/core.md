@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.91** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.92** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -1444,6 +1444,24 @@ Anything else is no metadata: bytes that are not JSON, a value that is not
 an object, or a member of another type, `null` included. A call is never
 refused for its attachment. `[Sc: operations.md §7]`
 
+**The forms.** §7.5 defines a call's three forms: its request, a value
+and an error. No rule at this version has a caller or an owner write
+them. A call's request, its values and its errors keep the wire this
+section and §5.2 describe.
+- **The as-of mark.** A value's and an error's run and seq are the
+  replying instance's **as-of mark**. The run is the one it writes under
+  when it replies (§4.3). The seq is the last it minted for state and
+  events under that run, or 0 when it has minted none. A reply mints no
+  seq.
+- **What it tells a caller.** It learns which run answered, without
+  presence. A run that changes is a new instance, or one that took a new
+  run (§4.3). Within one run, it can order the reply against the state it
+  holds, by seq.
+- **A request** carries no run: its caller need not be an owner.
+- **An error's run** attributes nothing. A `reply_err` still carries no
+  key, so a fan-out's errors stay unattributed (above). A tool that holds
+  descriptors may map the run to the instance that states it (§3.3).
+
 ### 5.2 The error envelope
 
 A failed call replies with `reply_err` and an envelope with these fields:
@@ -1544,10 +1562,33 @@ The decoding edges, each pinned by a case `[F: errors/cases.json]`:
   `message` decodes as `""` and is accepted, since protobuf cannot tell the
   two apart. A `cause` present but empty is not a valid cause (`cause`).
 
+**The error form.** §7.5's error carries the same fields in bytes, under
+the `Encoding` `zenoh/bytes`. No rule at this version has an owner answer
+in it: a failed call's `reply_err` carries the envelope above (§5.1, "The
+forms").
+- **The code and the cause** are numbers, in the order of the code table
+  above and of `build`, `config` and `capability`.
+- **The message** is optional, and at most 255 bytes of UTF-8.
+- **The detail** is the bytes of a value of the operation's `error` type,
+  encoded as that type says. A JSON Schema type's are JSON or CBOR, on
+  the operation's `encoding`. A protobuf type's are its encoded message,
+  and a raw type's are themselves, never base64.
+- **Its refusals.** §7.5's parse refuses a cause or a detail where the
+  envelope's decoding does, with the same tokens, `cause` and `detail`.
+  No code is unknown: three bits hold eight.
+
+`[F: errors/forms.json]`
+
 **Transport errors.** Zenoh reports some failures locally, such as a query
 timeout, as a reply error with encoding `zenoh/string`. A tool tells the two
 apart by encoding: only the three encodings above carry an envelope, and
 any other reply error is the transport's.
+- **A router's own.** A router answers a query its timeout ends with a
+  reply error of its own: the 7 bytes `Timeout`, under `zenoh/bytes`
+  (Appendix B). It is the transport's by the rule above.
+- **It is no error form either.** Its first byte, `T`, is `0x54`: a
+  value's CH, which a `reply_err` does not carry (`sample_kind`, §7.5).
+  `[F: errors/forms.json]`
 
 ---
 
@@ -1637,10 +1678,14 @@ listed files.
 `[F: contracts/e023-type, e024-ambiguous, e025-media-param, e029-schema, e032-ref-dangling, e032-ref-outside, ok-json-qualified, ok-protobuf-well-known]`
 
 **Where a packed type goes.** A packed type MUST be the `type` of a
-stream, a state or an event, never an explicit stream's (E044). It is
-never an attachment or an operation's type either. Those travel with no
-envelope, so no reader could check the record's tag.
-`[F: contracts/e044-packed-place, ok-packed]`
+stream that is not explicit, a state or an event, or an operation's
+`request`, `response`, `error` or `summary` (E044).
+- **An operation's types** travel in §7.5's forms, whose CH carries the
+  tag.
+- **An explicit stream's type and an attachment** travel with no CH, so
+  no reader could check the record's tag. A packed type is never one.
+
+`[F: contracts/e044-packed-place, ok-packed, ok-packed-operation]`
 
 ### 7.2 Encodings and rendering
 
@@ -1749,14 +1794,23 @@ sample, before its record. This section defines its bytes. §4.3 adopts
 it: which samples carry one, what a run names and how a seq counts. §7.2
 says the `Encoding` of a sample that carries one.
 
+An operation's call has **forms** of the same shape: its request, its
+value and its error. This section defines their bytes too. §5.1 says what
+a value's and an error's run and seq name, and §5.2 what an error holds.
+No rule at this version has a caller or an owner write them (§5).
+
 **The layouts.** A put carries an envelope as its payload, and a delete as
-its attachment:
+its attachment. A call's query, reply and reply error carry a form as
+their payload:
 
 ```text
 mutation, a put's payload            CH · run · seq · record
 delete, a delete's attachment        CH · run · seq
 heartbeat, a put's payload           CH · run · seq · body
 frame, a put's payload               CH · run · seq · body
+request, a query's payload           CH · record
+value, a reply's payload             CH · run · seq · record
+error, a reply error's payload       CH · run · seq · error
 ```
 
 **The header byte, CH,** holds three fields. Its bits are numbered from 7,
@@ -1774,27 +1828,36 @@ run. A delete's is `0x20` or `0x30`. And `0x1b` is `000 1 1011`: form 0, a
 32-bit run and tag 11. Only the `packed` kind defines a tag (§7.6). A
 delete carries no record, so its tag is 0. A heartbeat's tag names a
 contract revision (below). A frame's tag is its declaration's (§7.7).
+- **A request's** tag is its operation's `request` type's. Its width bit
+  is 0, since it carries no run.
+- **A value's** is the operation's `response` type's, or its `summary`
+  type's on a summary reply (O6).
+- **An error's** is the operation's `error` type's, whether a detail
+  follows or not. It is 0 for an operation that declares none.
 
-**The forms.** Each form has one code. This version defines four of
-them, and reserves the other four for later versions:
+**The forms.** Each form has one code. This version defines six of
+them, and reserves the other two for later versions:
 
 | Code | Form | What it carries |
 |---|---|---|
 | 0 | mutation | a put's run and seq, then its record |
 | 1 | delete | a delete's run and seq, as its attachment, and no record |
-| 2 | value | reserved: an operation's reply value |
-| 3 | error | reserved: an operation's error reply (§5.2) |
+| 2 | value | a call's request, as its query's payload; and a reply's run and seq, then its record |
+| 3 | error | a reply error's run and seq, then §5.2's error in bytes (below) |
 | 4 | event | reserved: an event's occurrence |
 | 5 | frame | a stream's records under one header, a put's payload (§7.7) |
 | 6 | heartbeat | an owner's confirmation of the state it holds for one interface (below) |
 | 7 | snapshot | reserved: a collection's state in one reply |
+
+A value carried by a query is a **request**. It has no run and no seq.
 
 **The run and the seq.** The run is an unsigned integer of 16 or 32 bits,
 as CH's width bit says. The seq is an unsigned 24-bit integer, from 0 to
 16,777,215. Both are written big-endian, the most significant byte first.
 Together they are the envelope's stamp, the sample's in-band stamp.
 This section fixes their widths and their byte order. What a run names,
-and how a seq counts, are §4.3's.
+and how a seq counts, are §4.3's. A value's and an error's are the
+replying instance's as-of mark, which §5.1 defines.
 
 **The record** is every byte after a mutation's seq, possibly none. It
 is read as the resource's type says (§7.1). A heartbeat and a frame carry
@@ -1803,12 +1866,55 @@ heartbeat's is read with its covered revision's collections (below). A
 frame's is read with its declaration (§7.7). A sample that carries
 an envelope has the Encoding `zenoh/bytes`, whatever its record's type:
 the contract names the type.
+- **A request's record** is every byte after its CH, possibly none. It is
+  read as the operation's `request` type says.
+- **A value's** is every byte after its seq, possibly none. It is read as
+  the `response` type says, or the `summary` type on a summary reply.
+- **A form's sample** has the Encoding `zenoh/bytes` too: a query, a
+  reply and a reply error alike.
+
+**After an error's seq** come one byte, then a message and a detail,
+each where the byte says so:
+
+```text
+error      byte · message, when its bit is 1 · detail, when its bit is 1
+message    its length in bytes, from 0 to 255, in one byte · that many bytes of UTF-8
+detail     every byte after the message, or after the byte without one
+```
+
+The byte holds five fields, its bits numbered as CH's are:
+
+| Bits | Field | Value |
+|---|---|---|
+| 7–5 | code | §5.2's code, numbered in its table's order: 0 `invalid_request`, 1 `not_found`, 2 `unavailable`, 3 `forbidden`, 4 `fanout_forbidden`, 5 `busy`, 6 `internal`, 7 `app` |
+| 4–3 | cause | 0 for none, 1 `build`, 2 `config`, 3 `capability` |
+| 2 | detail | 1 when a detail follows |
+| 1 | message | 1 when a message follows |
+| 0 | extension | 0. A later version may define 1. |
+
+So `0xa0` is `busy`, with no cause, detail or message. `0x50` is
+`unavailable` for `config`, and `0xe4` is `app` with a detail.
+- **The message** is for a human, never parsed (§5.2). An empty one has
+  its bit set and length 0, and reads back empty, not absent.
+- **The detail** is a value of the operation's `error` type, encoded as
+  that type says. It can be empty, as a protobuf message with no field
+  written is.
+- **Writing a message.** An implementation that writes an error MUST cut
+  a message longer than 255 bytes to its longest prefix of whole
+  characters within 255 bytes. `[F: errors/forms.json]`
+- **Writing what the parse refuses.** An implementation MUST NOT write
+  an error with a cause on a code other than `unavailable`, `unavailable`
+  without one, or a detail on a code other than `app`.
+  `[F: errors/forms.json]`
 
 **Sizes.** A mutation is 6 bytes over its record, or 8 with a 32-bit run.
 So is a heartbeat over its body, and a frame over its body.
 A delete's attachment is 6 or 8 bytes, and an attachment costs 2 more on
 the wire. Beside them, a Zenoh timestamp is 26 bytes. A predefined
 Encoding is 1 byte, and `zenoh/bytes` costs none (Appendix B).
+- **A request** is 1 byte over its record, and a value 6 or 8.
+- **An error** is 7 bytes, or 9 with a 32-bit run. A message adds its
+  length and a byte, and a detail its own bytes.
 
 **Why the payload.** Zenoh gives a sample one attachment.
 [`telemetry.v1`](profiles/telemetry/v1.md)'s Epoch, a contract's declared
@@ -1817,28 +1923,47 @@ put's envelope leads its payload. A delete has no payload, so its envelope
 is its attachment. It keeps CH, which states the run's width and lets a
 reader refuse an attachment that is not an envelope.
 
-**Parsing.** An envelope is parsed without the contract, as a key is
-(§1.1). The parser knows the sample's kind, put or delete. For a frame it
-also knows its key's kind token, which the grammar reads from the key
-alone. It knows nothing more. So it reports a mutation's, a heartbeat's
-or a frame's tag, and checks none: §7.6's reader, a heartbeat's reader
-and §7.7's do. An
-implementation MUST refuse an envelope for the first of these
+**Parsing.** An envelope or a form is parsed without the contract, as a
+key is (§1.1). The parser knows what carries the bytes, its **sample**:
+- a put's payload, or the payload of a GET's reply that represents a put
+  (S2);
+- a delete's attachment, or a `reply_del`'s (S2);
+- a call's query, its reply or its `reply_err`, each one's payload.
+
+For a frame it also knows its key's kind token, which the grammar reads
+from the key alone. It knows nothing more. So it reports the tag of every
+form but a delete, and checks none: §7.6's reader, a heartbeat's reader
+and §7.7's do. Of an error, it reads the byte and the message, and
+takes the detail's bytes unread. An
+implementation MUST refuse an envelope or a form for the first of these
 that applies, in this order:
 - no byte at all, so no CH (`short`);
-- a reserved form (`form`);
-- a form the sample's kind does not carry: a delete on a put, or a
-  mutation, a heartbeat or a frame as a delete's attachment (`sample_kind`);
+- a reserved form, 4 or 7 (`form`);
+- a form its sample does not carry (`sample_kind`). A put carries a
+  mutation, a heartbeat or a frame, and a delete's attachment a delete.
+  A query and a reply carry a value, and a `reply_err` an error;
 - a frame on a key whose kind token is not `stream`, such as a state's,
   an event's or an `@stream` key (`key_kind`);
 - a delete whose tag is not 0 (`tag`);
-- fewer bytes than CH, the run and the seq need (`short`);
-- a byte after a delete's seq (`trailing`).
+- a request whose width bit is 1 (`request_run`);
+- fewer bytes than CH, the run and the seq need, and an error's byte
+  after them (`short`);
+- a byte after a delete's seq (`trailing`);
+- then, reading an error's byte and what follows it:
+  - a cause on a code other than `unavailable`, or none on `unavailable`
+    (`cause`);
+  - a detail on a code other than `app` (`detail`);
+  - the extension bit set (`extension`);
+  - a message cut short: no length byte, or fewer bytes than it states
+    (`short`);
+  - a message that is not UTF-8, as RFC 3629 defines it (`utf8`);
+  - a byte after the message, or after the error's byte without one,
+    where no detail follows (`trailing`).
 
 `[F: envelope/vectors.json, carries.json]`
 
-Every envelope an implementation accepts MUST write back to the same
-bytes. `[F: envelope/vectors.json]`
+Every envelope and form an implementation accepts MUST write back to the
+same bytes. `[F: envelope/vectors.json]`
 
 **The heartbeat.** A **heartbeat** is a put an owner sends for one
 interface it serves, its **covered interface**. It vouches for the members of that interface's
@@ -3032,7 +3157,7 @@ not. An implementation MUST report, for each fixture, exactly the codes
 | E041 | a packed field whose width is not from 1 to 64 bits, or an enum whose `width` holds fewer codes than it needs (§7.6) | per field |
 | E042 | a name repeated in a packed file: a field's in its record, a value in its enum, or a reserved code in its list | per repeat, after the first |
 | E043 | a packed field whose `type` names no field type of §7.6 | per field |
-| E044 | a packed type with no envelope to carry it: an explicit stream's type, an attachment, or an operation's type (§7.1) | per reference |
+| E044 | a packed type with no CH to carry its tag: an explicit stream's type, or an attachment (§7.1) | per reference |
 | E045 | an extension marker misplaced: a field after a marker that is not optional, or a marker right after another (§7.6) | per field or marker |
 | E046 | `frame` on a resource that is not a plain stream, or whose template has a parameter (§7.7) | per occurrence |
 | E047 | a frame resource's type that is not packed, or a packed type with an extension marker (§7.7) | per resource |
@@ -4160,12 +4285,12 @@ descriptor checker. A class holds its role's rules in this text and in
 
 **How a static rule binds.** A static rule binds an implementation where
 it does what the rule governs. Such acts are parsing or building a key,
-parsing or writing an envelope (§7.5), a packed record (§7.6) or a
-frame (§7.7), reading a
-catalog or checking its succession (§8.6), slugging a value, linting a
-contract, building or verifying a bundle, checking a history and
-classifying a revision. A rule on what a contract
-states binds it through the contracts it writes and the lints it runs.
+and parsing or writing an envelope or a call's form (§7.5), a packed
+record (§7.6) or a frame (§7.7). So are reading a catalog or checking its
+succession (§8.6), slugging a value, linting a contract, building or
+verifying a bundle, checking a history and classifying a revision. A
+rule on what a contract states binds it through the contracts it writes
+and the lints it runs.
 §9.8's publication rules bind whoever publishes a revision: its CI, and the
 person who accepts it.
 
@@ -4376,6 +4501,14 @@ Appendix B. These are the ones the rules above cite:
 - A query timeout arrives as a reply error. A liveliness GET's too: one
   that reaches its timeout ends with the error reply `Timeout` (encoding
   `zenoh/string`), and one the routers finished ends with none.
+- A router that routed a query answers it when the query's timeout ends
+  before the queryable's final reply. Its answer is a reply error of its
+  own, the 7 bytes `Timeout` under the empty Encoding, `zenoh/bytes`
+  (`dispatcher/queries.rs`, `QueryCleanup`). The querier's own session
+  ends a query at its timeout with `Timeout` under `zenoh/string`
+  (`api/session.rs`). The `zenoh` crate and its storage manager send no
+  other reply error of their own. This is read from zenoh 1.10.1's
+  source, not measured. §5.2 tells both from an owner's.
 - A client's or a peer's runtime ends a liveliness GET its routers have
   not finished at `routing/interests/timeout` (10 s by default) with the
   final reply alone and no error reply, before the GET's own timeout when
@@ -4808,8 +4941,8 @@ section each was written against, whose pointer leads on.
 | `conformance/descriptors/` | §3.3 |
 | `conformance/budget/` | §2.7, `lossless.json` and the reader's stall included |
 | `conformance/seed/` | §4.2 a late joiner's merge: `merge.json` the Zenoh timestamps' order, unstamped samples, and a tool's across two ids; `inband.json` §4.3's in-band stamps, plain and serial order, and a tool's and a consumer's across two runs |
-| `conformance/errors/` | §5.2 |
-| `conformance/envelope/` | §7.5 |
+| `conformance/errors/` | §5.2: `cases.json` the envelope, `forms.json` §7.5's error form and a router's `Timeout` |
+| `conformance/envelope/` | §7.5, a call's forms included |
 | `conformance/frame/` | §7.7 |
 | `conformance/catalog/` | §8.6 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
@@ -4941,6 +5074,12 @@ brief:
   (descriptors).
 - **`bundles/`, `history/`, `errors/`:** expected tags, or the decoded
   value. The tags' meanings are §9.6's, §9.7's and §5.2's.
+  - **`errors/forms.json`** holds §7.5's error form. An error's byte → its
+    code, its cause and its two bits, or the refusal (`bytes`). An error
+    and its stamp → the payload's bytes, or the writer's refusal
+    (`writes`). A reply error's `Encoding` and payload → the error it
+    carries, or the refusal (`reads`). Its tokens are §7.5's, and
+    `encoding` for a payload under another `Encoding`.
 - **`budget/`**: a bound from the contract's `cardinality` and
   each instance's stated one (`bounds.json`); a population's verdict and
   reason class from a kind, a bound and one reading (`population.json`);
@@ -4966,17 +5105,22 @@ brief:
     neither. They give which arrivals a tool's merge keeps, and for a
     state key, which a consumer accepts.
 - **`envelope/`**: one byte → CH's form, run width and tag
-  (`vectors.json`'s `headers`). An envelope's bytes in hex, and the kind
-  of the sample that carries them, `put` for a payload or `delete` for an
-  attachment → the parse, or the refusal's token, the first that applies
-  in §7.5's order (`cases`). The parse is the form, the run's width in
-  bits, the run, the seq, the tag, and the record in hex, `null` for a
-  delete. Every header and every accepted case writes back to its bytes.
-  A key, as a session hears it, and the sample's `Encoding` → whether the
-  sample carries an envelope (`carries.json`'s `cases`, read by
-  [`observer.md`](observer.md) §7.3). A key and a put's payload under
-  `zenoh/bytes` → how it reads: plain, its form, or the refusal's token
-  (`carries.json`'s `reads`).
+  (`vectors.json`'s `headers`). An envelope's or a form's bytes in hex,
+  and the sample that carries them → the parse, or the refusal's token,
+  the first that applies in §7.5's order (`cases`).
+  - **The sample** is `put` or `delete` for an envelope, and `query`,
+    `reply` or `reply_err` for a call's form.
+  - **The parse** is the form, the run's width in bits, the run, the seq,
+    the tag, and the record in hex. The record is `null` for a delete and
+    an error, and a request's width, run and seq are `null`.
+  - **An error's parse** adds `error`: its code, its cause, its message
+    and its detail in hex, each absent one `null`.
+  - Every header and every accepted case writes back to its bytes.
+  - **`carries.json`:** a key, as a session hears it, and the sample's
+    `Encoding` → whether the sample carries an envelope (`cases`, read by
+    [`observer.md`](observer.md) §7.3). A key and a put's payload under
+    `zenoh/bytes` → how it reads: plain, its form, or the refusal's token
+    (`reads`).
 - **`frame/`**: one packed document, shared by every case (`schema`).
   A record type and a `frame` table → the frame form, its sha256, its
   tag, the count's and the offset's widths, and the span (`layouts.json`).
