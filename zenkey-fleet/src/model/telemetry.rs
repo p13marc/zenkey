@@ -1886,9 +1886,10 @@ mod tests {
     /// `spec/profiles/telemetry/conformance/v2/continuity.json` through
     /// the book (#983 T2): each case's frames, their bodies under their
     /// layout's tag and their run and seq, folded by `TelemetryBook::frame`
-    /// over `meterframe.v1`'s frame resources, the scenarios' contract;
-    /// every pair the book reads is the fixture's, in order, and each
-    /// series member keeps it.
+    /// over `meterframe.v1`'s frame resources, the scenarios' contract, and
+    /// a frame naming its own `layout` over that layout, another revision's
+    /// resource on the same key; every pair the book reads is the
+    /// fixture's, in order, and each series member keeps it.
     #[test]
     fn v2_continuity_cases_read_through_the_book() {
         use zenkey_model::wire::{Run, Seq, Stamp};
@@ -1919,6 +1920,40 @@ mod tests {
                 .map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap())
                 .collect()
         };
+        // A frame naming its own `layout` is another revision's frame of the
+        // same key (v2 §2.20): the fixture's layout of that name, its series
+        // mirroring meterframe.v1's streams, as a tool holding both
+        // revisions resolves that frame (`tests/profiles.rs` reads it so).
+        let packed = zenkey_model::packed::PackedDoc::read(&doc["schema"]);
+        assert!(packed.findings.is_empty(), "{:?}", packed.findings);
+        let own = |m: &Arc<MetricResource>, name: &str| -> Arc<MetricResource> {
+            let l = doc["layouts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|l| l["name"] == name)
+                .expect("a layout of the fixture's");
+            let record = packed.types[l["record"].as_str().unwrap()]
+                .as_ref()
+                .expect("its record's layout");
+            let spec: zenkey_model::authoring::FrameSpec =
+                serde_json::from_value(l["frame"].clone()).unwrap();
+            let params = zenkey_model::frame::FrameParams::resolve(&spec).unwrap();
+            let layout = zenkey_model::frame::Layout::of(record, &params).unwrap();
+            let ann = BTreeMap::from([(tm::SERIES.to_owned(), l["series"].clone())]);
+            let series = frames::series(layout.fields(), &ann, &|n| {
+                frames::mirror_in(rev.contract(), n)
+            });
+            assert!(series.declared().is_some(), "{name}: {series:?}");
+            Arc::new(MetricResource {
+                frame: Some(Arc::new(FrameMetric {
+                    layout: Arc::new(layout),
+                    series,
+                })),
+                ..(**m).clone()
+            })
+        };
+        let mut owned = 0;
         for case in doc["cases"].as_array().unwrap() {
             let note = case["note"].as_str().unwrap();
             let m = metric(case["layout"].as_str().unwrap());
@@ -1934,8 +1969,17 @@ mod tests {
                     seq: Seq::new(u32::try_from(frame["seq"].as_u64().unwrap()).unwrap()).unwrap(),
                 };
                 let arrival = frame["arrival_ns"].as_u64().unwrap_or(0);
+                let fm = match frame["layout"].as_str() {
+                    Some(name) => {
+                        owned += 1;
+                        own(&m, name)
+                    }
+                    None => Arc::clone(&m),
+                };
+                let f = fm.frame.clone().expect("its series");
+                let series = f.declared().expect("declared");
                 let seen = book.frame(
-                    &m,
+                    &fm,
                     MetricSample {
                         key: key.clone(),
                         delete: false,
@@ -2005,6 +2049,7 @@ mod tests {
                 assert_eq!(member.tally.total(), fixture as u64, "{note}: {}", s.field);
             }
         }
+        assert!(owned > 0, "a frame of another revision, read under its own layout");
     }
 
     /// A frame its layout refuses, a mutation on a frame resource and a
