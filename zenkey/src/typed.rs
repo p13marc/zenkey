@@ -31,6 +31,7 @@ use zenkey_model::contract::{Body, Data, Operation, Replies as RepliesKind, Reso
 use zenkey_model::grammar::{Addr, IfaceId, KindToken, data_key};
 use zenkey_model::schema::TypeId;
 use zenkey_model::template::Bindings;
+use zenkey_model::wire::Tag;
 use zenoh::sample::Sample;
 use zenoh::time::Timestamp;
 
@@ -206,6 +207,100 @@ impl<C: Codec, A: Codec> Writer<C, A> {
     pub fn inner(&self) -> &crate::writer::Writer {
         &self.inner
     }
+}
+
+/// A frame resource's writer, typed (core §7.7): each record a value of the
+/// resource's packed type, gathered into frames by its
+/// [`crate::frame::FrameWriter`].
+pub struct FrameWriter<C> {
+    inner: crate::frame::FrameWriter,
+    /// Its service's deployment epoch (core §7.6, §8.6).
+    epoch: i64,
+    _codec: PhantomData<fn() -> C>,
+}
+
+impl<C: Codec> FrameWriter<C> {
+    /// Wraps a frame writer of `r`, checking the codec against it: the
+    /// record type's, whose tag is its packed layout's.
+    pub fn new(inner: crate::frame::FrameWriter, r: &Resource, tag: Tag) -> Result<Self> {
+        check_data::<C, Nothing>(r)?;
+        tag_check::<C>(tag, r)?;
+        Ok(Self {
+            epoch: inner.deployment_epoch(),
+            inner,
+            _codec: PhantomData,
+        })
+    }
+
+    /// Declares the writer on the builder
+    /// ([`ServiceBuilder::declare_frame_writer`]). A frame resource has no
+    /// parameter, so `values` binds nothing.
+    pub async fn declare(
+        b: &mut ServiceBuilder,
+        iface: &IfaceId,
+        resource: &str,
+        _values: &Bindings,
+    ) -> Result<Self> {
+        let r = resource_in(b.impls(), iface, resource)?;
+        check_data::<C, Nothing>(&r)?;
+        let tag = record_tag(b.impls(), iface, &r)?;
+        let w = b.declare_frame_writer(iface, resource).await?;
+        Self::new(w, &r, tag)
+    }
+
+    /// A writer on a frame resource exposed before start
+    /// ([`Service::frame_writer`]).
+    pub async fn on(
+        svc: &Service,
+        iface: &IfaceId,
+        resource: &str,
+        _values: &Bindings,
+    ) -> Result<Self> {
+        let r = resource_in(svc.impls(), iface, resource)?;
+        check_data::<C, Nothing>(&r)?;
+        let tag = record_tag(svc.impls(), iface, &r)?;
+        let w = svc.frame_writer(iface, resource).await?;
+        Self::new(w, &r, tag)
+    }
+
+    /// Records a value, measured now: the stamp of the frame it completed
+    /// and put, if it completed one. It is encoded before the future
+    /// starts, so the value need not outlive the call.
+    pub fn record(
+        &self,
+        value: &C::Value,
+    ) -> impl Future<Output = Result<Option<zenkey_model::wire::Stamp>>> + Send + use<'_, C> {
+        let bytes = C::encode_in(value, None, self.epoch).map_err(Error::Payload);
+        async move { self.inner.record(&bytes?).await }
+    }
+
+    /// Puts the open frame now, if it holds a record.
+    pub async fn flush(&self) -> Result<Option<zenkey_model::wire::Stamp>> {
+        self.inner.flush().await
+    }
+
+    /// The untyped frame writer.
+    #[must_use]
+    pub fn inner(&self) -> &crate::frame::FrameWriter {
+        &self.inner
+    }
+}
+
+/// The tag of `r`'s packed record type (core §7.6), which a typed codec's
+/// own tag must match.
+fn record_tag(impls: &[ImplState], iface: &IfaceId, r: &Resource) -> Result<Tag> {
+    let s = impls
+        .iter()
+        .find(|s| s.imp.iface() == iface)
+        .ok_or_else(|| Error::NotImplemented(iface.clone()))?;
+    let d = data_of(r)?;
+    let layout = s
+        .imp
+        .contract()
+        .packed_layout(&d.type_)
+        .map_err(Error::Contract)?
+        .ok_or_else(|| Error::Contract(format!("{}/{}: no packed type", r.token, r.template)))?;
+    Tag::new(layout.tag()).ok_or_else(|| Error::Contract("a tag past 15".to_owned()))
 }
 
 /// A state member's writer, typed: stamped puts and deletes (S1).

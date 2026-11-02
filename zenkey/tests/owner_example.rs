@@ -2651,3 +2651,101 @@ async fn the_owner_example_states_its_catalog() {
     let e = running.task.await.unwrap().unwrap_err();
     assert!(e.contains("refused [member]"), "{e}");
 }
+
+/// `--frames` (#981 K3, core §7.7): `linkframes.v1` implemented and its
+/// frame resources written through the runtime's frame writer from
+/// standard input, a frame's seqs one per record, a lost frame taking its
+/// seqs, the open frame put by `frame flush`, and a mutation refused.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_writes_frames() {
+    let (_r1, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let data = tool
+        .declare_subscriber("zk2/ex/modem/linkframes.v1/stream/frames/*")
+        .with(flume::unbounded::<Sample>())
+        .await
+        .unwrap();
+    let o = spawn_owner(&["--connect", &ep, "--frames", "ex/modem"]);
+    assert_eq!(line(&o.lines).await, format!("connected {ep}"));
+    line(&o.lines).await;
+    let record =
+        r#"{"dropped": 7, "queue_depth": 12, "duty_available": 1, "duty_wait_ms": "1500"}"#;
+    // The first put that reaches the tool's subscriber, at seq 0 or later.
+    let first = loop {
+        let a = ask_json(&o, &format!("frame record frames/link {record}")).await;
+        assert_eq!(a["put"]["records"], 1, "{a}");
+        if let Ok(s) = tokio::time::timeout(Duration::from_millis(300), data.recv_async()).await {
+            break s.unwrap();
+        }
+    };
+    let e = zenkey::model::wire::Envelope::parse(&first.payload().to_bytes())
+        .unwrap()
+        .stamp;
+    let lost = ask_json(&o, "frame lose frames/link").await;
+    assert_eq!(lost["frame"], "lose");
+    let a = ask_json(&o, &format!("frame record frames/link {record}")).await;
+    assert_eq!(
+        a["put"]["seq"],
+        e.seq.get() + 1,
+        "the lost frame took its seq"
+    );
+    let b = ask_json(&o, &format!("frame record frames/link {record}")).await;
+    assert_eq!(b["put"]["seq"], e.seq.get() + 2);
+    let s = tokio::time::timeout(SETTLE, data.recv_async())
+        .await
+        .unwrap()
+        .unwrap();
+    let bytes = s.payload().to_bytes();
+    let got = zenkey::model::wire::Envelope::parse(&bytes).unwrap();
+    assert!(got.is_frame());
+    assert_eq!(got.stamp.seq.get(), e.seq.get() + 2);
+
+    // Three records 10 s apart on the drive's clock: one frame of three.
+    let sample = r#"{"temperature": "21.5", "rssi": -80, "link_up": true, "mode": "rx"}"#;
+    for (at, open) in [(0, 1), (10_000, 2)] {
+        let a = ask_json(&o, &format!("frame record frames/sample {sample} at={at}")).await;
+        assert_eq!(
+            (a["put"].clone(), a["open"].clone()),
+            (serde_json::Value::Null, open.into()),
+            "{a}"
+        );
+    }
+    let a = ask_json(&o, &format!("frame record frames/sample {sample} at=20000")).await;
+    assert_eq!(
+        (a["put"]["seq"].clone(), a["put"]["records"].clone()),
+        (0.into(), 3.into()),
+        "{a}"
+    );
+    let a = ask_json(&o, &format!("frame record frames/sample {sample} at=30000")).await;
+    assert_eq!(a["open"], 1);
+    let f = ask_json(&o, "frame flush frames/sample").await;
+    assert_eq!(
+        (f["put"]["seq"].clone(), f["put"]["records"].clone()),
+        (3.into(), 1.into()),
+        "{f}"
+    );
+    let m = ask_json(&o, "frame mutation frames/link").await;
+    assert!(
+        m["refused"].as_str().unwrap().contains("frame resource"),
+        "{m}"
+    );
+    let refused = o
+        .ask("frame record frames/link {\"queue_depth\": 2000}")
+        .await;
+    assert!(refused.starts_with("refused frame record"), "{refused}");
+    o.stop().await;
+}
+
+#[test]
+fn the_help_documents_the_frames_surface() {
+    for piece in [
+        "--frames",
+        "frame record <resource> <json> [at=<ms>]",
+        "frame flush <resource>",
+        "frame lose <resource>",
+        "frame mutation <resource>",
+        "frame new-epoch",
+    ] {
+        assert!(owner::HELP.contains(piece), "--help names {piece:?}");
+    }
+}

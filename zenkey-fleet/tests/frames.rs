@@ -21,8 +21,8 @@ use zenkey_model::template::Bindings;
 use zenkey_model::wire::{Run, Seq, Stamp};
 
 fn contract() -> Contract {
-    let p =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../zenkey/tests/contracts/linkframes.v1.toml");
+    let p = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../zenkey/tests/contracts/frames/linkframes.v1.toml");
     let l = load_path(&p);
     l.contract
         .unwrap_or_else(|| panic!("linkframes.v1: {}", l.report))

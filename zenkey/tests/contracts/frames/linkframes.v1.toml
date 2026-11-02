@@ -1,14 +1,16 @@
-# Frame resources (core §7.7) for a consumer's reader (#981's K2,
-# zenkey/tests/frame_reader.rs): zenoh-modem's link readings, one record a
-# frame with a deadband on the queue, a sampler's three records a frame,
-# and a plain packed stream of the same record type, which takes no frame.
+# Frame resources (core §7.7): the contract of spec/scenarios/frames.md
+# (#981's K3, zenkey/tests/frames.rs, the owner example's --frames and
+# codegen-test), and of a consumer's reader (K2, tests/frame_reader.rs):
+# zenoh-modem's link readings, one record a frame with a deadband on the
+# queue, a sampler's three records a frame, and a plain packed stream of
+# the same record type, which takes no frame.
 [interface]
 name  = "linkframes"
 major = 1
 minor = 0
 
 [schemas]
-packed = ["schemas/linkframes.json"]
+packed = ["linkframes.json"]
 
 [resources."frames/link"]
 kind  = "stream"

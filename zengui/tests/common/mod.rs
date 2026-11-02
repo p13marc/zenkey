@@ -54,7 +54,7 @@ pub fn metered_contract_paths() -> Vec<PathBuf> {
 pub fn framed_contract_paths() -> Vec<PathBuf> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut paths = contract_paths();
-    paths.push(root.join("../zenkey/tests/contracts/linkframes.v1.toml"));
+    paths.push(root.join("../zenkey/tests/contracts/frames/linkframes.v1.toml"));
     paths
 }
 
@@ -684,7 +684,7 @@ pub const FRAME_SAMPLE: &str = "zk2/lab/modem/linkframes.v1/stream/frames/sample
 /// A frame resource of `linkframes.v1`'s layout, read from its contract.
 pub fn frame_layout(template: &str) -> zenkey_model::frame::Layout {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../zenkey/tests/contracts/linkframes.v1.toml");
+        .join("../zenkey/tests/contracts/frames/linkframes.v1.toml");
     let c = zenkey_model::contract::load_path(&path)
         .contract
         .expect("linkframes.v1 loads");
