@@ -16,7 +16,7 @@
 //!     [--standby] [--election claim|external] [--instance-id <id>] [--name <word>]
 //!     [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>]
 //!     [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go]
-//!     [--timing] [--no-hlc] [--hlc] [--run-file <path>] [--catalog <path>]
+//!     [--timing] [--frames] [--no-hlc] [--hlc] [--run-file <path>] [--catalog <path>]
 //!     [--arbitrate <entry>[,<entry>...]] [--arbitrate-no-watch] [--watch-connect <endpoint>]
 //!     [--clock-bound-ms <ms>] [--commander] [--commander-lead-ms <ms>]
 //!     <address> <contract.toml>...
@@ -488,6 +488,14 @@
 //! re-minted make-before-break, and the election knows its new id (F-209).
 //! **A crash is the process's**: kill it, as the scenarios' §1 and §10 do.
 //!
+//! **Frames** (core §7.7, #981's K3) are the runtime's
+//! ([`zenkey::frame`]): with `--frames` the owner implements
+//! `linkframes.v1`, the contract of `spec/scenarios/frames.md`, and writes
+//! its frame resources through a `FrameWriter` each, from `frame record
+//! <resource> <json> [at=<ms>]` lines; `frame flush`, `frame lose` (the
+//! scenarios' lost frame), `frame mutation` (refused) and `frame new-epoch`
+//! beside them (`owner/frames.rs`).
+//!
 //! **`timing.v1`** (`spec/profiles/timing/v1.md`, #908) is the runtime's
 //! ([`zenkey::timing`]): with `--timing` the owner implements `pace.v1`,
 //! the scenarios' contract (`spec/profiles/timing/scenarios.md`,
@@ -554,6 +562,9 @@ pub mod drive;
 
 #[path = "owner/timing.rs"]
 pub mod timing_drive;
+
+#[path = "owner/frames.rs"]
+pub mod frames_drive;
 
 #[path = "owner/arbitrate.rs"]
 pub mod arbitrate;
@@ -670,6 +681,9 @@ pub struct Options {
     /// `--timing`: `pace.v1`, `timing.v1`'s scenarios' contract,
     /// implemented and driven (#908), unless a contract file implements it.
     pub timing: bool,
+    /// `--frames`: `linkframes.v1`, `frames.md`'s contract, implemented
+    /// and its frame resources driven (#981 K3), unless a file has it.
+    pub frames: bool,
     /// `--no-hlc`: with `--connect`, the session's HLC off, as it is by
     /// default (core §8.2), `--standby` included.
     pub no_hlc: bool,
@@ -740,7 +754,7 @@ usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
     [--standby] [--election claim|external] [--instance-id <id>] [--name <word>]
     [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>]
     [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go]
-    [--timing] [--no-hlc] [--hlc] [--run-file <path>] [--catalog <path>]
+    [--timing] [--frames] [--no-hlc] [--hlc] [--run-file <path>] [--catalog <path>]
     [--arbitrate <entry>[,<entry>...]] [--arbitrate-no-watch] [--watch-connect <endpoint>]
     [--clock-bound-ms <ms>] [--commander] [--commander-lead-ms <ms>]
     <system>/<service>|@hostid.v1/<service> <contract.toml>...
@@ -769,6 +783,7 @@ Command words:
   desired ...                             desired.v1 (--desired-*), below
   redundancy ...                          redundancy.v1 (--standby), below
   timing ...                              timing.v1 (--timing), below
+  frame ...                               core §7.7's frames (--frames), below
   arbitrate ...                           arbitration.v1's actuator (--arbitrate), below
   commander ...                           arbitration.v1's commander (--commander), below
 
@@ -1003,6 +1018,24 @@ redundancy.v1 (spec/profiles/redundancy/v1.md)
 
   A crash is the process's: kill it (scenarios.md §1, §10).
 
+Frames (spec/core.md §7.7, spec/scenarios/frames.md)
+  --frames implements linkframes.v1, frames.md's contract, unless a contract
+  file given is it, and writes its frame resources through the runtime's
+  FrameWriter: frames/link (one record a frame, a full record every 15, a
+  deadband on queue_depth) and frames/sample (three records a frame, 10 s
+  apart, within 500 ms). A resource is named by its template.
+  frame record <resource> <json> [at=<ms>]
+                                  one record, core §7.6's JSON reading, measured
+                                  now or <ms> after the drive's start on its
+                                  monotonic clock, answered as one JSON object:
+                                  frame, resource, put ({run, seq, records}, or
+                                  null while the frame is open) and open
+  frame flush <resource>          puts the open frame now
+  frame lose <resource>           the next frame is lost on its way: its seqs
+                                  taken, nothing put (frames.md's lost frame)
+  frame mutation <resource>       asks for a plain writer, which is refused
+  frame new-epoch                 a new instance and a new run (core §4.3)
+
 timing.v1 (spec/profiles/timing/v1.md)
   --timing implements pace.v1, the scenarios' contract
   (spec/profiles/timing/scenarios.md, its fingerprint sha256:6528b66a...),
@@ -1222,6 +1255,7 @@ impl Options {
             peer: false,
             wait_go: false,
             timing: false,
+            frames: false,
             no_hlc: false,
             hlc: false,
             run_file: None,
@@ -1496,6 +1530,10 @@ impl Options {
                     o.timing = true;
                     rest = tail;
                 }
+                [flag, tail @ ..] if flag == "--frames" => {
+                    o.frames = true;
+                    rest = tail;
+                }
                 [flag, tail @ ..] if flag == "--no-hlc" => {
                     o.no_hlc = true;
                     rest = tail;
@@ -1745,6 +1783,10 @@ pub async fn run_with(
     // timing.v1 (#908): the scenarios' pace.v1, unless a file has it.
     if opts.timing && !imps.iter().any(|i| i.iface() == &timing_drive::iface()) {
         imps.push(Implementation::new(timing_drive::contract()?));
+    }
+    // Frames (#981 K3): frames.md's linkframes.v1, unless a file has it.
+    if opts.frames && !imps.iter().any(|i| i.iface() == &frames_drive::iface()) {
+        imps.push(Implementation::new(frames_drive::contract()?));
     }
     // arbitration.v1 (#909): the scenarios' rudder.v1 and steer.v1, unless
     // a file has them.
@@ -2079,6 +2121,8 @@ struct Up {
     drive: Option<Arc<drive::Drive>>,
     /// timing.v1's drive, with `--timing`.
     timing: Option<timing_drive::Drive>,
+    /// The frame writers' drive, with `--frames`.
+    frames: Option<frames_drive::Drive>,
     /// arbitration.v1's actuator, with `--arbitrate`.
     actuator: Option<arbitrate::Actuator>,
     /// arbitration.v1's commander, with `--commander`.
@@ -2090,6 +2134,7 @@ impl Up {
         drop(self.actuator);
         drop(self.commander);
         drop(self.timing);
+        drop(self.frames);
         drop(self.members);
         self.svc.close().await?;
         drop(self.servers);
@@ -2106,6 +2151,16 @@ impl Ctx<'_> {
             let answer = telemetry_command(line, &mut up, self.session)
                 .await
                 .unwrap_or_else(|why| format!("refused {}: {why}", words.join(" ")));
+            return Ok((answer, up));
+        }
+        if line.split_whitespace().next() == Some("frame") {
+            let answer = match &up.frames {
+                Some(_) => {
+                    let Up { svc, frames, .. } = &mut up;
+                    frames_drive::command(line, svc, frames.as_ref().expect("checked")).await
+                }
+                None => format!("refused {line}: no frame resource is driven here (--frames)"),
+            };
             return Ok((answer, up));
         }
         if line.split_whitespace().next() == Some("timing") {
@@ -2484,6 +2539,12 @@ impl Ctx<'_> {
         {
             r.hold_heal(true);
         }
+        let frames = if opts.frames {
+            let c = frames_drive::contract()?;
+            Some(frames_drive::Drive::start(&svc, &c).await?)
+        } else {
+            None
+        };
         let timing = if opts.timing {
             Some(timing_drive::Drive::start(&svc, self.session).await?)
         } else {
@@ -2534,6 +2595,7 @@ impl Ctx<'_> {
             target,
             drive: drive_,
             timing,
+            frames,
             actuator,
             commander,
         })

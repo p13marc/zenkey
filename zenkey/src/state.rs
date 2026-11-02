@@ -409,6 +409,13 @@ impl Minter {
     /// the run (§4.3), whoever declares its publisher again. A key past
     /// [`STREAM_KEYS`] in the run takes a new run first.
     pub fn mint_stream(&self, key: &OwnedKeyExpr, timed: bool) -> Stamped {
+        self.mint_stream_n(key, 1, timed)
+    }
+
+    /// A frame's stamps (core §4.3, §7.7): `n` seqs of `key` in the run, the
+    /// first its record 0's, so the key's next sample takes the seq after
+    /// its last record's. Otherwise as [`Minter::mint_stream`].
+    pub fn mint_stream_n(&self, key: &OwnedKeyExpr, n: u32, timed: bool) -> Stamped {
         let mut r = self.runs.lock().expect("not poisoned");
         self.ensure(&mut r);
         if !r.streams.contains_key(key) && r.streams.len() >= STREAM_KEYS {
@@ -417,7 +424,7 @@ impl Minter {
         let run = r.run.expect("ensured");
         let next = r.streams.entry(key.clone()).or_insert(0);
         let seq = wire::Seq::new(*next).expect("kept below 2^24");
-        *next = (*next + 1) % SEQ_END;
+        *next = (*next + n % SEQ_END) % SEQ_END;
         Stamped {
             stamp: wire::Stamp { run, seq },
             time: self.timed(timed),
@@ -431,12 +438,17 @@ impl Minter {
     /// current one and nothing was minted on `key` since; otherwise nothing
     /// changes, and the gap stands. Returns whether it was given back.
     pub(crate) fn unmint_stream(&self, key: &OwnedKeyExpr, stamp: wire::Stamp) -> bool {
+        self.unmint_stream_n(key, stamp, 1)
+    }
+
+    /// [`Minter::unmint_stream`] of a frame's `n` seqs from `stamp` on.
+    pub(crate) fn unmint_stream_n(&self, key: &OwnedKeyExpr, stamp: wire::Stamp, n: u32) -> bool {
         let mut r = self.runs.lock().expect("not poisoned");
         if r.run != Some(stamp.run) {
             return false;
         }
         match r.streams.get_mut(key) {
-            Some(next) if *next == (stamp.seq.get() + 1) % SEQ_END => {
+            Some(next) if *next == (stamp.seq.get() + n % SEQ_END) % SEQ_END => {
                 *next = stamp.seq.get();
                 true
             }

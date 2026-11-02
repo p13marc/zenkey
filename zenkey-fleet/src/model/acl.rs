@@ -5510,6 +5510,82 @@ type = { raw = "text/plain" }
         }
     }
 
+    /// Frames across a face (link.v1 0.13 §2.8, core §7.7): `acl gen`'s
+    /// plan never downsamples a frame resource, and its block carries a
+    /// rule for the plain stream alone, with the plan's frame warnings.
+    #[test]
+    fn a_face_plan_never_downsamples_a_frame() {
+        let e: Enrollment = toml::from_str(
+            r#"
+[[principal]]
+user     = "modem"
+services = ["lab/modem"]
+
+[[principal]]
+user  = "ground"
+tools = ["console"]
+
+[[service]]
+address    = "lab/modem"
+implements = ["sampler.v1"]
+
+[[tool]]
+name = "console"
+
+[tool.bindings.radio]
+interface = "sampler.v1"
+providers = ["lab/*"]
+"#,
+        )
+        .unwrap();
+        let (set, problems) = ContractSet::load_path(
+            &Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../spec/profiles/link/conformance/contracts/sampler.v1.toml"),
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        let policy = r#"system   = "lab"
+services = ["modem"]
+
+[face.rf]
+far          = "ground"
+attach       = "client"
+select       = { link_protocols = ["unixsock-stream"] }
+class        = "constrained"
+expose       = "link"
+interval_s   = 60
+max_outage_s = 600
+batch_bytes  = 220
+link_bps     = 2400
+"#;
+        let plan = plan_acl(
+            &e,
+            &set,
+            &face_opts(AclPermission::Deny, link::parse(policy)),
+        )
+        .unwrap();
+        let face = &plan.faces[0];
+        let rules: Vec<&str> = face
+            .downsampling
+            .iter()
+            .flat_map(|d| &d.rules)
+            .map(|r| r.key_expr.as_str())
+            .collect();
+        assert_eq!(rules, ["zk2/lab/modem/sampler.v1/stream/level"]);
+        let codes: Vec<&str> = face.findings.iter().map(|f| f.code.as_str()).collect();
+        assert_eq!(
+            codes,
+            [
+                "frame_over_interval",
+                "frame_over_interval",
+                "frame_over_batch",
+                "history_on_frame",
+                "interval_over_horizon"
+            ]
+        );
+        let block = to_json5(&plan);
+        assert!(!block.contains("frames/link\""), "{block}");
+    }
+
     /// The radio example: the plan is link.v1's own, carried whole; its
     /// denies are the far principal's rules, under the namespace except the
     /// admin space's; its downsampling is zenoh's block, one rule per key;

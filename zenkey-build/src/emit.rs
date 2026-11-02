@@ -570,8 +570,15 @@ fn api_out(o: &Op<'_>) -> String {
     }
 }
 
+/// Whether `r` is a frame resource (core §7.7): its records go through a
+/// frame writer, never a mutation.
+fn is_frame(r: &Resource) -> bool {
+    matches!(&r.body, Body::Data(d) if d.frame.is_some())
+}
+
 fn writer_ty(d: &DataRes<'_>) -> String {
     match d.r.kind {
+        _ if is_frame(d.r) => format!("::zenkey::typed::FrameWriter<{}>", d.ty.codec),
         Kind::State => format!("::zenkey::typed::StateWriter<{}>", d.ty.codec),
         Kind::Event => format!("::zenkey::typed::EventWriter<{}>", d.ty.codec),
         _ => format!(
@@ -783,6 +790,24 @@ fn emit_consumer(s: &mut String, cfg: &str, data: &[DataRes<'_>]) {
     for d in data {
         let t = &d.ty.rust;
         let codec = &d.ty.codec;
+        if is_frame(d.r) {
+            // Core §7.7: a frame's body is no record of its type; each
+            // delivery carries its reader's reading in `frame`.
+            let _ = writeln!(
+                s,
+                "\n{}        pub async fn subscribe_{}<F>(&self, callback: F) -> ::zenkey::Result<::zenkey::consumer::Subscription>\n        where\n            F: Fn(::zenkey::consumer::Delivery) + Send + Sync + 'static,\n        {{\n            self.inner.subscribe(resource::{}, callback).await\n        }}",
+                doc(
+                    "        ",
+                    &format!(
+                        "Subscribes to {} across the bound providers: a frame resource, each delivery's `frame` its records and their fields' states (core §7.7).",
+                        data_doc(d)
+                    )
+                ),
+                d.name,
+                d.konst
+            );
+            continue;
+        }
         let _ = writeln!(
             s,
             "\n{}        pub async fn subscribe_{}<F>(&self, callback: F) -> ::zenkey::Result<::zenkey::consumer::Subscription>\n        where\n            F: Fn(::zenkey::typed::Received<{t}>) + Send + Sync + 'static,\n        {{\n            ::zenkey::typed::subscribe::<{codec}, F>(&self.inner, resource::{}, callback).await\n        }}",

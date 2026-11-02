@@ -4,7 +4,7 @@
 //! tool's consumer, one `zenkey_model::frame::Reader` per key.
 //!
 //! Setup: R1 a router; O a raw client putting `lab/modem`'s frames of
-//! `linkframes.v1` (`tests/contracts/linkframes.v1.toml`); S a tool's
+//! `linkframes.v1` (`tests/contracts/frames/linkframes.v1.toml`); S a tool's
 //! consumer of it on another client.
 
 mod common;
@@ -22,7 +22,7 @@ const SAMPLE: &str = "zk2/lab/modem/linkframes.v1/stream/frames/sample";
 const LEVEL: &str = "zk2/lab/modem/linkframes.v1/stream/level";
 
 fn layout(template: &str) -> Layout {
-    let c = contract("linkframes.v1");
+    let c = contract("frames/linkframes.v1");
     let r = c
         .resources
         .iter()
@@ -74,7 +74,7 @@ async fn subscribe(
     let (h, r) = (Arc::clone(heard), Arc::clone(heard));
     Consumer::for_tool(
         rs,
-        Arc::new(contract("linkframes.v1")),
+        Arc::new(contract("frames/linkframes.v1")),
         &["lab/modem"],
         &Default::default(),
     )

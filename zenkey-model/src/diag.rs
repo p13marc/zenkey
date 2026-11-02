@@ -314,6 +314,10 @@ pub const CODES: &[(&str, &str)] = &[
         "an annotation key is not in its profile's vocabulary: the published one, else the interim one (D19)",
     ),
     ("W107", "the file is not named <name>.v<major>.toml"),
+    (
+        "W108",
+        "a frame resource whose interval is above half its `freshness.ttl_s`",
+    ),
 ];
 
 /// The meaning of a code, from [`CODES`].

@@ -60,6 +60,8 @@ const KNOWN: &[(&str, &str)] = &[
     ("link", "v2/lints.json"),
     ("link", "v2/plan.json"),
     ("link", "v2/transport.json"),
+    ("link", "contracts/sampler.v1.toml"),
+    ("link", "contracts/sampler.json"),
     ("alarms", "keys.json"),
     ("alarms", "documents.json"),
     ("alarms", "transitions.json"),
@@ -156,7 +158,9 @@ fn every_profile_fixture_is_known() {
             let major = name
                 .strip_prefix('v')
                 .is_some_and(|m| !m.is_empty() && m.bytes().all(|b| b.is_ascii_digit()));
-            if entry.is_dir() && major {
+            // A later major's fixtures, and the contracts a fixture loads
+            // (link.v1 0.13's `contracts/`), one directory down.
+            if entry.is_dir() && (major || name == "contracts") {
                 for file in sorted_entries(&entry) {
                     let inner = file.file_name().unwrap().to_string_lossy().into_owned();
                     files.push((file, format!("{name}/{inner}")));
@@ -1766,6 +1770,10 @@ fn link_resources(rs: &Value) -> Vec<link::Res> {
                 .expect("a template"),
             token: link_token(&r["token"]),
             annotations: annotations(&r["annotations"]),
+            // Inline resources hold no `history` and no `frame` table: a
+            // case about either loads a contract.
+            history: false,
+            frame: None,
         })
         .collect()
 }

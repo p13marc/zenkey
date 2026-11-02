@@ -21,8 +21,8 @@ use zenkey_model::template::Bindings;
 use zenkey_model::wire::{Run, Seq, Stamp};
 
 fn contract() -> Contract {
-    let p =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../zenkey/tests/contracts/linkframes.v1.toml");
+    let p = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../zenkey/tests/contracts/frames/linkframes.v1.toml");
     let l = load_path(&p);
     l.contract
         .unwrap_or_else(|| panic!("linkframes.v1: {}", l.report))
@@ -177,4 +177,89 @@ async fn a_watch_shows_each_frame_as_its_keys_reader_read_it() {
             && line.contains("mode absent"),
         "{line}"
     );
+}
+
+/// `zenctl gen` writes frames (#981's K3, core §7.7): `run_gen` over
+/// `linkframes.v1` puts each frame resource's synthesized records through
+/// the runtime's frame writer, so a raw subscriber hears frames (§7.5's
+/// form 5), one stream seq per record, and never a mutation.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn gen_writes_a_frame_resource_as_frames() {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use zenkey_fleet::{GenPattern, GenSpec, gen_plan, run_gen};
+
+    let (_r, ep) = router(None).await;
+    let owners = client(&ep).await;
+    let tool = client(&ep).await;
+    let heard: Arc<std::sync::Mutex<Vec<zenoh::sample::Sample>>> = Arc::default();
+    let h = Arc::clone(&heard);
+    let _sub = tool
+        .declare_subscriber("zk2/lab/modem/linkframes.v1/stream/frames/*")
+        .callback(move |s| h.lock().unwrap().push(s))
+        .await
+        .unwrap();
+    let rev = Arc::new(Revision::from_contract(contract(), ContractSource::File));
+    let spec = GenSpec {
+        address: "lab/modem".parse().unwrap(),
+        revisions: vec![rev],
+        members: vec![],
+        bindings: BTreeMap::new(),
+        rate_hz: Some(20.0),
+        pattern: GenPattern::Steady,
+        duration: Duration::from_secs(3),
+        seed: 7,
+        tool: "frames test".into(),
+        elect: None,
+        run_store: None,
+        catalog: None,
+    };
+    let plan = gen_plan(&spec).unwrap();
+    let link = plan
+        .entries
+        .iter()
+        .find(|e| e.resource == "stream/frames/link")
+        .unwrap();
+    assert!(
+        link.note
+            .as_deref()
+            .unwrap_or("")
+            .contains("a frame resource"),
+        "{:?}",
+        link.note
+    );
+    run_gen(&owners, &spec, &plan, |_| {}).await.unwrap();
+    let mut seqs: BTreeMap<String, Vec<(u32, usize)>> = BTreeMap::new();
+    let c = contract();
+    let heard = std::mem::take(&mut *heard.lock().unwrap());
+    for s in heard {
+        let bytes = s.payload().to_bytes();
+        let e = zenkey_model::wire::Envelope::parse(&bytes).unwrap();
+        assert!(e.is_frame(), "{}: a frame, never a mutation", s.key_expr());
+        let template = s
+            .key_expr()
+            .as_str()
+            .split("/stream/")
+            .nth(1)
+            .unwrap()
+            .to_owned();
+        let f = Frame::parse(e.tag, e.record, &layout(&c, &template)).unwrap();
+        seqs.entry(template)
+            .or_default()
+            .push((e.stamp.seq.get(), f.records.len()));
+    }
+    let link = &seqs["frames/link"];
+    assert!(link.len() > 10, "{link:?}");
+    let sample = &seqs["frames/sample"];
+    assert!(sample.iter().any(|(_, n)| *n == 3), "{sample:?}");
+    // One seq per record: each frame's seq follows the last's records.
+    for frames in seqs.values() {
+        for w in frames.windows(2) {
+            assert_eq!(
+                w[1].0,
+                w[0].0 + u32::try_from(w[0].1).unwrap(),
+                "{frames:?}"
+            );
+        }
+    }
 }

@@ -107,6 +107,22 @@ impl ImplState {
         crate::writer::PackedType::of(self.imp.contract(), r, epoch)
     }
 
+    /// The frame layout of `r` (core §7.7): its `frame` table over its
+    /// packed record type. A resource that is no frame resource is refused.
+    fn frame_layout_of(
+        &self,
+        r: &zenkey_model::contract::Resource,
+    ) -> Result<zenkey_model::frame::Layout> {
+        zenkey_model::frame::Layout::of_resource(self.imp.contract(), r)
+            .map_err(|e| Error::Contract(format!("{}/{}: {e}", r.token, r.template)))?
+            .ok_or_else(|| {
+                Error::Contract(format!(
+                    "{}/{} is no frame resource: write it with a Writer",
+                    r.token, r.template
+                ))
+            })
+    }
+
     /// The budget every writer of `r` keeps (§2.7).
     fn budget(&self, r: &zenkey_model::contract::Resource) -> Option<Arc<Budget>> {
         self.budgets.get(&resource_name(r)).cloned()
@@ -1064,6 +1080,34 @@ impl ServiceBuilder {
         .packed(packed))
     }
 
+    /// A [`crate::frame::FrameWriter`] on a frame resource (core §7.7), with
+    /// the contract's QoS, and exposes the resource. A frame resource has
+    /// no parameter, so it is the resource's one key.
+    pub async fn declare_frame_writer(
+        &mut self,
+        iface: &IfaceId,
+        resource: &str,
+    ) -> Result<crate::frame::FrameWriter> {
+        let none = Bindings::default();
+        let key = self.key(iface, resource, &none)?;
+        let s = find(&self.impls, iface)?;
+        let r = s.imp.resource(resource)?.clone();
+        let layout = s.frame_layout_of(&r)?;
+        let budget = s.budget(&r);
+        let gate = s.gate.clone();
+        let epoch = self.deployment_epoch();
+        self.expose(iface, resource)?;
+        let w = Writer::declare_framed(&self.session, &self.minter, key.into_keyexpr(), &r, gate)
+            .await?
+            .bounded(budget);
+        Ok(crate::frame::FrameWriter::new(
+            w,
+            layout,
+            &self.minter,
+            epoch,
+        ))
+    }
+
     /// An [`EventWriter`] for an event's member, and exposes the resource.
     pub fn event_writer(
         &mut self,
@@ -1732,6 +1776,36 @@ impl Service {
         }
         self.state_qs.insert(iface.clone(), qs);
         Ok(())
+    }
+
+    /// A [`crate::frame::FrameWriter`] on an exposed frame resource (core
+    /// §7.7): for an owner that starts writing its frames after start.
+    /// Exposure is fixed at start, so an unexposed resource is refused.
+    pub async fn frame_writer(
+        &self,
+        iface: &IfaceId,
+        resource: &str,
+    ) -> Result<crate::frame::FrameWriter> {
+        let r = self.exposed(iface, resource)?;
+        let none = Bindings::default();
+        let key = self.key(iface, resource, &none)?;
+        let s = find(&self.impls, iface)?;
+        let layout = s.frame_layout_of(&r)?;
+        let w = Writer::declare_framed(
+            &self.session,
+            &self.minter,
+            key.into_keyexpr(),
+            &r,
+            s.gate.clone(),
+        )
+        .await?
+        .bounded(s.budget(&r));
+        Ok(crate::frame::FrameWriter::new(
+            w,
+            layout,
+            &self.minter,
+            self.deployment_epoch(),
+        ))
     }
 
     /// An [`EventWriter`] on a member of an exposed event.

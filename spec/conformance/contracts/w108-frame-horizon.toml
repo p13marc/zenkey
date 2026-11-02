@@ -1,0 +1,36 @@
+# core §7.7, §9.2 W108, freshness.v1 §2.4: a frame resource whose interval
+# is above half its horizon. A span of 30 s under a horizon of 50 s; a
+# period of 60 s under 100 s. A span of 30 s under 60 s is within, and a
+# horizon beside an unstated interval gives none.
+[interface]
+name  = "seed"
+major = 1
+minor = 0
+uses  = ["freshness.v1", "timing.v1"]
+
+[schemas]
+packed = ["schemas/packed/frames.json"]
+
+[resources."frames/sample"]
+kind        = "stream"
+type        = "packed:frames#Sample"
+frame       = { records = 3, step_ms = 10000 }
+annotations = { "freshness.ttl_s" = 50 }
+
+[resources."frames/minute"]
+kind        = "stream"
+type        = "packed:frames#Link"
+frame       = { records = 1 }
+annotations = { "timing.period_ms" = 60000, "freshness.ttl_s" = 100 }
+
+[resources."frames/within"]
+kind        = "stream"
+type        = "packed:frames#Sample"
+frame       = { records = 3, step_ms = 10000 }
+annotations = { "freshness.ttl_s" = 60 }
+
+[resources."frames/unstated"]
+kind        = "stream"
+type        = "packed:frames#Link"
+frame       = { records = 1 }
+annotations = { "freshness.ttl_s" = 10 }

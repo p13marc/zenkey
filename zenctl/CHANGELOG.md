@@ -6,6 +6,17 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — frames written: `gen` and `acl gen` (#981, K3)
+
+Core 0.87 has owners write frames (§7.7), and `link.v1` 0.13 lets a frame
+cross a face whole.
+
+| Before | Now | Notes |
+|---|---|---|
+| `gen` on a frame resource: a plain writer, each sample a mutation no reader reads | each synthesized record goes to the runtime's frame writer, which puts a frame when it holds `records` records or a record lies past its span, and the open one at the run's end | a frame resource with a step records on it unless `--rate`, so its later records are scheduled; the plan entry's `note` says so |
+| `acl gen --face-policy`: a crossing frame resource downsampled like any stream | no downsampling rule for a frame resource | `link.v1` §2.8: zenoh's timer would drop about every other frame |
+| — | the plan's warnings `frame_over_interval`, `frame_over_batch`, `history_on_frame`, and `interval_over_horizon` reading a frame's interval | `link.v1` 0.13 §2.3 |
+
 ## Unreleased (`main`, zk2) — frames read: records and field states (#981, K2)
 
 Core 0.83 §7.7 defines frames: one packed type's records under one

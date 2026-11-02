@@ -496,7 +496,7 @@ prod/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0
         use zenkey_model::frame::{Frame, Layout};
         use zenkey_model::wire::{Run, Seq, Stamp};
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../zenkey/tests/contracts/linkframes.v1.toml");
+            .join("../zenkey/tests/contracts/frames/linkframes.v1.toml");
         let (contracts, problems) = zenkey_fleet::ContractSet::load_path(&path);
         assert!(problems.is_empty(), "{problems:?}");
         let lens = Lens::new("prod", None, &contracts).offline(&contracts);

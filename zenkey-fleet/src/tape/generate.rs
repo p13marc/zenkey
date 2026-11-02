@@ -515,7 +515,12 @@ pub fn build_plan(spec: &GenSpec) -> Result<GenPlan> {
                     }
                 },
                 (Kind::State, ..) => spec.rate_hz.unwrap_or(0.5).clamp(0.001, 1000.0),
-                _ => spec.rate_hz.unwrap_or(1.0).clamp(0.001, 1000.0),
+                // Core §7.7: a frame resource with a step records on it, so
+                // each later record of a frame is scheduled.
+                _ => match (spec.rate_hz, d.frame.as_ref().and_then(|f| f.step_ms)) {
+                    (None, Some(step)) => (1000.0 / f64::from(step)).clamp(0.001, 1000.0),
+                    (asked, _) => asked.unwrap_or(1.0).clamp(0.001, 1000.0),
+                },
             };
             // telemetry.v1 §2.9: an Epoch attachment is the runtime's
             // writer's to write, never synthesized (#819, TC).
@@ -549,6 +554,14 @@ pub fn build_plan(spec: &GenSpec) -> Result<GenPlan> {
             }
             if source == MemberSource::Default {
                 notes.push("synthetic members (name them with --member)".to_owned());
+            }
+            if let Some(f) = &d.frame {
+                notes.push(format!(
+                    "a frame resource: each sample is one record, gathered into frames of up to \
+                     {} by the runtime's frame writer, never downsampled, the open frame put \
+                     when the run ends (core §7.7)",
+                    f.records
+                ));
             }
             for values in members {
                 let chunks = r
@@ -663,6 +676,8 @@ enum Out {
     Stream(Box<zenkey::writer::Writer>),
     State(Arc<zenkey::state::StateWriter>),
     Event(zenkey::writer::EventWriter),
+    /// A frame resource's (core §7.7): each sample one record.
+    Frame(Box<zenkey::frame::FrameWriter>),
 }
 
 /// What one entry's task did.
@@ -840,6 +855,11 @@ pub async fn run_gen(
                 b.event_writer(iface, &e.resource, &e.values)
                     .map_err(|err| runtime_error(rev, err))?,
             ),
+            _ if matches!(&r.body, Body::Data(d) if d.frame.is_some()) => Out::Frame(Box::new(
+                b.declare_frame_writer(iface, &e.resource)
+                    .await
+                    .map_err(|err| runtime_error(rev, err))?,
+            )),
             _ => Out::Stream(Box::new(
                 b.declare_writer(iface, &e.resource, &e.values)
                     .await
@@ -944,6 +964,8 @@ pub async fn run_gen(
                         let put = match &out {
                             Out::State(w) => w.put(s.bytes).await.map(|_| ()),
                             Out::Event(w) => w.put(s.bytes).await.map(|_| ()),
+                            // A record, gathered into the open frame.
+                            Out::Frame(w) => w.record(&s.bytes).await.map(|_| ()),
                             // telemetry.v1 §2.9: an Epoch attachment is the
                             // runtime's writer's to write (#819, TB).
                             Out::Stream(w) if epoch_attached => w.put(s.bytes).await,
@@ -978,6 +1000,12 @@ pub async fn run_gen(
                 if tokio::time::Instant::now() >= deadline {
                     break;
                 }
+            }
+            // Core §7.7: the open frame, put as the run ends.
+            if let Out::Frame(w) = &out
+                && let Err(err) = w.flush().await
+            {
+                tally.put(&e.key, Err(err));
             }
             (i, tally)
         });

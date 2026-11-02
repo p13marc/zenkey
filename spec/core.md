@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.86** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.87** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -2268,6 +2268,9 @@ needed, a reader takes the fingerprint from the owner's descriptor (§3.3).
 
 **The owner's frames.** An owner writes a frame resource's samples as
 frames, each of 1 to `records` records, in the order it measured them.
+- **Never a mutation.** An owner MUST NOT put a mutation (§7.5) on a frame
+  resource's key: a reader has no reading of one (below).
+  `[Sc: frames.md §1]`
 - **Seqs.** An owner MUST give a frame the seq of its record 0, and the
   frame after it the seq that follows its last record's.
   `[Sc: frames.md §1]`
@@ -2294,7 +2297,9 @@ frames, each of 1 to `records` records, in the order it measured them.
   instant.
   `[Sc: frames.md §3]`
 - **The span.** A record that would lie at or past its frame's span ends
-  the frame, and starts the next one as its record 0.
+  the frame, and starts the next one as its record 0. An owner MAY end a
+  frame before it holds `records` records, and puts it then.
+  `[Sc: frames.md §3]`
 
 **The reader's fields.** A **reader** of a frame key is a consumer or a
 tool. It keeps one state for each field of the key, in the run it holds:
@@ -2315,17 +2320,31 @@ tool. It keeps one state for each field of the key, in the run it holds:
   at a gap, at a rewind, and at a frame of a run other than the one it
   holds, its first frame included. It then reads the frame, whose
   included fields are `known` again, or `absent`.
-  `[Sc: frames.md §2, §5, §6]`
+  `[F: frame/apply.json]` `[Sc: frames.md §2, §5, §6]`
 - **Past the deadband.** A consumer or a tool MUST turn a field with a
   deadband `unknown` at the `max_records`-th record after the one that
-  included it, when that record omits it too. `[Sc: frames.md §4]`
+  included it, when that record omits it too.
+  `[F: frame/apply.json]` `[Sc: frames.md §4]`
 - **Never a value.** A consumer or a tool MUST NOT show or use an
   `unknown` or `absent` field as a value, its last value or 0 among
-  them. `[Sc: frames.md §2, §6]`
+  them. `[F: frame/apply.json]` `[Sc: frames.md §2, §6]`
 
 So a lost record costs the fields its successors omit, until each is
 included again, and a keyframe heals them all. zenoh keeps one key's puts
 in order on one priority, so a rewind is never a reorder on one path.
+
+**History.** A frame resource MAY declare `history` (§2.5). A late joiner
+then reads the frames its owner's cache holds, and the last keyframe among
+them heals its fields at once.
+- **In order.** A late joiner hands its reader the cache's frames before
+  the frames it hears live, in their seqs' order (§4.3), and never a frame
+  older than one the reader read. The reader would take that frame for a
+  rewind (above), and turn every field `unknown`.
+- **Across a face** the `@adv` deny keeps the cache home
+  ([`link.v1`](profiles/link/v1.md) §2.6). A far late joiner heals at the
+  next full record alone, and every put still carries the advanced
+  publisher's source info across the face, which `link.v1` warns of
+  (`history_on_frame`, §2.8).
 
 **Sizes.** A frame is 6 bytes over its body, or 8 with a 32-bit run. A
 keyframe of one record of 63 bits is 42 + 1 + 63 = 106 bits, so its body
@@ -2956,6 +2975,7 @@ not. An implementation MUST report, for each fixture, exactly the codes
 | W104 | `minor` is absent | once |
 | W105 | an annotation key outside its profile's vocabulary: the table the profile publishes, else its interim one (Appendix D); a profile with neither has none to be outside of (§10) | per key |
 | W107 | the file is not named `<name>.v<major>.toml` | once |
+| W108 | a frame resource whose interval (§7.7) is above half its `freshness.ttl_s` ([`freshness.v1`](profiles/freshness/v1.md) §2.4): its owner puts a frame at least every ttl/2, so its stated cadence is one it cannot keep | per resource |
 
 **Cascades.** A fixture's codes do not depend on the order lints run in,
 because of these rules:
@@ -2998,7 +3018,9 @@ because of these rules:
      the `timing.*` values as `timing.v1` §2.2 reads a declaration. Where
      one of them does not read, the declaration is invalid. E050 then
      reads none of its values, as `timing.v1` judges none.
-   `[F: contracts/e023-frame-unresolved, e047-frame-type, e049-frame-deadband, e050-frame-timing]`
+   - W108 waits for E048's none too. It reads the horizon as
+     `freshness.v1` §2.1 reads one, and an unstated interval gives none.
+   `[F: contracts/e023-frame-unresolved, e047-frame-type, e049-frame-deadband, e050-frame-timing, w108-frame-horizon]`
 
 **Order.** Resources are taken in the bytewise order of their template
 text: a sorted table's order, not the file's, since TOML gives a table's

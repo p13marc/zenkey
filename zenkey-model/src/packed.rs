@@ -167,6 +167,24 @@ impl Decimal {
         self.m.is_positive()
     }
 
+    /// An integer, as a decimal.
+    pub(crate) fn of_i128(v: i128) -> Self {
+        Self {
+            m: BigInt::from(v),
+            e: 0,
+        }
+    }
+
+    /// `|self − o|`: how far apart two values are, which a frame's
+    /// deadband weighs (core §7.7).
+    pub(crate) fn distance(&self, o: &Self) -> Self {
+        let d = self.sub(o);
+        Self {
+            m: d.m.abs(),
+            e: d.e,
+        }
+    }
+
     /// `self / o`, when it is an integer.
     fn div_exact(&self, o: &Self) -> Option<BigInt> {
         let e = self.e.max(o.e);

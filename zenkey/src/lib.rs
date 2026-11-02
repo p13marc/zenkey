@@ -99,7 +99,9 @@
 //! the binding's order, by `zenkey_model::arbitration`'s `Arbiter`: only
 //! the active provider's arrivals delivered, each switch told, the
 //! dead-man at start, withdrawals heard on a watch session and held back
-//! across its moves.
+//! across its moves; frames (core §7.7, #981) are [`frame`]: a frame
+//! resource's records gathered into frames by a [`frame::FrameWriter`],
+//! each put under its record 0's seq, a plain writer of one refused.
 
 #[cfg(feature = "zenoh")]
 pub mod alarms;
@@ -122,6 +124,8 @@ mod descriptor;
 #[cfg(feature = "zenoh")]
 pub mod desired;
 pub mod error;
+#[cfg(feature = "zenoh")]
+pub mod frame;
 #[cfg(feature = "zenoh")]
 mod gate;
 #[cfg(feature = "zenoh")]

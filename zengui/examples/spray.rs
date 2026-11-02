@@ -15,8 +15,9 @@
 //! event within its rate. Payloads are synthesized per (seed, tick); every
 //! operation is served. All on one session, in the deployment namespace
 //! (`--namespace`, `spray` by default), over `examples/zk2/walkthrough`,
-//! `examples/zk2/tcgui` and the runtime's `telemetry.v1` scenario contract
-//! (`zenkey/tests/contracts/meter.v1.toml`, `--meter`):
+//! `examples/zk2/tcgui`, the runtime's `telemetry.v1` scenario contract
+//! (`zenkey/tests/contracts/meter.v1.toml`, `--meter`) and its frames'
+//! (`zenkey/tests/contracts/frames/linkframes.v1.toml`, `--frames`):
 //!
 //! | address | implements | what it shows |
 //! |---|---|---|
@@ -29,6 +30,7 @@
 //! | `host-a/tc` | `tc.netif.v1`, `tc.netem.v1` | JSON Schema, templated `{ns}/{iface}`, an event at rate `low` |
 //! | `host-a/sysmon` | `health.v1` only | a status cycling OK → DEGRADED → OK |
 //! | `lab/meter` | `meter.v1` | `telemetry.v1` (#819, TD): a Point counter and a Point histogram, their epoch in the Point; a bare counter in `By`, its epoch in the Epoch attachment; a bare counter with no unit and no epoch; a bare gauge in `dBm`; a state counter — every epoch the instance, so a new term is a reset |
+//! | `lab/modem` | `linkframes.v1` | frames (core §7.7, #981 K3), through the runtime's frame writer: zenoh-modem's four link readings one record a frame, a full record every 15 and a deadband on the queue; a sampler's three records a frame, 10 s apart, on their schedule |
 //!
 //! An event's rate caps it per run, so each owner runs in **terms** of an
 //! hour (`TERM`): at the end of one its service is closed and brought up
@@ -123,6 +125,13 @@ pub struct Args {
         default_value = concat!(env!("CARGO_MANIFEST_DIR"), "/../zenkey/tests/contracts/meter.v1.toml")
     )]
     pub meter: PathBuf,
+    /// The frames scenario contract `lab/modem` implements: a frame
+    /// resource of one record a frame and one of three (core §7.7, #981 K3).
+    #[arg(
+        long,
+        default_value = concat!(env!("CARGO_MANIFEST_DIR"), "/../zenkey/tests/contracts/frames/linkframes.v1.toml")
+    )]
+    pub frames: PathBuf,
 }
 
 /// One owner: an address, the interfaces it implements, its role bindings,
@@ -197,12 +206,22 @@ const OWNERS: &[Owner] = &[
         bindings: &[],
         members: &[],
     },
+    Owner {
+        address: MODEM,
+        interfaces: &["linkframes.v1"],
+        bindings: &[],
+        members: &[],
+    },
 ];
 
 /// The owner of `meter.v1`'s metrics (#819, TD): what zengui's Inspector
 /// reads by `telemetry.v1` — kinds and units, a counter's rate, a reset at
 /// each new term.
 pub const METER: &str = "lab/meter";
+
+/// The owner of `linkframes.v1`'s frames (#981 K3): what zengui's
+/// Inspector reads as a frame's records and field states.
+pub const MODEM: &str = "lab/modem";
 
 /// The service implementing only `health.v1`, its status cycling.
 pub const SYSMON: &str = "host-a/sysmon";
@@ -300,11 +319,12 @@ const CONTRACTS: &[&str] = &[
     "tcgui/tc.netem.v1.toml",
 ];
 
-/// Every file of [`CONTRACTS`] under `root`, and `meter`, loaded; a file
-/// that does not load stops the demo, with what was wrong.
-fn load(root: &Path, meter: &Path) -> anyhow::Result<ContractSet> {
+/// Every file of [`CONTRACTS`] under `root`, `meter` and `frames`, loaded;
+/// a file that does not load stops the demo, with what was wrong.
+fn load(root: &Path, meter: &Path, frames: &Path) -> anyhow::Result<ContractSet> {
     let mut files: Vec<PathBuf> = CONTRACTS.iter().map(|f| root.join(f)).collect();
     files.push(meter.to_path_buf());
+    files.push(frames.to_path_buf());
     let (set, problems) = ContractSet::load_files(&files);
     if !problems.is_empty() {
         let said: Vec<String> = problems
@@ -312,8 +332,8 @@ fn load(root: &Path, meter: &Path) -> anyhow::Result<ContractSet> {
             .map(|p| format!("{}: {}", p.at, p.message))
             .collect();
         anyhow::bail!(
-            "the example contracts did not load (pass --contracts <examples/zk2> and \
-             --meter <meter.v1.toml>):\n{}",
+            "the example contracts did not load (pass --contracts <examples/zk2>, \
+             --meter <meter.v1.toml> and --frames <linkframes.v1.toml>):\n{}",
             said.join("\n")
         );
     }
@@ -455,7 +475,7 @@ impl Spray {
     /// Brings every owner up and starts the raw traffic. Returns once every
     /// owner's first term is up, or the first that could not come up.
     pub async fn start(args: &Args) -> anyhow::Result<Spray> {
-        let contracts = load(&args.contracts, &args.meter)?;
+        let contracts = load(&args.contracts, &args.meter, &args.frames)?;
 
         // Every plan before anything is brought up: a contract that will
         // not plan stops the demo with nothing declared.

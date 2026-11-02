@@ -62,6 +62,10 @@ async fn the_spray_is_a_deployment_and_the_doctor_finds_its_non_conformance() {
             env!("CARGO_MANIFEST_DIR"),
             "/../zenkey/tests/contracts/meter.v1.toml"
         )),
+        frames: PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../zenkey/tests/contracts/frames/linkframes.v1.toml"
+        )),
     };
     let up = spray::Spray::start(&args)
         .await
@@ -77,7 +81,7 @@ async fn the_spray_is_a_deployment_and_the_doctor_finds_its_non_conformance() {
 
     let mut want: Vec<String> = up.instances.keys().cloned().collect();
     want.push(spray::PHANTOM.to_owned());
-    assert_eq!(want.len(), 11, "ten services and the phantom: {want:?}");
+    assert_eq!(want.len(), 12, "eleven services and the phantom: {want:?}");
     let deadline = tokio::time::Instant::now() + SETTLE;
     loop {
         let listing =
@@ -193,6 +197,10 @@ async fn the_window_reads_the_spray_through_its_presence_link_and_lens() {
         meter: PathBuf::from(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../zenkey/tests/contracts/meter.v1.toml"
+        )),
+        frames: PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../zenkey/tests/contracts/frames/linkframes.v1.toml"
         )),
     };
     let up = spray::Spray::start(&args)

@@ -7,6 +7,60 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## 0.13 — 2026-11-02: a frame crosses whole, never downsampled (#981)
+
+Core 0.83 defined frames (§7.7), and 0.87 has owners write them. A frame
+puts several records of one packed type under one envelope, and a record
+may hold only the fields that changed since the record before. This
+version is #981's K3. Before it, the plan downsampled a frame resource as
+any stream, to one put per `interval_s`.
+
+**Changed: §2.8, a frame is never downsampled.** A generator MUST NOT
+emit a downsampling rule for a frame resource's key. `[F: plan.json]`
+- zenoh 1.10.1 passes a put only once the rule's interval has passed
+  since the last put it passed. A frame put every `interval_s`, a little
+  early now and then, would lose about every other frame.
+- A lost frame turns the fields its successors omit `unknown` until the
+  next full record. A thinned sampled stream loses samples; a thinned
+  frame loses its deltas' meaning.
+- Its cost is its owner's cadence, which the plan's three new warnings
+  weigh against the face.
+
+**Added: the plan's warnings** (§2.3's table, §2.8):
+- `frame_over_interval`: a crossing frame resource whose interval (core
+  §7.7: its span, else its `timing.period_ms`) is shorter than
+  `interval_s`. An unstated interval draws none.
+- `frame_over_batch`: one whose largest frame's payload is above
+  `batch_bytes`. That frame is `records` full records, every optional
+  field present, every later record with its offset, after an 8-byte
+  envelope. zenoh fragments a larger message and resends no fragment.
+- `history_on_frame`: one that declares `history`. Its source info rides
+  every put across the face, and the `@adv` deny keeps its cache home.
+
+**Changed: §2.7.** A frame resource has no parameter, so one exposed
+`link` crosses, and is never `templated_exposure`.
+
+**Changed: §2.12.** A crossing frame resource with a horizon is evidence
+as any crossing stream is. Never downsampled, it crosses at its own
+cadence, so `interval_over_horizon` reads its interval, not `interval_s`:
+2 × interval > ttl. An unstated interval draws none.
+
+**Fixtures.** `plan.json` gains a case over `contracts/sampler.v1.toml`,
+a new directory of the contracts a case loads: four frame resources and a
+plain stream on a face of 60 s and a 220-byte batch. Only the plain stream
+has a rule. It is written by hand, and never blessed. An inline resource
+declares no `history` and no `frame` table, as the description now says.
+
+**Deliberately not changed.**
+- **`history` on a frame is a warning, not an error.** On the host bus a
+  late joiner heals at the cache's last keyframe (core §7.7, "History").
+  Across a face the cache stays home, so the face pays for nothing it
+  uses.
+- **Per-face frame lists** and the batch against a face's MTU are #988's,
+  for `link.v2`.
+- **`link.v2`** restates `link.v1` by reference, so its plans gain the
+  same rule and warnings. Its text and fixtures are unchanged.
+
 ## link.v2 0.2 — 2026-11-01: the catalog read as core §8.6 reads one (#988)
 
 zk2py's round 96 found `transport.json`'s catalogs contradicting core

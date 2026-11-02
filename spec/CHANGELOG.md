@@ -3,6 +3,63 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.87 — 2026-11-02: frames written, and their scenarios (#981)
+
+0.83 defined frames and stated their owner's and reader's rules, citing
+`scenarios/frames.md`, which did not exist (0.85's note on F-454). This
+version is #981's K3: owners write frames, and `frames.md` runs both
+halves. The reference's owner is the runtime's `FrameWriter`.
+
+**Added: `scenarios/frames.md`, §1 to §6.** Each frame decoded alone, a
+lost delta frame, scheduled and measured time, the deadband, a new run,
+and a late joiner, on one bus over `linkframes.v1`. A lost frame is one
+whose seqs its owner takes and never puts, as a put a network dropped.
+Every MUST of §7.7 that cited it now has its evidence.
+
+**Added: §7.7, "Never a mutation".** An owner MUST NOT put a mutation on
+a frame resource's key. `[Sc: frames.md §1]` 0.83 said a reader has no
+reading of one, but asked nothing of the owner. The reference's runtime
+refuses a plain writer of a frame resource.
+
+**Added: §7.7, a frame ended early.** An owner MAY end a frame before it
+holds `records` records, and puts it then. `[Sc: frames.md §3]` 0.83's
+owner ended a frame only at its span or its count, so a frame waited for
+a record its owner might never measure.
+
+**Added: §7.7, "History".** A frame resource MAY declare `history`
+(§2.5). A late joiner hands its reader the cache's frames first, in their
+seqs' order, and never one older than the reader read, which would read
+as a rewind. The last keyframe among them heals it at once. Across a face
+the `@adv` deny keeps the cache home, and `link.v1` 0.13 warns of the
+cost (`history_on_frame`). The paragraph states no keyword: a seed that
+merges by seq within a run, as the reference's tools do, already orders
+the cache's frames so.
+
+**Changed: §7.7's three reader MUSTs** cite `[F: frame/apply.json]`
+beside their scenarios. K2's fixture is their evidence, and it predates
+the scenarios.
+
+**Added: W108** (§9.2): a frame resource whose interval is above half its
+`freshness.ttl_s`. Its owner puts a frame at least every ttl/2
+(`freshness.v1` §2.4), so a cadence it states above that is one it cannot
+keep. Cascade 8: it waits for E048's none, reads the horizon as
+`freshness.v1` §2.1 does, and an unstated interval gives none.
+`[F: contracts/w108-frame-horizon]`
+
+**Deliberately not changed.**
+- **The frame itself:** its form, body, tag, refusals and fixtures are
+  0.83's. No fingerprint in `examples/zk2/` moves.
+- **`history` on a frame is allowed.** On the host bus it is a late
+  joiner's fastest heal. Its cost across a face is `link.v1`'s to weigh,
+  where the deployment states the face.
+- **W108 is a warning,** as `link.v1`'s `interval_over_horizon` is: the
+  owner's configuration may put frames more often than the contract
+  states, and the horizon still holds.
+- **A frame's put carries no Zenoh timestamp:** E050 refuses a lifespan,
+  so a frame resource is on no row of §4.3's table.
+- **`RULES.md`** gains the owner's MUST NOT, 227 rules, and W108 among
+  its rule ids, 85. The MAY states no keyword the index lists.
+
 ## 0.86 — 2026-11-01: §11.1's Consume grants a `freshness.v2` heartbeat (#978)
 
 Epic #975 makes the wire bandwidth-first. `freshness.v2` confirms a

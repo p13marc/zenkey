@@ -336,8 +336,40 @@ impl Writer {
     }
 
     /// [`Writer::declare`] on a governed interface's `gate`: its publisher
-    /// declared only while the gate is open.
+    /// declared only while the gate is open. A frame resource's is
+    /// refused: a mutation on its key has no reading (core §7.7), so its
+    /// samples go through a [`crate::frame::FrameWriter`].
     pub(crate) async fn declare_gated(
+        session: &zenoh::Session,
+        minter: &Arc<crate::state::Minter>,
+        key: OwnedKeyExpr,
+        r: &Resource,
+        values: &Bindings,
+        gate: Option<Arc<Gate>>,
+    ) -> Result<Self> {
+        if data(r)?.frame.is_some() {
+            return Err(Error::Contract(format!(
+                "{} is a frame resource: write it with a FrameWriter, never a mutation \
+                 (core §7.7)",
+                r.template
+            )));
+        }
+        Self::declare_any(session, minter, key, r, values, gate).await
+    }
+
+    /// A frame resource's publisher, which only its
+    /// [`crate::frame::FrameWriter`] puts on.
+    pub(crate) async fn declare_framed(
+        session: &zenoh::Session,
+        minter: &Arc<crate::state::Minter>,
+        key: OwnedKeyExpr,
+        r: &Resource,
+        gate: Option<Arc<Gate>>,
+    ) -> Result<Self> {
+        Self::declare_any(session, minter, key, r, &Bindings::default(), gate).await
+    }
+
+    async fn declare_any(
         session: &zenoh::Session,
         minter: &Arc<crate::state::Minter>,
         key: OwnedKeyExpr,

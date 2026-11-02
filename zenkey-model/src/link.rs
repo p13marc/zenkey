@@ -714,6 +714,17 @@ pub enum Code {
     /// Revisions of a listed interface that disagree on a resource's
     /// exposure, one `link` and another not: it does not cross (§2.3, 0.3).
     ExposureDisagrees,
+    /// A crossing frame resource whose interval is shorter than the
+    /// face's `interval_s`: never downsampled, it crosses at its own
+    /// cadence (§2.8).
+    FrameOverInterval,
+    /// A crossing frame resource whose largest frame's payload is above
+    /// the face's batch: it is fragmented, and lost whole (§2.8).
+    FrameOverBatch,
+    /// A crossing frame resource that declares `history`: every put pays
+    /// the advanced publisher's source info across the face, and its
+    /// history stays home (§2.8).
+    HistoryOnFrame,
     /// A listed owner's tombstone window below the outage (§2.11).
     WindowUnderOutage,
     /// A block whose denies leave a pair of `@zk` open (§2.15).
@@ -793,6 +804,9 @@ impl Code {
             Self::CarveOutOverlap => "carve_out_overlap",
             Self::IntervalOverHorizon => "interval_over_horizon",
             Self::ExposureDisagrees => "exposure_disagrees",
+            Self::FrameOverInterval => "frame_over_interval",
+            Self::FrameOverBatch => "frame_over_batch",
+            Self::HistoryOnFrame => "history_on_frame",
             Self::WindowUnderOutage => "window_under_outage",
             Self::ZkNotDenied => "zk_not_denied",
             Self::WildcardDownsampling => "wildcard_downsampling",
@@ -827,6 +841,9 @@ impl Code {
             | Self::CarveOutOverlap
             | Self::IntervalOverHorizon
             | Self::ExposureDisagrees
+            | Self::FrameOverInterval
+            | Self::FrameOverBatch
+            | Self::HistoryOnFrame
             | Self::KeepAliveFlaps
             | Self::SequenceWindow
             | Self::OpenUnderHandshake
@@ -1858,21 +1875,52 @@ pub fn check_catalog(policy: &FacePolicy, held: &str) -> Vec<Finding> {
 
 // ── The deployment ───────────────────────────────────────────────────────
 
-/// One resource as the plan reads it: its template, its kind token, and
-/// its resolved annotations.
+/// One resource as the plan reads it: its template, its kind token, its
+/// resolved annotations, whether it declares `history` (core §2.5), and,
+/// for a frame resource (core §7.7), what the plan weighs of its frames.
 #[derive(Debug, Clone)]
 pub struct Res {
     pub template: Template,
     pub token: KindToken,
     pub annotations: BTreeMap<String, Value>,
+    pub history: bool,
+    pub frame: Option<FrameFacts>,
 }
 
-impl From<&Resource> for Res {
-    fn from(r: &Resource) -> Self {
+/// What the plan reads of a frame resource (§2.8): never downsampled, it
+/// crosses at its own cadence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FrameFacts {
+    /// Its interval (core §7.7): its span, else its `timing.period_ms`,
+    /// else unstated.
+    pub interval_ms: Option<u64>,
+    /// The payload of the largest frame its owner writes, in bytes
+    /// ([`crate::frame::Layout::largest_payload_bytes`]); `None` when its
+    /// record type's layout does not read.
+    pub largest_bytes: Option<u64>,
+}
+
+impl Res {
+    /// `r` of contract `c`, as the plan reads it.
+    #[must_use]
+    pub fn of(c: &Contract, r: &Resource) -> Self {
+        let data = match &r.body {
+            crate::contract::Body::Data(d) => Some(d),
+            crate::contract::Body::Operation(_) => None,
+        };
+        let frame = data.and_then(|d| d.frame.as_ref()).map(|p| FrameFacts {
+            interval_ms: p.interval_ms(&r.annotations),
+            largest_bytes: crate::frame::Layout::of_resource(c, r)
+                .ok()
+                .flatten()
+                .map(|l| l.largest_payload_bytes()),
+        });
         Res {
             template: r.template.clone(),
             token: r.token,
             annotations: r.annotations.clone(),
+            history: data.is_some_and(|d| d.history.is_some()),
+            frame,
         }
     }
 }
@@ -1904,7 +1952,7 @@ impl Deployment {
         }
         self.add_revision(
             c.iface.to_string(),
-            c.resources.iter().map(Res::from).collect(),
+            c.resources.iter().map(|r| Res::of(c, r)).collect(),
         );
     }
 
@@ -1947,6 +1995,10 @@ fn merge(revisions: &[Vec<Res>]) -> (Vec<Res>, BTreeSet<usize>) {
             .iter()
             .filter(|r| exposure(kind_of(r.token), &r.annotations) == Exposure::Link)
             .count();
+        // A frame's `history` is warned of where any revision declares it
+        // (§2.8); its `frame` table is one in every revision of a major,
+        // since a change to it is breaking (core §9.8).
+        out[i].history = rs.iter().any(|r| r.history);
         if links > 0 && links < rs.len() {
             disagree.insert(i);
             out[i]
@@ -2269,7 +2321,8 @@ fn plan_face(
         for s in services {
             for iface in &deployment.implements[s.as_str()] {
                 for r in resources_of(iface) {
-                    if is_stream(r.token) && crosses(iface, r) {
+                    // A frame is never downsampled (§2.8).
+                    if is_stream(r.token) && r.frame.is_none() && crosses(iface, r) {
                         rules.push(Rule {
                             key_expr: format!(
                                 "zk2/{}/{iface}/{}/{}",
@@ -2287,6 +2340,9 @@ fn plan_face(
         rules.dedup_by(|a, b| a.key_expr == b.key_expr);
         for iface in listed {
             for r in resources_of(iface) {
+                if r.frame.is_some() {
+                    continue;
+                }
                 if let (true, Some(ttl), Some(n)) = (
                     is_stream(r.token) && crosses(iface, r),
                     horizon(r).ttl(),
@@ -2299,6 +2355,32 @@ fn plan_face(
                         res_name(iface, r),
                     ));
                 }
+            }
+        }
+    }
+    // A crossing frame resource (§2.8, §2.12): its own cadence, against
+    // the face's interval, its batch and its horizon, and its history.
+    for iface in listed {
+        for r in resources_of(iface) {
+            let Some(f) = r.frame.filter(|_| crosses(iface, r)) else {
+                continue;
+            };
+            let at = || res_name(iface, r);
+            if let (Some(i), Some(n)) = (f.interval_ms, face.interval_s)
+                && u128::from(i) < u128::from(n) * 1000
+            {
+                findings.push(Finding::new(Code::FrameOverInterval, Some(name), at()));
+            }
+            if f.largest_bytes.is_some_and(|b| b > face.batch_bytes) {
+                findings.push(Finding::new(Code::FrameOverBatch, Some(name), at()));
+            }
+            if r.history {
+                findings.push(Finding::new(Code::HistoryOnFrame, Some(name), at()));
+            }
+            if let (Some(ttl), Some(i)) = (horizon(r).ttl(), f.interval_ms)
+                && u128::from(i) * 2 > ttl.as_millis()
+            {
+                findings.push(Finding::new(Code::IntervalOverHorizon, Some(name), at()));
             }
         }
     }
@@ -3099,6 +3181,8 @@ mod tests {
             template: Template::parse(template).unwrap(),
             token: KindToken::Stream,
             annotations: serde_json::from_value(annotations).unwrap(),
+            history: false,
+            frame: None,
         }
     }
 

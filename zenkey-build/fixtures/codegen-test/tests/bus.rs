@@ -715,3 +715,90 @@ async fn a_time_field_counts_from_the_catalogs_epoch() {
     );
     assert_eq!(off.at_ms, clock.at_ms - epoch * 1000);
 }
+
+/// Frames through the generated code (core §7.7, #981 K3): a frame
+/// resource's field is a typed frame writer, each record a value of its
+/// packed type, and the generated consumer hands over each frame's
+/// reading; a frame of three records takes three seqs.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn frames_are_written_through_the_generated_code() {
+    use zenkey::model::frame::FieldState;
+    use zenkey::packed::{Coded, Open};
+    use zenkey_codegen_test::zk2::linkframes_v1;
+    use zenkey_codegen_test::zk2::linkframes_v1::types::{Link, Sample, sample};
+
+    let (_r, ep) = router().await;
+    let (owner, reader) = (client(&ep).await, client(&ep).await);
+    let mut b = ServiceBuilder::new(&owner, ServiceConfig::new(addr("lab/modem")));
+    let server = linkframes_v1::Server::declare(&mut b).await.unwrap();
+    let _svc = b.start().await.unwrap();
+    let tool = linkframes_v1::Consumer::from_inner(
+        zenkey::consumer::Consumer::for_tool(
+            &reader,
+            linkframes_v1::contract(),
+            &["lab/modem"],
+            &Default::default(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let heard: Arc<Mutex<Vec<zenkey::consumer::FrameRead>>> = Arc::default();
+    let h = Arc::clone(&heard);
+    let _sub = tool
+        .subscribe_frames_link(move |d| h.lock().unwrap().extend(d.frame))
+        .await
+        .unwrap();
+    let samples: Arc<Mutex<Vec<zenkey::consumer::FrameRead>>> = Arc::default();
+    let h = Arc::clone(&samples);
+    let _s = tool
+        .subscribe_frames_sample(move |d| h.lock().unwrap().extend(d.frame))
+        .await
+        .unwrap();
+    eventually("the tool's subscribers reach the owner", || async {
+        (server
+            .frames_link
+            .inner()
+            .writer()
+            .matching()
+            .await
+            .unwrap()
+            && server
+                .frames_sample
+                .inner()
+                .writer()
+                .matching()
+                .await
+                .unwrap())
+        .then_some(())
+    })
+    .await;
+    let link = Link {
+        dropped: Some(7),
+        queue_depth: Some(Coded::Value(12)),
+        duty_available: Some(1),
+        duty_wait_ms: Some(Coded::Value("1500".parse().unwrap())),
+    };
+    let put = server.frames_link.record(&link).await.unwrap();
+    assert_eq!(put.map(|s| s.seq.get()), Some(0));
+    let reading = Sample {
+        temperature: "21.5".parse().unwrap(),
+        rssi: Coded::Value(-80),
+        link_up: true,
+        mode: Some(Open::Known(sample::Mode::Rx)),
+    };
+    for _ in 0..2 {
+        assert_eq!(server.frames_sample.record(&reading).await.unwrap(), None);
+    }
+    let put = server.frames_sample.record(&reading).await.unwrap();
+    assert_eq!(put.map(|s| s.seq.get()), Some(0));
+    eventually("the tool hears both frames", || async {
+        (!heard.lock().unwrap().is_empty() && !samples.lock().unwrap().is_empty()).then_some(())
+    })
+    .await;
+    let f = heard.lock().unwrap()[0].clone();
+    assert_eq!(f.field(0, "queue_depth"), Some(FieldState::Known(12)));
+    assert_eq!(f.field(0, "duty_wait_ms"), Some(FieldState::Known(15)));
+    let s = samples.lock().unwrap()[0].clone();
+    assert_eq!(s.applied.records.len(), 3);
+    assert_eq!(s.field(2, "rssi"), Some(FieldState::Known(60)));
+}

@@ -35,3 +35,11 @@ v1's `zenkey-build` (0.11.x on crates.io) is the `v1` branch's, and that branch'
   `zenkey::codec::Packed<T>`. `codegen-test/tests/packed.rs` runs every
   vector of `spec/conformance/packed/vectors.json` through it (`Wide64`
   aside: E028 keeps it out of every contract).
+- **Frame resources** (#981 K3, core §7.7): a frame resource's field on
+  the generated `Server` is a `zenkey::typed::FrameWriter<Packed<T>>`
+  (`emit::is_frame`), each record a value of its packed type, and the
+  generated `Consumer`'s `subscribe_<name>` hands over each
+  `zenkey::consumer::Delivery`, its `frame` the reader's reading, never a
+  typed record. `codegen-test` generates `linkframes.v1`
+  (`zenkey/tests/contracts/frames/`), and `tests/bus.rs`'s
+  `frames_are_written_through_the_generated_code` runs it on a bus.
