@@ -447,9 +447,10 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   `conformance/contracts/probe.v1.toml` (with `probe.json`) is the
   contract of `v2/plan.json`'s cases and `scenarios-v2.md` §2. A code
   keeps one severity, so the memo's one `not_packed` is two codes.
-- **`telemetry.v2`** (#983 T1, text 0.1, `experimental` until modem.v3
-  uses it) sits beside `telemetry.v1` in `spec/profiles/telemetry/`:
-  `v2.md`, `scenarios-v2.md`,
+- **`telemetry.v2`** (#983 T1, text 0.1; `draft` since T4, a status
+  entry, used by zenoh-modem's `modem.v3` 3.2, whose nine frame
+  resources mirror its streams) sits beside `telemetry.v1` in
+  `spec/profiles/telemetry/`: `v2.md`, `scenarios-v2.md`,
   `conformance/v2/{declarations,readings,continuity}.json` (blessed and
   read by hand, continuity cross-checked by a Python reading kept out of
   the repo), `conformance/contracts/meterframe.v1.toml` (the scenarios'
@@ -463,6 +464,11 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   §2.21 (the time base and its basis). No core or observer amendment.
   T3 (the owner, no text change) names `zenkey/tests/profile_telemetry_v2.rs`
   in `scenarios-v2.md`'s intro, which runs §1–§7 against the runtime.
+  T4 re-derived `link.v1`'s `plan.json` case 0 from 3.2 (seven subtree
+  denies, no downsampling, `frames/link` the liveness evidence); #988's
+  L5 adds zenoh-modem's five `link.v2` faces
+  (`examples/zk2/zenoh-modem/faces/`, `v2/plan.json` cases 14–18), and
+  `link.v2` stays experimental, since `modem.v3` lists `link.v1`.
 - **`freshness.v1`** is `experimental` since #978's F5 (a status entry in
   `freshness/CHANGELOG.md`, text still 0.5): the adopters' contracts and
   `nav.v2` moved to `freshness.v2`, each a `uses_changed` revision in
