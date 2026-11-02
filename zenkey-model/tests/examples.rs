@@ -108,12 +108,24 @@ fn every_example_contract_validates_fingerprints_and_bundles() {
     assert!(!set.has_errors(), "{set}");
 }
 
+/// The streams whose `link.exposure` an example's later revision moved back
+/// to `host`, their readings crossing in a frame: `modem.v3` 3.2's four
+/// `link` streams, now in `frames/link` (#983's T4). Each is a review,
+/// `annotations_changed`, accepted when 3.2 was published.
+const HOST_AGAIN: [(&str, &str); 4] = [
+    ("zenoh-modem/modem.v3.toml", "sdu/dropped_total"),
+    ("zenoh-modem/modem.v3.toml", "sched/queue_depth"),
+    ("zenoh-modem/modem.v3.toml", "air/duty_cycle_available"),
+    ("zenoh-modem/modem.v3.toml", "air/duty_cycle_wait_ms"),
+];
+
 /// `examples/zk2/.history` (#618): every bundle verifies, every example's
 /// current revision is published there, and it is compatible with every
 /// earlier revision of its interface, or a review its publication accepted:
-/// `uses_changed` alone, an example's move to `freshness.v2` (#978's F5), as
-/// `tests/profiles.rs` accepts a standard contract's. After an intended
-/// change, publish the new revision with
+/// `uses_changed`, an example's move to `freshness.v2` (#978's F5) or
+/// `telemetry.v2` (#983's T4), as `tests/profiles.rs` accepts a standard
+/// contract's; and `annotations_changed` on [`HOST_AGAIN`] alone. After an
+/// intended change, publish the new revision with
 /// `zk2 contract bundle <file> --history examples/zk2/.history`.
 #[test]
 fn every_example_is_published_and_compatible_with_its_history() {
@@ -138,11 +150,17 @@ fn every_example_is_published_and_compatible_with_its_history() {
             "{rel}: the current revision is not published; run zk2 contract bundle {rel} --history examples/zk2/.history"
         );
         // A published revision's review findings were accepted when it was
-        // published, as zenkey-build reads them: the one an example takes is
-        // `uses_changed`, its move to freshness.v2 (#978's F5). Breaking is
-        // refused, always.
+        // published, as zenkey-build reads them: the ones an example takes
+        // are `uses_changed`, and `annotations_changed` on a stream whose
+        // reading moved into a frame. Breaking is refused, always.
         let v = check_history(&revs, &new);
-        let accepted = v.findings.iter().all(|f| f.rule == "uses_changed");
+        let accepted = v.findings.iter().all(|f| {
+            f.rule == "uses_changed"
+                || (f.rule == "annotations_changed"
+                    && HOST_AGAIN
+                        .iter()
+                        .any(|(file, at)| rel == *file && f.at == format!("resources.\"{at}\"")))
+        });
         assert!(
             v.class() == Class::Compatible || (v.class() == Class::Review && accepted),
             "{rel}: {:#?}",
