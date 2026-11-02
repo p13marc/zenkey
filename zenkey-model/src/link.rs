@@ -47,6 +47,16 @@
 //! `horizon_under_face`, `block_over_batch`, `keep_alive_not_suppressed`,
 //! `timed_downsampled`).
 //!
+//! **A device face** (#982 H1, v2 0.7): `attach = "device"` with `devices`,
+//! the owners on a first hop by address (v2 §2.1, §2.5). Each device is a
+//! listed owner on every face ([`FacePolicy::owners`]), but for
+//! downsampling on its own face (v2 §2.8); the plan refuses one that
+//! implements `archive.v1` or a governed interface (`presence_required`),
+//! warns of its `epoch` templates (`epoch_on_device`), and carves `zk` into
+//! three denies, so that an instance key crosses on core §11.2's Own row's
+//! pairs alone ([`OWN_PAIRS`], v2 §2.6); [`check_block`] reads that carve
+//! on a device face (v2 §2.15).
+//!
 //! ```text
 //! crossing_v2(token, shape, …)      ─▶ link.v2's reading of one resource
 //! contract_findings(contract)       ─▶ packed_required, per exposed resource
@@ -77,6 +87,10 @@ use crate::template::{Segment, Template};
 
 /// The profile's id, as a contract lists it in `uses`.
 pub const PROFILE: &str = "link.v1";
+
+/// `archive.v1`'s interface id: a device implementing it is
+/// `presence_required` (v2 §2.5).
+const ARCHIVE: &str = "archive.v1";
 
 /// The profile's name, as an annotation key's prefix carries it.
 pub const NAME: &str = "link";
@@ -962,6 +976,17 @@ pub enum Code {
     /// A revision of an interface that crosses the face, which the
     /// deployment's catalog does not list (v2 §2.18).
     CatalogMissing,
+    /// A device the policy lists elsewhere: among `services`, or in
+    /// another face's `devices` (v2 §2.1, §2.5).
+    DeviceListed,
+    /// A device that implements `archive.v1`, or an interface a revision
+    /// given of which uses `redundancy.v1`: each needs presence on its
+    /// peers' side of the face (v2 §2.5, core §8.1).
+    PresenceRequired,
+    /// On a device face, a template of a device's interface that declares
+    /// `epoch`: its member tokens cross the face at each transport, and the
+    /// face denies them (v2 §2.5).
+    EpochOnDevice,
 }
 
 impl Code {
@@ -1019,6 +1044,9 @@ impl Code {
             Self::KeepAliveNotSuppressed => "keep_alive_not_suppressed",
             Self::TimedDownsampled => "timed_downsampled",
             Self::CatalogMissing => "catalog_missing",
+            Self::DeviceListed => "device_listed",
+            Self::PresenceRequired => "presence_required",
+            Self::EpochOnDevice => "epoch_on_device",
         }
     }
 
@@ -1046,7 +1074,8 @@ impl Code {
             | Self::HorizonUnderFace
             | Self::BlockOverBatch
             | Self::KeepAliveNotSuppressed
-            | Self::TimedDownsampled => Severity::Warning,
+            | Self::TimedDownsampled
+            | Self::EpochOnDevice => Severity::Warning,
             _ => Severity::Error,
         }
     }
@@ -1130,13 +1159,34 @@ pub fn sort_findings(findings: &mut Vec<Finding>) {
 
 // ── The face policy (§2.1) ───────────────────────────────────────────────
 
-/// How the far side attaches (§2.5).
+/// How the far side attaches (§2.5; v2 §2.5).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Attach {
     /// One far-side session, or a gateway session, as a client.
     Client,
     /// A far router in a south region, named by its `region_name`.
     SouthRegion { region: String },
+    /// link.v2's device face (v2 §2.5): the sessions of owners on a first
+    /// hop (core §8.1), each a client of the near router, by address
+    /// `<system>/<service>`, sorted by their bytes.
+    Device { devices: Vec<String> },
+}
+
+impl Attach {
+    /// The devices a device face attaches; none for any other face.
+    #[must_use]
+    pub fn devices(&self) -> &[String] {
+        match self {
+            Attach::Device { devices } => devices,
+            _ => &[],
+        }
+    }
+
+    /// Whether it is a device face (v2 §2.5).
+    #[must_use]
+    pub fn is_device(&self) -> bool {
+        matches!(self, Attach::Device { .. })
+    }
 }
 
 /// One constrained face of a router (§2.1).
@@ -1267,6 +1317,64 @@ impl FacePolicy {
         format!("{}/{service}", self.system)
     }
 
+    /// Every device a face of the policy attaches, by address, with its
+    /// face's name (v2 §2.5), in the faces' order and each face's.
+    pub fn devices(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.faces.iter().flat_map(|(name, f)| {
+            f.attach
+                .devices()
+                .iter()
+                .map(move |d| (name.as_str(), d.as_str()))
+        })
+    }
+
+    /// The face that attaches the device at `address`, when one does.
+    #[must_use]
+    pub fn device_face(&self, address: &str) -> Option<&str> {
+        self.devices()
+            .find(|(_, d)| *d == address)
+            .map(|(name, _)| name)
+    }
+
+    /// Every listed owner the plan reads (v2 §2.5): each listed service,
+    /// then each device, sorted by address. Each is `(address, the key the
+    /// deployment's `implements` names it by, the face that attaches it
+    /// when it is a device)`.
+    #[must_use]
+    pub fn owners(&self) -> Vec<Owner<'_>> {
+        let mut out: Vec<Owner<'_>> = self
+            .services
+            .iter()
+            .map(|s| Owner {
+                address: self.address(s),
+                key: s.as_str(),
+                device_face: None,
+            })
+            .chain(self.devices().map(|(face, d)| Owner {
+                address: d.to_owned(),
+                key: d,
+                device_face: Some(face),
+            }))
+            .collect();
+        out.sort_by(|a, b| a.address.cmp(&b.address));
+        out
+    }
+}
+
+/// One listed owner of a policy, as the plan reads it: a listed service,
+/// or a device (v2 §2.5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Owner<'a> {
+    /// `<system>/<service>`.
+    pub address: String,
+    /// The key the deployment's `implements` names it by: a listed
+    /// service's name, or a device's address.
+    pub key: &'a str,
+    /// The face that attaches it, for a device.
+    pub device_face: Option<&'a str>,
+}
+
+impl FacePolicy {
     /// What a reader or a caller across `face` reads of this policy (v2
     /// §2.20, §2.21): a link.v2 policy's face. A `link.v1` policy states
     /// no reply timeout and no transport, and is refused, as a face it
@@ -1563,6 +1671,9 @@ pub fn parse(text: &str) -> Parsed {
         shared_protocols(&table, protocols, &mut out);
     }
     shared_far(&table, &mut out);
+    if profile == Profile::V2 {
+        device_listed(&table, system.as_deref(), services.as_deref(), &mut out);
+    }
     sort_findings(&mut out);
     let policy = if out.iter().any(Finding::is_error) {
         None
@@ -1775,7 +1886,36 @@ const FACE_KEYS_V2: &[&str] = &[
     "reply_timeout_ms",
     "horizon_s",
     "frames",
+    "devices",
 ];
+
+/// What a face's `attach` names, when it is valid (§2.1; v2 §2.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AttachKind {
+    Client,
+    South,
+    Device,
+}
+
+/// A device face's `devices` (v2 §2.1): a non-empty array of addresses
+/// `<system>/<service>`, each two plain chunks (core §1.2), none repeated.
+/// `None` when it is not one: `devices` is one value.
+fn device_list(v: &toml::Value) -> Option<Vec<String>> {
+    let a = v.as_array()?;
+    if a.is_empty() {
+        return None;
+    }
+    let mut seen = BTreeSet::new();
+    for x in a {
+        let s = x.as_str()?;
+        let (system, service) = s.split_once('/')?;
+        if !is_plain_chunk(system) || !is_plain_chunk(service) || !seen.insert(s) {
+            return None;
+        }
+    }
+    // Sorted by their bytes (v2 §2.3).
+    Some(seen.into_iter().map(str::to_owned).collect())
+}
 
 /// A face's `frames` (v2 §2.1): a table of entries, each keyed
 /// `<iface>/<template>`, an interface id and a template with no parameter,
@@ -1894,14 +2034,16 @@ fn parse_face(
             None
         }
     };
-    // `attach`: Some(Some(south)) for a valid one, Some(None) when invalid.
+    // `attach`, when it is valid: `device` only in a link.v2 policy, which
+    // a link.v1 one knows nothing of (v2 §2.1).
     let attach = match t.get("attach") {
         None => {
             bad(out, Code::MissingField, "attach");
             None
         }
-        Some(toml::Value::String(s)) if s == "client" => Some(false),
-        Some(toml::Value::String(s)) if s == "south-region" => Some(true),
+        Some(toml::Value::String(s)) if s == "client" => Some(AttachKind::Client),
+        Some(toml::Value::String(s)) if s == "south-region" => Some(AttachKind::South),
+        Some(toml::Value::String(s)) if v2 && s == "device" => Some(AttachKind::Device),
         Some(toml::Value::String(s)) if s == "router" => {
             bad(out, Code::RouterAttach, "attach");
             None
@@ -1920,9 +2062,27 @@ fn parse_face(
         }
     };
     match (attach, t.contains_key("region")) {
-        (Some(true), false) => bad(out, Code::MissingField, "region"),
-        (Some(false), true) => bad(out, Code::BadValue, "region"),
+        (Some(AttachKind::South), false) => bad(out, Code::MissingField, "region"),
+        (Some(AttachKind::Client | AttachKind::Device), true) => {
+            bad(out, Code::BadValue, "region");
+        }
         _ => {}
+    }
+    // `devices` (v2 §2.1): one value, required with `device` and refused
+    // with any other `attach`, each checked against `attach` only when
+    // `attach` is valid. A link.v1 face's is `unknown_field`, above.
+    let devices = match t.get("devices") {
+        Some(v) if v2 => {
+            let l = device_list(v);
+            if l.is_none() || matches!(attach, Some(AttachKind::Client | AttachKind::South)) {
+                bad(out, Code::BadValue, "devices");
+            }
+            l
+        }
+        _ => None,
+    };
+    if attach == Some(AttachKind::Device) && !t.contains_key("devices") {
+        bad(out, Code::MissingField, "devices");
     }
     let link_protocols = match t.get("select") {
         None => {
@@ -2071,10 +2231,10 @@ fn parse_face(
         let tr = ctx.transport?;
         return Some(Face {
             far: far?,
-            attach: if attach? {
-                Attach::SouthRegion { region: region? }
-            } else {
-                Attach::Client
+            attach: match attach? {
+                AttachKind::Client => Attach::Client,
+                AttachKind::South => Attach::SouthRegion { region: region? },
+                AttachKind::Device => Attach::Device { devices: devices? },
             },
             link_protocols: link_protocols?,
             expose: expose?,
@@ -2109,10 +2269,12 @@ fn parse_face(
     }
     Some(Face {
         far: far?,
-        attach: if attach? {
-            Attach::SouthRegion { region: region? }
-        } else {
-            Attach::Client
+        attach: match attach? {
+            AttachKind::Client => Attach::Client,
+            AttachKind::South => Attach::SouthRegion { region: region? },
+            // A link.v1 policy has no device face: `attach = "device"` is
+            // its `bad_value`, above.
+            AttachKind::Device => return None,
         },
         link_protocols: link_protocols?,
         expose: expose?,
@@ -2236,6 +2398,42 @@ fn shared_far(table: &toml::Table, out: &mut Vec<Finding>) {
     for (far, n) in named {
         if n > 1 {
             out.push(Finding::new(Code::FarOfTwoFaces, None, far));
+        }
+    }
+}
+
+/// `device_listed` (v2 §2.1, §2.5), over every device face whose
+/// `devices` is one, whatever else the policy holds: a device listed among
+/// `services`, as `<system>/<service>`, or on another face. Each face
+/// listing it has the finding, at `devices`.
+fn device_listed(
+    table: &toml::Table,
+    system: Option<&str>,
+    services: Option<&[String]>,
+    out: &mut Vec<Finding>,
+) {
+    let Some(toml::Value::Table(faces)) = table.get("face") else {
+        return;
+    };
+    let lists: Vec<(&String, Vec<String>)> = faces
+        .iter()
+        .filter(|(_, v)| v.get("attach").and_then(toml::Value::as_str) == Some("device"))
+        .filter_map(|(name, v)| Some((name, device_list(v.get("devices")?)?)))
+        .collect();
+    let listed: BTreeSet<String> = match (system, services) {
+        (Some(sys), Some(services)) => services.iter().map(|s| format!("{sys}/{s}")).collect(),
+        _ => BTreeSet::new(),
+    };
+    for (i, (name, l)) in lists.iter().enumerate() {
+        let elsewhere = l.iter().any(|d| {
+            listed.contains(d)
+                || lists
+                    .iter()
+                    .enumerate()
+                    .any(|(j, (_, m))| i != j && m.contains(d))
+        });
+        if elsewhere {
+            out.push(Finding::new(Code::DeviceListed, Some(name), "devices"));
         }
     }
 }
@@ -2365,6 +2563,10 @@ pub struct Res {
     pub longest_bytes: Option<u64>,
     /// The revision that declares it lists `link.v2` (v2 §2.17).
     pub link_v2: bool,
+    /// The parameter its template declares as its epoch (core §4.3), whose
+    /// members hold member tokens: on a device face, `epoch_on_device` (v2
+    /// §2.5). Across revisions, any one's.
+    pub epoch: Option<String>,
 }
 
 impl Res {
@@ -2383,6 +2585,7 @@ impl Res {
             block: false,
             longest_bytes: None,
             link_v2: false,
+            epoch: None,
         }
     }
 
@@ -2450,6 +2653,7 @@ impl Res {
             block: data.is_some_and(|d| d.congestion == crate::authoring::Congestion::Block),
             longest_bytes,
             link_v2: uses_v2(c),
+            epoch: r.epoch.clone(),
         }
     }
 }
@@ -2478,6 +2682,9 @@ pub struct Deployment {
     /// deployment gives it: a link.v2 plan then refuses a crossing revision
     /// it does not list (v2 §2.18).
     pub catalog: Option<crate::catalog::Catalog>,
+    /// The interface ids a revision given of which uses `redundancy.v1`:
+    /// a device implementing one is `presence_required` (v2 §2.5).
+    pub governed: BTreeSet<String>,
 }
 
 impl Deployment {
@@ -2486,6 +2693,9 @@ impl Deployment {
     pub fn add_contract(&mut self, c: &Contract) {
         if freshness::uses_v2(c) {
             self.heartbeats.insert(c.iface.to_string());
+        }
+        if crate::redundancy::is_governed(c) {
+            self.governed.insert(c.iface.to_string());
         }
         self.fingerprints
             .entry(c.iface.to_string())
@@ -2547,6 +2757,9 @@ fn merge(revisions: &[Vec<Res>]) -> (Vec<Res>, BTreeSet<usize>) {
         // since a change to it is breaking (core §9.8), but for
         // `keyframe_every`, a review, of which the least binds (v2 §2.7).
         out[i].history = rs.iter().any(|r| r.history);
+        if out[i].epoch.is_none() {
+            out[i].epoch = rs.iter().find_map(|r| r.epoch.clone());
+        }
         if let Some(f) = &mut out[i].frame {
             f.keyframe_every = rs
                 .iter()
@@ -2655,7 +2868,7 @@ pub struct Gateway {
     pub south: Vec<South>,
 }
 
-/// The attachment, as the plan carries it (§2.5).
+/// The attachment, as the plan carries it (§2.5; v2 §2.3).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "shape")]
 pub enum AttachPlan {
@@ -2663,6 +2876,9 @@ pub enum AttachPlan {
     Client,
     #[serde(rename = "south-region")]
     SouthRegion { region: String, gateway: Gateway },
+    /// A device face's (v2 §2.3): its devices, sorted by their bytes.
+    #[serde(rename = "device")]
+    Device { devices: Vec<String> },
 }
 
 /// A listed owner of state's tombstone window floor (§2.11).
@@ -2730,9 +2946,13 @@ fn res_name(iface: &str, r: &Res) -> String {
 pub fn plan(policy: &FacePolicy, deployment: &Deployment) -> Result<Vec<FacePlan>, Vec<Finding>> {
     let mut errors = Vec::new();
     let mut listed: BTreeSet<&str> = BTreeSet::new();
-    for s in &policy.services {
-        match deployment.implements.get(s) {
-            None => errors.push(Finding::new(Code::ServiceUnknown, None, s.clone())),
+    // The listed services and the devices, each read alike (v2 §2.5): a
+    // device is named in the deployment by its address, and a device the
+    // deployment names none for is `service_unknown` there (v2 §2.3).
+    let services = policy.owners();
+    for s in &services {
+        match deployment.implements.get(s.key) {
+            None => errors.push(Finding::new(Code::ServiceUnknown, None, s.key)),
             Some(ifaces) => {
                 for i in ifaces {
                     if deployment
@@ -2744,6 +2964,13 @@ pub fn plan(policy: &FacePolicy, deployment: &Deployment) -> Result<Vec<FacePlan
                     } else {
                         errors.push(Finding::new(Code::ContractUnknown, None, i.clone()));
                     }
+                    // An owner on a first hop implements neither (v2 §2.5,
+                    // core §8.1).
+                    if let Some(face) = s.device_face
+                        && (i == ARCHIVE || deployment.governed.contains(i))
+                    {
+                        errors.push(Finding::new(Code::PresenceRequired, Some(face), i.clone()));
+                    }
                 }
             }
         }
@@ -2752,8 +2979,6 @@ pub fn plan(policy: &FacePolicy, deployment: &Deployment) -> Result<Vec<FacePlan
         sort_findings(&mut errors);
         return Err(errors);
     }
-    let mut services: Vec<&String> = policy.services.iter().collect();
-    services.sort_by_key(|s| policy.address(s));
     // Each listed interface read once across its revisions (§2.3).
     let view: View = listed
         .iter()
@@ -2835,7 +3060,7 @@ fn plan_face(
     policy: &FacePolicy,
     deployment: &Deployment,
     view: &View,
-    services: &[&String],
+    services: &[Owner<'_>],
     listed: &BTreeSet<&str>,
     name: &str,
     face: &Face,
@@ -2900,11 +3125,27 @@ fn plan_face(
         }
     }
 
-    let mut deny = vec![
-        plane("zk", ZK_DENY),
-        plane("adv", ADV_DENY),
-        plane("admin", ADMIN_DENY),
-    ];
+    // `zk` whole, or a device face's carve (v2 §2.6), then `adv` and
+    // `admin`.
+    let mut deny = if face.attach.is_device() {
+        zk_carve()
+    } else {
+        vec![plane("zk", ZK_DENY)]
+    };
+    deny.extend([plane("adv", ADV_DENY), plane("admin", ADMIN_DENY)]);
+    // Each template of a device's interface that declares `epoch`, on the
+    // device's own face (v2 §2.5).
+    for s in services.iter().filter(|s| s.device_face == Some(name)) {
+        for iface in &deployment.implements[s.key] {
+            for r in resources_of(iface).iter().filter(|r| r.epoch.is_some()) {
+                findings.push(Finding::new(
+                    Code::EpochOnDevice,
+                    Some(name),
+                    res_name(iface, r),
+                ));
+            }
+        }
+    }
     // The name (§0) of every overlapped resource.
     let mut overlapped: BTreeSet<String> = BTreeSet::new();
     // Each token's denies, computed with every stream last: a heartbeat
@@ -3012,18 +3253,20 @@ fn plan_face(
         crossing_of(iface, r).crosses() && !overlapped.contains(&res_name(iface, r))
     };
 
-    // Downsampling (§2.8), the interval against the horizon (§2.12).
+    // Downsampling (§2.8), the interval against the horizon (§2.12). A
+    // device's stream is never downsampled on its own face, where its puts
+    // arrive (v2 §2.8).
     let mut rules = Vec::new();
     if let Some(freq) = face.freq() {
-        for s in services {
-            for iface in &deployment.implements[s.as_str()] {
+        for s in services.iter().filter(|s| s.device_face != Some(name)) {
+            for iface in &deployment.implements[s.key] {
                 for r in resources_of(iface) {
                     // A frame is never downsampled (§2.8).
                     if is_stream(r.token) && r.frame.is_none() && crosses(iface, r) {
                         rules.push(Rule {
                             key_expr: format!(
                                 "zk2/{}/{iface}/{}/{}",
-                                policy.address(s),
+                                s.address,
                                 r.token.as_str(),
                                 r.template.as_str()
                             ),
@@ -3171,7 +3414,7 @@ fn plan_face(
     let mut windows = Vec::new();
     let mut liveness = Vec::new();
     for s in services {
-        let ifaces = &deployment.implements[s.as_str()];
+        let ifaces = &deployment.implements[s.key];
         let resources = || {
             ifaces
                 .iter()
@@ -3179,7 +3422,7 @@ fn plan_face(
         };
         if resources().any(|(_, r)| is_state(r.token)) {
             windows.push(Window {
-                service: policy.address(s),
+                service: s.address.clone(),
                 min_s: face.max_outage_s,
             });
         }
@@ -3198,7 +3441,7 @@ fn plan_face(
         evidence.sort();
         evidence.dedup();
         liveness.push(Liveness {
-            service: policy.address(s),
+            service: s.address.clone(),
             evidence,
         });
     }
@@ -3212,6 +3455,9 @@ fn plan_face(
             Attach::SouthRegion { region } => AttachPlan::SouthRegion {
                 region: region.clone(),
                 gateway: gateway(region),
+            },
+            Attach::Device { devices } => AttachPlan::Device {
+                devices: devices.clone(),
             },
         },
         deny,
@@ -3279,6 +3525,65 @@ fn plane(id: &str, key: &str) -> Deny {
         messages: MESSAGES.to_vec(),
         key_exprs: vec![key.to_owned()],
     }
+}
+
+/// The pairs of core §11.2's Own row, `(flow, message)`: what a far
+/// principal's Own grant lets cross a device face on an instance key (v2
+/// §2.6). Ingress `put`, `delete`, `declare_queryable`, `reply` and
+/// `liveliness_token`; egress `query` and `declare_subscriber`.
+pub const OWN_PAIRS: [(&str, &str); 7] = [
+    ("ingress", "put"),
+    ("ingress", "delete"),
+    ("ingress", "declare_queryable"),
+    ("ingress", "reply"),
+    ("ingress", "liveliness_token"),
+    ("egress", "query"),
+    ("egress", "declare_subscriber"),
+];
+
+/// A device face's `zk` keys (v2 §2.6): every `@zk` form of core §1.1 but
+/// the instance subtree, denied on every pair.
+pub const ZK_CARVED: [&str; 3] = [
+    "zk2/*/*/@zk/alive/**",
+    "zk2/*/*/@zk/member/**",
+    "zk2/@zk/**",
+];
+
+/// The instance subtree a device face lets cross on [`OWN_PAIRS`] alone
+/// (v2 §2.6).
+pub const ZK_INSTANCE: &str = "zk2/*/*/@zk/instance/**";
+
+/// The messages of `flow` outside core §11.2's Own row, in [`MESSAGES`]'
+/// order.
+fn outside_own(flow: &str) -> Vec<&'static str> {
+    MESSAGES
+        .iter()
+        .copied()
+        .filter(|m| !OWN_PAIRS.contains(&(flow, *m)))
+        .collect()
+}
+
+/// A device face's three denies in place of `zk` (v2 §2.6): `zk` on the
+/// interface tokens, member tokens and contract keys, every pair; and the
+/// instance subtree on the eleven pairs outside the Own row, one deny per
+/// flow. So an instance key crosses on the Own row's seven pairs alone,
+/// and whose instance keys is the far principal's grants' to decide.
+fn zk_carve() -> Vec<Deny> {
+    let mut out = vec![Deny {
+        id: "zk".to_owned(),
+        flows: FLOWS.to_vec(),
+        messages: MESSAGES.to_vec(),
+        key_exprs: ZK_CARVED.iter().map(|k| (*k).to_owned()).collect(),
+    }];
+    for flow in FLOWS {
+        out.push(Deny {
+            id: format!("zk:instance:{flow}"),
+            flows: vec![flow],
+            messages: outside_own(flow),
+            key_exprs: vec![ZK_INSTANCE.to_owned()],
+        });
+    }
+    out
 }
 
 fn push_deny(id: String, mut key_exprs: Vec<String>) -> Deny {
@@ -3453,8 +3758,9 @@ pub fn check_windows(
     windows: &BTreeMap<String, u64>,
 ) -> Vec<Finding> {
     let mut out = Vec::new();
-    for s in &policy.services {
-        let Some(ifaces) = deployment.implements.get(s) else {
+    // The listed services and the devices (v2 §2.5).
+    for s in policy.owners() {
+        let Some(ifaces) = deployment.implements.get(s.key) else {
             continue;
         };
         let owns_state = ifaces.iter().any(|i| {
@@ -3466,7 +3772,7 @@ pub fn check_windows(
         if !owns_state {
             continue;
         }
-        let addr = policy.address(s);
+        let addr = s.address;
         let w = windows.get(&addr).copied().unwrap_or(DEFAULT_WINDOW_S);
         for (name, face) in &policy.faces {
             if w < face.max_outage_s {
@@ -3648,20 +3954,34 @@ pub struct Block {
 /// Checks a router's block for the face `face` (§2.15): `block_disabled`
 /// when its access control is not enabled (0.7, F-124), beside every other
 /// finding, which reads the block as written; `zk_not_denied`;
-/// `wildcard_downsampling` and `intersecting_downsampling`.
+/// `wildcard_downsampling` and `intersecting_downsampling`. On a device
+/// face (`device`, v2 §2.15) `zk_not_denied` reads §2.6's carve: a whole
+/// `zk` passes, and so does the carve; on any other face the carve fails.
 #[must_use]
-pub fn check_block(face: &str, block: &Block) -> Vec<Finding> {
+pub fn check_block(face: &str, device: bool, block: &Block) -> Vec<Finding> {
     let mut out = Vec::new();
     if block.enabled == Some(false) {
         out.push(Finding::new(Code::BlockDisabled, Some(face), "enabled"));
     }
     let ns = block.namespace.trim_matches('/');
-    let target = if ns.is_empty() {
-        ZK_DENY.to_owned()
-    } else {
-        format!("{ns}/{ZK_DENY}")
+    let with_ns = |k: &str| {
+        if ns.is_empty() {
+            k.to_owned()
+        } else {
+            format!("{ns}/{k}")
+        }
     };
-    if !zk_denied(&target, &block.deny) {
+    let denied = if device {
+        ZK_CARVED
+            .iter()
+            .all(|k| zk_denied_on(&with_ns(k), &block.deny, |_, _| true))
+            && zk_denied_on(&with_ns(ZK_INSTANCE), &block.deny, |f, m| {
+                !OWN_PAIRS.contains(&(f, m))
+            })
+    } else {
+        zk_denied_on(&with_ns(ZK_DENY), &block.deny, |_, _| true)
+    };
+    if !denied {
         out.push(Finding::new(Code::ZkNotDenied, Some(face), "@zk"));
     }
     let parsed: Vec<Option<&keyexpr>> = block
@@ -3694,14 +4014,15 @@ pub fn check_block(face: &str, block: &Block) -> Vec<Finding> {
     out
 }
 
-/// Whether every pair of the nine messages and both flows is denied on a
-/// key expression that includes `target` (§2.15).
-fn zk_denied(target: &str, deny: &[BlockDeny]) -> bool {
+/// Whether every pair of the nine messages and both flows that `pairs`
+/// holds is denied on a key expression that includes `target` (§2.15; v2
+/// §2.15).
+fn zk_denied_on(target: &str, deny: &[BlockDeny], pairs: impl Fn(&str, &str) -> bool) -> bool {
     let Ok(target) = keyexpr::new(target) else {
         return false;
     };
     FLOWS.iter().all(|flow| {
-        MESSAGES.iter().all(|m| {
+        MESSAGES.iter().filter(|m| pairs(flow, m)).all(|m| {
             deny.iter().any(|d| {
                 d.flows.iter().any(|f| f == flow)
                     && d.messages.iter().any(|x| x == m)
@@ -3916,7 +4237,8 @@ pub fn lint(input: &LintInput<'_>) -> Vec<Finding> {
         }
     }
     if let Some((face, block)) = input.block {
-        out.extend(check_block(face, block));
+        let device = policy.faces.get(face).is_some_and(|f| f.attach.is_device());
+        out.extend(check_block(face, device, block));
         if let Some(s) = &block.subjects {
             if let Some(f) = policy.faces.get(face) {
                 out.extend(check_subjects(face, f, s));
@@ -3952,6 +4274,47 @@ mod tests {
         assert!(!ke("zk2/*/*/*/stream/**").includes(ke("zk2/h/s/m.v1/@stream/x")));
         assert!(ke("zk2/*/*/*/@stream/**").includes(ke("zk2/h/s/m.v1/@stream/x")));
         assert!(ke(ADV_DENY).includes(ke("zk2/h/s/m.v1/stream/x/@adv/pub/abc")));
+    }
+
+    /// A device face's carve (v2 §2.6): an instance key crosses on the Own
+    /// row's seven pairs and no other, and every other `@zk` key on none.
+    #[test]
+    fn the_carve_lets_an_instance_key_cross_on_the_own_pairs_alone() {
+        let carve = zk_carve();
+        let denied = |key: &str, flow: &str, m: &str| {
+            carve.iter().any(|d| {
+                d.flows.contains(&flow)
+                    && d.messages.contains(&m)
+                    && d.key_exprs.iter().any(|k| ke(k).includes(ke(key)))
+            })
+        };
+        let instance = "zk2/lab/probe-a/@zk/instance/0123456789abcdef";
+        let mut open = Vec::new();
+        for flow in FLOWS {
+            for m in MESSAGES {
+                for key in [
+                    "zk2/lab/probe-a/@zk/alive/probe.v1",
+                    "zk2/lab/probe-a/@zk/member/0123456789abcdef/x",
+                    "zk2/@zk/contract/probe.v1/abc",
+                ] {
+                    assert!(denied(key, flow, m), "{key} {flow} {m}");
+                }
+                if !denied(instance, flow, m) {
+                    open.push((flow, m));
+                }
+            }
+        }
+        open.sort_unstable();
+        let mut own = OWN_PAIRS.to_vec();
+        own.sort_unstable();
+        assert_eq!(open, own);
+        // The carve names no address: whose instance keys is the grants'.
+        assert!(
+            carve
+                .iter()
+                .flat_map(|d| &d.key_exprs)
+                .all(|k| k.starts_with("zk2/*/*/") || k == "zk2/@zk/**")
+        );
     }
 
     #[test]

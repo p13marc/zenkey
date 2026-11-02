@@ -1800,20 +1800,27 @@ fn link_resources(rs: &Value) -> Vec<link::Res> {
         .map(|r| {
             // Inline resources hold no `history` and no `frame` table, and
             // no layout: a case about any of them loads a contract. One may
-            // state its type's kind, `packed` or another (link.v2 §2.17).
+            // state its type's kind, `packed` or another (link.v2 §2.17),
+            // and the parameter its template declares as its `epoch`
+            // (link.v2 §2.5, `epoch_on_device`).
             let mut res = link::Res::new(
                 Template::parse(r["template"].as_str().expect("template")).expect("a template"),
                 link_token(&r["token"]),
                 annotations(&r["annotations"]),
             );
             res.packed = r.get("type").and_then(Value::as_str) == Some("packed");
+            res.epoch = r
+                .get("epoch")
+                .map(|e| e.as_str().expect("epoch").to_owned());
             res
         })
         .collect()
 }
 
 /// One inline revision: its resources, or `{uses, resources}` (0.11: a
-/// revision that uses `freshness.v2` has a heartbeat).
+/// revision that uses `freshness.v2` has a heartbeat; link.v2 0.7: one that
+/// uses `redundancy.v1` governs its interface, which a device may not
+/// implement).
 fn link_revision(d: &mut link::Deployment, iface: &str, rev: &Value) {
     match rev.get("resources") {
         Some(rs) => {
@@ -1826,6 +1833,9 @@ fn link_revision(d: &mut link::Deployment, iface: &str, rev: &Value) {
             };
             if uses(zenkey_model::freshness::PROFILE_V2) {
                 d.heartbeats.insert(iface.to_owned());
+            }
+            if uses(zenkey_model::redundancy::PROFILE) {
+                d.governed.insert(iface.to_owned());
             }
             let mut resources = link_resources(rs);
             // A revision that lists link.v2 types what it exposes packed
@@ -1964,7 +1974,8 @@ fn link_plan() {
                                 );
                             }
                         }
-                        let found = link::check_block(&p.name, &plan_as_block(p));
+                        let device = matches!(p.attach, link::AttachPlan::Device { .. });
+                        let found = link::check_block(&p.name, device, &plan_as_block(p));
                         assert!(
                             found.is_empty(),
                             "{what}: the plan fails its own checks: {found:?}"
@@ -2087,17 +2098,21 @@ fn link_lints() {
 
 // --- link.v2 (#988, L1) ---------------------------------------------------------
 
-/// `link/conformance/v2/lints.json`: a face policy → every finding
-/// (link.v2 §2.1, §2.4, §2.10, §2.16), a policy with no `profile` read as
-/// link.v1's.
+/// `link/conformance/v2/lints.json`: a face policy, and a router's block
+/// where the case gives one → every finding (link.v2 §2.1, §2.4, §2.10,
+/// §2.15, §2.16), a policy with no `profile` read as link.v1's. A block is
+/// read as `link/conformance/lints.json` reads it, `zk_not_denied` on a
+/// device face as link.v2 §2.15 says (0.7).
 #[test]
 fn link_v2_lints() {
     let path = profiles().join("link/conformance/v2/lints.json");
     let mut doc = read_json(&path);
     for case in doc["cases"].as_array_mut().expect("cases") {
         let what = format!("{}", case["note"]);
+        let block = case.get("block").map(link_block);
         let found = link::lint(&link::LintInput {
             text: case["policy"].as_str().expect("policy"),
+            block: block.as_ref().map(|(f, b)| (f.as_str(), b)),
             ..link::LintInput::default()
         });
         expect(case, findings_json(&found), &what);
@@ -2177,7 +2192,8 @@ fn link_v2_plan() {
                 Err(f) => json!({"refused": findings_json(&f)}),
                 Ok(plans) => {
                     for p in &plans {
-                        let found = link::check_block(&p.name, &plan_as_block(p));
+                        let device = matches!(p.attach, link::AttachPlan::Device { .. });
+                        let found = link::check_block(&p.name, device, &plan_as_block(p));
                         assert!(found.is_empty(), "{what}: {found:?}");
                     }
                     let mut got = json!({
