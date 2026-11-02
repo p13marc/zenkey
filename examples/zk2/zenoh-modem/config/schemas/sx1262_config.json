@@ -1,0 +1,387 @@
+{
+  "description": "zenoh-modem's sx1262_config.v1 (config.v2, #985 G4): sx1262-medium's three group types, then the five types zk2 config derive writes from them. The bounds are illustrative; zenoh-modem chooses the real ones.",
+  "types": {
+    "Duty": {
+      "description": "The duty budget: what fraction of a trailing period may be spent on air",
+      "fields": [
+        {
+          "name": "fraction_ppm",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 1000000,
+          "description": "The allowed fraction of the period, in parts per million (EU868: 10000)"
+        },
+        {
+          "name": "period_s",
+          "type": "int",
+          "minimum": 1,
+          "maximum": 86400,
+          "description": "The trailing period the fraction is measured over (EU868: 3600)"
+        }
+      ]
+    },
+    "Radio": {
+      "description": "The channel: both ends must move together, or the link is gone",
+      "fields": [
+        {
+          "name": "frequency_hz",
+          "type": "int",
+          "minimum": 150000000,
+          "maximum": 960000000,
+          "description": "The carrier frequency"
+        }
+      ]
+    },
+    "Modulation": {
+      "description": "What Zenoh's batch size was chosen against: changed in the startup file",
+      "fields": [
+        {
+          "name": "spreading_factor",
+          "type": "int",
+          "minimum": 7,
+          "maximum": 9,
+          "description": "The spreading factor"
+        }
+      ]
+    },
+    "Record": {
+      "description": "config.v2's record, derived (v2.md 2.3, 3): state/config and every reply",
+      "fields": [
+        {
+          "name": "instance",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        {
+          "name": "revision",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        {
+          "name": "floor_s",
+          "type": "int",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        {
+          "name": "would_be",
+          "type": "bool"
+        },
+        {
+          "name": "pending_token",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 281474976710655,
+          "optional": true
+        },
+        {
+          "name": "pending_apply_at",
+          "type": "time",
+          "optional": true
+        },
+        {
+          "name": "pending_deadline",
+          "type": "time",
+          "optional": true
+        },
+        {
+          "name": "last_token",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 281474976710655,
+          "optional": true
+        },
+        {
+          "name": "desired",
+          "type": "enum",
+          "values": [
+            "converged",
+            "refused",
+            "failed"
+          ],
+          "escape": true,
+          "optional": true
+        },
+        {
+          "name": "desired_revision",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "optional": true
+        },
+        {
+          "name": "desired_code",
+          "type": "enum",
+          "values": [
+            "reach",
+            "contract",
+            "sensitive",
+            "not_found",
+            "invalid_request",
+            "unavailable",
+            "busy",
+            "device_refused"
+          ],
+          "escape": true,
+          "optional": true
+        },
+        {
+          "name": "desired_group",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 15,
+          "optional": true
+        },
+        {
+          "name": "desired_parameter",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 15,
+          "optional": true
+        },
+        {
+          "name": "duty__writable",
+          "type": "bool"
+        },
+        {
+          "name": "duty__pending",
+          "type": "bool"
+        },
+        {
+          "name": "duty__last",
+          "type": "bool"
+        },
+        {
+          "name": "duty__fraction_ppm__source",
+          "type": "enum",
+          "values": [
+            "default",
+            "file",
+            "overlay",
+            "runtime"
+          ],
+          "optional": true
+        },
+        {
+          "name": "duty__fraction_ppm__differs",
+          "type": "bool"
+        },
+        {
+          "name": "duty__fraction_ppm",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 1000000,
+          "optional": true
+        },
+        {
+          "name": "duty__period_s__source",
+          "type": "enum",
+          "values": [
+            "default",
+            "file",
+            "overlay",
+            "runtime"
+          ],
+          "optional": true
+        },
+        {
+          "name": "duty__period_s__differs",
+          "type": "bool"
+        },
+        {
+          "name": "duty__period_s",
+          "type": "int",
+          "minimum": 1,
+          "maximum": 86400,
+          "optional": true
+        },
+        {
+          "name": "radio__writable",
+          "type": "bool"
+        },
+        {
+          "name": "radio__pending",
+          "type": "bool"
+        },
+        {
+          "name": "radio__last",
+          "type": "bool"
+        },
+        {
+          "name": "radio__frequency_hz__source",
+          "type": "enum",
+          "values": [
+            "default",
+            "file",
+            "overlay",
+            "runtime"
+          ],
+          "optional": true
+        },
+        {
+          "name": "radio__frequency_hz__differs",
+          "type": "bool"
+        },
+        {
+          "name": "radio__frequency_hz",
+          "type": "int",
+          "minimum": 150000000,
+          "maximum": 960000000,
+          "optional": true
+        },
+        {
+          "name": "modulation__spreading_factor__source",
+          "type": "enum",
+          "values": [
+            "default",
+            "file",
+            "overlay",
+            "runtime"
+          ],
+          "optional": true
+        },
+        {
+          "name": "modulation__spreading_factor__differs",
+          "type": "bool"
+        },
+        {
+          "name": "modulation__spreading_factor",
+          "type": "int",
+          "minimum": 7,
+          "maximum": 9,
+          "optional": true
+        },
+        "..."
+      ]
+    },
+    "SetDuty": {
+      "description": "set/duty's request, derived from Duty (v2.md 2.5, 3)",
+      "fields": [
+        {
+          "name": "fraction_ppm",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 1000000,
+          "optional": true
+        },
+        {
+          "name": "period_s",
+          "type": "int",
+          "minimum": 1,
+          "maximum": 86400,
+          "optional": true
+        },
+        {
+          "name": "confirm_s",
+          "type": "int",
+          "minimum": 1,
+          "maximum": 65535,
+          "optional": true
+        },
+        {
+          "name": "token",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 281474976710655,
+          "optional": true
+        },
+        {
+          "name": "expected_revision",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "optional": true
+        },
+        {
+          "name": "idempotency_key",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "optional": true
+        },
+        {
+          "name": "dry_run",
+          "type": "bool"
+        }
+      ]
+    },
+    "SetRadio": {
+      "description": "set/radio's request, derived from Radio (v2.md 2.5, 3)",
+      "fields": [
+        {
+          "name": "frequency_hz",
+          "type": "int",
+          "minimum": 150000000,
+          "maximum": 960000000,
+          "optional": true
+        },
+        {
+          "name": "confirm_s",
+          "type": "int",
+          "minimum": 1,
+          "maximum": 65535,
+          "optional": true
+        },
+        {
+          "name": "token",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 281474976710655,
+          "optional": true
+        },
+        {
+          "name": "expected_revision",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "optional": true
+        },
+        {
+          "name": "idempotency_key",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "optional": true
+        },
+        {
+          "name": "dry_run",
+          "type": "bool"
+        }
+      ]
+    },
+    "Control": {
+      "description": "confirm, cancel, extend and persist's request, derived (v2.md 2.10, 3)",
+      "fields": [
+        {
+          "name": "token",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 281474976710655
+        },
+        {
+          "name": "confirm_s",
+          "type": "int",
+          "minimum": 1,
+          "maximum": 65535,
+          "optional": true
+        }
+      ]
+    },
+    "Error": {
+      "description": "Every operation's error detail, derived (v2.md 2.5, 3)",
+      "fields": [
+        {
+          "name": "code",
+          "type": "enum",
+          "values": [
+            "device_refused"
+          ],
+          "escape": true,
+          "width": 4
+        }
+      ]
+    }
+  }
+}

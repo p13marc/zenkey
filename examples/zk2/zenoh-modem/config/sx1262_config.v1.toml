@@ -1,0 +1,110 @@
+# zenoh-modem's SX1262 radio, configured under config.v2 (spec/profiles/config/v2.md, text 0.1;
+# #985 G4). Bound in ../config.v2-binding.md.
+#
+# The interface is `sx1262_config`: a name's segments are `[a-z][a-z0-9_]*` (core §1.2, E001),
+# so the design's `sx1262-config`, with a hyphen, is no interface id.
+#
+# sx1262-medium's `Configure::schema` (zenoh-modem sx1262-medium/src/lib.rs), as a contract: its
+# three groups, their classes and their parameters' names, kinds and units. The bounds are
+# illustrative, and zenoh-modem chooses the real ones. A bound is the wire (config.v2 §2.2):
+# moving one is a breaking revision.
+# - duty (hot): fraction_ppm 0 to 1,000,000 (20 bits), period_s 1 to 86,400 (17 bits). The
+#   runtime schema states no upper bound for period_s; config.v2's `int` needs one, so
+#   `Configure::schema` must state 86,400 too, or the owner's start-time check refuses;
+# - radio (reach): frequency_hz 150 to 960 MHz (30 bits);
+# - modulation (contract): spreading_factor 7 to 9 (2 bits). It has no `set` (config.v2 §2.4).
+#
+# Keys, for lora0 on host h-c2a95e41d7f0 (device-as-service, as modem.v3):
+#   zk2/h-c2a95e41d7f0/lora0/sx1262_config.v1/state/config         the record; a GET is the read
+#   zk2/h-c2a95e41d7f0/lora0/sx1262_config.v1/@op/set/{duty,radio}  one per hot or reach group
+#   zk2/h-c2a95e41d7f0/lora0/sx1262_config.v1/@op/{confirm,cancel,extend,persist}
+#   zk2/h-c2a95e41d7f0/lora0/sx1262_config.v1/events/change/<ulid>  host only: JSON
+#
+# The record is exposed `link`: it crosses RF and LoRa as a push, packed, which link.v2 §2.17
+# requires of everything a contract that lists link.v2 exposes. The operations cross by grant,
+# never by exposure (link.v1 §2.9). The change event is JSON, and stays home.
+#
+# schemas/sx1262_config.json holds the three group types, then the five types
+# `zk2 config derive` writes from them: Record, SetDuty, SetRadio, Control and Error.
+
+[interface]
+name    = "sx1262_config"
+major   = 1
+minor   = 0
+summary = "The SX1262 radio's configuration: its duty budget, its channel and its modulation"
+uses    = ["config.v2", "freshness.v2", "link.v2"]
+
+[schemas]
+packed     = ["schemas/sx1262_config.json"]
+jsonschema = ["../../../../spec/profiles/config/config.v2.json"]
+
+# No operation is idempotent, and none fans out (config.v2 §3).
+[defaults.operation]
+idempotent = false
+fanout     = "forbidden"
+
+[resources.config]
+kind = "state"
+type = "packed:Record"
+doc  = "The record: the running values, the pending change, the last change and the floor (config.v2 2.3)"
+
+# A 300 s horizon: the heartbeat confirms the record every 150 s, at or above every RF and LoRa
+# face's horizon_s but SF12's (link.v2 §2.12).
+[resources.config.annotations]
+"freshness.ttl_s" = 300
+"link.exposure"   = "link"
+"config.groups"   = [
+  { name = "duty",       class = "hot",      type = "packed:Duty",       units = { fraction_ppm = "ppm", period_s = "s" } },
+  { name = "radio",      class = "reach",    type = "packed:Radio",      units = { frequency_hz = "Hz" } },
+  { name = "modulation", class = "contract", type = "packed:Modulation" },
+]
+
+[resources."set/duty"]
+kind     = "operation"
+request  = "packed:SetDuty"
+response = "packed:Record"
+error    = "packed:Error"
+doc      = "Change the duty budget: applied at once, with or without a window"
+
+[resources."set/radio"]
+kind     = "operation"
+request  = "packed:SetRadio"
+response = "packed:Record"
+error    = "packed:Error"
+doc      = "Move the channel: answered before the apply, under a window or a joining token"
+
+[resources.confirm]
+kind     = "operation"
+request  = "packed:Control"
+response = "packed:Record"
+error    = "packed:Error"
+doc      = "Keep the pending change"
+
+[resources.cancel]
+kind     = "operation"
+request  = "packed:Control"
+response = "packed:Record"
+error    = "packed:Error"
+doc      = "Undo the pending change now"
+
+[resources.extend]
+kind     = "operation"
+request  = "packed:Control"
+response = "packed:Record"
+error    = "packed:Error"
+doc      = "Move the pending change's deadline"
+
+[resources.persist]
+kind     = "operation"
+request  = "packed:Control"
+response = "packed:Record"
+error    = "packed:Error"
+optional = true
+doc      = "Make the last change survive a restart; a grant of its own"
+
+[resources.change]
+kind      = "event"
+type      = "json:ConfigChangeEvent"
+rate      = "burst(600/h)"
+retention = "7d"
+doc       = "One change, as it ended"
