@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 mod util;
-use util::zk2::{T, addr, client, example, router};
+use util::zk2::{T, addr, client, example, router, stamping};
 
 use zenkey_fleet::bus::presence::{Scope, service_listing};
 use zenkey_fleet::model::catalog::Revision;
@@ -484,7 +484,7 @@ async fn gen_of_a_governed_contract_elects_and_a_second_stands_by() {
         let catalog = Arc::clone(&catalog);
         let address = address.clone();
         async move {
-            let owner = client(&ep).await;
+            let owner = stamping(&ep).await;
             let startup = zenkey::redundancy::RedundancyStartup::new(client(&ep).await)
                 .with_watch(client(&ep).await);
             let spec = GenSpec {
@@ -651,7 +651,7 @@ async fn serve_of_a_governed_contract_stands_by_beside_a_serving_one() {
         let ep = ep.clone();
         let ledger = Arc::clone(&ledger);
         async move {
-            let owner = client(&ep).await;
+            let owner = stamping(&ep).await;
             let startup = zenkey::redundancy::RedundancyStartup::new(client(&ep).await)
                 .with_watch(client(&ep).await);
             serve_operation(
@@ -782,7 +782,7 @@ async fn gen_declares_a_governed_member_again_after_a_step_down() {
         catalog: None,
     };
     let plan = gen_plan(&spec).unwrap();
-    let owner = client(&ep).await;
+    let owner = stamping(&ep).await;
     let run = tokio::spawn(async move { run_gen(&owner, &spec, &plan, |_| {}).await });
     // The member tokens of `t1` a complete read of the address shows.
     let members = || async {

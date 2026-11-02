@@ -58,6 +58,19 @@ pub async fn client(endpoint: &str) -> zenoh::Session {
     client_ns(endpoint, None).await
 }
 
+/// A client of the router at `endpoint` whose session stamps every write:
+/// a `redundancy.v1` candidate's (§2.10), which the runtime refuses
+/// otherwise (F-467).
+pub async fn stamping(endpoint: &str) -> zenoh::Session {
+    let mut c = base_config();
+    c.insert_json5("mode", "\"client\"").expect("config");
+    c.insert_json5("connect/endpoints", &format!("[\"{endpoint}\"]"))
+        .expect("config");
+    c.insert_json5("timestamping/enabled", "true")
+        .expect("config");
+    zenoh::open(c).await.expect("a candidate's session")
+}
+
 /// The repository's `examples/zk2/` directory.
 pub fn examples() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2")

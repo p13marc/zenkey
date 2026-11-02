@@ -1996,6 +1996,127 @@ async fn the_owner_example_waits_for_go_and_says_its_polls() {
     o.stop().await;
 }
 
+/// A candidate's session stamps every write whatever its clock (core §8.2's
+/// exception, redundancy.v1 §2.10; F-467): the owner example run
+/// `--standby --election claim` on `beacon-governed.v2`, its clock 2 s
+/// ahead, as zk2py ran it for `freshness.v2` scenarios-v2.md §2 step 6.
+/// Every put a subscriber hears carries the candidate's own stamp, never
+/// R1's; once its guard reads the clock ahead, a put of `status` is refused
+/// (core §4.3, "A candidate's"); set right, it puts again under its own
+/// stamp. The same candidate given `--no-hlc` is refused before it claims.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_as_a_candidate_stamps_every_put() {
+    const STATUS: &str = "zk2/lab/candidate/beacon.v2/state/status";
+    let (r1, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let heard = tool
+        .declare_subscriber(STATUS)
+        .with(flume::unbounded::<Sample>())
+        .await
+        .unwrap();
+    let contract = governed("beacon-governed.v2");
+    let args = |extra: &'static [&'static str]| {
+        let mut a = vec![
+            "--connect",
+            ep.as_str(),
+            "--standby",
+            "--election",
+            "claim",
+            "--clock-reference",
+            "clock/heartbeat",
+            "--clock-offset-ms",
+            "2000",
+        ];
+        a.extend_from_slice(extra);
+        a.extend(["lab/candidate", contract.as_str()]);
+        a.into_iter().map(str::to_owned).collect::<Vec<_>>()
+    };
+    let spawn = |a: Vec<String>| spawn_owner(&a.iter().map(String::as_str).collect::<Vec<_>>());
+
+    let o = spawn(args(&[]));
+    assert_eq!(line(&o.lines).await, format!("connected {ep}"));
+    let ready = line(&o.lines).await;
+    assert!(
+        ready.starts_with("ready zk2/lab/candidate/@zk/instance/"),
+        "{ready}"
+    );
+    let w = ask_json(&o, "redundancy wait beacon.v2 serving 10000").await;
+    assert_eq!(w["reached"], true, "{w}");
+    let zid = ask_json(&o, "redundancy zid").await["zid"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_ne!(zid, r1.zid().to_string());
+    // Every put heard carries the candidate's stamp: what it put at its
+    // takeover, if anything, and this one, before its guard reads R1.
+    assert_eq!(
+        o.ask("put beacon.v2 state/status").await,
+        format!("put {STATUS}")
+    );
+    let own = |s: &Sample| {
+        let id = s.timestamp().map(|t| t.get_id().to_string());
+        assert_eq!(
+            id.as_deref(),
+            Some(zid.as_str()),
+            "the candidate's own stamp, not R1's ({})",
+            r1.zid()
+        );
+    };
+    own(&tokio::time::timeout(SETTLE, heard.recv_async())
+        .await
+        .expect("the put reaches the subscriber")
+        .unwrap());
+    // Its guard holds once it reads R1's stamps 2 s behind its clock: a
+    // put of `status` would carry a Zenoh timestamp, and is refused.
+    let refused = tokio::time::timeout(SETTLE * 4, async {
+        loop {
+            tool.put("clock/heartbeat", "tick").await.unwrap();
+            let a = o.ask("put beacon.v2 state/status").await;
+            if a.starts_with("refused") {
+                break a;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("its guard holds");
+    assert!(refused.contains("clock is ahead"), "{refused}");
+    // Set right, the guard releases, and its put carries its own stamp.
+    assert_eq!(o.ask("clock-offset 0").await, "clock-offset 0");
+    let put = tokio::time::timeout(SETTLE * 4, async {
+        loop {
+            tool.put("clock/heartbeat", "tick").await.unwrap();
+            let a = o.ask("put beacon.v2 state/status").await;
+            if a.starts_with("put ") {
+                break a;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("its guard releases");
+    assert_eq!(put, format!("put {STATUS}"));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let rest: Vec<Sample> = heard.drain().collect();
+    assert!(!rest.is_empty(), "the put after the release is heard");
+    rest.iter().for_each(own);
+    o.stop().await;
+
+    // `--no-hlc`: the runtime refuses a candidate whose session does not
+    // stamp, before its claim (redundancy.v1 §2.10).
+    let o = spawn(args(&["--no-hlc"]));
+    assert_eq!(line(&o.lines).await, format!("connected {ep}"));
+    let why = tokio::time::timeout(SETTLE, o.task)
+        .await
+        .expect("the owner stops")
+        .unwrap()
+        .expect_err("refused");
+    assert!(
+        why.contains("redundancy.v1 §2.10") && why.contains("timestamping"),
+        "{why}"
+    );
+}
+
 /// F-220 (#841, RD): `--wait-go` through the commands `main` reads, a pipe
 /// standing in for standard input. A line sent before `go` is refused,
 /// `go` starts the service, its instance token reaches the router, and the

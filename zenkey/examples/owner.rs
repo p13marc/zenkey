@@ -151,6 +151,12 @@
 //! would never reach the router. Off, they reach it as a session whose HLC
 //! is itself ahead would send them, and the router re-stamps the
 //! `clock_ahead` fault (core §4.1).
+//! - **A candidate's stays on** (`--standby`, F-467): its session stamps
+//!   every write whatever its clock (redundancy.v1 §2.10), and the runtime
+//!   refuses one that does not. Its HLC then re-stamps an offset stamp at
+//!   its own time, under its own id, so a subscriber still reads which
+//!   instance wrote it, and its guard holds every state write while the
+//!   offset clock is ahead (core §4.3, "A candidate's").
 //!
 //! `--tokenless <iface>` puts an interface in the deployment's tokenless
 //! set (core §8.1, U22): `health.v1`, for one.
@@ -529,9 +535,10 @@
 //! (§4's skewed owner), and `timing stamp none` puts raw through the
 //! session with no stamp set, its payload a wall clock 10 s old under the
 //! envelope (§5's unstamped owner). `--no-hlc` leaves the session's HLC off with
-//! `--connect`, as it is by default since core 0.73 (§8.2), `--standby`
-//! included: an HLC follows the stamps its own session puts (core §4.1),
-//! so an offset would grow under one. Each command is answered by one JSON
+//! `--connect`, as it is by default since core 0.73 (§8.2): an HLC follows
+//! the stamps its own session puts (core §4.1), so an offset would grow
+//! under one. With `--standby` the runtime refuses it, since a candidate's
+//! session stamps every write (redundancy.v1 §2.10, F-467). Each command is answered by one JSON
 //! line; `--help` lists them. The reader is `consume --timing`.
 //!
 //! **`arbitration.v1`** (`spec/profiles/arbitration/v1.md`, #909) is the
@@ -709,10 +716,12 @@ pub struct Options {
     /// and its frame resources driven (#981 K3), unless a file has it.
     pub frames: bool,
     /// `--no-hlc`: with `--connect`, the session's HLC off, as it is by
-    /// default (core §8.2), `--standby` included.
+    /// default (core §8.2); with `--standby` the runtime refuses it
+    /// (redundancy.v1 §2.10, F-467).
     pub no_hlc: bool,
     /// `--hlc`: with `--connect`, the session's timestamping on (core §8.2
-    /// asks an owner's off; `--standby` turns it on, redundancy.v1 §2.10).
+    /// asks an owner's off; `--standby` turns it on whatever the offset,
+    /// redundancy.v1 §2.10).
     pub hlc: bool,
     /// `--run-file <path>`: the record each instance's 16-bit run is taken
     /// from (core §4.3), else a random 32-bit run.
@@ -1113,14 +1122,16 @@ timing.v1 (spec/profiles/timing/v1.md)
   --timing                        implement and drive pace.v1
   --hlc                           with --connect, the session's timestamping on
                                   (core §8.2 asks an owner's off; --standby turns
-                                  it on, redundancy.v1 §2.10)
+                                  it on whatever --clock-offset-ms, redundancy.v1
+                                  §2.10)
   --run-file <path>               each instance's 16-bit run from this record (core
                                   §4.3), else a random 32-bit run
   --catalog <path>                the deployment catalog it writes under (core §8.6):
                                   its id stated in the descriptor, its epoch the one
                                   packed time fields count from
   --no-hlc                        with --connect, the session's HLC off (the
-                                  default, --standby included): the
+                                  default; with --standby the runtime refuses
+                                  it, redundancy.v1 §2.10): the
                                   stamps are the session's wall clock with its
                                   zid, so `timing offset` shifts them alone (an
                                   HLC would follow them, core §4.1); and `timing
@@ -1925,10 +1936,17 @@ pub async fn run_with(
             side(&mut z, &opts, endpoint)?;
             // Core §8.2: an owner's session runs without timestamping,
             // unless `--hlc`, or a candidate's (`--standby`: redundancy.v1
-            // §2.10). A simulated offset leaves it off (the module doc):
-            // the HLC would re-stamp the offset clock's stamps before they
-            // leave.
-            if (opts.hlc || opts.standby) && opts.clock_offset_ms == 0 && !opts.no_hlc {
+            // §2.10). A simulated offset leaves `--hlc` off (the module
+            // doc): the HLC would re-stamp the offset clock's stamps before
+            // they leave. A candidate's stays on whatever its clock, its
+            // stamps under its own id (F-467); `--no-hlc` turns it off, and
+            // the runtime then refuses the candidate.
+            let stamps = if opts.standby {
+                !opts.no_hlc
+            } else {
+                opts.hlc && opts.clock_offset_ms == 0 && !opts.no_hlc
+            };
+            if stamps {
                 z.insert_json5("timestamping/enabled", "true")?;
             }
             let session = zenoh::open(z).await?;

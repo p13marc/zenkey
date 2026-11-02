@@ -386,10 +386,12 @@ impl ServiceBuilder {
     /// none of its resources and writing none of its keys. The handle
     /// returned says each interface's role.
     ///
-    /// Refused when it is configured already, when `startup`'s reader is
-    /// this service's session or a watch session, or its watch is the
-    /// service's session or the reader (§2.5 step 1, §2.7; text 0.2,
-    /// F-204). A governed interface without it is refused at start.
+    /// Refused when it is configured already, when this service's session
+    /// runs without timestamping (§2.10: a candidate's session stamps every
+    /// write, F-467), when `startup`'s reader is this service's session or
+    /// a watch session, or its watch is the service's session or the reader
+    /// (§2.5 step 1, §2.7; text 0.2, F-204). A governed interface without
+    /// it is refused at start.
     pub fn redundancy(
         &mut self,
         startup: crate::redundancy::RedundancyStartup,
