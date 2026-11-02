@@ -7,6 +7,79 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.3 — 2026-11-02: the contract side, and frames per face (#988 L3)
+
+Text 0.2 said what a face runs. It said nothing of what a contract that
+lists `link.v2` owes the face, or of frames per face. This version is
+#988's L3. It restates `link.v1` text 0.14 by reference, where 0.2 named
+0.10: 0.11 to 0.14's heartbeats and frames already held for its plans.
+
+**Added: §2.17, the packed requirement.** A contract that lists
+`link.v2` MUST type every resource it exposes `link` as packed.
+`[F: v2/exposure.json]`
+- A linter reports `packed_required`, an error, and a generator refuses
+  a deployment that gives such a revision.
+- A contract that does not list `link.v2` is not bound. Its crossing
+  resources draw the plan's `not_packed` warning where they are not
+  packed.
+
+**Added: §2.7, frames per face.** A face's `frames` lists the frame
+resources that cross it, each with `every_s` and an optional
+`keyframe_s`. On a face with `frames`, a generator MUST let a frame
+resource cross only when the face lists it. `[F: v2/plan.json]`
+`[Sc: §2]`
+- The rest are templates that do not cross, denied by the carve-out.
+- `frame_unknown` refuses an entry that names no frame resource.
+- `keyframe_unreachable` refuses a `keyframe_s` above `keyframe_every` ×
+  `every_s`: an owner may write full records more often, never less.
+- `frame_unlisted` warns of an exposed frame no face lets cross.
+
+**Changed: §2.8, a timed stream is denied.** A generator MUST NOT emit a
+downsampling rule for a stream whose annotations hold
+`timing.deadline_ms`. It denies the stream, and the plan warns
+(`timed_downsampled`). `[F: v2/plan.json]` `[Sc: §2]` Every arbitrated
+role's stream is timed. A listed frame's cadence is its `every_s`, which
+`frame_over_interval` and `interval_over_horizon` read.
+
+**Added: §2.12's `horizon_s`.** A face states the shortest horizon it
+affords. The plan warns of a crossing frame or heartbeat whose horizon
+is below it (`horizon_under_face`). It is a budget floor, never an
+override: horizons stay the contract's.
+
+**Added: §2.13, counters by run.** A frame's counter series is
+`telemetry.v2`'s, its epoch the run. Across a face, a decrease within a
+run is that profile's finding, and a new run a reset.
+
+**Added: §2.16's two plan warnings.** `block_over_batch`: a crossing
+`block` resource whose longest put is above the batch. `keep_alive_not_suppressed`:
+a face whose shortest crossing cadence is above the keep-alive interval.
+
+**Added: §2.18, the catalog.** A generator given the far side's catalog
+MUST refuse a crossing revision it does not list (`catalog_missing`).
+`[F: v2/plan.json]` The plan carries each face's crossing `frames`.
+
+**Fixtures.**
+- `v2/exposure.json` is new: one resource, its contract's `uses`, its
+  type's kind and the face's `frames` → its reading, and its finding.
+- `v2/plan.json` gains cases over `contracts/probe.v1.toml`, a new
+  contract that lists `link.v2`, and its packed schema.
+- `v2/lints.json` gains the face's `frames` and `horizon_s`.
+- The cases over `radio.v1`, whose types are raw, gain `not_packed`.
+
+**The reference.** `zenkey_model::link` reads the contract's side in
+`Res::of`: packed, `block`, the longest put and `uses`. `crossing_v2`
+reads one resource, `contract_findings` a contract, and `plan` the rest.
+
+**Deliberately not changed.**
+- **No core amendment.** Every rule here reads what core §7.6 and §7.7
+  already define.
+- **`not_packed` is a warning, `packed_required` an error.** The design
+  memo gave one code two severities. A code keeps one severity here, so
+  the error is a code of its own.
+- **`block_over_batch` measures as `frame_over_batch` does:** the payload
+  after an 8-byte envelope, with no allowance for zenoh's own header.
+- **A far side's readers** (reply timeouts, re-declaring on silence) are
+  #988's L4.
 ## 0.14 — 2026-11-02: zk2py round 97's findings answered (#978, #981)
 
 zk2py's round 97 read core 0.84 to 0.87 and this text's 0.12 and 0.13

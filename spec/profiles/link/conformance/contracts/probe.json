@@ -1,0 +1,191 @@
+{
+  "description": "link.v2 (text 0.3): probe.v1's record types. Reading is a probe's reading, Status its state, and Config 28 64-bit counters, a record of 224 bytes, whose put passes a 222-byte batch.",
+  "types": {
+    "Reading": {
+      "fields": [
+        {
+          "name": "value",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 1022,
+          "reserved": [
+            "not_available"
+          ]
+        },
+        {
+          "name": "count",
+          "type": "counter",
+          "width": 16
+        },
+        {
+          "name": "ok",
+          "type": "bool"
+        }
+      ]
+    },
+    "Status": {
+      "fields": [
+        {
+          "name": "mode",
+          "type": "enum",
+          "values": [
+            "idle",
+            "run",
+            "fault"
+          ],
+          "escape": true
+        },
+        {
+          "name": "level",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 100
+        }
+      ]
+    },
+    "Config": {
+      "fields": [
+        {
+          "name": "c0",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c1",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c2",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c3",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c4",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c5",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c6",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c7",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c8",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c9",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c10",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c11",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c12",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c13",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c14",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c15",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c16",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c17",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c18",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c19",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c20",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c21",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c22",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c23",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c24",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c25",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c26",
+          "type": "counter",
+          "width": 64
+        },
+        {
+          "name": "c27",
+          "type": "counter",
+          "width": 64
+        }
+      ]
+    }
+  }
+}

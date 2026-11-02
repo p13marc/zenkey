@@ -1,0 +1,46 @@
+# link.v2 §2.7, §2.8, §2.12, §2.16, §2.17 (text 0.3): a probe's contract,
+# which lists link.v2, for v2/plan.json and scenarios-v2.md §2. Every
+# resource it exposes is packed. frames/link and frames/detail are frame
+# resources a face may list. status is a collection, so freshness.v2's
+# heartbeat covers probe.v1. setpoint is a timed stream, level a plain
+# one, and config a block state whose record is longer than RF's batch.
+[interface]
+name  = "probe"
+major = 1
+minor = 0
+uses  = ["link.v2", "freshness.v2", "timing.v1"]
+
+[schemas]
+packed = ["probe.json"]
+
+[resources."frames/link"]
+kind        = "stream"
+type        = "packed:probe#Reading"
+frame       = { records = 1, keyframe_every = 15 }
+annotations = { "link.exposure" = "link", "freshness.ttl_s" = 300 }
+
+[resources."frames/detail"]
+kind        = "stream"
+type        = "packed:probe#Reading"
+frame       = { records = 4, step_ms = 15000, keyframe_every = 8 }
+annotations = { "link.exposure" = "link" }
+
+[resources.status]
+kind        = "state"
+type        = "packed:probe#Status"
+annotations = { "link.exposure" = "link", "freshness.ttl_s" = 600 }
+
+[resources.setpoint]
+kind        = "stream"
+type        = "packed:probe#Reading"
+annotations = { "link.exposure" = "link", "timing.period_ms" = 500, "timing.deadline_ms" = 2000 }
+
+[resources.level]
+kind        = "stream"
+type        = "packed:probe#Reading"
+annotations = { "link.exposure" = "link" }
+
+[resources.config]
+kind        = "state"
+type        = "packed:probe#Config"
+annotations = { "link.exposure" = "link" }
