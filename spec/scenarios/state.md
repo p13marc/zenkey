@@ -15,8 +15,9 @@ the consumer are clients of R1, whose timestamping is disabled. The second
 time, they are clients of R2, whose timestamping is enabled. The owner's session is never the router
 itself. There, the owner's zid and the router's are one, and the id checks
 below prove nothing (core §4.2, "Observing S1"). The owner also serves
-`status`, a state whose contract declares `freshness.ttl_s` 60, so core
-§4.3's table lists it.
+`status`, a state with `freshness.ttl_s` 60. Its contract uses
+`freshness.v1`, so core §4.3's table lists it. A `freshness.v2` state's
+puts carry no Zenoh timestamp.
 
 **Steps.**
 1. The owner puts v1, then v2, then deletes the key. The consumer

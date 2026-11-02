@@ -60,9 +60,10 @@ reference tool runs them (`zenctl/tests/live_zk2.rs`, `zenctl health`).
    history, GETs the owner's `health.v1/state/**` the moment it sees the
    owner's instance token, and again the moment it sees its
    `alive/health.v1/…` token.
-2. A second owner, `lab/quiet`, starts with `health.v1` in its tokenless
-   set (core §8.1) and status `OK`. T GETs its descriptor and its
-   `health.v1/state/**` the moment it sees its instance token.
+2. A second owner, `lab/quiet`, starts with `health.v1` and
+   `freshness.v2` in its tokenless set (core §8.1) and status `OK`. T
+   GETs its descriptor and its `health.v1/state/**` the moment it sees
+   its instance token.
 3. The owner puts status `OK`, reason `"serving"`. G GETs.
 4. The owner puts nothing for 65 s, and S judges.
 5. The owner closes. S listens 3 s more.
@@ -70,9 +71,10 @@ reference tool runs them (`zenctl/tests/live_zk2.rs`, `zenctl health`).
 **Expected.**
 1. Both of T's GETs answer the status: `UNSPECIFIED`, `"starting"`,
    stamped by the owner's session. It was put before the tokens (§2.3).
-2. `lab/quiet` holds an instance token and no `alive/health.v1/…` token,
-   its descriptor lists `health.v1` with `"token": false`, and T's GET at
-   the instance token answers its status `OK`.
+2. `lab/quiet` holds an instance token and no `alive/health.v1/…` or
+   `alive/freshness.v2/…` token. Its descriptor lists `health.v1` with
+   `"token": false`, and T's GET at the instance token answers its status
+   `OK`.
 3. G's reply is `OK`, `"serving"`, with `since_ns` later than the first
    status's.
 4. S receives no put of the status (`freshness.v2` §2.4). It receives a
@@ -174,18 +176,19 @@ conventions say.
    the status again (`freshness.v2` §2.10). It receives no put of the
    status, and no `clock_ahead` fault after it. S judges **healthy**,
    `ok`, and the clock question no.
-4. **[moved clock]** S receives neither the fault nor the status put
-   while the owner was ahead: R1 dropped both (v1.md §2.5). G's reply
-   holds the status, under the owner's stamp, since a router never drops
-   or re-stamps a reply (core §4.1). That deployment's readers have only
-   the status's staleness to go on (v1.md §2.5).
+4. **[moved clock]** S receives no fault: R1 dropped it (v1.md §2.5). The
+   status put carries no Zenoh timestamp of the owner's (`freshness.v2`
+   §2.4), so R1 stamps it itself, and S receives it. G's reply holds the
+   status, under the owner's stamp, since a router never drops or
+   re-stamps a reply (core §4.1). That deployment's readers have only the
+   status's staleness to go on (v1.md §2.5).
 
 ## §5 A tokenless set of 100 (§2.7)
 
 **Setup.** `spec/scenarios/presence.md` §5's, with the standard contract:
-100 services `p5/dev0` to `p5/dev99`, each implementing `health.v1`, in
-its tokenless set, and `nav.v2`, each with status `OK` put before it
-starts. The tool T takes the deployment's word for its clock (the
+100 services `p5/dev0` to `p5/dev99`, each implementing `health.v1` and
+`nav.v2`, `health.v1` and `freshness.v2` in its tokenless set, each with
+status `OK` put before it starts. The tool T takes the deployment's word for its clock (the
 conventions).
 
 **Steps.** T lists `zk2/p5/*/@zk/**`, then `zk2/p5/*/@zk/alive/health.v1/**`,
@@ -194,7 +197,8 @@ then GETs each instance's descriptor, and each listed service's
 
 **Expected.**
 - 200 tokens: an instance token and an `alive/nav.v2/…` token each, and no
-  `alive/health.v1/…` token. The second read finds nothing.
+  `alive/health.v1/…` or `alive/freshness.v2/…` token. The second read
+  finds nothing.
 - Every descriptor lists `health.v1` with `"token": false`. T finds all
   100 providers, and judges each **healthy**, `ok`: none is reported as
   not implementing `health.v1` because it holds no interface token.

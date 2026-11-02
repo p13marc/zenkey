@@ -29,6 +29,17 @@ in `zenkey-fleet/tests/fixtures/acl/` carry it. The walkthrough's
 `zenwatch` binding over `*/*` holds
 `zk2/*/*/freshness.v2/stream/heartbeat/health.v1`.
 
+**Editorial: `scenarios/state.md` §1.** Its `status` is a state whose
+contract uses `freshness.v1`, where it said only a horizon of 60 s. The
+reference played it on `health.v1`'s status, which F4 moves onto
+`freshness.v2`, off the table. It now plays it on a `freshness.v1`
+contract of its own.
+
+**Editorial: `scenarios/presence.md` §5.** Its 100 services put
+`freshness.v2` in their tokenless set beside `health.v1`: every `health.v1`
+owner now implements `freshness.v2` beside it, an interface token more.
+They hold 200 tokens instead of 400, where it said 300.
+
 **Deliberately not changed.**
 - **No keyword rule.** §11.1's table states grant shapes, and RULES.md
   lists no row of it.

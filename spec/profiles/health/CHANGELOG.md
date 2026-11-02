@@ -36,16 +36,27 @@ changed. Revision 1.0 stays defined, and its owners re-put.
 - **§2.8:** a status that crosses brings its heartbeat with it
   (`link.v1` §2.9), which is the liveness evidence. The face's cost is
   that heartbeat, about 10 B every 28.5 s.
+- **§2.7:** each owner implements `freshness.v2` beside `health.v1`, an
+  interface token more, which the tokenless set holds too (core §8.1).
 - **§1, §3, Appendix A and Appendix B** name `freshness.v2`.
 
 **`scenarios.md`.** S hears the heartbeat key too, and G and T take the
 deployment's word for their clock: a status put carries no Zenoh
 timestamp of the owner's, so G can no longer measure it from S's
-deliveries. §1 waits 65 s, past the horizon, and S judges the status
+deliveries. §1's `lab/quiet` and §5's 100 services hold `freshness.v2` in
+their tokenless set too. §1 waits 65 s, past the horizon, and S judges the status
 fresh with no re-put. §2 confirms for 65 s first, then stops vouching:
 `set_confirming(false)` clears the status's bit, where the owner closed
-its writer. §4's step 3 is a heartbeat that vouches again. §8's run A
-hears the heartbeats that cross with the status.
+its writer. §4's step 3 is a heartbeat that vouches again. §4's step 4 hears the
+status put while ahead: it carries no Zenoh timestamp of the owner's, so a
+router under `drop_future_timestamp` stamps it and lets it through, and
+drops only the fault. §8's run A hears the heartbeats that cross with the
+status.
+
+**`link.v1`'s `plan.json`.** zenoh-modem's RF face denies the
+heartbeats covering `health.v1` and `config.v1`, `stream:freshness.v2`,
+as `link.v1` §2.9 says: none of their collections crosses that face. The
+case's expectation follows, and no rule of `link.v1` changed.
 
 **Written against core 0.82,** where it said 0.73: the heartbeat is core
 0.82's §7.5 form 6, and its stamps §4.3's table. The index's row follows.
