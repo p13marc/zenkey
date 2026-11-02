@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import textwrap
 import threading
 import time
 import traceback
@@ -196,16 +197,82 @@ def family_descriptors(root: Path) -> list[Result]:
 # -- errors/ (core.md §5.2) --------------------------------------------------
 
 def family_errors(root: Path) -> list[Result]:
+    """``errors/``, every file, an unknown one failing: ``cases.json``, §5.2's
+    envelope decoded by its Encoding; ``forms.json`` (core 0.92), §7.5's
+    error form (:func:`_error_forms`)."""
     from .envelope import EnvelopeError, decode
 
-    out = []
-    for c in _load_json(root / "errors" / "cases.json")["cases"]:
-        payload = c["text"].encode("utf-8") if "text" in c else bytes.fromhex(c["hex"])
+    out: list[Result] = []
+    for path in sorted((root / "errors").iterdir()):
+        if path.name == "forms.json":
+            out += _error_forms(_load_json(path))
+            continue
+        if path.name != "cases.json":
+            out.append((f"errors/{path.name}", False, "an unknown fixture file: the runner does not read it"))
+            continue
+        for c in _load_json(path)["cases"]:
+            payload = c["text"].encode("utf-8") if "text" in c else bytes.fromhex(c["hex"])
+            try:
+                got: Any = decode(c["encoding"], payload)
+            except EnvelopeError as e:
+                got = {"refused": e.tag}
+            out.append(_check(c["name"], got, c["expect"]))
+    return out
+
+
+def _error_forms(data: dict[str, Any]) -> list[Result]:
+    """``errors/forms.json`` (core 0.92, §5.2 "The error form", §7.5): its
+    ``codes`` and ``causes`` in zk2py's order; every error byte read alone
+    (``bytes``); an error and its stamp written, or the writer's refusal,
+    each accepted write parsed back to its value with the message as cut
+    (``writes``); a reply error's Encoding and payload read (``reads``)."""
+    from . import zk2c
+
+    unknown = set(data) - {"description", "codes", "causes", "bytes", "writes", "reads"}
+    out: list[Result] = [("errors: forms.json holds codes, causes, bytes, writes and reads", not unknown,
+                          f"members the runner does not read: {sorted(unknown)}" if unknown else "")]
+    out.append(_check("errors: forms: §5.2's codes in the error byte's order", data["codes"],
+                      list(zk2c.ERROR_CODES)))
+    out.append(_check("errors: forms: the causes in the error byte's order", data["causes"],
+                      list(zk2c.ERROR_CAUSES)))
+    seen = sorted(int(c["byte"], 16) for c in data["bytes"])
+    out.append(_check("errors: forms: every error byte, once", seen, list(range(256))))
+    for c in data["bytes"]:
         try:
-            got: Any = decode(c["encoding"], payload)
-        except EnvelopeError as e:
-            got = {"refused": e.tag}
-        out.append(_check(c["name"], got, c["expect"]))
+            got: Any = zk2c.error_byte(int(c["byte"], 16))
+        except zk2c.Refused as r:
+            got = {"refused": r.token}
+        out.append(_check(f"errors: forms: byte {c['byte']}", got, c["expect"]))
+    for c in data["writes"]:
+        v = c["value"]
+        stamp = zk2c.InBand(v["run_width"], v["run"], v["seq"])
+        detail = None if v["detail"] is None else bytes.fromhex(v["detail"])
+        try:
+            raw = zk2c.write_error(stamp, v["code"], v["cause"], v["message"], detail, v["tag"])
+        except zk2c.Refused as r:
+            got = {"refused": r.token}
+        else:
+            got = {"hex": raw.hex()}
+            back = zk2c.parse(raw, "reply_err")
+            assert back.stamp is not None and back.error is not None
+            read = {"run_width": back.width, "run": back.run, "seq": back.seq, "tag": back.tag,
+                    **back.error.as_json()}
+            # "every accepted write parses back to its value with the message
+            # as cut (reads_as gives it where it was cut)"
+            out.append(_check(f"errors: forms: write {c['note'][:60]}: parses back", read,
+                              {**v, **c["expect"].get("reads_as", {})}))
+        want = {k: x for k, x in c["expect"].items() if k != "reads_as"}
+        out.append(_check(f"errors: forms: write {c['note'][:60]}", got, want))
+    for c in data["reads"]:
+        try:
+            e = zk2c.read_reply_err(c["encoding"], bytes.fromhex(c["hex"]))
+        except zk2c.Refused as r:
+            got = {"refused": r.token}
+        else:
+            assert e.error is not None
+            got = {"error": {"run_width": e.width, "run": e.run, "seq": e.seq, "tag": e.tag, **e.error.as_json()}}
+        out.append(_check(f"errors: forms: read {c['encoding']} {c['hex'][:32] or '(empty)'}: {c['note']}", got,
+                          c["expect"]))
     return out
 
 
@@ -756,9 +823,16 @@ def _link_interfaces(case: dict[str, Any]) -> dict[str, Any]:
             raise CannotRun(f"{rel}: {c.codes}")
         revisions.setdefault(c.interface, []).append(link.revision_of(c))
     # link.v1 0.11: a case may give both, its interfaces inline and the
-    # standard contracts by path (freshness.v2's).
+    # standard contracts by path (freshness.v2's). link.v2 0.6 (F-469): one
+    # interface id given both ways is two revisions of it, "the contract's
+    # … and one, inline", the contract's first.
     out: dict[str, Any] = {i: {"revisions": revs} for i, revs in revisions.items()}
-    out.update(case.get("interfaces", {}))
+    for i, entry in case.get("interfaces", {}).items():
+        if i not in out:
+            out[i] = entry
+            continue
+        inline = entry["revisions"] if isinstance(entry, dict) and "revisions" in entry else [entry]
+        out[i] = {"revisions": out[i]["revisions"] + list(inline)}
     return out
 
 
@@ -3667,7 +3741,7 @@ def family_readings(root: Path) -> list[Result]:
         + _round91_readings(root) + _round92_readings(root) + _mend93_readings(root) + _round93_readings(root) \
         + _mend_after_round93_readings(root) + _round94_readings(root) + _mend_after_round94_readings(root) \
         + _round95_readings(root) + _round96_readings(root) + _round96_k1_readings(root) + _round97_readings(root) \
-        + _round98_readings(root) + _round99_readings(root)
+        + _round98_readings(root) + _round99_readings(root) + _round100_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -4109,7 +4183,6 @@ annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "1" }
     # core §8.1, §5.1 (0.91): the reply timeout across a face.
     faced = load_contract(repo / "zenkey" / "tests" / "contracts" / "faced.v1.toml")
     fr_ = {r["template"]: r for r in faced.canonical["resources"]}
-    pol = (repo / "impl" / "python" / "zk2py" / "far_side_live.py")
     from .far_side_live import policy
 
     radio, repaired = far_side.far_side(policy(False), "radio"), far_side.far_side(policy(True), "radio")
@@ -4120,11 +4193,11 @@ annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "1" }
                               "reply timeout",
                         "Across a constrained face, it waits at least the face's reply timeout (§8.1).")
                 + missing(l2, "A face's `reply_timeout_ms` is core §8.1's reply timeout.")
-                + [pol.is_file(), fr_["slow"].get("timeout_ms"),
+                + [fr_["slow"].get("timeout_ms"),
                    far_side.call_timeout_s(None, 1000, None), far_side.call_timeout_s(None, 1000, radio),
                    far_side.call_timeout_s(None, None, None), far_side.call_timeout_s(0.5, 1000, radio),
                    radio.get_timeout_s(1.0), radio.get_timeout_s(5.0)],
-                [True, 1000, 1.0, 3.0, 10.0, 0.5, 3.0, 5.0]))
+                [1000, 1.0, 3.0, 10.0, 0.5, 3.0, 5.0]))
     # core §8.5, observer §7.5 (0.91, 0.23): a subscription's horizon.
     beacon = load_contract(repo / "impl" / "python" / "interop" / "freshness" / "beacon.v2.toml")
     fv2c = load_contract(spec / "profiles" / "freshness" / "freshness.v2.toml")
@@ -4143,13 +4216,16 @@ annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "1" }
                    radio.redeclares, repaired.redeclares],
                 [1.0, None, 2.0, True, False]))
 
-    # Redeclaring on a fake session and a fake clock.
+    # Redeclaring on a fake session and a fake clock, its tick driven
+    # directly: no watcher thread, no real sleep (review-bot on round 99, PR
+    # #1049, 1).
     class Sub:
         def __init__(self, log: list[str], key: str) -> None:
-            self.log, self.key = log, key
+            self.log, self.key, self.undeclared = log, key, False
             log.append(f"declare {key}")
 
         def undeclare(self) -> None:
+            self.undeclared = True
             self.log.append(f"undeclare {self.key}")
 
     class Info:
@@ -4166,35 +4242,56 @@ annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "1" }
         def __init__(self) -> None:
             self.log: list[str] = []
             self.info = Info()
+            self.subs: list[Sub] = []
+            #: run before the next declaration, then cleared
+            self.before_declare: Callable[[], None] | None = None
 
         def declare_subscriber(self, key: str, handler: Any) -> Sub:
-            return Sub(self.log, key)
+            hook, self.before_declare = self.before_declare, None
+            if hook is not None:
+                hook()
+            self.subs.append(Sub(self.log, key))
+            return self.subs[-1]
 
-    def run(horizon: float | None, steps: list[float], up: bool = True, redeclare: bool = True) -> list[str]:
+    def run(horizon: float | None, steps: list[float], up: bool = True,
+            redeclare: bool = True) -> tuple[list[str], list[bool]]:
         sess, now = Session(), [0.0]
         sess.info.up = [object()] if up else []
-        r = far_side.Redeclaring(sess, "k", lambda _s: None, horizon, redeclare=redeclare, clock=lambda: now[0])
+        r = far_side.Redeclaring(sess, "k", lambda _s: None, horizon, redeclare=redeclare, clock=lambda: now[0],
+                                 watch=False)
+        ticks = []
         for t in steps:
             now[0] = t
-            time.sleep(0.25)
+            ticks.append(r.tick())
         r.undeclare()
-        return sess.log
+        return sess.log, ticks
 
-    import time
-
-    out.append(("core §8.5 (0.91): declared again after two horizons of silence, its transport up, undeclared and "
-                "then declared anew; never at 1.9 horizons, never with no open transport, never with arq true or no "
-                "horizon (far_side.Redeclaring, a fake session and clock)",
+    d, u = "declare k", "undeclare k"
+    out.append(("core §8.5 (0.91): declared again after two horizons of silence, its transport up: undeclared, "
+                "then declared anew, the silence counted again from it; never at 1.9 horizons, never with no open "
+                "transport, never with arq true or no horizon (far_side.Redeclaring, a fake session and clock, its "
+                "tick driven directly)",
                 missing(core, "**Declaring again** undeclares the subscription, then declares it anew.",
                         "Through a session cut off from every router nothing is declared.")
-                + [run(1.0, [1.9]), run(1.0, [2.0]), run(1.0, [2.0], up=False), run(1.0, [2.0], redeclare=False),
-                   run(None, [5.0])],
-                [["declare k", "undeclare k"], ["declare k", "undeclare k", "declare k", "undeclare k"],
-                 ["declare k", "undeclare k"], ["declare k", "undeclare k"], ["declare k", "undeclare k"]]))
+                + [run(1.0, [1.9]), run(1.0, [2.0]), run(1.0, [2.0, 3.9, 4.0]), run(1.0, [2.0], up=False),
+                   run(1.0, [2.0], redeclare=False), run(None, [5.0])],
+                [([d, u], [False]), ([d, u, d, u], [True]), ([d, u, d, u, d, u], [True, False, True]),
+                 ([d, u], [False]), ([d, u], [False]), ([d, u], [False])]))
+    # review-bot on round 99 (PR #1049, 2): undeclare() between the old
+    # subscriber's undeclare and the new one's declaration leaks no
+    # subscriber: the tick sees it stopped, and undeclares the new one.
+    sess, now = Session(), [0.0]
+    r = far_side.Redeclaring(sess, "k", lambda _s: None, 1.0, clock=lambda: now[0], watch=False)
+    sess.before_declare = r.undeclare
+    now[0] = 2.0
+    raced = r.tick()
+    out.append(("review-bot on PR #1049, 2: undeclare() while a re-declaration is in flight keeps no subscriber: "
+                "the tick declares, sees it stopped and undeclares the new one; every subscriber declared is "
+                "undeclared, and none is declared again after",
+                [raced, r.redeclared, [x.undeclared for x in sess.subs], r.sub is sess.subs[0], r.tick(), sess.log],
+                [False, [], [True, True], True, False, [d, u, u, d, u]]))
 
     # link.v2 0.3's scenarios-v2.md §2, expected 1 and 2: the plan alone.
-    import textwrap
-
     from . import link, link_v2
 
     sc2 = (spec / "profiles" / "link" / "scenarios-v2.md").read_text(encoding="utf-8")
@@ -4231,25 +4328,36 @@ annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "1" }
     sizes = {f"{x['interface']}/{x['resource']}": x for x in rows}
     out.append(("#983 T4: modem.v3 3.2's nine frame resources and gendev.v1 1.1's frames/sample, each declared, "
                 "written by zk2py's Framer under a 32-bit run, read back envelope first, written again byte for byte, "
-                "and every series field of every record a sample of the value written; link.v1 §2.8's largest frame "
-                "measured at frame_facts' size, frames/link 22 B, frames/message 213 B and frames/sample 97 B as the "
-                "Rust side measured",
+                "and every series field of every record a sample of the value written, paired by seq; link.v1 "
+                "0.16 §2.8's largest frame measured at frame_facts' size, frames/link 22 B and frames/message 213 B "
+                "(keyframe_every 1) and frames/sample 100 B",
                 [len(rows), all(x["declared"] == "declared" and x["read_back"] and x["samples"]
                                 and x["follows"] == ["first", "continues"] for x in rows),
-                 all(x["full_frame_bytes"] == x["largest_bytes"] for x in rows),
-                 [sizes.get(k, {}).get("full_frame_bytes")
+                 all(x["largest_frame_bytes"] == x["largest_bytes"] for x in rows),
+                 [sizes.get(k, {}).get("largest_frame_bytes")
                   for k in ("modem.v3/frames/link", "modem.v3/frames/message", "gendev.v1/frames/sample")]],
-                [10, True, True, [22, 213, 97]]))
-    out.append(("F-470: a frame whose keyframe_every is above 1 puts delta records; one that includes every field "
-                "(\"Including an unchanged field is never wrong\") is a bit a field longer than link.v1 §2.8's full "
-                "record, so zk2py's writer puts frames/layer at 109 B and frames/sample at 100 B",
-                missing(core, "Including an unchanged field is never wrong.")
-                + [{k: (x["largest_bytes"], x["delta_frame_bytes"]) for k, x in sizes.items()
-                    if x["delta_frame_bytes"] != x["largest_bytes"]}],
-                [{"modem.v3/frames/air": (49, 50), "modem.v3/frames/bearer": (32, 33), "modem.v3/frames/if": (58, 60),
-                  "modem.v3/frames/layer": (106, 109), "modem.v3/frames/radio": (21, 22),
-                  "modem.v3/frames/sched": (32, 33), "modem.v3/frames/sdu": (51, 52),
-                  "gendev.v1/frames/sample": (97, 100)}]))
+                [10, True, True, [22, 213, 100]]))
+    # F-470 answered (link.v1 0.16 §2.8): "the largest frame holds records −
+    # ⌊records / keyframe_every⌋ such delta records, and full records for
+    # the rest". zk2py's writer never puts a frame above it, and puts it
+    # where every field changes; examples/zk2/zenoh-modem/README.md states
+    # the group frames' new sizes.
+    readme = (spec.parent / "examples" / "zk2" / "zenoh-modem" / "README.md").read_text(encoding="utf-8")
+    stated = {m.group(1): int(m.group(2)) for m in re.finditer(r"^\| `(frames/\w+)` \|.*\| (\d+) B \|$", readme, re.M)}
+    out.append(("F-470 at link.v1 0.16: the largest frame holds records − ⌊records / keyframe_every⌋ delta records "
+                "that include every field; zk2py's writer puts no frame above it and reaches it where every field "
+                "changes (frames/layer 109 B, frames/sample 100 B); zenoh-modem's README states each modem.v3 size "
+                "zk2py measures",
+                missing(flat("profiles/link/v1.md"), "so the largest frame holds `records` −")
+                + [all(x["delta_frame_bytes"] <= x["largest_bytes"] for x in rows),
+                   {k: (x["full_frame_bytes"], x["largest_bytes"]) for k, x in sizes.items()
+                    if x["full_frame_bytes"] != x["largest_bytes"]},
+                   {k.split("/", 1)[1]: x["largest_bytes"] for k, x in sizes.items() if k.startswith("modem.v3/")}
+                   == stated],
+                [True, {"modem.v3/frames/air": (49, 50), "modem.v3/frames/bearer": (32, 33),
+                        "modem.v3/frames/if": (58, 60), "modem.v3/frames/layer": (106, 109),
+                        "modem.v3/frames/radio": (21, 22), "modem.v3/frames/sched": (32, 33),
+                        "modem.v3/frames/sdu": (51, 52), "gendev.v1/frames/sample": (97, 100)}, True]))
 
     # Review-bot on round 98 (PR #1041): the meter accepts after the put.
     mf = spec / "profiles" / "telemetry" / "conformance" / "contracts" / "meterframe.v1.toml"
@@ -4273,6 +4381,128 @@ annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "1" }
                 "a put that raised, and accepts it once its frame's put goes through (Meter.gather, put, unsent; "
                 "Owner._put_metered gives a failed frame's seqs back)",
                 got, ["90 refused while 100 pends", {}, {"frames_total": 90}]))
+    return out
+
+
+def _round100_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.92 (#985 C4a, a call's forms) and core 0.93, link.v1 0.16 and
+    link.v2 0.6 (round 99's F-465 to F-470 answered), read at main 037fce56
+    (#609, round 100): each entry; 0.92's fixture counts against its words;
+    what no rule adopts yet; each answer as its text now reads, and zk2py's
+    reading of it offline; F-471. The live halves are
+    ``freshness_v2_scenarios`` §2 step 6 (F-467) and ``forms_live``."""
+    import re
+
+    from . import envelope, link, zk2c
+    from .contract import load_contract
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, l1, l2 = flat("core.md"), flat("profiles/link/v1.md"), flat("profiles/link/v2.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.93 or later, link.v1 0.16 and link.v2 0.6, each with its entry, and 0.92's (#985 C4a; round 99 "
+         "answered)",
+         [core_v >= (0, 93)] + entry("CHANGELOG.md", "0.92", "value and error forms")
+         + entry("CHANGELOG.md", "0.93", "round 99") + entry("profiles/link/CHANGELOG.md", "0.16", "round 99")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 0.6", "round 99"),
+         [True]),
+    ]
+    # 0.92's evidence, as its entry counts it.
+    vec = _load_json(root / "envelope" / "vectors.json")
+    forms = _load_json(root / "errors" / "forms.json")
+    exp = _load_json(root / "contracts" / "expect.json")["cases"]
+    out.append(("core 0.92's entry: vectors.json's 20 headers and 147 cases, 91 of them on query, reply and "
+                "reply_err; forms.json's 256 error bytes, 22 writes and 17 reads; e044-packed-place lists two E044",
+                [len(vec["headers"]), len(vec["cases"]),
+                 sum(1 for c in vec["cases"] if c["sample"] in ("query", "reply", "reply_err")),
+                 len(forms["bytes"]), len(forms["writes"]), len(forms["reads"]),
+                 exp["e044-packed-place"]["codes"]],
+                [20, 147, 91, 256, 22, 17, ["E044", "E044"]]))
+    # What no rule adopts yet (core §5.1 "The forms", §5.2 "The error form").
+    out.append(("core §5.1 and §5.2 (0.92): no rule has a caller or an owner write a form; every failed call still "
+                "answers in §5.2's envelope, and a reply error under any other Encoding is the transport's, a "
+                "router's Timeout under zenoh/bytes too: zk2c reads it sample_kind, the querier's encoding",
+                missing(core, "No rule at this version has a caller or an owner write them.",
+                        "No rule at this version has an owner answer in it",
+                        "It is the transport's by the rule above.")
+                + [zk2c.read_reply_err_token("zenoh/bytes", b"Timeout"),
+                   zk2c.read_reply_err_token("zenoh/string", b"Timeout")],
+                ["sample_kind", "encoding"]))
+    # §7.5's sizes, as zk2py writes them.
+    st16, st32 = zk2c.InBand(16, 1, 7), zk2c.InBand(32, 1, 7)
+    out.append(("core §7.5 \"Sizes\" (0.92): a request is 1 byte over its record, a value 6 or 8, an error 7 or 9, "
+                "a message its length and a byte more, a detail its own bytes",
+                missing(core, "A request** is 1 byte over its record, and a value 6 or 8.",
+                        "An error** is 7 bytes, or 9 with a 32-bit run.")
+                + [len(zk2c.request(b"ab")) - 2, len(zk2c.value(st16, b"ab")) - 2, len(zk2c.value(st32, b"ab")) - 2,
+                   len(zk2c.write_error(st16, "busy")), len(zk2c.write_error(st32, "busy")),
+                   len(zk2c.write_error(st16, "busy", message="no")),
+                   len(zk2c.write_error(st16, "app", detail=b"\x00\x01"))],
+                [1, 6, 8, 7, 9, 10, 9]))
+    # E044 narrowed (§7.1, §9.2).
+    op = load_contract(root / "contracts" / "ok-packed-operation.toml")
+    out.append(("core §7.1 and §9.2 E044 (0.92): an operation's request, response, error and summary may be "
+                "packed; zk2py lints ok-packed-operation clean, its fingerprint the reference's",
+                missing(core, "or an operation's `request`, `response`, `error` or `summary` (E044).",
+                        "a packed type with no CH to carry its tag: an explicit stream's type, or an attachment")
+                + [op.codes, op.fingerprint],
+                [[], exp["ok-packed-operation"]["fingerprint"]]))
+    # F-471: §5.2's Encoding names no packed kind, where E044 now lets an
+    # operation's error and response be packed and every failed call still
+    # answers in the envelope. zk2py answers JSON, as the reference does
+    # (forms_live).
+    s52 = core[core.index("### 5.2 The error envelope"):core.index("## 6. Ownership and serving")]
+    by = {r["template"]: r for r in op.canonical["resources"]}
+    out.append(("F-471 (open): §5.2's \"Encoding\" names a JSON Schema, a protobuf and a raw type, and no packed "
+                "one; ok-packed-operation's calibrate (a packed error) and scan (a packed response, no error type) "
+                "have no envelope kind by the text, and zk2py answers both in JSON, as for a raw type",
+                missing(s52, "**A JSON Schema type:**", "**A protobuf type:**", "**A raw type:**")
+                + [("**A packed type" in s52), envelope.envelope_encoding(by["calibrate"]),
+                   envelope.envelope_encoding(by["scan"])],
+                [False, "application/json", "application/json"]))
+    # Round 99's answers, as the texts now read, and zk2py's reading.
+    out.append(("F-465 answered (link.v2 0.6 §2.3, §2.7): an empty frames lists no frame, every exposed frame denied "
+                "by name; F-466 (link.v1 0.16 §2.7, §2.9): an implied freshness.v2 is listed for stream alone; "
+                "F-468 (link.v1 0.16 §2.3, link.v2 0.6): a refused deployment lists its errors alone",
+                missing(l2, "An empty `frames`**, `frames = {}`, is a face with `frames` that lists none",
+                        "and empty for an empty `frames` (§2.7)",
+                        "A refusal lists the deployment's errors alone")
+                + missing(l1, "An implied `freshness.v2` is listed for `stream` alone (§2.9)",
+                          "A refused deployment lists its errors alone"), []))
+    rows = [{"token": "state", "template": "c", "type": "packed", "longest_bytes": 300},
+            {"token": "state", "template": "c"}]
+    drop_then_block = [{"token": "state", "template": "c", "type": "packed", "longest_bytes": 300,
+                        "congestion": "drop"},
+                       {"token": "state", "template": "c", "type": "packed", "longest_bytes": 100}]
+    a = link.merge_revisions("t.v1", [[rows[0]], [rows[1]]])[0]
+    b = link.merge_revisions("t.v1", [[drop_then_block[0]], [drop_then_block[1]]])[0]
+    out.append(("F-469 answered (link.v2 0.6 §2.3): each revision judged alone: packed only where every one is, a "
+                "longest put weighed in each revision that declares it block, so a drop revision's 300-byte put "
+                "draws nothing where the block one's is 100",
+                missing(l2, "What this text weighs of a resource is judged revision by revision",
+                        "**Its longest put** is weighed in each revision that declares it `block`.")
+                + [(a.packed, a.block, a.longest_put), (b.packed, b.block, b.longest_put)],
+                [(False, True, 300), (True, True, 100)]))
+    out.append(("F-467 answered (core 0.93 §8.2 \"Whatever its clock\"): a candidate's session stamps every write "
+                "while its clock is ahead too; the owner example's candidate now does (freshness_v2_scenarios §2 step "
+                "6, live: every put of status S hears carries the candidate's zid)",
+                missing(core, "A candidate's session stamps every write while its clock is ahead too",
+                        "The reference** refuses a candidate whose session runs without timestamping"), []))
+    out.append(("F-470 answered (link.v1 0.16 §2.8, §2.3): the largest frame holds records − ⌊records / "
+                "keyframe_every⌋ delta records that include every field, the largest any revision writes",
+                missing(l1, "so the largest frame holds `records` − ⌊`records` / `keyframe_every`⌋ such delta records",
+                        "is the largest that any revision declaring it writes"), []))
     return out
 
 
@@ -5253,9 +5483,10 @@ def _round94_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 [write(small, {"v": True}), write(count, {"v": True}), write(clock, {"v": False}, 0),
                  write(half, {"v": True}), write(flag, {"v": 1}), jcs.is_json_integer(True)],
                 [{"refused": "value"}] * 5 + [False]))
-    # 4. E044 per reference: an attachment's type and an operation's four
-    #    types; a stream's, a state's, an event's and an explicit state's
-    #    type are not.
+    # 4. E044 per reference: an attachment's type. A stream's, a state's,
+    #    an event's and an explicit state's type are not, and since core 0.92
+    #    (E044 narrowed, #985 C4a) neither are an operation's four types,
+    #    which travel in §7.5's forms behind a CH that holds their tag.
     placed = load_contract(root / "contracts" / "m.v1.toml", text="""[interface]
 name = "m"
 major = 1
@@ -5287,12 +5518,12 @@ error = "packed:Status"
 summary = "packed:Status"
 replies = "many"
 """)
-    out.append(("review-bot on PR #1014, 4: E044 on a state's and an event's attachment and on an operation's "
-                "request, response, error and summary; none on a stream's, a state's, an explicit state's or an "
-                "event's type",
+    out.append(("review-bot on PR #1014, 4, at core 0.92: E044 on a state's and an event's attachment; none on "
+                "a stream's, a state's, an explicit state's or an event's type, nor on an operation's request, "
+                "response, error and summary",
                 sorted(d.message.split(":")[0] + ":" + d.message.split(":")[1] for d in placed.diagnostics
                        if d.code == "E044"),
-                ["ev: attachment", "op: error", "op: request", "op: response", "op: summary", "st: attachment"]))
+                ["ev: attachment", "st: attachment"]))
     # Not a finding: reserved names in §7.6's order, whichever are declared.
     err = rec({"name": "v", "type": "int", "minimum": 0, "maximum": 2, "reserved": ["out_of_range", "error"]})
     out.append(("§7.6 \"from all ones down, in that order\": error alone above out_of_range takes all ones",
@@ -5562,15 +5793,16 @@ def _round93_readings(root: Path) -> list[tuple[str, Any, Any]]:
     refused = zk2c.read_put(key, "zenoh/bytes", b'{"a":1}')
     good = zk2c.read_put(key, "zenoh/bytes", zk2c.mutation(zk2c.InBand(16, 3, 9), b'{"a":1}'))
     out.append(("observer §7.3 (0.14): a state sample under zenoh/bytes with no envelope is refused (JSON's `{` is "
-                "form 3), its record None and its refusal named; an envelope's record is the payload",
+                "form 3, an error, which a put does not carry: sample_kind since core 0.92, where 0.72 reserved it, "
+                "form), its record None and its refusal named; an envelope's record is the payload",
                 [(refused.refused, refused.record, refused.refusal), (good.record, str(good.stamp)),
                  zk2c.read_put(key, "application/json", b'{"a":1}').record],
-                [(True, None, "form"), (b'{"a":1}', "run 0003 seq 9"), b'{"a":1}']))
+                [(True, None, "sample_kind"), (b'{"a":1}', "run 0003 seq 9"), b'{"a":1}']))
     row = echo_tool.row_of(key, False, 7, "zenoh/bytes", b'{"a":1}')
     ok_row = echo_tool.row_of(key, False, 13, "zenoh/bytes", zk2c.mutation(zk2c.InBand(32, 0xA1, 2), b"hi"))
     out.append(("observer §7.3 (0.14) in echo_tool: a refused envelope's row says undecodable, naming the refusal, "
                 "and sniffs nothing; an envelope's row shows its run and seq (observer §8.3) and sniffs its record",
-                [row["sniffed"], "form" in (row["undecodable"] or ""), ok_row["envelope"], ok_row["undecodable"],
+                [row["sniffed"], "sample_kind" in (row["undecodable"] or ""), ok_row["envelope"], ok_row["undecodable"],
                  ok_row["sniffed"] is not None],
                 [None, True, {"run": "000000a1", "seq": 2, "shown": "run 000000a1 seq 2"}, None, True]))
     lj = sd.LateJoiner(None, f"{key}", consumer=False)
@@ -8649,11 +8881,16 @@ def family_envelope(root: Path) -> list[Result]:
                 except zk2c.Refused as r:
                     got: Any = {"refused": r.token}
                 else:
+                    # core 0.92: a request's width, run and seq are null; an
+                    # error's parse adds `error`.
                     got = {"form": e.form, "run_width": e.width, "run": e.run, "seq": e.seq, "tag": e.tag,
                            "record": None if e.record is None else e.record.hex()}
-                    back = zk2c.write(e.form, e.width, e.run, e.seq, e.tag, e.record)
-                    out.append(_check(f"envelope: {c['sample']} {c['hex']} writes back", back.hex(), c["hex"]))
-                out.append(_check(f"envelope: {c['sample']} {c['hex'] or '(empty)'}: {c['note']}", got, c["expect"]))
+                    if e.error is not None:
+                        got["error"] = e.error.as_json()
+                    back = zk2c.write_back(e)
+                    out.append(_check(f"envelope: {c['sample']} {c['hex'][:64]} writes back", back.hex(), c["hex"]))
+                out.append(_check(f"envelope: {c['sample']} {c['hex'][:64] or '(empty)'}: {c['note']}", got,
+                                  c["expect"]))
         elif path.name == "carries.json":
             for c in data["cases"]:
                 out.append(_check(f"envelope: carries {c['key']} {c['encoding']}: {c['note']}",

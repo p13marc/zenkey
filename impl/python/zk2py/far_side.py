@@ -201,10 +201,13 @@ class Redeclaring:
 
     :attr:`redeclared` holds each declaration made again, its instant on the
     monotonic clock. The callback runs in zenoh's thread, as a plain
-    subscriber's does."""
+    subscriber's does. A watcher thread calls :meth:`tick` every twentieth
+    of the horizon, at most 0.1 s; ``watch=False`` starts none, and a test
+    drives :meth:`tick` itself (review-bot on round 99, PR #1049, 1)."""
 
     def __init__(self, session: Any, key: str, callback: Callable[[Any], None], horizon_s: float | None,
-                 *, redeclare: bool = True, clock: Callable[[], float] = time.monotonic) -> None:
+                 *, redeclare: bool = True, clock: Callable[[], float] = time.monotonic,
+                 watch: bool = True) -> None:
         import zenoh
 
         self.session, self.key, self.callback, self.horizon_s = session, key, callback, horizon_s
@@ -218,11 +221,18 @@ class Redeclaring:
         self.declared_at = self.last
         self.listener = None
         self.thread: threading.Thread | None = None
-        if redeclare and horizon_s is not None and horizon_s > 0:
+        #: whether this subscription is ever declared again
+        self.redeclares = bool(redeclare and horizon_s is not None and horizon_s > 0)
+        if self.redeclares:
+            # zenoh-python 1.10.1's SessionInfo.declare_transport_events_listener
+            # takes ``history`` as a keyword alone (its stub and its binding:
+            # a second positional argument is a TypeError); False reports
+            # no transport already open, only openings and closings to come.
             self.listener = session.info.declare_transport_events_listener(
                 zenoh.handlers.Callback(self._moved), history=False)
-            self.thread = threading.Thread(target=self._watch, name=f"redeclare {key}", daemon=True)
-            self.thread.start()
+            if watch:
+                self.thread = threading.Thread(target=self._watch, name=f"redeclare {key}", daemon=True)
+                self.thread.start()
 
     def _heard(self, sample: Any) -> None:
         with self.lock:
@@ -243,36 +253,59 @@ class Redeclaring:
             return False
 
     def _watch(self) -> None:
-        import zenoh
-
         assert self.horizon_s is not None
         tick = min(self.horizon_s / 20, 0.1)
         while not self.stop.wait(tick):
-            with self.lock:
-                silent = self.clock() - self.last
-            if silent < 2 * self.horizon_s or not self._up():
-                continue
-            # Undeclare, then declare: beside its twin a new subscriber
-            # sends nothing (core Appendix B). Outside the lock, so that a
-            # callback in flight never waits on it.
-            old = self.sub
-            try:
-                old.undeclare()
-            except Exception:  # noqa: BLE001 - one undeclared already declares anew all the same
-                pass
+            self.tick()
+
+    def tick(self) -> bool:
+        """One look at the silence: declared again when it has lasted two
+        horizons, a transport up and the subscription not stopped. True when
+        it declared again."""
+        import zenoh
+
+        if not self.redeclares:
+            return False
+        assert self.horizon_s is not None
+        with self.lock:
             if self.stop.is_set():
-                return
-            new = self.session.declare_subscriber(self.key, zenoh.handlers.Callback(self._heard))
-            with self.lock:
+                return False
+            silent = self.clock() - self.last
+            old = self.sub
+        if silent < 2 * self.horizon_s or not self._up():
+            return False
+        # Undeclare, then declare: beside its twin a new subscriber sends
+        # nothing (core Appendix B). Outside the lock, so that a callback in
+        # flight never waits on it.
+        try:
+            old.undeclare()
+        except Exception:  # noqa: BLE001 - one undeclared already declares anew all the same
+            pass
+        new = self.session.declare_subscriber(self.key, zenoh.handlers.Callback(self._heard))
+        with self.lock:
+            # stopped meanwhile (review-bot on round 99, PR #1049, 2): the
+            # new subscriber is never kept, so undeclare() leaks none
+            if not self.stop.is_set():
                 self.sub = new
                 self.last = self.declared_at = self.clock()
                 self.redeclared.append(self.last)
+                return True
+        try:
+            new.undeclare()
+        except Exception:  # noqa: BLE001 - closing anyway
+            pass
+        return False
 
     def undeclare(self) -> None:
-        self.stop.set()
+        """Stops the watcher, then undeclares the subscription and the
+        listener. The subscriber is taken under the lock once stopped, so a
+        tick in flight keeps none of its own (:meth:`tick`)."""
+        with self.lock:
+            self.stop.set()
+            sub = self.sub
         if self.thread is not None:
             self.thread.join(timeout=2.0)
-        for x in (self.sub, self.listener):
+        for x in (sub, self.listener):
             if x is None:
                 continue
             try:

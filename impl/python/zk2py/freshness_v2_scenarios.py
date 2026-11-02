@@ -795,6 +795,11 @@ def step6(report: Report, pairing: str, bus: Bus, impl: str, reader: str, beat: 
     try:
         oc = make_owner(impl, bus.endpoint, service="candidate", contract=GOVERNED, ahead_beat=beat, governed=True)
         bus.closers.append(oc)
+        if impl == "rust":
+            from . import live
+
+            d = live.get_descriptor(bus.g_session, oc.instance_key)
+            oc._zid = json.loads(d[0].payload).get("meta", {}).get("zid") if d and d[0].ok else None
         first = oc.try_put("status", b"up")
         deadline = time.monotonic() + 8.0
         while time.monotonic() < deadline and not oc.ahead():
@@ -835,7 +840,18 @@ def step6(report: Report, pairing: str, bus: Bus, impl: str, reader: str, beat: 
                  guard and first is not None and first.startswith("put") and refused,
                  f"guard {guard}, first {first!r}, second {second!r}")
     if reader == "py":
+        from .live import _zid_value
+
         puts = [x for x in s3.samples if x[1] == key and x[2] == "put"]
+        # core 0.93 §8.2 "Whatever its clock" (F-467's answer): "A
+        # candidate's session stamps every write while its clock is ahead
+        # too"; without it "its puts carry its router's stamp or none".
+        ids = [x[4].split("/", 1)[1] if x[4] else None for x in puts]
+        report.check(pairing, sec, "step 6: every put of status S hears carries a Zenoh timestamp of the "
+                                   "candidate's own zid, its clock ahead or set right (core 0.93 §8.2)",
+                     len(ids) >= 2 and all(i is not None and _zid_value(i) == _zid_value(oc.zid()) for i in ids),
+                     f"{len(ids)} puts, clocks {sorted({str(i) for i in ids})}, candidate {oc.zid()}, "
+                     f"R1 {bus.r1_zid}")
         before = [x for x in puts if x[0] <= before_second]
         stamp1 = before[-1][3] if before else None
         d1 = None if stamp1 is None else f"{heartbeat.digest([(key, stamp1.width, stamp1.run, stamp1.seq)]):08x}"

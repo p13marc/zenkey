@@ -309,7 +309,7 @@ def run() -> dict[str, Any]:
                 t0 = time.monotonic()
                 echo_tool.watch(session, scopes, 4.0, each=heard.take, across=no_arq, horizons=horizons,
                                 redeclared=again)
-                out["steps"]["9.2"] = {"arq": False, "primed": bool(first.since(0.0)) or bool(first.at),
+                out["steps"]["9.2"] = {"arq": False, "primed": bool(first.since(0.0)),
                                        "scopes": scopes, "horizons": {s: horizons.get(s) for s in scopes},
                                        "arrivals": heard.since(t0),
                                        "redeclared_s": [round(t - t0, 3) for _, t in again],

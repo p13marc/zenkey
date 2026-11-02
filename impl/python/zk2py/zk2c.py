@@ -1,31 +1,55 @@
-"""Core §7.5, the zk2c envelope (0.72), and observer §7.3's step that reads
-it first (text 0.14), with core §4.3's in-band stamp it carries (0.73).
+"""Core §7.5, the zk2c envelope (0.72) and a call's forms (0.92), and
+observer §7.3's step that reads an envelope first (text 0.14), with core
+§4.3's in-band stamp it carries (0.73).
 
 **The bytes (core §7.5).** A put carries an envelope as its payload, a
-delete as its attachment::
+delete as its attachment, and a call's query, reply and reply error a form
+as their payload::
 
     mutation, a put's payload            CH · run · seq · record
     delete, a delete's attachment        CH · run · seq
     heartbeat, a put's payload           CH · run · seq · body
+    frame, a put's payload               CH · run · seq · body
+    request, a query's payload           CH · record
+    value, a reply's payload             CH · run · seq · record
+    error, a reply error's payload       CH · run · seq · error
 
 The heartbeat is form 6 (core 0.81, #978 F1): :mod:`zk2py.heartbeat` reads
-and writes its body, and checks its tag against the covered revision.
+and writes its body, and checks its tag against the covered revision. The
+value is form 2, a request among them ("A value carried by a query is a
+request. It has no run and no seq"), and the error form 3 (core 0.92, #985
+C4a): its byte holds §5.2's code, its cause, a detail bit, a message bit
+and an extension bit (:class:`ErrorForm`).
 
 CH is the form's code × 32, plus the run width bit × 16, plus the tag. The
 run is 16 or 32 bits, the seq 24, both big-endian. The record is every byte
-after the seq, possibly none.
+after the seq, possibly none; a request's every byte after its CH.
 
-**Parsing.** "An envelope is parsed without the contract, as a key is
-(§1.1). The parser knows the sample's kind, put or delete, and nothing
-more." :func:`parse` refuses for the first of §7.5's six reasons, in its
-order, each with its token (:class:`Refused`): ``short`` (no CH), ``form``
-(a reserved form), ``sample_kind``, ``tag`` (a delete's), ``short`` (the
-stamp), ``trailing`` (a delete's). "Every envelope an implementation
-accepts MUST write back to the same bytes": :func:`write` does, and the
-envelope family checks each accepted case (``conformance/envelope/
-vectors.json``). It reports a mutation's tag, and "checks it against no
-type: §7.6's reader does" (0.75): :func:`zk2py.packed.open_put` reads a
-packed record under the tag CH carries.
+**Parsing.** "An envelope or a form is parsed without the contract, as a
+key is (§1.1). The parser knows what carries the bytes, its sample":
+``put``, ``delete``, ``query``, ``reply`` or ``reply_err``. :func:`parse`
+refuses for the first of §7.5's reasons, in its order, each with its token
+(:class:`Refused`): ``short`` (no CH), ``form`` (4 or 7), ``sample_kind``,
+``key_kind`` (a frame's, given its key), ``tag`` (a delete's),
+``request_run``, ``short`` (the stamp, and an error's byte after it),
+``trailing`` (a delete's), then on an error's byte ``cause``, ``detail``,
+``extension``, ``short`` (its message), ``utf8`` and ``trailing``. "Every
+envelope and form an implementation accepts MUST write back to the same
+bytes": :func:`write_back` does, and the envelope family checks each
+accepted case (``conformance/envelope/vectors.json``). It reports the tag
+of every form but a delete, and "checks none: §7.6's reader … do(es)":
+:func:`zk2py.packed.open_put` reads a packed record under the tag CH
+carries. Of an error it "reads the byte and the message, and takes the
+detail's bytes unread".
+
+**Writing an error** (:func:`write_error`, ``conformance/errors/
+forms.json``): "An implementation that writes an error MUST cut a message
+longer than 255 bytes to its longest prefix of whole characters within 255
+bytes", and "MUST NOT write an error with a cause on a code other than
+unavailable, unavailable without one, or a detail on a code other than
+app": it refuses those as the parse would, ``cause`` first. No zk2py owner
+answers in a form, and no caller sends one: "No rule at this version has a
+caller or an owner write them" (core §5.1, "The forms").
 
 **Which sample carries one (observer §7.3, text 0.14).** "A tool that shows
 or judges a payload MUST read a sample on a zk2 data key whose kind is a
@@ -48,13 +72,32 @@ from typing import Any
 
 from . import keys
 
-#: core §7.5's forms by code. Four are defined at this version (core 0.81
-#: adds the heartbeat, code 6, and 0.83 the frame, code 5, #981 K1); the
-#: other four are reserved, each refused (``form``).
+#: core §7.5's forms by code. Six are defined at this version (core 0.81
+#: adds the heartbeat, code 6, 0.83 the frame, code 5, #981 K1, and 0.92 the
+#: value, code 2, and the error, code 3, #985 C4a); "a reserved form, 4 or
+#: 7" is refused (``form``).
 FORMS = ("mutation", "delete", "value", "error", "event", "frame", "heartbeat", "snapshot")
-DEFINED = ("mutation", "delete", "frame", "heartbeat")
+DEFINED = ("mutation", "delete", "value", "error", "frame", "heartbeat")
+#: core §7.5 (0.92): "A put carries a mutation, a heartbeat or a frame, and a
+#: delete's attachment a delete. A query and a reply carry a value, and a
+#: reply_err an error." A GET's reply that represents a put is ``put``, and a
+#: ``reply_del``'s attachment ``delete``.
+CARRIES = {"put": ("mutation", "frame", "heartbeat"), "delete": ("delete",), "query": ("value",),
+           "reply": ("value",), "reply_err": ("error",)}
+SAMPLES = tuple(CARRIES)
 #: the forms a put's payload carries; a delete's attachment carries a delete
-PUT_FORMS = ("mutation", "frame", "heartbeat")
+PUT_FORMS = CARRIES["put"]
+#: what each sample is called in a refusal's reason
+_CARRIER = {"put": "a put's payload", "delete": "a delete's attachment", "query": "a query's payload",
+            "reply": "a reply's payload", "reply_err": "a reply error's payload"}
+
+#: core §7.5's error byte (0.92): "§5.2's code, numbered in its table's
+#: order", and "0 for none, 1 build, 2 config, 3 capability".
+ERROR_CODES = ("invalid_request", "not_found", "unavailable", "forbidden", "fanout_forbidden", "busy", "internal",
+               "app")
+ERROR_CAUSES = (None, "build", "config", "capability")
+#: core §7.5: "its length in bytes, from 0 to 255, in one byte"
+MESSAGE_MAX = 255
 
 #: core §7.5: "The seq is an unsigned 24-bit integer, from 0 to 16,777,215."
 SEQ_MAX = 2**24 - 1
@@ -99,20 +142,53 @@ class InBand:
 
 
 @dataclass(frozen=True)
+class ErrorForm:
+    """Core §7.5's error, after an error form's seq (0.92): §5.2's code, its
+    cause or None, the message or None where its bit is 0 ("An empty one has
+    its bit set and length 0, and reads back empty, not absent"), and the
+    detail's bytes, unread, or None where its bit is 0."""
+
+    code: str
+    cause: str | None
+    message: str | None
+    detail: bytes | None
+
+    def as_json(self) -> dict[str, Any]:
+        """As ``vectors.json`` and ``forms.json`` write it: the detail in
+        hex."""
+        return {"code": self.code, "cause": self.cause, "message": self.message,
+                "detail": None if self.detail is None else self.detail.hex()}
+
+
+@dataclass(frozen=True)
 class Envelope:
-    """A parsed envelope: its form's name, the run's width in bits, the run,
-    the seq, the tag, and the record: a mutation's record, a heartbeat's
-    body, None for a delete."""
+    """A parsed envelope or form: its form's name, the run's width in bits,
+    the run, the seq, the tag, the record, and an error's error.
+    - ``record``: a mutation's or a value's record, a heartbeat's or a
+      frame's body, a request's record; None for a delete and an error;
+    - ``width``, ``run`` and ``seq``: None for a request (core §7.5: "It has
+      no run and no seq");
+    - ``error``: an error form's :class:`ErrorForm`, else None."""
 
     form: str
-    width: int
-    run: int
-    seq: int
+    width: int | None
+    run: int | None
+    seq: int | None
     tag: int
     record: bytes | None
+    error: ErrorForm | None = None
 
     @property
-    def stamp(self) -> InBand:
+    def request(self) -> bool:
+        """A value carried by a query (core §7.5)."""
+        return self.form == "value" and self.width is None
+
+    @property
+    def stamp(self) -> InBand | None:
+        """The in-band stamp; for a value and an error the replying
+        instance's as-of mark (core §5.1); None for a request."""
+        if self.width is None or self.run is None or self.seq is None:
+            return None
         return InBand(self.width, self.run, self.seq)
 
 
@@ -124,15 +200,63 @@ def header(byte: int) -> dict[str, Any]:
     return {"form": FORMS[byte >> 5], "run_width": 32 if byte & 0x10 else 16, "tag": byte & 0x0F}
 
 
+def error_byte(byte: int) -> dict[str, Any]:
+    """Core §7.5's error byte read alone (``forms.json``'s ``bytes``): its
+    code and cause, and its detail and message bits; :class:`Refused` for
+    the first of the parse's checks on the byte, ``cause``, ``detail``, then
+    ``extension``."""
+    if not 0 <= byte <= 0xFF:
+        raise ValueError("an error's byte is one byte")
+    code, cause = ERROR_CODES[byte >> 5], ERROR_CAUSES[(byte >> 3) & 0b11]
+    if (code == "unavailable") != (cause is not None):
+        raise Refused("cause", f"{code} with a cause of {cause}" if cause else "unavailable with no cause")
+    detail, message = bool(byte & 0b100), bool(byte & 0b10)
+    if detail and code != "app":
+        raise Refused("detail", f"a detail on {code}: only app carries one")
+    if byte & 1:
+        raise Refused("extension", "the extension bit is set")
+    return {"code": code, "cause": cause, "detail": detail, "message": message}
+
+
+def _error(data: bytes, at: int) -> ErrorForm:
+    """An error form's error, from its byte at ``at``: "Of an error, it
+    reads the byte and the message, and takes the detail's bytes unread"."""
+    b = error_byte(data[at])
+    pos = at + 1
+    message = None
+    if b["message"]:
+        if pos >= len(data):
+            raise Refused("short", "a message bit and no length byte")
+        n = data[pos]
+        if len(data) < pos + 1 + n:
+            raise Refused("short", f"a message of {n} bytes, {len(data) - pos - 1} given")
+        try:
+            # Python's strict decoder refuses what RFC 3629 does: a lone
+            # continuation, a cut character, a surrogate, an overlong form.
+            message = data[pos + 1:pos + 1 + n].decode("utf-8")
+        except UnicodeDecodeError as e:
+            raise Refused("utf8", f"a message that is not UTF-8 ({e.reason})") from None
+        pos += 1 + n
+    detail = None
+    if b["detail"]:
+        detail = data[pos:]
+    elif pos < len(data):
+        raise Refused("trailing", f"{len(data) - pos} bytes after the "
+                      + ("message" if b["message"] else "error's byte") + ", and no detail")
+    return ErrorForm(b["code"], b["cause"], message, detail)
+
+
 def parse(data: bytes, sample: str, key_token: str | None = None) -> Envelope:
-    """Core §7.5's parse of ``data`` as the envelope a ``sample`` (``put``:
-    its payload; ``delete``: its attachment) carries. Raises
+    """Core §7.5's parse of ``data`` as the envelope or form its ``sample``
+    carries: ``put`` (its payload, or a GET reply's that represents a put),
+    ``delete`` (its attachment, or a ``reply_del``'s), ``query``, ``reply``
+    or ``reply_err`` (each one's payload, core 0.92). Raises
     :class:`Refused` for the first reason that applies, in the text's
     order. ``key_token``, the kind token "the grammar reads from the key
     alone", refuses a frame on a key that is not a plain stream's
     (``key_kind``, core 0.83, after ``sample_kind``); None parses with no
     key, as ``vectors.json`` does."""
-    if sample not in ("put", "delete"):
+    if sample not in CARRIES:
         raise ValueError(f"no such sample kind: {sample!r}")
     data = bytes(data)
     if not data:
@@ -140,43 +264,153 @@ def parse(data: bytes, sample: str, key_token: str | None = None) -> Envelope:
     h = header(data[0])
     if h["form"] not in DEFINED:
         raise Refused("form", f"form {h['form']} is reserved at this version")
-    if (sample == "put") != (h["form"] in PUT_FORMS):
-        raise Refused("sample_kind", f"a {h['form']} as a {sample}'s "
-                      + ("payload" if sample == "put" else "attachment"))
+    if h["form"] not in CARRIES[sample]:
+        raise Refused("sample_kind", f"a {h['form']} as {_CARRIER[sample]}")
     if h["form"] == "frame" and key_token is not None and key_token != "stream":
         raise Refused("key_kind", f"a frame on a {key_token} key: only a plain stream's carries one (core §7.5)")
     if h["form"] == "delete" and h["tag"] != 0:
         raise Refused("tag", f"a delete whose tag is {h['tag']}")
+    if sample == "query":
+        # "A request's width bit is 0, since it carries no run"; its record
+        # "is every byte after its CH, possibly none".
+        if h["run_width"] != 16:
+            raise Refused("request_run", "a request whose width bit is 1: a request carries no run")
+        return Envelope("value", None, None, None, h["tag"], data[1:])
     run_bytes = h["run_width"] // 8
     need = 1 + run_bytes + 3
-    if len(data) < need:
-        raise Refused("short", f"{len(data)} bytes, and CH, a {h['run_width']}-bit run and the seq need {need}")
+    error = h["form"] == "error"
+    if len(data) < need + error:
+        what = f"CH, a {h['run_width']}-bit run, the seq" + (" and the error's byte" if error else "")
+        raise Refused("short", f"{len(data)} bytes, and {what} need {need + error}")
     if h["form"] == "delete" and len(data) > need:
         raise Refused("trailing", f"{len(data) - need} bytes after a delete's seq")
     run = int.from_bytes(data[1:1 + run_bytes], "big")
     seq = int.from_bytes(data[1 + run_bytes:need], "big")
-    return Envelope(h["form"], h["run_width"], run, seq, h["tag"],
-                    data[need:] if h["form"] in PUT_FORMS else None)
+    if error:
+        return Envelope("error", h["run_width"], run, seq, h["tag"], None, _error(data, need))
+    return Envelope(h["form"], h["run_width"], run, seq, h["tag"], None if h["form"] == "delete" else data[need:])
 
 
-def write(form: str, width: int, run: int, seq: int, tag: int = 0, record: bytes | None = None) -> bytes:
-    """An envelope's bytes (core §7.5). Refuses what no parse would accept
-    back: a reserved form, a width other than 16 or 32, a run, a seq or a
-    tag out of its field, a delete with a tag or a record."""
-    if form not in DEFINED:
-        raise ValueError(f"form {form!r} is not defined at this version")
+def _ch(form: str, width: int, tag: int) -> int:
+    if not 0 <= tag <= 15:
+        raise ValueError("a tag is four bits")
+    return FORMS.index(form) * 32 + (16 if width == 32 else 0) + tag
+
+
+def _stamp(width: int, run: int, seq: int) -> bytes:
     if width not in (16, 32):
         raise ValueError("a run is 16 or 32 bits")
     if not 0 <= run < 2**width:
         raise ValueError(f"run {run} does not fit {width} bits")
     if not 0 <= seq <= SEQ_MAX:
         raise ValueError(f"seq {seq} does not fit 24 bits")
-    if not 0 <= tag <= 15:
-        raise ValueError("a tag is four bits")
+    return run.to_bytes(width // 8, "big") + seq.to_bytes(3, "big")
+
+
+def write(form: str, width: int, run: int, seq: int, tag: int = 0, record: bytes | None = None) -> bytes:
+    """An envelope's bytes, or a value's (core §7.5). Refuses what no parse
+    would accept back: a reserved form, a width other than 16 or 32, a run,
+    a seq or a tag out of its field, a delete with a tag or a record. An
+    error is :func:`write_error`'s, and a request :func:`request`'s."""
+    if form not in DEFINED:
+        raise ValueError(f"form {form!r} is not defined at this version")
+    if form == "error":
+        raise ValueError("an error form is written by write_error")
     if form == "delete" and (tag or record):
         raise ValueError("a delete carries no record, and its tag is 0")
-    ch = FORMS.index(form) * 32 + (16 if width == 32 else 0) + tag
-    return bytes([ch]) + run.to_bytes(width // 8, "big") + seq.to_bytes(3, "big") + (record or b"")
+    return bytes([_ch(form, width, tag)]) + _stamp(width, run, seq) + (record or b"")
+
+
+def request(record: bytes, tag: int = 0) -> bytes:
+    """A request, a query's payload: ``CH · record``, CH form 2 with its
+    width bit 0 and the operation's ``request`` type's tag (core §7.5)."""
+    return bytes([_ch("value", 16, tag)]) + bytes(record)
+
+
+def value(stamp: InBand, record: bytes, tag: int = 0) -> bytes:
+    """A value, a reply's payload: ``CH · run · seq · record``, its stamp the
+    replying instance's as-of mark (core §5.1) and its tag the operation's
+    ``response`` type's, or its ``summary`` type's on a summary reply."""
+    return write("value", stamp.width, stamp.run, stamp.seq, tag, record)
+
+
+def cut_message(message: str) -> str:
+    """Core §7.5: "cut a message longer than 255 bytes to its longest prefix
+    of whole characters within 255 bytes". A character is a code point, as
+    RFC 3629 counts them."""
+    raw = message.encode("utf-8")
+    if len(raw) <= MESSAGE_MAX:
+        return message
+    # The prefix of valid UTF-8 ends at most 3 bytes into a character cut
+    # short; "ignore" drops that partial character alone.
+    return raw[:MESSAGE_MAX].decode("utf-8", "ignore")
+
+
+def write_error(stamp: InBand, code: str, cause: str | None = None, message: str | None = None,
+                detail: bytes | None = None, tag: int = 0) -> bytes:
+    """An error form, a reply error's payload: ``CH · run · seq · error``
+    (core §7.5, 0.92). ``tag`` is the operation's ``error`` type's, "whether
+    a detail follows or not", 0 for one that declares none. Refuses, as the
+    parse would and in its order (:class:`Refused`), "a cause on a code
+    other than unavailable, unavailable without one" (``cause``), "or a
+    detail on a code other than app" (``detail``). A message over 255 bytes
+    is cut (:func:`cut_message`)."""
+    if code not in ERROR_CODES:
+        raise ValueError(f"no such code: {code!r}")
+    if cause not in ERROR_CAUSES:
+        raise ValueError(f"no such cause: {cause!r}")
+    if (code == "unavailable") != (cause is not None):
+        raise Refused("cause", f"{code} with a cause of {cause}" if cause else "unavailable with no cause")
+    if detail is not None and code != "app":
+        raise Refused("detail", f"a detail on {code}: only app carries one")
+    byte = (ERROR_CODES.index(code) << 5) | (ERROR_CAUSES.index(cause) << 3) \
+        | (0b100 if detail is not None else 0) | (0b10 if message is not None else 0)
+    out = bytes([_ch("error", stamp.width, tag)]) + _stamp(stamp.width, stamp.run, stamp.seq) + bytes([byte])
+    if message is not None:
+        m = cut_message(message).encode("utf-8")
+        out += bytes([len(m)]) + m
+    return out + (bytes(detail) if detail is not None else b"")
+
+
+def write_back(env: Envelope) -> bytes:
+    """An accepted envelope or form written again, to the bytes it was
+    parsed from (core §7.5: "Every envelope and form an implementation
+    accepts MUST write back to the same bytes")."""
+    if env.request:
+        return request(env.record or b"", env.tag)
+    assert env.width is not None and env.run is not None and env.seq is not None
+    if env.error is not None:
+        e = env.error
+        return write_error(InBand(env.width, env.run, env.seq), e.code, e.cause, e.message, e.detail, env.tag)
+    return write(env.form, env.width, env.run, env.seq, env.tag, env.record)
+
+
+#: core §5.2: "§7.5's error carries the same fields in bytes, under the
+#: Encoding zenoh/bytes".
+FORM_ENCODING = ENCODING
+
+
+def read_reply_err(encoding: str, payload: bytes) -> Envelope:
+    """A reply error's payload read as an error form, by its ``Encoding``
+    first (``forms.json``'s ``reads``): only ``zenoh/bytes``, "compared as an
+    exact string", carries a form (``encoding`` otherwise, a schema suffix
+    included); then §7.5's parse of a ``reply_err``. A router's ``Timeout``
+    under ``zenoh/bytes`` is ``sample_kind``: "T is a value's CH". Reading
+    one so is no rule's at this version: §5.2's three envelope encodings
+    still carry every owner's error, and any other reply error is the
+    transport's (zk2py's caller reads so, :mod:`zk2py.live`)."""
+    if str(encoding) != FORM_ENCODING:
+        raise Refused("encoding", f"{encoding!r} carries no form: only {FORM_ENCODING} does")
+    return parse(payload, "reply_err")
+
+
+def read_reply_err_token(encoding: str, payload: bytes) -> str | None:
+    """:func:`read_reply_err`'s refusal token, or None for an error form."""
+    try:
+        read_reply_err(encoding, payload)
+    except Refused as e:
+        return e.token
+    return None
 
 
 def mutation(stamp: InBand, record: bytes, tag: int = 0) -> bytes:

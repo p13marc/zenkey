@@ -10,20 +10,26 @@ schema files beside it are loaded by zk2py's contract reader, not read here).
 
 For each frame resource, with zk2py's own writer (:class:`zk2py.frame.Framer`)
 from its layout, under a 32-bit run, in core §7.5's envelope:
-1. **the largest frame link.v1 §2.8 names**: ``records`` full records, every
-   optional field present, every record after record 0 with its offset (the
-   records measured off their schedule). Its put's length is checked against
-   :func:`zk2py.link.frame_facts`' ``largest_bytes``;
+1. **the largest frame link.v1 §2.8 names**, at text 0.16 (F-470's answer):
+   ``records`` records, every optional field present, every record after
+   record 0 with its offset (the records measured off their schedule), of
+   which ``records`` − ⌊``records`` / ``keyframe_every``⌋ are delta records
+   that include every field and the rest full (:func:`largest_frame_bytes`).
+   Its put's length is checked against :func:`zk2py.link.frame_facts`'
+   ``largest_bytes``. The frame of full records alone, 0.15's figure, is
+   :func:`full_frame_bytes`;
 2. **the largest frame zk2py's writer puts**: the frame after it, every field
-   changed, so that every record is a delta record that includes every field.
-   A delta record carries one inclusion bit per field more than a full record
-   (core §7.7), so a frame resource whose ``keyframe_every`` is above 1 puts
-   frames up to one bit per field per record longer than (1) (F-470);
+   changed, so that every record is a delta record that includes every field,
+   but where ``keyframe_every`` asks a full one. A delta record carries one
+   inclusion bit per field more than a full record (core §7.7);
 3. **each put read back**, envelope first (:func:`zk2py.zk2c.read_put`): its
    body by the layout's tag, written again byte for byte, and through
    :class:`zk2py.telemetry_v2.SeriesReader`: every series field of every
    record a sample, its value the one written (a count modulo its width),
-   each frame following the one before in the run.
+   each frame following the one before in the run. A record read back is
+   paired with the values written by its seq, the frame's seq plus its
+   place, never by the order of the writes (review-bot on round 99, PR
+   #1049, 4).
 """
 
 from __future__ import annotations
@@ -79,7 +85,10 @@ def frames_of(contract: Any, r: dict[str, Any]) -> dict[str, Any]:
     d = lo.decl
     # off-schedule records, inside the span: every later record has its offset
     gap_ns = ((d.step_ms or 0) + (d.jitter_ms or 0) + 1) * 1_000_000 if d.step_ms is not None else 0
-    puts, values_written = [], []
+    puts: list[dict[str, Any]] = []
+    #: the values each record put carries, by its seq: "Record i's is that
+    #: seq plus i, modulo 2^24" (core §7.7)
+    written_at: dict[int, dict[str, Any]] = {}
     mono = 10**12
     for which in (0, 1):
         ready: list[Any] = []
@@ -87,7 +96,6 @@ def frames_of(contract: Any, r: dict[str, Any]) -> dict[str, Any]:
             # record i alternates within the frame, so every delta record
             # includes every field
             vals = {f.name: _value(f, (which + i) % 2) for f in lo.fields}
-            values_written.append(vals)
             ready += fr_.record(vals, mono, TIME)
             mono += gap_ns if i + 1 < d.records else 10**10
         if len(ready) != 1:
@@ -95,13 +103,14 @@ def frames_of(contract: Any, r: dict[str, Any]) -> dict[str, Any]:
         for rd in ready:
             seq = sum(len(p["value"]["records"]) for p in puts)
             value = fr_.seal(rd, RUN)
+            for j, m in enumerate(rd.records):
+                written_at[(seq + j) % (zk2c.SEQ_MAX + 1)] = m.values
             body = lo.write(value)
             puts.append({"value": value, "payload": zk2c.write("frame", RUN[0], RUN[1], seq, lo.tag, body),
                          "body": body})
     key = f"zk2/lab/node/{contract.interface}/stream/{r['template']}"
     reader = t2.SeriesReader(lo, decl) if isinstance(decl, t2.FrameDeclaration) else None
     back, follows, samples_ok = [], [], True
-    i_rec = 0
     for p in puts:
         read = zk2c.read_put(key, zk2c.ENCODING, p["payload"])
         got = lo.read(read.tag, read.record or b"")
@@ -111,8 +120,10 @@ def frames_of(contract: Any, r: dict[str, Any]) -> dict[str, Any]:
             g = reader.read_put(read)
             follows.append(g.get("follows"))
             for rec in g.get("records", []):
-                written = values_written[i_rec]
-                i_rec += 1
+                written = written_at.get(rec["seq"])
+                if written is None:
+                    samples_ok = False
+                    continue
                 for s in reader.decl.series:
                     f = next(x for x in lo.fields if x.name == s.field)
                     x = rec["fields"][s.field]
@@ -124,6 +135,7 @@ def frames_of(contract: Any, r: dict[str, Any]) -> dict[str, Any]:
             "series": None if reader is None else len(reader.decl.series),
             "declared": None if reader is None else reader.decl.declaration,
             "largest_bytes": facts["largest_bytes"] if facts else None,
+            "largest_frame_bytes": largest_frame_bytes(contract, r),
             "full_frame_bytes": full_frame_bytes(contract, r), "first_frame_bytes": len(puts[0]["payload"]),
             "first_frame_records_full": [rec["full"] for rec in puts[0]["value"]["records"]],
             "delta_frame_bytes": len(puts[-1]["payload"]),
@@ -148,13 +160,29 @@ def run() -> list[dict[str, Any]]:
 def full_frame_bytes(contract: Any, r: dict[str, Any]) -> int:
     """A frame of ``records`` full records, every optional field present,
     later records with offsets, written by the layout itself under a 32-bit
-    run: link.v1 §2.8's largest frame, measured."""
+    run: link.v1 0.15 §2.8's largest frame, measured."""
+    return _frame_bytes(contract, r, 0)
+
+
+def largest_frame_bytes(contract: Any, r: dict[str, Any]) -> int:
+    """link.v1 0.16 §2.8's largest frame, measured: as
+    :func:`full_frame_bytes`, but "``records`` − ⌊``records`` /
+    ``keyframe_every``⌋ such delta records" that include every field, "and
+    full records for the rest". Which records are the deltas changes no
+    bit's count."""
+    lo = frame.layout_of(contract, r)
+    assert lo is not None
+    return _frame_bytes(contract, r, lo.decl.records - lo.decl.records // lo.decl.keyframe_every)
+
+
+def _frame_bytes(contract: Any, r: dict[str, Any], deltas: int) -> int:
     lo = frame.layout_of(contract, r)
     assert lo is not None
     d = lo.decl
     recs = []
     for i in range(d.records):
-        rec: dict[str, Any] = {"full": True, "values": {f.name: _value(f, 0) for f in lo.fields}, "absent": []}
+        rec: dict[str, Any] = {"full": i >= deltas, "values": {f.name: _value(f, 0) for f in lo.fields},
+                               "absent": []}
         if i >= 1:
             rec["at"] = min(i * ((d.step_ms or 0) + (d.jitter_ms or 0) + 1), (d.span_ms or 1) - 1)
         recs.append(rec)

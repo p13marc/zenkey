@@ -2477,8 +2477,13 @@ class Owner:
             call.reply(json.dumps({"state": "up"}).encode(), encoding="application/json")
         else:
             # §5.2 (0.7): any operation may refuse with app; with no error
-            # type there is no detail.
-            call.refuse("app", "this owner decodes no protobuf schema")
+            # type there is no detail. A packed operation type (core 0.92,
+            # E044 narrowed) is refused so too: no rule adopts §7.5's forms
+            # yet, and §5.2's envelope it answers in is JSON, as for a raw
+            # type, where §5.2 names no packed kind (F-471).
+            kinds = sorted({req, resp} - {"raw", "jsonschema"})
+            what = " or ".join(kinds) if kinds else f"{req} to {resp}"
+            call.refuse("app", f"this owner serves no {what} operation")
 
     def close(self) -> None:
         # freshness.v1 §2.4: "The re-puts stop when the owner stops". _stop

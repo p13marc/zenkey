@@ -5852,6 +5852,119 @@ expected 1 and 2, is a reading); core §8.5's MAY, a session opened again;
 Round 99 found F-465 to F-470, six, none a blocker. See "At core 0.91,
 observer 0.23 and link.v2 0.4" in `SPEC-FINDINGS.md`.
 
+## Core 0.92 and 0.93, `link.v1` 0.16 and `link.v2` 0.6: a call's forms, and round 99 answered (round 100)
+
+Since round 99 main took:
+- **core 0.92** (#985 C4a): a call's forms defined, the request, form 2's
+  value and form 3's error, with the error's byte, in §5.1, §5.2, §7.1,
+  §7.5, §9.2's E044, narrowed, and §12. No rule adopts them: every call is
+  still answered in §5.2's envelope. Four vectors move from `form` to
+  `sample_kind`, and `envelope/vectors.json` gains 91 cases. New are
+  `errors/forms.json` and `contracts/ok-packed-operation`;
+- **core 0.93, `link.v1` 0.16 and `link.v2` 0.6:** the answers to round
+  99's F-465 to F-470, with new `plan.json` and `v2/plan.json` cases.
+
+zk2py diffed every keyword sentence of the changed texts between
+2ed6d968 and 037fce56. **No rule changed beyond what the changelogs
+state.**
+
+### The classes zk2py claims
+
+Unchanged: the **owner**, **consumer**, **caller** and **observer**
+classes, at the full level, and the static rules, which now hold a
+call's forms (core §12).
+
+### Its walk of `RULES.md` at 0.93
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 75 | 64 | 3 | 8 |
+| consumer | 23 | 19 | 0 | 4 |
+| caller | 14 | 14 | 0 | 0 |
+| observer | 86 | 82 | 2 | 2 |
+| static, in every class | 64 | 62 | 0 | 2 |
+
+- **236 rows walked of 236, none without a verdict.** The walk was
+  re-keyed first, in the commit that brings `just py-conformance` level.
+  §7.1's E044 is narrowed. §7.5's two writer rules are new, both met.
+  Its parse and write-back rules now read "an envelope or a form".
+- **Not met:** unchanged, the owner's three SHOULDs and observer §7.3's
+  two decoding MUSTs.
+
+### What round 100 changed in zk2py
+
+- **`zk2c`, core 0.92:**
+  - forms 2 and 3 are defined; 4 and 7 stay reserved;
+  - `parse` reads a `query`, a `reply` and a `reply_err` in §7.5's order:
+    `request_run` after `tag`, `short` counting an error's byte, then on
+    that byte `cause`, `detail`, `extension`, a message's `short`, `utf8`
+    and `trailing`;
+  - a request's width, run and seq are None, and an error's byte, message
+    and unread detail are an `ErrorForm`;
+  - `write_back` writes every accepted form again;
+  - `request`, `value` and `write_error` write the forms. `write_error`
+    cuts a message to whole code points within 255 bytes, and refuses
+    `cause`, then `detail`, as the parse would;
+  - `read_reply_err` reads a reply error by its Encoding first.
+- **No zk2py owner answers in a form, and no caller sends one** (core
+  §5.1, "The forms"). zk2py's caller still reads a reply error under any
+  but §5.2's three encodings as the transport's, a router's `Timeout`
+  under `zenoh/bytes` too.
+- **The errors family** reads `forms.json`: its codes and causes in the
+  byte's order, all 256 bytes, 22 writes each parsed back as cut, and 17
+  reads.
+- **The linter** takes the narrowed E044: an attachment and an explicit
+  stream's type alone. `ok-packed-operation`'s fingerprint is the
+  reference's.
+- **The answers.** A refused deployment lists its errors alone (F-468).
+  Each revision is judged alone, a longest put weighed in its `block`
+  revisions (F-469). The largest frame holds `records` −
+  ⌊`records`/`keyframe_every`⌋ delta records of every field, the largest
+  any revision writes (F-470). The runner reads one interface id given by
+  contract and inline as two revisions of it.
+- **The mend of round 99's review (PR #1049):**
+  - `Redeclaring.tick()`, driven directly with no real sleep;
+  - the stop race closed under the lock;
+  - `history=` noted as zenoh-python 1.10.1's keyword-only argument;
+  - `adopter_frames` pairs records by seq;
+  - the nits.
+- **`forms_live`** (new): Appendix B's router `Timeout` measured, and
+  both owners on a packed operation (F-471).
+- **`readings`: 883, up from 872.**
+
+**`just py-conformance`: 5639 of 5639**, on main 037fce56. Of them,
+`envelope` 275 (147 cases, 20 headers, each accepted one written back),
+`errors` 361 (`forms.json` 316), `contracts` 144, `link` 277 and
+`readings` 883.
+
+### Live
+
+| Run | Pairing | Result |
+|---|---|---|
+| `freshness.v2` `scenarios-v2.md` §2, step 6 checking the candidate's stamps | zk2py owner, zk2py readers | 14/14 (step 6: 6/6) |
+| | owner example, zk2py readers | 14/14 (step 6: 6/6, F-467) |
+| | zk2py owner, `zenctl watch` | 10/10 (step 6: 2/2) |
+| `forms_live`: a held query's reply error, both owners on `ok-packed-operation` | zk2py, the owner example | 6/6 |
+| `far_side_live` (regression after the mend) | zk2py's owner, caller, consumer and tool | 16/16 |
+
+- **F-467:** the owner example as the candidate, 2 s ahead: its guard
+  holds the second put, and every put S hears carries its own zid.
+  `--no-hlc` beside `--standby` is refused at start.
+- **Frames' sizes** (`adopter_frames`, `link.v1` 0.16 §2.8): `frames/link`
+  22 B, `frames/message` 213 B, `sdu` 52, `sched` 33, `air` 50, `layer`
+  109, `if` 60, `radio` 22, `bearer` 33, as the modem README states;
+  `gendev.v1`'s `frames/sample` 100 B.
+- **A router's `Timeout`:** one reply error per held query, under
+  `zenoh/bytes` at 1.00 s. At 2.50 s it came under `zenoh/bytes` in one
+  run and under the querier's `zenoh/string` in another.
+
+**Not run:** the C4b reading of both wires, which is the reference's;
+`link.v2`'s scenarios on routers; core §8.5's MAY; and F-436's fix, as
+before.
+
+Round 100 found F-471, one gap, not a blocker. See "At core 0.93 (#985
+C4a, round 99's answers)" in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -5905,6 +6018,11 @@ observer 0.23 and link.v2 0.4" in `SPEC-FINDINGS.md`.
   zk2py's owner holds values only for parameterless state. It answers
   templated operations through the handlers and members it is given, and
   otherwise names no member.
+- **A call's forms on the wire** (core 0.92, round 100): zk2py parses and
+  writes them (`zk2c`), but no zk2py owner answers in one and no caller
+  sends one, since no rule adopts them (core §5.1, "The forms"). A tool's
+  reading of both wires, C4b's, is not zk2py's yet. A packed operation is
+  served and answers every call `app` in JSON (F-471).
 - **Of `telemetry.v2`** (round 98): a candidate of a `freshness.v2`
   contract with its clock ahead, live (F-461); zk2py's echo tool shows a
   frame's field states, never its series; histograms, which no field
@@ -5972,7 +6090,9 @@ impl/python/
     catalog.py        §8.6      the deployment catalog: its reading, id, succession and a reader's resolution (round 95)
     cbor.py, envelope.py §5.2   the error envelope
     zk2c.py           §7.5, observer §7.3 the zk2c envelope: parse, write, which sample carries one, a sample read
-                                envelope first (round 93)
+                                envelope first (round 93); a call's forms, the request, the value and the error,
+                                parsed, written and read by a reply error's Encoding (core 0.92, round 100)
+    forms_live.py     §5.2 §7.5 a router's own Timeout measured, and both owners on a packed operation (round 100)
     packed.py         §7.6 §9.2 the packed kind: a file's lints (E038–E045), layouts, the tag, the writer and the
                                 reader in exact decimals, a record in the envelope (round 94); a sample read
                                 as observer §7.3 reads it, the deployment epoch (the mend after round 94)
@@ -6014,7 +6134,8 @@ impl/python/
     far_side.py       §8.1 §8.5 a far side across a face: the reply timeout, a subscription's horizon, Redeclaring
                                 (core 0.91, observer 0.23, link.v2 0.4; round 99)
     far_side_live.py  §8.1 §8.5 constrained.md §8 and §9 in process, a proxy dropping a batch the far client sends
-    adopter_frames.py §7.7     modem.v3 3.2's and gendev.v1's frames written, read back and read as series (round 99)
+    adopter_frames.py §7.7     modem.v3 3.2's and gendev.v1's frames written, read back and read as series (round 99);
+                                link.v1 0.16's largest frame, its delta records, measured (round 100)
     alarms.py         alarms.v1 the key and the sanitizing step, references, strict JSON, the document, transitions,
                                 the conclusions, AlarmsOwner, the reader on a bus
     alarms_scenarios.py alarms.v1 scenarios.md §1–§10 against zk2py's owner or the Rust owner example

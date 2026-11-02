@@ -421,13 +421,17 @@ class Resource:
     #: "history", "keyframe_every"}``; None for any other resource, and for
     #: every inline one ("An inline resource declares no history and no frame
     #: table"). ``keyframe_every`` is the least over the declaring revisions
-    #: (link.v2 0.3 §2.7: "Across revisions, the plan reads the least").
+    #: (link.v2 0.3 §2.7: "Across revisions, the plan reads the least"), and
+    #: ``largest_bytes`` the largest (0.16 §2.3: "the largest that any
+    #: revision declaring it writes, each read with its own record type and
+    #: keyframe_every").
     frame: dict[str, Any] | None = None
-    #: link.v2 0.3 (§2.8, §2.16, §2.17), over every declaring revision:
-    #: packed only where every one types it packed; ``block`` where any one's
-    #: congestion is block (core §2.4's default by token where a revision
-    #: states none); its longest put, the longest any packed revision writes
-    #: (None where none is packed: "Another type's length is unbounded");
+    #: link.v2 (§2.8, §2.16, §2.17), "judged revision by revision" (0.6 §2.3,
+    #: F-469): packed only where every one types it packed; ``block`` where
+    #: any one's congestion is block (core §2.4's default by token where a
+    #: revision states none); its longest put, the longest any packed
+    #: revision that is block writes ("weighed in each revision that declares
+    #: it block"; None where none is: "Another type's length is unbounded");
     #: timed where any one's annotations hold ``timing.deadline_ms``.
     packed: bool = False
     block: bool = False
@@ -515,9 +519,13 @@ def merge_revisions(iface: str, revisions: list[list[dict[str, Any]]]) -> list[R
             if r.get("frame") is not None:
                 if k not in framed:
                     framed[k] = dict(r["frame"])
-                elif "keyframe_every" in r["frame"]:
-                    framed[k]["keyframe_every"] = min(framed[k].get("keyframe_every", r["frame"]["keyframe_every"]),
-                                                      r["frame"]["keyframe_every"])
+                else:
+                    if "keyframe_every" in r["frame"]:
+                        framed[k]["keyframe_every"] = min(framed[k].get("keyframe_every",
+                                                                        r["frame"]["keyframe_every"]),
+                                                          r["frame"]["keyframe_every"])
+                    # 0.16 §2.3: the largest frame any declaring revision writes
+                    framed[k]["largest_bytes"] = max(framed[k]["largest_bytes"], r["frame"]["largest_bytes"])
     out = []
     for token, template in order:
         anns = declared[(token, template)]
@@ -552,8 +560,12 @@ def _contract_side(r: Resource, rows: list[dict[str, Any]]) -> Resource:
     type's kind as ``type`` (plan.json: "``packed`` is packed, and any other
     or none is not"), and may state ``congestion`` and ``longest_bytes``."""
     r.packed = all(row.get("type") == "packed" for row in rows)
-    r.block = any(row.get("congestion", _DEFAULT_CONGESTION.get(r.token, "drop")) == "block" for row in rows)
-    puts = [(row["frame"]["largest_bytes"] if row.get("frame") else row.get("longest_bytes")) for row in rows
+    blocks = [row for row in rows if row.get("congestion", _DEFAULT_CONGESTION.get(r.token, "drop")) == "block"]
+    r.block = bool(blocks)
+    # link.v2 0.6 §2.3 (F-469): "Its longest put is weighed in each revision
+    # that declares it block. One whose longest put is above batch_bytes
+    # draws block_over_batch."
+    puts = [(row["frame"]["largest_bytes"] if row.get("frame") else row.get("longest_bytes")) for row in blocks
             if row.get("type") == "packed"]
     puts = [p for p in puts if p is not None]
     r.longest_put = max(puts) if puts else None
@@ -565,10 +577,13 @@ def frame_facts(contract: Any, r: dict[str, Any]) -> dict[str, Any] | None:
     """A frame resource's facts the plan reads (0.13, §2.8, §2.12): its
     interval (core §7.7: its span where it has a step, else its
     ``timing.period_ms``, else unstated, None), its largest frame's payload
-    ("``records`` full records, every optional field present, every record
-    after record 0 with its offset, after an envelope of a 32-bit run (8
-    bytes)"), and whether it declares ``history``. None for a resource that
-    is no frame resource."""
+    ("``records`` records, every optional field present, every record after
+    record 0 with its offset, after an envelope of a 32-bit run (8 bytes)";
+    0.16, F-470: "the largest frame holds ``records`` − ⌊``records`` /
+    ``keyframe_every``⌋ such delta records, and full records for the rest",
+    a delta record "that includes every field" being "a bit per field longer
+    than a full record"), and whether it declares ``history``. None for a
+    resource that is no frame resource."""
     from . import frame, timing
 
     lo = frame.layout_of(contract, r)
@@ -583,7 +598,9 @@ def frame_facts(contract: Any, r: dict[str, Any]) -> dict[str, Any] | None:
         read = {k: timing.value_ms(r["annotations"][k]) for k in timing.KEYS if k in r["annotations"]}
         interval = None if any(v is None for v in read.values()) else read.get(timing.PERIOD)
     rec = sum((1 if f.optional else 0) + f.width for f in lo.fields)
-    bits = 42 + lo.count_bits + (1 + rec) + (d.records - 1) * (1 + 1 + (lo.offset_bits or 0) + rec)
+    deltas = d.records - d.records // d.keyframe_every
+    bits = 42 + lo.count_bits + (1 + rec) + (d.records - 1) * (1 + 1 + (lo.offset_bits or 0) + rec) \
+        + deltas * len(lo.fields)
     return {"interval_ms": interval, "largest_bytes": 8 + (bits + 7) // 8, "history": r.get("history") is not None,
             "keyframe_every": d.keyframe_every}
 
@@ -648,7 +665,9 @@ def plan(policy_text: str, implements: dict[str, list[str]], interfaces: dict[st
             if i not in interfaces:
                 errors.append(finding("contract_unknown", None, i))
     if errors:
-        return {"refused": sort_findings(findings + errors)}
+        # §2.3 (0.16, F-468): "A refused deployment lists its errors alone:
+        # neither the policy's warnings nor the plan's come with it."
+        return {"refused": sort_findings(errors)}
     return {"faces": [plan_face(policy, f, implements, interfaces) for f in policy.faces]}
 
 

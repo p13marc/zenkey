@@ -224,7 +224,9 @@ def envelope_encoding(op: dict[str, Any]) -> str:
     envelope's kind follows the operation's error type when it declares
     one, else its response type": JSON Schema → the operation's
     ``encoding`` (JSON or CBOR); protobuf → ``zk2.core.v1.Error``; raw →
-    JSON. ``op`` is the operation's canonical resource (§9.5)."""
+    JSON. A packed type (core 0.92 lets an operation's be one) → JSON, as a
+    raw type's, where §5.2 names no packed kind; the reference answers so
+    too (F-471). ``op`` is the operation's canonical resource (§9.5)."""
     kind = (op.get("error") or op["response"])["kind"]
     if kind == "protobuf":
         return PROTOBUF_ENCODING
