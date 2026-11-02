@@ -416,6 +416,11 @@ class Resource:
     #: §2.12 over every declaring revision: "only where every revision that
     #: declares it gives one above 0; its horizon is then the least".
     merged_horizon: freshness.Horizon | None = None
+    #: 0.13: a frame resource's facts (core §7.7), from the first declaring
+    #: revision that loads a contract: ``{"interval_ms", "largest_bytes",
+    #: "history"}``; None for any other resource, and for every inline one
+    #: ("An inline resource declares no history and no frame table").
+    frame: dict[str, Any] | None = None
 
     @property
     def name(self) -> str:
@@ -479,9 +484,11 @@ def merge_revisions(iface: str, revisions: list[list[dict[str, Any]]]) -> list[R
     above 0; its horizon is then the least of them". Resources keep the
     order of their first declaration. One revision is read as itself."""
     if len(revisions) == 1:
-        return [Resource(iface, r["token"], r["template"], r.get("annotations") or {}) for r in revisions[0]]
+        return [Resource(iface, r["token"], r["template"], r.get("annotations") or {}, frame=r.get("frame"))
+                for r in revisions[0]]
     order: list[tuple[str, str]] = []
     declared: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    framed: dict[tuple[str, str], dict[str, Any]] = {}
     for rev in revisions:
         for r in rev:
             k = (r["token"], r["template"])
@@ -489,6 +496,8 @@ def merge_revisions(iface: str, revisions: list[list[dict[str, Any]]]) -> list[R
                 order.append(k)
                 declared[k] = []
             declared[k].append(r.get("annotations") or {})
+            if r.get("frame") is not None:
+                framed.setdefault(k, r["frame"])
     out = []
     for token, template in order:
         anns = declared[(token, template)]
@@ -507,14 +516,45 @@ def merge_revisions(iface: str, revisions: list[list[dict[str, Any]]]) -> list[R
             h = freshness.Horizon("within", min(x.ttl_s for x in hs))
         else:
             h = freshness.Horizon("none")
-        out.append(Resource(iface, token, template, anns[0], exp, disagrees, h))
+        out.append(Resource(iface, token, template, anns[0], exp, disagrees, h, framed.get((token, template))))
     return out
 
 
+def frame_facts(contract: Any, r: dict[str, Any]) -> dict[str, Any] | None:
+    """A frame resource's facts the plan reads (0.13, §2.8, §2.12): its
+    interval (core §7.7: its span where it has a step, else its
+    ``timing.period_ms``, else unstated, None), its largest frame's payload
+    ("``records`` full records, every optional field present, every record
+    after record 0 with its offset, after an envelope of a 32-bit run (8
+    bytes)"), and whether it declares ``history``. None for a resource that
+    is no frame resource."""
+    from . import frame, timing
+
+    lo = frame.layout_of(contract, r)
+    if lo is None:
+        return None
+    d = lo.decl
+    if d.span_ms is not None:
+        interval = d.span_ms
+    else:
+        v = r["annotations"].get(timing.PERIOD)
+        interval = None if v is None else timing.value_ms(v)
+    rec = sum((1 if f.optional else 0) + f.width for f in lo.fields)
+    bits = 42 + lo.count_bits + (1 + rec) + (d.records - 1) * (1 + 1 + (lo.offset_bits or 0) + rec)
+    return {"interval_ms": interval, "largest_bytes": 8 + (bits + 7) // 8, "history": r.get("history") is not None}
+
+
 def resources_of(contract: Any) -> list[dict[str, Any]]:
-    """A loaded contract's resolved resources, as plan.json writes them."""
-    return [{"template": r["template"], "token": r["token"], "annotations": dict(r["annotations"])}
-            for r in contract.canonical["resources"]]
+    """A loaded contract's resolved resources, as plan.json writes them, a
+    frame resource's facts beside (0.13, :func:`frame_facts`)."""
+    out = []
+    for r in contract.canonical["resources"]:
+        row = {"template": r["template"], "token": r["token"], "annotations": dict(r["annotations"])}
+        facts = frame_facts(contract, r) if r.get("frame") is not None else None
+        if facts is not None:
+            row["frame"] = facts
+        out.append(row)
+    return out
 
 
 def revision_of(contract: Any) -> dict[str, Any]:
@@ -648,14 +688,30 @@ def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
                     warnings.append(finding("templated_exposure", face.name, r.name, "warning"))
                 if r.token in ("stream", "@stream") and crossing_res(r):
                     h = r.horizon()
-                    if h.horizon == "within" and h.ttl_s < 2 * (face.interval_s or 0):
+                    if r.frame is not None:
+                        # §2.12 (0.13): "Never downsampled, it crosses at its
+                        # own cadence, so interval_over_horizon reads its
+                        # interval, not interval_s: 2 × interval > ttl. An
+                        # unstated interval draws none." §2.8's warnings.
+                        iv = r.frame["interval_ms"]
+                        if h.horizon == "within" and iv is not None and 2 * iv > h.ttl_s * 1000:
+                            warnings.append(finding("interval_over_horizon", face.name, r.name, "warning"))
+                        if iv is not None and iv < (face.interval_s or 0) * 1000:
+                            warnings.append(finding("frame_over_interval", face.name, r.name, "warning"))
+                        if face.batch_bytes is not None and r.frame["largest_bytes"] > face.batch_bytes:
+                            warnings.append(finding("frame_over_batch", face.name, r.name, "warning"))
+                        if r.frame["history"]:
+                            warnings.append(finding("history_on_frame", face.name, r.name, "warning"))
+                    elif h.horizon == "within" and h.ttl_s < 2 * (face.interval_s or 0):
                         warnings.append(finding("interval_over_horizon", face.name, r.name, "warning"))
         for s in policy.services:
             for i in implements[s]:
                 for r in res[i]:
                     # §2.8 (0.11): "A generator MUST NOT emit a downsampling
                     # rule for a heartbeat's key": none is a resource here.
-                    if r.token in ("stream", "@stream") and crossing_res(r):
+                    # (0.13): "A generator MUST NOT emit a downsampling rule
+                    # for a frame resource's key (core §7.7)."
+                    if r.token in ("stream", "@stream") and crossing_res(r) and r.frame is None:
                         rules.append({"key_expr": f"zk2/{policy.system}/{s}/{i}/{r.token}/{r.template}",
                                       "freq": 1 / face.interval_s})
     rules.sort(key=lambda x: _bytes(x["key_expr"]))

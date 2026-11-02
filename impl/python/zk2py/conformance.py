@@ -749,6 +749,27 @@ def _link_interfaces(case: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _link_contracts(path: Path) -> list[Result]:
+    """``conformance/contracts/`` (link.v1 0.13): "a new directory of the
+    contracts a case loads". Each authoring file there loads as core §9
+    loads it, valid, its codes named (``sampler.v1``'s ``frames/wide`` draws
+    W108, as its header says); every other file is an artifact one of them
+    lists, an unlisted one failing."""
+    from .contract import load_contract
+
+    out: list[Result] = []
+    listed: set[str] = set()
+    for f in sorted(path.glob("*.toml")):
+        c = load_contract(f, check_file_name=True)
+        out.append((f"contracts/{f.name} loads valid (codes {c.codes})", c.valid, "" if c.valid else str(c.codes)))
+        if c.canonical is not None:
+            listed |= {s_["name"] for s_ in c.canonical["schemas"]}
+    for f in sorted(x for x in path.iterdir() if x.suffix != ".toml"):
+        ok = f.stem in listed
+        out.append((f"contracts/{f.name} is an artifact a contract there lists", ok, "" if ok else "unlisted"))
+    return out
+
+
 def _link_exposure(path: Path) -> list[Result]:
     """link.v1 §2.2, §2.7: a resource and the face's expose -> its exposure
     and whether its pushes cross."""
@@ -1406,7 +1427,8 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
     "config": {"validation.json": _config_validation, "window.json": _config_window,
                "lifecycle.json": _config_lifecycle, "desired.json": _config_desired,
                "redaction.json": _config_redaction},
-    "link": {"exposure.json": _link_exposure, "plan.json": _link_plan, "lints.json": _link_lints, "v2": _link_v2},
+    "link": {"exposure.json": _link_exposure, "plan.json": _link_plan, "lints.json": _link_lints, "v2": _link_v2,
+             "contracts": _link_contracts},
     "alarms": {"keys.json": _alarms_keys, "documents.json": _alarms_documents,
                "transitions.json": _alarms_transitions, "conclusions.json": _alarms_conclusions},
     "telemetry": {"schema.json": _telemetry_schema, "declarations.json": _telemetry_declarations,
