@@ -33,8 +33,8 @@ says what it will be.
 | **The runtime and codegen** | Landed | `zenkey` and `zenkey-build` 0.20: `ServiceBuilder`, the generated `Server`, `Consumer` and `Client`, packed structs, typed frame writers ([`docs/zk2/codegen.md`](../../../docs/zk2/codegen.md)) |
 | A published release | Missing | Every zk2 crate is `publish = false`, and no release tag of them exists: the release tags end at v1's `0.14.0` (#929) |
 | `modem-contract` as a zk2 contract crate | Missing: zenoh-modem's to build | [`contract-crate.md`](contract-crate.md) is its design |
-| **The contract, `modem.v3` 3.2** | Landed | Nine frame resources over packed records; `uses` `telemetry.v2`, `freshness.v2` and `link.v1`; [`catalog.json`](catalog.json) `ab76ec37`, index 6 |
-| `modem.v3` 3.3 | Drafted, PR #1059 (`chunk-991-gate`), in review | Ranges taken from zenoh-modem's code; `frames/fast`, `frames/slow` and `frames/paid` over one record of all 73 readings, the largest frame 216 B; 3.2's nine frames deprecated and `host`; the seven states' packed twins under `packed/`; catalog `c6b5f7d3`, index 7 (#991) |
+| **The contract, `modem.v3` 3.3** | Landed, PR #1059 | Ranges taken from zenoh-modem's code; `frames/fast`, `frames/slow` and `frames/paid` over one record of all 73 readings, the largest frame 216 B; 3.2's nine frames deprecated and `host`; the seven states' packed twins under `packed/`; `uses` `telemetry.v2`, `freshness.v2` and `link.v1`; [`catalog.json`](catalog.json) `e3a529fe`, index 8. The faces list one frame each, SF9's lease is 480 s and SF12's 3,600 s, and `link.v2`'s plans are derived from 3.3 (#991) |
+| `modem.v3` 3.2 | Landed, deprecated by 3.3 | Nine frame resources over packed records, at illustrative ranges; catalog `ab76ec37`, index 6 |
 | **The wire:** packed records | Landed | Core §7.6; generated structs carried by `zenkey::codec::Packed<T>` (#979) |
 | Text, lists and dictionaries in packed records | Missing | #979's B3 |
 | The in-band stamp, a run and a seq | Landed | Core §4.3, §7.5 (#976) |
@@ -73,7 +73,7 @@ move together.
 | 2 | Build on zenkey 0.20 | #929, or a git dependency |
 | 3 | `modem-contract` becomes a contract crate | step 2 |
 | 4 | modem-mgmt serves each device as a zk2 service | step 3 |
-| 5 | Telemetry crosses as frames | step 4; settle 3.2 or 3.3 first (§6) |
+| 5 | Telemetry crosses as frames | step 4; 3.3's frames, never 3.2's |
 | 6 | States and events, confirmed by the heartbeat | step 4 |
 | 7 | Configuration | step 4; `config.v1` now, `config.v2` once its tools and `sx1262_config.v1` land |
 | 8 | Each node's cutover: the generated access control | steps 4 to 7 |
@@ -122,7 +122,7 @@ move together.
   - `contract/modem.v3.toml` is this directory's [`modem.v3.toml`](modem.v3.toml);
   - `schemas/modem.json` is schemars' output from `src/documents.rs`, committed;
   - the packed files are hand-written: [`schemas/modem-frames.json`](schemas/modem-frames.json)
-    for 3.2, or 3.3's `modem-readings.json` and `modem-states.json`;
+    for 3.2's deprecated frames, and 3.3's `modem-readings.json` and `modem-states.json`;
   - `build.rs` runs zenkey-build 0.20, and `contracts/.history/` holds the published bundles;
   - `registry/` (`modem.toml` and `types.toml`), the three `.lock` files, `src/schema.rs`
     (`SchemaSet`, `verify_total`), `PROFILE` and `PRODUCER` go;
@@ -190,8 +190,8 @@ move together.
   - A frame the face does not list is left unpublished, and listed unavailable, cause `config`.
     The cadence and the list are the device's configuration: 3.3's gate is a `[[device]]`'s
     `frames` table, `config:device.frames.<name>`.
-  - 3.2's resources are `frames/link`, seven group frames and `frames/message`. 3.3's are
-    `frames/fast`, `frames/slow` and `frames/paid` (§6 says which to write).
+  - Write 3.3's `frames/fast`, `frames/slow` and `frames/paid`. 3.2's, `frames/link`, seven
+    group frames and `frames/message`, are deprecated: an owner lists them unavailable.
 - **Uses.** The generated `Server`'s typed `zenkey::typed::FrameWriter<Packed<T>>`, its `record`
   and `flush`. The writer frames, keyframes and deadbands. On a contract that uses
   `telemetry.v2` it meters each counter, and refuses one below its last count within the run
@@ -207,9 +207,9 @@ move together.
   |---|---:|---|
   | Today: the four link streams, downsampled to one put a minute | 280.5 KB, measured | the baseline's "W1, a day" |
   | 3.2's `frames/link` alone, the same four readings | 64.8 KB | #981's design, §3 |
-  | 3.2's eight frames on rf0's face, all 73 readings present | 401 KB | PR #1059's README |
-  | 3.3's `frames/fast`, all 73 present, 24 moving | 177 KB | PR #1059's README |
-  | 3.3's `frames/fast`, rf0's own 18 readings | 92 KB | PR #1059's README |
+  | 3.2's eight frames on rf0's face, all 73 readings present | 401 KB | the README's "Frames" |
+  | 3.3's `frames/fast`, all 73 present, 24 moving | 177 KB | the README's "Frames" |
+  | 3.3's `frames/fast`, rf0's own 18 readings | 92 KB | the README's "Frames" |
 
   On LoRa, with all 73 present, 3.3 spends 376 s, 534 s and 785 s of the 864 s daily duty at
   SF7, SF9 and SF12. lora0's own readings spend 248 s, 281 s and 434 s. 3.2's nine frames would
@@ -354,7 +354,7 @@ move together.
 `lora0`'s one router, one per spreading factor. [`link.md`](link.md)'s first note gives each
 plan.
 
-| Policy | Node, service | On `main`: `modem.v3` 3.2 | In PR #1059: 3.3 |
+| Policy | Node, service | Under `modem.v3` 3.2 (#988's L5) | Since 3.3 (#991) |
 |---|---|---|---|
 | [`zenohd-rf0`](faces/zenohd-rf0.face.toml) | `h-3fa9c2d41b7e`, `rf0` | `frames/link` and the seven group frames, every 60 s | `frames/fast`, every 60 s |
 | [`zenohd-lora0-sf7`](faces/zenohd-lora0-sf7.face.toml) | `h-c2a95e41d7f0`, `lora0` | the same eight, every 60 s | `frames/fast`, every 60 s |
@@ -404,7 +404,7 @@ it leaves out. The other warnings differ:
 Keep-alives a day are 2 × `keep_alive` × 86,400 / lease, both ways (#988's design, §1.4). Every
 policy runs `sequence = "16bit"`, and `wait_before_close` equals the lease.
 
-| Router | bit/s | Shipped today | `main`'s policy | PR #1059 | Keep-alives a day | Reply timeout | Batch |
+| Router | bit/s | Shipped today | #988's policy | Since 3.3 (#991) | Keep-alives a day | Reply timeout | Batch |
 |---|---:|---|---|---|---:|---:|---:|
 | RF | 2,400 | 10 s / 4 (`configs/zenohd-rf0.json5`) | 240 s / 4 | the same | 69,120 → 2,880 | 15 s | 222 |
 | LoRa SF7 | 5,469 | none | 120 s / 4 | the same | 5,760 | 15 s | 224 |
@@ -415,7 +415,7 @@ policy runs `sequence = "16bit"`, and `wait_before_close` equals the lease.
 - **Why 4 keep-alives.** At 5 % loss, a keep-alive count of 2 closed the link at every lost
   keep-alive, 9 of 9 LoRa runs, and each reopen cost more air than it saved (#988's design,
   §1.4).
-- **Why PR #1059 moves SF9 and SF12.** At four frame intervals a lease, the frames replace
+- **Why #991 moved SF9 and SF12.** At four frame intervals a lease, the frames replace
   every uplink keep-alive. SF12's 288 uplink keep-alives a day cost 427 s of air, half its duty.
 
 ### 3.4 What the policies assume
@@ -484,9 +484,9 @@ would save them, and is missing.
 | Decision | The options | The drafts' default | Where |
 |---|---|---|---|
 | The crates' path | a publish of the zk2 crates, or a git dependency on a tag | none. No zk2 tag exists, so a git dependency pins a revision until one is cut. #929's boxes (`zenkey-model` in the lane, READMEs, stable zenoh, metadata, what 0.20 promises, whether an adopter goes first) stand before a publish | #929 |
-| Whether `modem.v3` lists `link.v2` | in #991's revision, or a face policy counted as use | keep `link.v1`: 3.3 does too. Every resource 3.2 exposes is already packed, so no plan draws `not_packed`. `link.v2` is draft in the profiles index since G4, whose `sx1262_config.v1` lists it | [`link.md`](link.md), its first note; #991 |
+| Whether `modem.v3` lists `link.v2` | in a later revision, or a face policy counted as use | keep `link.v1`, as 3.3 does. Every resource 3.2 and 3.3 expose is already packed, so no plan draws `not_packed`. `link.v2` is draft in the profiles index since G4, whose `sx1262_config.v1` lists it | [`link.md`](link.md), its first note; #991 |
 | Whether a reader may reopen its session for a lost `DeclareKeyExpr` | reopen after silence, or rely on link ARQ | none. Re-declaring repairs a lost subscriber, never a lost key expression: only a reopen or link ARQ does. A reopen re-sends every declaration, non-droppable, about 44 s for 1.6 KB at SF12 | `zenkey/src/redeclare.rs`; #988's design, risk 5 |
-| #991's frame layout and LoRa leases | 3.3's three frames over one record of all 73 readings, or 3.2's nine per-group frames (#1048) at #983's cadences; SF9's lease at 480 s and SF12's at 3,600 s, or #988's 240 s and 1,080 s | 3.3's, both departing from #983's and #988's designs for the budget. 3.2's nine frames cost 401 KB a day on RF, and 164 % and 241 % of LoRa's duty at SF9 and SF12. A later revision can reverse either, but `.history` is append-only, so 3.3 stays published once merged | PR #1059; #991 |
+| #991's frame layout and LoRa leases | 3.3's three frames over one record of all 73 readings, or 3.2's nine per-group frames (#1048) at #983's cadences; SF9's lease at 480 s and SF12's at 3,600 s, or #988's 240 s and 1,080 s | 3.3's, both departing from #983's and #988's designs for the budget. 3.2's nine frames cost 401 KB a day on RF, and 164 % and 241 % of LoRa's duty at SF9 and SF12. A later revision can reverse either, but `.history` is append-only, so 3.3 stays published | PR #1059; #991 |
 
 **zenoh-modem's.**
 
@@ -507,8 +507,6 @@ A migration started today would hit each of these.
 
 | What it hits | What to do meanwhile | Issue |
 |---|---|---|
-| **The frame layout is not settled.** `main` has 3.2's nine frames. 3.3, in review in PR #1059, deprecates them for three over one record | Write 3.3's `frames/fast`, `slow` and `paid` once PR #1059 merges, and do not ship 3.2's | #991 |
-| **The catalog's next index.** G4 appended `sx1262_config.v1` at index 7 (`8c808dff`); PR #1059 appends 3.3 at index 7 too | PR #1059 adds its entry again on G4's successor, at index 8 | #991, #985 |
 | **No published crates,** and no zk2 tag | A git dependency on a revision, or a path | #929 |
 | **The readers' `wait_before_close` default** is zenoh 1.10.1's 5 s | Pass `--wait-before-close`, or `--face-policy` where a verb takes it | #1011 |
 | **The bare wire is still read.** An owner on `main` takes a bare request, and C4d removes it | Write every call through `zenkey::Client` or the generated `Client`, which write the request form; give zenoh-modem's ops tooling no bare request to depend on | #985 (C4d) |
@@ -518,6 +516,5 @@ A migration started today would hit each of these.
 | **Event keys are ULIDs.** An event cannot cross on its template's prefix | Keep the four events `host` | #980 (C2) |
 | **No text in packed records** | Text stays in the JSON states, and in `config.v1` | #979 (B3) |
 | **zengui has no face scope,** and `zenctl telemetry` and `config` take no `--face-policy` | Set `--selector`, `--zenoh-config`, `--timeout` and `--settle` by hand (§4) | none filed |
-| **SF12 and SBD on 3.2.** `frames/link`'s 150 s horizon is below SF12's 1,800 s floor, and `frames/message` has none, so SBD shows no liveness | 3.3's `frames/slow` and `frames/paid` fix both | #991 |
 | **The transport that never came back** (W2, finding 5) | zenoh-modem's tracker. Keep nothing `block` larger than a batch on a crossing key | #988's design, §1.8 |
 | **The bytes are modelled.** zk2c's run of W1 and W2 on the fake media has not happened | Read every unmarked figure here as a model | #989 |

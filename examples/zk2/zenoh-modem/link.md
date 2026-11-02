@@ -24,9 +24,10 @@
 >   §2.8). Every frame a face leaves out is denied by name. So `stream:modem.v3` is the seven
 >   reading subtrees (`air`, `if`, `layer`, `link`, `radio`, `sched`, `sdu`), 3.2's nine frames,
 >   deprecated and `host` since 3.3, and the two of `frames/fast`, `slow` and `paid` the face does
->   not list. No plain stream crosses, so no face has a downsampling rule. The 207 B full record is
->   above SF9's 117 B batch alone (`frame_over_batch`): zenoh fragments it, every 15 minutes, and
->   one lost fragment loses the frame, which the next full record heals.
+>   not list. No plain stream crosses, so no face has a downsampling rule. `frames/fast`'s largest
+>   frame, 216 B, is above SF9's 117 B batch alone (`frame_over_batch`): zenoh fragments its 207 B
+>   full record every 15 minutes, and one lost fragment loses the frame, which the next full record
+>   heals.
 > - **`frame_unlisted`** names, on each router, the frames no face of its policy lets across. One
 >   contract serves every medium, and each router knows only its own face. Its device's owner
 >   leaves those frames unpublished (`config:device.frames.<name>`).
@@ -110,11 +111,11 @@
 > `Readings` ([`schemas/modem-readings.json`](schemas/modem-readings.json)), each range taken from
 > zenoh-modem's code or, where the code bounds nothing, a physical bound (README, "Frames"):
 >
-> | Frame resource | Horizon, full record | Listed by | Largest frame, its payload (32-bit run) |
+> | Frame resource | Horizon, full record | Listed by | Largest frame, its payload (32-bit run; `link.v1` 0.16 §2.8) |
 > |---|---|---|---:|
-> | `frames/fast` | 300 s, at least every 15; deadbands | RF, LoRa SF7 (60 s), SF9 (120 s) | 207 B |
-> | `frames/slow` | 1,800 s, at least every 4; deadbands | LoRa SF12 (900 s) | 207 B |
-> | `frames/paid` | 3,600 s, every frame | SBD (1,800 s) | 207 B |
+> | `frames/fast` | 300 s, at least every 15; deadbands | RF, LoRa SF7 (60 s), SF9 (120 s) | 216 B: a delta of all 73 |
+> | `frames/slow` | 1,800 s, at least every 4; deadbands | LoRa SF12 (900 s) | 216 B: a delta of all 73 |
+> | `frames/paid` | 3,600 s, every frame | SBD (1,800 s) | 207 B: a full record |
 >
 > With every reading present and 24 of them moving, RF carries 177 KB a day, LoRa spends 376 s,
 > 534 s and 785 s of its 864 s at SF7, SF9 and SF12, and SBD 96 messages a day, as idle.

@@ -257,9 +257,12 @@ Each of the three:
 | `frames/paid` | 3,600 s | every frame | none | SBD, 1,800 s: one paid message |
 
 A full record with every reading present is 1,542 bits, 199 B of body: 207 B of payload after an
-envelope with a 32-bit run (`link.v1` §2.8's largest frame), 205 B with a 16-bit run. A device
-writes a reading it lacks absent, one bit, so rf0's full record, 18 readings present, is 66 B of
-payload, and a delta 39 B.
+envelope with a 32-bit run, 205 B with a 16-bit run. That is `frames/paid`'s largest frame
+(`link.v1` §2.8), a full record every frame. `frames/fast`'s and `frames/slow`'s may hold a delta
+record that includes every reading, a bit per reading longer (`link.v1` 0.16): 216 B, within RF's
+220 B batch and LoRa's 224 B, and above SF9's 117 B alone (`frame_over_batch`). A device writes a
+reading it lacks absent, one bit, so rf0's full record, 18 readings present, is 66 B of payload,
+and a delta 39 B.
 
 **3.2's nine, deprecated.** `frames/link`, the seven group frames (`sdu`, `sched`, `air`, `layer`,
 `if`, `radio`, `bearer`) and `frames/message`, typed in

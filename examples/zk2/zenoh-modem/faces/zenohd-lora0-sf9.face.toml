@@ -12,9 +12,9 @@
 #
 # Across the face: frames/fast every two minutes, a full record every 15
 # minutes (`keyframe_s`, #991's table): all 73 readings in 534 s of air a
-# day, lora0's own in 281 s. Its 207 B full record is above the chip's
-# 117 B batch (`frame_over_batch`), and fragments into two frames every 15
-# minutes. frames/slow and frames/paid are SF12's and SBD's
+# day, lora0's own in 281 s. Its largest frame, 216 B, a delta of all 73
+# (link.v1 §2.8), is above the chip's 117 B batch (`frame_over_batch`), and
+# its 207 B full record fragments into two frames every 15 minutes. frames/slow and frames/paid are SF12's and SBD's
 # (`frame_unlisted`), and the chip has no ARQ (`no_arq`).
 profile  = "link.v2"
 system   = "h-c2a95e41d7f0"
