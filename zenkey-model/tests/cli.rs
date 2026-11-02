@@ -224,6 +224,64 @@ fn a_published_review_is_accepted() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// `zk2 config derive` on zenoh-modem's `sx1262_config.v1` (#985 G4)
+/// prints exactly the five derived types its packed file holds after its
+/// three group types, and `contract lint` finds nothing in it.
+#[test]
+fn config_derive_reproduces_the_sx1262s_derived_types() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2/zenoh-modem/config");
+    let contract = dir.join("sx1262_config.v1.toml").display().to_string();
+    let out = Command::new(env!("CARGO_BIN_EXE_zk2"))
+        .args(["config", "derive", &contract])
+        .output()
+        .expect("runs");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let printed: serde_json::Value = serde_json::from_slice(&out.stdout).expect("JSON");
+    let packed: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.join("schemas/sx1262_config.json")).expect("the packed file"),
+    )
+    .expect("JSON");
+    let names = |v: &serde_json::Value| {
+        let mut n: Vec<String> = v["types"]
+            .as_object()
+            .expect("types")
+            .keys()
+            .cloned()
+            .collect();
+        n.sort_unstable();
+        n
+    };
+    let derived = names(&printed);
+    assert_eq!(
+        derived,
+        ["Control", "Error", "Record", "SetDuty", "SetRadio"],
+        "Record, a Set<T> per hot or reach group, Control and Error"
+    );
+    assert_eq!(
+        names(&packed),
+        [
+            "Control",
+            "Duty",
+            "Error",
+            "Modulation",
+            "Radio",
+            "Record",
+            "SetDuty",
+            "SetRadio"
+        ],
+        "the three group types and the five derived ones"
+    );
+    for n in &derived {
+        assert_eq!(printed["types"][n], packed["types"][n], "{n}");
+    }
+    assert_eq!(zk2(&["contract", "lint", &contract]), 0);
+}
+
 /// `zk2 config derive` prints the types config.v2 derives from a contract's
 /// declaration (config.v2 §3): for the test contract `rfcfg.v1`, exactly
 /// the eight derived types its packed file holds.

@@ -1284,6 +1284,282 @@ async fn a_config_v1_owners_device_reset_is_a_new_instance() {
     o.end().await;
 }
 
+/// #1064: a `config.v2` owner whose device resets mints a new instance
+/// (core §1.5), which restarts its configuration as `config.v1`'s does
+/// (`config.v1` §2.12, which `config.v2` §2.12 keeps): its pending change
+/// cancelled, its device returned to its startup values, revision 0, and
+/// its record's instance number the new instance's run, put before its
+/// token. R reads the frame counter across as a reset, in band, never a
+/// decrease (§2.19).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_config_v2_owners_device_reset_is_a_new_instance() {
+    use zenkey::config_v2::{self, Interface, State};
+    use zenkey::model::config::v2::{ChangeEvent, ParamState};
+    use zenkey::model::config::{Outcome as Ending, Source, Value as V};
+    use zenkey::{CallMetadata, Client, Outcome};
+
+    /// A call of the config contract's `resource` at O, as `ops`.
+    async fn call(s: &zenoh::Session, c: &Arc<Contract>, resource: &str, rec: Vec<u8>) -> Outcome {
+        Client::new(s, Arc::clone(c), &[SVC])
+            .unwrap()
+            .with_timeout(Duration::from_secs(2))
+            .with_metadata(CallMetadata::new("ops", resource))
+            .call(&SVC.parse().unwrap(), resource, &Bindings::new(), rec)
+            .await
+            .unwrap()
+    }
+    let rfcfg = Arc::new(sim::rfcfg().unwrap());
+    let i = Interface::of(&rfcfg).unwrap();
+    let record = |o: &Outcome| -> State {
+        let Outcome::Value(a) = o else {
+            panic!("a value reply, not {o:?}")
+        };
+        let bytes = a.record().expect("the value form's record");
+        i.read_record(a.tag().unwrap().get(), &bytes, 0).unwrap()
+    };
+    let set = |group: &str, fields: Value| {
+        i.derived
+            .set(group)
+            .unwrap()
+            .1
+            .write(&fields, None)
+            .unwrap()
+            .bytes
+    };
+    let control = |token: u64| {
+        i.derived
+            .control()
+            .write(&json!({"token": token}), None)
+            .unwrap()
+            .bytes
+    };
+    let param = |s: &State, g: &str, p: &str| match &s.groups[g].params[p] {
+        ParamState::Plain { source, value, .. } => (value.clone(), *source),
+        other => panic!("{g}.{p}: {other:?}"),
+    };
+    let int = |n: i64| Some(V::Integer(n));
+
+    let (_r1, ep) = router(None).await;
+    let rs = client(&ep).await;
+    let r = reader(&rs).await;
+    // R's view of O's instance tokens, and of its record and events, in
+    // arrival order.
+    type Log<T> = Arc<Mutex<Vec<T>>>;
+    let heard: Log<(Instant, String, Vec<u8>)> = Arc::default();
+    let (h1, h2) = (Arc::clone(&heard), Arc::clone(&heard));
+    let _tokens = rs
+        .liveliness()
+        .declare_subscriber("zk2/lab/meterframe/@zk/instance/*")
+        .callback(move |x: Sample| {
+            if x.kind() == zenoh::sample::SampleKind::Put {
+                let key = x.key_expr().as_str().to_owned();
+                h1.lock().unwrap().push((Instant::now(), key, Vec::new()));
+            }
+        })
+        .await
+        .unwrap();
+    let _configs = rs
+        .declare_subscriber("zk2/lab/meterframe/rfcfg.v1/**")
+        .callback(move |x: Sample| {
+            let key = x.key_expr().as_str().to_owned();
+            let bytes = x.payload().to_bytes().into_owned();
+            h2.lock().unwrap().push((Instant::now(), key, bytes));
+        })
+        .await
+        .unwrap();
+    let records = || -> Vec<(Instant, State)> {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, k, _)| k.ends_with("/rfcfg.v1/state/config"))
+            .map(|(at, _, b)| {
+                let e = Envelope::parse(b).unwrap();
+                (*at, i.read_record(e.tag.get(), e.record, 0).unwrap())
+            })
+            .collect()
+    };
+    let events = || -> Vec<ChangeEvent> {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, k, _)| k.contains("/events/change/"))
+            .map(|(_, _, b)| serde_json::from_slice(Envelope::parse(b).unwrap().record).unwrap())
+            .collect()
+    };
+    let token_at = |id: &str| {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(_, k, _)| k.ends_with(&format!("/{id}")))
+            .map(|(at, ..)| *at)
+    };
+
+    // O: meterframe.v1's frames, and config.v2 over rfcfg.v1 on the owner
+    // example's simulated device.
+    let session = client(&ep).await;
+    let mut b = ServiceBuilder::new(&session, config(SVC));
+    b.implement(Implementation::new((*rfcfg).clone())).unwrap();
+    let startup = sim::rfcfg_startup(10, Duration::from_secs(1), false);
+    let device = Arc::new(sim::SimDevice::new_v2(&startup));
+    let cfg = b
+        .config_v2(startup, Arc::clone(&device) as Arc<dyn config_v2::Device>)
+        .await
+        .unwrap();
+    let mut o = owner_of(session, b).await;
+    let old = o.svc.instance().to_string();
+    let i1 = cfg.instance();
+    eventually("R sees O's instance token", || async {
+        token_at(&old).is_some()
+    })
+    .await;
+
+    // 1. A runtime change made permanent (duty, hot, no window), then one
+    // pending, applied (radio, reach, a 60 s window).
+    let applied = call(
+        &rs,
+        &rfcfg,
+        &config_v2::set("duty"),
+        set("duty", json!({"fraction_ppm": 20000, "dry_run": false})),
+    )
+    .await;
+    assert_eq!(record(&applied).revision, 1);
+    let pending = call(
+        &rs,
+        &rfcfg,
+        &config_v2::set("radio"),
+        set(
+            "radio",
+            json!({"frequency_hz": 869_525_000, "confirm_s": 60, "dry_run": false}),
+        ),
+    )
+    .await;
+    let token = record(&pending).pending.expect("pending").token;
+    eventually("the reach change applied", || async {
+        cfg.state().await.pending.is_some_and(|p| p.applied)
+    })
+    .await;
+    assert_eq!(device.holds("radio", "frequency_hz"), int(869_525_000));
+
+    // 2. Its counter, in instance I1: 100 then 120. The device resets, its
+    // counter from 0: within I1 below its last, refused (§2.19).
+    let t = Instant::now();
+    let r0 = o.totals(100, "21.5", t).await.run;
+    o.totals(120, "21.5", t + s(1)).await;
+    let below = json!({"frames_total": 5, "temperature": "21.5"});
+    let e = o.w(TOTALS).record_json_at(&below, t + s(2)).await;
+    assert!(matches!(
+        refusal(e.unwrap_err()),
+        Reason::FieldDecreased { .. }
+    ));
+
+    // 3. A new instance, I2: the configuration restarts in it.
+    let new = o.svc.new_epoch().await.unwrap().to_string();
+    assert_ne!(new, old);
+    let r1 = o.svc.minter().run();
+    assert_ne!(r1, r0, "a new instance takes a new run (core §4.3)");
+    let b = o.totals(5, "21.5", t + s(2)).await;
+    assert_eq!((b.run, b.seq.get()), (r1, 0));
+    o.totals(9, "21.5", t + s(3)).await;
+    r.wait(TOTALS, 4).await;
+
+    // R: 120 → 5 a reset in band, with no rate; no pair a decrease.
+    let f = r.fold(TOTALS);
+    let p = f.pair("frames_total", 120, 5);
+    assert_eq!((p.continuity, p.basis), (Continuity::Reset, IN_BAND));
+    assert_eq!(p.rate, Err(NoRate::Reset));
+    assert!(
+        f.pairs("frames_total")
+            .iter()
+            .all(|(_, _, p)| p.continuity != Continuity::Decreased),
+        "{:?}",
+        f.pairs("frames_total")
+    );
+
+    // config.v2 restarted in I2 (§2.12): the pending change cancelled, its
+    // undo run and its event published; the device returned to its startup
+    // values (duty); then revision 0 from them, nothing pending, no last
+    // change, the instance number I2's run.
+    let i2 = cfg.instance();
+    assert_eq!(i2, r1.value(), "the instance number is the new run (§2.3)");
+    assert_ne!(i2, i1);
+    let st = cfg.state().await;
+    assert_eq!((st.instance, st.revision), (i2, 0));
+    assert_eq!((&st.pending, &st.last), (&None, &None));
+    assert_eq!(
+        param(&st, "duty", "fraction_ppm"),
+        (int(10_000), Some(Source::File))
+    );
+    assert_eq!(
+        param(&st, "radio", "frequency_hz"),
+        (int(868_100_000), Some(Source::File))
+    );
+    assert_eq!(device.holds("duty", "fraction_ppm"), int(10_000));
+    assert_eq!(device.holds("radio", "frequency_hz"), int(868_100_000));
+    let (undos, restores) = device.with(|d| (d.undos.len(), d.restores.clone()));
+    assert_eq!(undos, 1, "the cancel's undo");
+    assert_eq!(
+        restores
+            .iter()
+            .flat_map(|(_, r)| r.iter())
+            .map(|x| (x.group.as_str(), x.parameter.as_str(), x.value.clone()))
+            .collect::<Vec<_>>(),
+        [("duty", "fraction_ppm", V::Integer(10_000))],
+        "one return, of what runs off its startup value"
+    );
+    eventually("R hears the cancel's event and I2's record", || async {
+        events()
+            .iter()
+            .any(|e| e.token == token && e.outcome == Ending::RolledBack)
+            && records()
+                .iter()
+                .any(|(_, s)| s.instance == i2 && s.revision == 0)
+    })
+    .await;
+    eventually("R sees I2's token", || async { token_at(&new).is_some() }).await;
+    let first = records()
+        .into_iter()
+        .find(|(_, s)| s.instance == i2)
+        .unwrap()
+        .0;
+    assert!(
+        first < token_at(&new).unwrap(),
+        "I2's record before its token (§2.3)"
+    );
+
+    // A late confirm of I1's token names nothing (§2.6); I2 mints its own,
+    // under its run.
+    let late = call(&rs, &rfcfg, config_v2::CONFIRM, control(token)).await;
+    match late {
+        Outcome::Refused(e) => assert_eq!(e.code, "not_found"),
+        other => panic!("a refusal, not {other:?}"),
+    }
+    let again = call(
+        &rs,
+        &rfcfg,
+        &config_v2::set("duty"),
+        set("duty", json!({"fraction_ppm": 30000, "dry_run": false})),
+    )
+    .await;
+    let last = record(&again).last.expect("the last change").token;
+    assert_eq!(last >> 16, u64::from(i2), "a token of I2's run (§2.6)");
+
+    // 4. config.v1's refusals: a device that cannot return to its startup
+    // values refuses the re-mint, and I2 runs on.
+    device.with(|d| d.refuse_restore = Some("the radio is busy".to_owned()));
+    let e = o.svc.new_epoch().await.expect_err("the device refused");
+    assert!(e.to_string().contains("config.v1 §2.12"), "{e}");
+    assert_eq!(o.svc.instance().to_string(), new);
+    assert_eq!(cfg.instance(), i2);
+    assert_eq!(
+        param(&cfg.state().await, "duty", "fraction_ppm"),
+        (int(30_000), Some(Source::Runtime))
+    );
+    o.end().await;
+}
+
 /// A new run within the instance (core §4.3's MAY, [`Service::new_run`]):
 /// no counter restarted, no instance minted. The descriptor states the
 /// run, and R reads the pair across as a reset, in band, with no rate

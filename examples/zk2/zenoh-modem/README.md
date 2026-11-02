@@ -25,6 +25,13 @@ Its seam crates are on crates.io for out-of-tree backends.
 - The configuration plane's 8 gated entries are `config.v1`, bound in
   [`config.v1-binding.md`](config.v1-binding.md). That file also explains why the far side of a
   radio can arm a reach change today but never keep it, and gives the zk2 grants that fix it.
+- Since #985 G4, the SX1262's configuration is a contract of its own under
+  [`config.v2`](../../../spec/profiles/config/v2.md):
+  [`config/sx1262_config.v1.toml`](config/sx1262_config.v1.toml), its types in
+  [`config/schemas/sx1262_config.json`](config/schemas/sx1262_config.json). One packed record
+  replaces the view and the status. [`config.v2-binding.md`](config.v2-binding.md) binds it, and
+  gives the far-side reach change at one radio frame a step. A backend whose configuration holds
+  text stays on `config.v1` until a packed format carries text.
 - The radio faces, the rules a generator would emit, and the declaration cost of zk2 keys against
   v1's are in [`link.md`](link.md), a sketch now superseded by the profile
   [`link.v1`](../../../spec/profiles/link/v1.md) (#769). Since #988 L5 the routers run
@@ -38,8 +45,8 @@ Its seam crates are on crates.io for out-of-tree backends.
   routers, the ground side, and what is still to decide.
 - [`catalog.json`](catalog.json) is the deployment catalog ([core §8.6](../../../spec/core.md#86-the-deployment-catalog)),
   provisioned to rf0's host and to the ground. It indexes `modem.v3`, `config.v1` and
-  `health.v1` at their current revisions (`modem.v3` 3.2 at index 6, catalog `ab76ec37`), and
-  dates times from 2026-01-01. A new revision goes in
+  `health.v1` at their current revisions (`modem.v3` 3.2 at index 6), and `sx1262_config.v1`
+  (index 7, catalog `8c808dff`, #985 G4), and dates times from 2026-01-01. A new revision goes in
   with `zk2 catalog add`, which writes the catalog's successor.
 
 **The verdict.** Every v1 entry maps or is deleted for a stated reason, and the constrained-face
@@ -80,7 +87,7 @@ The gaps below are the draft-0 record, kept as written; r3.3 §0.3 says where ea
 |---|---|
 | `system` | the node's host id, `h-<12hex>` (`hostid.v1`; see gap 22 for its salt) |
 | `service` | one per device the host serves: `rf0`, `sat0`, `wwan0`, `lora0`, `dlep0`. They are hosted by one driver process (`modem-mgmt`'s `Host` with N `Node`s), one session, one instance id per service. |
-| interfaces | `modem.v3` on every device service; `config.v1` where the device has a configuration plane (v1 `capability:config`); `health.v1` ([`spec/profiles/health/health.v1.toml`](../../../spec/profiles/health/health.v1.toml), the profile [`health.v1`](../../../spec/profiles/health/v1.md)) recommended, though none of it crosses the RF face ([`health.v1`](../../../spec/profiles/health/v1.md) §2.8), its status derived from `oper` (`up` → ok; `down` and recoverable → degraded; `down` and not recoverable → failed) |
+| interfaces | `modem.v3` on every device service; where the device has a configuration plane (v1 `capability:config`), its backend's config contract under `config.v2` (`sx1262_config.v1` on an SX1262, [binding](config.v2-binding.md)), or `config.v1` while that configuration holds text; `health.v1` ([`spec/profiles/health/health.v1.toml`](../../../spec/profiles/health/health.v1.toml), the profile [`health.v1`](../../../spec/profiles/health/v1.md)) recommended, though none of it crosses the RF face ([`health.v1`](../../../spec/profiles/health/v1.md) §2.8), its status derived from `oper` (`up` → ok; `down` and recoverable → degraded; `down` and not recoverable → failed) |
 | presence | per device service: an instance token, plus one interface token per interface the device exposes something of. A netdev holds no SDU resource, but it still implements `modem.v3`, because its `oper`, `identity` and `security` are always exposed. |
 | continuity epoch | a new instance id whenever a device's counters reset: re-enumeration, ifindex change, restart; a frame resource's is its run, in band, which a new instance renews (`telemetry.v2` §2.19) |
 | ownership | every resource `exclusive`; both operations `fanout = "forbidden"`; config writes serialized per device by the server, which is v1's single-writer rule |
@@ -95,6 +102,8 @@ zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/01j9x3k7q2m4n5p6r7s8t9v0wx
 zk2/h-3fa9c2d41b7e/sat0/modem.v3/@op/action/mailbox_check
 zk2/h-3fa9c2d41b7e/rf0/config.v1/@op/set/radio                      a reach group: {token, apply_at} first
 zk2/h-3fa9c2d41b7e/rf0/config.v1/state/view                         the echo; GET is the read
+zk2/h-c2a95e41d7f0/lora0/sx1262_config.v1/@op/set/radio             config.v2: the record, pending, before the apply
+zk2/h-c2a95e41d7f0/lora0/sx1262_config.v1/state/config              config.v2's record, one packed state; GET is the read
 zk2/h-3fa9c2d41b7e/rf0/@zk/alive/modem.v3/<instance>/<fp16>         never across a constrained face
 zk2/@zk/contract/modem.v3/<sha256>
 zk2/*/*/@zk/alive/config.v1/**                                     "which devices can be configured"
@@ -429,6 +438,9 @@ Each gap gives what is missing, the evidence, and a proposed correction. "r3.2" 
    - *Correction:* a discriminated `SetReply` union, which needs S7's subset to admit `oneOf` with
      a discriminator. Splitting `set` and `arm` is the alternative, and is rejected: the class is
      the device's, not the caller's.
+   - *Status since #985 G4:* **closed for the SX1262.** Under `config.v2` every operation answers
+     one type, the record, which a reach `set` returns with the change pending and its `apply_at`
+     ([binding](config.v2-binding.md) §5). No union is needed.
 9. **The `config.v1` echo does not fit a constrained face, and the floor is not visible.**
    - *Evidence:*
      - the view is about 1,286 B: six SDUs, 4.4 s at 2,400 bit/s per read, and about 15% of the
@@ -439,6 +451,14 @@ Each gap gives what is missing, the evidence, and a proposed correction. "r3.2" 
    - *Correction:* a `config.v1` `state/status` of about 319 B (revision, pending, last change,
      `confirm_floor_s`, values), and a per-group `writable` in the view. Control operations answer
      the status when asked to.
+   - *Status since #985 G4:* **closed for the SX1262, open where a configuration holds text.**
+     `config.v2`'s record holds the values, the pending and the last change, `floor_s` and a
+     `writable` bit per group: 30 to 50 B with its envelope, one frame, put on a change and
+     confirmed by the heartbeat. Every control operation answers it
+     ([binding](config.v2-binding.md) §7). `fake-medium` and `udp-medium` can follow at 0.1.
+     `sbd-medium`, `netdev-modem`, `dlep-modem` and `mm-modem` cannot: `config.v2` 0.1 has `int`
+     and `bool` alone, and their `imei`, `port`, `interface`, `apn` and `pin` are text, which
+     waits for #979's B3. They stay on `config.v1`.
 10. **Per-face exposure fails on a node with two radios.** Device-as-service gives per-device keys,
     but the face selector cannot tell rf0's lane from sat0's: `unixsock-stream` reports no
     interfaces. RF's carve-out and SBD's "nothing" cannot both hold on one router.
@@ -516,6 +536,8 @@ Each gap gives what is missing, the evidence, and a proposed correction. "r3.2" 
       schema files (l.59).
     - *Correction:* `json:<iface>.v<N>/<Name>`, resolved in that contract's bundle and fingerprinted
       by its sha256; or accept duplication, each copy checked on its own.
+    - *Status since #985 G4:* **stands.** `config.v2` takes duplication: each config contract
+      carries its own derived `Control` and `Error`, which its lint checks against the derivation.
 19. **Rust-first schemas need a type binding and a schema subset that fits.** modem-contract
     derives its schemas with schemars 1. v1 bound types to Rust in `types.toml`'s `rust =` field,
     and draft 0 has no place for that.
@@ -534,11 +556,16 @@ Each gap gives what is missing, the evidence, and a proposed correction. "r3.2" 
       cross it (`link.v2` §2.7): exposure chosen by the deployment, but per face, among frames the
       contract already exposes. It is not per principal, and reaches no standard profile's
       resource: `config.v1`'s view still crosses only as a GET, by grant (`link.v1` §2.9).
+    - *Status since #985 G4:* **closed for configuration.** Under `config.v2` the config contract is
+      the adopter's own, so `sx1262_config.v1` exposes its record `link`, and it crosses RF and
+      LoRa as a push ([binding](config.v2-binding.md) §11). `config.v1`'s view still cannot be.
 21. **`claimed_source` has no zk2 source.** O7 carries `{actor, request_id}` only, and zenoh's
     `SourceInfo` is unstable. (Minor.)
     - *Evidence:* `zenkey/src/config.rs:780-784`; r3.2 l.384, §3.8.
     - *Correction:* keep it optional, filled from the runtime's best effort and documented as
       unauthenticated.
+    - *Status since #985 G4:* **unchanged.** `config.v2`'s change event keeps `claimed_source`
+      optional, and stays on the host.
 22. **"System = host" holds only per application.** v1 salts the host id per application. RFC 06
     §1 makes the salt an application constant, so one machine mints three different `h-<12hex>`
     ids for the three adopters, and `zk2/<host>/**` would show one application's services.
@@ -554,7 +581,8 @@ Each gap gives what is missing, the evidence, and a proposed correction. "r3.2" 
 
 These are not zk2 gaps. They are drift between zenoh-modem's v1 registry, its implementation and
 RFC 05 §5.1, and they are listed so that the port fixes them on purpose. Details are in
-[`config.v1-binding.md`](config.v1-binding.md) §10 and [`link.md`](link.md) §3.
+[`config.v1-binding.md`](config.v1-binding.md) §10 and [`link.md`](link.md) §3. For the SX1262,
+`config.v2` closes the first five ([`config.v2-binding.md`](config.v2-binding.md) §10).
 - `set` declares the wrong reply type for reach groups.
 - The reach reply carries a `deadline` field that no schema describes.
 - `persist` replies `{}` rather than the read-back.

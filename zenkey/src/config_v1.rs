@@ -413,7 +413,7 @@ pub(crate) fn claimed(call: &Call) -> model::Call {
 
 /// How many times a re-mint cancels a pending change before it gives up: a
 /// call can start another while the cancel acts.
-const RESTART_TRIES: usize = 4;
+pub(crate) const RESTART_TRIES: usize = 4;
 
 /// A configuration readied to restart in a new instance (§2.12), from
 /// [`Configuration::restarting`]: nothing pending, its device at its

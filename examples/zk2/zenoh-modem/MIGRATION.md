@@ -44,20 +44,20 @@ says what it will be.
 | **Freshness,** `freshness.v2` | Landed | One heartbeat per interface in place of re-puts. `modem.v3`, `config.v1` and `health.v1` use it (#978) |
 | **The catalog,** and keys on a hop | Landed | Core §8.6 and §8.5: `ServiceBuilder::catalog`, `--catalog` on zenctl and zengui, `zk2 catalog`, `zenctl catalog`, zenctl's `--across-face` scope (#980's C1) |
 | **Configuration,** `config.v1` | Landed | `ServiceBuilder::config_v1`, `zenkey::config_v1::{Startup, Device}`, the compact status, `zenctl config`, zengui's Config tool |
-| A `config.v1` owner's re-mint | Missing, in progress | `Service::new_epoch` allowed on a `config.v1` service whose device runs its startup values (`config.v1` §2.12), so a device's restart takes a new instance (#1055) |
+| A configuration owner's re-mint | Landed | `Service::new_epoch` on a `config.v1` or `config.v2` service restarts its configuration in the new instance (`config.v1` §2.12): a pending change cancelled, the device returned to its startup values through `Device::restore_startup`, revision 0. Refused while an act is in flight, for a runtime value that starts unknown, and when fed through `desired.v1` (#1055, PR #1063; #1064 for `config.v2`) |
 | **Calls:** the value and error forms | Landed | Core 0.94 §5.1 and §5.2. A caller writes its request as `CH · record` under `zenoh/bytes`. An owner answers in the value form, or refuses in the error form, each with its as-of mark. `Call::reply`, `summary` and `refuse` write the forms, and `Client` and the generated `Client` write the request (#985's C4a to C4c; C4c is PR #1057) |
 | The bare wire's removal | Missing, in progress | An owner on `main` still reads a bare request, under its type's `Encoding` (core §5.1's MAY), and a caller a bare reply. C4d removes both (#985's C4d) |
-| **`config.v2`,** its text and its model | Landed | `config.v2` 0.1, experimental: the groups declared in the adopter's contract (`config.groups`), one packed record in place of the view and the status, and the derived `Record`, `Set<T>`, `Control` and `Error`. `zenkey_model::config::v2`; `zk2 config derive` prints the derived types, and `zk2 contract lint` runs its lint (#985's G1, PR #1058) |
+| **`config.v2`,** its text and its model | Landed | `config.v2` 0.1, draft since G4: the groups declared in the adopter's contract (`config.groups`), one packed record in place of the view and the status, and the derived `Record`, `Set<T>`, `Control` and `Error`. `zenkey_model::config::v2`; `zk2 config derive` prints the derived types, and `zk2 contract lint` runs its lint (#985's G1, PR #1058) |
 | `config.v2`'s owner | Landed | `ServiceBuilder::config_v2(Startup, Device)` and `zenkey::config_v2`, over the service's own config contract. zenkey-build lints a contract that uses `config.v2` and generates its derived types. The owner example's `--config-v2` runs the spec's `rfcfg.v1` (#985's G2, PR #1061) |
 | `config.v2`'s tools | Missing | `zenctl config` and zengui's Config tool read `config.v1` only (#985's G3) |
-| `sx1262_config.v1` and its binding | Drafted, `chunk-g4` | `config.v2-binding.md`, `config/sx1262_config.v1.toml`; catalog `e1810014`. Written over G1's draft, so it is still to be rebased onto `config.v2` 0.1 and linted there (#985's G4) |
+| `sx1262_config.v1` and its binding | Landed | [`config.v2-binding.md`](config.v2-binding.md), [`config/sx1262_config.v1.toml`](config/sx1262_config.v1.toml), linted clean on `config.v2` 0.1; catalog `8c808dff`, index 7. `zenkey/tests/zenoh_modem_config.rs` runs the binding's §15 round trip, byte for byte (#985's G4) |
 | **The link,** `link.v2` | Landed | The policies in [`faces/`](faces/); `zenctl acl gen --face-policy … --catalog …` and `--far-config`; `zenctl check face` with `--peer-config` and `--catalog` (#988) |
 | The far side across a face | Landed | `Consumer::across`, `Client::across`, `FacePolicy::far_side`, and zenctl's `--face-policy F --face NAME`: the face's timeout, transport and re-declaration (#988's L4). A re-declare holds no lock across the network, and a failed one is retried at every check and warned of once a horizon (#1047, PR #1056) |
 | `check face` on the fork's binding | Landed | `check face` with its `--peer-config`, and `acl gen --check`, read a `zm-1.10.2-r1` router config as data, in zenoh 1.10.1's shapes and the binding's link protocols. zenoh-modem's five router blocks pass unedited (#1044, PR #1056) |
 | The readers' `wait_before_close` per binding | Missing | zenctl's defaults are zenoh 1.10.1's 5 s, and the fork's is 10 s (#1011, item 3) |
 | **Presence:** a tokenless provider found | Landed | A consumer reads absence only from a complete read (#1018, for #982) |
 | A first hop holds its instance token alone | Drafted, `chunk-h1` (text) | The runtime's `first_hop` and the tools are missing (#982's H2 and H3) |
-| A new epoch on a running service | Landed | `Service::new_epoch`, refused on a service that implements `config.v1` or `config.v2` (#1055 lifts it for `config.v1`) |
+| A new epoch on a running service | Landed | `Service::new_epoch`; on a service that implements `config.v1` or `config.v2`, a restart of its configuration (#1055, #1064) |
 | **Snapshots,** one reply per collection | Drafted, `chunk-e1` and `chunk-e3-spec` (text) | The readers, the owners and the old path's removal are missing (#977) |
 | **The measurement** of W1 and W2 on zk2c | Missing | #989 |
 
@@ -163,7 +163,7 @@ move together.
     zenoh-modem's own callers move to the generated `Client`, which writes the request form. An
     owner still reads a bare JSON request, until C4d removes the bare wire (§6).
   - `presence_loop`, which cycles a netdev's token when its ifindex moves, becomes
-    `Service::new_epoch`. It is refused on a service implementing `config.v1` until #1055 (§6).
+    `Service::new_epoch`, which restarts a `config.v1` or `config.v2` configuration (#1055, #1064).
   - `twin_alive` has no runtime twin. The README's "Tokens" maps it to a liveliness query on the
     instance key before `start`, and the doctor's `hostid-duplicate` sees two instance tokens.
 - **Uses.** `ServiceConfig::minted`, `ServiceBuilder::{new, implement, health, catalog, run_store,
@@ -264,17 +264,17 @@ move together.
   - Across RF, a far caller GETs the compact status, two SDUs, in place of the 1,286 B view's
     six. Nothing pushes either (README gap 20).
 
-**Next, on `config.v2`** (its text and its owner landed; its tools and `sx1262_config.v1` not):
+**Next, on `config.v2`** (its text, its owner and `sx1262_config.v1` landed; its tools not):
 - **Changes.**
   - One config contract per backend, written from its `Configure::schema`. `sx1262_config.v1`
-    is drafted (`chunk-g4`).
+    is the SX1262's.
   - Each lists `config.v2` and `freshness.v2` in `uses`. It declares its groups in
     `config.groups` on the state `config`, and its packed file holds the derived `Record`,
     `Set<T>`, `Control` and `Error`.
   - Each backend's `zenkey::config_v1::Device` from `config.v1` serves `config.v2` unchanged.
     The schema comes from the contract, not from `Startup`.
   - Tokens and times are the runtime's, and nothing is put on a timer (`config.v2-binding.md`
-    §13, on `chunk-g4`).
+    §13).
 - **Uses.**
   - `zk2 config derive <contract.toml>` prints the derived types for the packed file. zenkey-build
     then lints the contract and generates them.
@@ -288,10 +288,11 @@ move together.
   - `sbd-medium`, `netdev-modem`, `dlep-modem` and `mm-modem` hold text parameters, and wait for
     #979's B3 on `config.v1`.
 - **Check.** `zenkey/tests/profile_config_v2.rs` runs `scenarios-v2.md` §1 to §12 over the
-  spec's `rfcfg.v1`, and the owner example's `--config-v2` drives `rfcfg.v1` by hand. The
-  binding's §15 round trip on `sx1262_config.v1` waits for G4, and `zenctl config` for G3.
+  spec's `rfcfg.v1`, and the owner example's `--config-v2` drives `rfcfg.v1` by hand.
+  `zenkey/tests/zenoh_modem_config.rs` runs the binding's §15 round trip on `sx1262_config.v1`
+  with its bytes. `zenctl config` waits for G3.
 - **Saves.** The far-side reach change at 2,400 bit/s, each step one 220 B frame (`config.v2`
-  Appendix B; the push and the refusal from the drafted binding):
+  Appendix B; the push and the refusal from the binding, measured by its §15 round trip):
 
   | Step | `config.v1` | `config.v2` |
   |---|---|---|
@@ -429,7 +430,7 @@ policy runs `sequence = "16bit"`, and `wait_before_close` equals the lease.
   (§5).
 - **The enrollment** ([`faces/zenoh-modem.enrollment.toml`](faces/zenoh-modem.enrollment.toml))
   gives each device service `modem.v3`, `config.v1` and `health.v1`. `config.v2`'s owner is on
-  `main`. Once `sx1262_config.v1` lands (G4), `lora0` implements it there in `config.v1`'s place.
+  `main`, and `sx1262_config.v1` with it (G4): `lora0` implements it there in `config.v1`'s place.
 - **`lora0`'s host id**, `h-c2a95e41d7f0`, is made up. LoRa has no shipped router config yet.
 - **The compress layer** finds nothing in a packed payload, and its stored form costs a byte.
   #988's design asks zenoh-modem to turn it off on zk2c lanes (§1.8's tracker list).
@@ -483,7 +484,7 @@ would save them, and is missing.
 | Decision | The options | The drafts' default | Where |
 |---|---|---|---|
 | The crates' path | a publish of the zk2 crates, or a git dependency on a tag | none. No zk2 tag exists, so a git dependency pins a revision until one is cut. #929's boxes (`zenkey-model` in the lane, READMEs, stable zenoh, metadata, what 0.20 promises, whether an adopter goes first) stand before a publish | #929 |
-| Whether `modem.v3` lists `link.v2` | in #991's revision, or a face policy counted as use | keep `link.v1`: 3.3 does too. Every resource 3.2 exposes is already packed, so no plan draws `not_packed`. `link.v2` stays experimental in the profiles index meanwhile | [`link.md`](link.md), its first note; #991 |
+| Whether `modem.v3` lists `link.v2` | in #991's revision, or a face policy counted as use | keep `link.v1`: 3.3 does too. Every resource 3.2 exposes is already packed, so no plan draws `not_packed`. `link.v2` is draft in the profiles index since G4, whose `sx1262_config.v1` lists it | [`link.md`](link.md), its first note; #991 |
 | Whether a reader may reopen its session for a lost `DeclareKeyExpr` | reopen after silence, or rely on link ARQ | none. Re-declaring repairs a lost subscriber, never a lost key expression: only a reopen or link ARQ does. A reopen re-sends every declaration, non-droppable, about 44 s for 1.6 KB at SF12 | `zenkey/src/redeclare.rs`; #988's design, risk 5 |
 | #991's frame layout and LoRa leases | 3.3's three frames over one record of all 73 readings, or 3.2's nine per-group frames (#1048) at #983's cadences; SF9's lease at 480 s and SF12's at 3,600 s, or #988's 240 s and 1,080 s | 3.3's, both departing from #983's and #988's designs for the budget. 3.2's nine frames cost 401 KB a day on RF, and 164 % and 241 % of LoRa's duty at SF9 and SF12. A later revision can reverse either, but `.history` is append-only, so 3.3 stays published once merged | PR #1059; #991 |
 
@@ -507,16 +508,15 @@ A migration started today would hit each of these.
 | What it hits | What to do meanwhile | Issue |
 |---|---|---|
 | **The frame layout is not settled.** `main` has 3.2's nine frames. 3.3, in review in PR #1059, deprecates them for three over one record | Write 3.3's `frames/fast`, `slow` and `paid` once PR #1059 merges, and do not ship 3.2's | #991 |
-| **The catalog's next index.** PR #1059 appends 3.3 at index 7; `chunk-g4` appends `sx1262_config.v1` at index 6, over a catalog before 3.2's | Whichever merges second adds its entry again on the other's successor | #991, #985 |
+| **The catalog's next index.** G4 appended `sx1262_config.v1` at index 7 (`8c808dff`); PR #1059 appends 3.3 at index 7 too | PR #1059 adds its entry again on G4's successor, at index 8 | #991, #985 |
 | **No published crates,** and no zk2 tag | A git dependency on a revision, or a path | #929 |
 | **The readers' `wait_before_close` default** is zenoh 1.10.1's 5 s | Pass `--wait-before-close`, or `--face-policy` where a verb takes it | #1011 |
 | **The bare wire is still read.** An owner on `main` takes a bare request, and C4d removes it | Write every call through `zenkey::Client` or the generated `Client`, which write the request form; give zenoh-modem's ops tooling no bare request to depend on | #985 (C4d) |
-| **`config.v2` has no tools,** and `sx1262_config.v1` is drafted over G1's draft. Four backends need text | Stay on `config.v1`. Across RF, a GET of the status by grant; the view is never pushed | #985 (G3, G4), #979 |
+| **`config.v2` has no tools.** Four backends need text | Stay on `config.v1`. Across RF, a GET of the status by grant; the view is never pushed | #985 (G3, G4), #979 |
 | **No snapshots.** A seed or a re-read across RF is a reply per key, about 120 B each before its value. A 64-endpoint re-read is 14,788 B in 129 SDUs | Keep states `host`, as 3.2 and 3.3 do | #977 |
 | **No first-hop configuration** | Nothing for zenoh-modem's own owners, whose sessions are TCP on the node. A ground service across the radio pays its tokens at each reconnect | #982 |
 | **Event keys are ULIDs.** An event cannot cross on its template's prefix | Keep the four events `host` | #980 (C2) |
 | **No text in packed records** | Text stays in the JSON states, and in `config.v1` | #979 (B3) |
-| **`Service::new_epoch` is refused on a `config.v1` service.** wwan0's and dlep0's netdevs implement it, and their ifindex can move. A device's restart resets its counters, which core §1.5 makes a new instance | Build a new service for the new epoch; `config.v1` §2.12 reads it as a restart. #1055, in progress, allows the re-mint while the device runs its startup values. `config.v2` refuses it too | #1055 |
 | **zengui has no face scope,** and `zenctl telemetry` and `config` take no `--face-policy` | Set `--selector`, `--zenoh-config`, `--timeout` and `--settle` by hand (§4) | none filed |
 | **SF12 and SBD on 3.2.** `frames/link`'s 150 s horizon is below SF12's 1,800 s floor, and `frames/message` has none, so SBD shows no liveness | 3.3's `frames/slow` and `frames/paid` fix both | #991 |
 | **The transport that never came back** (W2, finding 5) | zenoh-modem's tracker. Keep nothing `block` larger than a batch on a crossing key | #988's design, §1.8 |

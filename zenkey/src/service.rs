@@ -727,7 +727,10 @@ impl ServiceBuilder {
                 c.fed_by_desired();
                 crate::desired::Configured::V1(c)
             }
-            (None, Some(c)) => crate::desired::Configured::V2(c),
+            (None, Some(c)) => {
+                c.fed_by_desired();
+                crate::desired::Configured::V2(c)
+            }
             (None, None) => {
                 return Err(Error::Contract(
                     "desired.v1 §2.16: implement config.v1 (ServiceBuilder::config_v1) or a \
@@ -2075,10 +2078,11 @@ impl Service {
     /// an owner fed through `desired.v1` ([`ServiceBuilder::desired_config`],
     /// `desired.v1` §2.16).
     ///
-    /// Refused for a service implementing `config.v2` through
-    /// [`ServiceBuilder::config_v2`]: its re-mint, a restart too (`config.v1`
-    /// §2.12, which `config.v2` keeps), is not made in place at this
-    /// version, so a restart is a new service ([`crate::config_v2`]).
+    /// A service implementing `config.v2` through
+    /// [`ServiceBuilder::config_v2`] restarts its configuration the same way
+    /// (`config.v1` §2.12, which `config.v2` keeps; #1064), with the same
+    /// refusals: its record's instance number is the new instance's run,
+    /// and its record is put under it, before its tokens (`config.v2` §2.3).
     ///
     /// A service implementing `alarms.v1` through [`ServiceBuilder::alarms`]
     /// puts every alarm it holds again from the new instance, after its
@@ -2091,14 +2095,6 @@ impl Service {
     /// with the old instance kept, writing under the new run, which its
     /// descriptor is put again stating (§3.3).
     pub async fn new_epoch(&mut self) -> Result<InstanceId> {
-        if self.config_v2.is_some() {
-            return Err(Error::Contract(
-                "config.v2: a new instance is a restart of the configuration, from its startup \
-                 values (config.v1 §2.12), not made in place at this version: close this \
-                 service and start another"
-                    .to_owned(),
-            ));
-        }
         // An author's re-puts below carry a Zenoh timestamp, which the clock
         // guard refuses (core §4.3, "Ahead"): refused here instead, before
         // the new instance's run, descriptor or electors move. An alarm's
@@ -2112,6 +2108,12 @@ impl Service {
         // and held until the new instance starts it, or refused.
         let config = self.config_v1.clone();
         let restarting = match &config {
+            Some(c) => Some(c.restarting().await?),
+            None => None,
+        };
+        // config.v2 keeps it (#1064).
+        let config_v2 = self.config_v2.clone();
+        let restarting_v2 = match &config_v2 {
             Some(c) => Some(c.restarting().await?),
             None => None,
         };
@@ -2133,6 +2135,10 @@ impl Service {
         // its run, before its tokens.
         if let Some(r) = restarting {
             r.start(&next.to_string()).await;
+        }
+        // config.v2 §2.3, §2.12: its record, its instance number the run.
+        if let Some(r) = restarting_v2 {
+            r.start().await;
         }
         // alarms.v1 §2.9: each alarm kept put again from the new instance,
         // under its run, before its new instance token. desired.v1 §2.11:

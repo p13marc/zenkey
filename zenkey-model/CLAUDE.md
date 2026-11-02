@@ -296,7 +296,7 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   each counter series' consecutive samples. `tests/profiles.rs` runs
   `telemetry/conformance/v2/{declarations,readings,continuity}.json` and loads
   `conformance/contracts/meterframe.v1.toml`, the scenarios' contract.
-  `config.v2` (#985 G1, text 0.1, experimental) is `config::v2`
+  `config.v2` (#985 G1, text 0.1, draft since G4) is `config::v2`
   (`src/config/v2.rs`): `Groups::read(annotation, packed files)` (§2.2's
   reasons in order), `Derived::of` (`Record`, `Set<T>`, `Control`,
   `Error`; `to_text` is what `zk2 config derive <contract.toml>` prints,
@@ -311,6 +311,8 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   the record put whenever its bytes change, the reply under the as-of
   mark, events after, a key's first answer replayed byte for byte; a
   `Mint` stamps, which the runtime implements over its minter (G2).
+  `restart` takes a new run; `restart_in`, a re-mint's, the run the new
+  instance took already (#1064); `restart_plan` is config.v1's.
   `tests/profiles/config_v2.rs`, a module of `profiles.rs`, runs the six
   `v2/` fixtures and loads `rfcfg.v1.toml`.
   It depends on `zenoh-keyexpr` and no other zenoh crate
@@ -326,8 +328,9 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   and `annotations_changed` on `HOST_AGAIN` alone (#983 T4: `modem.v3`
   3.2's four `link` streams back on `host`, their readings in
   `frames/link`).
-  zenoh-modem's catalog appends each new `modem.v3`, `config.v1` and
-  `health.v1` revision (`zk2 catalog add`). After an intended change,
+  zenoh-modem's catalog appends each new `modem.v3`, `config.v1`,
+  `health.v1` and `config/sx1262_config.v1` revision (`zk2 catalog add`;
+  `cli.rs` checks `zk2 config derive` against its packed file, #985 G4). After an intended change,
   run `cargo run -p zenkey-model --bin zk2 -- contract bundle <file>
   --history examples/zk2/.history`; the history is append-only.
   `budget::DEFAULT_LEASE`, `DEFAULT_KEEP_ALIVE` and

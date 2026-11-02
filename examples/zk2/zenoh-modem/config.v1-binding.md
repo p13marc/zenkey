@@ -1,5 +1,11 @@
 # `config.v1`, bound to zenoh-modem (#623)
 
+> **For the SX1262, superseded by [`config.v2-binding.md`](config.v2-binding.md) (#985 G4).**
+> This file is kept as the record it was. `config.v2` answers its gaps 8 and 9 with one packed
+> record, and its findings 1 to 5 close there. The backends whose configuration holds text
+> (`sbd-medium`, `netdev-modem`, `dlep-modem`, `mm-modem`) stay on `config.v1` until a packed
+> format carries text.
+
 zenoh-modem's configuration plane is zenkey v1's RFC 05 §5.1, implemented whole by
 `modem-mgmt/src/config.rs`, with each device declaring its own schema (`modem_device::Configure`).
 r3.2 claims `config.v1` takes those semantics whole (`docs/zk2/architecture.md:133`):

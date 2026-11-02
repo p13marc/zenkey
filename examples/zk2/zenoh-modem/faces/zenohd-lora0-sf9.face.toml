@@ -16,7 +16,7 @@ profile  = "link.v2"
 system   = "h-c2a95e41d7f0"
 services = ["lora0"]
 binding  = "zm-1.10.2-r1"
-catalog  = "ab76ec37"
+catalog  = "8c808dff"
 
 [transport]
 lease_ms             = 240000

@@ -39,16 +39,38 @@
 //!
 //! **The device** is `config.v1`'s [`Device`]: the acts are config.v1's,
 //! and a value is an integer or a boolean. **A restart is a new service**,
-//! as with `config.v1`: a new instance number, every key forgotten, and
-//! [`crate::Service::new_epoch`] refused while it runs.
+//! as with `config.v1`: a new instance number, every key forgotten.
+//!
+//! **A re-mint is a restart** (v1 §2.12, which §2.12 keeps; #1064), as
+//! [`crate::config_v1`]'s is: [`crate::Service::new_epoch`] on a running
+//! service restarts its configuration in the new instance, with its device
+//! running its startup values first:
+//!
+//! ```text
+//! new_epoch ─▶ Configuration::restarting: a pending change cancelled, as `cancel` does
+//!                 (its undo, its record, its event); then Owner::restart_plan, each
+//!                 parameter off its startup value ─▶ Device::restore_startup, once, if any;
+//!                 the owner held
+//!          ─▶ the new instance's descriptor and run ─▶ Restarting::start: Owner::restart_in
+//!                 (its instance number the new run, revision 0, nothing pending, no last
+//!                 change, no key held, the last hour's events kept), the record put ─▶ the tokens
+//! ```
+//!
+//! Refused, the instance running on, while an act is in flight, when a
+//! parameter set at runtime starts unknown, when the device refuses to
+//! return (by default it cannot), and for an owner fed through `desired.v1`
+//! (`desired.v1` §2.16). A cancel made before a refusal stays made. A late
+//! confirm with a token of the old instance is `not_found`: its run is the
+//! old instance's. A new run within the instance
+//! ([`crate::Service::new_run`], core §4.3) restarts nothing.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
 use std::time::{Duration, SystemTime};
 
 use zenkey_model::config::v2::{self, Answer, Converge, Mint, Output, Step};
-use zenkey_model::config::{self as model, Act, DeviceResult, Source, Time};
+use zenkey_model::config::{self as model, Act, DeviceResult, Restore, Source, Time};
 use zenkey_model::descriptor::Cause;
 use zenkey_model::grammar::IfaceId;
 use zenkey_model::template::Bindings;
@@ -59,7 +81,9 @@ pub use zenkey_model::config::v2::{Interface, State};
 pub use zenkey_model::config::{Class, DesiredConfig, DesiredReport, Kind, Schema, Value};
 
 use crate::call::OpError;
-use crate::config_v1::{DESIRED_WAIT_IN_FLIGHT, DESIRED_WAIT_PAST_DEADLINE, DesiredEnd};
+use crate::config_v1::{
+    DESIRED_WAIT_IN_FLIGHT, DESIRED_WAIT_PAST_DEADLINE, DesiredEnd, RESTART_TRIES,
+};
 use crate::error::{Error, Result};
 use crate::operation::{Call, OperationServer};
 use crate::service::ServiceBuilder;
@@ -246,6 +270,59 @@ impl Mint for RunMint<'_> {
     }
 }
 
+/// A configuration readied to restart in a new instance (v1 §2.12, which
+/// §2.12 keeps), from [`Configuration::restarting`]: nothing pending, its
+/// device at its startup values, its owner held so that no call lands
+/// before [`Restarting::start`]. Dropped unstarted (the re-mint failed after
+/// it), the old instance runs on, and says so.
+pub(crate) struct Restarting<'a> {
+    inner: &'a Inner,
+    core: Option<tokio::sync::MutexGuard<'a, Core>>,
+}
+
+impl Restarting<'_> {
+    /// The configuration restarts in the new instance (§2.12), whose run
+    /// the service took already: its instance number that run, from its
+    /// startup values and persisted layer, revision 0, nothing pending, no
+    /// last change, no idempotency key held, the last hour's change events
+    /// still counted (§2.17), and the next token's counter drawn afresh
+    /// (§2.6); a document given by [`Configuration::set_desired`] acted on
+    /// again, as a restart's is. Its record is put now, under that run,
+    /// before the new instance's tokens (§2.3).
+    pub(crate) async fn start(mut self) {
+        let Some(mut c) = self.core.take() else {
+            return;
+        };
+        let (owner, out) = c.with(&self.inner.minter, |o, m| o.restart_in(m));
+        let instance = owner.instance();
+        c.owner = owner;
+        c.acted = None;
+        c.named.clear();
+        c.take(out, None);
+        self.inner.instance.store(instance, Ordering::Relaxed);
+        drop(c);
+        tracing::info!(
+            service = %self.inner.service, instance,
+            "config.v2: restarted in a new instance, from its startup values (config.v1 §2.12)"
+        );
+        self.inner.flush().await;
+        self.inner.wake.notify_one();
+    }
+}
+
+impl Drop for Restarting<'_> {
+    fn drop(&mut self) {
+        if self.core.is_some() {
+            tracing::warn!(
+                service = %self.inner.service, instance = self.inner.instance(),
+                "config.v2: the re-mint failed after the device returned to its startup values; \
+                 the record may name values it no longer runs: close this service and start \
+                 another"
+            );
+        }
+    }
+}
+
 /// One write an [`Output`] owes the bus, in its order.
 enum Write {
     /// The record, as stamped.
@@ -318,7 +395,12 @@ struct Inner {
     iface: IfaceId,
     /// The owner's address, `<system>/<service>`.
     service: String,
-    instance: u32,
+    /// The instance number (§2.3), moved at a re-mint
+    /// ([`Restarting::start`]).
+    instance: AtomicU32,
+    /// Fed through `desired.v1` ([`crate::ServiceBuilder::desired_config`]):
+    /// its re-mint is refused (`desired.v1` §2.16).
+    fed: AtomicBool,
     interface: Interface,
     /// config.v1's schema of the groups, the allowlist's `writable` set:
     /// what the device's words are redacted by.
@@ -473,7 +555,8 @@ impl Configuration {
         let inner = Arc::new(Inner {
             iface: iface.clone(),
             service: addr.to_string(),
-            instance,
+            instance: AtomicU32::new(instance),
+            fed: AtomicBool::new(false),
             interface,
             schema,
             set_tags,
@@ -580,7 +663,105 @@ impl Configuration {
     /// The instance number (§2.3): the run the instance first wrote under.
     #[must_use]
     pub fn instance(&self) -> u32 {
-        self.inner.instance
+        self.inner.instance()
+    }
+
+    /// Fed through `desired.v1` from now on
+    /// ([`crate::ServiceBuilder::desired_config`]).
+    pub(crate) fn fed_by_desired(&self) {
+        self.inner.fed.store(true, Ordering::Relaxed);
+    }
+
+    /// Readies a re-mint (v1 §2.12, "A re-mint is a restart", which §2.12
+    /// keeps; [`crate::Service::new_epoch`]), as
+    /// [`crate::config_v1::Configuration`]'s does: a pending change
+    /// cancelled as `cancel` does, its record and its event written; the
+    /// device returned to its startup values where a runtime change left a
+    /// parameter elsewhere ([`Device::restore_startup`]); then the owner
+    /// held, so that no call lands until the new instance starts it
+    /// ([`Restarting::start`]).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Contract`], the instance running on (a cancel made stays
+    /// made): fed through `desired.v1`; an act in flight (§2.7); a
+    /// parameter set at runtime that starts unknown; the device's refusal
+    /// to return; a change pending again at every try.
+    pub(crate) async fn restarting(&self) -> Result<Restarting<'_>> {
+        let i = &*self.inner;
+        if i.fed.load(Ordering::Relaxed) {
+            return Err(Error::Contract(
+                "config.v2: a re-mint is a restart (config.v1 §2.12, which config.v2 keeps), \
+                 which an owner fed through desired.v1 refuses while it runs (desired.v1 \
+                 §2.16): close this service and start another"
+                    .to_owned(),
+            ));
+        }
+        // A call can start another change while the cancel acts, so it is
+        // tried a few times.
+        for _ in 0..RESTART_TRIES {
+            let mut c = i.core.lock().await;
+            if c.owner.in_flight() {
+                return Err(Error::Contract(
+                    "config.v2: an act is in flight (config.v1 §2.7), so the re-mint is \
+                     refused: try again once it ends"
+                        .to_owned(),
+                ));
+            }
+            let Some(token) = c.owner.state().pending.map(|p| p.token) else {
+                let plan = c.owner.restart_plan().map_err(|(g, p)| {
+                    Error::Contract(format!(
+                        "config.v1 §2.12: {g}.{p} runs a runtime value and starts unknown, so \
+                         nothing returns the device to its startup values: close this service \
+                         and start another"
+                    ))
+                })?;
+                if !plan.is_empty() {
+                    i.restore(&plan).await?;
+                }
+                return Ok(Restarting {
+                    inner: i,
+                    core: Some(c),
+                });
+            };
+            tracing::info!(
+                service = %i.service, instance = i.instance(),
+                token,
+                "config.v2: the pending change is cancelled, for a re-mint (config.v1 §2.12)"
+            );
+            let control = v2::Control {
+                token,
+                confirm_s: None,
+            };
+            let payload = i.interface.encode_control(&control).map_err(|e| {
+                Error::Contract(format!(
+                    "config.v2: the cancel of {token} does not encode: {}",
+                    e.token()
+                ))
+            })?;
+            let now = i.now();
+            let step = c.with(&i.minter, |o, m| {
+                o.cancel(now, &payload, &model::Call::default(), m)
+            });
+            drop(c);
+            let reply = i.drive(step, None).await;
+            i.flush().await;
+            i.wake.notify_one();
+            if let Some(v2::Reply {
+                answer: Answer::Error { code, .. },
+                ..
+            }) = reply
+            {
+                return Err(Error::Contract(format!(
+                    "config.v2: the pending change was not cancelled for a re-mint ({})",
+                    code.as_str()
+                )));
+            }
+        }
+        Err(Error::Contract(
+            "config.v2: a change was pending again at every try, so the re-mint is refused"
+                .to_owned(),
+        ))
     }
 
     /// The record as the owner holds it now (§2.3). Between an act's start
@@ -733,6 +914,43 @@ impl Configuration {
 }
 
 impl Inner {
+    /// The instance number it runs under now.
+    fn instance(&self) -> u32 {
+        self.instance.load(Ordering::Relaxed)
+    }
+
+    /// [`Device::restore_startup`], on a task of its own, as an act is
+    /// ([`Inner::perform`]): its refusal, or its panic, refuses the re-mint.
+    async fn restore(&self, plan: &[Restore]) -> Result<()> {
+        tracing::info!(
+            service = %self.service, instance = self.instance(),
+            parameters = plan.len(),
+            "config.v2: the device returns to its startup values, for a re-mint (config.v1 §2.12)"
+        );
+        let device = Arc::clone(&self.device);
+        let owned = plan.to_vec();
+        let joined = tokio::spawn(async move { device.restore_startup(&owned).await }).await;
+        let words = match joined {
+            Ok(Ok(())) => return Ok(()),
+            Ok(Err(words)) => words,
+            Err(e) => format!("the device's act did not complete: {e}"),
+        };
+        let act = Act::Undo {
+            restore: plan.to_vec(),
+        };
+        let words = model::device_words(&self.schema, &act, &words).unwrap_or(model::REDACTED);
+        tracing::warn!(
+            service = %self.service, instance = self.instance(),
+            words = %words,
+            "config.v2: the device did not return to its startup values, so the re-mint is \
+             refused (config.v1 §2.12)"
+        );
+        Err(Error::Contract(format!(
+            "config.v1 §2.12: the device did not return to its startup values ({words}), so \
+             the re-mint is refused"
+        )))
+    }
+
     fn now(&self) -> Time {
         let t = crate::config_v1::time_of(SystemTime::now());
         Time::from_millis(
@@ -746,13 +964,13 @@ impl Inner {
     async fn perform(&self, act: &Act) -> DeviceResult {
         match act {
             Act::Apply { group, values } => tracing::info!(
-                service = %self.service, instance = self.instance,
+                service = %self.service, instance = self.instance(),
                 group = %group,
                 parameters = values.len(),
                 "config.v2: apply"
             ),
             Act::Undo { restore } => tracing::info!(
-                service = %self.service, instance = self.instance,
+                service = %self.service, instance = self.instance(),
                 parameters = restore.len(),
                 "config.v2: undo"
             ),
@@ -761,7 +979,7 @@ impl Inner {
         if let DeviceResult::Refused(words) | DeviceResult::Failed { words, .. } = &result {
             let words = model::device_words(&self.schema, act, words).unwrap_or(model::REDACTED);
             tracing::warn!(
-                service = %self.service, instance = self.instance,
+                service = %self.service, instance = self.instance(),
                 words = %words,
                 "config.v2: the device {} (config.v1 §2.9, §2.11)",
                 if matches!(act, Act::Apply { .. }) {
@@ -803,13 +1021,13 @@ impl Inner {
             match w {
                 Write::Put(p) => {
                     if let Err(e) = self.record.put_sealed(p.stamp, p.payload).await {
-                        tracing::warn!(service = %self.service, instance = self.instance, "config.v2: the record was not put: {e}");
+                        tracing::warn!(service = %self.service, instance = self.instance(), "config.v2: the record was not put: {e}");
                     }
                 }
                 Write::Reply(call, r) => {
                     if let Answer::Error { code, cause, .. } = &r.answer {
                         tracing::info!(
-                            service = %self.service, instance = self.instance,
+                            service = %self.service, instance = self.instance(),
                             code = code.as_str(),
                             cause = cause.map(|c| c.as_str()).unwrap_or("-"),
                             "config.v2: refused"
@@ -820,7 +1038,7 @@ impl Inner {
                         Answer::Error { .. } => call.refuse_form(r.payload).await,
                     };
                     if let Err(e) = sent {
-                        tracing::warn!(service = %self.service, instance = self.instance, "config.v2: a reply was not sent: {e}");
+                        tracing::warn!(service = %self.service, instance = self.instance(), "config.v2: a reply was not sent: {e}");
                     }
                 }
                 Write::Event(p) => {
@@ -864,7 +1082,7 @@ impl Inner {
             _ => "-".to_owned(),
         };
         tracing::info!(
-            service = %self.service, instance = self.instance,
+            service = %self.service, instance = self.instance(),
             group = %group,
             request = %logged,
             actor = who.actor.as_deref().unwrap_or("-"),
@@ -891,7 +1109,7 @@ impl Inner {
         let payload = Self::payload(&call, self.control_tag);
         let who = crate::config_v1::claimed(&call);
         tracing::info!(
-            service = %self.service, instance = self.instance,
+            service = %self.service, instance = self.instance(),
             token = self.interface.decode_control(&payload).map(|c| c.token).unwrap_or_default(),
             actor = who.actor.as_deref().unwrap_or("-"),
             request_id = who.request_id.as_deref().unwrap_or("-"),
@@ -927,7 +1145,7 @@ impl Inner {
         }
         let payload = Self::payload(&call, self.control_tag);
         tracing::info!(
-            service = %self.service, instance = self.instance,
+            service = %self.service, instance = self.instance(),
             token = self.interface.decode_control(&payload).map(|c| c.token).unwrap_or_default(),
             "config.v2: persist"
         );
@@ -941,7 +1159,7 @@ impl Inner {
                 Ok(plan) => {
                     if let Err(why) = self.device.persist(&plan.entries).await {
                         tracing::warn!(
-                            service = %self.service, instance = self.instance,
+                            service = %self.service, instance = self.instance(),
                             "config.v2: the persisted layer was not written: {why}"
                         );
                         return Err(OpError::internal(format!(
@@ -985,7 +1203,7 @@ impl Inner {
             Ok(p) => p,
             Err(e) => {
                 tracing::warn!(
-                    service = %self.service, instance = self.instance,
+                    service = %self.service, instance = self.instance(),
                     revision,
                     "config.v2: a desired document's set of {group} does not encode: {}",
                     e.token()
@@ -1060,7 +1278,7 @@ impl Inner {
                         });
                         if let Some(why) = why {
                             tracing::warn!(
-                                service = %self.service, instance = self.instance,
+                                service = %self.service, instance = self.instance(),
                                 revision = doc.revision,
                                 "config.v2: a desired document gave up waiting (desired.v1): {why}"
                             );
@@ -1080,7 +1298,7 @@ impl Inner {
                     }
                     Converge::Refused(r) | Converge::Converged(r) => {
                         tracing::info!(
-                            service = %self.service, instance = self.instance,
+                            service = %self.service, instance = self.instance(),
                             revision = doc.revision,
                             report = %serde_json::to_string(&r).unwrap_or_default(),
                             "config.v2: a desired document acted on (desired.v1)"
@@ -1109,7 +1327,7 @@ impl Inner {
             if let Some(code) = code {
                 let r = Self::failed(doc.revision, &group, code);
                 tracing::info!(
-                    service = %self.service, instance = self.instance,
+                    service = %self.service, instance = self.instance(),
                     revision = doc.revision,
                     report = %serde_json::to_string(&r).unwrap_or_default(),
                     "config.v2: a desired document failed (desired.v1)"
@@ -1139,7 +1357,7 @@ impl Inner {
                     Converge::Wait => return,
                     Converge::Refused(report) | Converge::Converged(report) => {
                         tracing::info!(
-                            service = %self.service, instance = self.instance,
+                            service = %self.service, instance = self.instance(),
                             revision = doc.revision,
                             report = %serde_json::to_string(&report).unwrap_or_default(),
                             "config.v2: a desired document acted on"
@@ -1166,7 +1384,7 @@ impl Inner {
             if let Some(code) = code {
                 let report = Self::failed(revision, &group, code);
                 tracing::info!(
-                    service = %self.service, instance = self.instance,
+                    service = %self.service, instance = self.instance(),
                     revision,
                     report = %serde_json::to_string(&report).unwrap_or_default(),
                     "config.v2: a desired document failed"
