@@ -8960,7 +8960,7 @@ async fn raw_frame(
 }
 
 /// A frame series' member row: its key and its field.
-fn series_row<'a>(doc: &'a Value, template: &str, field: &str) -> Value {
+fn series_row(doc: &Value, template: &str, field: &str) -> Value {
     let key = format!("zk2/lab/meterframe/meterframe.v1/stream/{template}");
     rows_of(doc, "member")
         .into_iter()

@@ -892,7 +892,7 @@ impl TelemetryBook {
             .map(|(k, m)| (k, None, m))
             .chain(self.series.iter().map(|((k, i), m)| (k, *i, m)))
             .collect();
-        all.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+        all.sort_by_key(|(k, i, _)| (*k, *i));
         all.into_iter().map(|(k, _, m)| (k, m))
     }
 
