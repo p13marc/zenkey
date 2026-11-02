@@ -5,8 +5,8 @@
 [interface]
 name  = "configs"
 major = 1
-minor = 0
-uses  = ["desired.v1", "freshness.v1"]
+minor = 1
+uses  = ["desired.v1", "freshness.v2"]
 
 [schemas]
 jsonschema = ["schemas/desired.json"]
