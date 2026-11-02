@@ -214,6 +214,10 @@ fn the_value_names_the_zk2_read_that_produced_it() {
             .is_ok()
     );
     assert!(
+        ui.find("confirmed by heartbeat (freshness.v2)").is_ok(),
+        "tc.netif.v1 uses freshness.v2 since #978's F5: the stamp is the last confirmation"
+    );
+    assert!(
         ui.find(zengui::view::detail::hex_dump(body)).is_ok(),
         "the owner's reply, in hex"
     );
