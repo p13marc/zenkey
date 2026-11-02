@@ -2421,8 +2421,8 @@ async fn a_profiles_owner_is_refused_on_a_governed_interface() {
         .join("../spec/profiles/alarms/alarms.v1.toml");
     let text = std::fs::read_to_string(&path).unwrap();
     let governed = text.replace(
-        "uses    = [\"freshness.v1\"]",
-        "uses    = [\"freshness.v1\", \"redundancy.v1\"]",
+        "uses    = [\"freshness.v2\"]",
+        "uses    = [\"freshness.v2\", \"redundancy.v1\"]",
     );
     assert_ne!(governed, text);
     let l = zenkey::model::contract::load_str(&governed, path.parent().unwrap(), None);
