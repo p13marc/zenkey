@@ -25,10 +25,10 @@
 //! - **A standby sends none**: the writer is declared through the covered
 //!   interface's gate, so a governed interface's heartbeat goes out only
 //!   while its instance serves it (`redundancy.v1` §2.4).
-//! - **The clock guard** (v2 §2.10): while it holds the owner's state
-//!   writes, each heartbeat vouches for nothing and says its time is
-//!   unknown, so the members go stale by design, as `freshness.v1`'s re-puts
-//!   stop.
+//! - **The clock guard** (v2 §2.10, #978's F6): it holds no write of a
+//!   covered member, which carries no Zenoh timestamp, so each heartbeat
+//!   vouches as at any other time. Its time is unknown while the guard
+//!   holds: the owner's clock is ahead, and the time is its word of it.
 //! - **The time** is under the deployment epoch, 0 until #980's catalog
 //!   carries one (core §7.6), as a packed record's `time` fields are.
 
@@ -113,13 +113,13 @@ impl Beat {
         let Ok(admitted) = self.writer.serving().await else {
             return;
         };
-        let held = self.minter.is_ahead();
         // One instant, taken before the put: the body's time, and the last
         // confirmation the replies of each member it vouches for carry
         // (S2), so a reply never claims a confirmation later than the
-        // heartbeat's.
+        // heartbeat's. While the clock guard holds, the time is unknown
+        // (v2 §2.10), and the replies' stamp is from the clock ahead.
         let at = self.minter.time();
-        let time = if held {
+        let time = if self.minter.is_ahead() {
             Time::Unknown
         } else {
             let ms = at
@@ -130,7 +130,7 @@ impl Beat {
             Time::from_unix_ms(ms, EPOCH).unwrap_or(Time::Unknown)
         };
         let iface = self.layout.iface.to_string();
-        let Some((hb, vouched)) = self.store.heartbeat(&iface, &self.exposed, time, !held) else {
+        let Some((hb, vouched)) = self.store.heartbeat(&iface, &self.exposed, time) else {
             return;
         };
         // The body before the seq: a heartbeat that cannot be written takes

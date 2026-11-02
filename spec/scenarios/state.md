@@ -174,10 +174,15 @@ window": wrong without replication).*
      arrived last, until rev 12.
 6. **Ahead.** The owner's clock runs 2 s ahead, beyond the router's HLC
    delta, and it holds a subscription to a router-stamped heartbeat. It
-   detects the drift and stops writing state. Where it implements
-   `health.v1`, it reports the drift as a `faults` sample with code
-   `clock_ahead`, not through its status, which is state
-   (`profiles/health/scenarios.md` §4).
+   serves §1's `status` too, which core §4.3's table lists. It detects
+   the drift, then tries a put and a delete of `status`, and of a plan.
+   - `status`'s put and delete are refused: each would carry a Zenoh
+     timestamp.
+   - The plan's put and delete go on, under the in-band stamp alone:
+     `plans/{vehicle}` is on no row of the table.
+   - Where it implements `health.v1`, it reports the drift as a `faults`
+     sample with code `clock_ahead`. Its status, which carries no Zenoh
+     timestamp, is not held (`profiles/health/scenarios.md` §4).
 
 *Spike S12: with a clock 2 s ahead, the next right-clocked write looked
 stale. It also showed rev 14 rejected as stale after a restart without a
@@ -188,7 +193,7 @@ which a consumer accepts whatever its clock.*
 `s7_a_run_record_persists_across_a_restart`,
 `s7_no_record_takes_a_random_32_bit_run` and
 `s7_the_run_changes_before_the_seq_wraps`, and step 6 as
-`s7_an_owner_ahead_stops_writing_state`. Steps 4 and 5 are
+`s7_an_owner_ahead_stops_its_timed_state_writes`. Steps 4 and 5 are
 `s7_late_joiners_across_runs` and
 `s7_late_joiners_across_runs_inside_the_seed`: the consumer through
 `ValueOrder`, the tool's merge beside it. The fleet's two seeded

@@ -2004,9 +2004,10 @@ impl Service {
     /// puts every alarm it holds again from the new instance, after its
     /// descriptor and before its tokens (`alarms.v1` §2.9), and an author of
     /// `desired.v1` documents every document it keeps, and every delete
-    /// within its window (`desired.v1` §2.11). Such a service's new epoch
-    /// is refused while the clock guard holds ([`Error::ClockAhead`]),
-    /// nothing changed. A re-put that fails otherwise returns its error
+    /// within its window (`desired.v1` §2.11). An author's new epoch is
+    /// refused while the clock guard holds ([`Error::ClockAhead`]), nothing
+    /// changed: a document carries a Zenoh timestamp. An alarm carries none,
+    /// so the guard holds no alarm's re-put (core §4.3, #978's F6). A re-put that fails otherwise returns its error
     /// with the old instance kept, writing under the new run, which its
     /// descriptor is put again stating (§3.3).
     pub async fn new_epoch(&mut self) -> Result<InstanceId> {
@@ -2017,10 +2018,12 @@ impl Service {
                     .to_owned(),
             ));
         }
-        // The re-puts below are state writes, which the clock guard refuses
-        // (core §4.3, "Ahead"): refused here instead, before the new
-        // instance's run, descriptor or electors move.
-        if (self.alarms.is_some() || !self.desired_authors.is_empty()) && self.minter.is_ahead() {
+        // An author's re-puts below carry a Zenoh timestamp, which the clock
+        // guard refuses (core §4.3, "Ahead"): refused here instead, before
+        // the new instance's run, descriptor or electors move. An alarm's
+        // carry none, unless the session stamps every put (§8.2).
+        let timed_alarms = self.alarms.is_some() && self.minter.session_timestamping();
+        if (timed_alarms || !self.desired_authors.is_empty()) && self.minter.is_ahead() {
             return Err(Error::ClockAhead);
         }
         let next = mint();

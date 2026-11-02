@@ -987,7 +987,8 @@ pub(crate) enum Command {
     /// unhealthy at its level, by its status or a current check worse than
     /// it; stale, which is never FAILED and never down); does its status
     /// agree with its checks (a break seen in both readings is the finding);
-    /// is its clock ahead (a clock_ahead fault no confirmation followed);
+    /// is its clock ahead (a clock_ahead fault no heartbeat with its time
+    /// known followed);
     /// and the roll-up, the worst established level with every verdict
     /// counted apart. An absent service is not asked — presence's word, not
     /// a level — and an archive's status for it is shown last-known, never

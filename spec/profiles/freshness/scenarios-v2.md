@@ -113,9 +113,10 @@ named after it).
 2. The owner clears `status`'s bit. S listens 4 s.
 3. The owner sets it again. S listens 2 s.
 4. A second owner, `lab/ahead`, its clock 2 s ahead of R1's, watches a key
-   that a client of R1 puts, stamped by R1. Once its guard holds its
-   writes, S2, a subscriber of `lab/ahead`'s `status` and heartbeat,
-   listens 4 s, and H2 reads its heartbeats.
+   that a client of R1 puts, stamped by R1. It puts `status` = `up`. Once
+   its guard holds, it puts `status` = `still up`. S2, a subscriber of
+   `lab/ahead`'s `status` and heartbeat, listens 4 s, and H2 reads its
+   heartbeats. Then G GETs `lab/ahead`'s `status`.
 5. The first owner closes its service. S listens 3 s.
 
 **Expected.**
@@ -124,10 +125,13 @@ named after it).
   stale at once. It judges it stale more than 2 s after the last
   heartbeat that vouched for it.
 - **Step 3.** S judges `status` fresh again from the next heartbeat.
-- **Step 4.** H2 still hears heartbeats while the guard holds, each bit
-  clear and the time unknown, all 42 bits set. Each keeps its map,
-  `1 0 1`, and `status`'s digest, its put's stamp's (§2.10). S2 judges
-  `status` stale more than 2 s after the guard held.
+- **Step 4.** The second put goes on: it carries no Zenoh timestamp
+  (§2.10). H2 hears heartbeats while the guard holds, the time unknown,
+  all 42 bits set. Each has its map, `1 0 1`, vouches for `status`, and
+  holds `status`'s digest over the second put's stamp. S2 judges `status`
+  fresh 4 s on, past its horizon. G's reply carries the owner's stamp
+  from the clock ahead, ahead of G's clock beyond the delta. G judges
+  `status` unobservable (v1 §2.6's band).
 - **Step 5.** A silent heartbeat: S judges `status` stale more than 2 s
   after the last heartbeat. It never reports the owner down.
 

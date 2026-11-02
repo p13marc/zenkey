@@ -57,7 +57,12 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   `[transport]`, `FacePlan::reply_timeout_ms`, the lints
   `transport_missing` … `no_arq` (`keep_alive_flaps` exact in
   `num-bigint`), and `StatedTransport`, `check_transport` and
-  `check_catalog`/`catalog_id` for v2 §2.19), `alarms.v1`'s (`alarms`,
+  `check_catalog`/`catalog_id` for v2 §2.19), `health.v1`'s §5 clock
+  question (`health::clock_ahead`, text 0.9, #978 F6: over `Heard`'s
+  `Heartbeat` (time known), `HeartbeatHeld`, `StatusPut`, a fault; yes on
+  a fault no `Heartbeat` followed, no when the last heartbeat is
+  `Heartbeat`, else `time_unknown` or `nothing_heard`; `clock.json`),
+  `alarms.v1`'s (`alarms`,
   #800 AA: the key recipe byte for
   byte ZenSight's — `host` and `host.*` removed first, labels by name then
   value in byte order, FNV-1a 64 — as the strict `alert_key`, the public

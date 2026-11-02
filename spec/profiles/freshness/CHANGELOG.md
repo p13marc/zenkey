@@ -5,6 +5,43 @@ entry naming its text. Each entry records what changed, what deliberately
 did not, and why. A breaking change is a new major, a new file, never an
 entry here ([`../README.md`](../README.md)).
 
+## `v2.md` 0.4 — 2026-11-02: a clock ahead holds no confirmation (#978)
+
+Core 0.88 (#978's F6) narrows its clock guard. An owner whose clock is
+ahead of its router stops only the state writes that carry a Zenoh
+timestamp. A member of this text carries none on its puts (§2.4), so the
+guard holds none of its writes. This text, written against core 0.88,
+follows.
+
+**Changed: §2.10.**
+- **Before:** while the guard holds, an owner MUST NOT vouch for any
+  member, and its heartbeat's time is unknown. Every bit is clear, and
+  the members go stale, by design.
+- **Now:** its heartbeats go on vouching as at any other time, and it
+  MUST write all ones as their time while the guard holds. `[Sc: §2]`
+  A subscriber ages a member on its own clock, which the owner's does
+  not move.
+- **Its replies** carry a last confirmation from the clock ahead. A
+  GET reader whose clock is right reads a fresh one as ahead of its
+  clock beyond the delta: unobservable, by v1 §2.6's band.
+- **When the guard releases,** the next heartbeat's time is known again,
+  where the next heartbeat vouched again.
+- **§2.4's time** says all ones are what a held guard writes, and
+  Appendix A gains the row.
+
+**`scenarios-v2.md` §2, step 4.** The owner `lab/ahead` puts `status`
+again once its guard holds, and the put goes on. H2 hears each heartbeat
+vouch for `status`, its time unknown, its digest over that put. S2 judges
+`status` fresh 4 s on, past its horizon. G, on the deployment's word,
+judges the reply unobservable, its stamp ahead of G's clock.
+
+**Deliberately not changed.**
+- **The body:** a time of all ones is §7.5's unknown, as before. No
+  fixture, contract or fingerprint moves.
+- **`freshness.v1` §2.10:** a v1 member is re-put with a Zenoh timestamp,
+  which the guard holds, so it goes stale as before.
+- **The reply's stamp** is not held: holding it would break core S2.
+
 ## `v1.md` experimental — 2026-11-02: no user left (#978)
 
 The text's status moves from `draft` to `experimental`, the status of a

@@ -25,8 +25,8 @@
 //! | §2.3 never deleted while the service runs | no call deletes it; closing the service leaves it |
 //! | §2.3 checks on change, deleted when retired, at most 64 | [`Health::set_check`] puts only a change; [`Health::retire_check`] deletes; the 65th is refused, or past a lowered bound |
 //! | §2.3 faults as occurrences | [`Health::fault`]: one sample each, on the stream, with the contract's QoS |
-//! | §2.5 `clock_ahead` | on the guard's first hold, again every status interval (28.5 s, the status's confirmation period, [`StateWriter::confirm_period`]) while it holds, none after it releases; the `detail` names the offset |
-//! | §2.5 the status stale, then confirmed again | while the guard holds, every state call is refused ([`Error::ClockAhead`]) and each heartbeat vouches for nothing (`freshness.v2` §2.10); once it releases, the next heartbeat vouches for the status again |
+//! | §2.5 `clock_ahead` | on the guard's first hold, again every period of the heartbeat covering `health.v1` (28.5 s, [`crate::heartbeat::period`]) while it holds, none after it releases; the `detail` names the offset |
+//! | §2.5 the status not held | the guard holds no call: the status and the checks carry no Zenoh timestamp (core §4.3, "Ahead"; #978's F6), and the heartbeat goes on vouching for the status, its time unknown while the guard holds (`freshness.v2` §2.10) |
 //! | §2.6 `UNSPECIFIED` | the status only at start; a check only through [`Health::set_check_unknown`] |
 //! | §2.10 fault codes | an application's code in the form, or refused; the profile's codes are the runtime's |
 //!
@@ -279,11 +279,13 @@ impl Effective {
 /// [`crate::Service::health`] once it runs.
 ///
 /// A clone is the same handle. Calls are serialized: each one finishes its
-/// puts, in §2.2's order, before the next begins. While the clock guard
-/// holds state writes (§2.5), the calls that put state return
-/// [`Error::ClockAhead`]. A call that fails after its first put leaves that
-/// put standing, which keeps §2.2's rule; [`Health::status`] says what is
-/// published, and the next call puts the status the checks then call for.
+/// puts, in §2.2's order, before the next begins. The clock guard holds
+/// none of them (§2.5): the status and the checks carry no Zenoh timestamp
+/// (core §4.3), unless the session stamps every put (§8.2), when a call
+/// that puts returns [`Error::ClockAhead`]. A call that fails after its
+/// first put leaves that put standing, which keeps §2.2's rule;
+/// [`Health::status`] says what is published, and the next call puts the
+/// status the checks then call for.
 #[derive(Clone)]
 pub struct Health {
     inner: Arc<Inner>,
@@ -431,7 +433,7 @@ async fn publish_fault(
 
 /// §2.5: a `clock_ahead` fault when the guard first holds, again every
 /// `period` while it holds, none once it releases, until the service
-/// closes.
+/// closes. `period` is the heartbeat's covering `health.v1`.
 async fn clock_ahead(
     faults: Arc<Writer>,
     minter: Arc<Minter>,
@@ -451,7 +453,7 @@ async fn clock_ahead(
             };
             let detail = format!(
                 "the clock guard measured this owner {} ms ahead of its router, beyond the HLC \
-                 delta of {} ms: its state writes are held, and its status goes stale \
+                 delta of {} ms: its state writes that carry a Zenoh timestamp are held \
                  (core §4.3, health.v1 §2.5)",
                 offset.as_millis(),
                 HLC_DELTA.as_millis()
@@ -518,16 +520,21 @@ impl Health {
     }
 
     /// Starts §2.5's watcher on the service's clock guard.
+    ///
+    /// The fault repeats at the period of the heartbeat covering
+    /// `health.v1` (`freshness.v2` §2.4), not the status's own horizon:
+    /// that heartbeat's time, unknown while the guard holds, is what a
+    /// reader's "no" rests on (§5), so a reader that joined during the hold
+    /// hears a fault within one period, as it hears that time. In revision
+    /// 1.1 the status is the interface's one collection, and both are
+    /// 28.5 s.
     pub(crate) fn watch_clock(&self, closed: tokio::sync::watch::Receiver<bool>) {
         let Ok(rt) = tokio::runtime::Handle::try_current() else {
             tracing::warn!("health.v1: no tokio runtime here, so a clock ahead is not reported");
             return;
         };
-        let period = self
-            .inner
-            .status
-            .confirm_period()
-            .unwrap_or(model::STATUS_REFRESH);
+        let layout = zenkey_model::heartbeat::Layout::of(implementation().contract());
+        let period = crate::heartbeat::period(&layout).unwrap_or(model::STATUS_REFRESH);
         let task = rt.spawn(clock_ahead(
             Arc::clone(&self.inner.faults),
             Arc::clone(&self.inner.minter),
@@ -665,14 +672,15 @@ impl Health {
     /// Whether the status is being confirmed: the contract's horizon
     /// confirms it, by the heartbeat under `freshness.v2`, and
     /// [`Health::set_confirming`] has not turned that off. A clock guard
-    /// holding writes clears every bit without turning it off.
+    /// that holds leaves it so (§2.5).
     #[must_use]
     pub fn is_confirming(&self) -> bool {
         self.inner.status.confirm_period().is_some() && self.inner.status.is_vouched()
     }
 
-    /// Whether the clock guard holds this owner's state writes (core §4.3,
-    /// §2.5): its status goes stale, and `clock_ahead` is published.
+    /// Whether the clock guard holds this owner's timed state writes (core
+    /// §4.3, §2.5): `clock_ahead` is published, and its heartbeats' time is
+    /// unknown. Its status is not held.
     #[must_use]
     pub fn is_clock_ahead(&self) -> bool {
         self.inner.minter.is_ahead()

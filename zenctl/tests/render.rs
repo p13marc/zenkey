@@ -374,19 +374,19 @@ health in namespace "acme" — worst FAILED: 1 healthy, 1 unhealthy, 1 stale, 1 
     status OK "serving" — its owner's reply, stamped 2026-10-10T08:00:00.000000000Z by a1
     checks disk FAILED "full"
     agrees with its checks: no — a current check is worse than its fresh status in each of 2 readings: its owner breaks health.v1 §2.2
-    clock ahead: no — its status was confirmed after its last clock_ahead fault, or with none heard
+    clock ahead: no — its last heartbeat had its time known, after its last clock_ahead fault or with none heard
 ✓  lab/ok     healthy (ok, OK) — its status is OK and confirmed, and no check is worse
     status OK "serving" — the last put heard, stamped 2026-10-10T08:00:00.000000000Z by a2
     agrees with its checks: yes — its status is fresh at a level, and no current check is worse
-    clock ahead: no — its status was confirmed after its last clock_ahead fault, or with none heard
+    clock ahead: no — its last heartbeat had its time known, after its last clock_ahead fault or with none heard
 ⚠  lab/ahead  stale (beyond_horizon) — not confirmed within its horizon
     agrees with its checks: unobservable — not confirmed within its horizon
-    clock ahead: yes — a clock_ahead fault was heard, and no confirmation of its status since
+    clock ahead: yes — a clock_ahead fault was heard, and no heartbeat with its time known since
     2 fault(s) heard, the last clock_ahead (profile) FAILED "2000 ms ahead"
 ?  lab/new    unobservable (unknown_level) — its status's level is unknown
     status UNSPECIFIED "starting" — its owner's reply, stamped 2026-10-10T08:00:00.000000000Z by a3
     agrees with its checks: unobservable — its status's level is unknown
-    clock ahead: no — its status was confirmed after its last clock_ahead fault, or with none heard
+    clock ahead: no — its last heartbeat had its time known, after its last clock_ahead fault or with none heard
 —  lab/svc    not asked (absent) — it is absent: presence's word, not a level
     agrees with its checks: not asked — it is absent: presence's word, not a level
     clock ahead: not asked — it is absent: presence's word

@@ -18,7 +18,8 @@
 //! There is no I/O and no clock here. A reader observes presence, the
 //! descriptor, the status (as [`freshness::Observation`]s, plus the level
 //! of the latest value) and the checks, and hands them over as values. The
-//! owner's puts, its re-puts and its `clock_ahead` fault are the runtime's.
+//! owner's puts, its heartbeats and its `clock_ahead` fault are the
+//! runtime's.
 
 use std::fmt;
 use std::time::Duration;
@@ -557,12 +558,26 @@ pub fn agrees(judged: Judged, checks_read: bool) -> Agreement {
 
 /// One delivery a subscriber heard of one service during its reading, as
 /// §5's last question reads it.
+///
+/// Since text 0.9 (#978's F6) the clock guard holds no write of the
+/// status, which carries no Zenoh timestamp, and the heartbeat goes on
+/// vouching while it holds. So the evidence that the guard does not hold is
+/// a heartbeat's time, known, never a confirmation of the status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Heard {
-    /// A put of `state/status`, a change or a re-put, or a heartbeat that
-    /// vouched for it (`freshness.v2` §2.5): a confirmation.
-    Status,
-    /// A delete of `state/status`, which §2.3 forbids: no confirmation.
+    /// A heartbeat covering `health.v1`, its status's section read in step
+    /// with the reader's view (`freshness.v2` §2.5, `confirmed`, its bit
+    /// set or clear), whose time is known: the guard did not hold when the
+    /// owner wrote it (`freshness.v2` §2.10).
+    Heartbeat,
+    /// The same, whose time is unknown, all ones: the guard holds, or the
+    /// owner does not know its time. No evidence either way.
+    HeartbeatHeld,
+    /// A put of `state/status`: the guard does not hold it, so it says
+    /// nothing of the clock.
+    StatusPut,
+    /// A delete of `state/status`, which §2.3 forbids: nothing of the
+    /// clock.
     StatusDeleted,
     /// A `faults` sample whose code is `clock_ahead` (§2.5, §2.10).
     ClockAhead,
@@ -574,15 +589,18 @@ pub enum Heard {
 /// Why §5's last question has its answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ClockReason {
-    /// Yes: a `clock_ahead` fault, and no confirmation of the status heard
-    /// since.
+    /// Yes: a `clock_ahead` fault, and no heartbeat whose time is known
+    /// heard since.
     ClockAhead,
-    /// No: the status confirmed after the last `clock_ahead` fault, or with
-    /// none heard. Its guard did not hold that write.
+    /// No: the last heartbeat heard has its time known, and came after the
+    /// last `clock_ahead` fault, or with none heard. Its guard did not hold
+    /// when the owner wrote it.
     Confirmed,
-    /// Unobservable: no `clock_ahead` fault heard, and the status not
-    /// confirmed within the reader's window. Never "no" from the faults'
-    /// silence.
+    /// Unobservable: no `clock_ahead` fault heard since the last heartbeat
+    /// whose time is known, and the last heartbeat's time unknown.
+    TimeUnknown,
+    /// Unobservable: no `clock_ahead` fault and no heartbeat heard within
+    /// the reader's window. Never "no" from the faults' silence.
     NothingHeard,
     /// Not asked: absent, presence's word (§2.1).
     Absent,
@@ -597,6 +615,7 @@ impl ClockReason {
         match self {
             Self::ClockAhead => "clock_ahead",
             Self::Confirmed => "confirmed",
+            Self::TimeUnknown => "time_unknown",
             Self::NothingHeard => "nothing_heard",
             Self::Absent => "absent",
             Self::NotListed => "not_listed",
@@ -608,14 +627,17 @@ impl ClockReason {
     pub fn says(self) -> &'static str {
         match self {
             Self::ClockAhead => {
-                "a clock_ahead fault was heard, and no confirmation of its status since"
+                "a clock_ahead fault was heard, and no heartbeat with its time known since"
             }
             Self::Confirmed => {
-                "its status was confirmed after its last clock_ahead fault, or with none heard"
+                "its last heartbeat had its time known, after its last clock_ahead fault or with \
+                 none heard"
             }
-            Self::NothingHeard => {
-                "no clock_ahead fault was heard, and its status was not confirmed in the window"
+            Self::TimeUnknown => {
+                "its last heartbeat's time was unknown, and no clock_ahead fault was heard since \
+                 one with its time known"
             }
+            Self::NothingHeard => "no clock_ahead fault and no heartbeat was heard in the window",
             Self::Absent => "it is absent: presence's word",
             Self::NotListed => "its descriptor does not list health.v1",
         }
@@ -638,13 +660,15 @@ pub struct Clock {
 
 /// §5's last question from what one subscriber heard of one service in its
 /// window, in arrival order: *yes* on a `clock_ahead` fault with no
-/// confirmation of the status heard since; *no* when the status was
-/// confirmed after the last one, or with none heard; unobservable when
-/// neither was heard, since the faults' silence is their normal state (core
-/// O5). Not asked as the first question's: absent, or not listing
-/// `health.v1`. Whatever else presence says, a fault heard is the service's
-/// own word, and answers. Nothing rests on a fault's stamp, nor its level
-/// (§2.5).
+/// heartbeat whose time is known heard since; *no* when the last heartbeat
+/// heard has its time known and came after the last fault, or with none
+/// heard; unobservable otherwise, since the faults' silence is their
+/// normal state (core O5) and a time unknown proves nothing alone. A put
+/// or a delete of the status says nothing of the clock: the guard holds
+/// neither (§2.5). Not asked as the first question's: absent, or not
+/// listing `health.v1`. Whatever else presence says, a fault heard is the
+/// service's own word, and answers. Nothing rests on a fault's stamp, nor
+/// its level (§2.5).
 #[must_use]
 pub fn clock_ahead(presence: Presence, heard: &[Heard]) -> Clock {
     let c = |answer, reason| Clock { answer, reason };
@@ -655,13 +679,15 @@ pub fn clock_ahead(presence: Presence, heard: &[Heard]) -> Clock {
         }
         _ => {}
     }
-    let fault = heard.iter().rposition(|h| *h == Heard::ClockAhead);
-    let status = heard.iter().rposition(|h| *h == Heard::Status);
-    match (fault, status) {
-        (Some(f), Some(s)) if f > s => c(Answer::Yes, ClockReason::ClockAhead),
-        (Some(_), None) => c(Answer::Yes, ClockReason::ClockAhead),
-        (_, Some(_)) => c(Answer::No, ClockReason::Confirmed),
-        (None, None) => c(Answer::Unobservable, ClockReason::NothingHeard),
+    let last = |h: Heard| heard.iter().rposition(|x| *x == h);
+    let fault = last(Heard::ClockAhead);
+    let known = last(Heard::Heartbeat);
+    let unknown = last(Heard::HeartbeatHeld);
+    match (fault, known, unknown) {
+        (Some(f), k, _) if k.is_none_or(|k| k < f) => c(Answer::Yes, ClockReason::ClockAhead),
+        (_, Some(k), u) if u.is_none_or(|u| u < k) => c(Answer::No, ClockReason::Confirmed),
+        (_, _, Some(_)) => c(Answer::Unobservable, ClockReason::TimeUnknown),
+        _ => c(Answer::Unobservable, ClockReason::NothingHeard),
     }
 }
 
@@ -814,15 +840,28 @@ mod tests {
     }
 
     #[test]
-    fn the_clock_is_ahead_on_a_fault_no_confirmation_followed() {
-        use Heard::{ClockAhead, Fault, Status, StatusDeleted};
+    fn the_clock_is_ahead_on_a_fault_no_heartbeat_with_its_time_followed() {
+        use Heard::{ClockAhead, Fault, Heartbeat, HeartbeatHeld, StatusDeleted, StatusPut};
         let p = present();
         let a = |heard: &[Heard]| clock_ahead(p, heard).answer;
         assert_eq!(a(&[ClockAhead]), Answer::Yes);
-        assert_eq!(a(&[Status, ClockAhead]), Answer::Yes);
-        assert_eq!(a(&[ClockAhead, Status]), Answer::No);
+        assert_eq!(a(&[Heartbeat, ClockAhead]), Answer::Yes);
+        assert_eq!(a(&[ClockAhead, Heartbeat]), Answer::No);
         assert_eq!(a(&[ClockAhead, StatusDeleted]), Answer::Yes);
-        assert_eq!(a(&[Status]), Answer::No);
+        assert_eq!(
+            a(&[ClockAhead, StatusPut]),
+            Answer::Yes,
+            "the guard holds no put"
+        );
+        assert_eq!(a(&[ClockAhead, HeartbeatHeld]), Answer::Yes);
+        assert_eq!(a(&[Heartbeat]), Answer::No);
+        assert_eq!(a(&[StatusPut]), Answer::Unobservable);
+        assert_eq!(
+            clock_ahead(p, &[Heartbeat, HeartbeatHeld]).reason,
+            ClockReason::TimeUnknown,
+            "a time unknown since: no longer no, and no fault to say yes"
+        );
+        assert_eq!(a(&[ClockAhead, HeartbeatHeld, Heartbeat]), Answer::No);
         assert_eq!(a(&[Fault]), Answer::Unobservable, "never from silence");
         assert_eq!(a(&[]), Answer::Unobservable);
         assert_eq!(

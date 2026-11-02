@@ -4,6 +4,26 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.12 — 2026-11-02: a clock ahead is no cause of a stale alarm (#978)
+
+Core 0.88 (#978's F6) narrows its clock guard to the state writes that
+carry a Zenoh timestamp. An alarm carries none since 0.11, so the guard
+holds none, and `freshness.v2` 0.4's heartbeat goes on vouching for each
+firing alarm while it holds. This text, written against core 0.88,
+follows.
+
+**Changed, no rule.**
+- **§2.7, "Stale is not resolved":** a stale alarm's causes are the
+  owner hung or its writer closed. A clock ahead is no longer one.
+- **§5's last row** finds the owner that broke §2.7's confirmation, no
+  longer one whose clock is ahead.
+- **"Which cause"** drops the clock ahead, and `health.v1`'s status goes
+  stale with the alarm when the owner stops.
+
+**Deliberately not changed.** No MUST, fixture, scenario or contract.
+The runtime refuses no alarm while the guard holds, unless the owner's
+session stamps every put (core §8.2).
+
 ## 0.11 — 2026-11-01: each firing alarm confirmed by `freshness.v2`'s heartbeat, and §2.15's window read over it (#978)
 
 Epic #975 makes the wire bandwidth-first. Under `freshness.v1` an owner

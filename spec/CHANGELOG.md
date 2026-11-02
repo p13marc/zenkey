@@ -3,6 +3,55 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.88 — 2026-11-02: the clock guard holds only a write that carries a Zenoh timestamp (#978)
+
+§4.3's "Ahead" stopped every state write of an owner whose clock guard
+found it ahead of its router beyond the delta. The harm it guards against
+is a Zenoh timestamp from that clock: a router re-stamps or drops it, and
+freshness ages by it. Since #978's F3 and F5, a state of a contract that
+uses `freshness.v2` carries none on its puts, and every adopter's states
+are such. The guard held them all the same, and each went stale for no
+harm. This version is #978's F6.
+
+**Changed: §4.3, "Ahead".**
+- **Before:** when a detection shows it beyond the delta, the owner MUST
+  stop writing state, re-puts included.
+- **Now:** it MUST stop the state writes that carry a Zenoh timestamp,
+  re-puts included. `[Sc: state.md §7]`
+  `[Sc: profiles/freshness/scenarios.md §2]`
+- **What it holds:** a write of a resource on §4.3's table, a
+  `freshness.v1` state with a horizon, a `desired.v1` document, a
+  `telemetry.v1` metric state, and every state write on a session that
+  stamps (§8.2), a `redundancy.v1` candidate's among them. Those members
+  go stale, as before.
+- **What goes on:** every other state write. A `freshness.v2` state's
+  heartbeat goes on vouching, its time unknown (`freshness.v2` 0.4,
+  §2.10), and its replies carry a last confirmation from the clock ahead.
+  `[Sc: profiles/freshness/scenarios-v2.md §2]`
+- **"The report is not state"** becomes "The report". The status of a
+  `health.v1` owner is not held (`health.v1` 0.9, §2.5), so it says
+  nothing of the clock, and the `clock_ahead` fault is the report.
+
+**Changed: §4.3, "Minting".** A heartbeat's time is the instant of its
+confirmation's timestamp, except while the guard holds, when it is
+unknown. The heartbeat still mints that timestamp.
+
+**Deliberately not changed.**
+- **The detection and its SHOULDs:** the reference, the delta and the
+  report are 0.87's.
+- **Events and streams** were never held, and are not now. A stream with
+  a `timing.v1` lifespan still carries the owner's stamp, which a router
+  re-stamps.
+- **A reply's stamp is not held.** A router never re-stamps a reply
+  (§4.1). A reply confirmed within the offset reads as ahead of a right
+  clock, unobservable by `freshness.v1` §2.6's band. An older one reads
+  younger by the offset: the deployment's word, which the clock ahead
+  breaks, is the operator's error (`freshness.v1` §2.6, ground 1).
+  Holding the replies would break S2.
+- **No wire, fixture or fingerprint moves.**
+- **`RULES.md`** keeps 227 rules: the MUST's text changes, and its
+  evidence gains `state.md` §7.
+
 ## 0.87 — 2026-11-02: frames written, and their scenarios (#981)
 
 0.83 defined frames and stated their owner's and reader's rules, citing

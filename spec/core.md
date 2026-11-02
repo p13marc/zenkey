@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.87** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.88** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -1114,7 +1114,8 @@ time a profile reads (the table below).
       An owner mints one at each mutation of such a member, though its
       put carries none. It mints one as it writes each heartbeat (§7.5).
       That heartbeat's time is the timestamp's instant, to the
-      millisecond, counted from the deployment epoch (§7.6).
+      millisecond, counted from the deployment epoch (§7.6). While the
+      clock guard holds ("Ahead", below), the time is unknown.
       `[Sc: profiles/freshness/scenarios-v2.md §3]`
   - **Order and id.** Two such timestamps with one id order by time. A
     timestamp under another id is another session's.
@@ -1134,16 +1135,28 @@ time a profile reads (the table below).
   - The owner SHOULD detect drift against a reference it holds for the
     purpose, such as a subscription to a router-stamped heartbeat key,
     because its own puts are never echoed back. `[Sc: state.md §7]`
-  - When a detection shows it beyond the delta, the owner MUST stop
-    writing state, re-puts included, and SHOULD report it. Its members then go
-    stale, by design ([`freshness.v1`](profiles/freshness/v1.md) §2.10).
+  - When a detection shows it beyond the delta, the owner MUST stop the
+    state writes that carry a Zenoh timestamp, re-puts included, and
+    SHOULD report it. `[Sc: state.md §7]`
     `[Sc: profiles/freshness/scenarios.md §2]`
-  - **The report is not state.** A state value saying so would be
-    a write the rule stops. The standard way is a stream sample: a
-    `health.v1` owner publishes a `faults` sample with code
-    `clock_ahead`, and its status goes stale
-    ([`profiles/health/v1.md`](profiles/health/v1.md) §2.5).
-    `[Sc: profiles/health/scenarios.md §4]`
+  - **What it holds.** A state write carries a Zenoh timestamp where the
+    table lists its resource. On a session with timestamping enabled
+    (§8.2), every state write carries one. Those members go stale, by
+    design ([`freshness.v1`](profiles/freshness/v1.md) §2.10).
+  - **What goes on.** The owner's other state writes go on, and its
+    events and streams. A put or a delete that carries no Zenoh timestamp
+    gives a router no time of the owner's to re-stamp or drop. A state of
+    a contract that uses `freshness.v2` is one: its heartbeat goes on
+    vouching for it, with its time unknown
+    ([`freshness.v2`](profiles/freshness/v2.md) §2.10). Its replies carry
+    a last confirmation from the clock ahead, which a router never
+    re-stamps (§4.1). `[Sc: state.md §7]`
+    `[Sc: profiles/freshness/scenarios-v2.md §2]`
+  - **The report.** The standard way is a stream sample: a `health.v1`
+    owner publishes a `faults` sample with code `clock_ahead`
+    ([`profiles/health/v1.md`](profiles/health/v1.md) §2.5). Its status is
+    a `freshness.v2` state, which the guard does not hold, so the status
+    says nothing of the clock. `[Sc: profiles/health/scenarios.md §4]`
     - Where the owner stamps the sample from its clock, which is ahead
       (the table above), a router re-stamps it, or drops it under
       `timestamping.drop_future_timestamp`, which loses the report.

@@ -9,7 +9,7 @@
 //! | S3 the tombstone window, 60 s unless configured | [`DEFAULT_WINDOW`], `ServiceConfig::tombstone_window_s` |
 //! | S4 a consumer's GET: the owner's keys, target `All`, consolidation `Latest` | [`crate::consumer::Consumer::get`] |
 //! | S6 current is the owner's answer; silence is no verdict | [`StateGet`] |
-//! | S7 a run never reused, a seq never wrapped within it; §4.3's table's timestamps, ahead | [`Minter`], [`crate::run`], the clock guard (`ServiceConfig::clock_reference`) |
+//! | S7 a run never reused, a seq never wrapped within it; §4.3's table's timestamps, ahead: the guard holds a state write that carries a Zenoh timestamp | [`Minter`], [`crate::run`], the clock guard (`ServiceConfig::clock_reference`) |
 //! | a re-put is a mutation (0.21); `freshness.v1` §2.4, §2.10 | [`StateWriter`]'s refresher |
 //! | `freshness.v2` §2.4: a collection's members vouched for by a heartbeat, its replies carrying the last confirmation (§4.3's table, row 1) | [`Store`]'s books, [`crate::heartbeat`] |
 //!
@@ -24,7 +24,8 @@
 //! toggled at each mutation, and each live member's bit; and each member's
 //! last confirmation, the later of its last mutation and the last
 //! heartbeat that vouched for it, which its GET replies carry as their
-//! Zenoh timestamp (S2).
+//! Zenoh timestamp (S2). The clock guard holds none of its writes, since
+//! they carry no Zenoh timestamp (§4.3, "Ahead"; #978's F6).
 //!
 //! **The refresher** (`freshness.v1` §2.4, #720). A state resource whose
 //! contract declares `freshness.ttl_s` above 0 is confirmed at least every
@@ -152,9 +153,11 @@ struct Runs {
 ///   session's zid as the id, on the resources §4.3's table lists. On a
 ///   session without timestamping, as an owner's runs (§8.2), that is the
 ///   wall clock with the zid.
-/// - **The clock guard** ("Ahead"): while it holds, every state write is
-///   refused, [`Error::ClockAhead`], whether or not it carries a Zenoh
-///   timestamp.
+/// - **The clock guard** ("Ahead", #978's F6): while it holds, a state
+///   write that carries a Zenoh timestamp is refused, [`Error::ClockAhead`]:
+///   one on §4.3's table (`timed`), or any on a session that stamps. Every
+///   other state write goes on, a `freshness.v2` member's among them,
+///   since a router has no time of the owner's to re-stamp on it.
 ///
 /// **Session posture** (core §8.2): a session with timestamping enabled
 /// stamps every put and delete it is not given a timestamp for, so on one
@@ -380,9 +383,11 @@ impl Minter {
 
     /// A state mutation's stamps (S1): the next seq of the run, and a Zenoh
     /// timestamp when `timed` (§4.3's table) or the session stamps. Refused,
-    /// [`Error::ClockAhead`], while the clock guard holds (§4.3, "Ahead").
+    /// [`Error::ClockAhead`], while the clock guard holds, only when it
+    /// would carry that timestamp (§4.3, "Ahead"): an untimed write goes
+    /// on.
     pub fn mint_state(&self, timed: bool) -> Result<Stamped> {
-        if self.ahead.load(Ordering::Relaxed) {
+        if (timed || self.session_hlc) && self.ahead.load(Ordering::Relaxed) {
             return Err(Error::ClockAhead);
         }
         let mut r = self.runs.lock().expect("not poisoned");
@@ -394,7 +399,7 @@ impl Minter {
     }
 
     /// An event occurrence's stamps: the next seq of the run, shared with
-    /// state's (§4.3). Never held by the clock guard, which stops state.
+    /// state's (§4.3). Never held by the clock guard, which stops timed state.
     pub fn mint_event(&self, timed: bool) -> Stamped {
         let mut r = self.runs.lock().expect("not poisoned");
         let stamp = self.next_seq(&mut r);
@@ -530,15 +535,16 @@ impl Minter {
     }
 
     /// The guard's hold as a watch: `Some(offset)` while it holds this
-    /// owner's state writes, with the offset it last measured, `None` while
-    /// it does not. It wakes on a change of hold only (`health.v1` §2.5).
+    /// owner's timed state writes, with the offset it last measured, `None`
+    /// while it does not. It wakes on a change of hold only (`health.v1`
+    /// §2.5).
     pub(crate) fn held(&self) -> tokio::sync::watch::Receiver<Option<Duration>> {
         self.held.subscribe()
     }
 
     /// The guard measured this owner `offset` ahead of its router: beyond
-    /// [`HLC_DELTA`] its state writes stop (§4.3). Returns whether this
-    /// detection is the first of a hold.
+    /// [`HLC_DELTA`] its timed state writes stop (§4.3). Returns whether
+    /// this detection is the first of a hold.
     fn measure(&self, offset: Duration) -> bool {
         let ahead = offset > HLC_DELTA;
         let first = if ahead {
@@ -566,7 +572,8 @@ impl Minter {
 
 /// Watches a router-stamped reference key (§4.3, "Ahead"): the owner's own
 /// puts are never echoed back, so drift is measured against samples a router
-/// stamped. Beyond [`HLC_DELTA`] the owner stops writing state.
+/// stamped. Beyond [`HLC_DELTA`] the owner stops the state writes that
+/// carry a Zenoh timestamp.
 pub(crate) struct ClockGuard {
     _sub: zenoh::pubsub::Subscriber<()>,
 }
@@ -593,13 +600,13 @@ impl ClockGuard {
                     tracing::warn!(
                         ahead_ms = offset.as_millis() as u64,
                         "this owner's clock is ahead of its router beyond the HLC delta: \
-                         state writes stop (spec §4.3)"
+                         its timed state writes stop (spec §4.3)"
                     );
                 } else if was && !minter.is_ahead() {
                     tracing::info!(
                         ahead_ms = offset.as_millis() as u64,
                         "this owner's clock is back within the HLC delta of its router: \
-                         state writes resume (spec §4.3)"
+                         its timed state writes resume (spec §4.3)"
                     );
                 }
             })
@@ -748,15 +755,13 @@ impl Store {
 
     /// `iface`'s heartbeat body now (core §7.5): a section for each
     /// collection `exposed` marks, its digest and its members' bits in key
-    /// order, every bit clear when `vouch` is false (the clock guard
-    /// holds, `freshness.v2` §2.10). Returns it with what it vouched for,
-    /// or `None` for an interface it does not cover.
+    /// order. Returns it with what it vouched for, or `None` for an
+    /// interface it does not cover.
     pub(crate) fn heartbeat(
         &self,
         iface: &str,
         exposed: &[bool],
         time: zenkey_model::heartbeat::Time,
-        vouch: bool,
     ) -> Option<(zenkey_model::heartbeat::Heartbeat, Vouched)> {
         use zenkey_model::heartbeat::{Heartbeat, Members, Section};
         let books = self.books.lock().expect("not poisoned");
@@ -772,7 +777,7 @@ impl Store {
                 if !exposed.get(i).copied().unwrap_or(false) {
                     return None;
                 }
-                let bits: Vec<bool> = c.live.values().map(|(_, v)| vouch && *v).collect();
+                let bits: Vec<bool> = c.live.values().map(|(_, v)| *v).collect();
                 for ((k, (stamp, _)), on) in c.live.iter().zip(&bits) {
                     if *on {
                         vouched.push((k.clone(), *stamp));
@@ -1066,8 +1071,9 @@ impl Refresher {
                 }
             }
             Err(_) => {
-                // §4.3, freshness.v1 §2.10: the clock guard holds writes, so
-                // the member goes stale by design. Try again shortly.
+                // §4.3, freshness.v1 §2.10: the clock guard holds a re-put,
+                // which carries a Zenoh timestamp, so the member goes stale
+                // by design. Try again shortly.
                 let retry = HELD_RETRY.min(self.period);
                 let now = tokio::time::Instant::now();
                 h.at = now.checked_sub(self.period - retry).unwrap_or(now);

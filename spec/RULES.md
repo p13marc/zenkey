@@ -146,7 +146,7 @@ The owner, consumer and caller sections each point to them.
 | [S7](core.md#43-runs-and-sequence-numbers-s7) | **Streams.** … An owner MUST NOT restart a stream key's seq within a run, even where it declares the key's publisher again: a takeover, or a member removed and added. | `[Sc: state.md §13]` |
 | [S7](core.md#43-runs-and-sequence-numbers-s7) | **Ahead.** … An owner SHOULD NOT stamp beyond its router's HLC delta: it cannot know its own offset without a reference. | `[Sc: state.md §7]` |
 | [S7](core.md#43-runs-and-sequence-numbers-s7) | The owner SHOULD detect drift against a reference it holds for the purpose, such as a subscription to a router-stamped heartbeat key, because its own puts are never echoed back. | `[Sc: state.md §7]` |
-| [S7](core.md#43-runs-and-sequence-numbers-s7) | When a detection shows it beyond the delta, the owner MUST stop writing state, re-puts included, and SHOULD report it. | `[Sc: profiles/freshness/scenarios.md §2]` |
+| [S7](core.md#43-runs-and-sequence-numbers-s7) | When a detection shows it beyond the delta, the owner MUST stop the state writes that carry a Zenoh timestamp, re-puts included, and SHOULD report it. | `[Sc: state.md §7]` `[Sc: profiles/freshness/scenarios.md §2]` |
 
 ### [core §4.4 Archives](core.md#44-archives)
 

@@ -1297,9 +1297,12 @@ async fn s7_late_joiners_across_runs_inside_the_seed() {
 }
 
 /// §7 step 6, ahead: an owner 2 s ahead of its router, which stamps a
-/// heartbeat, detects the drift and stops writing state.
+/// heartbeat, detects the drift and stops the state writes that carry a
+/// Zenoh timestamp (core §4.3, "Ahead"; #978's F6): `status.v1`'s status,
+/// a `freshness.v1` state with a horizon on §4.3's table, is refused, put
+/// and delete; `plans/{vehicle}`, on no row, goes on.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s7_an_owner_ahead_stops_writing_state() {
+async fn s7_an_owner_ahead_stops_its_timed_state_writes() {
     let (_r1, ep) = router(None).await;
     let hb = client(&ep).await;
     let s = client(&ep).await;
@@ -1307,11 +1310,22 @@ async fn s7_an_owner_ahead_stops_writing_state() {
     cfg.clock_reference = Some("clock/heartbeat".to_owned());
     let mut b = ServiceBuilder::new(&s, cfg);
     b.implement(imp("mission_plan.v1")).unwrap();
+    b.implement(status_v1()).unwrap();
     b.minter().simulate_offset(2000);
     let w = b
         .declare_state_writer(&plan(), "state/plans/{vehicle}", &vehicle("vehicle-01"))
         .await
         .unwrap();
+    let status = b
+        .declare_state_writer(
+            &"status.v1".parse().unwrap(),
+            "state/status",
+            &Bindings::new(),
+        )
+        .await
+        .unwrap();
+    assert!(status.writer().is_stamped(), "on §4.3's table");
+    assert!(!w.writer().is_stamped(), "on no row");
     let mgr = b.start().await.unwrap();
     eventually("the drift is detected", || async {
         hb.put("clock/heartbeat", "tick").await.unwrap();
@@ -1319,10 +1333,20 @@ async fn s7_an_owner_ahead_stops_writing_state() {
     })
     .await;
     assert!(
-        matches!(w.put("late").await, Err(zenkey::Error::ClockAhead)),
-        "state writes stop, whether or not they carry a Zenoh timestamp"
+        matches!(status.put("late").await, Err(zenkey::Error::ClockAhead)),
+        "a state write that carries a Zenoh timestamp stops"
     );
-    assert!(matches!(w.delete().await, Err(zenkey::Error::ClockAhead)));
+    assert!(matches!(
+        status.delete().await,
+        Err(zenkey::Error::ClockAhead)
+    ));
+    let put = w
+        .put("on time")
+        .await
+        .expect("an untimed state write goes on");
+    assert!(put.time.is_none(), "it carries no Zenoh timestamp");
+    w.delete().await.expect("and so does its delete");
+    assert!(mgr.minter().is_ahead(), "the guard still holds");
 }
 
 /// §9: an archive that holds v1 (seq a of run n) and its delete (seq b of

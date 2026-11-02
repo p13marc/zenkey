@@ -514,10 +514,12 @@ pub struct Adoption {
 /// and again from [`crate::Service::alarms`] once it runs.
 ///
 /// A clone is the same handle. Calls are serialized: each finishes its puts
-/// before the next begins. While the clock guard holds state writes (core
-/// §4.3), a call that puts returns [`Error::ClockAhead`] and changes
-/// nothing; a confirmation it holds goes out once the guard releases
-/// (`freshness.v1` §2.10).
+/// before the next begins. The clock guard holds none of its puts: an
+/// alarm carries no Zenoh timestamp (core §4.3, "Ahead"; #978's F6), and
+/// its heartbeat goes on vouching for each firing alarm (`freshness.v2`
+/// §2.10). Only on a session that stamps every put (§8.2) does a call that
+/// puts return [`Error::ClockAhead`] while the guard holds, changing
+/// nothing.
 #[derive(Clone)]
 pub struct Alarms {
     inner: Arc<Inner>,

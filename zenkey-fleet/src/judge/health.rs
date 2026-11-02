@@ -659,7 +659,7 @@ mod tests {
         assert_eq!(one(&r).clock_ahead.reason, "nothing_heard");
         let r = judge(&face(
             true,
-            w(Some(Duration::from_secs(10)), vec![hm::Heard::Status]),
+            w(Some(Duration::from_secs(10)), vec![hm::Heard::Heartbeat]),
         ));
         assert_eq!(one(&r).verdict, HealthVerdict::Healthy);
         assert_eq!(
@@ -669,7 +669,7 @@ mod tests {
         assert_eq!(one(&r).clock_ahead.answer, HealthAnswerToken::No);
         let r = judge(&face(
             true,
-            w(Some(Duration::from_secs(64)), vec![hm::Heard::Status]),
+            w(Some(Duration::from_secs(64)), vec![hm::Heard::Heartbeat]),
         ));
         assert_eq!(one(&r).verdict, HealthVerdict::Stale);
         let r = judge(&face(false, w(None, vec![hm::Heard::ClockAhead])));

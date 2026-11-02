@@ -343,8 +343,9 @@ async fn s1_the_cadence_and_the_bits() {
 }
 
 /// §2: a cleared bit is no confirmation, not stale at once; set again, the
-/// next heartbeat confirms; the clock guard holds every bit and the time;
-/// a silent heartbeat goes stale, never "down".
+/// next heartbeat confirms; the clock guard holds no put and no bit, only
+/// the time (#978's F6), and a GET reader finds the reply's stamp ahead; a
+/// silent heartbeat goes stale, never "down".
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s2_a_vouch_withdrawn_goes_stale() {
     let (_r1, ep) = router(None).await;
@@ -381,11 +382,14 @@ async fn s2_a_vouch_withdrawn_goes_stale() {
     })
     .await;
 
-    // 4. A clock ahead: the heartbeats go on, every bit clear and the time
-    // unknown, the map and the digests as the guard found them (§2.10).
+    // 4. A clock ahead: the guard holds no write of beacon.v2's, which
+    // carries no Zenoh timestamp, and the heartbeats go on vouching, the
+    // time unknown (§2.10). S2 judges `status` fresh past its horizon; G,
+    // on the deployment's word, finds the reply stamped ahead of its clock.
     let tick = client(&ep).await;
     let ahead_session = client(&ep).await;
     let ahead_key = "zk2/lab/ahead/freshness.v2/stream/heartbeat/beacon.v2";
+    let ahead_status = "zk2/lab/ahead/beacon.v2/state/status";
     let (_h2, beats) = heartbeats(&rs, ahead_key).await;
     let a = reader(&rs, "lab/ahead");
     let (asub, _alog, _) = listen(&a, STATUS).await;
@@ -398,13 +402,19 @@ async fn s2_a_vouch_withdrawn_goes_stale() {
     )
     .await;
     matched(ahead.status.writer()).await;
-    let ahead_put = ahead.status.put("up").await.unwrap().stamp;
+    ahead.status.put("up").await.unwrap();
     eventually("the drift is detected", || async {
         tick.put("clock/heartbeat", "tick").await.unwrap();
         ahead.svc.minter().is_ahead()
     })
     .await;
     let detected = Instant::now();
+    let held_put = ahead
+        .status
+        .put("still up")
+        .await
+        .expect("not held: it carries no Zenoh timestamp")
+        .stamp;
     until(detected, Duration::from_secs(4)).await;
     let held = beats_after(&beats, detected + Duration::from_millis(1200));
     assert!(held.len() >= 2, "heartbeats go on: {}", held.len());
@@ -412,23 +422,38 @@ async fn s2_a_vouch_withdrawn_goes_stale() {
         assert_eq!(b.hb.time, Time::Unknown, "the time unknown while held");
         assert!(
             b.hb.sections[0].is_some() && b.hb.sections[1].is_none(),
-            "the map 1 0 1, as the guard found it"
+            "the map 1 0 1"
         );
         let s = b.hb.sections[2].as_ref().expect("status's section");
         assert_eq!(
             s.members,
-            Members::One { vouched: false },
-            "every bit clear"
+            Members::One { vouched: true },
+            "vouched for, as at any other time"
         );
         assert_eq!(
             s.digest,
-            Digest::of([("zk2/lab/ahead/beacon.v2/state/status", ahead_put)]),
-            "the digest as the guard found it"
+            Digest::of([(ahead_status, held_put)]),
+            "the digest over the put made while the guard held"
         );
     }
+    assert!(ahead.svc.minter().is_ahead(), "the guard still holds");
     assert_eq!(
-        verdict(&h, &asub.freshness("zk2/lab/ahead/beacon.v2/state/status")),
-        (Verdict::Stale, Reason::BeyondHorizon)
+        verdict(&h, &asub.freshness(ahead_status)),
+        (Verdict::Fresh, Reason::WithinHorizon),
+        "confirmed past its horizon"
+    );
+    let reply = match a.get(STATUS, None, T).await.unwrap() {
+        StateGet::Answered(mut v) => v.remove(0),
+        StateGet::Silent => panic!("lab/ahead did not answer"),
+    };
+    let word = ClockTrust::Trusted {
+        delta: DEFAULT_DELTA,
+    };
+    let j = a.freshness(STATUS, &[reply.freshness(word)]).unwrap();
+    assert_eq!(
+        (j.verdict, j.reason),
+        (Verdict::Unobservable, Reason::ClockDisagrees),
+        "the last confirmation, from the clock ahead"
     );
 
     // 5. The first owner closes: its heartbeat falls silent, and S judges
