@@ -18,8 +18,8 @@
 #
 # Across the face: modem.v3's frames/fast, all 73 readings in one record,
 # whole at one a minute and never downsampled, a full record every 15
-# (modem.v3 3.3, #991): 177 KB a day with every reading present and moving,
-# 92 KB for rf0's own. No plain stream crosses (modem.v3 exposes only its
+# (modem.v3 3.3, #991): 177 KB a day with every reading present and 24 of
+# them moving, 92 KB for rf0's own. No plain stream crosses (modem.v3 exposes only its
 # frames). Its 300 s horizon is liveness evidence. frames/slow and
 # frames/paid are LoRa SF12's and SBD's, and draw `frame_unlisted` here: rf0
 # does not publish them. The radio repairs no lost frame, so the linter
