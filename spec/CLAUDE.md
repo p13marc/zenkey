@@ -400,6 +400,8 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   included value; no value is never 0), §2.19 (the epoch is the run, a
   rewind a reset), §2.20 (a counter's width, its serial window) and
   §2.21 (the time base and its basis). No core or observer amendment.
+  T3 (the owner, no text change) names `zenkey/tests/profile_telemetry_v2.rs`
+  in `scenarios-v2.md`'s intro, which runs §1–§7 against the runtime.
 - **`freshness.v1`** is `experimental` since #978's F5 (a status entry in
   `freshness/CHANGELOG.md`, text still 0.5): the adopters' contracts and
   `nav.v2` moved to `freshness.v2`, each a `uses_changed` revision in
