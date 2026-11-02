@@ -3,6 +3,170 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.93 — 2026-11-02: every call in the value and error forms (#980, #985)
+
+0.92 defined a call's forms, and no rule adopted them. This version is
+C4c, #985's flip. A caller writes its request in the forms, and an owner
+its values and its errors. Every operation of every contract travels so,
+its JSON Schema, protobuf and raw records included, as 0.73 put every
+state, stream and event record in an envelope. `observer.md` moves to
+text 0.24 beside it ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)).
+0.91 is still held for another chunk.
+
+**Changed: §5.1, "The forms," adopted.**
+- **Added, a MUST: the request.** A caller writes its request as §7.5's
+  request, `CH · record`, under `zenoh/bytes`. CH's width bit is 0, and
+  its tag the `request` type's.
+- **Added, a MUST: the value.** An owner writes each value reply in the
+  value form, under `zenoh/bytes`, with its as-of mark. Its tag is the
+  `response` type's, or the `summary` type's on a summary reply.
+- **Added, a MUST: an answer sent again.** An owner that answers with an
+  answer it sent before, as `config.v1` §2.14 replays a first answer,
+  sends its bytes unchanged, its mark included. The mark dates the first
+  answer. A later one would let a caller order its state above a newer
+  put.
+- **Added: reading a value.** A caller reads a reply by §7.5's parse,
+  and its record by the type. A reply the parse or the type refuses is
+  malformed, and still an answer: it came on the call's key.
+- **Added, a MAY: the bare wire.** It is a call with no form, as 0.92
+  and before wrote one: a request and a value bare, under their type's
+  `Encoding`, and an error in §5.2's envelope.
+  - An implementation MAY read a call's sample whose `Encoding` is not
+    `zenoh/bytes` as the bare wire, and none writes it.
+  - The `Encoding` alone tells the two wires apart: a bare record can
+    parse as a form, as `vectors.json`'s JSON array of 8 bytes does.
+- **O3.** Success is a reply in the value form, and failure a
+  `reply_err` in the error form. Its evidence is `forms.json` and
+  `operations.md` §9, where it was `cases.json`.
+- **"The request."** A request that §7.5's parse refuses, or whose record
+  does not decode as the `request` type, is `invalid_request`. The record
+  is read on the contract's `encoding`, and a packed one under CH's tag.
+  It was decoded "by its `Encoding` and then the contract's".
+- **"Retries."** A `reply_err` that is the transport's is silence, a
+  malformed error among them. It said that an envelope is an answer,
+  "and so is a malformed one". An error is an answer, and so is a value
+  that does not parse.
+- **Words.** "A value or an envelope" becomes "a value or an error" in
+  "Calling", "Answering" and "Attribution".
+
+**Changed: §5.2, retitled "Errors".** It was "The error envelope".
+- **The fields** are the error's, on any wire. `message` is optional and
+  at most 255 bytes, and `detail` is bytes of the `error` type.
+- **Added, a MUST: the error form.** An owner answers a failed call in
+  §7.5's error form, under `zenoh/bytes`, with its as-of mark. CH's tag
+  is the `error` type's, 0 when it declares none.
+- **The detail** is its type's own bytes: JSON or CBOR on the
+  operation's `encoding`, a protobuf message, a raw type's bytes, never
+  base64, or a packed record.
+- **`app`.** The MUST NOT on a detail where no `error` type is declared
+  stays, for the form. The MUST NOT on a detail that does not fit its
+  envelope becomes one on a detail its type cannot encode: bytes for a
+  JSON Schema type, a value for a protobuf or raw one, or a packed value
+  with no code.
+- **Added, two MUSTs: reading an error.** A caller or a tool reads a
+  `reply_err` under `zenoh/bytes` by §7.5's parse, and holds an error it
+  accepts as the owner's. It reads every other `reply_err` as the
+  transport's: one the parse refuses, and one under another `Encoding`.
+  §5.1's MAY excepts the bare wire's envelope.
+- **A detail its type refuses** leaves the error the owner's, its detail
+  undecodable.
+- **"Transport errors," restated by form.**
+  - A querier's own `Timeout` is under `zenoh/string`. A router's, under
+    `zenoh/bytes`, is refused `sample_kind`. Neither is an owner's error,
+    and a caller reads both as silence.
+  - A malformed error is the transport's too, so a caller may retry after
+    one.
+  - It rests on zenoh 1.10.1's routers sending that one payload of their
+    own. A later Zenoh's that parsed as an error form would read as an
+    owner's.
+- **The envelope** moves under "The envelope, on the bare wire": its
+  kind, its `Encoding` and its decoding, read and no longer written.
+  - **Removed, a MUST:** the owner's reply's `Encoding` says which
+    envelope it carries.
+  - **"Decoding"'s MUST** binds a caller or a tool that reads the bare
+    wire, where it bound a tool.
+
+**Changed: §4.3, §7.2, §7.5 and §7.6.**
+- **§4.3, "What keeps its wire":** the descriptor and bundles. A call
+  carries the forms instead.
+- **§7.2.** The predefined-`Encoding` MUST excepts a call's form too. The
+  schema-suffix MUST NOT loses its one exception, the error envelope's,
+  which no owner writes.
+- **§7.5 and §7.6.** "No rule at this version has a caller or an owner
+  write them" becomes "§5.1 adopts them". A packed record travels in an
+  envelope or a call's form.
+
+**Decided here, where the memo left it open.**
+- **The bare wire is a MAY.** The memo has C4b read both wires, C4c
+  flip, and C4d remove the read path, and states no rule for the middle.
+  Without it, a reader in a fleet being moved would read an older owner's
+  `busy` as the transport's. C4d removes it.
+- **A malformed error is the transport's.** The memo tells the transport
+  apart by form, and its rule reaches every `reply_err` that does not
+  parse. 0.92 held a malformed envelope to be an answer.
+- **A replayed answer keeps its mark,** as G1's `config.v2` §2.14 asked.
+  The core states it once, for `config.v1`'s replay and any other.
+- **A value that does not parse is an answer.** It came on the call's
+  key, where an error carries none.
+- **A packed detail is read under CH's tag,** and an error with no detail
+  reads no record, so its tag is not checked. That follows 0.92's §7.5,
+  which reports a tag and leaves §7.6's reader to check it.
+- **A router's `Timeout` is played** in §9 by a test session. In zenoh
+  1.10.1 a router starts its timer when the query reaches it, after the
+  querier's session started its own, so the querier's `Timeout` usually
+  ends the query first (`api/session.rs`, `dispatcher/queries.rs`). Read
+  from the source, not measured.
+
+**Why.** A refusal was 60 to 90 bytes of JSON, a value carried no stamp,
+and a `reply_err`'s `Encoding` told an envelope from the transport's
+error. In the forms, a refusal is 7 bytes and every reply carries its
+as-of mark. The bytes tell an owner's error from a router's. One wire for
+every type keeps one code path, as 0.73's envelope did for state.
+
+**The evidence.**
+- **`envelope/calls.json`,** new. It holds `ok-packed-operation`'s three
+  operations: each form's CH by its types' tags (`Sensor` 6, `Status` 14,
+  `Change` 2), 21 writes and 18 reads.
+  - Written by an independent reading of the text, in Python with the
+    standard library: C4a's form codec, and G1's packed codec checked
+    against all of `packed/vectors.json`.
+  - Checked by a second reader with hand-laid layouts, and never blessed.
+- **`scenarios/operations.md` §9,** new: each kind of type, the packed
+  tags, a wrong tag, and the as-of mark across puts and a new instance.
+  - Four reply errors played by a test session: a router's `Timeout`,
+    `busy` with a cause, an error form under `zenoh/string`, and `busy`.
+  - A timeout behind a router, and the bare wire's envelope.
+- **`scenarios/operations.md` §2, §3, §4 and §6** say "error" for
+  "envelope". §3's step 6 expects a raw detail's own bytes, never base64.
+- **`errors/forms.json`, `errors/cases.json`, `envelope/vectors.json` and
+  `envelope/carries.json`:** descriptions and notes. No case changes.
+- Appendix C and E list them, and so does `conformance/README.md`.
+
+**Deliberately not changed.**
+- **The forms' bytes,** §7.5's layouts, its parse and its refusals, are
+  0.92's.
+- **O1, O2, O4 to O7,** §5.1's order of refusals, and a fan-out's errors
+  unattributed. A summary reply still carries the attachment `summary`:
+  a JSON Schema summary's tag is 0, so CH cannot tell it from a value.
+- **Call metadata** is still the request's JSON attachment (O7).
+- **The descriptor and bundles** keep their wire.
+- **No profile text.** Their owners answer in the forms, as every
+  operation does, and their citations still resolve.
+  - `config.v1` §2.5's "the envelope is core §5.2's" now reads §5.2's
+    error. Its `ConfigError` detail is that type's JSON bytes.
+  - `telemetry.v1` §2.6 reads a CBOR map "as the envelope's are read", in
+    §5.2's bare-wire decoding, which stays.
+  - A profile's scenario that says "envelope", such as `redundancy.v1`'s
+    §8, follows at its profile's next version.
+- **`core/error.proto`, `core/error.schema.json` and `errors/cases.json`**
+  stay, for the bare wire. C4d removes its read path.
+- **No section number moves.** §5.2's title changes, and its anchor
+  with it: `spec/README.md`'s link follows.
+
+**The index.** [`RULES.md`](RULES.md) lists 236 rules, 7 more: 6 of this
+text added and 1 removed, and `observer.md`'s 2. The glossary's
+"Envelope" becomes "Error", and "Forms of a call" gains the bare wire.
+
 ## 0.92 — 2026-11-02: a call's value and error forms defined (#980, #985)
 
 Epic #975, zk2c, makes the wire bandwidth-first. A call is still answered

@@ -64,17 +64,17 @@ one queryable over the template that refuses every call with `busy`.
 2. One reply per host.
 3. From `h1`, two value replies, on `…/interfaces/eth0/reset` and
    `…/interfaces/eth1/reset`. From `h2`, one value reply, on the key of the
-   member its server named, which the call selected. One `busy` envelope,
+   member its server named, which the call selected. One `busy` error,
    which the caller reports unattributed: a `reply_err` carries no key.
    Presence shows `h3` holding the token and sending no value, so `h3`
    refused or was silent, which the caller cannot tell apart.
-4. Two `invalid_request` envelopes, from `h2` and `h3`, and no handler
+4. Two `invalid_request` errors, from `h2` and `h3`, and no handler
    runs: the key names no member (core §5.1). `h1`'s queryables, on
    `eth0` and `eth1`, are not selected.
 5. Two values, both on `…/ports/p1/scan`, and none on any other key:
    naming `p2` is refused to the handler. A template-wide server answers
    for one member per call, whatever `replies` is (core §5.1).
-6. No value and no envelope: zero values, then completion. Sending nothing
+6. No value and no error: zero values, then completion. Sending nothing
    needs no member (core §5.1, "Answering").
 
 ## §3 Replies and errors (O3, §5.2)
@@ -97,18 +97,19 @@ one queryable over the template that refuses every call with `busy`.
 
 **Expected.**
 1. A value reply on the concrete key.
-2. A `reply_err` envelope with `code = invalid_request`.
+2. A `reply_err` with `code = invalid_request`.
 3. `invalid_request`, not `not_found`: the key names no member.
-4. A `reply_err` envelope with `code = unavailable` and
-   `cause = capability`.
-5. A `reply_err` envelope with `code = internal`, never silence.
-6. `app` with no detail; `app` with the error value inline, or none; `app`
-   in a JSON envelope with the error's bytes as base64 text, or none. A
-   detail that does not fit its envelope goes out as `internal` instead.
+4. A `reply_err` with `code = unavailable` and `cause = capability`.
+5. A `reply_err` with `code = internal`, never silence.
+6. `app` with no detail; `app` with the error value's JSON as its detail,
+   or none; `app` with the raw error's bytes as its detail, never base64,
+   or none. A detail its type cannot encode goes out as `internal`
+   instead.
 7. 200 executions on the first instance, and no `unavailable`: the replica
    declares no queryable on `set`.
 
-The envelope's encoding follows core §5.2.
+Each error is core §7.5's error form, under `zenoh/bytes` (core §5.2).
+§9 reads its bytes.
 
 ## §4 Retries (O4)
 
@@ -119,7 +120,7 @@ again, with no retries configured.
 
 **Expected.** The first is called again after each timeout, up to the
 configured number of attempts, and ends silent. The second is called once
-and returns `busy`: an envelope is an answer. The third is called once. The
+and returns `busy`: an error is an answer. The third is called once. The
 last is called once: retrying is opt-in.
 
 ## §5 Silence (O5)
@@ -153,7 +154,7 @@ last is called once: retrying is opt-in.
 **Expected.**
 1. With consolidation `None`, 10 values and 2 summaries. With `Latest` or
    `Auto`, values are lost: the reason `None` is required.
-2. The 5 values, then an `internal` envelope. The caller reports the
+2. The 5 values, then an `internal` error. The caller reports the
    replier as possibly partial.
 3. 10 values and 2 summaries on one key. The caller reports that replier
    as possibly partial too: two instances on one key cannot be told
@@ -208,3 +209,86 @@ only is not part of a finding.
 
 *Spike S6: the token check found every split-brain and flagged no standby.
 A check that compares tokens only would report steps 4 and 5 both.*
+
+## §9 A call's forms (core §5.1, §5.2, §7.5)
+
+**Setup.** `h1/tc` serves `set` (§1) with JSON Schema types, a JSON
+Schema `error` type and `encoding = "json"`. It serves three variants of
+`set` too: one declared `encoding = "cbor"`, one with protobuf types,
+and one with raw types (`application/octet-stream`). `tc.v1` also
+declares `@op/ping`, `idempotent = true`.
+
+`h1/tc` implements `seed.v1` beside it, the contract of
+`conformance/contracts/ok-packed-operation.toml`:
+- `calibrate`: its request, response and error types are packed;
+- `scan`: `replies = "many"`, with a packed response and summary;
+- `reset`: a packed request, a JSON Schema response, and no `error`
+  type.
+
+The test captures each query's payload and `Encoding` as the server
+receives it. It captures each reply and reply error as the caller
+receives it.
+
+**Steps.**
+1. **Each kind of type.** The caller calls `set` and each variant twice:
+   once accepted, and once refused `app` with a detail.
+2. **Packed types.** The caller calls `calibrate`, then calls it again,
+   refused `app` with a `Change` detail. It calls `scan`, whose handler
+   sends two values and its summary. It calls `reset`, refused `busy`.
+3. **The wrong tag.** A session of the test's own sends `calibrate` a
+   `Sensor` record under CH `0x40`, tag 0.
+4. **The as-of mark.** `h1/tc` puts its state twice, and the caller calls
+   `set`. Then `h1/tc` puts once more. A second instance then replaces
+   it, and the caller calls `set` before that instance's first put.
+5. **Errors that are no owner's.** The caller has two attempts
+   configured. A session of the test's own serves `ping` in place of its
+   server, and answers every attempt of a call with one reply error:
+   - the first call's, the 7 bytes `Timeout` under `zenoh/bytes`, as a
+     router's (core Appendix B);
+   - the second's, `600001000007a8`, `busy` with a cause, under
+     `zenoh/bytes`;
+   - the third's, `600001000007a0`, a `busy` error's bytes, under
+     `zenoh/string`;
+   - the fourth's, `600001000007a0` under `zenoh/bytes`.
+6. **A timeout behind a router.** `ping`'s server, behind a router,
+   freezes, and the caller calls it.
+7. **The bare wire.** A session of the test's own answers `set` with the
+   JSON envelope `{"code":"busy","message":""}`, under
+   `application/json`.
+
+**Expected.**
+1. Every query arrives under `zenoh/bytes`, as `0x40` then the request's
+   record: its JSON, its CBOR, its protobuf message or its raw bytes.
+   - Every value arrives under `zenoh/bytes`: CH `0x40`, or `0x50` with
+     a 32-bit run, then the mark and the record.
+   - Every error arrives under `zenoh/bytes`, CH `0x60` or `0x70`. Its
+     detail is the error value in its type's own bytes: JSON, CBOR, the
+     protobuf message or the raw bytes, never base64.
+   - No sample carries a schema suffix.
+   - A tool shows each error by its code, its cause and its message. It
+     shows the detail decoded by the `error` type it holds.
+2. Each CH carries its type's tag (`conformance/envelope/calls.json`):
+   - `calibrate`'s request `0x46`, `Sensor`'s tag 6. Its value `0x4e`,
+     `Status`'s tag 14, and its error `0x62`, `Change`'s tag 2, before a
+     `Change` record.
+   - `scan`'s request `0x40`, its values `0x46`, and its summary `0x4e`
+     with the attachment `summary`.
+   - `reset`'s request `0x4e`, and its `busy` error `0x60`: it declares
+     no `error` type.
+   - With a 32-bit run, a value's and an error's CH is `0x10` more.
+3. `invalid_request`, and no handler runs: the record's tag is not
+   `Sensor`'s (core §7.6, `tag`).
+4. The reply's run is the descriptor's `run`. Its seq is the second
+   put's, and the third put's seq follows it: a reply mints no seq. The
+   second instance's reply carries its own descriptor's run, and seq 0.
+5. The first three calls report no error. Each reply error is the
+   transport's: `sample_kind`, `cause`, then another `Encoding`.
+   - The caller calls `ping` twice for each, then reports silence.
+   - A tool shows each as the transport's, with its `Encoding` and its
+     bytes, never as `busy`.
+   - The fourth is `busy`, an owner's error, and the caller calls once.
+6. Silence. The caller's own `Timeout` comes under `zenoh/string`, or the
+   router's under `zenoh/bytes`. Neither is an owner's error, so the
+   caller calls twice.
+7. A caller that reads the bare wire reports `busy`. One that does not
+   reports the transport's, and calls `set` once: it is not idempotent.

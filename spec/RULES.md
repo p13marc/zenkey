@@ -51,13 +51,13 @@ The owner, consumer and caller sections each point to them.
 
 | Role | Rules |
 |---|---|
-| [Owner](#owner) | 71 |
+| [Owner](#owner) | 73 |
 | [Consumer](#consumer) | 20 |
-| [Caller](#caller) | 13 |
+| [Caller](#caller) | 17 |
 | [Deployment](#deployment) | 17 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 63, 25 of them a reader's |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 66, 25 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 63 |
-| Every rule, once | 229 |
+| Every rule, once | 236 |
 | [Rule ids](#rule-ids) | 85 |
 
 ## Owner
@@ -164,21 +164,23 @@ The owner, consumer and caller sections each point to them.
 |---|---|---|
 | [O1](core.md#51-rules) | **Owner:** an operation's queryable MUST be declared on its concrete key (or its template), and MUST be `complete`. | `[Sc: operations.md §1]` |
 | [O2](core.md#51-rules) | **Owner:** a call whose key expression is not concrete MUST be refused with `fanout_forbidden`, unless the operation declares `fanout = "allowed"`, whatever the access control allows. | `[Sc: operations.md §2]` |
-| [O3](core.md#51-rules) | **Owner:** a reply MUST go on the operation's own concrete key, a member's for a call over a template (below). | `[Sc: operations.md §3]` `[F: errors/cases.json]` |
-| [O3](core.md#51-rules) | Every call that reaches an owner's queryable MUST get one or the other, never silence (below). | `[Sc: operations.md §3]` `[F: errors/cases.json]` |
-| [O3](core.md#51-rules) | The active instance of a service MUST answer a call to an optional operation it does not expose with `unavailable` and its cause. | `[Sc: operations.md §3]` `[F: errors/cases.json]` |
+| [O3](core.md#51-rules) | **Owner:** a reply MUST go on the operation's own concrete key, a member's for a call over a template (below). | `[Sc: operations.md §3, §9]` `[F: errors/forms.json]` |
+| [O3](core.md#51-rules) | Every call that reaches an owner's queryable MUST get one or the other, never silence (below). | `[Sc: operations.md §3, §9]` `[F: errors/forms.json]` |
+| [O3](core.md#51-rules) | The active instance of a service MUST answer a call to an optional operation it does not expose with `unavailable` and its cause. | `[Sc: operations.md §3, §9]` `[F: errors/forms.json]` |
 | [O6](core.md#51-rules) | With a declared `summary`, each replier MUST end with exactly one summary reply, whose attachment is the ASCII bytes `summary`; value replies carry none. | `[Sc: operations.md §6]` `[F: contracts/e033-summary]` |
 | [§5.1](core.md#51-rules) | **Beside replicas.** … An instance whose exposed resources of an interface are all replicated operations MUST NOT declare an `unavailable` queryable on an exclusive operation of it … | `[Sc: operations.md §3, §8]` |
 | [§5.1](core.md#51-rules) | Replicas SHOULD expose the same replicated operations, since one answers `unavailable` where another would have served. | `[Sc: operations.md §3, §8]` |
 | [§5.1](core.md#51-rules) | It [a server declared over the whole template] names the member each reply answers for, and replies on that member's key, which the call's key expression MUST select. | `[Sc: operations.md §2]` |
+| [§5.1](core.md#51-rules) | **Owner:** an owner MUST write each value reply in §7.5's value form, under the `Encoding` `zenoh/bytes`, with its as-of mark (below). | `[F: envelope/calls.json, vectors.json]` `[Sc: operations.md §1, §9]` |
+| [§5.1](core.md#51-rules) | **An answer sent again.** … The owner MUST then send that answer's bytes unchanged, its mark included. | `[Sc: profiles/config/scenarios.md §10]` |
 
-### [core §5.2 The error envelope](core.md#52-the-error-envelope)
+### [core §5.2 Errors](core.md#52-errors)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§5.2](core.md#52-the-error-envelope) | **The `Encoding` of the owner's reply** MUST say which: (2 items) | none cited |
-| [§5.2](core.md#52-the-error-envelope) | An operation that declares no `error` type has none to send: its envelope follows the `response` type, and an owner MUST NOT put a detail in it. | none cited |
-| [§5.2](core.md#52-the-error-envelope) | **A detail that does not fit** its envelope, such as bytes in a JSON or CBOR envelope other than a raw type's base64 text, or a value in a protobuf one, MUST NOT be sent by an owner. | none cited |
+| [§5.2](core.md#52-errors) | An owner MUST answer a failed call in §7.5's error form, under the `Encoding` `zenoh/bytes`, with its as-of mark (§5.1). | `[F: errors/forms.json, envelope/calls.json]` `[Sc: operations.md §3, §9]` |
+| [§5.2](core.md#52-errors) | An operation that declares no `error` type has none to send, and an owner MUST NOT put a detail in its error. | `[F: envelope/calls.json]` |
+| [§5.2](core.md#52-errors) | **A detail its type cannot encode,** such as bytes for a JSON Schema type, a value for a protobuf or raw one, or a packed value with no code (§7.6), MUST NOT be sent by an owner. | `[Sc: operations.md §3]` |
 
 ### [core §6 Ownership and serving](core.md#6-ownership-and-serving)
 
@@ -191,8 +193,8 @@ The owner, consumer and caller sections each point to them.
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§7.2](core.md#72-encodings-and-rendering) | An owner MUST set Zenoh's predefined `Encoding` for every sample whose type has one (protobuf, JSON, CBOR, or a predefined media type), except a sample that carries §7.5's envelope (§4.3). | `[Sc: types.md §1]` |
-| [§7.2](core.md#72-encodings-and-rendering) | **The sample's `Encoding`.** … It [an owner] MUST NOT add a schema suffix to it, except on the error envelope (§5.2). | `[Sc: types.md §1]` |
+| [§7.2](core.md#72-encodings-and-rendering) | An owner MUST set Zenoh's predefined `Encoding` for every sample whose type has one (protobuf, JSON, CBOR, or a predefined media type), except a sample that carries §7.5's envelope (§4.3) or a call's form (§5.1). | `[Sc: types.md §1]` |
+| [§7.2](core.md#72-encodings-and-rendering) | **The sample's `Encoding`.** … It [an owner] MUST NOT add a schema suffix to it. | `[Sc: types.md §1]` |
 
 ### [core §7.4 Shared memory](core.md#74-shared-memory)
 
@@ -334,6 +336,15 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [O5](core.md#51-rules) | **Caller and tool:** MUST NOT treat an empty reply set as a verdict. | `[Sc: operations.md §5]` |
 | [O6](core.md#51-rules) | **Caller:** MUST use consolidation `None`, since `Latest` and `Auto` drop replies (spike S6, Appendix B). | `[Sc: operations.md §6]` `[F: contracts/e033-summary]` |
 | [§5.1](core.md#51-rules) | A caller MUST NOT depend on a refusal of what the schema refuses: a writer sends only what its schema declares (§9.8). | `[Sc: operations.md §3]` |
+| [§5.1](core.md#51-rules) | **Caller:** a caller MUST write its request as §7.5's request, `CH · record`, under the `Encoding` `zenoh/bytes`. | `[F: envelope/calls.json, vectors.json]` `[Sc: operations.md §9]` |
+
+### [core §5.2 Errors](core.md#52-errors)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§5.2](core.md#52-errors) | A caller or a tool MUST read a `reply_err` under the `Encoding` `zenoh/bytes` by §7.5's parse. | `[F: errors/forms.json]` `[Sc: operations.md §9]` |
+| [§5.2](core.md#52-errors) | **Reading an error.** … A caller or a tool MUST read every other `reply_err` as the transport's: one the parse refuses, and one under another `Encoding`. *Except:* An implementation MAY read a call's sample whose `Encoding` is not `zenoh/bytes` as the bare wire. | `[F: errors/forms.json]` `[Sc: operations.md §9]` |
+| [§5.2](core.md#52-errors) | **Decoding.** … It [a caller or a tool decoding an envelope] MUST refuse: (5 items) | `[F: errors/cases.json]` |
 
 ### [core §8.1 Tokens](core.md#81-tokens)
 
@@ -447,11 +458,12 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 |---|---|---|
 | [O5](core.md#51-rules) | **Caller and tool:** MUST NOT treat an empty reply set as a verdict. | `[Sc: operations.md §5]` |
 
-### [core §5.2 The error envelope](core.md#52-the-error-envelope)
+### [core §5.2 Errors](core.md#52-errors)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§5.2](core.md#52-the-error-envelope) | **Decoding.** … It [a tool decoding an envelope] MUST refuse: (5 items) | `[F: errors/cases.json]` |
+| [§5.2](core.md#52-errors) | A caller or a tool MUST read a `reply_err` under the `Encoding` `zenoh/bytes` by §7.5's parse. | `[F: errors/forms.json]` `[Sc: operations.md §9]` |
+| [§5.2](core.md#52-errors) | **Reading an error.** … A caller or a tool MUST read every other `reply_err` as the transport's: one the parse refuses, and one under another `Encoding`. *Except:* An implementation MAY read a call's sample whose `Encoding` is not `zenoh/bytes` as the bare wire. | `[F: errors/forms.json]` `[Sc: operations.md §9]` |
 
 ### [core §7.7 Frames](core.md#77-frames)
 
@@ -599,6 +611,8 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§7.3](observer.md#73-decoding-and-rendering) | A tool that shows or judges a payload MUST read a sample on a zk2 data key whose kind is a stream, state or an event, and whose `Encoding` is `zenoh/bytes`, as core §7.5's envelope. | `[F: envelope/carries.json]` |
 | [§7.3](observer.md#73-decoding-and-rendering) | **The envelope first.** … The tool MUST NOT decode or sniff a refused envelope's bytes as a payload with no envelope. | `[F: envelope/carries.json]` |
 | [§7.3](observer.md#73-decoding-and-rendering) | A tool MUST NOT decode, render or judge a heartbeat's body as a record of its resource's type. | `[F: envelope/carries.json, heartbeat/bodies.json]` `[Sc: profiles/freshness/scenarios-v2.md §1]` |
+| [§7.3](observer.md#73-decoding-and-rendering) | A tool that shows or judges a call's reply MUST read a reply under `zenoh/bytes` as core §7.5's value form, and a reply error as core §5.2 reads it. | `[F: envelope/vectors.json, errors/forms.json]` `[Sc: operations.md §9]` |
+| [§7.3](observer.md#73-decoding-and-rendering) | The tool MUST NOT decode or sniff a refused value's bytes as a bare record. | `[F: envelope/vectors.json]` |
 | [§7.3](observer.md#73-decoding-and-rendering) | A tool that shows a payload it cannot decode MUST render it as its declared type and size, or through a plugin. | `[Sc: types.md §2]` |
 | [§7.3](observer.md#73-decoding-and-rendering) | **Honest rendering.** … It [a tool that shows a payload it cannot decode] MUST NOT show garbage, and MUST NOT drop the sample silently. | `[Sc: types.md §2]` |
 
