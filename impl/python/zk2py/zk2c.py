@@ -47,9 +47,10 @@ forms.json``): "An implementation that writes an error MUST cut a message
 longer than 255 bytes to its longest prefix of whole characters within 255
 bytes", and "MUST NOT write an error with a cause on a code other than
 unavailable, unavailable without one, or a detail on a code other than
-app": it refuses those as the parse would, ``cause`` first. No zk2py owner
-answers in a form, and no caller sends one: "No rule at this version has a
-caller or an owner write them" (core §5.1, "The forms").
+app": it refuses those as the parse would, ``cause`` first. Since core 0.94
+(#985 C4c) every call travels in the forms: :mod:`zk2py.calls` writes and
+reads them by an operation's types, zk2py's owner answers in them and its
+caller writes its request in one (core §5.1, "The forms").
 
 **Which sample carries one (observer §7.3, text 0.14).** "A tool that shows
 or judges a payload MUST read a sample on a zk2 data key whose kind is a
@@ -346,6 +347,21 @@ def cut_message(message: str) -> str:
     return raw[:MESSAGE_MAX].decode("utf-8", "ignore")
 
 
+def check_error(code: str, cause: str | None, has_detail: bool) -> None:
+    """§7.5's writer checks on an error's byte, in the parse's order: "MUST
+    NOT write an error with a cause on a code other than unavailable,
+    unavailable without one" (``cause``), "or a detail on a code other than
+    app" (``detail``). ValueError for a code or a cause §5.2 does not name."""
+    if code not in ERROR_CODES:
+        raise ValueError(f"no such code: {code!r}")
+    if cause not in ERROR_CAUSES:
+        raise ValueError(f"no such cause: {cause!r}")
+    if (code == "unavailable") != (cause is not None):
+        raise Refused("cause", f"{code} with a cause of {cause}" if cause else "unavailable with no cause")
+    if has_detail and code != "app":
+        raise Refused("detail", f"a detail on {code}: only app carries one")
+
+
 def write_error(stamp: InBand, code: str, cause: str | None = None, message: str | None = None,
                 detail: bytes | None = None, tag: int = 0) -> bytes:
     """An error form, a reply error's payload: ``CH · run · seq · error``
@@ -355,15 +371,8 @@ def write_error(stamp: InBand, code: str, cause: str | None = None, message: str
     other than unavailable, unavailable without one" (``cause``), "or a
     detail on a code other than app" (``detail``). A message over 255 bytes
     is cut (:func:`cut_message`)."""
-    if code not in ERROR_CODES:
-        raise ValueError(f"no such code: {code!r}")
-    if cause not in ERROR_CAUSES:
-        raise ValueError(f"no such cause: {cause!r}")
-    if (code == "unavailable") != (cause is not None):
-        raise Refused("cause", f"{code} with a cause of {cause}" if cause else "unavailable with no cause")
-    if detail is not None and code != "app":
-        raise Refused("detail", f"a detail on {code}: only app carries one")
-    byte = (ERROR_CODES.index(code) << 5) | (ERROR_CAUSES.index(cause) << 3) \
+    check_error(code, cause, detail is not None)
+    byte =(ERROR_CODES.index(code) << 5) | (ERROR_CAUSES.index(cause) << 3) \
         | (0b100 if detail is not None else 0) | (0b10 if message is not None else 0)
     out = bytes([_ch("error", stamp.width, tag)]) + _stamp(stamp.width, stamp.run, stamp.seq) + bytes([byte])
     if message is not None:
@@ -395,10 +404,11 @@ def read_reply_err(encoding: str, payload: bytes) -> Envelope:
     first (``forms.json``'s ``reads``): only ``zenoh/bytes``, "compared as an
     exact string", carries a form (``encoding`` otherwise, a schema suffix
     included); then §7.5's parse of a ``reply_err``. A router's ``Timeout``
-    under ``zenoh/bytes`` is ``sample_kind``: "T is a value's CH". Reading
-    one so is no rule's at this version: §5.2's three envelope encodings
-    still carry every owner's error, and any other reply error is the
-    transport's (zk2py's caller reads so, :mod:`zk2py.live`)."""
+    under ``zenoh/bytes`` is ``sample_kind``: "T is a value's CH". Core 0.94
+    §5.2: "A caller or a tool MUST read a reply_err under the Encoding
+    zenoh/bytes by §7.5's parse", and every other one as the transport's;
+    zk2py's caller reads so (:func:`zk2py.live.read_reply_error`), and takes
+    §5.1's MAY for the bare wire's envelope."""
     if str(encoding) != FORM_ENCODING:
         raise Refused("encoding", f"{encoding!r} carries no form: only {FORM_ENCODING} does")
     return parse(payload, "reply_err")

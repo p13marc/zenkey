@@ -24822,3 +24822,243 @@ the transport's.
   resolved in the owner example too.
 - **Open:** F-436 (not re-run), F-437 to F-441, F-471. F-365 stays open
   as #965's.
+
+## At core 0.94 and observer 0.24 (#985 C4c)
+
+Round 101 read, cold, the texts at main b483902e: core 0.94 and observer
+0.24, each changelog entry first. Then core §5 whole, §7.5's request,
+value and error, observer §7.3 whole, and `scenarios/operations.md` §9.
+Its evidence: `envelope/calls.json` (3 types, 3 forms, 21 writes, 18
+reads), the unchanged cases of `errors/forms.json`, `errors/cases.json`,
+`envelope/vectors.json` and `envelope/carries.json`, and `operations.md`
+§9 live in three pairings: zk2py's caller and owner, zk2py's caller and
+the owner example, and `zenctl call` and zk2py's owner (black boxes of
+main fd50c100). Then config.v1's scenarios through the forms, against
+both owners. config.v2 0.1 (#985 G1) is present on main and not read:
+#985's later round reads it after G2 and G3.
+
+**F-471 holds.** Core 0.94 §5.1, "The forms": "A call travels in §7.5's
+forms, whatever its types' kind: a JSON Schema, protobuf, raw or packed
+record is carried alike." §5.2: "a packed type's are its record (§7.6)".
+§7.2: "A packed record always travels in an envelope or a call's form".
+The envelope's kinds, which named no packed type, are now "The envelope,
+on the bare wire", which no owner writes. zk2py writes calls.json's 21
+cases and reads its 18. Live, on a 32-bit run, zk2py's owner answers
+`calibrate` 0x5e (Status's tag 14) and its refusal 0x72 before a Change
+record, and `scan`'s values 0x56 and its summary 0x5e. The owner example
+answers `calibrate` 0x72 under Change's tag, and `scan` and `reset` 0x70.
+
+**The rules changed as the changelogs state.** zk2py diffed every keyword
+sentence of `core.md`, `observer.md` and `scenarios/operations.md`
+between 037fce56 (round 100's texts) and fd50c100.
+- **Core, added:** the caller's request MUST, the owner's value MUST,
+  an answer sent again MUST, the bare wire's MAY, the error form MUST, and
+  the two reading MUSTs.
+- **Core, removed:** the reply's `Encoding` MUST.
+- **Core, reworded:** the detail's MUST NOT, by its type; the MUST NOT on
+  a detail with no `error` type, "in its error"; §7.2's predefined
+  `Encoding` MUST, which excepts a call's form; its schema-suffix MUST
+  NOT, which loses its exception. "Decoding"'s MUST is rebound by its
+  antecedent to "a caller or a tool that reads the bare wire".
+- **Observer:** §7.3's MUST and MUST NOT, added.
+- `operations.md` states no keyword rule. The four touched fixtures change
+  no case, descriptions and notes aside.
+
+**No rule changed beyond what the changelogs state.** `RULES.md` lists
+239 rules, 7 more, as 0.94's entry says. One class lost a row it should
+hold (F-472).
+
+**A router's `Timeout`, measured again.** 0.94's entry, "Decided here":
+"the querier's `Timeout` usually ends the query first … Read from the
+source, not measured." Through a zenoh-python router, a held query drew
+the querier's own `Timeout` under `zenoh/string` for zenoh-python's
+caller, 6 of 6 at 1 s and 2 s. `zenctl call` drew the router's under
+`zenoh/bytes` 4 times in 6. Both read as silence, so no rule rests on
+which comes first, and zk2py files no finding.
+
+### F-472 · contradiction · `RULES.md` beside core §5.2 "Decoding": a rule the observer class does not list
+
+> Core 0.94 §5.2: "**Decoding.** A caller or a tool that reads the bare
+> wire decodes an envelope by its reply's `Encoding`, without the
+> contract. It MUST refuse:". `RULES.md`: "Each is listed under every
+> role it binds (core §0)".
+
+- **The contradiction.** `RULES.md` lists the row under "Caller" alone.
+  At 0.93 it was listed under "Observer", whose subject was "A tool". The
+  two reading MUSTs beside it, whose subject is also "A caller or a tool",
+  are listed under both classes. So the observer class counts 69, where
+  66, plus the two reading MUSTs and observer 0.24's two rules, make 70.
+- **What zk2py does:** its verdict for the observer class stands, beyond
+  the index. `envelope.decode` is every zk2py reader's.
+- **Fix:** the generator lists the row under "Observer" too, and the
+  observer class counts 70.
+- **Changes:** the observer class's count, and a tool's claim to the rule.
+
+### F-473 · ambiguity · core §5.2 "The bare wire" beside "A malformed error": an envelope its decoding refuses
+
+> §5.2, "Reading an error": "**The bare wire.** A reader of the bare wire
+> (§5.1) reads a `reply_err` under one of the envelope's three encodings
+> as that envelope (below), not as the transport's." "Transport errors":
+> "**A malformed error** is the transport's too." §5.1, "Retries": "A
+> `reply_err` that is the transport's is silence too, a malformed error
+> among them (§5.2)." 0.94's entry: "It said that an envelope is an
+> answer, 'and so is a malformed one'."
+
+- **The ambiguity.** A bare-wire reader decodes an envelope "by its
+  reply's `Encoding`", and "Decoding" names its refusals. The text does not
+  say what a refused envelope is.
+  - Read by "The bare wire", it is that envelope, "not … the
+    transport's": an answer, as at 0.93.
+  - Read by "A malformed error", it is the transport's: silence, after
+    which an idempotent call is retried.
+- **What zk2py does:** the transport's, its decoding's token named
+  (`live.read_reply_error`). It retries an idempotent call after one.
+- **Fix:** §5.2, "The bare wire": "… as that envelope. One its decoding
+  refuses is a malformed error, the transport's."
+- **Changes:** whether a caller retries after a malformed bare-wire
+  envelope, until C4d removes the read path.
+
+### F-474 · gap · `operations.md` §9 step 4: a state the setup does not declare
+
+> §9 step 4: "**The as-of mark.** `h1/tc` puts its state twice, and the
+> caller calls `set`. Then `h1/tc` puts once more." Setup: "`h1/tc`
+> serves `set` (§1) with JSON Schema types … It serves three variants of
+> `set` too … `tc.v1` also declares `@op/ping`". The common setup:
+> "`tc` exposing `@op/interfaces/{if}/set` … and `@op/diagnostics`".
+
+- **The gap.** Neither setup declares a state, so "its state" names no
+  resource. `seed.v1`, the other contract `h1/tc` implements, declares
+  none either. The expected 4, "Its seq is the second put's", needs one
+  whose puts mint seqs: a `state`, or an `events` resource.
+- **What zk2py does:** its `tc.v1` declares the state `status`
+  (`interop/operations/tc.v1.toml`), and step 4 puts it. The owner
+  example puts it through `put tc.v1 state/status`.
+- **Fix:** §9's setup: "`tc.v1` also declares a parameterless state,
+  `status`, which step 4 puts."
+- **Changes:** the scenario's setup, for an implementation that builds
+  `tc.v1` from the text.
+
+### F-475 · gap · core §5.1 "Reading a value": a reply under another `Encoding`, for a reader that does not take the MAY
+
+> §5.1: "**Reading a value.** A caller reads a reply by §7.5's parse,
+> and its record as the `response` type". "**The bare wire.** … An
+> implementation MAY read a call's sample whose `Encoding` is not
+> `zenoh/bytes` as the bare wire. It tells the two wires apart by the
+> `Encoding` alone: a bare record can parse as a form (§7.5)." §5.2
+> bounds a `reply_err` by its `Encoding`: "one under another `Encoding`"
+> is the transport's. Observer §7.3: "MUST read a reply under
+> `zenoh/bytes` as core §7.5's value form".
+
+- **The gap.** No text bounds a value reply by its `Encoding`. A caller
+  that does not read the bare wire reads every reply "by §7.5's parse",
+  so an older owner's bare value is parsed as a form. `vectors.json`'s
+  `[1,2,3,4]` parses as a value: CH `0x5b`, a 32-bit run, a seq and tag
+  11 read from its text, and the record `]` handed on. Its note says
+  "only the Encoding tells them apart (§5.2)", where §5.2 tells reply
+  errors apart. Observer §7.3 binds a tool under `zenoh/bytes` alone, and
+  says nothing of another `Encoding`. `operations.md` §9 step 7 covers
+  the reply error alone.
+- **What zk2py does:** it takes the MAY. Its reader without it
+  (`read_bare=False`, step 7's second caller) parses every reply, as
+  §5.1 says.
+- **Fix:** §5.1, "Reading a value": "A caller reads a reply under
+  `zenoh/bytes` by §7.5's parse. One under another `Encoding` is
+  malformed, unless the caller reads the bare wire (below)."
+- **Changes:** what a caller that does not read the bare wire hands on
+  from an older owner's value.
+
+### F-476 · gap · core §5.1 "The as-of mark": seq 0, minted none or minted 0
+
+> §5.1: "The seq is the last it minted for state and events under that
+> run, or 0 when it has minted none. A reply mints no seq." "**What it
+> tells a caller.** … Within one run, it can order the reply against the
+> state it holds, by seq." §4.3: an instance's seqs count "from 0" in a
+> run.
+
+- **The gap.** A reply before an instance's first put and a reply after
+  that put, whose seq is 0, carry one mark: its run and seq 0. So a caller
+  cannot order a reply of seq 0 against the put of seq 0. Every other seq
+  orders, since a mark of n follows the put of n and precedes n + 1.
+  `operations.md` §9 step 4 checks the first case alone: "The second
+  instance's reply carries its own descriptor's run, and seq 0."
+- **Measured:** `forms_live` §9 step 4, in each pairing. A second
+  instance's reply before its first put, that put, and a reply after it
+  carry its run and seq 0, all three. The owner example's do too.
+- **What zk2py does:** what the text says. Its owner's mark is 0 until
+  its first mint, and the mint's seq after it (`Owner.mark`).
+- **Fix:** §5.1: "A reply's seq is the next it would mint", so a mark of
+  n orders after every put below n. Or: "A mark of seq 0 orders nothing
+  against the put of seq 0."
+- **Changes:** how a caller orders a reply against an instance's first
+  put.
+
+### F-477 · bug · the reference's `zenctl call` beside core 0.94 §5.1: a packed request refused, nothing sent
+
+> §5.1, "The forms": "A call travels in §7.5's forms, whatever its types'
+> kind … **Caller:** a caller MUST write its request as §7.5's request,
+> `CH · record` … its tag is the `request` type's." `operations.md` §9
+> step 2: "The caller calls `calibrate`, then calls it again … It calls
+> `reset`, refused `busy`."
+
+- **The bug.** `zenctl call` of fd50c100 refuses an operation whose
+  `request` type is packed, exit 2, and sends nothing: "Error: the request
+  for @op/calibrate: packed:Sensor is a packed type, whose call travels in
+  core §7.5's forms, which no caller writes yet". `reset` (`packed:Status`)
+  is refused the same. `scan`, a JSON Schema request, is called, and its
+  packed values and summary are shown decoded.
+- **Measured:** `forms_live --pairing zenctl-py`, §9 step 2: 1 of 5.
+  zk2py's caller writes both requests, `0x46` and `0x4e`, and the owners
+  answer them.
+- **Fix:** the reference writes a packed request through §7.6's writer
+  under its type's tag, as zk2py's `calls.request` does.
+- **Changes:** whether the reference's tool can call a packed operation.
+
+### F-478 · bug · the reference's `zenctl call` beside core 0.94 §5.1 and observer §7.3: a CBOR operation's record read as JSON
+
+> §5.1: "A form's record is encoded as its type says, on the contract's
+> `encoding` (§7.2)." §5.2: "A JSON Schema type's are JSON or CBOR, on the
+> operation's `encoding`." Observer §7.3: "The type is then read on its
+> contract's `encoding` (core §7.2). That covers an envelope's record, and
+> a form's."
+
+- **The bug.** On `set-cbor`, declared `encoding = "cbor"`, `zenctl call`
+  writes its request in CBOR, and zk2py's owner receives `0x40` and the
+  CBOR map. It shows the value's record, CBOR as the contract says,
+  `undecodable`: "as json: expected value at line 1 column 1". So is the
+  `app` error's `TcError` detail. The JSON, protobuf and raw variants are
+  shown decoded.
+- **Measured:** `forms_live --pairing zenctl-py`, §9 step 1: 20 of 22,
+  the two failures these. zk2py's caller and tool read the same bytes as
+  `{"applied": true}` and `{"reason": "mtu 9000 refused"}`.
+- **Fix:** the reference reads a form's JSON Schema record and detail on
+  the operation's `encoding`, as it writes the request.
+- **Changes:** what the reference's tool shows of every CBOR operation.
+
+### F-479 · bug · the reference's `consume` example beside core 0.94 §5.1: a raw value printed with its form
+
+> §5.1: "**Reading a value.** A caller reads a reply by §7.5's parse, and
+> its record as the `response` type". Observer §7.3: "The value's record
+> is the payload every later step decodes, renders or judges".
+
+- **The bug.** The `consume` example of fd50c100 calls `zk2py_echo.v1`'s
+  `@op/echo`, a raw `text/plain` operation, with `ping`. It prints the
+  value's whole payload, CH, run and seq included: `call value
+  P\xfa\x08…\x00\x00\x00ping`, where it printed `call value ping` before
+  the flip. It does so against the owner example too, so its reader, not
+  the owner, is at fault. Its errors read right: `call refused app …`.
+- **Measured:** `live_interop --only owner`, and a probe of both owners
+  on one router.
+- **Fix:** the example reads the value form by §7.5's parse and prints its
+  record.
+- **Changes:** what the reference's consumer example shows of a raw
+  operation's value.
+
+### Counts at core 0.94 and observer 0.24 (#985 C4c)
+
+479 entries.
+- **New: F-472 to F-479:** one contradiction (F-472), one ambiguity
+  (F-473), three gaps (F-474 to F-476) and three bugs in the reference
+  (F-477 to F-479). None is a blocker.
+- **Resolved: F-471**, as above.
+- **Open:** F-436 (not re-run), F-437 to F-441, F-472 to F-479. F-365
+  stays open as #965's.

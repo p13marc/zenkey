@@ -1036,6 +1036,19 @@ def _telemetry_contracts(path: Path) -> list[Result]:
     return out
 
 
+def _config_v2_not_read(path: Path) -> list[Result]:
+    """``config.v2`` 0.1 (#985 G1, main b483902e): its fixtures under
+    ``conformance/v2/`` and the contract they load under ``contracts/``
+    (``rfcfg.v1``). Keyed as present and not read this round: round 101
+    reads core 0.94's flip (#985 C4c), and #985's later round reads
+    ``config.v2`` once its owner (G2) and its tools (G3) land. So each entry
+    is named, never failed as unknown, and never counted as read; zk2py
+    files no finding on it."""
+    print(f"NOTE config: {path.name}/ is config.v2 0.1's (#985 G1): present, not read this round", file=sys.stderr)
+    return [(f"{path.name}/ (config.v2 0.1, #985 G1): present, not read this round, for #985's round after G2 and G3",
+             True, "")]
+
+
 def _alarms_keys(path: Path) -> list[Result]:
     """alarms.v1 §2.2, §2.3, §2.12: `derive`, `host_scoped`, `ref` and
     `parse`, each by its `op`. A `derive` case also checks that framed input
@@ -1625,7 +1638,7 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
                "codes.json": _health_codes, "clock.json": _health_clock},
     "config": {"validation.json": _config_validation, "window.json": _config_window,
                "lifecycle.json": _config_lifecycle, "desired.json": _config_desired,
-               "redaction.json": _config_redaction},
+               "redaction.json": _config_redaction, "v2": _config_v2_not_read, "contracts": _config_v2_not_read},
     "link": {"exposure.json": _link_exposure, "plan.json": _link_plan, "lints.json": _link_lints, "v2": _link_v2,
              "contracts": _link_contracts},
     "alarms": {"keys.json": _alarms_keys, "documents.json": _alarms_documents,
@@ -3741,7 +3754,8 @@ def family_readings(root: Path) -> list[Result]:
         + _round91_readings(root) + _round92_readings(root) + _mend93_readings(root) + _round93_readings(root) \
         + _mend_after_round93_readings(root) + _round94_readings(root) + _mend_after_round94_readings(root) \
         + _round95_readings(root) + _round96_readings(root) + _round96_k1_readings(root) + _round97_readings(root) \
-        + _round98_readings(root) + _round99_readings(root) + _round100_readings(root)
+        + _round98_readings(root) + _round99_readings(root) + _round100_readings(root) \
+        + _round101_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -4429,13 +4443,16 @@ def _round100_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  len(forms["bytes"]), len(forms["writes"]), len(forms["reads"]),
                  exp["e044-packed-place"]["codes"]],
                 [20, 147, 91, 256, 22, 17, ["E044", "E044"]]))
-    # What no rule adopts yet (core §5.1 "The forms", §5.2 "The error form").
-    out.append(("core §5.1 and §5.2 (0.92): no rule has a caller or an owner write a form; every failed call still "
-                "answers in §5.2's envelope, and a reply error under any other Encoding is the transport's, a "
-                "router's Timeout under zenoh/bytes too: zk2c reads it sample_kind, the querier's encoding",
-                missing(core, "No rule at this version has a caller or an owner write them.",
-                        "No rule at this version has an owner answer in it",
-                        "It is the transport's by the rule above.")
+    # What no rule adopted at 0.92 (core §5.1 "The forms", §5.2 "The error
+    # form"). Core 0.94 (#985 C4c) adopts the forms: round 101 re-keys this
+    # reading to the three sentences' absence, and reads 0.94's own rules in
+    # _round101_readings. A router's Timeout still reads sample_kind.
+    out.append(("core §5.1 and §5.2 (0.92): no rule had a caller or an owner write a form, until 0.94 adopted them "
+                "(round 101): the three sentences are gone; a router's Timeout under zenoh/bytes still reads "
+                "sample_kind, the querier's encoding",
+                [q for q in ("No rule at this version has a caller or an owner write them.",
+                             "No rule at this version has an owner answer in it",
+                             "It is the transport's by the rule above.") if q in core]
                 + [zk2c.read_reply_err_token("zenoh/bytes", b"Timeout"),
                    zk2c.read_reply_err_token("zenoh/string", b"Timeout")],
                 ["sample_kind", "encoding"]))
@@ -4458,17 +4475,19 @@ def _round100_readings(root: Path) -> list[tuple[str, Any, Any]]:
                         "a packed type with no CH to carry its tag: an explicit stream's type, or an attachment")
                 + [op.codes, op.fingerprint],
                 [[], exp["ok-packed-operation"]["fingerprint"]]))
-    # F-471: §5.2's Encoding names no packed kind, where E044 now lets an
-    # operation's error and response be packed and every failed call still
-    # answers in the envelope. zk2py answers JSON, as the reference does
-    # (forms_live).
-    s52 = core[core.index("### 5.2 The error envelope"):core.index("## 6. Ownership and serving")]
+    # F-471: §5.2's Encoding named no packed kind at 0.92 and 0.93, where
+    # E044 let an operation's error and response be packed and every failed
+    # call still answered in the envelope. Core 0.94 answers it (round 101):
+    # every call travels in the forms, a packed record alike, and the
+    # envelope's kinds are the bare wire's, which no owner writes.
+    s52 = core[core.index("### 5.2 Errors"):core.index("## 6. Ownership and serving")]
     by = {r["template"]: r for r in op.canonical["resources"]}
-    out.append(("F-471 (open): §5.2's \"Encoding\" names a JSON Schema, a protobuf and a raw type, and no packed "
-                "one; ok-packed-operation's calibrate (a packed error) and scan (a packed response, no error type) "
-                "have no envelope kind by the text, and zk2py answers both in JSON, as for a raw type",
-                missing(s52, "**A JSON Schema type:**", "**A protobuf type:**", "**A raw type:**")
-                + [("**A packed type" in s52), envelope.envelope_encoding(by["calibrate"]),
+    out.append(("F-471 (round 100; answered by core 0.94, round 101): the envelope's kinds name a JSON Schema, a "
+                "protobuf and a raw type and no packed one, and are now the bare wire's alone; zk2py's envelope "
+                "kind for a packed operation, on the bare wire it writes no more, stays JSON",
+                missing(s52, "**a JSON Schema type:**", "**a protobuf type:**", "**a raw type:**",
+                        "**The envelope, on the bare wire.**")
+                + [("**a packed type" in s52), envelope.envelope_encoding(by["calibrate"]),
                    envelope.envelope_encoding(by["scan"])],
                 [False, "application/json", "application/json"]))
     # Round 99's answers, as the texts now read, and zk2py's reading.
@@ -4503,6 +4522,163 @@ def _round100_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "keyframe_every⌋ delta records that include every field, the largest any revision writes",
                 missing(l1, "so the largest frame holds `records` − ⌊`records` / `keyframe_every`⌋ such delta records",
                         "is the largest that any revision declaring it writes"), []))
+    return out
+
+
+def _round101_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.94 and observer 0.24 (#985 C4c, the flip: every call in the
+    value and error forms), read at main b483902e (#609, round 101): each
+    entry; the fixtures' counts against its words; each new rule as its text
+    states it; F-471's answer; RULES.md's counts. The live half is
+    ``forms_live`` (operations.md §9 in three pairings) and config.v1's
+    scenarios through the forms."""
+    import re
+
+    from . import calls, zk2c
+    from .contract import load_contract
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, obs, ops = flat("core.md"), flat("observer.md"), flat("scenarios/operations.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.94 or later and observer 0.24, written against it, each with its entry (#985 C4c)",
+         [core_v >= (0, 94)] + entry("CHANGELOG.md", "0.94", "value and error forms")
+         + entry("observer-CHANGELOG.md", "0.24", "a call's forms read first")
+         + missing(obs, "| **Text version** | 0.24", "| **Written against** | core 0.94"),
+         [True]),
+    ]
+    # The evidence, as 0.94's entry counts it: calls.json new, the others'
+    # cases unchanged since 0.92.
+    cj = _load_json(root / "envelope" / "calls.json")
+    vec = _load_json(root / "envelope" / "vectors.json")
+    forms = _load_json(root / "errors" / "forms.json")
+    out.append(("core 0.94's entry: calls.json holds ok-packed-operation's three operations, CHs by the tags Sensor 6, "
+                "Status 14 and Change 2, 21 writes and 18 reads; vectors.json (20 headers, 147 cases) and "
+                "forms.json (256 bytes, 22 writes, 17 reads) change no case",
+                [cj["contract"], [f["operation"] for f in cj["forms"]],
+                 {n.split("#")[1]: t["tag"] for n, t in cj["types"].items()}, len(cj["writes"]), len(cj["reads"]),
+                 len(vec["headers"]), len(vec["cases"]), len(forms["bytes"]), len(forms["writes"]),
+                 len(forms["reads"])],
+                ["contracts/ok-packed-operation.toml", ["calibrate", "scan", "reset"],
+                 {"Sensor": 6, "Status": 14, "Change": 2}, 21, 18, 20, 147, 256, 22, 17]))
+    # §5.1's four additions and §5.2's two, as the entry names them.
+    out.append(("core 0.94 §5.1: the caller's request MUST, the owner's value MUST with its as-of mark, reading a "
+                "value, an answer sent again MUST, and the bare wire's MAY",
+                missing(core, "a caller MUST write its request as §7.5's request, `CH · record`, under the "
+                              "`Encoding` `zenoh/bytes`. CH's width bit is 0, and its tag is the `request` type's.",
+                        "an owner MUST write each value reply in §7.5's value form, under the `Encoding` "
+                        "`zenoh/bytes`, with its as-of mark (below).",
+                        "A reply the parse or the type refuses is malformed, and an answer all the same (above).",
+                        "The owner MUST then send that answer's bytes unchanged, its mark included.",
+                        "An implementation MAY read a call's sample whose `Encoding` is not `zenoh/bytes` as the "
+                        "bare wire.", "None writes the bare wire"), []))
+    out.append(("core 0.94 §5.2: the owner's error form MUST, the detail its type's own bytes, the two reading MUSTs, "
+                "a malformed error the transport's, and the envelope the bare wire's",
+                missing(core, "An owner MUST answer a failed call in §7.5's error form, under the `Encoding` "
+                              "`zenoh/bytes`, with its as-of mark (§5.1).",
+                        "a raw type's are themselves, never base64, and a packed type's are its record (§7.6).",
+                        "A caller or a tool MUST read a `reply_err` under the `Encoding` `zenoh/bytes` by §7.5's "
+                        "parse.",
+                        "A caller or a tool MUST read every other `reply_err` as the transport's: one the parse "
+                        "refuses, and one under another `Encoding`.",
+                        "**A malformed error** is the transport's too.",
+                        "**The envelope, on the bare wire.**",
+                        "**Decoding.** A caller or a tool that reads the bare wire decodes an envelope")
+                + [q for q in ("**The `Encoding` of the owner's reply** MUST say which",
+                               "No rule at this version has an owner answer in it") if q in core], []))
+    out.append(("observer 0.24 §7.3, \"A call's forms first\": the MUST, the MUST NOT on a refused value, an error by "
+                "its code, cause and message, the transport's shown so",
+                missing(obs, "A tool that shows or judges a call's reply MUST read a reply under `zenoh/bytes` as "
+                             "core §7.5's value form, and a reply error as core §5.2 reads it.",
+                        "The tool MUST NOT decode or sniff a refused value's bytes as a bare record.",
+                        "**An error** is shown by its code, its cause and its message.",
+                        "never as an owner's error."), []))
+    # F-471's answer: a packed operation's types travel in the forms, and
+    # zk2py's codec writes calls.json's bytes for ok-packed-operation.
+    k = load_contract(root / "contracts" / "ok-packed-operation.toml")
+    cal = calls.Operation.of(k, "calibrate")
+    st = zk2c.InBand(16, 1, 7)
+    out.append(("F-471 answered (core 0.94 §5.1, §5.2, §7.2): a JSON Schema, protobuf, raw or packed record is carried "
+                "alike, a packed detail is its record, a packed record travels in an envelope or a call's form; "
+                "calibrate's busy is 0x62 0001 000007 a0 under Change's tag",
+                missing(core, "whatever its types' kind: a JSON Schema, protobuf, raw or packed record is carried "
+                              "alike.", "A packed record** always travels in an envelope or a call's form")
+                + [calls.error(cal, st, "busy").hex()], ["620001000007a0"]))
+    out.append(("operations.md §9 (new): a call's forms for each kind of type, the packed tags, a wrong tag, the as-of "
+                "mark, four reply errors a test session plays, a timeout behind a router, and the bare wire",
+                missing(ops, "## §9 A call's forms (core §5.1, §5.2, §7.5)", "**The wrong tag.**",
+                        "**The as-of mark.**", "**Errors that are no owner's.**",
+                        "**A timeout behind a router.**", "**The bare wire.**"), []))
+    # RULES.md, as the entry counts it.
+    rules = (spec / "RULES.md").read_text(encoding="utf-8")
+    counted = {n: int(c) for n, c in re.findall(r"^\| \[([^\]]+)\]\(#[^)]*\) \| (\d+)", rules, re.M)}
+    once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
+    out.append(("core 0.94's entry: RULES.md lists 239 rules, 7 more; the owner 73, the caller 18",
+                [int(once.group(1)) if once else None, counted.get("Owner"), counted.get("Caller")], [239, 73, 18]))
+    # F-472: §5.2's Decoding MUST binds "a caller or a tool that reads the
+    # bare wire", and RULES.md lists it under the caller alone, where the two
+    # reading MUSTs of the same subject are under both.
+    from . import classes, live
+
+    rows = classes._rules_md(spec)
+    dec = sorted(r[0] for r in rows if r[1] == "core §5.2" and "**Decoding.**" in r[3])
+    read = sorted(r[0] for r in rows if r[1] == "core §5.2" and "MUST read a `reply_err` under" in r[3])
+    out.append(("F-472 (open): §5.2's Decoding MUST, of \"A caller or a tool that reads the bare wire\", is listed "
+                "under the caller alone; the reading MUST beside it, of the same subject, under both; the observer "
+                "class counts 69",
+                missing(core, "**Decoding.** A caller or a tool that reads the bare wire decodes an envelope")
+                + [dec, read, counted.get("Observer: the tool role, and a reader")],
+                [["caller"], ["caller", "observer"], 69]))
+    # F-473: a bare-wire envelope its decoding refuses: "that envelope …
+    # not as the transport's", or "A malformed error is the transport's
+    # too". zk2py reads it as the transport's, its decoding's token named.
+    bad = live.read_reply_error("application/json", b'{"code":"busy"}')
+    good = live.read_reply_error("application/json", b'{"code":"busy","message":""}')
+    out.append(("F-473 (open): a bare-wire envelope its decoding refuses is that envelope by \"The bare wire\", the "
+                "transport's by \"A malformed error\"; zk2py reads it as the transport's (decode), a good one busy",
+                missing(core, "under one of the envelope's three encodings as that envelope (below), not as the "
+                              "transport's.", "**A malformed error** is the transport's too.")
+                + [(bad.kind, bad.refusal), (good.kind, good.code, good.bare)],
+                [("transport", "decode"), ("error", "busy", True)]))
+    # F-474: §9 step 4 puts "its state", and neither setup declares one.
+    sec9 = ops[ops.index("## §9 A call's forms"):]
+    setup = sec9[:sec9.index("**Steps.**")]
+    out.append(("F-474 (open): operations.md §9 step 4 puts h1/tc's state, and its setup and the common one declare "
+                "no state; zk2py's tc.v1 declares status",
+                missing(sec9, "`h1/tc` puts its state twice, and the caller calls `set`.")
+                + ["state" in setup, "state" in ops[:ops.index("## §1 ")],
+                   "[resources.status]" in (spec.parent / "impl" / "python" / "interop" / "operations"
+                                            / "tc.v1.toml").read_text(encoding="utf-8")],
+                [False, False, True]))
+    # F-475: no text bounds a value reply by its Encoding; a bare JSON array
+    # of 8 bytes or more parses as a value (vectors.json), so a reader that
+    # takes no MAY hands its "record" on.
+    arr = zk2c.parse(bytes.fromhex("5b312c322c332c345d"), "reply")
+    out.append(("F-475 (open): \"A caller reads a reply by §7.5's parse\", bounded by no Encoding; [1,2,3,4] under "
+                "application/json parses as a value, tag 11, record ']'; zk2py takes the MAY",
+                missing(core, "**Reading a value.** A caller reads a reply by §7.5's parse,")
+                + [(arr.form, arr.width, arr.tag, arr.record)],
+                [("value", 32, 11, b"]")]))
+    # F-476: the as-of mark's seq is "the last it minted …, or 0 when it has
+    # minted none", and a run's seqs count from 0, so a reply before the first
+    # put and one after it carry one mark (forms_live §9 step 4, both owners).
+    out.append(("F-476 (open): the as-of mark's seq is the last minted, or 0 when none is, and a run's first put is seq "
+                "0: a reply before it and one after it carry one mark; operations.md §9 step 4 checks the first alone",
+                missing(core, "The seq is the last it minted for state and events under that run, or 0 when it has "
+                              "minted none.", "Within one run, it can order the reply against the state it holds, by "
+                                              "seq.")
+                + missing(ops, "The second instance's reply carries its own descriptor's run, and seq 0."), []))
     return out
 
 
@@ -6958,8 +7134,11 @@ def _round89_readings(root: Path) -> list[tuple[str, Any, Any]]:
          "timestamp", "the delta, it MUST stop"),
         ("**An archive's backend MUST NOT accept a put older than a delete it holds.**", "**Its backend MUST NOT"),
         ("A request type SHOULD NOT repeat a template parameter (W102).", "repeat a template parameter. `"),
-        ("**The `Encoding` of the owner's reply** MUST say which:", "**The reply's `Encoding`**"),
-        ("or a value in a protobuf one, MUST NOT be sent by an owner.", "protobuf one, MUST NOT be sent. "),
+        # core 0.94 (round 101, #985 C4c): the reply's Encoding MUST removed,
+        # the bare wire's envelope stated with no keyword; the detail's
+        # MUST NOT reworded by its type, still the owner's
+        ("**Its `Encoding`** is `application/json` or `application/cbor`", "**The reply's `Encoding`**"),
+        ("or a packed value with no code (§7.6), MUST NOT be sent by an owner.", "protobuf one, MUST NOT be sent. "),
         # core 0.75 (round 94, #979 B1): the uniqueness split by kind
         ("The name MUST be unique across the listed JSON Schema files (E024).", "unique across the listed files. |"),
         ("**A deployment's batch SHOULD take at most a third of the lease to cross the face.**",
@@ -7133,8 +7312,10 @@ def _round89_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 + [refused(cardinality={"zk2py_probe.v1": {"state/status": 1}})],
                 ["refused", "refused", "starts", "starts", "refused", "refused"]))
 
+    from . import calls, zk2c
+
     class Query:
-        payload = attachment = None
+        payload = attachment = encoding = None
 
         def __init__(self) -> None:
             self.sent: list[str] = []
@@ -7150,7 +7331,8 @@ def _round89_readings(root: Path) -> list[tuple[str, Any, Any]]:
 
     def call(template: str, *steps: tuple[str, Any]) -> tuple[list[str], list[str]]:
         q = Query()
-        c = ow.OpCall(q, base, rres[template], "application/json", {}, f"{base}/@op/{template}")
+        c = ow.OpCall(q, base, rres[template], calls.Operation.of_resource(rres[template], replica.schemas),
+                      lambda: zk2c.InBand(16, 0, 0), {}, f"{base}/@op/{template}")
         said = []
         for what, arg in steps:
             try:
@@ -7165,7 +7347,8 @@ def _round89_readings(root: Path) -> list[tuple[str, Any, Any]]:
         raises: :meth:`OpCall.finish` after a handler that failed, as
         ``Owner._op_handler`` runs it."""
         q = Query()
-        c = ow.OpCall(q, base, rres[template], "application/json", {}, f"{base}/@op/{template}")
+        c = ow.OpCall(q, base, rres[template], calls.Operation.of_resource(rres[template], replica.schemas),
+                      lambda: zk2c.InBand(16, 0, 0), {}, f"{base}/@op/{template}")
         try:
             for what, arg in steps:
                 getattr(c, what)(**arg) if isinstance(arg, dict) else getattr(c, what)(arg)
@@ -8899,8 +9082,74 @@ def family_envelope(root: Path) -> list[Result]:
             for c in data.get("reads", []):
                 out.append(_check(f"envelope: reads {c['key']} {c['hex'] or '(empty)'}: {c['note']}",
                                   zk2c.reads(c["key"], bytes.fromhex(c["hex"])), c["expect"]))
+        elif path.name == "calls.json":
+            out += _envelope_calls(root, data)
         else:
             out.append((f"envelope/{path.name}", False, "an unknown fixture file: the runner does not read it"))
+    return out
+
+
+def _envelope_calls(root: Path, data: dict[str, Any]) -> list[Result]:
+    """``envelope/calls.json`` (core 0.94 §5.1, §5.2, #985 C4c): the
+    operations of its ``contract`` through :mod:`zk2py.calls`. ``types``:
+    each packed type's layout sha256 and tag, by its contract's files;
+    ``forms``: each form's CH by its types' tags; ``writes``: an operation,
+    a form, a stamp and a record or an error -> the payload, or the
+    writer's refusal (the error's byte first, then the detail's record);
+    ``reads``: a sample and a payload -> the stamp, the tag and the record
+    read as its type, or the first refusal (§7.5's, then §7.6's), a detail
+    its type refuses kept as the owner's. Every accepted read writes back
+    to its bytes."""
+    from . import calls, packed, zk2c
+    from .contract import load_contract
+
+    unknown = set(data) - {"description", "contract", "epoch", "types", "forms", "writes", "reads"}
+    out: list[Result] = [("envelope: calls.json holds its contract, types, forms, writes and reads", not unknown,
+                          f"members the runner does not read: {sorted(unknown)}" if unknown else "")]
+    k = load_contract(root / data["contract"])
+    out.append(_check(f"envelope: calls.json's contract {data['contract']} loads with no finding", k.codes, []))
+    ops = {r["template"]: calls.Operation.of_resource(r, k.schemas, data.get("epoch"))
+           for r in k.canonical["resources"] if r["kind"] == "operation"}
+    def ref_of(t: dict[str, Any] | None) -> str | None:
+        """A type as calls.json names it: ``<stem>#<Name>`` for a packed
+        one, by the listed file that defines it, ``json:<Name>`` else."""
+        if t is None:
+            return None
+        if t["kind"] == "packed":
+            return next(f"{a.name}#{t['name']}" for a in k.schemas.packed_files if a.id == t["schema"])
+        return f"json:{t['name']}" if t["kind"] == "jsonschema" else t["name"]
+
+    for name, want in data["types"].items():
+        stem, _, tname = name.partition("#")
+        recs = [k.schemas.packed_read[a.listed].types.get(tname) for a in k.schemas.packed_files if a.name == stem]
+        got = {"tag": recs[0].tag, "sha256": recs[0].layout_sha256()} if recs and recs[0] is not None else None
+        out.append(_check(f"envelope: calls.json type {name}: its layout's sha256 and tag", got, want))
+    for c in data["forms"]:
+        op = ops[c["operation"]]
+        named = {role: ref_of(t) for role, t in op.types.items() if t is not None}
+        st = zk2c.InBand(16, 0, 0)
+        got = {"request": f"{calls.request(op, b'')[0]:02x}", "value": f"{calls.value(op, st, b'')[0]:02x}",
+               "error": f"{calls.error(op, st, 'busy')[0]:02x}"}
+        if op.types["summary"] is not None:
+            got["summary"] = f"{calls.value(op, st, b'', summary=True)[0]:02x}"
+        out.append(_check(f"envelope: calls.json forms {c['operation']}: each form's CH by its types' tags",
+                          [named, got], [c["types"], c["expect"]]))
+    for c in data["writes"]:
+        op = ops[c["operation"]]
+        try:
+            got: Any = {"hex": calls.write_case(op, c).hex()}
+        except (zk2c.Refused, packed.Refused, calls.Refused) as e:
+            got = {"refused": e.token}
+        out.append(_check(f"envelope: calls.json write {c['operation']} {c['form']}: {c['note']}", got, c["expect"]))
+    for c in data["reads"]:
+        op = ops[c["operation"]]
+        got = calls.read_case(op, c)
+        out.append(_check(f"envelope: calls.json read {c['operation']} {c['sample']} {c['hex'][:48]}: {c['note']}",
+                          got, c["expect"]))
+        if "refused" not in got:
+            raw = bytes.fromhex(c["hex"])
+            back = zk2c.write_back(zk2c.parse(raw, c["sample"])).hex()
+            out.append(_check(f"envelope: calls.json read {c['sample']} {c['hex'][:48]} writes back", back, c["hex"]))
     return out
 
 

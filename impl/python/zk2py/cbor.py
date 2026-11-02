@@ -174,3 +174,42 @@ def _to_python(v: Any) -> Any:
     if isinstance(v, list):
         return [_to_python(x) for x in v]
     return v
+
+
+def _head(major: int, n: int) -> bytes:
+    if n < 24:
+        return bytes([major << 5 | n])
+    for ai, size in ((24, 1), (25, 2), (26, 4), (27, 8)):
+        if n < 1 << (8 * size):
+            return bytes([major << 5 | ai]) + n.to_bytes(size, "big")
+    raise CborError(f"{n} does not fit 64 bits")
+
+
+def dumps(value: Any) -> bytes:
+    """One CBOR data item for a JSON value (RFC 8949 §4.2.1's preferred
+    serialization: the shortest head, definite lengths, a float as a double):
+    a JSON Schema record or detail on ``encoding = "cbor"`` (core §5.2, 0.94:
+    "A JSON Schema type's are JSON or CBOR, on the operation's encoding").
+    Bytes are a byte string."""
+    if value is None:
+        return b"\xf6"
+    if value is True:
+        return b"\xf5"
+    if value is False:
+        return b"\xf4"
+    if isinstance(value, int):
+        return _head(0, value) if value >= 0 else _head(1, -1 - value)
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise CborError("a float that is not finite")
+        return b"\xfb" + struct.pack(">d", value)
+    if isinstance(value, (bytes, bytearray)):
+        return _head(2, len(value)) + bytes(value)
+    if isinstance(value, str):
+        raw = value.encode("utf-8")
+        return _head(3, len(raw)) + raw
+    if isinstance(value, (list, tuple)):
+        return _head(4, len(value)) + b"".join(dumps(v) for v in value)
+    if isinstance(value, dict):
+        return _head(5, len(value)) + b"".join(dumps(k) + dumps(v) for k, v in value.items())
+    raise CborError(f"no CBOR for {type(value).__name__}")

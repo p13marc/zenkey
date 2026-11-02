@@ -1,0 +1,61 @@
+# zk2py's contract for operations.md §9 (core 0.94, #985 C4c): a call's
+# forms for each kind of type. `set` (§1) with JSON Schema types, a JSON
+# Schema `error` type and `encoding = "json"`, and its three variants: one
+# on CBOR, one of protobuf types, one of raw types. `ping` is idempotent
+# (step 5). `status` is the state step 4 puts, beside the as-of mark: the
+# scenario's setup names none (F-474). The packed operations are seed.v1's,
+# spec/conformance/contracts/ok-packed-operation.toml, served beside it. It
+# must load with no finding at all.
+[interface]
+name    = "tc"
+major   = 1
+minor   = 0
+summary = "operations.md §9: a call's forms by its types"
+
+[schemas]
+jsonschema = ["calls.json"]
+protobuf   = ["proto/tc/v1/calls.proto"]
+
+[resources.status]
+kind = "state"
+type = "json:Status"
+
+[resources."interfaces/{if}/set"]
+kind        = "operation"
+request     = "json:SetRequest"
+response    = "json:SetResponse"
+error       = "json:TcError"
+encoding    = "json"
+params      = { if = "string" }
+cardinality = 8
+
+[resources."interfaces/{if}/set-cbor"]
+kind        = "operation"
+request     = "json:SetRequest"
+response    = "json:SetResponse"
+error       = "json:TcError"
+encoding    = "cbor"
+params      = { if = "string" }
+cardinality = 8
+
+[resources."interfaces/{if}/set-proto"]
+kind        = "operation"
+request     = "tc.v1.Set"
+response    = "tc.v1.Set"
+error       = "tc.v1.Fault"
+params      = { if = "string" }
+cardinality = 8
+
+[resources."interfaces/{if}/set-raw"]
+kind        = "operation"
+request     = { raw = "application/octet-stream" }
+response    = { raw = "application/octet-stream" }
+error       = { raw = "application/octet-stream" }
+params      = { if = "string" }
+cardinality = 8
+
+[resources.ping]
+kind       = "operation"
+request    = { raw = "application/octet-stream" }
+response   = { raw = "application/octet-stream" }
+idempotent = true

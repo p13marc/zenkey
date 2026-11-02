@@ -205,8 +205,10 @@ class Refusal:
         return out
 
     def envelope_kw(self) -> dict[str, Any]:
-        """The keywords of :func:`zk2py.envelope.encode`: a cause on
-        ``unavailable``, a ``ConfigError`` detail on ``app``."""
+        """The keywords of :meth:`zk2py.owner.OpCall.refuse`: a cause on
+        ``unavailable``, a ``ConfigError`` detail on ``app``, a value its
+        error type, ``json:ConfigError``, encodes as JSON (core 0.94 §5.2:
+        "Its ConfigError detail is that type's JSON bytes")."""
         kw: dict[str, Any] = {}
         if self.cause is not None:
             kw["cause"] = self.cause
@@ -508,12 +510,17 @@ class Change:
 
 @dataclass
 class Kept:
-    """A first answer held under an idempotency key (§2.14)."""
+    """A first answer held under an idempotency key (§2.14). ``wire`` is
+    the answer as it was written, (``value`` or ``error``, its bytes), which
+    a session's owner fills when it writes it: core 0.94 §5.1, "An answer
+    sent again": "The owner MUST then send that answer's bytes unchanged,
+    its mark included"."""
 
     group: str
     request: dict[str, Any]
     answer: Any                     # a reply dict, or a Refusal
     at: int
+    wire: tuple[str, bytes] | None = None
 
 
 @dataclass
@@ -525,6 +532,10 @@ class Step:
     reply: Any = None
     acts: list[str] = field(default_factory=list)
     events: list[dict[str, Any]] = field(default_factory=list)
+    #: the key's first answer this reply is (§2.14): ``kept`` for an answer
+    #: made now and kept, ``replay`` for one sent again
+    kept: Any = None
+    replay: Any = None
 
 
 #: a device result that leaves the act in flight (lifecycle.json's "hold")
@@ -829,9 +840,10 @@ class Core:
     # -- the calls ---------------------------------------------------------------------------
 
     def _row2(self, request: dict[str, Any], group: str, now: int) -> Any:
-        """§2.5 row 2: the key's first answer for the same group and an
-        equal request; ``invalid_request`` (never kept) for another; None
-        when no first answer is held under the key (§2.14)."""
+        """§2.5 row 2: the key's first answer, its :class:`Kept`, for the
+        same group and an equal request; ``invalid_request`` (never kept)
+        for another; None when no first answer is held under the key
+        (§2.14)."""
         key = request.get("idempotency_key")
         kept = None if key is None else self.keys.get(key)
         if kept is not None and now >= kept.at + KEY_TTL_NS:
@@ -841,7 +853,7 @@ class Core:
         if kept is None:
             return None
         if kept.group == group and _same_request(kept.request, request):
-            return kept.answer
+            return kept
         return _bad(pointer("idempotency_key"), "this idempotency key's first answer was to another group or "
                                                 "request (§2.14)")
 
@@ -866,15 +878,19 @@ class Core:
             return step
         key = request.get("idempotency_key")
         first = self._row2(request, group, now)
+        if isinstance(first, Kept):
+            step.reply, step.replay = first.answer, first
+            return step
         if first is not None:
             step.reply = first
             return step
         r = check_set(self.schema, group, request, f)
 
         def answer(reply: Any) -> None:
+            at = self.held_step or step
             if key is not None:
-                self.keys[key] = Kept(group, dict(request), reply, self._now)
-            (self.held_step or step).reply = reply
+                self.keys[key] = at.kept = Kept(group, dict(request), reply, self._now)
+            at.reply = reply
 
         if r is not None:
             answer(r)
@@ -1377,6 +1393,10 @@ class ConfigOwner:
         #: (and kept as first answers) but never sent; ``dropped`` holds them
         self.drop_replies = 0
         self.dropped: list[bytes] = []
+        self.dropped_wire: list[bytes] = []
+        #: each first answer sent again, its bytes as first written (§2.14,
+        #: core 0.94 §5.1)
+        self.resent: list[bytes] = []
 
     @property
     def instance(self) -> str:
@@ -1459,24 +1479,41 @@ class ConfigOwner:
             self._fed_check()
             self.cv.notify_all()
 
-    def _send(self, call: Any, reply: Any) -> None:
+    def _send(self, call: Any, step: Step) -> None:
+        """``step``'s reply on ``call``, in core §7.5's forms (core 0.94).
+        A first answer sent again (§2.14, ``step.replay``) is its first
+        bytes, its as-of mark included (core §5.1, "An answer sent again");
+        one made now and kept (``step.kept``) keeps its bytes for that."""
         from .owner import MemberRefused
 
+        reply = step.reply
+        if step.replay is not None and step.replay.wire is not None:
+            call.resend(*step.replay.wire)
+            if step.replay.wire[0] == "value":
+                self.replies.append(encode_json(reply))
+            self.resent.append(step.replay.wire[1])
+            return
         if isinstance(reply, Refusal):
-            call.refuse(reply.code, reply.message, **reply.envelope_kw())
+            wire = call.refuse(reply.code, reply.message, **reply.envelope_kw())
+            if step.kept is not None:
+                step.kept.wire = ("error", wire)
             return
         data = encode_json(reply)
-        if self.drop_replies > 0:
-            # Lost on its way: the call counts as answered, so O3's
-            # "internal" for a call left without its answer is not sent.
-            self.drop_replies -= 1
-            self.dropped.append(data)
-            call.values += 1
-            return
+        lost = self.drop_replies > 0
         try:
-            call.reply(data, encoding="application/json")
+            # Lost on its way: made and kept, never sent, and the call
+            # counts as answered, so O3's "internal" for a call left without
+            # its answer is not sent.
+            wire = call.reply(data, send=not lost)
         except MemberRefused:
             call.refuse("internal", "the reply has no member to go on")
+            return
+        if step.kept is not None:
+            step.kept.wire = ("value", wire)
+        if lost:
+            self.drop_replies -= 1
+            self.dropped.append(data)
+            self.dropped_wire.append(wire)
             return
         self.replies.append(data)
 
@@ -1500,7 +1537,7 @@ class ConfigOwner:
             step = Step(reply=bad) if bad is not None else self.core.set(group, request, time.time_ns(),
                                                                           call.metadata())
             if step.reply is not None:
-                self._send(call, step.reply)
+                self._send(call, step)
             self._after(step)
 
     def _on_control(self, op: str):
@@ -1509,7 +1546,7 @@ class ConfigOwner:
             with self.cv:
                 step = Step(reply=bad) if bad is not None else self.core.control(op, request, time.time_ns())
                 if step.reply is not None:
-                    self._send(call, step.reply)
+                    self._send(call, step)
                 self._after(step)
         return handle
 
@@ -1518,7 +1555,7 @@ class ConfigOwner:
         with self.cv:
             step = Step(reply=bad) if bad is not None else self.core.persist(request, time.time_ns())
             if step.reply is not None:
-                self._send(call, step.reply)
+                self._send(call, step)
             self._after(step)
 
     def _on_desired(self, payload: bytes) -> None:

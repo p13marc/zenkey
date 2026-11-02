@@ -719,27 +719,36 @@ def _state_and_calls(report: Report, run: str, session, system: str, svc: str, o
     report.check(run, "@op/echo: one value reply, the request's bytes, on the operation's key (O1, O3)",
                  [(r.kind, r.key, r.payload) for r in echo.replies] == [("value", f"{base}/@op/echo", b"ping")],
                  str([(r.kind, r.key, r.payload) for r in echo.replies]))
+    # core 0.94 §5.1 (#985 C4c): the value form under zenoh/bytes, CH 0x40 or
+    # 0x50, with the replying instance's as-of mark, its run the descriptor's
+    report.check(run, "@op/echo's value is §7.5's value form under zenoh/bytes, its as-of mark under the "
+                      "descriptor's run (core 0.94 §5.1)",
+                 len(echo.replies) == 1 and echo.replies[0].encoding == "zenoh/bytes"
+                 and echo.replies[0].raw[:1].hex() in ("40", "50") and echo.replies[0].mark is not None
+                 and echo.replies[0].mark.run_hex() == owner_doc.get("run"),
+                 str([(r.encoding, r.raw.hex(), str(r.mark)) for r in echo.replies]))
     refuse = live.call(session, f"{base}/@op/refuse", b"")
-    report.check(run, "@op/refuse: one reply_err, an `app` envelope in zk2.core.v1.Error (O3, §5.2)",
-                 len(refuse.replies) == 1 and refuse.replies[0].kind == "envelope"
-                 and refuse.replies[0].envelope["code"] == "app"
-                 and refuse.replies[0].encoding == "application/protobuf;zk2.core.v1.Error",
-                 str([(r.kind, r.encoding, r.envelope or r.refusal) for r in refuse.replies]))
-    # §5.2 (0.7): "With no error type there is no detail." @op/refuse
-    # declares none.
-    no_detail = len(refuse.replies) == 1 and refuse.replies[0].envelope is not None \
-        and refuse.replies[0].envelope["detail"] is None
-    report.check(run, "@op/refuse's app envelope carries no detail (no error type, §5.2, F-65)", no_detail,
-                 str([(r.envelope or {}).get("detail") for r in refuse.replies]))
+    report.check(run, "@op/refuse: one reply_err, app in §7.5's error form under zenoh/bytes, tag 0 (O3, core 0.94 "
+                      "§5.2)",
+                 len(refuse.replies) == 1 and refuse.replies[0].kind == "error"
+                 and refuse.replies[0].code == "app" and refuse.replies[0].encoding == "zenoh/bytes"
+                 and refuse.replies[0].raw[:1].hex() in ("60", "70"),
+                 str([(r.kind, r.encoding, r.raw.hex(), r.error or r.refusal) for r in refuse.replies]))
+    # §5.2: "An operation that declares no error type has none to send, and
+    # an owner MUST NOT put a detail in its error." @op/refuse declares none.
+    no_detail = len(refuse.replies) == 1 and refuse.replies[0].error is not None \
+        and refuse.replies[0].error["detail"] is None
+    report.check(run, "@op/refuse's app error carries no detail (no error type, §5.2, F-65)", no_detail,
+                 str([(r.error or {}).get("detail") for r in refuse.replies]))
     typed = live.call(session, f"{base}/@op/typed", b"not json")
-    good = len(typed.replies) == 1 and typed.replies[0].kind == "envelope" \
-        and typed.replies[0].encoding == "application/json" \
-        and (expect_typed is None or typed.replies[0].envelope["code"] == expect_typed)
-    report.check(run, "@op/typed, a malformed request: one reply_err whose JSON envelope decodes (§5.2)", good,
-                 str([(r.kind, r.encoding, r.envelope or r.refusal) for r in typed.replies]))
+    good = len(typed.replies) == 1 and typed.replies[0].kind == "error" \
+        and typed.replies[0].encoding == "zenoh/bytes" \
+        and (expect_typed is None or typed.replies[0].code == expect_typed)
+    report.check(run, "@op/typed, a malformed request: one reply_err in the error form (core 0.94 §5.2)", good,
+                 str([(r.kind, r.encoding, r.error or r.refusal) for r in typed.replies]))
     fan = live.call(session, f"{base}/@op/*", b"ping", fanout=True)
     report.check(run, "a call on a wildcard key: fanout_forbidden from each operation, no value (O2)",
-                 len(fan.replies) == 3 and all(r.kind == "envelope" and r.envelope["code"] == "fanout_forbidden"
+                 len(fan.replies) == 3 and all(r.kind == "error" and r.envelope["code"] == "fanout_forbidden"
                                                for r in fan.replies),
                  str([(r.kind, (r.envelope or {}).get("code")) for r in fan.replies]))
     silent = live.call(session, f"{base}/@op/nothing_here", b"ping")
@@ -1224,7 +1233,7 @@ def run_python_o1(report: Report) -> None:
     linked to R1."""
     import zenoh
 
-    from . import live
+    from . import live, zk2c
     from .owner import free_loopback_port
 
     n, hold = 200, 0.5
@@ -1256,7 +1265,7 @@ def run_python_o1(report: Report) -> None:
             caller.get(key, zenoh.handlers.Callback(lambda rep: (q.append(rep), got.append(time.monotonic() - t0)),
                                                     done.set),
                        target=zenoh.QueryTarget.BEST_MATCHING, consolidation=zenoh.ConsolidationMode.LATEST,
-                       payload=b"x", timeout=5.0)
+                       payload=zk2c.request(b"x"), encoding=zk2c.ENCODING, timeout=5.0)
             done.wait(10)
             report.check(run, "control: under Latest the same call's reply waits for the query to complete",
                          len(got) == 1 and got[0] >= hold * 0.9, f"reply after {got[0] if got else None} s")
@@ -1275,8 +1284,14 @@ def run_python_o1(report: Report) -> None:
                          f"first {len(a.handled)}, second {len(b.handled)}")
             a.handled.clear()
             b.handled.clear()
-            every = live._answers(caller, key, zenoh.QueryTarget.ALL, 5.0)
-            got_all = list(every)
+            # core 0.94 §5.1: the control's query is a request form too, or
+            # the owners refuse it invalid_request before any handler runs
+            got_all = []
+            fin = threading.Event()
+            caller.get(key, zenoh.handlers.Callback(got_all.append, fin.set), target=zenoh.QueryTarget.ALL,
+                       consolidation=zenoh.ConsolidationMode.NONE, payload=zk2c.request(b"x"),
+                       encoding=zk2c.ENCODING, timeout=5.0)
+            fin.wait(10)
             time.sleep(hold + 0.2)
             report.check(run, "control: under target All, one call runs on both instances",
                          len(a.handled) + len(b.handled) == 2 and len(got_all) == 2,
@@ -1372,7 +1387,7 @@ def run_python_fanout(report: Report) -> None:
             # Step 3.
             reset = live.call(caller, "zk2/*/tc/zk2py_tc.v1/@op/interfaces/*/reset", b"x", fanout=True)
             vals = sorted(r.key for r in reset.replies if r.kind == "value")
-            envs = [r.envelope["code"] for r in reset.replies if r.kind == "envelope"]
+            envs = [r.envelope["code"] for r in reset.replies if r.kind == "error"]
             report.check(run, "step 3: h1 two values (eth0, eth1), h2 one on the member it named, one busy "
                               "envelope, unattributed",
                          vals == ["zk2/h1/tc/zk2py_tc.v1/@op/interfaces/eth0/reset",

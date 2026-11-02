@@ -81,6 +81,8 @@ PROFILES = {
     "freshness.v2": ("owner (heartbeats), consumer and tool (§2.5's rule, the re-read, the judgements)", ""),
     "health.v1": ("owner, tool (§2.11's reader and roll-ups)", ""),
     "config.v1": ("owner (the simulated device), caller, tool (§5's reader)", ""),
+    "config.v2": ("none yet", "text 0.1 (#985 G1) is present on main and not read by round 101: #985's later round "
+                              "reads it after its owner (G2) and tools (G3) land"),
     "link.v1": ("tool (the generator and the checks)", ""),
     "link.v2": ("tool (the linter, the plan with 0.3's contract side and frames per face, the transport block and "
                 "its checks); a far side's caller, consumer and tool (0.4's §2.20, §2.21)",
@@ -240,12 +242,24 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "an owner.Owner exposes every resource it is not told to list or withhold, so replicas configured alike expose the same"),
     ("owner", "core §5.1", "It names the member each reply answers for", MET,
      "owner.OpCall.name refuses a member the call does not select (live_interop operations.md §2)"),
-    ("owner", "core §5.2", "The `Encoding` of the owner's reply MUST say", MET,
-     "owner._refuse, the envelope's encoding (envelope.envelope_encoding)"),
     ("owner", "core §5.2", "An operation that declares no `error` type has", MET,
      "owner.OpCall.refuse refuses a detail for it, nothing sent (round 89; readings)"),
-    ("owner", "core §5.2", "A detail that does not fit its envelope", MET,
-     "envelope.encode raises before anything is sent, and the call ends internal (errors family)"),
+    # core 0.94 (#985 C4c): §5.1's and §5.2's forms adopted; §5.2's
+    # Encoding MUST removed with the envelope's writer.
+    ("owner", "core §5.1", "Owner: an owner MUST write each value reply in §7.5's value form", MET,
+     "owner.OpCall.reply and summary through calls.value: under zenoh/bytes, CH the response or summary type's tag, "
+     "owner.Owner.mark's as-of mark (envelope family: calls.json; forms_live §9 steps 1, 2 and 4, py-py and "
+     "zenctl-py) (round 101, core 0.94)"),
+    ("owner", "core §5.1", "The owner MUST then send that answer's bytes unchanged", MET,
+     "config.ConfigOwner keeps each first answer's bytes (Kept.wire) and OpCall.resend sends them again, its mark "
+     "included (config_scenarios §10 step 2: the bytes compared) (round 101, core 0.94)"),
+    ("owner", "core §5.2", "An owner MUST answer a failed call in §7.5's error form", MET,
+     "owner.OpCall.refuse and owner._refuse through calls.error: under zenoh/bytes, CH the error type's tag or 0, "
+     "the as-of mark (forms_live §9 steps 1 to 3; errors family) (round 101, core 0.94)"),
+    ("owner", "core §5.2", "A detail its type cannot encode", MET,
+     "calls.Operation.encode refuses bytes for a JSON Schema type, a value for a protobuf or raw one, and §7.6's "
+     "writer a packed value with no code, before anything is sent: the handler fails and the call ends internal "
+     "(envelope family: calls.json's writes) (round 101, core 0.94)"),
     ("owner", "core §6", "An owner MUST NOT write under another service's", MET,
      "owner.Owner builds every key under its own prefix"),
     ("owner", "core §6", "An owner SHOULD keep a re-mint's overlap below", MET,
@@ -357,6 +371,19 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "live.call"),
     ("caller", "core §5.1", "A caller MUST NOT depend on a refusal", MET,
      "live.call sends what it is handed, and reads a refusal as an answer, never as a check"),
+    # core 0.94 (#985 C4c): the request's form, and §5.2's readers.
+    ("caller", "core §5.1", "Caller: a caller MUST write its request as §7.5's request", MET,
+     "live.call: zk2c.request under zenoh/bytes, CH the request type's tag (calls.Operation) (forms_live §9 steps 1 "
+     "and 2: each query as zk2py's owner received it) (round 101, core 0.94)"),
+    ("caller", "core §5.2", "A caller or a tool MUST read a `reply_err` under the `Encoding` `zenoh/bytes` by",
+     MET, "live.read_reply_error: §7.5's parse, an error it accepts the owner's (forms_live §9 step 5's fourth "
+          "call) (round 101, core 0.94)"),
+    ("caller", "core §5.2", "A caller or a tool MUST read every other `reply_err` as the transport's", MET,
+     "live.read_reply_error: one the parse refuses and one under another Encoding the transport's, silence, an "
+     "idempotent call retried; §5.1's MAY reads the bare wire's three envelope encodings, a malformed one the "
+     "transport's (forms_live §9 steps 5 to 7) (round 101, core 0.94)"),
+    ("caller", "core §5.2", "It MUST refuse", MET,
+     "envelope.decode, the bare wire's envelope (errors family: cases.json) (core 0.94)"),
     ("caller", "core §8.1", "Every instance MUST hold one, including pure consumers", MET,
      "a zk2py service that calls is an owner.Owner, which holds one (presence_scenarios §1; F-361)"),
     ("caller", "core §8.1", "A caller, a consumer or a tool across a constrained face whose face policy states a reply timeout", MET,
@@ -390,7 +417,14 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "core §5.1", "Caller and tool: MUST NOT treat an empty", MET,
      "judgement, live.o3_verdict (observer_scenarios, operations.md §5)"),
     ("observer", "core §5.2", "It MUST refuse", MET,
-     "envelope.decode (errors family)"),
+     "envelope.decode (errors family); at core 0.94 a caller's or a tool's that reads the bare wire, listed under "
+     "the caller alone (F-472)"),
+    ("observer", "core §5.2", "A caller or a tool MUST read a `reply_err` under the `Encoding` `zenoh/bytes` by",
+     MET, "live.read_reply_error, which live.o3_verdict and live.show_reply read through (forms_live §9 step 5) "
+          "(round 101, core 0.94)"),
+    ("observer", "core §5.2", "A caller or a tool MUST read every other `reply_err` as the transport's", MET,
+     "live.read_reply_error; live.show_reply shows the transport's with its Encoding and its bytes (forms_live §9 "
+     "steps 5 and 6) (round 101, core 0.94)"),
     ("observer", "core §8.1", "Every instance MUST hold one, including pure consumers", NA,
      "no zk2py tool is a service, so none is an instance (observer §7.1's refusal of a self.system provider, met)"),
     ("observer", "core §8.1", "A caller, a consumer or a tool across a constrained face whose face policy states a reply timeout", MET,
@@ -517,6 +551,14 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "echo_tool.heartbeat_of: given the covered revision, the body read with its collections; else its form, the "
      "interface it covers and its size; never sniffed; freshness_v2.View reads it with the collections alone "
      "(freshness_v2_scenarios §1 py-py and rust-py: echo_tool's rows; readings) (round 97, observer 0.20)"),
+    # observer 0.24 (#985 C4c): a call's forms first.
+    ("observer", "observer §7.3", "A tool that shows or judges a call's reply MUST read a reply under `zenoh/bytes`",
+     MET, "live.read_reply: §7.5's parse, its record handed on; live.show_reply decodes it as the response or "
+          "summary type, a packed one under CH's tag, an error by its code, cause and message (forms_live §9 steps "
+          "1 and 2) (round 101, observer 0.24)"),
+    ("observer", "observer §7.3", "The tool MUST NOT decode or sniff a refused value's bytes as a bare record", MET,
+     "live.read_reply: a refused value is refused_value, its payload empty and its token named; live.show_reply "
+     "shows it undecodable (round 101, observer 0.24)"),
     ("observer", "observer §7.3", "A tool that shows a payload it cannot decode MUST", NOT_MET,
      "no zk2py tool shows a payload by its declared type: echo_tool sniffs each one, its type not held (0.12); the "
      "profiles' readers show no payload they cannot decode, an undecodable one being their judgement's own answer "
@@ -602,8 +644,8 @@ WALK: list[tuple[str, str, str, str, str]] = [
      MET, "zk2c.write_error through zk2c.cut_message: the longest prefix of whole code points within 255 bytes "
      "(errors family: forms.json's writes, each parsed back as cut) (round 100, core 0.92)"),
     ("static", "core §7.5", "An implementation MUST NOT write an error with a cause on a code other than", MET,
-     "zk2c.write_error refuses cause, then detail, as the parse would (errors family: forms.json's writes); no "
-     "zk2py owner answers in a form yet (core §5.1, \"The forms\") (round 100, core 0.92)"),
+     "zk2c.write_error refuses cause, then detail, as the parse would (errors family: forms.json's writes); every "
+     "zk2py owner's error goes through it since core 0.94 (round 100, core 0.92; round 101)"),
     ("static", "core §7.5", "An implementation MUST refuse an envelope or a form for the first of these", MET,
      "zk2c.parse, in §7.5's order, each token, on put, delete, query, reply and reply_err, a frame's key_kind "
      "on its key, an error's byte and message after the stamp (envelope family: vectors.json, carries.json's "

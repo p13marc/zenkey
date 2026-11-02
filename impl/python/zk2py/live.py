@@ -2025,14 +2025,52 @@ def get_state(session: zenoh.Session, selector: str, timeout: float = GET_TIMEOU
 
 # -- §5 operations, a caller's call ----------------------------------------------
 
+#: The kinds of a call's reply (core 0.94 §5.1, §5.2): ``value``, a reply
+#: whose value form (or bare value) was read; ``refused_value``, a reply the
+#: parse or its type refuses, "malformed, and an answer all the same";
+#: ``error``, an owner's error, a form the parse accepts or the bare wire's
+#: envelope; ``transport``, every other reply error, "one the parse refuses,
+#: and one under another Encoding", silence (§5.1, "Retries").
+ANSWERS = ("value", "refused_value", "error")
+
+
 @dataclass
 class CallReply:
-    kind: str            # "value", "envelope", "refused_envelope", "transport"
+    kind: str            # "value", "refused_value", "error", "transport"
     key: str | None
     encoding: str
+    #: a value's record, the bytes every later step decodes (observer §7.3:
+    #: "The value's record is the payload every later step decodes"); the
+    #: reply error's bytes for an error and the transport's; b"" for a
+    #: refused value, whose bytes are never handed on
     payload: bytes
-    envelope: dict[str, Any] | None = None   # the decoded §5.2 envelope
-    refusal: str | None = None               # the tag a malformed envelope got
+    #: an owner's error: code, cause, message and detail (a form's detail
+    #: its bytes, the bare wire's envelope its decoded value)
+    error: dict[str, Any] | None = None
+    #: the token of the refusal: a refused value's, or §7.5's for a reply
+    #: error read as the transport's (``encoding`` for another Encoding),
+    #: or §5.2's decoding of the bare wire's envelope
+    refusal: str | None = None
+    #: the replying instance's as-of mark (core §5.1), and CH's tag; None on
+    #: the bare wire and for the transport's
+    mark: zk2c.InBand | None = None
+    tag: int | None = None
+    #: the payload as it came, and whether it came on the bare wire (core
+    #: §5.1's MAY: another Encoding than zenoh/bytes)
+    raw: bytes = b""
+    bare: bool = False
+    #: O6: a reply whose attachment is the ASCII bytes ``summary``
+    summary: bool = False
+
+    @property
+    def envelope(self) -> dict[str, Any] | None:
+        """The owner's error (the name it had while every error was §5.2's
+        envelope)."""
+        return self.error
+
+    @property
+    def code(self) -> str | None:
+        return None if self.error is None else self.error.get("code")
 
 
 @dataclass
@@ -2042,57 +2080,205 @@ class CallResult:
     #: completion (None when ``first`` returned before it)
     first_s: float | None = None
     done_s: float | None = None
+    #: the attempts made (O4: more than one only for an idempotent
+    #: operation, each after silence), the last one's replies above
+    attempts: int = 1
 
     @property
     def silent(self) -> bool:
-        """O5: "MUST NOT treat an empty reply set as a verdict". §5.1: "A
-        call that ends there with no value and no envelope is silent", "the
-        transport's own error reply included" (zenoh's `Timeout`, Appendix
-        B), so a transport reply does not make a call answered."""
-        return not any(r.kind in ("value", "envelope", "refused_envelope") for r in self.replies)
+        """O5: "MUST NOT treat an empty reply set as a verdict". §5.1 (0.94):
+        "A call that ends there with no value and no error is silent", and
+        "A reply_err that is the transport's is silence too, a malformed
+        error among them"; "A value is an answer, and so is a reply that does
+        not parse as one"."""
+        return not any(r.kind in ANSWERS for r in self.replies)
+
+
+def read_reply(sample: Any, read_bare: bool = True) -> CallReply:
+    """One reply of a call read as core 0.94 §5.1 reads it: under
+    ``zenoh/bytes`` by §7.5's parse, its record "the payload every later
+    step decodes"; a refused one is ``refused_value``, never decoded or
+    sniffed as a bare record (observer §7.3); under any other Encoding the
+    bare wire, its payload the record (§5.1's MAY). ``read_bare`` False is a
+    reader that takes no MAY: it reads every reply "by §7.5's parse", which
+    no text bounds by the Encoding for a value (F-475)."""
+    from . import calls
+
+    key, enc, data = str(sample.key_expr), str(sample.encoding), sample.payload.to_bytes()
+    att = None if sample.attachment is None else sample.attachment.to_bytes()
+    summ = att == b"summary"
+    if calls.bare(enc) and read_bare:
+        return CallReply("value", key, enc, data, raw=data, bare=True, summary=summ)
+    try:
+        e = zk2c.parse(data, "reply")
+    except zk2c.Refused as r:
+        return CallReply("refused_value", key, enc, b"", refusal=r.token, raw=data, summary=summ)
+    return CallReply("value", key, enc, e.record or b"", mark=e.stamp, tag=e.tag, raw=data, summary=summ)
+
+
+def read_reply_error(encoding: str, data: bytes, read_bare: bool = True) -> CallReply:
+    """One reply error of a call read as core 0.94 §5.2 reads it: "A caller
+    or a tool MUST read a reply_err under the Encoding zenoh/bytes by §7.5's
+    parse. It holds an error the parse accepts as the owner's. A caller or a
+    tool MUST read every other reply_err as the transport's: one the parse
+    refuses, and one under another Encoding." §5.1's MAY: zk2py reads the
+    bare wire, so a reply_err under one of the envelope's three encodings is
+    "that envelope … not as the transport's"; one §5.2's decoding refuses is
+    a malformed error, the transport's too ("A malformed error is the
+    transport's too"). ``read_bare`` False reads every reply_err under another
+    Encoding as the transport's, the bare wire's envelope included."""
+    from . import envelope
+
+    if encoding == zk2c.ENCODING:
+        try:
+            e = zk2c.parse(data, "reply_err")
+        except zk2c.Refused as r:
+            return CallReply("transport", None, encoding, data, refusal=r.token, raw=data)
+        assert e.error is not None
+        err = {"code": e.error.code, "cause": e.error.cause, "message": e.error.message, "detail": e.error.detail}
+        return CallReply("error", None, encoding, data, error=err, mark=e.stamp, tag=e.tag, raw=data)
+    if read_bare and encoding in (envelope.JSON_ENCODING, envelope.CBOR_ENCODING, envelope.PROTOBUF_ENCODING):
+        try:
+            env = envelope.decode(encoding, data)
+        except envelope.EnvelopeError as r:
+            return CallReply("transport", None, encoding, data, refusal=r.tag, raw=data, bare=True)
+        err = {"code": env.get("code"), "cause": env.get("cause"), "message": env.get("message"),
+               "detail": env.get("detail")}
+        return CallReply("error", None, encoding, data, error=err, raw=data, bare=True)
+    return CallReply("transport", None, encoding, data, refusal="encoding", raw=data)
+
+
+def show_reply(r: CallReply, op: Any = None) -> dict[str, Any]:
+    """A call's reply as a tool shows it, observer 0.24 §7.3, "A call's forms
+    first":
+    - a value by its record, "decoded … as the operation's response type, or
+      its summary type on a summary reply" where ``op`` (a
+      :class:`zk2py.calls.Operation`) is held, a packed one under CH's tag,
+      else its bytes in hex;
+    - "A refused value is undecodable, and the tool names the refusal", its
+      bytes never decoded nor sniffed;
+    - "An error is shown by its code, its cause and its message. Its detail
+      is decoded as the operation's error type where the tool holds it, a
+      packed one under CH's tag, and shown as its bytes otherwise";
+    - "The transport's … is shown so, with its Encoding and its bytes, never
+      as an owner's error";
+    - "The as-of mark. A tool may show a reply's run and seq beside it": its
+      run and seq, never an instance (the run "names an instance only
+      through the descriptor that states it").
+    The bare wire is shown as read (core §5.1's MAY), marked ``bare``."""
+    from . import calls, packed
+
+    out: dict[str, Any] = {"kind": r.kind, "encoding": r.encoding}
+    if r.mark is not None:
+        out["mark"] = {"run": r.mark.run_hex(), "seq": r.mark.seq}
+    if r.bare:
+        out["bare"] = True
+    if r.kind == "transport":
+        out["transport"] = {"encoding": r.encoding, "bytes": r.raw.hex(), "refusal": r.refusal}
+        return out
+    if r.kind == "refused_value":
+        out["undecodable"] = r.refusal
+        return out
+    if r.kind == "error":
+        e = r.error or {}
+        out.update({"code": e.get("code"), "cause": e.get("cause"), "message": e.get("message")})
+        d = e.get("detail")
+        if isinstance(d, (bytes, bytearray)):
+            shown: Any = bytes(d).hex()
+            if op is not None and op.types.get("error") is not None:
+                try:
+                    v = op.decode("error", r.tag or 0, bytes(d))
+                    shown = v.hex() if isinstance(v, bytes) else v
+                except (packed.Refused, calls.Refused) as x:
+                    shown = {"undecodable": x.token, "bytes": bytes(d).hex()}
+            out["detail"] = shown
+        else:
+            out["detail"] = d
+        return out
+    role = calls.value_role(r.summary)
+    value: Any = r.payload.hex()
+    if op is not None and op.types.get(role) is not None and not (r.bare and op.kind(role) == "packed"):
+        try:
+            v = op.decode(role, r.tag or 0, r.payload)
+            value = v.hex() if isinstance(v, bytes) else v
+        except (packed.Refused, calls.Refused) as x:
+            value = {"undecodable": x.token}
+    out["value"] = value
+    if r.summary:
+        out["summary"] = True
+    return out
 
 
 def call(session: zenoh.Session, key: str, payload: bytes = b"", *, fanout: bool = False,
          encoding: str | None = None, timeout: float | None = GET_TIMEOUT_S, first: bool = False,
-         attachment: bytes | None = None, recommended_ms: int | None = None, across: Any = None) -> CallResult:
+         attachment: bytes | None = None, recommended_ms: int | None = None, across: Any = None,
+         tag: int = 0, op: Any = None, bare: bool = False, attempts: int = 1,
+         idempotent: bool = False, read_bare: bool = True) -> CallResult:
     """Call an operation (§5.1).
 
+    - **The request (core 0.94 §5.1).** "A caller MUST write its request as
+      §7.5's request, ``CH · record``, under the Encoding zenoh/bytes. CH's
+      width bit is 0, and its tag is the request type's": ``payload`` is
+      the record, ``tag`` the ``request`` type's, or ``op``'s (a
+      :class:`zk2py.calls.Operation`). ``bare`` writes the bare wire under
+      ``encoding``, which "none writes": a test's older caller alone.
     - **The timeout** (§5.1, §8.1 at 0.91): ``timeout``, the caller's, at
       its word; ``None`` sets none, and the call waits the operation's
       ``timeout_ms`` (``recommended_ms``), else 10 s, and across a face
       (``across``, a :class:`zk2py.far_side.FarSide`) at least the face's
       reply timeout (:func:`zk2py.far_side.call_timeout_s`).
-
     - A concrete call uses target ``BestMatching`` (O1); a call to a fan-out
       operation, target ``All`` and consolidation ``None`` (O2).
     - Consolidation is ``None`` for a concrete call too: §5.1 O1 (0.7) says
       "a concrete call MUST set BestMatching and None", since ``Latest``
       would hold the reply until the query completes.
-    - ``first``: a one-reply caller "takes the first value or envelope on
-      the call's key, without waiting for the query to complete" (§5.1
-      "A concrete call"); the call returns at the first value or envelope.
-      Otherwise every reply is collected until the query completes.
-    - A value reply is the result; a reply error is decoded by its encoding
-      (§5.2). Only ``application/json``, ``application/cbor`` and
-      ``application/protobuf;zk2.core.v1.Error`` carry an envelope; any
-      other is the transport's (§5.2 "Transport errors").
-    - No reply is silence, never a verdict (O5).
+    - ``first``: a one-reply caller "takes the first value on the call's
+      key, or the first error, without waiting for the query to complete"
+      (§5.1 "A concrete call"). Otherwise every reply is collected until the
+      query completes.
+    - **The replies** (core 0.94): each read by :func:`read_reply` and
+      :func:`read_reply_error`. No reply, and the transport's alone, is
+      silence, never a verdict (O5).
+    - **Retries (O4).** ``attempts`` above 1 calls again after silence
+      alone, and only an ``idempotent`` operation: "calls an operation that
+      is not idempotent once, whatever the configuration", and never a
+      fan-out ("The reference retries no fan-out").
     - ``attachment``: the call metadata (O7), ``{"actor", "request_id"}``.
+    - ``read_bare``: zk2py takes core §5.1's MAY and reads the bare wire;
+      False is a caller that does not (operations.md §9 step 7).
     """
-    from . import envelope, far_side
+    from . import far_side
 
     timeout = far_side.call_timeout_s(timeout, recommended_ms, across)
-    q: queue.Queue = queue.Queue()
+    if op is not None:
+        tag = op.tag("request")
     kwargs: dict[str, Any] = {
         "target": zenoh.QueryTarget.ALL if fanout else zenoh.QueryTarget.BEST_MATCHING,
         "consolidation": zenoh.ConsolidationMode.NONE,
         "timeout": timeout,
-        "payload": payload,
     }
-    if encoding is not None:
-        kwargs["encoding"] = encoding
+    if bare:
+        kwargs["payload"] = payload
+        if encoding is not None:
+            kwargs["encoding"] = encoding
+    else:
+        kwargs["payload"] = zk2c.request(payload, tag)
+        kwargs["encoding"] = zk2c.ENCODING
     if attachment is not None:
         kwargs["attachment"] = attachment
+    tries = attempts if idempotent and not fanout else 1
+    out = CallResult()
+    for n in range(1, max(tries, 1) + 1):
+        out = _call_once(session, key, kwargs, timeout, first, read_bare)
+        out.attempts = n
+        if not out.silent:
+            break
+    return out
+
+
+def _call_once(session: zenoh.Session, key: str, kwargs: dict[str, Any], timeout: float,
+               first: bool, read_bare: bool = True) -> CallResult:
+    q: queue.Queue = queue.Queue()
     t0 = time.monotonic()
     session.get(key, zenoh.handlers.Callback(q.put, lambda: q.put(_DONE)), **kwargs)
     out = CallResult()
@@ -2107,19 +2293,10 @@ def call(session: zenoh.Session, key: str, payload: bytes = b"", *, fanout: bool
         if out.first_s is None:
             out.first_s = time.monotonic() - t0
         if item.ok is not None:
-            s = item.ok
-            out.replies.append(CallReply("value", str(s.key_expr), str(s.encoding), s.payload.to_bytes()))
+            out.replies.append(read_reply(item.ok, read_bare))
         else:
-            enc, data = str(item.err.encoding), item.err.payload.to_bytes()
-            if enc not in (envelope.JSON_ENCODING, envelope.CBOR_ENCODING, envelope.PROTOBUF_ENCODING):
-                out.replies.append(CallReply("transport", None, enc, data))
-                continue
-            try:
-                env = envelope.decode(enc, data)
-                out.replies.append(CallReply("envelope", None, enc, data, envelope=env))
-            except envelope.EnvelopeError as e:
-                out.replies.append(CallReply("refused_envelope", None, enc, data, refusal=e.tag))
-        if first and out.replies[-1].kind != "transport" and (out.replies[-1].kind != "value"
-                                                              or out.replies[-1].key == key):
+            out.replies.append(read_reply_error(str(item.err.encoding), item.err.payload.to_bytes(), read_bare))
+        last = out.replies[-1]
+        if first and last.kind != "transport" and (last.kind == "error" or last.key == key):
             break
     return out
