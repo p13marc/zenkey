@@ -1,10 +1,72 @@
-# `link.v1` for zenoh-modem: the RF and SBD faces (#623, #616, #617)
+# zenoh-modem's radio faces: the `link.v1` sketch, and the `link.v2` policies (#623, #616, #617, #988)
+
+> **The faces zenoh-modem's routers run are [`link.v2`](../../../spec/profiles/link/v2.md)
+> policies, in [`faces/`](faces/) (#988 L5).** One router per medium, as that profile requires
+> (its §2.16): zenoh reads the lease, the keep-alives, the batch, `wait_before_close` and the
+> timeouts once per router, for every link it holds. Each policy names the zenoh its router runs,
+> `zm-1.10.2-r1`, and the catalog the ground holds, [`catalog.json`](catalog.json)'s `ab76ec37`.
+> [`faces/zenoh-modem.enrollment.toml`](faces/zenoh-modem.enrollment.toml) gives the routers'
+> principals, and `link.v2`'s `conformance/v2/plan.json` holds each face's plan (its Appendix B).
+>
+> | Face policy | Node, service | bit/s | Lease / keep-alives, `wait_before_close` | Timeouts | Batch | What crosses, at each frame's `every_s` | `horizon_s` | The plan's warnings |
+> |---|---|---:|---|---|---:|---|---:|---|
+> | [`zenohd-rf0`](faces/zenohd-rf0.face.toml) | `h-3fa9c2d41b7e`, `rf0` | 2,400 | 240 s / 4, 240 s | 10 s | 222 | `frames/link` and the seven group frames, 60 s | 120 | `frame_unlisted` |
+> | [`zenohd-lora0-sf7`](faces/zenohd-lora0-sf7.face.toml) | `h-c2a95e41d7f0`, `lora0` | 5,469 | 120 s / 4, 120 s | 10 s | 224 | the same eight, 60 s | 120 | `frame_unlisted`, `keep_alive_not_suppressed` |
+> | [`zenohd-lora0-sf9`](faces/zenohd-lora0-sf9.face.toml) | `lora0` | 1,758 | 240 s / 4, 240 s | 10 s | 117 | `frames/link` at 60 s, the group frames at 120 s | 120 | `frame_unlisted` |
+> | [`zenohd-lora0-sf12`](faces/zenohd-lora0-sf12.face.toml) | `lora0` | 293 | 1,080 s / 4, 1,080 s | 40 s, interests 40 s | 224 | the same eight, 900 s; the group frames' `keyframe_s` 3,600 | 1,800 | `frame_unlisted`, `keep_alive_not_suppressed`; on `frames/link`, `interval_over_horizon` and `horizon_under_face` |
+> | [`zenohd-sat0`](faces/zenohd-sat0.face.toml) | `h-71c0e2a9d4b3`, `sat0` | 2,400 | 3,600 s / 2, 3,600 s | 1,000 s | 271 | `frames/message` alone, 1,800 s | 3,600 | `frame_unlisted`, the other eight |
+>
+> Every face runs `16bit` sequence numbers. RF and LoRa lose 5 % and repair nothing, so their
+> linter also warns `no_arq`. SBD retries, so it has no loss and ARQ. What the plans say:
+> - **What crosses.** A listed frame crosses whole, never downsampled (`link.v2` §2.7, `link.v1`
+>   §2.8). Every frame a face leaves out is denied by name. So `stream:modem.v3` is the seven
+>   reading subtrees (`air`, `if`, `layer`, `link`, `radio`, `sched`, `sdu`) and `frames/message`
+>   on RF and LoRa, and on SBD those seven and the other eight frames. No plain stream crosses, so
+>   no face has a downsampling rule. No frame's payload is above its face's batch
+>   (`frame_over_batch`): SF9's 117 B holds `frames/layer`'s 106.
+> - **`frame_unlisted`** names, on each router, the frames no face of its policy lets across. One
+>   contract serves every medium, and each router knows only its own face. Its device's owner
+>   leaves those frames unpublished (`config:frames.<name>`).
+> - **The cadences** are the owner's configuration (#991's per-medium table), and each plan states
+>   them as the deployment's word to the ground. The owner puts each listed frame at its `every_s`.
+> - **Keep-alives.** A batch sent resets its end's keep-alive interval. On RF and SF9 the interval
+>   is 60 s, `frames/link`'s cadence, and on SBD it is 1,800 s, the message's: data replaces every
+>   keep-alive the uplink would send. SF7's 30 s and SF12's 270 s are below their frames' cadence,
+>   so the uplink pays one keep-alive between two frames at SF7 and three at SF12
+>   (`keep_alive_not_suppressed`).
+> - **Keyframes.** A group frame writes a full record at least every 15 records: 15 minutes at RF
+>   and SF7, 30 at SF9, and 3.75 hours at SF12. SF12's face asks for one an hour, which its owner
+>   meets by a full record every fourth frame. `frames/link` and `frames/message` are full records
+>   every frame.
+> - **Liveness** (README gap 14). `frames/link`'s 150 s horizon makes it evidence across RF and
+>   LoRa. At SF12 it crosses every 900 s: a far reader judges it stale between two frames, and an
+>   owner putting it every 75 s, as the horizon asks, would spend more than the face affords. A
+>   horizon for the slowest medium is `modem.v3`'s to choose (#991). `frames/message` declares no
+>   horizon, so liveness across SBD stays unobservable.
+> - **The counter's epoch** (README gap 1). Every counter that crosses is a frame's field, read
+>   under [`telemetry.v2`](../../../spec/profiles/telemetry/v2.md) with the frame's run as its
+>   epoch, in band (`link.v2` §2.13): a decrease within one run is no longer read as a reset.
+> - **The fail-open hazard** (README gap 12) stays narrowed to `frames/`. A frame or a `host`
+>   resource a later minor adds there crosses until the plan is derived again.
+> - **Both ends run one transport.** `zenctl acl gen --face-policy … --json5` writes the router's
+>   `transport` and `routing` blocks, and `--far-config` the ground end's: neither the lease nor
+>   the keep-alives are negotiated. `zenctl check face --peer-config` compares the two ends.
+>   zenoh-modem's shipped `configs/zenohd-*.json5` still run their own values, RF's 10 s lease
+>   among them, which are zenoh-modem's to move.
+>
+> **Why `modem.v3` still lists `link.v1`.** A face policy is the deployment's, never on the bus
+> (`link.v2` §3). A contract lists `link.v2` only to take its packed requirement (its §1 and
+> §2.17), and one that lists `link.v1` crosses a `link.v2` face as `link.v1` says, warned
+> `not_packed` for each unpacked resource that crosses. Every resource `modem.v3` 3.2 exposes is a
+> packed frame, so no plan draws one. Moving `uses` would take a revision of its own, a new
+> fingerprint and a successor catalog, for a requirement 3.2 already meets. It can ride with
+> #991's revision, which fixes the frames' ranges. Until then a descriptor of a `modem.v3`
+> instance lists `link.v1`, and so does the profiles index.
 
 > **Superseded by [`link.v1`](../../../spec/profiles/link/v1.md), text 0.1
-> (#769).** This sketch is kept as the record it was; the profile is the
-> rule. Its Appendix B gives zenoh-modem's two face policies and the plans
-> derived from them (`conformance/plan.json`'s first two cases). What
-> changed:
+> (#769), then by `link.v2`'s policies above.** This sketch is kept as the record it was; the
+> profile is the rule. `link.v1`'s Appendix B gives zenoh-modem's two `link.v1` face policies and
+> the plans derived from them (`conformance/plan.json`'s first two cases). What changed:
 > - **A defect: the events.** `face-deny-modem-streams` below denies
 >   `zk2/*/*/modem.v3/stream/{oper_change,device_fault,identity_change,action_event}/**`,
 >   the draft-0 keys of zenoh-modem's occurrences. Under draft 1 they are
@@ -34,34 +96,8 @@
 > | `frames/sdu`, `sched`, `air`, `layer`, `if`, `radio`, `bearer` | each group of readings (`bearer` is `link/`'s), counters at 32 bits, a full record at least every 15 | 21 to 106 B |
 > | `frames/message` | all 73, counters at 24 bits: one paid SBD message | 213 B |
 >
-> What changes on a face, as `link.v1` 0.14 derives it (the Rust lane re-blesses `plan.json`'s
-> zenoh-modem cases):
-> - **RF.** Every exposed frame crosses whole and is never downsampled (§2.8). Which ones a device
->   publishes, and how often, is its owner's configuration (`config:frames.<name>`, #991's
->   per-medium table). `stream:modem.v3` becomes seven subtree denies, `air`, `if`, `layer`,
->   `link`, `radio`, `sched` and `sdu`, with no name, and the face has no downsampling rule: no
->   plain stream of the plane crosses. No frame is above the batch of 220 B (`frame_over_batch`).
-> - **Liveness across RF** (README gap 14): `frames/link`'s horizon makes it evidence (§2.12). Its
->   interval is unstated, so its owner puts a frame at least every 75 s, and the plan draws no
->   `interval_over_horizon`.
-> - **The counter's epoch** (README gap 1): a frame's epoch is its run, in band (`telemetry.v2`
->   §2.19), which is `link.v1` §2.13's in-band epoch at no byte. Across the face, a decrease of
->   `dropped` within one run is no longer read as a reset. §5's "not available" holds only for the
->   JSON streams, and they no longer cross.
-> - **The fail-open hazard** (README gap 12) shrinks: `sdu/`, `sched/` and `air/` are denied whole.
->   Only `frames/` mixes, and every resource under it crosses. A `host` resource a later minor
->   added there would cross until the plan is derived again.
-> - **SBD** still exposes none, so nothing crosses, `frames/message` included. It crosses once that
->   face exposes. A `link.v1` face lists no frames, so every exposed frame would then cross it. A
->   [`link.v2`](../../../spec/profiles/link/v2.md) face lists the ones it lets across (its §2.7), as
->   #988 plans for SBD's `frames/message` alone.
->
-> **Why `link.v1`, not `link.v2`.** `link.v2` 0.3 binds a contract that lists it to type every
-> resource it exposes `link` as packed (its §2.17, `packed_required`). From 3.2, `modem.v3` would
-> meet that: what it exposes are its nine frames, all packed. Its 73 JSON streams are `host`, and
-> §2.17 binds no `host` resource. It stays on `link.v1` because nothing needs the move yet. A
-> `link.v2` face carries a contract that lists `link.v1` as `link.v1` says (§2.17), with that
-> face's transport and its `frames` list (#988), and `link.v2` is experimental.
+> Under `link.v1`'s policies, whose faces list no frames, every exposed frame crosses a face that
+> exposes, and none crosses SBD's, which exposes none (`link.v1` Appendix B).
 
 zenoh-modem carries stock Zenoh over radios where every byte is billed in airtime:
 - 220 B MTU at 2,400 bit/s on RF;

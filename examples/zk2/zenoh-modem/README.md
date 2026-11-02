@@ -27,7 +27,10 @@ Its seam crates are on crates.io for out-of-tree backends.
   radio can arm a reach change today but never keep it, and gives the zk2 grants that fix it.
 - The radio faces, the rules a generator would emit, and the declaration cost of zk2 keys against
   v1's are in [`link.md`](link.md), a sketch now superseded by the profile
-  [`link.v1`](../../../spec/profiles/link/v1.md) (#769), whose Appendix B gives the two faces.
+  [`link.v1`](../../../spec/profiles/link/v1.md) (#769). Since #988 L5 the routers run
+  [`link.v2`](../../../spec/profiles/link/v2.md) policies, one router per medium, in
+  [`faces/`](faces/): RF, LoRa at SF7, SF9 and SF12, and SBD. `link.md`'s first note gives each
+  face's transport, the frames that cross it and its plan's warnings.
 - What `modem-contract` becomes is in [`contract-crate.md`](contract-crate.md).
 - [`catalog.json`](catalog.json) is the deployment catalog ([core §8.6](../../../spec/core.md#86-the-deployment-catalog)),
   provisioned to rf0's host and to the ground. It indexes `modem.v3`, `config.v1` and
@@ -360,10 +363,12 @@ Each gap gives what is missing, the evidence, and a proposed correction. "r3.2" 
      epoch in an attachment typed `telemetry.v1.Epoch` (§2.4, §2.9), which `link.v1` §2.13 cites.
      `modem.v3` declares none yet: adding it to `sdu/dropped_total` is a revision, review under
      core §9.8.
-   - *Status since `modem.v3` 3.2 (#983 T4):* **closed for the radio.** The stream no longer
-     crosses. Its reading crosses in `frames/link`, whose epoch is the frame's run, in band
-     ([`telemetry.v2`](../../../spec/profiles/telemetry/v2.md) §2.19), at no byte. A decrease of
-     `dropped` within one run is not a reset across the face: at 32 bits it is
+   - *Status since `modem.v3` 3.2 and the `link.v2` faces (#983 T4, #988 L5):* **closed on every
+     face.** No JSON stream crosses. Each counter crosses as a frame's field: `frames/link` and
+     the group frames over RF and LoRa, `frames/message` over SBD. Its epoch is the frame's run, in
+     band ([`telemetry.v2`](../../../spec/profiles/telemetry/v2.md) §2.19), at no byte, and
+     [`link.v2`](../../../spec/profiles/link/v2.md) §2.13 reads it so across a face. A decrease
+     within one run is not a reset there: at 32 bits, or 24 in `frames/message`, it is
      `wrap_or_decrease` (§2.20). The JSON stream on the host bus reads as before, by presence.
 2. **Occurrence-keyed streams cannot state a rate, so their population bound is uncheckable.** v1's
    `rate = rare | low | burst(600/h)` is enforced by the publisher, which folds the excess into
@@ -435,6 +440,12 @@ Each gap gives what is missing, the evidence, and a proposed correction. "r3.2" 
     - *Correction:* `link.v1` states that face policy is per router transport. A two-radio node
       uses `zids` subjects per lane peer (unauthenticated, but the peer is configured) or a router
       per radio. S3 and S14 test `zids` subjects.
+    - *Status since #988 L5:* **narrowed.** A `link.v2` policy states the router's transport,
+      which zenoh reads once per router, so a router per medium is the rule (`link.v2` §2.16):
+      RF's 240 s lease and SBD's 3,600 s cannot share one. [`faces/`](faces/) gives each medium
+      its router, each carrying one device. A node with two radios stays open: a face's `frames`
+      names an interface's frame resource, not a service's, so a router that also carried the
+      other device's traffic would let its listed frames across too.
 11. **Every key under one downsampling rule shares its timer.**
     - *Evidence:* zenoh 1.10.1 `interceptor/downsampling.rs:208-251, 281-304`. v1's
       `zenohd-rf0.json5:118-121` rules span `*` devices: a latent v1 bug on a two-device node.
@@ -466,10 +477,13 @@ Each gap gives what is missing, the evidence, and a proposed correction. "r3.2" 
     - *Evidence:* r3.2 l.307; `zenohd-sat0-gateway.json5:99-102`.
     - *Correction:* R7 reads "the freshness of whatever `link.v1` exposes". Over SBD, liveness
       across the face is unobservable by design.
-    - *Status since `modem.v3` 3.2:* **closed for RF, open for SBD.** `frames/link` declares
-      `freshness.ttl_s = 150`, so it is liveness evidence across RF (`link.v1` §2.12): its owner
-      puts a frame at least every 75 s. SBD exposes none, so nothing crosses it, `frames/message`
-      included, until that face exposes (#988).
+    - *Status since `modem.v3` 3.2 and the `link.v2` faces (#983 T4, #988 L5):* **closed for RF
+      and for LoRa at SF7 and SF9, open at SF12 and for SBD.** `frames/link` declares
+      `freshness.ttl_s = 150`, so it is liveness evidence across each of those faces (`link.v1`
+      §2.12), which carry it every minute. SF12's carries it every 15 minutes: a far reader finds
+      it stale between two frames (`interval_over_horizon`, `horizon_under_face`), and a horizon
+      that medium can carry is `modem.v3`'s to choose (#991). SBD now carries `frames/message`,
+      which declares no horizon, so liveness across it stays unobservable by design.
 15. **The descriptor's ≤ 1 KB target fails for a union contract.** Listing unavailable optional
     resources one by one costs 4.5–5.4 KB per device (wwan0: 69 entries; rf0 and sat0: 57).
     - *Evidence:* r3.2 l.444-447, 458.
@@ -510,6 +524,10 @@ Each gap gives what is missing, the evidence, and a proposed correction. "r3.2" 
     - *Evidence:* r3.2 l.128; draft 0 l.128-132.
     - *Correction:* face and role files may expose resources per principal. `link.v1` defines that
       vocabulary beside the contract annotation.
+    - *Status since #988 L5:* **open.** A `link.v2` face lists which of a contract's exposed frames
+      cross it (`link.v2` §2.7): exposure chosen by the deployment, but per face, among frames the
+      contract already exposes. It is not per principal, and reaches no standard profile's
+      resource: `config.v1`'s view still crosses only as a GET, by grant (`link.v1` §2.9).
 21. **`claimed_source` has no zk2 source.** O7 carries `{actor, request_id}` only, and zenoh's
     `SourceInfo` is unstable. (Minor.)
     - *Evidence:* `zenkey/src/config.rs:780-784`; r3.2 l.384, §3.8.
