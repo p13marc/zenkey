@@ -1685,32 +1685,41 @@ mod tests {
 
     /// A present owner whose descriptor names `revision` of `alarms.v1`.
     fn presence_at(listed: bool, zid: Option<&str>, revision: &str) -> Observed {
-        let keys = vec!["zk2/lab/svc/@zk/instance/000000000000000a".to_owned()];
+        presence_of(listed, zid, &[("000000000000000a", revision)])
+    }
+
+    /// A present owner whose instances' descriptors each name a revision of
+    /// `alarms.v1`: `(instance, revision)`.
+    fn presence_of(listed: bool, zid: Option<&str>, instances: &[(&str, &str)]) -> Observed {
+        let keys: Vec<String> = instances
+            .iter()
+            .map(|(i, _)| format!("zk2/lab/svc/@zk/instance/{i}"))
+            .collect();
         let mut o = Observed::from_keys("zk2/lab/*/@zk/**", &keys, true);
         let mut ds = BTreeMap::new();
-        let interfaces = if listed {
-            serde_json::json!([{"iface": "alarms.v1",
-                "contract": format!("sha256:{revision}"),
-                "minor": 0, "token": false}])
-        } else {
-            serde_json::json!([])
-        };
-        let mut meta = serde_json::Map::new();
-        if let Some(z) = zid {
-            meta.insert("zid".into(), z.into());
+        for (instance, revision) in instances {
+            let interfaces = if listed {
+                serde_json::json!([{"iface": "alarms.v1",
+                    "contract": format!("sha256:{revision}"),
+                    "minor": 0, "token": false}])
+            } else {
+                serde_json::json!([])
+            };
+            let mut meta = serde_json::Map::new();
+            if let Some(z) = zid {
+                meta.insert("zid".into(), z.into());
+            }
+            let d: zenkey_model::descriptor::Descriptor =
+                serde_json::from_value(serde_json::json!({
+                    "format": "zk2-descriptor/0.1", "service": "lab/svc",
+                    "instance": instance, "interfaces": interfaces, "meta": meta,
+                }))
+                .unwrap();
+            ds.insert(
+                ("lab/svc".parse().unwrap(), instance.parse().unwrap()),
+                crate::model::catalog::DescriptorRead::Served(Box::new(d)),
+            );
         }
-        let d: zenkey_model::descriptor::Descriptor = serde_json::from_value(serde_json::json!({
-            "format": "zk2-descriptor/0.1", "service": "lab/svc",
-            "instance": "000000000000000a", "interfaces": interfaces, "meta": meta,
-        }))
-        .unwrap();
-        ds.insert(
-            (
-                "lab/svc".parse().unwrap(),
-                "000000000000000a".parse().unwrap(),
-            ),
-            crate::model::catalog::DescriptorRead::Served(Box::new(d)),
-        );
         o.descriptors = Some(ds);
         o
     }
@@ -2436,6 +2445,90 @@ mod tests {
         v1.presence_read(&presence(true, Some(ZID)), t0);
         get(&mut v1, t0, vec![]);
         assert_eq!(v1.owner_set(&owner, later).reason, Reason::Window);
+    }
+
+    /// §2.15 (text 0.11): an empty view is in step only with a heartbeat
+    /// whose owner holds no alarm live, which vouches for none. One whose
+    /// owner holds an alarm with its bit clear is out of step, its live
+    /// count not the view's, even under the empty digest.
+    #[test]
+    fn an_empty_view_is_in_step_only_with_an_owner_holding_none() {
+        use zenkey_model::heartbeat::Digest;
+        let owner: Addr = "lab/svc".parse().unwrap();
+        let t0 = Instant::now();
+        let later = t0 + Duration::from_secs(1000);
+        let mut b = book(true);
+        b.subscribed(t0);
+        b.presence_read(
+            &presence_at(true, Some(ZID), zenkey::alarms::FINGERPRINT),
+            t0,
+        );
+        get(&mut b, t0, vec![]);
+        // One alarm live, its bit clear, under a digest of none.
+        beat(
+            &mut b,
+            0,
+            Digest::EMPTY,
+            1,
+            &[],
+            t0 + Duration::from_secs(400),
+        );
+        assert_eq!(b.window(&owner, later).unwrap().in_step, Some(false));
+        assert_eq!(b.owner_set(&owner, later).reason, Reason::WindowUnconfirmed);
+        // None live: in step, vouching for none.
+        beat(
+            &mut b,
+            1,
+            Digest::EMPTY,
+            0,
+            &[],
+            t0 + Duration::from_secs(800),
+        );
+        assert_eq!(b.window(&owner, later).unwrap().in_step, Some(true));
+        assert_eq!(b.owner_set(&owner, later).reason, Reason::Window);
+    }
+
+    /// §2.15 (text 0.11): whether an owner is confirmed by heartbeat is
+    /// read from the instances present at the book's latest read. While an
+    /// instance on revision 1.1 is present, beside one on 1.0 or alone,
+    /// its window waits for a heartbeat in step, the stricter reading;
+    /// once only the instance on 1.0 is present, its re-puts confirm it
+    /// and its window asks for none.
+    #[test]
+    fn an_owner_back_on_revision_1_0_is_confirmed_by_its_re_puts() {
+        let owner: Addr = "lab/svc".parse().unwrap();
+        let t0 = Instant::now();
+        let later = t0 + Duration::from_secs(1000);
+        let (old, new) = ("000000000000000a", "000000000000000b");
+        let mut b = book(true);
+        b.subscribed(t0);
+        b.presence_read(
+            &presence_of(true, Some(ZID), &[(old, zenkey::alarms::FINGERPRINT)]),
+            t0,
+        );
+        assert_eq!(b.window(&owner, later).unwrap().in_step, Some(false));
+        b.presence_read(
+            &presence_of(
+                true,
+                Some(ZID),
+                &[(old, zenkey::alarms::FINGERPRINT), (new, REVISION_1_0)],
+            ),
+            t0 + Duration::from_secs(1),
+        );
+        assert_eq!(b.window(&owner, later).unwrap().in_step, Some(false));
+        // The instance on 1.1 withdraws: the one on 1.0 is the owner.
+        b.instance(
+            &owner,
+            &old.parse().unwrap(),
+            false,
+            t0 + Duration::from_secs(2),
+        );
+        assert_eq!(b.window(&owner, later).unwrap().in_step, None);
+        b.presence_read(
+            &presence_of(true, Some(ZID), &[(new, REVISION_1_0)]),
+            t0 + Duration::from_secs(3),
+        );
+        assert_eq!(b.window(&owner, later).unwrap().in_step, None);
     }
 
     /// §2.14 step 5 (text 0.11): a `freshness.v2` owner's put carries no
