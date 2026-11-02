@@ -63,7 +63,10 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   `Face::frames` (`FrameCadence`) and `horizon_s`, `Res::new` and its
   `packed`, `block`, `longest_bytes` (`ENVELOPE_BYTES` + a packed
   record's `max_bits`, or the largest frame), `link_v2`,
-  `FrameFacts::keyframe_every` (the least across revisions),
+  `FrameFacts::keyframe_every` (the least across revisions; link.v2 0.6,
+  F-469: `merge` judges packed, timed, `block` and the longest put
+  revision by revision; link.v1 0.16, F-470: the largest frame counts
+  `records` − ⌊`records`/`keyframe_every`⌋ delta records of every field),
   `Deployment::fingerprints` and `catalog`, `FacePlan::frames`
   (`ListedFrame`), and a v2 plan's refusals `packed_required`,
   `frame_unknown`, `keyframe_unreachable`, `catalog_missing` and
