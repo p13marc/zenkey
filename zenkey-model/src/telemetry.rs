@@ -24,6 +24,14 @@
 //! the Point, its tagged value and the histogram, with serde (#819, TB).
 //! [`stamp_ns`] is a state sample's stamp in nanoseconds, as zenoh reads it
 //! (§2.11, 0.2).
+//!
+//! `telemetry.v2` (`spec/profiles/telemetry/v2.md`, #983 T1) restates these
+//! rules by reference and binds a frame's fields to series ([`frames`]). A
+//! counter carries its width ([`Measure::Counter`]), so [`pair`] reads a
+//! narrow one in a serial window (v2 §2.20), and a frame's sample carries
+//! its record's time ([`RecordTime`]), so a rate names its basis
+//! ([`TimeBasis`], v2 §2.21). A v1 sample is a 64-bit counter with no
+//! record time, and reads as before.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -35,10 +43,15 @@ use crate::contract::{Body, Contract, Resource};
 use crate::schema::{Artifact, ArtifactData, TypeId};
 
 pub mod decode;
+pub mod frames;
 pub mod wire;
 
 /// The profile's id, as a contract lists it in `uses`.
 pub const PROFILE: &str = "telemetry.v1";
+
+/// `telemetry.v2`'s id (#983 T1): v1's rules by reference, and a frame
+/// resource's fields bound to series by `telemetry.series` (v2 §2.16).
+pub const PROFILE_V2: &str = "telemetry.v2";
 
 /// The profile's name, as an annotation key's prefix carries it.
 pub const NAME: &str = "telemetry";
@@ -52,9 +65,28 @@ pub const BUCKETS: &str = "telemetry.buckets";
 /// `telemetry.semantic` (§4).
 pub const SEMANTIC: &str = "telemetry.semantic";
 
+/// `telemetry.series` (v2 §4): a frame resource's fields, each bound to a
+/// series.
+pub const SERIES: &str = "telemetry.series";
+
 /// The published vocabulary (§4): the keys under `telemetry.`, which W105
 /// reads in place of core Appendix D's interim row (core 0.35).
 pub const VOCABULARY: &[&str] = &["kind", "unit", "buckets", "semantic"];
+
+/// `telemetry.v2`'s vocabulary (v2 §4): v1's four keys and `series`, which
+/// W105 reads for a contract that uses `telemetry.v2`.
+pub const VOCABULARY_V2: &[&str] = &["kind", "unit", "buckets", "semantic", "series"];
+
+/// Whether `c` uses `telemetry.v2` (v2 §1): its frame resources' fields
+/// are series by their `telemetry.series`, and every other resource reads
+/// as `telemetry.v1` reads it.
+#[must_use]
+pub fn uses_v2(c: &Contract) -> bool {
+    c.uses.iter().any(|u| u.to_string() == PROFILE_V2)
+}
+
+/// A v1 counter's width: every count from 0 to 2^64 − 1 (§2.7).
+pub const FULL_WIDTH: u32 = 64;
 
 /// The standard schema's stem (§3): `telemetry.v1.json`.
 pub const SCHEMA_STEM: &str = "telemetry.v1";
@@ -930,7 +962,13 @@ pub struct Histogram {
 /// A conforming sample's value, by its kind.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Measure {
-    Counter(u64),
+    /// A count modulo 2^`width`: a v1 counter's width is 64
+    /// ([`FULL_WIDTH`]), a frame's counter field's its declared width, from
+    /// 1 to 64 (core §7.6, v2 §2.20).
+    Counter {
+        value: u64,
+        width: u32,
+    },
     Gauge(f64),
     Histogram(Histogram),
     Text(String),
@@ -939,10 +977,19 @@ pub enum Measure {
 }
 
 impl Measure {
+    /// A 64-bit counter, as every v1 carrier holds one (§2.7).
+    #[must_use]
+    pub const fn counter(value: u64) -> Self {
+        Self::Counter {
+            value,
+            width: FULL_WIDTH,
+        }
+    }
+
     #[must_use]
     pub fn kind(&self) -> MetricKind {
         match self {
-            Self::Counter(_) => MetricKind::Counter,
+            Self::Counter { .. } => MetricKind::Counter,
             Self::Gauge(_) => MetricKind::Gauge,
             Self::Histogram(_) => MetricKind::Histogram,
             Self::Text(_) => MetricKind::Text,
@@ -1034,7 +1081,7 @@ fn check_value(
                 return None;
             };
             match count(i) {
-                Ok(n) => Some(Measure::Counter(n)),
+                Ok(n) => Some(Measure::counter(n)),
                 Err(()) => {
                     out.push(Problem::OutOfRange);
                     None
@@ -1257,6 +1304,68 @@ pub struct Sampled<'a> {
     pub stamp_ns: Option<i128>,
     /// When the reader received it, in nanoseconds on its monotonic clock.
     pub arrival_ns: i128,
+    /// A frame's sample: its record's time (v2 §2.21). `None` for every v1
+    /// carrier, whose time base is §2.11's list.
+    pub record: Option<RecordTime>,
+}
+
+/// A frame record's time, as a frame's sample carries it (v2 §2.21, core
+/// §7.7): what [`crate::frame::RecordRead`] reads, and which frame of the
+/// key the record came in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RecordTime {
+    /// Which frame of its key it came in, as its reader counts them: two
+    /// records with one number came in one frame, and are timed by their
+    /// offsets from its record 0.
+    pub frame: u64,
+    pub when: crate::frame::When,
+    /// After record 0: its measured offset, or `step_ms` × its index when
+    /// scheduled. 0 for record 0.
+    pub after_ms: u64,
+    /// Its instant in milliseconds from the deployment epoch, `None` when
+    /// its frame's time is unknown.
+    pub at_ms: Option<u64>,
+}
+
+impl RecordTime {
+    /// How far its time may lie from the instant it gives: a scheduled
+    /// record's `jitter_ms`, else 0.
+    #[must_use]
+    pub const fn jitter_ms(&self) -> u64 {
+        match self.when {
+            crate::frame::When::Scheduled { jitter_ms } => jitter_ms as u64,
+            _ => 0,
+        }
+    }
+
+    const fn scheduled(&self) -> bool {
+        matches!(self.when, crate::frame::When::Scheduled { .. })
+    }
+}
+
+/// What a frame's rate is timed by (v2 §2.21). A v1 rate names none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeBasis {
+    /// Both records' times measured on the owner's clocks.
+    Measured,
+    /// At least one record's time scheduled: the elapsed time is exact to
+    /// within `jitter_ms` either way, the sum of the scheduled records'
+    /// `jitter_ms`. Never a measured rate.
+    Scheduled { jitter_ms: u64 },
+    /// The reader's arrivals: a record's time was unknown.
+    Arrival,
+}
+
+impl TimeBasis {
+    /// The fixture's token.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Measured => "measured",
+            Self::Scheduled { .. } => "scheduled",
+            Self::Arrival => "arrival",
+        }
+    }
 }
 
 /// What the reader observed of the owning service's instance tokens, or of
@@ -1330,7 +1439,10 @@ pub enum Continuity {
     SameEpoch,
     Reset,
     Decreased,
-    /// The two samples cannot be compared (`incomparable`).
+    /// The two samples cannot be compared (`incomparable`: their kinds,
+    /// their widths, or a histogram's bounds or length differ), or a narrow
+    /// counter's change within one epoch lies outside its serial window
+    /// (`wrap_or_decrease`, v2 §2.20). [`Pair::unobservable`] says which.
     Unobservable,
     /// Neither sample is a counter or a histogram (`kind`).
     NotAsked,
@@ -1366,6 +1478,10 @@ pub enum NoRate {
     Decreased,
     /// The elapsed time is 0 or less.
     Elapsed,
+    /// A narrow counter's change within one epoch lies outside its serial
+    /// window: a wrap or a decrease, which the two values cannot tell apart
+    /// (v2 §2.20).
+    WrapOrDecrease,
 }
 
 impl NoRate {
@@ -1376,6 +1492,7 @@ impl NoRate {
             Self::Reset => "reset",
             Self::Decreased => "decreased",
             Self::Elapsed => "elapsed",
+            Self::WrapOrDecrease => "wrap_or_decrease",
         }
     }
 }
@@ -1387,6 +1504,11 @@ pub struct Rate {
     pub per_s: f64,
     /// The counter's unit followed by `/s`; `None` when it is unknown.
     pub unit: Option<String>,
+    /// The elapsed time the rate is over, in nanoseconds, above 0.
+    pub elapsed_ns: i128,
+    /// A frame's rate's time basis (v2 §2.21); `None` for a v1 pair, timed
+    /// by §2.11's list.
+    pub basis: Option<TimeBasis>,
 }
 
 /// A pair, judged (§2.10, §2.11).
@@ -1398,33 +1520,106 @@ pub struct Pair {
     pub rate: Result<Rate, NoRate>,
 }
 
-/// Whether `later` decreased from `earlier` (§2.10); `None` when the two
-/// cannot be compared.
-fn decreased(earlier: &Measure, later: &Measure) -> Option<bool> {
+impl Pair {
+    /// Why an unobservable pair is: `incomparable` (§2.10), or
+    /// `wrap_or_decrease` (v2 §2.20). `None` for any other continuity.
+    #[must_use]
+    pub fn unobservable(&self) -> Option<&'static str> {
+        match (self.continuity, &self.rate) {
+            (Continuity::Unobservable, Err(NoRate::WrapOrDecrease)) => Some("wrap_or_decrease"),
+            (Continuity::Unobservable, _) => Some("incomparable"),
+            _ => None,
+        }
+    }
+}
+
+/// How a later value moved from an earlier one of one member (§2.10, v2
+/// §2.20).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Change {
+    /// No decrease: a counter's increase by this much (0 for a histogram).
+    Up(u64),
+    /// A decrease (§2.10).
+    Down,
+    /// A narrow counter's change outside its serial window (v2 §2.20).
+    Outside,
+}
+
+/// How `later` moved from `earlier` (§2.10); `None` when the two cannot be
+/// compared: their kinds, a counter's widths, or a histogram's bounds or
+/// length differ. A counter of width w below 64 is read in a serial window
+/// (v2 §2.20): the increase d = (b − a) mod 2^w when d < 2^(w−1), else
+/// outside it. At width 64, b below a is a decrease.
+fn change(earlier: &Measure, later: &Measure) -> Option<Change> {
     match (earlier, later) {
-        (Measure::Counter(a), Measure::Counter(b)) => Some(b < a),
+        (
+            Measure::Counter { value: a, width: w },
+            Measure::Counter {
+                value: b,
+                width: wb,
+            },
+        ) => {
+            if w != wb || *w == 0 || *w > FULL_WIDTH {
+                return None;
+            }
+            if *w == FULL_WIDTH {
+                return Some(if b < a {
+                    Change::Down
+                } else {
+                    Change::Up(b - a)
+                });
+            }
+            let mask = (1u64 << w) - 1;
+            let d = b.wrapping_sub(*a) & mask;
+            Some(if d < 1u64 << (w - 1) {
+                Change::Up(d)
+            } else {
+                Change::Outside
+            })
+        }
         (Measure::Histogram(a), Measure::Histogram(b)) => {
             let same_bounds = a.bounds.len() == b.bounds.len()
                 && a.bounds.iter().zip(&b.bounds).all(|(x, y)| x == y);
             if !same_bounds || a.counts.len() != b.counts.len() {
                 return None;
             }
-            Some(b.count < a.count || a.counts.iter().zip(&b.counts).any(|(x, y)| y < x))
+            let down = b.count < a.count || a.counts.iter().zip(&b.counts).any(|(x, y)| y < x);
+            Some(if down { Change::Down } else { Change::Up(0) })
         }
         _ => None,
     }
 }
 
-/// The elapsed time between two samples, in nanoseconds, on the first time
-/// base both have (§2.11).
-fn elapsed_ns(a: &Sampled<'_>, b: &Sampled<'_>) -> i128 {
-    if let (Some(x), Some(y)) = (a.timestamp_ms, b.timestamp_ms) {
-        (i128::from(y) - i128::from(x)) * 1_000_000
+/// The elapsed time between two samples, in nanoseconds, and what it is
+/// timed by: two frame records by their times (v2 §2.21), else the first
+/// time base of §2.11's list both have.
+fn elapsed(a: &Sampled<'_>, b: &Sampled<'_>) -> (i128, Option<TimeBasis>) {
+    const MS: i128 = 1_000_000;
+    if let (Some(x), Some(y)) = (&a.record, &b.record) {
+        let timed = if x.scheduled() || y.scheduled() {
+            TimeBasis::Scheduled {
+                jitter_ms: x.jitter_ms() + y.jitter_ms(),
+            }
+        } else {
+            TimeBasis::Measured
+        };
+        if x.frame == y.frame {
+            let e = i128::from(y.after_ms) - i128::from(x.after_ms);
+            return (e * MS, Some(timed));
+        }
+        if let (Some(p), Some(q)) = (x.at_ms, y.at_ms) {
+            return ((i128::from(q) - i128::from(p)) * MS, Some(timed));
+        }
+        return (b.arrival_ns - a.arrival_ns, Some(TimeBasis::Arrival));
+    }
+    let e = if let (Some(x), Some(y)) = (a.timestamp_ms, b.timestamp_ms) {
+        (i128::from(y) - i128::from(x)) * MS
     } else if let (Some(x), Some(y)) = (a.stamp_ns, b.stamp_ns) {
         y - x
     } else {
         b.arrival_ns - a.arrival_ns
-    }
+    };
+    (e, None)
 }
 
 /// A state sample's stamp in nanoseconds (§2.11, 0.2, F-142), from its raw
@@ -1449,7 +1644,10 @@ pub fn rate_per_s(d: u64, elapsed_ns: i128) -> f64 {
 }
 
 /// Judges a pair of conforming samples of one member, in arrival order
-/// (§2.9–§2.11). `unit` is the counter's unit (§2.5), for the rate's.
+/// (§2.9–§2.11). `unit` is the counter's unit (§2.5), for the rate's. A
+/// counter narrower than 64 bits is read in its serial window, and two
+/// frame records are timed by their records (`telemetry.v2` §2.20,
+/// §2.21).
 #[must_use]
 pub fn pair(
     earlier: &Sampled<'_>,
@@ -1473,36 +1671,49 @@ pub fn pair(
             Err(NoRate::Kind)
         }
     };
-    let Some(down) = (ka == kb)
-        .then(|| decreased(earlier.value, later.value))
+    let Some(moved) = (ka == kb)
+        .then(|| change(earlier.value, later.value))
         .flatten()
     else {
-        // Incomparable (§2.10): never two counters, so no rate by kind
-        // (§2.11, 0.2).
+        // Incomparable (§2.10): two kinds, two counter widths (v2 §2.20),
+        // or two histograms' bounds; no rate is asked of it (§2.11).
         return Pair {
             continuity: Continuity::Unobservable,
             basis: None,
             rate: Err(NoRate::Kind),
         };
     };
-    let (continuity, basis) = match epochs(earlier.epoch, later.epoch, presence) {
-        Epochs::Same(via) if down => (Continuity::Decreased, Basis::Established(via)),
-        Epochs::Same(via) => (Continuity::SameEpoch, Basis::Established(via)),
-        Epochs::Different(via) => (Continuity::Reset, Basis::Established(via)),
-        Epochs::Unobservable if down => (Continuity::Reset, Basis::Assumed),
-        Epochs::Unobservable => (Continuity::SameEpoch, Basis::Assumed),
+    let (continuity, basis) = match (epochs(earlier.epoch, later.epoch, presence), moved) {
+        (Epochs::Same(via), Change::Down) => (Continuity::Decreased, Basis::Established(via)),
+        (Epochs::Same(via), Change::Up(_)) => (Continuity::SameEpoch, Basis::Established(via)),
+        (Epochs::Same(via), Change::Outside) => {
+            // A wrap or a decrease within one epoch: the values cannot say
+            // which (v2 §2.20).
+            return Pair {
+                continuity: Continuity::Unobservable,
+                basis: Some(Basis::Established(via)),
+                rate: Err(NoRate::WrapOrDecrease),
+            };
+        }
+        (Epochs::Different(via), _) => (Continuity::Reset, Basis::Established(via)),
+        (Epochs::Unobservable, Change::Down | Change::Outside) => {
+            (Continuity::Reset, Basis::Assumed)
+        }
+        (Epochs::Unobservable, Change::Up(_)) => (Continuity::SameEpoch, Basis::Assumed),
     };
-    let rate = match (continuity, earlier.value, later.value) {
-        (Continuity::Reset, ..) => no_rate(NoRate::Reset),
-        (Continuity::Decreased, ..) => no_rate(NoRate::Decreased),
-        (Continuity::SameEpoch, Measure::Counter(a), Measure::Counter(b)) => {
-            let e = elapsed_ns(earlier, later);
+    let rate = match (continuity, moved) {
+        (Continuity::Reset, _) => no_rate(NoRate::Reset),
+        (Continuity::Decreased, _) => no_rate(NoRate::Decreased),
+        (Continuity::SameEpoch, Change::Up(d)) if counters => {
+            let (e, timed) = elapsed(earlier, later);
             if e <= 0 {
                 Err(NoRate::Elapsed)
             } else {
                 Ok(Rate {
-                    per_s: rate_per_s(b - a, e),
+                    per_s: rate_per_s(d, e),
                     unit: unit.map(|u| format!("{u}/s")),
+                    elapsed_ns: e,
+                    basis: timed,
                 })
             }
         }
@@ -1609,13 +1820,14 @@ mod tests {
 
     #[test]
     fn a_decrease_is_a_reset_unless_one_epoch_is_established() {
-        let (a, b) = (Measure::Counter(10), Measure::Counter(3));
+        let (a, b) = (Measure::counter(10), Measure::counter(3));
         let s = |v, e| Sampled {
             value: v,
             epoch: e,
             timestamp_ms: None,
             stamp_ns: None,
             arrival_ns: 0,
+            record: None,
         };
         let p = pair(&s(&a, None), &s(&b, None), None, None);
         assert_eq!(
@@ -1629,20 +1841,23 @@ mod tests {
 
     #[test]
     fn the_rate_is_the_formula() {
-        let (a, b) = (Measure::Counter(0), Measure::Counter(1_000));
+        let (a, b) = (Measure::counter(0), Measure::counter(1_000));
         let s = |v, t| Sampled {
             value: v,
             epoch: None,
             timestamp_ms: Some(t),
             stamp_ns: None,
             arrival_ns: 0,
+            record: None,
         };
         let p = pair(&s(&a, 0), &s(&b, 2_000), Some("By"), None);
         assert_eq!(
             p.rate,
             Ok(Rate {
                 per_s: 500.0,
-                unit: Some("By/s".into())
+                unit: Some("By/s".into()),
+                elapsed_ns: 2_000_000_000,
+                basis: None,
             })
         );
     }

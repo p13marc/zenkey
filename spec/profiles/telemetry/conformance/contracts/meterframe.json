@@ -1,0 +1,25 @@
+{
+  "description": "telemetry.v2's scenarios: modem.v3's link readings (core §7.7's fixtures' Link), a 64-bit total beside a temperature, and a 24-bit byte counter",
+  "types": {
+    "Link": {
+      "description": "sdu/dropped_total, sched/queue_depth, air/duty_cycle_available, air/duty_cycle_wait_ms",
+      "fields": [
+        {"name": "dropped", "type": "counter", "width": 32, "optional": true},
+        {"name": "queue_depth", "type": "int", "minimum": 0, "maximum": 1022, "reserved": ["out_of_range"], "optional": true},
+        {"name": "duty_available", "type": "int", "minimum": 0, "maximum": 1, "optional": true},
+        {"name": "duty_wait_ms", "type": "fixed", "minimum": "0", "maximum": "3600000", "resolution": "100", "reserved": ["out_of_range"], "optional": true}
+      ]
+    },
+    "Totals": {
+      "fields": [
+        {"name": "frames_total", "type": "counter", "width": 64},
+        {"name": "temperature", "type": "fixed", "minimum": "-40", "maximum": "85", "resolution": "0.5", "reserved": ["not_available", "error"]}
+      ]
+    },
+    "Bytes": {
+      "fields": [
+        {"name": "rx", "type": "counter", "width": 24}
+      ]
+    }
+  }
+}

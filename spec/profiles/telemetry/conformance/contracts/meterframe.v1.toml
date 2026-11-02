@@ -1,0 +1,51 @@
+# telemetry.v2 §2.16 (text 0.1): the scenarios' contract (scenarios-v2.md),
+# which declarations.json also reads whole. frames/link is modem.v3's link
+# readings, its counter a mirror of the bare stream sdu/dropped_total;
+# frames/totals a 64-bit total beside a temperature, a keyframe every 4
+# records, crossing a face; frames/bytes a 24-bit byte counter, three
+# scheduled records a frame.
+[interface]
+name  = "meterframe"
+major = 1
+minor = 0
+uses  = ["telemetry.v2", "link.v1"]
+
+[schemas]
+jsonschema = ["meter.json"]
+packed     = ["meterframe.json"]
+
+[resources."sdu/dropped_total"]
+kind        = "stream"
+type        = "json:Count"
+annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "1" }
+
+[resources."frames/link"]
+kind  = "stream"
+type  = "packed:meterframe#Link"
+frame = { records = 1 }
+
+[resources."frames/link".annotations."telemetry.series"]
+dropped        = "sdu/dropped_total"
+queue_depth    = { kind = "gauge", unit = "1" }
+duty_available = { kind = "gauge", unit = "1" }
+duty_wait_ms   = { kind = "gauge", unit = "ms" }
+
+[resources."frames/totals"]
+kind  = "stream"
+type  = "packed:meterframe#Totals"
+frame = { records = 1, keyframe_every = 4 }
+
+[resources."frames/totals".annotations]
+"link.exposure" = "link"
+
+[resources."frames/totals".annotations."telemetry.series"]
+frames_total = { kind = "counter", unit = "1" }
+temperature  = { kind = "gauge", unit = "Cel", semantic = "temperature" }
+
+[resources."frames/bytes"]
+kind  = "stream"
+type  = "packed:meterframe#Bytes"
+frame = { records = 3, step_ms = 1000, jitter_ms = 100 }
+
+[resources."frames/bytes".annotations."telemetry.series"]
+rx = { kind = "counter", unit = "By" }

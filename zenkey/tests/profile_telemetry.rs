@@ -313,7 +313,7 @@ impl Read {
 
     fn counter(&self) -> u64 {
         match self.measure() {
-            Measure::Counter(n) => *n,
+            Measure::Counter { value, .. } => *value,
             m => panic!("not a counter: {m:?}"),
         }
     }
@@ -332,6 +332,7 @@ fn sampled(r: &Read) -> Sampled<'_> {
         timestamp_ms: r.checked.reading.as_ref().unwrap().timestamp_ms,
         stamp_ns: None,
         arrival_ns: r.at,
+        record: None,
     }
 }
 
@@ -604,7 +605,9 @@ async fn s1_counter_across_a_restart() {
             j.pair.rate,
             Ok(Rate {
                 per_s: by_arrivals(j, b - a),
-                unit: None
+                unit: None,
+                elapsed_ns: j.later.at - j.earlier.at,
+                basis: None,
             })
         );
     }
@@ -729,7 +732,7 @@ async fn s3_a_decrease_within_one_epoch() {
     };
     assert_eq!(
         (epoch.as_str(), *before, *after),
-        (i1.as_str(), Measure::Counter(10), Measure::Counter(7))
+        (i1.as_str(), Measure::counter(10), Measure::counter(7))
     );
     let e = o.w("drops").put_value(&7u64).await.unwrap_err();
     assert!(matches!(refusal(e), Reason::Decreased { .. }));
@@ -1159,9 +1162,9 @@ async fn s9_state_counter_seeded() {
     assert_eq!(
         values,
         [
-            &Measure::Counter(12),
-            &Measure::Counter(10),
-            &Measure::Counter(15)
+            &Measure::counter(12),
+            &Measure::counter(10),
+            &Measure::counter(15)
         ]
     );
     let sampled = |i: usize| Sampled {
@@ -1170,6 +1173,7 @@ async fn s9_state_counter_seeded() {
         timestamp_ms: None,
         stamp_ns: Some(telemetry::stamp_ns(&got[i].stamp)),
         arrival_ns: got[i].at,
+        record: None,
     };
     let pair_of = |a: usize, b: usize| {
         let (alone, earlier, later) = r.presence(got[a].at, got[b].at);
@@ -1203,7 +1207,9 @@ async fn s9_state_counter_seeded() {
         kept.rate,
         Ok(Rate {
             per_s: tm::rate_per_s(3, e),
-            unit: None
+            unit: None,
+            elapsed_ns: e,
+            basis: None,
         })
     );
     // 3. Paired as received, 12 → 10 would be the finding.

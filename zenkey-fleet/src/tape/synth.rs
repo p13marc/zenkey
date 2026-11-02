@@ -1241,6 +1241,7 @@ message Pose {
                                 timestamp_ms: None,
                                 stamp_ns: None,
                                 arrival_ns: 0,
+                                record: None,
                             };
                             let p = telemetry::pair(&at(before), &at(&now), None, None);
                             assert_ne!(p.continuity, Continuity::Decreased, "{what}");

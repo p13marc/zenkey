@@ -290,7 +290,7 @@ pub fn declaration_row(d: &Declaration) -> TelemetryDeclaration {
 pub fn measure_json(m: &Measure) -> serde_json::Value {
     use serde_json::json;
     match m {
-        Measure::Counter(n) => json!(n),
+        Measure::Counter { value, .. } => json!(value),
         Measure::Gauge(f) => json!(f),
         Measure::Histogram(h) => json!({
             "buckets": h.bounds, "counts": h.counts, "count": h.count, "sum": h.sum,

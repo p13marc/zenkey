@@ -1,0 +1,1410 @@
+{
+  "cases": [
+    {
+      "expect": [
+        {
+          "continuity": "same_epoch",
+          "earlier": {
+            "frame": 0,
+            "record": 0
+          },
+          "elapsed_ns": 2000000000,
+          "epoch": "established",
+          "field": "dropped",
+          "jitter_ms": null,
+          "later": {
+            "frame": 1,
+            "record": 0
+          },
+          "no_rate": null,
+          "rate": 5.0,
+          "rate_unit": "1/s",
+          "time_basis": "measured",
+          "via": "in_band",
+          "why": null
+        }
+      ],
+      "frames": [
+        {
+          "arrival_ns": 0,
+          "hex": "00000e100030000000a807c00000",
+          "run": "0001",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "dropped": 10,
+                  "duty_available": 1,
+                  "duty_wait_ms": "0",
+                  "queue_depth": 3
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 3600
+            }
+          }
+        },
+        {
+          "arrival_ns": 2000000000,
+          "hex": "00000e1200300000014807c00000",
+          "run": "0001",
+          "seq": 1,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "dropped": 20,
+                  "duty_available": 1,
+                  "duty_wait_ms": "0",
+                  "queue_depth": 3
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 3602
+            }
+          }
+        }
+      ],
+      "layout": "link",
+      "note": "scenarios §1: two measured records 2 s apart, one run: same_epoch in band, 5 in 1/s, measured; the gauges form no pair"
+    },
+    {
+      "expect": [
+        {
+          "continuity": "same_epoch",
+          "earlier": {
+            "frame": 0,
+            "record": 0
+          },
+          "elapsed_ns": 1000000000,
+          "epoch": "established",
+          "field": "rx",
+          "jitter_ms": 100,
+          "later": {
+            "frame": 0,
+            "record": 1
+          },
+          "no_rate": null,
+          "rate": 500.0,
+          "rate_unit": "By/s",
+          "time_basis": "scheduled",
+          "via": "in_band",
+          "why": null
+        },
+        {
+          "continuity": "same_epoch",
+          "earlier": {
+            "frame": 0,
+            "record": 1
+          },
+          "elapsed_ns": 1000000000,
+          "epoch": "established",
+          "field": "rx",
+          "jitter_ms": 200,
+          "later": {
+            "frame": 0,
+            "record": 2
+          },
+          "no_rate": null,
+          "rate": 600.0,
+          "rate_unit": "By/s",
+          "time_basis": "scheduled",
+          "via": "in_band",
+          "why": null
+        },
+        {
+          "continuity": "same_epoch",
+          "earlier": {
+            "frame": 0,
+            "record": 2
+          },
+          "elapsed_ns": 1000000000,
+          "epoch": "established",
+          "field": "rx",
+          "jitter_ms": 100,
+          "later": {
+            "frame": 1,
+            "record": 0
+          },
+          "no_rate": null,
+          "rate": 500.0,
+          "rate_unit": "By/s",
+          "time_basis": "scheduled",
+          "via": "in_band",
+          "why": null
+        }
+      ],
+      "frames": [
+        {
+          "arrival_ns": 2000000000,
+          "hex": "00001c200028001f46000bb980041a00",
+          "run": "0001",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "rx": 1000
+                }
+              },
+              {
+                "absent": [],
+                "at": "scheduled",
+                "full": true,
+                "values": {
+                  "rx": 1500
+                }
+              },
+              {
+                "absent": [],
+                "at": "scheduled",
+                "full": true,
+                "values": {
+                  "rx": 2100
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 7200
+            }
+          }
+        },
+        {
+          "arrival_ns": 3000000000,
+          "hex": "00001c230008005140",
+          "run": "0001",
+          "seq": 3,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "rx": 2600
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 7203
+            }
+          }
+        }
+      ],
+      "layout": "bytes",
+      "note": "scenarios §1: three records 1 s apart, two scheduled, then the next frame: within a frame by offsets, across two by instants; the bound the scheduled records' jitter_ms summed"
+    },
+    {
+      "expect": [
+        {
+          "continuity": "same_epoch",
+          "earlier": {
+            "frame": 0,
+            "record": 0
+          },
+          "elapsed_ns": 1000000000,
+          "epoch": "established",
+          "field": "frames_total",
+          "jitter_ms": null,
+          "later": {
+            "frame": 1,
+            "record": 0
+          },
+          "no_rate": null,
+          "rate": 40.0,
+          "rate_unit": "1/s",
+          "time_basis": "measured",
+          "via": "in_band",
+          "why": null
+        },
+        {
+          "continuity": "reset",
+          "earlier": {
+            "frame": 1,
+            "record": 0
+          },
+          "elapsed_ns": null,
+          "epoch": "established",
+          "field": "frames_total",
+          "jitter_ms": null,
+          "later": {
+            "frame": 2,
+            "record": 0
+          },
+          "no_rate": "reset",
+          "rate": null,
+          "rate_unit": null,
+          "time_basis": null,
+          "via": "in_band",
+          "why": null
+        },
+        {
+          "continuity": "same_epoch",
+          "earlier": {
+            "frame": 2,
+            "record": 0
+          },
+          "elapsed_ns": 1000000000,
+          "epoch": "established",
+          "field": "frames_total",
+          "jitter_ms": null,
+          "later": {
+            "frame": 3,
+            "record": 0
+          },
+          "no_rate": null,
+          "rate": 6.0,
+          "rate_unit": "1/s",
+          "time_basis": "measured",
+          "via": "in_band",
+          "why": null
+        }
+      ],
+      "frames": [
+        {
+          "arrival_ns": 0,
+          "hex": "0000006400200000000000000c8f60",
+          "run": "0001",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 100,
+                  "temperature": "21.5"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 100
+            }
+          }
+        },
+        {
+          "arrival_ns": 1000000000,
+          "hex": "000000650020000000000000118f60",
+          "run": "0001",
+          "seq": 1,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 140,
+                  "temperature": "21.5"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 101
+            }
+          }
+        },
+        {
+          "arrival_ns": 10000000000,
+          "hex": "0000006e0020000000000000006f60",
+          "run": "0002",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 3,
+                  "temperature": "21.5"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 110
+            }
+          }
+        },
+        {
+          "arrival_ns": 11000000000,
+          "hex": "0000006f0020000000000000012f60",
+          "run": "0002",
+          "seq": 1,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 9,
+                  "temperature": "21.5"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 111
+            }
+          }
+        }
+      ],
+      "layout": "totals",
+      "note": "scenarios §2: a restart under a new run: a reset, established in band, no rate; same_epoch again after it"
+    },
+    {
+      "expect": [
+        {
+          "continuity": "same_epoch",
+          "earlier": {
+            "frame": 0,
+            "record": 0
+          },
+          "elapsed_ns": 1000000000,
+          "epoch": "established",
+          "field": "rx",
+          "jitter_ms": 100,
+          "later": {
+            "frame": 0,
+            "record": 1
+          },
+          "no_rate": null,
+          "rate": 316.0,
+          "rate_unit": "By/s",
+          "time_basis": "scheduled",
+          "via": "in_band",
+          "why": null
+        },
+        {
+          "continuity": "unobservable",
+          "earlier": {
+            "frame": 0,
+            "record": 1
+          },
+          "elapsed_ns": null,
+          "epoch": "established",
+          "field": "rx",
+          "jitter_ms": null,
+          "later": {
+            "frame": 0,
+            "record": 2
+          },
+          "no_rate": "wrap_or_decrease",
+          "rate": null,
+          "rate_unit": null,
+          "time_basis": null,
+          "via": "in_band",
+          "why": "wrap_or_decrease"
+        }
+      ],
+      "frames": [
+        {
+          "arrival_ns": 2000000000,
+          "hex": "00001c20002ffff9460000c9c4aa5200",
+          "run": "0001",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "rx": 16777000
+                }
+              },
+              {
+                "absent": [],
+                "at": "scheduled",
+                "full": true,
+                "values": {
+                  "rx": 100
+                }
+              },
+              {
+                "absent": [],
+                "at": "scheduled",
+                "full": true,
+                "values": {
+                  "rx": 9000100
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 7200
+            }
+          }
+        }
+      ],
+      "layout": "bytes",
+      "note": "scenarios §3: a 24-bit counter: an increase across the wrap is 316, in the window; a step of 9,000,000 is past 2^23, wrap_or_decrease, no rate"
+    },
+    {
+      "expect": [
+        {
+          "continuity": "same_epoch",
+          "earlier": {
+            "frame": 0,
+            "record": 0
+          },
+          "elapsed_ns": 1000000000,
+          "epoch": "established",
+          "field": "rx",
+          "jitter_ms": 100,
+          "later": {
+            "frame": 0,
+            "record": 1
+          },
+          "no_rate": null,
+          "rate": 8388607.0,
+          "rate_unit": "By/s",
+          "time_basis": "scheduled",
+          "via": "in_band",
+          "why": null
+        },
+        {
+          "continuity": "unobservable",
+          "earlier": {
+            "frame": 0,
+            "record": 1
+          },
+          "elapsed_ns": null,
+          "epoch": "established",
+          "field": "rx",
+          "jitter_ms": null,
+          "later": {
+            "frame": 0,
+            "record": 2
+          },
+          "no_rate": "wrap_or_decrease",
+          "rate": null,
+          "rate_unit": null,
+          "time_basis": null,
+          "via": "in_band",
+          "why": "wrap_or_decrease"
+        }
+      ],
+      "frames": [
+        {
+          "arrival_ns": 2000000000,
+          "hex": "00001c200028000006ffffffffffff80",
+          "run": "0001",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "rx": 0
+                }
+              },
+              {
+                "absent": [],
+                "at": "scheduled",
+                "full": true,
+                "values": {
+                  "rx": 8388607
+                }
+              },
+              {
+                "absent": [],
+                "at": "scheduled",
+                "full": true,
+                "values": {
+                  "rx": 16777215
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 7200
+            }
+          }
+        }
+      ],
+      "layout": "bytes",
+      "note": "the window's edge: d = 2^23 - 1 is an increase, d = 2^23 is wrap_or_decrease"
+    },
+    {
+      "expect": [
+        {
+          "continuity": "same_epoch",
+          "earlier": {
+            "frame": 0,
+            "record": 0
+          },
+          "elapsed_ns": 4000000000,
+          "epoch": "established",
+          "field": "frames_total",
+          "jitter_ms": null,
+          "later": {
+            "frame": 3,
+            "record": 0
+          },
+          "no_rate": null,
+          "rate": 2.0,
+          "rate_unit": "1/s",
+          "time_basis": "measured",
+          "via": "in_band",
+          "why": null
+        }
+      ],
+      "frames": [
+        {
+          "arrival_ns": 0,
+          "hex": "000000640020000000000000014f00",
+          "run": "0001",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 10,
+                  "temperature": "20"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 100
+            }
+          }
+        },
+        {
+          "arrival_ns": 1000000000,
+          "hex": "00000065000bc8",
+          "run": "0001",
+          "seq": 1,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": false,
+                "values": {
+                  "temperature": "20.5"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 101
+            }
+          }
+        },
+        {
+          "arrival_ns": 3000000000,
+          "hex": "00000067000bd0",
+          "run": "0001",
+          "seq": 3,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": false,
+                "values": {
+                  "temperature": "21"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 103
+            }
+          }
+        },
+        {
+          "arrival_ns": 4000000000,
+          "hex": "000000680020000000000000024f40",
+          "run": "0001",
+          "seq": 4,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 18,
+                  "temperature": "21"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 104
+            }
+          }
+        }
+      ],
+      "layout": "totals",
+      "note": "scenarios §4: a lost frame between two samples: the pair spans it, exact, the epoch kept; 8 over 4 s"
+    },
+    {
+      "expect": [
+        {
+          "continuity": "decreased",
+          "earlier": {
+            "frame": 0,
+            "record": 0
+          },
+          "elapsed_ns": null,
+          "epoch": "established",
+          "field": "frames_total",
+          "jitter_ms": null,
+          "later": {
+            "frame": 1,
+            "record": 0
+          },
+          "no_rate": "decreased",
+          "rate": null,
+          "rate_unit": null,
+          "time_basis": null,
+          "via": "in_band",
+          "why": null
+        }
+      ],
+      "frames": [
+        {
+          "arrival_ns": 0,
+          "hex": "0000006400200000000000003e8f60",
+          "run": "0001",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 500,
+                  "temperature": "21.5"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 100
+            }
+          }
+        },
+        {
+          "arrival_ns": 1000000000,
+          "hex": "0000006500200000000000003c0f60",
+          "run": "0001",
+          "seq": 1,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 480,
+                  "temperature": "21.5"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 101
+            }
+          }
+        }
+      ],
+      "layout": "totals",
+      "note": "scenarios §5: a 64-bit counter's decrease within one run: decreased, established in band, with no presence"
+    },
+    {
+      "expect": [
+        {
+          "continuity": "same_epoch",
+          "earlier": {
+            "frame": 0,
+            "record": 0
+          },
+          "elapsed_ns": 1000000000,
+          "epoch": "established",
+          "field": "frames_total",
+          "jitter_ms": null,
+          "later": {
+            "frame": 1,
+            "record": 0
+          },
+          "no_rate": null,
+          "rate": 10.0,
+          "rate_unit": "1/s",
+          "time_basis": "measured",
+          "via": "in_band",
+          "why": null
+        },
+        {
+          "continuity": "reset",
+          "earlier": {
+            "frame": 1,
+            "record": 0
+          },
+          "elapsed_ns": null,
+          "epoch": "established",
+          "field": "frames_total",
+          "jitter_ms": null,
+          "later": {
+            "frame": 2,
+            "record": 0
+          },
+          "no_rate": "reset",
+          "rate": null,
+          "rate_unit": null,
+          "time_basis": null,
+          "via": "in_band",
+          "why": null
+        }
+      ],
+      "frames": [
+        {
+          "arrival_ns": 0,
+          "hex": "0000006400200000000000007d0f60",
+          "run": "0001",
+          "seq": 10,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 1000,
+                  "temperature": "21.5"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 100
+            }
+          }
+        },
+        {
+          "arrival_ns": 1000000000,
+          "hex": "0000006500200000000000007e4f60",
+          "run": "0001",
+          "seq": 11,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 1010,
+                  "temperature": "21.5"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 101
+            }
+          }
+        },
+        {
+          "arrival_ns": 100000000000,
+          "hex": "000000c80020000000000000008f60",
+          "run": "0001",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 4,
+                  "temperature": "21.5"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 200
+            }
+          }
+        }
+      ],
+      "layout": "totals",
+      "note": "scenarios §6: a rewind under a reused run: a reset, established in band, never decreased"
+    },
+    {
+      "expect": [
+        {
+          "continuity": "decreased",
+          "earlier": {
+            "frame": 0,
+            "record": 0
+          },
+          "elapsed_ns": null,
+          "epoch": "established",
+          "field": "frames_total",
+          "jitter_ms": null,
+          "later": {
+            "frame": 1,
+            "record": 0
+          },
+          "no_rate": "decreased",
+          "rate": null,
+          "rate_unit": null,
+          "time_basis": null,
+          "via": "in_band",
+          "why": null
+        }
+      ],
+      "frames": [
+        {
+          "arrival_ns": 0,
+          "hex": "00000064003ffffffffffffffeaf60",
+          "run": "0001",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 18446744073709551605,
+                  "temperature": "21.5"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 100
+            }
+          }
+        },
+        {
+          "arrival_ns": 1000000000,
+          "hex": "00000065002000000000000000af60",
+          "run": "0001",
+          "seq": 1,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 5,
+                  "temperature": "21.5"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 101
+            }
+          }
+        }
+      ],
+      "layout": "totals",
+      "note": "a 64-bit counter has no window: 2^64 - 11 then 5 within one run is decreased, never a wrap"
+    },
+    {
+      "expect": [
+        {
+          "continuity": "same_epoch",
+          "earlier": {
+            "frame": 0,
+            "record": 0
+          },
+          "elapsed_ns": 1500000000,
+          "epoch": "established",
+          "field": "frames_total",
+          "jitter_ms": null,
+          "later": {
+            "frame": 1,
+            "record": 0
+          },
+          "no_rate": null,
+          "rate": 20.0,
+          "rate_unit": "1/s",
+          "time_basis": "arrival",
+          "via": "in_band",
+          "why": null
+        }
+      ],
+      "frames": [
+        {
+          "arrival_ns": 0,
+          "hex": "ffffffffffe00000000000000c8f60",
+          "run": "0001",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 100,
+                  "temperature": "21.5"
+                }
+              }
+            ],
+            "time": null
+          }
+        },
+        {
+          "arrival_ns": 1500000000,
+          "hex": "ffffffffffe0000000000000104f60",
+          "run": "0001",
+          "seq": 1,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 130,
+                  "temperature": "21.5"
+                }
+              }
+            ],
+            "time": null
+          }
+        }
+      ],
+      "layout": "totals",
+      "note": "two frames whose time is unknown: timed by their arrivals, the basis arrival"
+    },
+    {
+      "expect": [
+        {
+          "continuity": "same_epoch",
+          "earlier": {
+            "frame": 0,
+            "record": 0
+          },
+          "elapsed_ns": 1000000000,
+          "epoch": "established",
+          "field": "frames_total",
+          "jitter_ms": null,
+          "later": {
+            "frame": 1,
+            "record": 0
+          },
+          "no_rate": null,
+          "rate": 10.0,
+          "rate_unit": "1/s",
+          "time_basis": "arrival",
+          "via": "in_band",
+          "why": null
+        }
+      ],
+      "frames": [
+        {
+          "arrival_ns": 0,
+          "hex": "0000006400200000000000000c8f60",
+          "run": "0001",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 100,
+                  "temperature": "21.5"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 100
+            }
+          }
+        },
+        {
+          "arrival_ns": 1000000000,
+          "hex": "ffffffffffe00000000000000dcf60",
+          "run": "0001",
+          "seq": 1,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 110,
+                  "temperature": "21.5"
+                }
+              }
+            ],
+            "time": null
+          }
+        }
+      ],
+      "layout": "totals",
+      "note": "one known instant and one unknown: arrival"
+    },
+    {
+      "expect": [
+        {
+          "continuity": "same_epoch",
+          "earlier": {
+            "frame": 0,
+            "record": 0
+          },
+          "elapsed_ns": 1000000000,
+          "epoch": "established",
+          "field": "rx",
+          "jitter_ms": 100,
+          "later": {
+            "frame": 0,
+            "record": 1
+          },
+          "no_rate": null,
+          "rate": 500.0,
+          "rate_unit": "By/s",
+          "time_basis": "scheduled",
+          "via": "in_band",
+          "why": null
+        },
+        {
+          "continuity": "same_epoch",
+          "earlier": {
+            "frame": 0,
+            "record": 1
+          },
+          "elapsed_ns": 1300000000,
+          "epoch": "established",
+          "field": "rx",
+          "jitter_ms": 100,
+          "later": {
+            "frame": 0,
+            "record": 2
+          },
+          "no_rate": null,
+          "rate": 692.3076923076923,
+          "rate_unit": "By/s",
+          "time_basis": "scheduled",
+          "via": "in_band",
+          "why": null
+        }
+      ],
+      "frames": [
+        {
+          "arrival_ns": 3000000000,
+          "hex": "ffffffffffe8001f46000bb947e0004b00",
+          "run": "0001",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "rx": 1000
+                }
+              },
+              {
+                "absent": [],
+                "at": "scheduled",
+                "full": true,
+                "values": {
+                  "rx": 1500
+                }
+              },
+              {
+                "absent": [],
+                "at": 2300,
+                "full": true,
+                "values": {
+                  "rx": 2400
+                }
+              }
+            ],
+            "time": null
+          }
+        }
+      ],
+      "layout": "bytes",
+      "note": "one frame whose time is unknown: its records timed by their offsets, a measured offset beside a scheduled one"
+    },
+    {
+      "expect": [
+        {
+          "continuity": "same_epoch",
+          "earlier": {
+            "frame": 0,
+            "record": 0
+          },
+          "elapsed_ns": null,
+          "epoch": "established",
+          "field": "frames_total",
+          "jitter_ms": null,
+          "later": {
+            "frame": 1,
+            "record": 0
+          },
+          "no_rate": "elapsed",
+          "rate": null,
+          "rate_unit": null,
+          "time_basis": null,
+          "via": "in_band",
+          "why": null
+        }
+      ],
+      "frames": [
+        {
+          "arrival_ns": 0,
+          "hex": "000000647d200000000000000c8f60",
+          "run": "0001",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 100,
+                  "temperature": "21.5"
+                }
+              }
+            ],
+            "time": {
+              "ms": 500,
+              "s": 100
+            }
+          }
+        },
+        {
+          "arrival_ns": 1000000000,
+          "hex": "000000647d200000000000000dcf60",
+          "run": "0001",
+          "seq": 1,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 110,
+                  "temperature": "21.5"
+                }
+              }
+            ],
+            "time": {
+              "ms": 500,
+              "s": 100
+            }
+          }
+        }
+      ],
+      "layout": "totals",
+      "note": "two instants equal: no rate (elapsed)"
+    }
+  ],
+  "description": "telemetry.v2 §2.19 to §2.21: one key's frames, read in the order they arrive by one reader that held nothing before the first, each with its arrival on the reader's monotonic clock (`arrival_ns`) → every pair its counter series form, in order. `schema`, `resources` and `layouts` are as readings.json writes them, and each frame as there, without `expect`. A pair is two consecutive samples of one counter series (readings.json's `sample`), whatever was omitted, unknown or lost between them; a gauge, a boolean or a text forms none. Its epoch is the run: the two are of one epoch when no frame from the earlier to the later was read as the reader's first, as another run's or as a rewind (core's frame/apply.json `follows`), and of two otherwise, established in band either way. Each pair: `field`; `earlier` and `later`, each {frame, record}, the frame's index in the case and the record's in its frame; `continuity`, `epoch` and `via` as telemetry.v1's continuity.json spells them; `why` (`incomparable` or `wrap_or_decrease`, for unobservable only); a counter of width w below 64 read in its serial window (d = (later - earlier) mod 2^w: below 2^(w-1) an increase of d, else unobservable, wrap_or_decrease), at 64 as telemetry.v1 reads it. `rate` (telemetry.v1 §2.11's formula over d and the elapsed time), `rate_unit`, `elapsed_ns`, `time_basis` and `jitter_ms`, or `no_rate` (`reset`, `decreased`, `elapsed`, `wrap_or_decrease`). The elapsed time is, first that applies: in one frame, the later record's after_ms less the earlier's (frame/apply.json's after_ms, 0 for record 0); in two frames with both instants known (`at`), the later less the earlier; else the later frame's arrival less the earlier's. Its `time_basis` is `scheduled` when either record is scheduled, with `jitter_ms` the scheduled records' jitter_ms summed, else `measured`, and `arrival` for the last base. Elapsed milliseconds are times 10^6 nanoseconds.",
+  "layouts": [
+    {
+      "frame": {
+        "records": 1
+      },
+      "name": "link",
+      "record": "Link",
+      "series": {
+        "dropped": "sdu/dropped_total",
+        "duty_available": {
+          "kind": "gauge",
+          "unit": "1"
+        },
+        "duty_wait_ms": {
+          "kind": "gauge",
+          "unit": "ms"
+        },
+        "queue_depth": {
+          "kind": "gauge",
+          "unit": "1"
+        }
+      }
+    },
+    {
+      "frame": {
+        "keyframe_every": 4,
+        "records": 1
+      },
+      "name": "totals",
+      "record": "Totals",
+      "series": {
+        "frames_total": {
+          "kind": "counter",
+          "unit": "1"
+        },
+        "temperature": {
+          "kind": "gauge",
+          "semantic": "temperature",
+          "unit": "Cel"
+        }
+      }
+    },
+    {
+      "frame": {
+        "jitter_ms": 100,
+        "records": 3,
+        "step_ms": 1000
+      },
+      "name": "bytes",
+      "record": "Bytes",
+      "series": {
+        "rx": {
+          "kind": "counter",
+          "unit": "By"
+        }
+      }
+    }
+  ],
+  "resources": [
+    {
+      "annotations": {
+        "telemetry.kind": "counter",
+        "telemetry.unit": "1"
+      },
+      "attachment": null,
+      "frame": false,
+      "kind": "stream",
+      "template": "sdu/dropped_total",
+      "type": {
+        "kind": "jsonschema",
+        "name": "Count",
+        "root": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+      }
+    }
+  ],
+  "schema": {
+    "description": "telemetry.v2's frames: modem.v3's link readings, a 64-bit total beside a temperature, a 24-bit byte counter, and a record of every carrier",
+    "types": {
+      "Bytes": {
+        "fields": [
+          {
+            "name": "rx",
+            "type": "counter",
+            "width": 24
+          }
+        ]
+      },
+      "Link": {
+        "fields": [
+          {
+            "name": "dropped",
+            "optional": true,
+            "type": "counter",
+            "width": 32
+          },
+          {
+            "maximum": 1022,
+            "minimum": 0,
+            "name": "queue_depth",
+            "optional": true,
+            "reserved": [
+              "out_of_range"
+            ],
+            "type": "int"
+          },
+          {
+            "maximum": 1,
+            "minimum": 0,
+            "name": "duty_available",
+            "optional": true,
+            "type": "int"
+          },
+          {
+            "maximum": "3600000",
+            "minimum": "0",
+            "name": "duty_wait_ms",
+            "optional": true,
+            "reserved": [
+              "out_of_range"
+            ],
+            "resolution": "100",
+            "type": "fixed"
+          }
+        ]
+      },
+      "Mixed": {
+        "fields": [
+          {
+            "name": "count",
+            "type": "counter",
+            "width": 16
+          },
+          {
+            "maximum": -20,
+            "minimum": -140,
+            "name": "level",
+            "reserved": [
+              "not_available"
+            ],
+            "type": "int"
+          },
+          {
+            "maximum": "1",
+            "minimum": "0",
+            "name": "ratio",
+            "resolution": "0.01",
+            "type": "fixed"
+          },
+          {
+            "name": "up",
+            "type": "bool"
+          },
+          {
+            "escape": true,
+            "name": "mode",
+            "type": "enum",
+            "values": [
+              "idle",
+              "rx",
+              "tx"
+            ]
+          },
+          {
+            "ms": true,
+            "name": "at",
+            "type": "time"
+          }
+        ]
+      },
+      "Totals": {
+        "fields": [
+          {
+            "name": "frames_total",
+            "type": "counter",
+            "width": 64
+          },
+          {
+            "maximum": "85",
+            "minimum": "-40",
+            "name": "temperature",
+            "reserved": [
+              "not_available",
+              "error"
+            ],
+            "resolution": "0.5",
+            "type": "fixed"
+          }
+        ]
+      }
+    }
+  }
+}

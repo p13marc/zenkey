@@ -296,7 +296,8 @@ struct Ctx<'a> {
     schemas: SchemaSet,
     defaults: DefaultsSection,
     base: DefaultsBlock,
-    profiles: BTreeSet<String>,
+    /// Each profile `uses` lists, by name, and its major.
+    profiles: BTreeMap<String, u32>,
     minor: Option<u32>,
 }
 
@@ -361,7 +362,10 @@ fn resolve(
             ),
         ));
     }
-    let profiles = uses.iter().map(|p| p.name().to_owned()).collect();
+    let profiles = uses
+        .iter()
+        .map(|p| (p.name().to_owned(), p.major()))
+        .collect();
     let schemas = SchemaSet::load(dir, &file.schemas, report);
     let defaults = file.defaults.clone().unwrap_or_default();
     let mut cx = Ctx {
@@ -590,7 +594,8 @@ fn check_history(h: Option<&a::History>, at: &str, report: &mut Report) {
 /// (`redundancy::VOCABULARY`, core 0.39), `timing.v1` the interim row's
 /// three keys (`timing::VOCABULARY`, core 0.53), and `arbitration.v1` the
 /// interim row's `policy`, read on a requirement (`arbitration::VOCABULARY`,
-/// core 0.54).
+/// core 0.54). A later major's own is [`vocabulary`]'s: `telemetry.v2`
+/// adds `series` (`telemetry::VOCABULARY_V2`, #983 T1).
 const VOCABULARIES: &[(&str, &[&str])] = &[
     (crate::freshness::NAME, crate::freshness::VOCABULARY),
     (crate::timing::NAME, crate::timing::VOCABULARY),
@@ -613,10 +618,22 @@ const VOCABULARIES: &[(&str, &[&str])] = &[
     (crate::redundancy::NAME, crate::redundancy::VOCABULARY),
 ];
 
+/// The vocabulary W105 reads for the profile `name` at `major`: a later
+/// major's where it publishes its own, else [`VOCABULARIES`]' row.
+fn vocabulary(name: &str, major: u32) -> Option<&'static [&'static str]> {
+    if name == crate::telemetry::NAME && major == 2 {
+        return Some(crate::telemetry::VOCABULARY_V2);
+    }
+    VOCABULARIES
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, keys)| *keys)
+}
+
 fn check_annotations(
     map: &BTreeMap<String, Value>,
     at: &str,
-    profiles: &BTreeSet<String>,
+    profiles: &BTreeMap<String, u32>,
     report: &mut Report,
 ) {
     for (k, v) in map {
@@ -641,13 +658,13 @@ fn check_annotations(
                 at,
                 format!("annotation {k:?} is not <profile>.<key>"),
             ));
-        } else if !profiles.contains(p) {
+        } else if !profiles.contains_key(p) {
             report.push(Diagnostic::error(
                 "E020",
                 at,
                 format!("annotation {k:?}: profile {p:?} is not listed in `uses`"),
             ));
-        } else if let Some((_, keys)) = VOCABULARIES.iter().find(|(n, _)| *n == p)
+        } else if let Some(keys) = vocabulary(p, profiles[p])
             && !keys.contains(&key)
         {
             report.push(Diagnostic::warning(
@@ -1527,6 +1544,21 @@ mod tests {
     }
 
     const HEAD: &str = "[interface]\nname = \"t\"\nmajor = 1\nminor = 0\n";
+
+    /// W105 reads the vocabulary of the major a contract uses:
+    /// `telemetry.v2` adds `series` to `telemetry.v1`'s four keys (#983 T1).
+    #[test]
+    fn a_later_major_reads_its_own_vocabulary() {
+        let src = |major: u32| {
+            format!(
+                "[interface]\nname = \"t\"\nmajor = 1\nminor = 0\nuses = [\"telemetry.v{major}\"]\n\
+                 [resources.\"a\"]\nkind = \"stream\"\ntype = {{ raw = \"image/jpeg\" }}\n\
+                 annotations = {{ \"telemetry.series\" = {{ n = {{ kind = \"counter\" }} }} }}\n"
+            )
+        };
+        assert_eq!(codes(&src(1)), ["W105"]);
+        assert!(codes(&src(2)).is_empty(), "{:?}", codes(&src(2)));
+    }
 
     #[test]
     fn rates_and_durations() {

@@ -219,6 +219,11 @@
     "over": 2,
     "tags": 0
   },
+  "spec/profiles/telemetry/scenarios-v2.md": {
+    "mean": 12.24,
+    "over": 0,
+    "tags": 0
+  },
   "spec/profiles/telemetry/scenarios.md": {
     "mean": 13.6,
     "over": 0,
@@ -226,6 +231,11 @@
   },
   "spec/profiles/telemetry/v1.md": {
     "mean": 16.88,
+    "over": 0,
+    "tags": 0
+  },
+  "spec/profiles/telemetry/v2.md": {
+    "mean": 13.22,
     "over": 0,
     "tags": 0
   },
