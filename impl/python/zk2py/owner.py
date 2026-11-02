@@ -185,8 +185,9 @@ class BudgetExceeded(RuntimeError):
 
 
 class ClockAhead(RuntimeError):
-    """Core §4.3 "Ahead": a detection shows the owner's clock beyond its
-    router's delta, so it "MUST stop writing state, re-puts included"."""
+    """Core §4.3 "Ahead" (0.88): a detection shows the owner's clock beyond
+    its router's delta, so it "MUST stop the state writes that carry a Zenoh
+    timestamp, re-puts included". A write that carries none goes on."""
 
 
 def free_loopback_port() -> int:
@@ -476,9 +477,13 @@ class Owner:
         - ``heartbeat``: a router-stamped key the owner subscribes to as its
           clock reference (core §4.3 "Ahead"), with ``delta_s`` the
           router's HLC delta. While its clock reads beyond the delta ahead
-          of a heartbeat's stamp, it writes no state: :meth:`set_state`
-          raises :class:`ClockAhead`, and no re-put is made
-          (freshness.v1 §2.10).
+          of a heartbeat's stamp, it writes no state that carries a Zenoh
+          timestamp (core §4.3, 0.88): :meth:`set_state` and
+          :meth:`delete_state` raise :class:`ClockAhead` for a key on §4.3's
+          table, or for any key on a session that stamps, and no re-put is
+          made (freshness.v1 §2.10). Every other state write goes on, and a
+          ``freshness.v2`` heartbeat goes on vouching, its time all ones
+          (freshness.v2 §2.10, 0.4).
 
         - ``cardinality``: per interface, ``<kind token>/<template>`` -> the
           bound this instance states in its descriptor (§3.3), lowering the
@@ -609,7 +614,8 @@ class Owner:
         #: every re-put made, (key, stamp)
         self.reputs: list[tuple[str, zenoh.Timestamp]] = []
         self.heartbeat, self.delta_ns = heartbeat, int(delta_s * 1e9)
-        #: core §4.3 "Ahead": the guard holds every state write
+        #: core §4.3 "Ahead" (0.88): the guard holds the state writes that
+        #: carry a Zenoh timestamp (:meth:`_stamped`)
         self.ahead = False
         #: what the owner reports: the guard's transitions (core §4.3: it
         #: "SHOULD report it")
@@ -962,6 +968,13 @@ class Owner:
         if rec is None:
             raise OwnerRefused(f"{key}: its type is not packed")
         return rec.write(value, self.writing_epoch())
+
+    def _stamped(self, key: str) -> bool:
+        """Whether a state write of ``key`` carries a Zenoh timestamp (core
+        §4.3 "What it holds", 0.88): "where the table lists its resource",
+        and "On a session with timestamping enabled (§8.2), every state
+        write carries one"."""
+        return self.hlc or self._table(key)
 
     def _table(self, key: str) -> bool:
         """Whether ``key``'s resource carries a Zenoh timestamp the owner
@@ -1532,9 +1545,10 @@ class Owner:
         after :meth:`close_writer` is a new writer's."""
         with self._writes:
             self._refuse_standby_write(key)
-            if self.ahead:
-                raise ClockAhead(f"{key}: the clock guard holds state writes (core §4.3)")
             self._member_publisher(key)
+            if self.ahead and self._stamped(key):
+                raise ClockAhead(f"{key}: the clock guard holds the state writes that carry a Zenoh timestamp "
+                                 "(core §4.3)")
             held = self._held.get(key)
             if key in self._member_of and (held is None or held.payload is None):
                 # §2.7: a new live member. A key with a value is live.
@@ -1573,9 +1587,10 @@ class Owner:
         (desired.v1 §2.11, 0.3, "not a window more")."""
         with self._writes:
             self._refuse_standby_write(key)
-            if self.ahead:
-                raise ClockAhead(f"{key}: the clock guard holds state writes (core §4.3)")
             self._member_publisher(key)
+            if self.ahead and self._stamped(key):
+                raise ClockAhead(f"{key}: the clock guard holds the state writes that carry a Zenoh timestamp "
+                                 "(core §4.3)")
             # S1 (0.73): a delete's in-band stamp is its attachment.
             stamp = self.mint() if self._table(key) else None
             ib, att = None, None
@@ -1804,7 +1819,7 @@ class Owner:
         with self._writes:
             if off > self.delta_ns and not self.ahead:
                 self.ahead = changed = True
-                self.events.append(f"ahead by {off / 1e9:.3f} s, beyond the delta: state writes held (core §4.3)")
+                self.events.append(f"ahead by {off / 1e9:.3f} s, beyond the delta: the state writes that carry a Zenoh timestamp held (core §4.3)")
             elif off <= self.delta_ns and self.ahead:
                 self.ahead, changed = False, False
                 self.events.append(f"within the delta again ({off / 1e9:.3f} s): state writes released")
@@ -1848,8 +1863,9 @@ class Owner:
     def heartbeat_body(self, iface: str, now: zenoh.Timestamp | None) -> dict[str, Any]:
         """The value of ``iface``'s next body (§2.4): each exposed
         collection's map bit, its digest over the members held live, a bit
-        for each it vouches for; under the clock guard (§2.10) none vouched
-        and the time unknown."""
+        for each it vouches for; under the clock guard (§2.10, 0.4) the bits
+        as at any other time, and the time unknown: "An owner MUST write all
+        ones as its heartbeat's time while its guard holds"."""
         lo = self.hb_layouts[iface]
         exposed = {f"{r['token']}/{r['template']}" for r, status in self._plan_made.get(iface, [])
                    if status == "exposed"}
@@ -1858,7 +1874,7 @@ class Owner:
                    for k, h in self._held.items() if k.startswith(prefix) and h.payload is not None}
         known = None if now is None or self.ahead else hbeat.time_of(
             now.get_time_as_ntp64().as_nanos(), self.writing_epoch())
-        return freshness_v2.owner_body(lo, exposed, members, known, vouch=known is not None)
+        return freshness_v2.owner_body(lo, exposed, members, known)
 
     def _put_heartbeat(self, iface: str) -> None:
         """One heartbeat covering ``iface``: a put on its heartbeat key (§3),
@@ -1879,8 +1895,11 @@ class Owner:
             self._publishers[key].put(zk2c.heartbeat(ib, hbeat.write(lo, value), lo.tag),
                                       encoding=zk2c.ENCODING)
             self.heartbeats_sent.append((iface, ib, value))
-            if value["time"] is None:
-                return
+            # core §4.3 "Minting" (0.88): "The heartbeat still mints that
+            # timestamp" while the guard holds, so each member it vouches
+            # for is confirmed at it, from the clock ahead (freshness.v2
+            # §2.10: "Its replies carry a last confirmation minted from the
+            # clock ahead").
             prefix = f"zk2/{self.system}/{self.service}/{iface}/"
             for k, h in self._held.items():
                 if k.startswith(prefix) and h.payload is not None and k not in self.unvouched \
@@ -1913,7 +1932,8 @@ class Owner:
         since its last put, less a margin for the scheduler (a fifth of
         ttl/2, at most 200 ms), so that two puts are never more than ttl/2
         apart. A deleted member, one whose writer closed, and every member
-        while the clock guard holds, are not re-put (§2.10). When the guard
+        whose re-put carries a Zenoh timestamp while the clock guard holds,
+        are not re-put (§2.10; core §4.3, 0.88). When the guard
         releases, the members whose interval ran out are re-put at the next
         tick."""
         def horizons() -> list[tuple[str, freshness.Horizon]]:
@@ -1932,7 +1952,7 @@ class Owner:
                 with self._writes:
                     held = self._held.get(key)
                     if self._stop.is_set() or self.session is None or held is None or held.payload is None \
-                            or key in self.closed_writers or self.ahead:
+                            or key in self.closed_writers or (self.ahead and self._stamped(key)):
                         continue
                     if (time.monotonic() - held.at) * 1e9 < due:
                         continue

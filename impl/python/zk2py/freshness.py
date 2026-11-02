@@ -481,7 +481,8 @@ class Subscriber:
                      for s in ([selectors] if isinstance(selectors, str) else selectors)]
         #: freshness.v2 (round 97): per followed owner and interface, its
         #: view (:class:`zk2py.freshness_v2.View`), and every heartbeat read,
-        #: (arrival, the view's answer)
+        #: (arrival, the view's answer, with the body's ``time`` where it was
+        #: read: health.v1 0.9's clock question)
         self.views: dict[tuple[str, str], Any] = {}
         self.beats: dict[tuple[str, str], list[tuple[int, dict[str, Any]]]] = {}
 
@@ -529,6 +530,13 @@ class Subscriber:
             if env is not None:
                 answer = {"refused": "form"} if env.form != "heartbeat" else \
                     view.heartbeat(env.tag, env.stamp, env.record or b"", arrival)
+                if "read" in answer:
+                    # health.v1 §2.5 (0.9): the clock question reads "the
+                    # time of each heartbeat", all ones while the guard
+                    # holds (freshness.v2 §2.10, 0.4)
+                    from . import heartbeat
+
+                    answer = {**answer, "time": heartbeat.read(view.layout, env.record or b"")["time"]}
             self.beats[k].append((arrival, answer))
             for sec in answer.get("read", {}).get("sections", {}).values():
                 if not isinstance(sec, dict):

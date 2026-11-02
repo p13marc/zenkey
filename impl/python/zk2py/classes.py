@@ -202,8 +202,12 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "owner.Owner's heartbeat and clock guard (freshness_scenarios §2, health_scenarios §4)"),
     ("owner", "core §4.3", "The owner SHOULD detect drift against a reference", MET,
      "owner.Owner._beat, a router-stamped heartbeat key (freshness_scenarios §2)"),
-    ("owner", "core §4.3", "When a detection shows it beyond the delta", MET,
-     "owner.ClockAhead stops every state write, re-puts included, and Owner.events reports it (freshness_scenarios §2, health_scenarios §4)"),
+    # core 0.88 (#978 F6, round 98): the guard holds only the state writes that carry a Zenoh timestamp.
+    ("owner", "core §4.3", "When a detection shows it beyond the delta, the owner MUST stop the state writes that carry a Zenoh timestamp", MET,
+     "owner.Owner._stamped: ClockAhead refuses a put or a delete of a key on §4.3's table, or of any key on a session "
+     "that stamps, re-puts included, and every other state write goes on; Owner.events and health.v1's clock_ahead "
+     "report it (state_pairings §7 step 6, freshness_scenarios §2, freshness_v2_scenarios §2 step 4, "
+     "health_scenarios §4) (round 98, core 0.88)"),
     ("owner", "core §4.4", "An archive's backend MUST NOT accept a put", NA,
      "zk2py runs no archive"),
     ("owner", "core §4.4", "When an owner becomes reachable again, the archive", NA,

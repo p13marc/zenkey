@@ -3554,7 +3554,8 @@ def family_readings(root: Path) -> list[Result]:
         + _round88_readings(root) + _round89_readings(root) + _round90_readings(root) \
         + _round91_readings(root) + _round92_readings(root) + _mend93_readings(root) + _round93_readings(root) \
         + _mend_after_round93_readings(root) + _round94_readings(root) + _mend_after_round94_readings(root) \
-        + _round95_readings(root) + _round96_readings(root) + _round96_k1_readings(root) + _round97_readings(root)
+        + _round95_readings(root) + _round96_readings(root) + _round96_k1_readings(root) + _round97_readings(root) \
+        + _round98_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -3784,6 +3785,127 @@ annotations = { "timing.period_ms" = 60000, "freshness.ttl_s" = 100 }
     return out
 
 
+def _round98_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.88, freshness.v2 0.4, health.v1 0.9, alarms.v1 0.12 and
+    freshness.v1 experimental (#609, round 98; #978 F5 and F6): each text at
+    its version with its entry; the sentences zk2py now keeps; and what it
+    does, offline: :func:`zk2py.owner.keeps_timestamp` for what the guard
+    holds, :func:`zk2py.freshness_v2.owner_body` under the guard, and
+    :func:`zk2py.health.heard_from` over heartbeats read through
+    :meth:`zk2py.freshness.Subscriber.follow` on a fake session."""
+    import re
+
+    from . import freshness as fr, freshness_v2 as fv2, health as h, heartbeat, zk2c
+    from .contract import load_contract
+    from .owner import keeps_timestamp
+
+    spec = root.parent
+    repo = spec.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def kept(text: str, *quotes: str) -> list[str]:
+        return [f"still: {q}" for q in quotes if q in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, v2, he, al_ = flat("core.md"), flat("profiles/freshness/v2.md"), flat("profiles/health/v1.md"), \
+        flat("profiles/alarms/v1.md")
+    v1, idx, st = flat("profiles/freshness/v1.md"), flat("profiles/README.md"), flat("scenarios/state.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.88 or later, freshness.v2 0.4, health.v1 0.9 and alarms.v1 0.12, each with its entry, and "
+         "freshness.v1 experimental (#978 F5, F6)",
+         [core_v >= (0, 88)] + entry("CHANGELOG.md", "0.88", "Zenoh timestamp")
+         + entry("profiles/freshness/CHANGELOG.md", "`v2.md` 0.4", "clock ahead")
+         + entry("profiles/freshness/CHANGELOG.md", "`v1.md` experimental", "no user left")
+         + entry("profiles/health/CHANGELOG.md", "0.9", "clock ahead")
+         + entry("profiles/alarms/CHANGELOG.md", "0.12", "clock ahead")
+         + missing(v1, "| **Status** | experimental |")
+         + missing(idx, "| [`freshness.v1`](freshness/v1.md) | 0.5 | experimental | none |"),
+         [True]),
+    ]
+    # core §4.3 "Ahead" (0.88): what the guard holds is a write that carries a Zenoh timestamp.
+    ground = load_contract(repo / "impl" / "python" / "interop" / "state" / "zk2py_ground.v1.toml")
+    by = {r["template"]: r for r in ground.canonical["resources"]}
+    hc = load_contract(spec / "profiles" / "health" / "health.v1.toml")
+    hby = {r["template"]: r for r in hc.canonical["resources"]}
+    out.append(("core §4.3 \"Ahead\" (0.88): the guard holds the state writes that carry a Zenoh timestamp, and the "
+                "others go on; zk2py's reading: state.md §1's status (freshness.v1, ttl 60) is on the table, a plan "
+                "and health.v1 1.1's status (freshness.v2) are not",
+                missing(core, "When a detection shows it beyond the delta, the owner MUST stop the state writes that "
+                              "carry a Zenoh timestamp, re-puts included, and SHOULD report it.",
+                        "On a session with timestamping enabled (§8.2), every state write carries one.",
+                        "The owner's other state writes go on, and its events and streams.",
+                        "While the clock guard holds (\"Ahead\", below), the time is unknown.")
+                + kept(core, "the owner MUST stop writing state")
+                + missing(st, "`status`'s put and delete are refused: each would carry a Zenoh timestamp.")
+                + [keeps_timestamp(ground, by["status"]), keeps_timestamp(ground, by["plans/{vehicle}"]),
+                   keeps_timestamp(hc, hby["status"])],
+                [True, False, False]))
+    # freshness.v2 §2.10 (0.4): the bits as at any other time, the time all ones.
+    beacon = load_contract(repo / "impl" / "python" / "interop" / "freshness" / "beacon.v2.toml")
+    blo = heartbeat.layout_of(beacon.canonical, beacon.fingerprint)
+    sk = "zk2/lab/beacon/beacon.v2/state/status"
+    body = fv2.owner_body(blo, {"state/status"}, {sk: fv2.OwnerView(sk, zk2c.InBand(16, 1, 0))}, None)
+    out.append(("freshness.v2 §2.10 (0.4): while the guard holds, the heartbeats vouch as at any other time, their "
+                "time all ones; zk2py's owner body, the same",
+                missing(v2, "An owner MUST write all ones as its heartbeat's time while its guard holds.",
+                        "**When the guard releases,** the next heartbeat's time is known again.")
+                + kept(v2, "an owner MUST NOT vouch for any member")
+                + [body["time"], body["sections"]["state/status"]["vouched"],
+                   heartbeat.read(blo, heartbeat.write(blo, body))["time"]],
+                [None, True, None]))
+
+    # health.v1 §2.5 and §5 (0.9): the clock question over the heartbeats' time, through a subscriber.
+    class Fake:
+        def declare_subscriber(self, *a: Any, **k: Any) -> Any:
+            return None
+
+    class Smp:
+        def __init__(self, payload: bytes) -> None:
+            self.payload = type("P", (), {"to_bytes": lambda _s, b=payload: b})()
+
+    hlo = heartbeat.layout_of(hc.canonical, hc.fingerprint)
+    sub = fr.Subscriber(Fake(), "zk2/lab/svc/health.v1/**")
+    sub.follow("lab/svc", hc.canonical, hc.fingerprint)
+    empty = f"{heartbeat.digest([]):08x}"
+
+    def beat(seq: int, known: bool) -> None:
+        b = heartbeat.write(hlo, {"time": {"s": 100 + seq, "ms": 0} if known else None,
+                                  "sections": {"state/status": {"digest": empty, "vouched": False}}})
+        sub._beat(("lab/svc", "health.v1"), Smp(zk2c.heartbeat(zk2c.InBand(16, 1, seq), b, hlo.tag)))
+
+    beat(0, True)
+    first = h.heard_from(sub, "lab/svc")
+    beat(1, False)
+    held = h.heard_from(sub, "lab/svc")
+    beat(2, True)
+    out.append(("health.v1 §2.5 (0.9): the clock question reads the time of each heartbeat covering health.v1 read in "
+                "step, never the status; zk2py's subscriber: a heartbeat whose time is known, then all ones, then "
+                "known again",
+                missing(he, "§5's clock question reads the faults and the time of each heartbeat covering "
+                            "`health.v1`, never the status.",
+                        "While the guard holds, the owner SHOULD publish it again at least once per period of its "
+                        "heartbeat covering `health.v1` (`freshness.v2` §2.4), 30 s at most.")
+                + kept(he, "The status goes stale, by design.")
+                + missing(al_, "A clock ahead is no cause: the guard holds no alarm")
+                + [first, h.clock_question("present", {"lists": True}, first),
+                   held, h.clock_question("present", {"lists": True}, held),
+                   h.clock_question("present", {"lists": True}, h.heard_from(sub, "lab/svc")),
+                   h.HealthOwner.fault_period(type("O", (), {"fault_period_s": None,
+                                                              "owner": type("W", (), {"hb_layouts": {"health.v1": hlo}})()})())],
+                [["heartbeat"], ("no", "confirmed"), ["heartbeat", "heartbeat_held"], ("unobservable", "time_unknown"),
+                 ("no", "confirmed"), 28.5]))
+    return out
+
+
 def _round96_k1_readings(root: Path) -> list[tuple[str, Any, Any]]:
     """Core 0.83 (#609, round 96's extension; #981 K1) and the answers to
     F-451 to F-454 (core 0.85, ``timing.v1`` 0.10 and core 0.87; round 97):
@@ -3955,15 +4077,18 @@ def _round96_readings(root: Path) -> list[tuple[str, Any, Any]]:
          + [keeps_timestamp(beacon, next(r for r in beacon.canonical["resources"] if r["template"] == "status")),
             keeps_timestamp(old, next(r for r in old.canonical["resources"] if r["template"] == "status"))],
          [False, True]),
-        ("F-447 answered (freshness.v2 0.2): every vouched bit clear, the map, the live counts and the digests "
-         "kept; zk2py's reading, the same",
-         missing(v2, "Its heartbeats go on, every vouched bit clear, so its liveness still crosses. Each keeps its "
-                     "map, its live counts and its digests as the owner holds them.")
-         + kept(v2, "Its heartbeats go on, every bit clear, so its liveness still crosses.")
+        # F-447's answer (0.2) stood until freshness.v2 0.4 rewrote §2.10 (core 0.88, #978 F6, round 98): the
+        # heartbeats now vouch as at any other time, their time all ones while the guard holds.
+        ("F-447 answered (freshness.v2 0.2), and §2.10 rewritten by 0.4: the heartbeats go on vouching, the map, "
+         "the live counts and the digests as the owner holds them, the time unknown; zk2py's reading, the same",
+         missing(v2, "**The heartbeats go on,** as at any other time: each sets a member's bit while the owner "
+                     "vouches for it (§2.4).",
+                 "An owner MUST write all ones as its heartbeat's time while its guard holds.")
+         + kept(v2, "Its heartbeats go on, every vouched bit clear, so its liveness still crosses.")
          + [freshness_v2.owner_body(lo, {"state/status"}, {
              "zk2/lab/beacon/beacon.v2/state/status": freshness_v2.OwnerView(
-                 "zk2/lab/beacon/beacon.v2/state/status", zk2c.InBand(16, 1, 0))}, None, vouch=False)],
-         [{"time": None, "sections": {"state/status": {"digest": f"{heartbeat.digest([('zk2/lab/beacon/beacon.v2/state/status', 16, 1, 0)]):08x}", "vouched": False}}}]),
+                 "zk2/lab/beacon/beacon.v2/state/status", zk2c.InBand(16, 1, 0))}, None)],
+         [{"time": None, "sections": {"state/status": {"digest": f"{heartbeat.digest([('zk2/lab/beacon/beacon.v2/state/status', 16, 1, 0)]):08x}", "vouched": True}}}]),
     ]
     # F-448: only a read heartbeat counts (apply.json's new case).
     view = freshness_v2.View(lo, ["state/status"])
@@ -6012,8 +6137,9 @@ def _round89_readings(root: Path) -> list[tuple[str, Any, Any]]:
         ("The owner's descriptor MUST NOT raise it.", "contract's. It MUST NOT raise it."),
         ("**Size.** An owner's descriptor SHOULD stay within 1 KB.", "**Size.** A descriptor SHOULD"),
         ("- The owner SHOULD detect drift against a reference", "- It SHOULD detect drift"),
-        ("When a detection shows it beyond the delta, the owner MUST stop writing state",
-         "the delta, it MUST stop"),
+        # core 0.88 (round 98, #978 F6): the guard narrowed to the writes that carry a Zenoh timestamp
+        ("When a detection shows it beyond the delta, the owner MUST stop the state writes that carry a Zenoh "
+         "timestamp", "the delta, it MUST stop"),
         ("**An archive's backend MUST NOT accept a put older than a delete it holds.**", "**Its backend MUST NOT"),
         ("A request type SHOULD NOT repeat a template parameter (W102).", "repeat a template parameter. `"),
         ("**The `Encoding` of the owner's reply** MUST say which:", "**The reply's `Encoding`**"),
