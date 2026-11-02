@@ -371,7 +371,18 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   §2.12's `interval_over_horizon` reading a frame's interval;
   `plan.json`'s case loads `conformance/contracts/sampler.v1.toml`, a
   directory `zenkey-model/tests/profiles.rs`'s walker reads as it reads
-  `v2/`.
+  `v2/`. Core 0.88 (#978's F6) narrows §4.3's clock guard: the owner MUST
+  stop only the state writes that carry a Zenoh timestamp (the table's
+  rows, or every one on a stamping session); `scenarios/state.md` §7
+  step 6 has `status` refused and a plan go on. `freshness.v2` 0.4
+  §2.10: the heartbeats go on vouching, and MUST write all ones as their
+  time while the guard holds; a reply's stamp is from the clock ahead
+  (scenarios §2 step 4: S2 fresh, G `clock_disagrees`). `health.v1`
+  0.9: the status is not held, `clock_ahead` repeats at least once per
+  heartbeat period, and §5's clock question reads each in-step
+  heartbeat's time, never a put (`clock.json`'s `heartbeat`,
+  `heartbeat_held`, `status_put`, reason `time_unknown`, 29 cases).
+  `alarms.v1` 0.12 drops the clock as a stale alarm's cause. 227 rules.
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`

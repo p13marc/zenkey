@@ -11,7 +11,7 @@
       },
       "face": null,
       "heard": [],
-      "note": "nothing heard: the faults' silence is their normal state, and no confirmation was heard (§5)",
+      "note": "nothing heard: the faults' silence is their normal state, and no heartbeat was heard (§5)",
       "presence": "present"
     },
     {
@@ -25,9 +25,9 @@
       },
       "face": null,
       "heard": [
-        "status"
+        "heartbeat"
       ],
-      "note": "a confirmation, and no fault heard: its guard did not hold that write",
+      "note": "a heartbeat with its time known, and no fault heard: its guard did not hold then",
       "presence": "present"
     },
     {
@@ -57,10 +57,10 @@
       },
       "face": null,
       "heard": [
-        "status",
+        "heartbeat",
         "clock_ahead"
       ],
-      "note": "a confirmation, then a clock_ahead fault: none since",
+      "note": "a heartbeat with its time known, then a clock_ahead fault: none since",
       "presence": "present"
     },
     {
@@ -75,9 +75,9 @@
       "face": null,
       "heard": [
         "clock_ahead",
-        "status"
+        "heartbeat"
       ],
-      "note": "a clock_ahead fault, then a confirmation: the drift ended, the status re-put (§2.5)",
+      "note": "a clock_ahead fault, then a heartbeat with its time known: the drift ended (§2.5, freshness.v2 §2.10)",
       "presence": "present"
     },
     {
@@ -92,10 +92,10 @@
       "face": null,
       "heard": [
         "clock_ahead",
-        "status",
+        "heartbeat",
         "clock_ahead"
       ],
-      "note": "a fault, a confirmation, a fault again: the last fault has no confirmation after it",
+      "note": "a fault, a heartbeat with its time known, a fault again: the last fault has none after it",
       "presence": "present"
     },
     {
@@ -109,11 +109,11 @@
       },
       "face": null,
       "heard": [
-        "status",
+        "heartbeat",
         "clock_ahead",
         "clock_ahead"
       ],
-      "note": "a fault published again every status interval while the guard holds (§2.5)",
+      "note": "a fault published again every heartbeat period while the guard holds (§2.5)",
       "presence": "present"
     },
     {
@@ -130,7 +130,7 @@
         "clock_ahead",
         "status_deleted"
       ],
-      "note": "a delete of the status after the fault is no confirmation (§2.3)",
+      "note": "a delete of the status after the fault says nothing of the clock (§2.3)",
       "presence": "present"
     },
     {
@@ -146,7 +146,7 @@
       "heard": [
         "status_deleted"
       ],
-      "note": "a delete of the status alone confirms nothing",
+      "note": "a delete of the status alone says nothing of the clock",
       "presence": "present"
     },
     {
@@ -177,9 +177,9 @@
       "face": null,
       "heard": [
         "fault",
-        "status"
+        "heartbeat"
       ],
-      "note": "another code, then a confirmation",
+      "note": "another code, then a heartbeat with its time known",
       "presence": "present"
     },
     {
@@ -193,10 +193,10 @@
       },
       "face": null,
       "heard": [
-        "status",
+        "heartbeat",
         "fault"
       ],
-      "note": "a confirmation, then another code",
+      "note": "a heartbeat with its time known, then another code",
       "presence": "present"
     },
     {
@@ -238,7 +238,7 @@
       },
       "face": null,
       "heard": [
-        "status"
+        "heartbeat"
       ],
       "note": "the descriptor does not list health.v1: not asked (§2.7)",
       "presence": "present"
@@ -288,9 +288,9 @@
         "status_crosses": true
       },
       "heard": [
-        "status"
+        "heartbeat"
       ],
-      "note": "across a face that lets the status cross: a confirmation crossed (§2.8)",
+      "note": "across a face that lets the status cross: its heartbeat crossed (§2.8, freshness.v2 §2.9)",
       "presence": "across_face"
     },
     {
@@ -320,7 +320,148 @@
       "heard": [],
       "note": "across a face closed to the status, nothing heard: no heartbeat (§2.8)",
       "presence": "across_face"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "answer": "yes",
+        "reason": "clock_ahead"
+      },
+      "face": null,
+      "heard": [
+        "clock_ahead",
+        "heartbeat_held",
+        "clock_ahead",
+        "heartbeat_held"
+      ],
+      "note": "while the guard holds: each heartbeat's time unknown, and the fault again (§2.5, freshness.v2 §2.10)",
+      "presence": "present"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "answer": "yes",
+        "reason": "clock_ahead"
+      },
+      "face": null,
+      "heard": [
+        "clock_ahead",
+        "status_put"
+      ],
+      "note": "a put of the status after the fault: the guard does not hold it, so it says nothing of the clock (§2.5)",
+      "presence": "present"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "answer": "yes",
+        "reason": "clock_ahead"
+      },
+      "face": null,
+      "heard": [
+        "heartbeat",
+        "status_put",
+        "clock_ahead",
+        "heartbeat_held",
+        "status_put"
+      ],
+      "note": "the status put again while the guard holds: still yes",
+      "presence": "present"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "answer": "unobservable",
+        "reason": "nothing_heard"
+      },
+      "face": null,
+      "heard": [
+        "status_put"
+      ],
+      "note": "a put of the status alone says nothing of the clock",
+      "presence": "present"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "answer": "unobservable",
+        "reason": "time_unknown"
+      },
+      "face": null,
+      "heard": [
+        "heartbeat_held"
+      ],
+      "note": "a reader that joined during the hold: the time unknown, and no fault heard yet (§2.5)",
+      "presence": "present"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "answer": "unobservable",
+        "reason": "time_unknown"
+      },
+      "face": null,
+      "heard": [
+        "heartbeat",
+        "heartbeat_held"
+      ],
+      "note": "a time known, then a time unknown, and no fault: the fault lost or not yet repeated",
+      "presence": "present"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "answer": "unobservable",
+        "reason": "time_unknown"
+      },
+      "face": null,
+      "heard": [
+        "clock_ahead",
+        "heartbeat",
+        "heartbeat_held"
+      ],
+      "note": "a fault, a time known, then a time unknown with no fault since",
+      "presence": "present"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "answer": "no",
+        "reason": "confirmed"
+      },
+      "face": null,
+      "heard": [
+        "clock_ahead",
+        "heartbeat_held",
+        "heartbeat"
+      ],
+      "note": "the guard released: the next heartbeat's time is known again (freshness.v2 §2.10)",
+      "presence": "present"
     }
   ],
-  "description": "health.v1 §5, \"is this service's clock ahead?\" (§2.5): what one subscriber heard of one service during its reading, in arrival order -> the answer. A case gives presence, descriptor and face as judgements.json writes them. heard: the deliveries, each \"status\" (a put of state/status, a change or a re-put: a confirmation), \"status_deleted\" (a delete of state/status, which is no confirmation), \"clock_ahead\" (a stream/faults sample whose code is clock_ahead, whatever its level and its stamp) or \"fault\" (a stream/faults sample with any other code). expect.answer is yes, no, unobservable or not_asked: yes on a clock_ahead fault with no confirmation heard after it; no when a confirmation was heard after the last clock_ahead fault, or with none heard; unobservable when neither was heard, since the faults' silence is their normal state; not_asked when the service is absent or its descriptor does not list health.v1, as the first question's. A fault heard answers whatever else presence says. expect.reason: clock_ahead, confirmed, nothing_heard, absent or not_listed."
+  "description": "health.v1 §5, \"is this service's clock ahead?\" (§2.5): what one subscriber heard of one service during its reading, in arrival order -> the answer. A case gives presence, descriptor and face as judgements.json writes them. heard: the deliveries, each \"heartbeat\" (a heartbeat covering health.v1 whose status's section the reader read in step, freshness.v2 §2.5's confirmed, its bit set or clear, and whose time is known), \"heartbeat_held\" (the same, its time unknown, all ones, as while the guard holds: freshness.v2 §2.10), \"status_put\" (a put of state/status, which the guard does not hold), \"status_deleted\" (a delete of state/status), \"clock_ahead\" (a stream/faults sample whose code is clock_ahead, whatever its level and its stamp) or \"fault\" (a stream/faults sample with any other code). expect.answer is yes, no, unobservable or not_asked: yes on a clock_ahead fault with no heartbeat whose time is known heard after it; no when the last heartbeat heard has its time known and came after the last clock_ahead fault, or with none heard; unobservable otherwise, since the faults' silence is their normal state and a time unknown proves nothing alone; not_asked when the service is absent or its descriptor does not list health.v1, as the first question's. A put or a delete of the status says nothing of the clock. A fault heard answers whatever else presence says. expect.reason: clock_ahead, confirmed, time_unknown, nothing_heard, absent or not_listed."
 }

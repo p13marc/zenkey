@@ -4,6 +4,74 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.9 — 2026-11-02: a clock ahead holds no status, and the clock question reads the heartbeat's time (#978)
+
+Core 0.88 (#978's F6) narrows its clock guard to the state writes that
+carry a Zenoh timestamp. The status carries none since 0.8, so the guard
+no longer holds it, and `freshness.v2` 0.4's heartbeat goes on vouching
+for it, its time unknown. This text, written against core 0.88, follows.
+
+**Changed: §2.5.**
+- **Before:** the guard held the status's puts and its heartbeat's bit.
+  The status went stale, by design, 60 s after its last confirmation,
+  and the next heartbeat after the guard released vouched for it again.
+- **Now:** the status is not held. The owner puts it as at any other
+  time, and its heartbeat vouches for it, its time unknown. `[Sc: §4]`
+  An owner that the drift leaves worse off, its timed writes held, puts
+  its status as for any occurrence. §2.3 drops its "unless its clock is
+  ahead".
+- **The fault stays:** the MUST at the guard's first hold is 0.8's.
+- **The repeat** follows the heartbeat covering `health.v1`: at least
+  once per its period, 30 s at most, where 0.8 said once per status
+  interval. `[Sc: §4]` In revision 1.1 the two are one: the status is
+  the interface's one collection, so its heartbeat beats at 28.5 s. The
+  heartbeat is what a reader's "no" now rests on, so a reader that
+  joined during the hold hears a fault within the period it hears the
+  time unknown in. A minor that added a collection with a shorter horizon
+  would quicken both.
+- **Once the guard releases,** the next heartbeat's time is known again,
+  the evidence that the drift ended, where 0.8's was a heartbeat vouching
+  again.
+- **A deployment under `drop_future_timestamp`** loses the fault, and
+  its readers see the heartbeat's time unknown, where 0.8's saw the
+  status go stale.
+
+**Changed: §5's clock question, and `clock.json`.** A confirmation of
+the status no longer tells a held guard from a released one.
+- **Yes:** a `clock_ahead` fault, with no heartbeat whose time is known
+  heard since.
+- **No:** the last heartbeat heard has its time known, after the last
+  fault or with none heard.
+- **Unobservable:** `time_unknown`, a new reason, when the last
+  heartbeat's time is unknown with no fault since one whose time is
+  known; `nothing_heard` when neither a fault nor a heartbeat was heard.
+- **A heartbeat counts** where the reader read the status's section in
+  step with its view, its bit set or clear (§2.5). A put of the status
+  says nothing of the clock.
+- **The fixture's tokens.** `status`, a confirmation, is gone. Its cases
+  read `heartbeat`, a heartbeat whose time is known. `heartbeat_held`
+  (its time unknown) and `status_put` (a put of the status) are new, with
+  8 cases, 29 in all.
+
+**Changed, no rule:** §2.10's `clock_ahead` names the writes that carry
+a Zenoh timestamp; §5's "Which cause" drops the clock ahead from a stale
+status's causes; Appendix A's clock row.
+
+**`scenarios.md` §4.** Step 2 puts the status once the guard holds, and
+S receives it. Every heartbeat from the detection on vouches for it, its
+time unknown, and S judges **healthy** at 65 s, where 0.8's judged stale.
+Step 3's evidence is a heartbeat whose time is known again. Step 4's
+readers have the heartbeat's time unknown to go on.
+
+**Deliberately not changed.**
+- **The contract:** revision 1.1, `sha256:60a43745…`, as 0.8's. No
+  fingerprint moves.
+- **The fault's level** stays `FAILED`, and its stamp as §2.5 says.
+- **Revision 1.0's owners** re-put their status with a Zenoh timestamp,
+  which the guard holds, and send no heartbeat. A reader that heard one's
+  fault answers yes until its reading ends, the drift over or not. No
+  owner of this repository serves 1.0, and zk2py's move in its round.
+
 ## 0.8 — 2026-11-01: the status confirmed by `freshness.v2`'s heartbeat, never re-put (#978)
 
 Epic #975 makes the wire bandwidth-first. Under `freshness.v1` an owner

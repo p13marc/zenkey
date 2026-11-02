@@ -151,8 +151,9 @@ conventions say.
 
 **Steps.**
 1. The owner puts status `OK` before any heartbeat.
-2. The heartbeat is put until the owner reports itself ahead. S listens
-   for 65 s from then, and judges.
+2. The heartbeat is put until the owner reports itself ahead. The owner
+   then puts status `OK` with the reason `"ahead"`. S listens for 65 s
+   from the detection, and judges.
 3. The owner's clock is set right, and the heartbeat goes on. S listens
    for 35 s, and judges.
 4. **[moved clock]** Steps 1 and 2 again, with R1 running
@@ -163,25 +164,30 @@ conventions say.
 1. S receives the status.
 2. Within 1 s of the detection, S receives a `faults` sample with code
    `clock_ahead` and level `FAILED`. S judges nothing by its stamp (v1.md
-   §2.5). S receives no status put from the detection on. The reference
-   publishes the fault again within 31 s (§2.5, a SHOULD). The owner's
-   tokens stay present. At 65 s, S judges the status **stale**, never
-   `FAILED`, and a tool reading the faults answers "is its clock ahead?"
-   yes (v1.md §5).
+   §2.5). The guard does not hold the status: the owner's put succeeds,
+   and S receives it. The reference publishes the fault again within
+   31 s (§2.5, a SHOULD). The owner's tokens stay present.
+   - Every heartbeat from the detection on vouches for the status, its
+     time unknown, all ones (`freshness.v2` §2.10).
+   - At 65 s, S judges **healthy**, `ok`: the heartbeats confirmed the
+     status.
+   - A tool reading the faults and the heartbeats answers "is its clock
+     ahead?" yes (v1.md §5).
    - **[moved clock]** The fault's stamp is not the owner's: R1 re-stamped
      a future-dated put (core §4.1).
    - Without root, the fault's stamp is the owner's honest one, set or
      re-stamped by its own session (v1.md §2.5), and is not checked.
-3. Within 30 s of the correction, S receives a heartbeat that vouches for
-   the status again (`freshness.v2` §2.10). It receives no put of the
-   status, and no `clock_ahead` fault after it. S judges **healthy**,
-   `ok`, and the clock question no.
+3. Within 30 s of the correction, S receives a heartbeat whose time is
+   known again (`freshness.v2` §2.10). It receives no put of the status
+   after step 2's, and no `clock_ahead` fault after that heartbeat. S
+   judges **healthy**, `ok`, and the clock question no.
 4. **[moved clock]** S receives no fault: R1 dropped it (v1.md §2.5). The
    status put carries no Zenoh timestamp of the owner's (`freshness.v2`
    §2.4), so R1 stamps it itself, and S receives it. G's reply holds the
    status, under the owner's stamp, since a router never drops or
    re-stamps a reply (core §4.1). That deployment's readers have only the
-   status's staleness to go on (v1.md §2.5).
+   heartbeat's time unknown to go on, which answers no clock question
+   alone (v1.md §2.5).
 
 ## §5 A tokenless set of 100 (§2.7)
 
