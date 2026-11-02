@@ -11,7 +11,7 @@ mod common;
 
 use std::sync::{Arc, Mutex};
 
-use common::{client, contract, eventually, router};
+use common::{client, client_ns, contract, eventually, router};
 use serde_json::{Value, json};
 use zenkey::consumer::{Consumer, Delivery, FrameRead, Refused};
 use zenkey::model::frame::{FieldState, Follows, Frame, Layout, Unknown, When};
@@ -184,7 +184,41 @@ async fn a_subscription_reads_a_keys_frames_into_field_states() {
         heard.frames.lock().unwrap()[5].applied.follows,
         Follows::Gap { lost: 2 }
     );
+    // The gap counts the refused frame's seq, and names it; the mutation
+    // was no frame, so only its seq is lost.
+    assert_eq!(
+        heard.frames.lock().unwrap()[5].applied.refused,
+        [Seq::new(16).unwrap()]
+    );
     assert!(states(5).iter().all(|s| matches!(s, FieldState::Known(_))));
+}
+
+/// In a namespace, the consumer's session hears each key base-relative,
+/// and its reader of the key keeps the run across frames: the second frame
+/// continues the first.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_namespaced_subscription_keeps_one_reader_per_key() {
+    let (_r1, ep) = router(None).await;
+    let os = client_ns(&ep, Some("site")).await;
+    let rs = client_ns(&ep, Some("site")).await;
+    let heard = Arc::new(Heard::default());
+    let _sub = subscribe(&rs, "stream/frames/link", &heard).await;
+    let p = os.declare_publisher(LINK).await.unwrap();
+    eventually("S's subscriber reaches O", || async {
+        p.matching_status().await.unwrap().matching()
+    })
+    .await;
+    let l = layout("frames/link");
+    p.put(put(&l, 1, &keyframe(100, 12))).await.unwrap();
+    p.put(put(&l, 2, &delta(160, json!({})))).await.unwrap();
+    eventually("two frames", || async {
+        heard.frames.lock().unwrap().len() >= 2
+    })
+    .await;
+    let f = heard.frames.lock().unwrap();
+    assert_eq!(f[0].applied.follows, Follows::First);
+    assert_eq!(f[1].applied.follows, Follows::Continues);
+    assert_eq!(f[1].field(0, "queue_depth"), Some(FieldState::Within(12)));
 }
 
 /// A three-record frame's later records are scheduled within its jitter

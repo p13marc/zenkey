@@ -876,6 +876,20 @@ impl Consumer {
                             Ok(frame) => frame,
                             Err(why) => {
                                 seen.undecodable.fetch_add(1, Ordering::Relaxed);
+                                // A frame its layout refused is never applied:
+                                // its key's reader notes it, so the next frame
+                                // follows a gap that counts and names it.
+                                if let (Some(_), crate::inband::Read::Framed { stamp, .. }) =
+                                    (&frame_layout, &read)
+                                {
+                                    let key = read.sample().key_expr().as_str().to_owned();
+                                    seen.frames
+                                        .lock()
+                                        .expect("not poisoned")
+                                        .entry(key)
+                                        .or_default()
+                                        .refuse(*stamp);
+                                }
                                 tracing::debug!(
                                     key = %read.sample().key_expr(),
                                     reason = %why.reason(),

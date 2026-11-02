@@ -15,7 +15,8 @@
 //!   ring says so ([`FrameRead::evicted`]).
 //! - **A frame lost** between two the ring holds (a seq the pump never
 //!   delivered, or a body its layout refused) turns the fields the next one
-//!   omits `unknown`, until each is included again.
+//!   omits `unknown`, until each is included again. A refused one is named
+//!   by the next frame's head (`Reader::refuse`), its records in the gap.
 //! - **Time.** A scheduled record reads as scheduled with its jitter, never
 //!   as a measured instant; a record's `t` is from the deployment epoch, as
 //!   the frame carries it. Its record type's `time` fields read under the
@@ -123,7 +124,15 @@ pub fn read(
         let encoding = (!e.encoding.is_empty()).then_some(e.encoding.as_str());
         let parsed = match zenkey_fleet::model::inband::payload(key, encoding, &bytes) {
             zenkey_fleet::model::inband::Payload::Frame { body, stamp, tag } => {
-                Frame::parse(tag, body, &layout).ok().map(|f| (stamp, f))
+                match Frame::parse(tag, body, &layout) {
+                    Ok(f) => Some((stamp, f)),
+                    // Never applied: the reader notes it, so the next
+                    // frame's gap counts and names it (core §7.7).
+                    Err(_) => {
+                        reader.refuse(stamp);
+                        None
+                    }
+                }
             }
             _ => None,
         };

@@ -24,7 +24,7 @@
 //! (`zenkey::consumer::Delivery::frame`), which [`applied_rendering`]
 //! renders.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use zenkey_model::frame::{Applied, Frame, Layout, Reader};
 use zenkey_model::wire;
@@ -38,10 +38,16 @@ pub use zenkey::inband::{FRAME_AS_RECORD, MUTATION_ON_FRAME};
 /// reads its next frame as a first, its omitted fields `unknown`.
 pub const MAX_KEYS: usize = 4096;
 
-/// One window's readers, one per frame key (core §7.7).
+/// One window's readers, one per frame key (core §7.7), each keyed by the
+/// namespace-relative key, as a consumer's subscription keys its own (a
+/// session in the namespace hands it that key): one key, one reader,
+/// whichever session heard it.
 #[derive(Debug, Clone, Default)]
 pub struct Readers {
     keys: BTreeMap<String, Reader>,
+    /// The keys in the order their readers were made: past [`MAX_KEYS`]
+    /// the oldest goes first.
+    order: VecDeque<String>,
 }
 
 impl Readers {
@@ -51,13 +57,25 @@ impl Readers {
         Self::default()
     }
 
-    /// `key`'s reader, made when it holds none. Past [`MAX_KEYS`] it
-    /// forgets the first key in byte order.
+    /// `key`'s reader, `key` namespace-relative, made when it holds none.
+    /// Past [`MAX_KEYS`] it forgets the reader made first.
     pub fn reader(&mut self, key: &str) -> &mut Reader {
-        if !self.keys.contains_key(key) && self.keys.len() >= MAX_KEYS {
-            self.keys.pop_first();
+        if !self.keys.contains_key(key) {
+            while self.keys.len() >= MAX_KEYS {
+                let Some(oldest) = self.order.pop_front() else {
+                    break;
+                };
+                self.keys.remove(&oldest);
+            }
+            self.order.push_back(key.to_owned());
         }
         self.keys.entry(key.to_owned()).or_default()
+    }
+
+    /// Whether it holds a reader of `key`.
+    #[must_use]
+    pub fn holds(&self, key: &str) -> bool {
+        self.keys.contains_key(key)
     }
 
     /// How many keys it holds.
@@ -89,6 +107,24 @@ fn holds_time(layout: &Layout) -> bool {
         .any(|f| matches!(f.kind, zenkey_model::packed::FieldKind::Time { .. }))
 }
 
+/// The frames of the run held that their layout refused since the frame
+/// before (`Applied::refused`), as a member of the reading: `"refused"`,
+/// each record 0's seq. Their records are among the gap's `lost`. Absent
+/// when there are none, so a reading is `frame/apply.json`'s spelling.
+fn with_refused(mut value: serde_json::Value, applied: &Applied) -> serde_json::Value {
+    if !applied.refused.is_empty()
+        && let Some(m) = value.as_object_mut()
+    {
+        let seqs: Vec<serde_json::Value> = applied
+            .refused
+            .iter()
+            .map(|s| serde_json::Value::from(s.get()))
+            .collect();
+        m.insert("refused".into(), serde_json::Value::Array(seqs));
+    }
+    value
+}
+
 /// A frame its reader read, rendered: its reading as the value, valid,
 /// its record type's `time` fields under `epoch`, the epoch in force for
 /// its owner (core §8.6), as a packed record's are
@@ -112,7 +148,10 @@ pub fn applied_rendering(
     let given = epoch.given();
     let assumed = (timed && given.is_none()).then_some(zenkey_model::packed::DEFAULT_EPOCH);
     let under = given.unwrap_or(zenkey_model::packed::DEFAULT_EPOCH);
-    match applied.reading(layout, Some(under)) {
+    match applied
+        .reading(layout, Some(under))
+        .map(|v| with_refused(v, applied))
+    {
         Ok(value) => (
             PayloadRendering {
                 key: key.to_owned(),
@@ -133,8 +172,9 @@ pub fn applied_rendering(
 /// A frame's body read with its layout under CH's `tag`, then applied by
 /// `reader`: its reading under `epoch` ([`applied_rendering`]), or
 /// undecodable with its refusal (core §7.7's first, by token). A refused
-/// body never reaches the reader, so its records read as lost at the key's
-/// next frame.
+/// body is never applied: `reader` notes it (`Reader::refuse`), so the
+/// key's next frame follows a gap that counts its records and names its
+/// seq (`"refused"`), and the refusal's reason says so.
 #[allow(clippy::too_many_arguments)]
 #[must_use]
 pub fn frame_check(
@@ -153,14 +193,28 @@ pub fn frame_check(
             let applied = reader.apply(layout, stamp, &frame);
             applied_rendering(key, resource, declared, layout, &applied, body.len(), epoch)
         }
-        Err(r) => undecodable(
-            key,
-            resource,
-            declared,
-            body.len(),
-            format!("a zk2c frame refused by its layout, {r}"),
-        ),
+        Err(r) => {
+            reader.refuse(stamp);
+            undecodable(
+                key,
+                resource,
+                declared,
+                body.len(),
+                refused_reason(stamp, r),
+            )
+        }
     }
+}
+
+/// Why a frame its layout refused is undecodable, and what it costs the
+/// reader: its records read as lost at the key's next frame.
+#[must_use]
+pub fn refused_reason(stamp: wire::Stamp, r: zenkey_model::frame::ReadRefusal) -> String {
+    format!(
+        "a zk2c frame refused by its layout, {r}; its records, from seq {}, read as lost at the \
+         key's next frame",
+        stamp.seq.get()
+    )
 }
 
 /// Undecodable, with why.
@@ -257,8 +311,19 @@ pub fn reading_lines(value: &serde_json::Value) -> Option<Vec<String>> {
         "run" => ", a run not held before".to_owned(),
         other => format!(", {other}"),
     };
+    let refused = match value.get("refused").and_then(serde_json::Value::as_array) {
+        Some(seqs) if !seqs.is_empty() => {
+            let seqs: Vec<String> = seqs.iter().map(ToString::to_string).collect();
+            format!(
+                " (refused by its layout: the frame{} at seq {})",
+                if seqs.len() == 1 { "" } else { "s" },
+                seqs.join(", ")
+            )
+        }
+        _ => String::new(),
+    };
     let mut out = vec![format!(
-        "run {}, seq {}{follows}",
+        "run {}, seq {}{follows}{refused}",
         value.get("run")?.as_str()?,
         value.get("seq")?
     )];
@@ -336,6 +401,24 @@ mod tests {
             .bytes
     }
 
+    /// Past [`MAX_KEYS`], the reader made first is forgotten, whatever its
+    /// key's place in byte order.
+    #[test]
+    fn readers_forget_the_oldest_first() {
+        let mut r = Readers::new();
+        r.reader("zz/first");
+        for i in 0..MAX_KEYS - 1 {
+            r.reader(&format!("k/{i:05}"));
+        }
+        assert_eq!(r.len(), MAX_KEYS);
+        r.reader("zz/first");
+        assert!(r.holds("zz/first"), "a key held is not made again");
+        r.reader("aa/new");
+        assert_eq!(r.len(), MAX_KEYS);
+        assert!(!r.holds("zz/first"), "the oldest goes, not the lowest key");
+        assert!(r.holds("k/00000") && r.holds("aa/new"));
+    }
+
     /// A key's reader turns a lost frame's omitted fields unknown; a fresh
     /// reader reads a delta frame as a first, never showing a value it
     /// does not hold; another tag is undecodable, named.
@@ -405,8 +488,27 @@ mod tests {
         );
         assert!(matches!(r.rendered, Rendered::Undecodable { .. }), "{r:?}");
         assert!(
-            matches!(c, Conformance::Undecodable { reason, .. } if reason.ends_with("tag: the envelope's tag is not the frame's"))
+            matches!(&c, Conformance::Undecodable { reason, .. } if reason.contains(
+                "tag: the envelope's tag is not the frame's; its records, from seq 9, read as lost"
+            )),
+            "{c:?}"
         );
+        // The refused frame is named by the next one, whose gap counts it.
+        let v10 = value(check(&mut readers, 10, &delta));
+        assert_eq!(
+            (
+                v10["follows"].clone(),
+                v10["lost"].clone(),
+                v10["refused"].clone()
+            ),
+            (json!("gap"), json!(2), json!([9]))
+        );
+        assert_eq!(
+            reading_lines(&v10).unwrap()[0],
+            "run 0001, seq 10, 2 records lost before it (refused by its layout: the frame at seq 9)"
+        );
+        // Readers key by the namespace-relative key, oldest out first.
+        assert!(readers.holds(key));
         assert_eq!(
             unread_text(stamp(9), 11),
             "<zk2c frame, run 0001, seq 9, 11 bytes>"

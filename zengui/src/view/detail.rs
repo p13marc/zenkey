@@ -1483,10 +1483,6 @@ fn timing_badge<'a>(
     )
 }
 
-/// A `timing.v1` stream over the recorded history (#908, MC): the window's
-/// own view of §5's deadline and period questions, each the model's
-/// answer, the misses with the owner's state the presence link gave, and
-/// the lifespan said not judged here (no ε).
 /// A frame resource's newest frame (core §7.7, observer §7.6; #981's K2):
 /// its head, then a record a block, its seq and time (a scheduled one says
 /// so, with its jitter), and a field a line in its state, an `unknown` or
@@ -1557,6 +1553,10 @@ fn frame_section<'a>(f: &'a crate::frame::FrameRead, sp: Spacing) -> Element<'a,
     col.into()
 }
 
+/// A `timing.v1` stream over the recorded history (#908, MC): the window's
+/// own view of §5's deadline and period questions, each the model's
+/// answer, the misses with the owner's state the presence link gave, and
+/// the lifespan said not judged here (no ε).
 fn timing_section<'a>(t: &'a crate::timing::TimingRead, sp: Spacing) -> Element<'a, Message> {
     use zenkey_model::timing::Question;
     let mut col = Column::new().spacing(sp.xs);

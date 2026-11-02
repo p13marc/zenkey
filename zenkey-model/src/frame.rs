@@ -1070,6 +1070,12 @@ pub struct Applied {
     pub stamp: Stamp,
     pub follows: Follows,
     pub records: Vec<RecordRead>,
+    /// Record 0's seq of each frame of the run it holds that its layout
+    /// refused since the frame before this one ([`Reader::refuse`]), in
+    /// arrival order. Their records are among a gap's `lost`: a refused
+    /// frame's body is not read, so how many records it held is not known
+    /// to the reader, and only the next frame's seq tells it.
+    pub refused: Vec<Seq>,
 }
 
 impl Applied {
@@ -1163,13 +1169,20 @@ struct Held {
     /// The layout's hash: another layout is read as another run.
     layout: [u8; 32],
     tracks: Vec<Track>,
+    /// Frames of this run its layout refused since the last one read.
+    refused: Vec<Seq>,
 }
 
 /// One key's reader (core §7.7, "The reader's fields"): what it holds of
 /// the key's frames, in the run it holds. A consumer or a tool keeps one
 /// per frame key and hands it each frame in the order it arrived
-/// ([`Reader::apply`]). A frame refused by its layout never reaches it,
-/// so its records read as lost at the next frame.
+/// ([`Reader::apply`]). A frame refused by its layout is never applied: its
+/// body is not read, so neither its fields nor how many records it held
+/// are known, and the next frame's seq reads its records as lost, a gap
+/// (core §7.7, "The frames it expects": a seq newer than the one expected
+/// follows records lost, whatever lost them; `spec/conformance/frame/
+/// apply.json` reads a gap so). [`Reader::refuse`] notes it, so the next
+/// frame says which of its lost records were refused ([`Applied::refused`]).
 #[derive(Debug, Clone, Default)]
 pub struct Reader {
     held: Option<Held>,
@@ -1189,6 +1202,21 @@ impl Reader {
             run: h.run,
             seq: h.next,
         })
+    }
+
+    /// Notes a frame at `stamp` whose layout refused it (core §7.7's
+    /// refusals). It is never applied: the reader still expects the seq
+    /// after the last record it read, so the next frame follows a gap
+    /// counting the refused frame's records, and lists its seq in
+    /// [`Applied::refused`]. A refused frame of a run it does not hold is
+    /// forgotten: the next frame of that run resets every field anyway.
+    pub fn refuse(&mut self, stamp: Stamp) {
+        if let Some(h) = &mut self.held
+            && h.run == stamp.run
+            && h.refused.len() < usize::from(u16::MAX)
+        {
+            h.refused.push(stamp.seq);
+        }
     }
 
     /// What a frame at `stamp` would follow, read under `layout`.
@@ -1223,6 +1251,13 @@ impl Reader {
     pub fn apply(&mut self, layout: &Layout, stamp: Stamp, frame: &Frame) -> Applied {
         let follows = self.follows(layout, stamp);
         let n = layout.fields.len();
+        // A frame refused in the run held is among what this one follows.
+        let refused = self
+            .held
+            .as_mut()
+            .filter(|h| h.run == stamp.run)
+            .map(|h| std::mem::take(&mut h.refused))
+            .unwrap_or_default();
         let held = match (&mut self.held, follows.resets()) {
             (Some(h), false) => h,
             (slot, _) => slot.insert(Held {
@@ -1237,6 +1272,7 @@ impl Reader {
                     };
                     n
                 ],
+                refused: Vec::new(),
             }),
         };
         let base = frame.time.map(|t| u64::from(t.s) * 1000 + u64::from(t.ms));
@@ -1308,6 +1344,7 @@ impl Reader {
             stamp,
             follows,
             records,
+            refused,
         }
     }
 }
@@ -1392,6 +1429,37 @@ mod tests {
         .unwrap_err();
         assert_eq!(bad.len(), 3, "{bad:?}");
         assert_eq!(FrameParams::from_canonical(&p.canonical()), Ok(p));
+    }
+
+    /// A frame its layout refuses is never applied (core §7.7): the next
+    /// frame follows a gap that counts its records, and names it.
+    #[test]
+    fn a_refused_frame_reads_as_lost_and_is_named() {
+        let l = Layout::of(&link(), &one()).unwrap();
+        let stamp = |seq| Stamp {
+            run: crate::wire::Run::U16(1),
+            seq: Seq::new(seq).unwrap(),
+        };
+        let full = Frame::from_json(
+            &json!({"time": {"s": 1, "ms": 0}, "records": [{"full": true, "values": {"dropped": 1}}]}),
+            &l,
+            None,
+        )
+        .unwrap();
+        let mut r = Reader::new();
+        assert!(r.apply(&l, stamp(10), &full).refused.is_empty());
+        r.refuse(stamp(11));
+        let next = r.apply(&l, stamp(12), &full);
+        assert_eq!(next.follows, Follows::Gap { lost: 1 });
+        assert_eq!(next.refused, [Seq::new(11).unwrap()]);
+        // Noted once: the frame after reads none.
+        assert!(r.apply(&l, stamp(13), &full).refused.is_empty());
+        // Another run's refusal is forgotten.
+        r.refuse(Stamp {
+            run: crate::wire::Run::U16(2),
+            seq: Seq::new(0).unwrap(),
+        });
+        assert!(r.apply(&l, stamp(14), &full).refused.is_empty());
     }
 
     #[test]

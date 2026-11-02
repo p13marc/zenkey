@@ -447,15 +447,8 @@ impl<'a> Lens<'a> {
         // Core §7.7: a frame resource's put is a frame, applied by the
         // key's reader; a frame elsewhere, and a mutation on a frame
         // resource, have no reading.
-        if let Some(checked) = self.frames(
-            wire,
-            key,
-            &resolution,
-            member,
-            payload,
-            bytes.len(),
-            readers,
-        ) {
+        if let Some(checked) = self.frames(key, &resolution, member, payload, bytes.len(), readers)
+        {
             return Checked {
                 rendering: checked.0,
                 conformance: checked.1,
@@ -542,13 +535,12 @@ impl<'a> Lens<'a> {
     }
 
     /// A frame, or a sample of a frame resource, on a key that resolved
-    /// (core §7.7, #981's K2): read by `readers`' reader of the key, or
-    /// alone, as a reader's first; `None` for any other sample, which its
-    /// type reads.
+    /// (core §7.7, #981's K2): read by `readers`' reader of `key`, its
+    /// namespace-relative key, or alone, as a reader's first; `None` for
+    /// any other sample, which its type reads.
     #[allow(clippy::too_many_arguments)]
     fn frames(
         &self,
-        wire: &str,
         key: &str,
         resolution: &Resolution,
         member: Member,
@@ -575,8 +567,10 @@ impl<'a> Lens<'a> {
             values: r.values.clone(),
         };
         let mut alone = zenkey_model::frame::Reader::new();
+        // Keyed by the namespace-relative key, as a consumer's subscription
+        // keys its readers: a session in the namespace hands it that key.
         let reader = match readers {
-            Some(rs) => rs.reader(wire),
+            Some(rs) => rs.reader(key),
             None => &mut alone,
         };
         crate::model::render::frame_check(
@@ -1376,6 +1370,11 @@ mod tests {
         );
         let alone = lens.check_sample(wire, Member::Type, enc, &delta, None);
         assert_eq!(value(&alone)["follows"], "first");
+        // Under the namespace `prod`, the reader is the relative key's, the
+        // one a consumer's subscription in the namespace keys its own by.
+        assert!(readers.holds("zk2/lab/modem/linkframes.v1/stream/frames/link"));
+        assert!(!readers.holds(wire));
+        assert_eq!(readers.len(), 1);
         // A record in no frame on the frame resource; a frame on a plain
         // stream of the same record type.
         let mutation = Envelope::mutation(
