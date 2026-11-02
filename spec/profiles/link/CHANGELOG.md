@@ -65,10 +65,10 @@ device's instance token is no liveness evidence. §2.18: the far end's
 block is each device's. §2.20: the near side waits for a device's
 replies. §5 and Appendix A have a row each.
 
-**The fixtures.** `v2/plan.json`'s cases 19 to 23 and `v2/lints.json`'s
+**The fixtures.** `v2/plan.json`'s cases 22 to 26 and `v2/lints.json`'s
 40 to 57 are the device face's. Each was written by reading this text,
 not derived by the reference, which does not know `attach = "device"`
-yet. Its `zenctl acl gen --face-policy` refuses case 19's policy:
+yet. Its `zenctl acl gen --face-policy` refuses case 22's policy:
 `bad_value` at `attach`, and `unknown_field` at `devices`.
 - A plan case's `implements` keys a device by its address, an inline
   interface's `uses` names `redundancy.v1` for `presence_required`, and an
