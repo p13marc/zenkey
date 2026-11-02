@@ -70,6 +70,12 @@ const KNOWN: &[(&str, &str)] = &[
     ("telemetry", "declarations.json"),
     ("telemetry", "samples.json"),
     ("telemetry", "continuity.json"),
+    ("telemetry", "v2/declarations.json"),
+    ("telemetry", "v2/readings.json"),
+    ("telemetry", "v2/continuity.json"),
+    ("telemetry", "contracts/meterframe.v1.toml"),
+    ("telemetry", "contracts/meterframe.json"),
+    ("telemetry", "contracts/meter.json"),
     ("desired", "schema.json"),
     ("desired", "declarations.json"),
     ("desired", "bindings.json"),
@@ -2896,6 +2902,388 @@ fn telemetry_continuity() {
         });
         let what = format!("{}", case["note"]);
         expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+// --- telemetry.v2 (#983 T1) ---------------------------------------------------------
+
+/// `telemetry/conformance/v2/*.json`'s shared packed document: each record
+/// type its `schema` declares, by name, as its fields.
+fn telemetry_v2_records(doc: &Value) -> BTreeMap<String, Vec<zenkey_model::packed::Field>> {
+    let read = zenkey_model::packed::PackedDoc::read(&doc["schema"]);
+    assert!(read.findings.is_empty(), "{:?}", read.findings);
+    read.types
+        .into_iter()
+        .map(|(name, l)| {
+            let l = l.unwrap_or_else(|| panic!("{name}: no layout"));
+            (name, l.fields().cloned().collect())
+        })
+        .collect()
+}
+
+/// What a mirror names among a fixture's `resources` (telemetry.v2 §2.16):
+/// the one resource of that template, when it is no frame resource and
+/// has no parameter, read by `telemetry.v1`'s declaration.
+fn telemetry_v2_mirror(resources: &Value, name: &str) -> Option<Declaration> {
+    let named: Vec<&Value> = resources
+        .as_array()
+        .expect("resources")
+        .iter()
+        .filter(|r| r["template"] == name)
+        .collect();
+    let [r] = named.as_slice() else {
+        return None;
+    };
+    if r["frame"] == json!(true) || name.contains('{') {
+        return None;
+    }
+    Some(telemetry_declaration(r))
+}
+
+/// A frame resource's series as `telemetry/conformance/v2/` spells them.
+fn telemetry_series_json(s: &telemetry::frames::Series) -> Value {
+    use telemetry::frames::Series;
+    match s {
+        Series::Declared(series) => json!({
+            "declaration": s.as_str(),
+            "series": series.iter().map(|f| json!({
+                "field": f.field,
+                "kind": f.kind.as_str(),
+                "unit": f.unit,
+                "semantic": f.semantic.map(telemetry::Semantic::as_str),
+                "mirror": f.mirror,
+                "width": f.width,
+            })).collect::<Vec<_>>(),
+        }),
+        Series::Invalid(p) => json!({
+            "declaration": s.as_str(),
+            "reasons": p.iter().map(|p| json!({"entry": p.entry, "reason": p.reason.as_str()})).collect::<Vec<_>>(),
+        }),
+        Series::Ignored | Series::NotThisProfiles => json!({"declaration": s.as_str()}),
+    }
+}
+
+/// A fixture resource's resolved annotations: given, or merged from its
+/// layers (core §9.3), as `telemetry_declaration` merges them.
+fn telemetry_v2_annotations(r: &Value) -> BTreeMap<String, Value> {
+    match r.get("layers") {
+        Some(l) => {
+            let mut m = BTreeMap::new();
+            for layer in ["defaults", "kind_defaults", "resource"] {
+                m.extend(annotations(&l[layer]));
+            }
+            m
+        }
+        None => annotations(&r["annotations"]),
+    }
+}
+
+/// `telemetry/conformance/v2/declarations.json`: a resource of an
+/// interface whose other resources the file lists → what a
+/// `telemetry.v2` reader reads of it (v2 §2.1 to §2.16): a frame
+/// resource's series, or `telemetry.v1`'s declaration of any other. Then
+/// each resource of the scenarios' contract, read from its TOML.
+#[test]
+fn telemetry_v2_declarations() {
+    let path = profiles().join("telemetry/conformance/v2/declarations.json");
+    let mut doc = read_json(&path);
+    let records = telemetry_v2_records(&doc);
+    let resources = doc["resources"].clone();
+    let mut tokens = BTreeSet::new();
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let r = &case["resource"];
+        let got = if r["frame"] == json!(true) {
+            let fields = &records[r["record"].as_str().expect("record")];
+            let s = telemetry::frames::series(fields, &telemetry_v2_annotations(r), &|name| {
+                telemetry_v2_mirror(&resources, name)
+            });
+            if let telemetry::frames::Series::Invalid(p) = &s {
+                tokens.extend(p.iter().map(|p| p.reason.as_str()));
+            }
+            telemetry_series_json(&s)
+        } else {
+            telemetry_declaration_json(&telemetry_declaration(r))
+        };
+        let what = format!("{}: {}", case["note"], case["resource"]);
+        expect(case, got, &what);
+    }
+    for token in [
+        "series_value",
+        "series_field",
+        "kind_value",
+        "unit_value",
+        "semantic_value",
+        "mirror_missing",
+        "mirror_invalid",
+        "kind_missing",
+        "not_a_carrier",
+    ] {
+        assert!(tokens.contains(token), "no case is invalid by {token}");
+    }
+    let dir = profiles().join("telemetry/conformance");
+    for case in doc["contracts"].as_array_mut().expect("contracts") {
+        let file = case["contract"].as_str().expect("contract").to_owned();
+        let l = zenkey_model::contract::load_path(&dir.join(&file));
+        assert!(
+            l.report.0.is_empty(),
+            "{file}: no finding at all:\n{}",
+            l.report
+        );
+        let c = l
+            .contract
+            .unwrap_or_else(|| panic!("{file}:\n{}", l.report));
+        assert!(telemetry::uses_v2(&c), "{file} uses telemetry.v2");
+        let got: serde_json::Map<String, Value> = c
+            .resources
+            .iter()
+            .map(|r| {
+                let read = match telemetry::frames::series_of(&c, r) {
+                    Some(s) => telemetry_series_json(&s),
+                    None => telemetry_declaration_json(&telemetry::declaration_of(&c, r)),
+                };
+                (r.template.as_str().to_owned(), read)
+            })
+            .collect();
+        expect(case, Value::Object(got), &file);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// A layout of `telemetry/conformance/v2/`: its record type, its `frame`
+/// table resolved as a contract's is, and its `series` read against the
+/// file's `resources`, which must be declared.
+fn telemetry_v2_layouts(
+    doc: &Value,
+) -> BTreeMap<
+    String,
+    (
+        zenkey_model::frame::Layout,
+        Vec<telemetry::frames::FieldSeries>,
+    ),
+> {
+    use zenkey_model::authoring::FrameSpec;
+    use zenkey_model::frame::{FrameParams, Layout};
+    let read = zenkey_model::packed::PackedDoc::read(&doc["schema"]);
+    assert!(read.findings.is_empty(), "{:?}", read.findings);
+    let mut out = BTreeMap::new();
+    for l in doc["layouts"].as_array().expect("layouts") {
+        let name = l["name"].as_str().expect("name").to_owned();
+        let record = read.types[l["record"].as_str().expect("record")]
+            .as_ref()
+            .unwrap_or_else(|| panic!("{name}: no record layout"));
+        let spec: FrameSpec = serde_json::from_value(l["frame"].clone()).expect("a frame table");
+        let params = FrameParams::resolve(&spec).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        let layout = Layout::of(record, &params).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let ann = BTreeMap::from([(telemetry::SERIES.to_owned(), l["series"].clone())]);
+        let s = telemetry::frames::series(layout.fields(), &ann, &|m| {
+            telemetry_v2_mirror(&doc["resources"], m)
+        });
+        let series = s
+            .declared()
+            .unwrap_or_else(|| panic!("{name}: its series are declared: {s:?}"))
+            .to_vec();
+        assert!(
+            out.insert(name, (layout, series)).is_none(),
+            "a layout's name once"
+        );
+    }
+    out
+}
+
+/// A frame of `telemetry/conformance/v2/`: its stamp and its body, read
+/// from `hex` and checked against its `value` (core §7.7's
+/// `frame/bodies.json` spelling). A bless writes `hex` from `value`.
+fn telemetry_v2_frame(
+    f: &mut Value,
+    l: &zenkey_model::frame::Layout,
+    what: &str,
+) -> (zenkey_model::wire::Stamp, zenkey_model::frame::Frame) {
+    use zenkey_model::frame::Frame;
+    use zenkey_model::packed::DEFAULT_EPOCH;
+    use zenkey_model::wire::{Run, Seq, Stamp};
+    let epoch = Some(DEFAULT_EPOCH);
+    let run = Run::from_hex(f["run"].as_str().expect("run")).expect("a run");
+    let seq = Seq::new(u32::try_from(f["seq"].as_u64().expect("seq")).unwrap()).expect("a seq");
+    if bless() {
+        let written = Frame::from_json(&f["value"], l, epoch)
+            .and_then(|x| x.write(l))
+            .unwrap_or_else(|e| panic!("{what}: {e}"));
+        f["hex"] = written
+            .bytes
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+            .into();
+    }
+    let body = unhex(f["hex"].as_str().expect("hex"));
+    let frame = Frame::parse(l.tag(), &body, l).unwrap_or_else(|e| panic!("{what}: {e}"));
+    assert_eq!(
+        frame.read_json(l, epoch).unwrap(),
+        f["value"],
+        "{what}: its value"
+    );
+    (Stamp { run, seq }, frame)
+}
+
+/// A reading as `telemetry/conformance/v2/readings.json` spells it.
+fn telemetry_reading_json(r: &telemetry::frames::FieldReading) -> Value {
+    use telemetry::frames::FieldReading as R;
+    match r {
+        R::Sample(v) => {
+            json!({"reading": r.as_str(), "kind": v.measure.kind().as_str(), "value": v.json})
+        }
+        R::Held { value, within } => json!({
+            "reading": r.as_str(),
+            "state": if *within { "within" } else { "known" },
+            "value": value.json,
+        }),
+        R::Unknown(why) => json!({"reading": r.as_str(), "why": why.token()}),
+        R::Absent | R::OwnerError | R::BeyondRange | R::Unnamed => json!({"reading": r.as_str()}),
+    }
+}
+
+/// `telemetry/conformance/v2/readings.json`: a layout and one key's frames
+/// → each record's reading of each series field, by one `frames::Fold`
+/// that held nothing before the first (telemetry.v2 §2.18).
+#[test]
+fn telemetry_v2_readings() {
+    let path = profiles().join("telemetry/conformance/v2/readings.json");
+    let mut doc = read_json(&path);
+    let layouts = telemetry_v2_layouts(&doc);
+    let mut tokens = BTreeSet::new();
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let note = case["note"].to_string();
+        let (l, series) = &layouts[case["layout"].as_str().expect("layout")];
+        let mut fold = telemetry::frames::Fold::new();
+        for (i, f) in case["frames"]
+            .as_array_mut()
+            .expect("frames")
+            .iter_mut()
+            .enumerate()
+        {
+            let what = format!("{note}, frame {i}");
+            let (stamp, frame) = telemetry_v2_frame(f, l, &what);
+            let folded = fold.apply(l, series, stamp, &frame, 0);
+            let records: Vec<Value> = folded
+                .records
+                .iter()
+                .map(|r| {
+                    let fields: serde_json::Map<String, Value> = r
+                        .fields
+                        .iter()
+                        .map(|s| {
+                            tokens.insert(s.reading.as_str());
+                            (
+                                series[s.series].field.clone(),
+                                telemetry_reading_json(&s.reading),
+                            )
+                        })
+                        .collect();
+                    json!({"seq": r.seq.get(), "fields": fields})
+                })
+                .collect();
+            let mut got = json!({"follows": folded.applied.follows.token(), "records": records});
+            if let zenkey_model::frame::Follows::Gap { lost } = folded.applied.follows {
+                got["lost"] = lost.into();
+            }
+            expect(f, got, &what);
+        }
+    }
+    for token in [
+        "sample",
+        "held",
+        "absent",
+        "owner_error",
+        "beyond_range",
+        "unnamed",
+        "unknown",
+    ] {
+        assert!(tokens.contains(token), "no field reads {token}");
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// `telemetry/conformance/v2/continuity.json`: a layout and one key's
+/// frames, each with its arrival → every pair its counter series form, in
+/// order: the two samples, the pair's continuity, how its epoch was had,
+/// and its rate with its time basis (telemetry.v2 §2.19 to §2.21).
+#[test]
+fn telemetry_v2_continuity() {
+    let path = profiles().join("telemetry/conformance/v2/continuity.json");
+    let mut doc = read_json(&path);
+    let layouts = telemetry_v2_layouts(&doc);
+    let mut seen = BTreeSet::new();
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let note = case["note"].to_string();
+        let (l, series) = &layouts[case["layout"].as_str().expect("layout")];
+        let mut fold = telemetry::frames::Fold::new();
+        let mut pairs = Vec::new();
+        for (i, f) in case["frames"]
+            .as_array_mut()
+            .expect("frames")
+            .iter_mut()
+            .enumerate()
+        {
+            let what = format!("{note}, frame {i}");
+            let (stamp, frame) = telemetry_v2_frame(f, l, &what);
+            let arrival = f["arrival_ns"].as_i64().map_or(0, i128::from);
+            let folded = fold.apply(l, series, stamp, &frame, arrival);
+            for (j, r) in folded.records.iter().enumerate() {
+                for s in &r.fields {
+                    let Some((at, p)) = &s.pair else { continue };
+                    let (epoch, via) = match p.basis {
+                        None => (None, None),
+                        Some(telemetry::Basis::Assumed) => (Some("assumed"), None),
+                        Some(telemetry::Basis::Established(v)) => {
+                            (Some("established"), Some(v.as_str()))
+                        }
+                    };
+                    let rate = p.rate.as_ref().ok();
+                    seen.insert(p.continuity.as_str());
+                    seen.extend(rate.and_then(|r| r.basis).map(|b| b.as_str()));
+                    seen.extend(p.rate.as_ref().err().map(|n| n.as_str()));
+                    pairs.push(json!({
+                        "field": series[s.series].field,
+                        "earlier": {"frame": at.frame, "record": at.record},
+                        "later": {"frame": i, "record": j},
+                        "continuity": p.continuity.as_str(),
+                        "why": p.unobservable(),
+                        "epoch": epoch,
+                        "via": via,
+                        "rate": rate.map(|r| r.per_s),
+                        "rate_unit": rate.and_then(|r| r.unit.clone()),
+                        "elapsed_ns": rate.map(|r| i64::try_from(r.elapsed_ns).expect("an i64")),
+                        "time_basis": rate.and_then(|r| r.basis).map(|b| b.as_str()),
+                        "jitter_ms": rate.and_then(|r| match r.basis {
+                            Some(telemetry::TimeBasis::Scheduled { jitter_ms }) => Some(jitter_ms),
+                            _ => None,
+                        }),
+                        "no_rate": p.rate.as_ref().err().map(|n| n.as_str()),
+                    }));
+                }
+            }
+        }
+        expect(case, Value::Array(pairs), &note);
+    }
+    for token in [
+        "same_epoch",
+        "reset",
+        "decreased",
+        "unobservable",
+        "measured",
+        "scheduled",
+        "arrival",
+        "wrap_or_decrease",
+        "elapsed",
+    ] {
+        assert!(seen.contains(token), "no pair reads {token}");
     }
     if bless() {
         write_json(&path, &doc);

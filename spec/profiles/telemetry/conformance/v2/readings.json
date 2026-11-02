@@ -1,0 +1,1236 @@
+{
+  "cases": [
+    {
+      "frames": [
+        {
+          "expect": {
+            "follows": "first",
+            "records": [
+              {
+                "fields": {
+                  "dropped": {
+                    "kind": "counter",
+                    "reading": "sample",
+                    "value": 7
+                  },
+                  "duty_available": {
+                    "kind": "gauge",
+                    "reading": "sample",
+                    "value": 1
+                  },
+                  "duty_wait_ms": {
+                    "kind": "gauge",
+                    "reading": "sample",
+                    "value": "1500"
+                  },
+                  "queue_depth": {
+                    "kind": "gauge",
+                    "reading": "sample",
+                    "value": 12
+                  }
+                },
+                "seq": 12
+              }
+            ]
+          },
+          "hex": "00000e103eb00000007819c003c0",
+          "run": "0001",
+          "seq": 12,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "dropped": 7,
+                  "duty_available": 1,
+                  "duty_wait_ms": "1500",
+                  "queue_depth": 12
+                }
+              }
+            ],
+            "time": {
+              "ms": 250,
+              "s": 3600
+            }
+          }
+        }
+      ],
+      "layout": "link",
+      "note": "a keyframe: every series field included with a value is a sample, a fixed gauge's value its decimal string (§2.18)"
+    },
+    {
+      "frames": [
+        {
+          "expect": {
+            "follows": "first",
+            "records": [
+              {
+                "fields": {
+                  "dropped": {
+                    "reading": "absent"
+                  },
+                  "duty_available": {
+                    "kind": "gauge",
+                    "reading": "sample",
+                    "value": 0
+                  },
+                  "duty_wait_ms": {
+                    "reading": "beyond_range"
+                  },
+                  "queue_depth": {
+                    "reading": "beyond_range"
+                  }
+                },
+                "seq": 0
+              }
+            ]
+          },
+          "hex": "00000e10002fff7fffc0",
+          "run": "0001",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [
+                  "dropped"
+                ],
+                "full": true,
+                "values": {
+                  "duty_available": 0,
+                  "duty_wait_ms": "out_of_range",
+                  "queue_depth": "out_of_range"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 3600
+            }
+          }
+        }
+      ],
+      "layout": "link",
+      "note": "no value: a field included absent reads absent, out_of_range beyond_range; none is a sample, none is 0"
+    },
+    {
+      "frames": [
+        {
+          "expect": {
+            "follows": "first",
+            "records": [
+              {
+                "fields": {
+                  "frames_total": {
+                    "kind": "counter",
+                    "reading": "sample",
+                    "value": 10
+                  },
+                  "temperature": {
+                    "kind": "gauge",
+                    "reading": "sample",
+                    "value": "20"
+                  }
+                },
+                "seq": 0
+              }
+            ]
+          },
+          "hex": "000000640020000000000000014f00",
+          "run": "0001",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 10,
+                  "temperature": "20"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 100
+            }
+          }
+        },
+        {
+          "expect": {
+            "follows": "continues",
+            "records": [
+              {
+                "fields": {
+                  "frames_total": {
+                    "kind": "counter",
+                    "reading": "sample",
+                    "value": 11
+                  },
+                  "temperature": {
+                    "reading": "held",
+                    "state": "within",
+                    "value": "20"
+                  }
+                },
+                "seq": 1
+              }
+            ]
+          },
+          "hex": "0000006500100000000000000058",
+          "run": "0001",
+          "seq": 1,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": false,
+                "values": {
+                  "frames_total": 11
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 101
+            }
+          }
+        },
+        {
+          "expect": {
+            "follows": "continues",
+            "records": [
+              {
+                "fields": {
+                  "frames_total": {
+                    "reading": "held",
+                    "state": "known",
+                    "value": 11
+                  },
+                  "temperature": {
+                    "reading": "absent"
+                  }
+                },
+                "seq": 2
+              }
+            ]
+          },
+          "hex": "00000066000ff8",
+          "run": "0001",
+          "seq": 2,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": false,
+                "values": {
+                  "temperature": "not_available"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 102
+            }
+          }
+        },
+        {
+          "expect": {
+            "follows": "continues",
+            "records": [
+              {
+                "fields": {
+                  "frames_total": {
+                    "kind": "counter",
+                    "reading": "sample",
+                    "value": 12
+                  },
+                  "temperature": {
+                    "reading": "owner_error"
+                  }
+                },
+                "seq": 3
+              }
+            ]
+          },
+          "hex": "0000006700180000000000000067f0",
+          "run": "0001",
+          "seq": 3,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": false,
+                "values": {
+                  "frames_total": 12,
+                  "temperature": "error"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 103
+            }
+          }
+        },
+        {
+          "expect": {
+            "follows": "continues",
+            "records": [
+              {
+                "fields": {
+                  "frames_total": {
+                    "kind": "counter",
+                    "reading": "sample",
+                    "value": 12
+                  },
+                  "temperature": {
+                    "kind": "gauge",
+                    "reading": "sample",
+                    "value": "21"
+                  }
+                },
+                "seq": 4
+              }
+            ]
+          },
+          "hex": "000000680020000000000000018f40",
+          "run": "0001",
+          "seq": 4,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 12,
+                  "temperature": "21"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 104
+            }
+          }
+        }
+      ],
+      "layout": "totals",
+      "note": "an omitted field holds a value and is no sample: held known by no change, held within its deadband; not_available reads absent, error owner_error; a keyframe's unchanged count is a sample"
+    },
+    {
+      "frames": [
+        {
+          "expect": {
+            "follows": "first",
+            "records": [
+              {
+                "fields": {
+                  "frames_total": {
+                    "kind": "counter",
+                    "reading": "sample",
+                    "value": 10
+                  },
+                  "temperature": {
+                    "kind": "gauge",
+                    "reading": "sample",
+                    "value": "20"
+                  }
+                },
+                "seq": 0
+              }
+            ]
+          },
+          "hex": "000000640020000000000000014f00",
+          "run": "0001",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 10,
+                  "temperature": "20"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 100
+            }
+          }
+        },
+        {
+          "expect": {
+            "follows": "gap",
+            "lost": 1,
+            "records": [
+              {
+                "fields": {
+                  "frames_total": {
+                    "reading": "unknown",
+                    "why": "gap"
+                  },
+                  "temperature": {
+                    "kind": "gauge",
+                    "reading": "sample",
+                    "value": "21"
+                  }
+                },
+                "seq": 2
+              }
+            ]
+          },
+          "hex": "00000066000bd0",
+          "run": "0001",
+          "seq": 2,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": false,
+                "values": {
+                  "temperature": "21"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 102
+            }
+          }
+        },
+        {
+          "expect": {
+            "follows": "continues",
+            "records": [
+              {
+                "fields": {
+                  "frames_total": {
+                    "kind": "counter",
+                    "reading": "sample",
+                    "value": 15
+                  },
+                  "temperature": {
+                    "kind": "gauge",
+                    "reading": "sample",
+                    "value": "21"
+                  }
+                },
+                "seq": 3
+              }
+            ]
+          },
+          "hex": "00000067002000000000000001ef40",
+          "run": "0001",
+          "seq": 3,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 15,
+                  "temperature": "21"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 103
+            }
+          }
+        }
+      ],
+      "layout": "totals",
+      "note": "a lost record: an omitted field is unknown (gap), never its last value nor 0, until it is included again"
+    },
+    {
+      "frames": [
+        {
+          "expect": {
+            "follows": "first",
+            "records": [
+              {
+                "fields": {
+                  "frames_total": {
+                    "kind": "counter",
+                    "reading": "sample",
+                    "value": 3
+                  },
+                  "temperature": {
+                    "reading": "unknown",
+                    "why": "first"
+                  }
+                },
+                "seq": 5
+              }
+            ]
+          },
+          "hex": "0000006900100000000000000018",
+          "run": "0001",
+          "seq": 5,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": false,
+                "values": {
+                  "frames_total": 3
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 105
+            }
+          }
+        }
+      ],
+      "layout": "totals",
+      "note": "a reader's first frame is a delta: an omitted field is unknown (first)"
+    },
+    {
+      "frames": [
+        {
+          "expect": {
+            "follows": "first",
+            "records": [
+              {
+                "fields": {
+                  "frames_total": {
+                    "kind": "counter",
+                    "reading": "sample",
+                    "value": 10
+                  },
+                  "temperature": {
+                    "kind": "gauge",
+                    "reading": "sample",
+                    "value": "20"
+                  }
+                },
+                "seq": 0
+              }
+            ]
+          },
+          "hex": "000000640020000000000000014f00",
+          "run": "0001",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 10,
+                  "temperature": "20"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 100
+            }
+          }
+        },
+        {
+          "expect": {
+            "follows": "continues",
+            "records": [
+              {
+                "fields": {
+                  "frames_total": {
+                    "kind": "counter",
+                    "reading": "sample",
+                    "value": 11
+                  },
+                  "temperature": {
+                    "reading": "held",
+                    "state": "within",
+                    "value": "20"
+                  }
+                },
+                "seq": 1
+              }
+            ]
+          },
+          "hex": "0000006500100000000000000058",
+          "run": "0001",
+          "seq": 1,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": false,
+                "values": {
+                  "frames_total": 11
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 101
+            }
+          }
+        },
+        {
+          "expect": {
+            "follows": "continues",
+            "records": [
+              {
+                "fields": {
+                  "frames_total": {
+                    "kind": "counter",
+                    "reading": "sample",
+                    "value": 12
+                  },
+                  "temperature": {
+                    "reading": "held",
+                    "state": "within",
+                    "value": "20"
+                  }
+                },
+                "seq": 2
+              }
+            ]
+          },
+          "hex": "0000006600100000000000000060",
+          "run": "0001",
+          "seq": 2,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": false,
+                "values": {
+                  "frames_total": 12
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 102
+            }
+          }
+        },
+        {
+          "expect": {
+            "follows": "continues",
+            "records": [
+              {
+                "fields": {
+                  "frames_total": {
+                    "kind": "counter",
+                    "reading": "sample",
+                    "value": 13
+                  },
+                  "temperature": {
+                    "reading": "unknown",
+                    "why": "deadband"
+                  }
+                },
+                "seq": 3
+              }
+            ]
+          },
+          "hex": "0000006700100000000000000068",
+          "run": "0001",
+          "seq": 3,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": false,
+                "values": {
+                  "frames_total": 13
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 103
+            }
+          }
+        }
+      ],
+      "layout": "totals",
+      "note": "past the deadband: within for fewer than max_records records after a value, then unknown (deadband)"
+    },
+    {
+      "frames": [
+        {
+          "expect": {
+            "follows": "first",
+            "records": [
+              {
+                "fields": {
+                  "frames_total": {
+                    "kind": "counter",
+                    "reading": "sample",
+                    "value": 10
+                  },
+                  "temperature": {
+                    "reading": "absent"
+                  }
+                },
+                "seq": 0
+              }
+            ]
+          },
+          "hex": "000000640020000000000000015fe0",
+          "run": "0001",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 10,
+                  "temperature": "not_available"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 100
+            }
+          }
+        },
+        {
+          "expect": {
+            "follows": "continues",
+            "records": [
+              {
+                "fields": {
+                  "frames_total": {
+                    "kind": "counter",
+                    "reading": "sample",
+                    "value": 11
+                  },
+                  "temperature": {
+                    "reading": "unknown",
+                    "why": "no_value"
+                  }
+                },
+                "seq": 1
+              }
+            ]
+          },
+          "hex": "0000006500100000000000000058",
+          "run": "0001",
+          "seq": 1,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": false,
+                "values": {
+                  "frames_total": 11
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 101
+            }
+          }
+        }
+      ],
+      "layout": "totals",
+      "note": "after an inclusion that was no value, a deadband field omitted is unknown (no_value), never held"
+    },
+    {
+      "frames": [
+        {
+          "expect": {
+            "follows": "first",
+            "records": [
+              {
+                "fields": {
+                  "count": {
+                    "kind": "counter",
+                    "reading": "sample",
+                    "value": 5
+                  },
+                  "level": {
+                    "kind": "gauge",
+                    "reading": "sample",
+                    "value": -70
+                  },
+                  "mode": {
+                    "kind": "text",
+                    "reading": "sample",
+                    "value": "rx"
+                  },
+                  "ratio": {
+                    "kind": "gauge",
+                    "reading": "sample",
+                    "value": "0.25"
+                  },
+                  "up": {
+                    "kind": "boolean",
+                    "reading": "sample",
+                    "value": true
+                  }
+                },
+                "seq": 0
+              },
+              {
+                "fields": {
+                  "count": {
+                    "reading": "held",
+                    "state": "known",
+                    "value": 5
+                  },
+                  "level": {
+                    "reading": "absent"
+                  },
+                  "mode": {
+                    "reading": "unnamed"
+                  },
+                  "ratio": {
+                    "reading": "held",
+                    "state": "known",
+                    "value": "0.25"
+                  },
+                  "up": {
+                    "kind": "boolean",
+                    "reading": "sample",
+                    "value": false
+                  }
+                },
+                "seq": 1
+              }
+            ]
+          },
+          "hex": "6553f10000300058c66b2a9f8800f6adfd80",
+          "run": "0001",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "at": 1700000000123,
+                  "count": 5,
+                  "level": -70,
+                  "mode": "rx",
+                  "ratio": "0.25",
+                  "up": true
+                }
+              },
+              {
+                "absent": [],
+                "at": "scheduled",
+                "full": false,
+                "values": {
+                  "level": "not_available",
+                  "mode": null,
+                  "up": false
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 1700000000
+            }
+          }
+        }
+      ],
+      "layout": "mixed",
+      "note": "every carrier: a counter, an int and a fixed gauge, a boolean and a text are samples; then not_available absent, the escape unnamed, and the unchanged fields held; the time field is no series"
+    },
+    {
+      "frames": [
+        {
+          "expect": {
+            "follows": "first",
+            "records": [
+              {
+                "fields": {
+                  "frames_total": {
+                    "kind": "counter",
+                    "reading": "sample",
+                    "value": 1000
+                  },
+                  "temperature": {
+                    "kind": "gauge",
+                    "reading": "sample",
+                    "value": "20"
+                  }
+                },
+                "seq": 10
+              }
+            ]
+          },
+          "hex": "0000006400200000000000007d0f00",
+          "run": "0001",
+          "seq": 10,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 1000,
+                  "temperature": "20"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 100
+            }
+          }
+        },
+        {
+          "expect": {
+            "follows": "rewind",
+            "records": [
+              {
+                "fields": {
+                  "frames_total": {
+                    "kind": "counter",
+                    "reading": "sample",
+                    "value": 4
+                  },
+                  "temperature": {
+                    "reading": "unknown",
+                    "why": "rewind"
+                  }
+                },
+                "seq": 0
+              }
+            ]
+          },
+          "hex": "000000c800100000000000000020",
+          "run": "0001",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": false,
+                "values": {
+                  "frames_total": 4
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 200
+            }
+          }
+        }
+      ],
+      "layout": "totals",
+      "note": "a rewind: a seq of the run held, older than the one expected; an omitted field is unknown (rewind)"
+    },
+    {
+      "frames": [
+        {
+          "expect": {
+            "follows": "first",
+            "records": [
+              {
+                "fields": {
+                  "frames_total": {
+                    "kind": "counter",
+                    "reading": "sample",
+                    "value": 1000
+                  },
+                  "temperature": {
+                    "kind": "gauge",
+                    "reading": "sample",
+                    "value": "20"
+                  }
+                },
+                "seq": 0
+              }
+            ]
+          },
+          "hex": "0000006400200000000000007d0f00",
+          "run": "0001",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": true,
+                "values": {
+                  "frames_total": 1000,
+                  "temperature": "20"
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 100
+            }
+          }
+        },
+        {
+          "expect": {
+            "follows": "run",
+            "records": [
+              {
+                "fields": {
+                  "frames_total": {
+                    "kind": "counter",
+                    "reading": "sample",
+                    "value": 4
+                  },
+                  "temperature": {
+                    "reading": "unknown",
+                    "why": "run"
+                  }
+                },
+                "seq": 0
+              }
+            ]
+          },
+          "hex": "000000c800100000000000000020",
+          "run": "0002",
+          "seq": 0,
+          "value": {
+            "records": [
+              {
+                "absent": [],
+                "full": false,
+                "values": {
+                  "frames_total": 4
+                }
+              }
+            ],
+            "time": {
+              "ms": 0,
+              "s": 200
+            }
+          }
+        }
+      ],
+      "layout": "totals",
+      "note": "another run: an omitted field is unknown (run)"
+    }
+  ],
+  "description": "telemetry.v2 §2.18: one key's frames, read in the order they arrive by one reader that held nothing before the first → each record's reading of each series field. `schema` is a packed document (core §7.6). Each layout names a record type of it, its `frame` table as a contract writes it (core §7.7's defaults for what it omits), and its `telemetry.series` value, whose mirrors name `resources` (as declarations.json writes them); every layout's series are declared. Each frame is its envelope's `run` (4 or 8 lowercase hex digits) and `seq` (record 0's), its body (`hex`, under the layout's tag) and that body's value (core's frame/bodies.json spelling) → `expect`: `follows` (core's frame/apply.json token, with `lost` for a gap) and each record's `seq` and `fields`, one member per series field by name, its reading: {reading: sample, kind, value} (the record included the field with a code that is a value: value is core §7.6's JSON reading, a fixed field's decimal string); {reading: held, state, value} (the record omitted it, and it holds a value: state known, by no change since its inclusion, or within its deadband); {reading: absent} (included absent, or holding not_available); {reading: owner_error} (error); {reading: beyond_range} (out_of_range); {reading: unnamed} (an enum's escape); {reading: unknown, why} (its state unknown, why core's frame/apply.json token). Only a sample is a value a pair or a rate may read.",
+  "layouts": [
+    {
+      "frame": {
+        "records": 1
+      },
+      "name": "link",
+      "record": "Link",
+      "series": {
+        "dropped": "sdu/dropped_total",
+        "duty_available": {
+          "kind": "gauge",
+          "unit": "1"
+        },
+        "duty_wait_ms": {
+          "kind": "gauge",
+          "unit": "ms"
+        },
+        "queue_depth": {
+          "kind": "gauge",
+          "unit": "1"
+        }
+      }
+    },
+    {
+      "frame": {
+        "deadband": {
+          "temperature": {
+            "delta": "1",
+            "max_records": 3
+          }
+        },
+        "keyframe_every": 4,
+        "records": 1
+      },
+      "name": "totals",
+      "record": "Totals",
+      "series": {
+        "frames_total": {
+          "kind": "counter",
+          "unit": "1"
+        },
+        "temperature": {
+          "kind": "gauge",
+          "semantic": "temperature",
+          "unit": "Cel"
+        }
+      }
+    },
+    {
+      "frame": {
+        "records": 2,
+        "step_ms": 1000
+      },
+      "name": "mixed",
+      "record": "Mixed",
+      "series": {
+        "count": {
+          "kind": "counter",
+          "unit": "By"
+        },
+        "level": {
+          "kind": "gauge",
+          "unit": "dBm"
+        },
+        "mode": {
+          "kind": "text",
+          "semantic": "state"
+        },
+        "ratio": {
+          "kind": "gauge",
+          "semantic": "ratio",
+          "unit": "1"
+        },
+        "up": {
+          "kind": "boolean"
+        }
+      }
+    }
+  ],
+  "resources": [
+    {
+      "annotations": {
+        "telemetry.kind": "counter",
+        "telemetry.unit": "1"
+      },
+      "attachment": null,
+      "frame": false,
+      "kind": "stream",
+      "template": "sdu/dropped_total",
+      "type": {
+        "kind": "jsonschema",
+        "name": "Count",
+        "root": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+      }
+    }
+  ],
+  "schema": {
+    "description": "telemetry.v2's frames: modem.v3's link readings, a 64-bit total beside a temperature, a 24-bit byte counter, and a record of every carrier",
+    "types": {
+      "Bytes": {
+        "fields": [
+          {
+            "name": "rx",
+            "type": "counter",
+            "width": 24
+          }
+        ]
+      },
+      "Link": {
+        "fields": [
+          {
+            "name": "dropped",
+            "optional": true,
+            "type": "counter",
+            "width": 32
+          },
+          {
+            "maximum": 1022,
+            "minimum": 0,
+            "name": "queue_depth",
+            "optional": true,
+            "reserved": [
+              "out_of_range"
+            ],
+            "type": "int"
+          },
+          {
+            "maximum": 1,
+            "minimum": 0,
+            "name": "duty_available",
+            "optional": true,
+            "type": "int"
+          },
+          {
+            "maximum": "3600000",
+            "minimum": "0",
+            "name": "duty_wait_ms",
+            "optional": true,
+            "reserved": [
+              "out_of_range"
+            ],
+            "resolution": "100",
+            "type": "fixed"
+          }
+        ]
+      },
+      "Mixed": {
+        "fields": [
+          {
+            "name": "count",
+            "type": "counter",
+            "width": 16
+          },
+          {
+            "maximum": -20,
+            "minimum": -140,
+            "name": "level",
+            "reserved": [
+              "not_available"
+            ],
+            "type": "int"
+          },
+          {
+            "maximum": "1",
+            "minimum": "0",
+            "name": "ratio",
+            "resolution": "0.01",
+            "type": "fixed"
+          },
+          {
+            "name": "up",
+            "type": "bool"
+          },
+          {
+            "escape": true,
+            "name": "mode",
+            "type": "enum",
+            "values": [
+              "idle",
+              "rx",
+              "tx"
+            ]
+          },
+          {
+            "ms": true,
+            "name": "at",
+            "type": "time"
+          }
+        ]
+      },
+      "Totals": {
+        "fields": [
+          {
+            "name": "frames_total",
+            "type": "counter",
+            "width": 64
+          },
+          {
+            "maximum": "85",
+            "minimum": "-40",
+            "name": "temperature",
+            "reserved": [
+              "not_available",
+              "error"
+            ],
+            "resolution": "0.5",
+            "type": "fixed"
+          }
+        ]
+      }
+    }
+  }
+}

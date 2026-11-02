@@ -1,0 +1,1638 @@
+{
+  "cases": [
+    {
+      "expect": {
+        "declaration": "declared",
+        "series": [
+          {
+            "field": "dropped",
+            "kind": "counter",
+            "mirror": "sdu/dropped_total",
+            "semantic": null,
+            "unit": null,
+            "width": 32
+          },
+          {
+            "field": "queue_depth",
+            "kind": "gauge",
+            "mirror": "sched/queue_depth",
+            "semantic": null,
+            "unit": "1",
+            "width": null
+          },
+          {
+            "field": "duty_available",
+            "kind": "gauge",
+            "mirror": null,
+            "semantic": null,
+            "unit": "1",
+            "width": null
+          },
+          {
+            "field": "duty_wait_ms",
+            "kind": "gauge",
+            "mirror": null,
+            "semantic": null,
+            "unit": "ms",
+            "width": null
+          }
+        ]
+      },
+      "note": "modem.v3's frames/link: two mirrors and two inline series, each field a series in field order; a mirror lends its kind and unit, here none for sdu/dropped_total (§2.16)",
+      "resource": {
+        "annotations": {
+          "link.exposure": "link",
+          "telemetry.series": {
+            "dropped": "sdu/dropped_total",
+            "duty_available": {
+              "kind": "gauge",
+              "unit": "1"
+            },
+            "duty_wait_ms": {
+              "kind": "gauge",
+              "unit": "ms"
+            },
+            "queue_depth": "sched/queue_depth"
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "declared",
+        "series": [
+          {
+            "field": "count",
+            "kind": "counter",
+            "mirror": null,
+            "semantic": null,
+            "unit": "By",
+            "width": 16
+          },
+          {
+            "field": "level",
+            "kind": "gauge",
+            "mirror": null,
+            "semantic": null,
+            "unit": "dBm",
+            "width": null
+          },
+          {
+            "field": "ratio",
+            "kind": "gauge",
+            "mirror": null,
+            "semantic": "ratio",
+            "unit": "1",
+            "width": null
+          },
+          {
+            "field": "up",
+            "kind": "boolean",
+            "mirror": null,
+            "semantic": null,
+            "unit": null,
+            "width": null
+          },
+          {
+            "field": "mode",
+            "kind": "text",
+            "mirror": null,
+            "semantic": "state",
+            "unit": null,
+            "width": null
+          }
+        ]
+      },
+      "note": "every carrier inline: counter on counter (its width), gauge on int and on fixed, boolean on bool, text on enum; the time field is named by no entry, so no series",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "count": {
+              "kind": "counter",
+              "unit": "By"
+            },
+            "level": {
+              "kind": "gauge",
+              "unit": "dBm"
+            },
+            "mode": {
+              "kind": "text",
+              "semantic": "state"
+            },
+            "ratio": {
+              "kind": "gauge",
+              "semantic": "ratio",
+              "unit": "1"
+            },
+            "up": {
+              "kind": "boolean"
+            }
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Mixed",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "declared",
+        "series": [
+          {
+            "field": "count",
+            "kind": "counter",
+            "mirror": "pt/counter",
+            "semantic": null,
+            "unit": "By",
+            "width": 16
+          },
+          {
+            "field": "level",
+            "kind": "gauge",
+            "mirror": "sched/queue_depth",
+            "semantic": null,
+            "unit": "1",
+            "width": null
+          },
+          {
+            "field": "ratio",
+            "kind": "gauge",
+            "mirror": "air/temperature",
+            "semantic": "temperature",
+            "unit": "Cel",
+            "width": null
+          },
+          {
+            "field": "up",
+            "kind": "boolean",
+            "mirror": "link/up",
+            "semantic": null,
+            "unit": null,
+            "width": null
+          },
+          {
+            "field": "mode",
+            "kind": "text",
+            "mirror": "link/mode",
+            "semantic": "state",
+            "unit": null,
+            "width": null
+          }
+        ]
+      },
+      "note": "every carrier by a mirror: a state mirror lends its semantic, and a Point that declares its kind lends it, with its unit",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "count": "pt/counter",
+            "level": "sched/queue_depth",
+            "mode": "link/mode",
+            "ratio": "air/temperature",
+            "up": "link/up"
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Mixed",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "declared",
+        "series": [
+          {
+            "field": "dropped",
+            "kind": "counter",
+            "mirror": null,
+            "semantic": null,
+            "unit": null,
+            "width": 32
+          }
+        ]
+      },
+      "note": "only the named fields are series; a unit no entry gives is unknown, null",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "dropped": {
+              "kind": "counter"
+            }
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "declared",
+        "series": [
+          {
+            "field": "dropped",
+            "kind": "counter",
+            "mirror": null,
+            "semantic": null,
+            "unit": "1",
+            "width": 32
+          },
+          {
+            "field": "queue_depth",
+            "kind": "gauge",
+            "mirror": null,
+            "semantic": null,
+            "unit": "By/s",
+            "width": null
+          }
+        ]
+      },
+      "note": "the series are listed in field order, whatever the table's order",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "dropped": {
+              "kind": "counter",
+              "unit": "1"
+            },
+            "queue_depth": {
+              "kind": "gauge",
+              "unit": "By/s"
+            }
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "ignored"
+      },
+      "note": "no telemetry.series, and v1's keys on a frame resource: ignored, never read as a declaration (§2.16)",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter",
+          "telemetry.unit": "1"
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "not_this_profiles"
+      },
+      "note": "no key of the vocabulary: not this profile's",
+      "resource": {
+        "annotations": {
+          "link.exposure": "link"
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "declared",
+        "series": [
+          {
+            "field": "queue_depth",
+            "kind": "gauge",
+            "mirror": null,
+            "semantic": null,
+            "unit": "1",
+            "width": null
+          }
+        ]
+      },
+      "note": "[defaults.stream] spreads v1's keys to a frame resource: they mean nothing there, and its series are its table's",
+      "resource": {
+        "frame": true,
+        "kind": "stream",
+        "layers": {
+          "defaults": {},
+          "kind_defaults": {
+            "telemetry.kind": "gauge",
+            "telemetry.unit": "%"
+          },
+          "resource": {
+            "telemetry.series": {
+              "queue_depth": {
+                "kind": "gauge",
+                "unit": "1"
+              }
+            }
+          }
+        },
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": null,
+            "reason": "series_value"
+          }
+        ]
+      },
+      "note": "the annotation is a string, not a table: series_value on the whole, nothing else checked",
+      "resource": {
+        "annotations": {
+          "telemetry.series": "dropped"
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": null,
+            "reason": "series_value"
+          }
+        ]
+      },
+      "note": "an empty table declares no series: series_value on the whole",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {}
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": null,
+            "reason": "series_value"
+          }
+        ]
+      },
+      "note": "an array is not a table: series_value on the whole",
+      "resource": {
+        "annotations": {
+          "telemetry.series": [
+            {
+              "dropped": "sdu/dropped_total"
+            }
+          ]
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "drops",
+            "reason": "series_field"
+          }
+        ]
+      },
+      "note": "an entry naming no field: series_field",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "drops": {
+              "kind": "counter"
+            }
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "nope",
+            "reason": "series_field"
+          },
+          {
+            "entry": "nope",
+            "reason": "mirror_missing"
+          }
+        ]
+      },
+      "note": "an entry naming no field, its mirror naming no resource: series_field, then mirror_missing",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "nope": "x/y"
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "dropped",
+            "reason": "series_value"
+          }
+        ]
+      },
+      "note": "an entry that is neither a string nor a table: series_value, the later checks skipped",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "dropped": 3
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "dropped",
+            "reason": "series_value"
+          }
+        ]
+      },
+      "note": "an array entry: series_value",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "dropped": [
+              "counter"
+            ]
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "dropped",
+            "reason": "series_value"
+          }
+        ]
+      },
+      "note": "an inline series holding a member other than kind, unit and semantic: series_value, its kind still checked",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "dropped": {
+              "buckets": [
+                1,
+                2
+              ],
+              "kind": "counter"
+            }
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "dropped",
+            "reason": "series_value"
+          },
+          {
+            "entry": "dropped",
+            "reason": "not_a_carrier"
+          }
+        ]
+      },
+      "note": "a histogram's buckets inline: series_value, and no field carries a histogram: not_a_carrier",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "dropped": {
+              "buckets": [
+                1,
+                2
+              ],
+              "kind": "histogram"
+            }
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "dropped",
+            "reason": "kind_value"
+          },
+          {
+            "entry": "dropped",
+            "reason": "unit_value"
+          },
+          {
+            "entry": "dropped",
+            "reason": "semantic_value"
+          }
+        ]
+      },
+      "note": "three wrong values, each checked alone: kind_value, unit_value, semantic_value; not_a_carrier skipped, the kind being wrong",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "dropped": {
+              "kind": "bool",
+              "semantic": "speed",
+              "unit": "m s"
+            }
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "dropped",
+            "reason": "unit_value"
+          }
+        ]
+      },
+      "note": "an empty unit is no unit: unit_value",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "dropped": {
+              "kind": "counter",
+              "unit": ""
+            }
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "dropped",
+            "reason": "kind_missing"
+          }
+        ]
+      },
+      "note": "an inline series with no kind: kind_missing",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "dropped": {
+              "unit": "1"
+            }
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "dropped",
+            "reason": "kind_missing"
+          }
+        ]
+      },
+      "note": "a mirror that declares no kind, a Point with no telemetry.kind: kind_missing",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "dropped": "pt/reading"
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "dropped",
+            "reason": "mirror_missing"
+          }
+        ]
+      },
+      "note": "a mirror naming an event, which is no metric resource: mirror_missing",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "dropped": "ev/occurred"
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "dropped",
+            "reason": "mirror_missing"
+          }
+        ]
+      },
+      "note": "a mirror naming a stream with no key of the vocabulary: mirror_missing",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "dropped": "plain/notes"
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "dropped",
+            "reason": "mirror_missing"
+          }
+        ]
+      },
+      "note": "a mirror naming a template with a parameter: mirror_missing",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "dropped": "sdu/endpoint/{endpoint}/rx_total"
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "dropped",
+            "reason": "mirror_missing"
+          }
+        ]
+      },
+      "note": "a mirror naming another frame resource: mirror_missing",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "dropped": "frames/other"
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "dropped",
+            "reason": "mirror_missing"
+          }
+        ]
+      },
+      "note": "a mirror naming a template that two kind tokens declare: mirror_missing",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "dropped": "dup/total"
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "dropped",
+            "reason": "mirror_missing"
+          }
+        ]
+      },
+      "note": "a mirror is compared byte for byte with the templates: a trailing slash names none, mirror_missing",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "dropped": "sdu/dropped_total/"
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "dropped",
+            "reason": "mirror_invalid"
+          }
+        ]
+      },
+      "note": "a mirror whose own declaration is invalid (kind_value): mirror_invalid",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "dropped": "bad/kind"
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "dropped",
+            "reason": "mirror_invalid"
+          }
+        ]
+      },
+      "note": "a mirror whose own declaration is invalid (not_a_carrier): mirror_invalid",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "dropped": "bad/carrier"
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "queue_depth",
+            "reason": "not_a_carrier"
+          }
+        ]
+      },
+      "note": "a counter mirrored onto an int field: not_a_carrier",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "queue_depth": "sdu/dropped_total"
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "dropped",
+            "reason": "not_a_carrier"
+          }
+        ]
+      },
+      "note": "a gauge on a counter field: not_a_carrier",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "dropped": {
+              "kind": "gauge"
+            }
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "mode",
+            "reason": "not_a_carrier"
+          }
+        ]
+      },
+      "note": "a boolean on an enum field: not_a_carrier",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "mode": {
+              "kind": "boolean"
+            }
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Mixed",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "up",
+            "reason": "not_a_carrier"
+          }
+        ]
+      },
+      "note": "a text on a bool field: not_a_carrier",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "up": {
+              "kind": "text"
+            }
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Mixed",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "at",
+            "reason": "not_a_carrier"
+          }
+        ]
+      },
+      "note": "a time field carries no kind: not_a_carrier",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "at": {
+              "kind": "gauge",
+              "unit": "ms"
+            }
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Mixed",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "count",
+            "reason": "not_a_carrier"
+          }
+        ]
+      },
+      "note": "no field carries binary: not_a_carrier",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "count": {
+              "kind": "binary"
+            }
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Mixed",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "count",
+            "reason": "not_a_carrier"
+          }
+        ]
+      },
+      "note": "a histogram mirror: no field carries one, not_a_carrier",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "count": "hist/latency"
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Mixed",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "declaration": "invalid",
+        "reasons": [
+          {
+            "entry": "Dropped",
+            "reason": "series_field"
+          },
+          {
+            "entry": "Dropped",
+            "reason": "series_value"
+          },
+          {
+            "entry": "dropped",
+            "reason": "not_a_carrier"
+          }
+        ]
+      },
+      "note": "one invalid entry makes the whole invalid, every entry's reasons listed in byte order of its key (Dropped before dropped), the valid entries giving none",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "Dropped": 1,
+            "dropped": {
+              "kind": "gauge"
+            },
+            "duty_available": "sched/queue_depth",
+            "queue_depth": {
+              "kind": "gauge"
+            }
+          }
+        },
+        "frame": true,
+        "kind": "stream",
+        "record": "Link",
+        "template": "frames/x"
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "counter",
+        "semantic": null,
+        "unit": null
+      },
+      "note": "a resource that is no frame resource reads as telemetry.v1 says (§2.1 to §2.15): a bare counter",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "counter"
+        },
+        "attachment": null,
+        "frame": false,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "declaration": "not_this_profiles"
+      },
+      "note": "telemetry.series on a resource that is no frame resource means nothing: with no other key, not this profile's",
+      "resource": {
+        "annotations": {
+          "telemetry.series": {
+            "dropped": {
+              "kind": "counter"
+            }
+          }
+        },
+        "attachment": null,
+        "frame": false,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Counter",
+          "root": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "bare",
+        "declaration": "declared",
+        "epoch": null,
+        "kind": "gauge",
+        "semantic": null,
+        "unit": "Cel"
+      },
+      "note": "telemetry.series on a resource that is no frame resource means nothing: its other keys declare it, as v1 §2.2 reads them",
+      "resource": {
+        "annotations": {
+          "telemetry.kind": "gauge",
+          "telemetry.series": "anything",
+          "telemetry.unit": "Cel"
+        },
+        "attachment": null,
+        "frame": false,
+        "kind": "state",
+        "type": {
+          "kind": "jsonschema",
+          "name": "Measure",
+          "root": {
+            "type": "number"
+          },
+          "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+        }
+      }
+    },
+    {
+      "expect": {
+        "buckets": null,
+        "carrier": "point",
+        "declaration": "declared",
+        "epoch": "point",
+        "kind": null,
+        "semantic": null,
+        "unit": null
+      },
+      "note": "the Point, read as v1 reads it",
+      "resource": {
+        "annotations": {},
+        "attachment": null,
+        "frame": false,
+        "kind": "stream",
+        "type": {
+          "kind": "jsonschema",
+          "name": "telemetry.v1.Point",
+          "root": null,
+          "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+        }
+      }
+    }
+  ],
+  "contracts": [
+    {
+      "contract": "contracts/meterframe.v1.toml",
+      "expect": {
+        "frames/bytes": {
+          "declaration": "declared",
+          "series": [
+            {
+              "field": "rx",
+              "kind": "counter",
+              "mirror": null,
+              "semantic": null,
+              "unit": "By",
+              "width": 24
+            }
+          ]
+        },
+        "frames/link": {
+          "declaration": "declared",
+          "series": [
+            {
+              "field": "dropped",
+              "kind": "counter",
+              "mirror": "sdu/dropped_total",
+              "semantic": null,
+              "unit": "1",
+              "width": 32
+            },
+            {
+              "field": "queue_depth",
+              "kind": "gauge",
+              "mirror": null,
+              "semantic": null,
+              "unit": "1",
+              "width": null
+            },
+            {
+              "field": "duty_available",
+              "kind": "gauge",
+              "mirror": null,
+              "semantic": null,
+              "unit": "1",
+              "width": null
+            },
+            {
+              "field": "duty_wait_ms",
+              "kind": "gauge",
+              "mirror": null,
+              "semantic": null,
+              "unit": "ms",
+              "width": null
+            }
+          ]
+        },
+        "frames/totals": {
+          "declaration": "declared",
+          "series": [
+            {
+              "field": "frames_total",
+              "kind": "counter",
+              "mirror": null,
+              "semantic": null,
+              "unit": "1",
+              "width": 64
+            },
+            {
+              "field": "temperature",
+              "kind": "gauge",
+              "mirror": null,
+              "semantic": "temperature",
+              "unit": "Cel",
+              "width": null
+            }
+          ]
+        },
+        "sdu/dropped_total": {
+          "buckets": null,
+          "carrier": "bare",
+          "declaration": "declared",
+          "epoch": null,
+          "kind": "counter",
+          "semantic": null,
+          "unit": "1"
+        }
+      },
+      "note": "the scenarios' contract: three frame resources, one of them mirroring the bare counter, all declared"
+    }
+  ],
+  "description": "telemetry.v2 §2.1 to §2.16: what a reader reads of a resource. `schema` is a packed document (core §7.6) whose record types the frame resources name. `resources` is the interface's other resources, each as telemetry.v1's declarations.json writes one (kind, annotations, type, attachment), with its `template` and `frame` (true for a frame resource); a template holds a parameter when it holds `{`. A case's resource is a frame resource (`frame` true: its record type, `record`, and its resolved annotations, given or merged from `layers` {defaults, kind_defaults, resource}, resource over kind_defaults over defaults) or any other (`frame` false: as telemetry.v1's declarations.json writes it, and expected as that file expects it). A frame resource's expect.declaration is one of: \"not_this_profiles\" (no telemetry.series, and none of telemetry.kind, unit, buckets, semantic); \"ignored\" (no telemetry.series, and one of those four); \"declared\", with `series`, one per entry in field order: `field`, `kind`, `unit`, `semantic` (each null when no entry gives it), `mirror` (the template it names, null inline) and `width` (a counter field's, else null); or \"invalid\", with `reasons`, each {entry, reason}: entry null for the annotation whole (series_value: not a table, or an empty one; nothing else checked), then each entry in byte order of its key, its reasons in this order: series_field (names no field), series_value (neither a string nor a table, or a table holding a member other than kind, unit and semantic; neither skips the rest), kind_value, unit_value, semantic_value (an inline member present whose value is not one, as telemetry.v1 §2.2 says), mirror_missing (the string names no resource of `resources`, or two, a frame resource, a template with a parameter, or a resource whose telemetry.v1 declaration is not_this_profiles or ignored), mirror_invalid (that declaration is invalid), kind_missing (an inline series with no kind, or a mirror declaring none), not_a_carrier (a kind given, and the field's type cannot carry it: counter on counter, gauge on int or fixed, boolean on bool, text on enum, nothing else). `contracts` reads each resource of a contract under `conformance/`, by its template: a frame resource's series as above, any other's telemetry.v1 declaration.",
+  "resources": [
+    {
+      "annotations": {
+        "telemetry.kind": "counter"
+      },
+      "attachment": null,
+      "frame": false,
+      "kind": "stream",
+      "template": "sdu/dropped_total",
+      "type": {
+        "kind": "jsonschema",
+        "name": "Counter",
+        "root": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+      }
+    },
+    {
+      "annotations": {
+        "telemetry.kind": "gauge",
+        "telemetry.unit": "1"
+      },
+      "attachment": null,
+      "frame": false,
+      "kind": "stream",
+      "template": "sched/queue_depth",
+      "type": {
+        "kind": "jsonschema",
+        "name": "Gauge",
+        "root": {
+          "type": "integer"
+        },
+        "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+      }
+    },
+    {
+      "annotations": {
+        "telemetry.kind": "gauge",
+        "telemetry.semantic": "temperature",
+        "telemetry.unit": "Cel"
+      },
+      "attachment": null,
+      "frame": false,
+      "kind": "state",
+      "template": "air/temperature",
+      "type": {
+        "kind": "jsonschema",
+        "name": "Measure",
+        "root": {
+          "type": "number"
+        },
+        "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+      }
+    },
+    {
+      "annotations": {
+        "telemetry.kind": "boolean"
+      },
+      "attachment": null,
+      "frame": false,
+      "kind": "stream",
+      "template": "link/up",
+      "type": {
+        "kind": "jsonschema",
+        "name": "Up",
+        "root": {
+          "type": "boolean"
+        },
+        "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+      }
+    },
+    {
+      "annotations": {
+        "telemetry.kind": "text",
+        "telemetry.semantic": "state"
+      },
+      "attachment": null,
+      "frame": false,
+      "kind": "stream",
+      "template": "link/mode",
+      "type": {
+        "kind": "jsonschema",
+        "name": "Mode",
+        "root": {
+          "type": "string"
+        },
+        "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+      }
+    },
+    {
+      "annotations": {
+        "telemetry.kind": "counter",
+        "telemetry.unit": "By"
+      },
+      "attachment": null,
+      "frame": false,
+      "kind": "stream",
+      "template": "pt/counter",
+      "type": {
+        "kind": "jsonschema",
+        "name": "telemetry.v1.Point",
+        "root": null,
+        "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+      }
+    },
+    {
+      "annotations": {},
+      "attachment": null,
+      "frame": false,
+      "kind": "stream",
+      "template": "pt/reading",
+      "type": {
+        "kind": "jsonschema",
+        "name": "telemetry.v1.Point",
+        "root": null,
+        "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+      }
+    },
+    {
+      "annotations": {
+        "telemetry.buckets": [
+          0.01,
+          0.1
+        ],
+        "telemetry.kind": "histogram",
+        "telemetry.unit": "s"
+      },
+      "attachment": null,
+      "frame": false,
+      "kind": "stream",
+      "template": "hist/latency",
+      "type": {
+        "kind": "jsonschema",
+        "name": "telemetry.v1.Point",
+        "root": null,
+        "schema": "sha256:715ce537b2150beb3863f0e5cd356281357f7ec56d93625ee64e14f0045629e9"
+      }
+    },
+    {
+      "annotations": {
+        "telemetry.kind": "bool"
+      },
+      "attachment": null,
+      "frame": false,
+      "kind": "stream",
+      "template": "bad/kind",
+      "type": {
+        "kind": "jsonschema",
+        "name": "Up",
+        "root": {
+          "type": "boolean"
+        },
+        "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+      }
+    },
+    {
+      "annotations": {
+        "telemetry.kind": "counter"
+      },
+      "attachment": null,
+      "frame": false,
+      "kind": "stream",
+      "template": "bad/carrier",
+      "type": {
+        "kind": "jsonschema",
+        "name": "Up",
+        "root": {
+          "type": "boolean"
+        },
+        "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+      }
+    },
+    {
+      "annotations": {},
+      "attachment": null,
+      "frame": false,
+      "kind": "stream",
+      "template": "plain/notes",
+      "type": {
+        "kind": "jsonschema",
+        "name": "Note",
+        "root": {
+          "type": "string"
+        },
+        "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+      }
+    },
+    {
+      "annotations": {
+        "telemetry.kind": "counter"
+      },
+      "attachment": null,
+      "frame": false,
+      "kind": "event",
+      "template": "ev/occurred",
+      "type": {
+        "kind": "jsonschema",
+        "name": "Counter",
+        "root": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+      }
+    },
+    {
+      "annotations": {
+        "telemetry.kind": "counter"
+      },
+      "attachment": null,
+      "frame": false,
+      "kind": "stream",
+      "template": "sdu/endpoint/{endpoint}/rx_total",
+      "type": {
+        "kind": "jsonschema",
+        "name": "Counter",
+        "root": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+      }
+    },
+    {
+      "annotations": {
+        "telemetry.series": {
+          "dropped": {
+            "kind": "counter"
+          }
+        }
+      },
+      "frame": true,
+      "kind": "stream",
+      "record": "Link",
+      "template": "frames/other"
+    },
+    {
+      "annotations": {
+        "telemetry.kind": "counter"
+      },
+      "attachment": null,
+      "frame": false,
+      "kind": "stream",
+      "template": "dup/total",
+      "type": {
+        "kind": "jsonschema",
+        "name": "Counter",
+        "root": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+      }
+    },
+    {
+      "annotations": {
+        "telemetry.kind": "counter"
+      },
+      "attachment": null,
+      "frame": false,
+      "kind": "state",
+      "template": "dup/total",
+      "type": {
+        "kind": "jsonschema",
+        "name": "Counter",
+        "root": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schema": "sha256:f1a81aab079c9f7687c81575c52a9e79e8c01c24ee4ef4c86b5b2565294dbc32"
+      }
+    }
+  ],
+  "schema": {
+    "description": "telemetry.v2's declarations: modem.v3's link readings, and a record of every field type",
+    "types": {
+      "Link": {
+        "fields": [
+          {
+            "name": "dropped",
+            "optional": true,
+            "type": "counter",
+            "width": 32
+          },
+          {
+            "maximum": 1022,
+            "minimum": 0,
+            "name": "queue_depth",
+            "optional": true,
+            "reserved": [
+              "out_of_range"
+            ],
+            "type": "int"
+          },
+          {
+            "maximum": 1,
+            "minimum": 0,
+            "name": "duty_available",
+            "optional": true,
+            "type": "int"
+          },
+          {
+            "maximum": "3600000",
+            "minimum": "0",
+            "name": "duty_wait_ms",
+            "optional": true,
+            "reserved": [
+              "out_of_range"
+            ],
+            "resolution": "100",
+            "type": "fixed"
+          }
+        ]
+      },
+      "Mixed": {
+        "fields": [
+          {
+            "name": "count",
+            "type": "counter",
+            "width": 16
+          },
+          {
+            "maximum": -20,
+            "minimum": -140,
+            "name": "level",
+            "reserved": [
+              "not_available"
+            ],
+            "type": "int"
+          },
+          {
+            "maximum": "1",
+            "minimum": "0",
+            "name": "ratio",
+            "resolution": "0.01",
+            "type": "fixed"
+          },
+          {
+            "name": "up",
+            "type": "bool"
+          },
+          {
+            "escape": true,
+            "name": "mode",
+            "type": "enum",
+            "values": [
+              "idle",
+              "rx",
+              "tx"
+            ]
+          },
+          {
+            "ms": true,
+            "name": "at",
+            "type": "time"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,8 +1,95 @@
-# `telemetry.v1` changelog
+# `telemetry` changelog
 
-Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
-what deliberately did not, and why. A breaking change is a new major, a new
-file, never an entry here ([`../README.md`](../README.md)).
+Versions of the texts of [`v1.md`](v1.md) (`telemetry.v1`) and
+[`v2.md`](v2.md) (`telemetry.v2`). Each entry records what changed, what
+deliberately did not, and why. A breaking change is a new major, a new
+file, never an entry here ([`../README.md`](../README.md)). An entry
+headed `telemetry.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
+`v1.md`'s.
+
+## telemetry.v2 0.1 — 2026-11-02: a frame's fields as metric series (#983, T1)
+
+Core 0.83 defined frames (§7.7), and 0.87 has owners write them. A frame
+carries packed records, and `telemetry.v1` reads no packed type: it read
+a frame resource as no metric resource. This text binds a frame's fields
+to metric series. It is #983's first chunk, T1, written against core
+0.87, and the design is the one posted on #983.
+
+**Why a new id.** Core §10 allows one major of a profile per contract
+(E002). A contract keeps its JSON streams for host tools and gains frames
+for a radio, so one text must read both. So `telemetry.v2` restates
+`telemetry.v1` 0.7's §2.1 to §2.15 by reference, word for word, on every
+resource that is no frame resource. A reader of `telemetry.v1` alone
+reads a frame resource as no metric resource, never under v1's epoch
+rules.
+
+**Added, on a frame resource:**
+- **§2.16, `telemetry.series`:** one entry per series field, a mirror (a
+  non-frame metric resource of the interface with no parameter, which
+  lends its kind, unit and semantic) or an inline `{kind, unit,
+  semantic}`. v1's four keys mean nothing there. A field's packed type
+  carries the kind: `counter`, `int` or `fixed` for a gauge, `bool`,
+  `enum`. Four reasons join v1's: `series_value`, `series_field`,
+  `mirror_missing` and `mirror_invalid`.
+- **§2.17, the series:** the frame key and the field, never the mirrored
+  key. A reader never pairs a sample of a mirrored stream with one of its
+  frame.
+- **§2.18, samples:** a record that includes the field with a value. An
+  omitted field is held, no sample. `not_available`, `error`,
+  `out_of_range`, the escape and `unknown` are no value, never 0, and
+  none is a finding.
+- **§2.19, the epoch is the run:** in band always, a rewind a reset. An
+  owner writes a restarted counter under a new run, and writes no
+  decrease within one.
+- **§2.20, the width:** a narrow counter read in a serial window, d =
+  (b − a) mod 2^w. Below 2^(w−1) it is an increase; at or above it,
+  `wrap_or_decrease`, no rate. At 64 bits, v1's `decreased`. An owner
+  SHOULD size the width to hold an increase between two samples.
+- **§2.21, the time base:** the records' offsets within one frame, their
+  instants across two, else the arrivals. The basis is named `measured`,
+  `scheduled` or `arrival`, and a scheduled rate carries its bound.
+
+**The defaults taken, from the design's open questions.**
+- A new id that restates v1, not v1 amended in place.
+- Mirrors beside inline series.
+- The series apart from the mirrored key.
+- A narrow counter read in its window, never every decrease as one wrap.
+- Histograms deferred: no field carries one yet.
+- A scheduled rate reported with its bound.
+- No reserved code a finding.
+
+**Readings the design left open.**
+- An enum's escape is no value (`unnamed`): its JSON reading is `null`,
+  and v1 §2.4 reads `null` as no value of any kind.
+- Each entry's reasons in one order. A mirror that declares no kind, a
+  Point with no `telemetry.kind`, is `kind_missing`. A mirror naming a
+  template two kind tokens declare is `mirror_missing`.
+- A frame resource with v1's keys and no `telemetry.series` is
+  `ignored`. `telemetry.series` on any other resource means nothing.
+- Two counter samples of two widths are incomparable, as v1 §2.10 reads
+  two kinds.
+- A pair across a rewind is formed, and is a reset, never a decrease.
+- "Could not tell" covers a series with a `wrap_or_decrease` pair and no
+  `decreased` one.
+
+**Evidence.**
+- `conformance/v2/declarations.json`: 41 cases, and the scenarios'
+  contract read whole.
+- `conformance/v2/readings.json`: 10 cases, every reading.
+- `conformance/v2/continuity.json`: 13 cases, every continuity and
+  basis.
+- `scenarios-v2.md`: §1 to §7, over `conformance/contracts/meterframe.v1.toml`.
+
+`zenkey-model/tests/profiles.rs` runs the fixtures. `telemetry.v1`'s
+fixtures are this text's evidence for §2.1 to §2.15. W105 reads §4's
+table, with `series`, for a contract that uses `telemetry.v2`.
+
+**Deliberately not changed.**
+- **`telemetry.v1`:** no rule and no fixture. Its counters are 64 bits
+  wide, and its rates name no basis.
+- **The core and the observer text:** no amendment.
+- **The status:** `experimental`. No adopter's contract uses this text
+  yet.
 
 ## 0.7 — 2026-10-30: editorial: round 87's F-339 and F-340, no rule changed (#935)
 
