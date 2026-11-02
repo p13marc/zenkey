@@ -5,34 +5,30 @@
 # file as --face-policy.
 #
 # The transport: at 540 s with 2, each reopen cost more air than the duty
-# allows. 1,080 s with 4 sends 640 keep-alives a day, 0.08 false closes a
-# day at 5 % loss. The handshake's 384 bytes take 10.5 s here, so the open,
-# accept and interests timeouts are 40 s, and a reply may take 16 full
-# batches' air, 98 s.
+# allows. 3,600 s with 4 puts the keep-alive interval at 900 s, the frame's
+# cadence, so the frame replaces every uplink keep-alive: 192 a day idle,
+# 0.02 false closes a day at 5 % loss. (#988 L5 ran 1,080 s, whose 270 s
+# interval left three keep-alives between two frames, 288 a day and 427 s
+# of air, half the duty; #991.) The handshake's 384 bytes take 10.5 s here,
+# so the open, accept and interests timeouts are 40 s, and a reply may take
+# 16 full batches' air, 98 s.
 #
-# Across the face: every frame every 15 minutes, the group frames' full
-# record at least hourly (`keyframe_s`), where zk2c fits all 73 readings at
-# 96 % of the duty. Three warnings follow from the cadence, and are the
-# medium's:
-# - `keep_alive_not_suppressed`: a 270 s keep-alive interval is below the
-#   frames' 900 s, so the uplink pays three keep-alives between two frames;
-# - `interval_over_horizon` and `horizon_under_face` on frames/link, whose
-#   150 s horizon is the contract's: at one frame every 900 s a far reader
-#   judges it stale between two, and at one every 75 s, as the horizon
-#   asks, its owner would spend more than the face affords. A horizon for
-#   the slowest crossing medium is modem.v3's to choose (#991).
-# frames/message is SBD's (`frame_unlisted`), and the chip has no ARQ
-# (`no_arq`).
+# Across the face: frames/slow every 15 minutes, a full record hourly
+# (modem.v3 3.3, #991): all 73 readings in 785 s of air a day, 91 % of the
+# duty, lora0's own in 434 s. Its 1,800 s horizon is the face's
+# `horizon_s`, so it is liveness evidence here, as 3.2's frames/link was
+# not. frames/fast and frames/paid are the faster media's and SBD's
+# (`frame_unlisted`), and the chip has no ARQ (`no_arq`).
 profile  = "link.v2"
 system   = "h-c2a95e41d7f0"
 services = ["lora0"]
 binding  = "zm-1.10.2-r1"
-catalog  = "8c808dff"
+catalog  = "e3a529fe"
 
 [transport]
-lease_ms             = 1080000
+lease_ms             = 3600000
 keep_alive           = 4
-wait_before_close_ms = 1080000
+wait_before_close_ms = 3600000
 sequence             = "16bit"
 batch_bytes          = 224          # the fragment layer's 222 B SDU and 2 B of stream framing
 open_timeout_ms      = 40000
@@ -53,15 +49,7 @@ arq              = false
 reply_timeout_ms = 120000
 horizon_s        = 1800
 
-# A group frame keyframes at least every 15 records (modem.v3), 3.75 h at
-# one every 15 minutes; the face asks every 4, hourly. frames/link is a
-# full record every frame.
+# frames/slow writes a full record at least every 4 (modem.v3), hourly at
+# one every 15 minutes, as the face asks.
 [face.lora.frames]
-"modem.v3/frames/link"   = { every_s = 900 }
-"modem.v3/frames/sdu"    = { every_s = 900, keyframe_s = 3600 }
-"modem.v3/frames/sched"  = { every_s = 900, keyframe_s = 3600 }
-"modem.v3/frames/air"    = { every_s = 900, keyframe_s = 3600 }
-"modem.v3/frames/layer"  = { every_s = 900, keyframe_s = 3600 }
-"modem.v3/frames/if"     = { every_s = 900, keyframe_s = 3600 }
-"modem.v3/frames/radio"  = { every_s = 900, keyframe_s = 3600 }
-"modem.v3/frames/bearer" = { every_s = 900, keyframe_s = 3600 }
+"modem.v3/frames/slow" = { every_s = 900, keyframe_s = 3600 }
