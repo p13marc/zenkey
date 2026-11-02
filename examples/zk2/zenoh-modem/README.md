@@ -250,11 +250,11 @@ Each of the three:
 - declares a horizon its medium can carry, so it is liveness evidence across its face (`link.v1`
   §2.12, `link.v2` §2.12).
 
-| Frame resource | Horizon | Full record | Deadbands | Faces, at their cadence |
-|---|---:|---|---|---|
-| `frames/fast` | 300 s | at least every 15 | RSSI and SNR (1 dB), the scheduler's queue (4) and lane backlog (1,024 B), the qdisc backlog (4,096 B, 4 packets), each in at least 1 record of 5 | RF and LoRa SF7, 60 s; LoRa SF9, 120 s, a full record every 15 minutes (`keyframe_s`) |
-| `frames/slow` | 1,800 s | at least every 4 | the same, in at least 1 record of 4 | LoRa SF12, 900 s: a full record hourly |
-| `frames/paid` | 3,600 s | every frame | none | SBD, 1,800 s: one paid message |
+| Frame resource | Horizon | Full record | Deadbands | Faces, at their cadence | Largest frame |
+|---|---:|---|---|---|---:|
+| `frames/fast` | 300 s | at least every 15 | RSSI and SNR (1 dB), the scheduler's queue (4) and lane backlog (1,024 B), the qdisc backlog (4,096 B, 4 packets), each in at least 1 record of 5 | RF and LoRa SF7, 60 s; LoRa SF9, 120 s, a full record every 15 minutes (`keyframe_s`) | 216 B |
+| `frames/slow` | 1,800 s | at least every 4 | the same, in at least 1 record of 4 | LoRa SF12, 900 s: a full record hourly | 216 B |
+| `frames/paid` | 3,600 s | every frame | none | SBD, 1,800 s: one paid message | 207 B |
 
 A full record with every reading present is 1,542 bits, 199 B of body: 207 B of payload after an
 envelope with a 32-bit run, 205 B with a 16-bit run. That is `frames/paid`'s largest frame
@@ -274,7 +274,20 @@ and a delta 39 B.
   401 KB a day on RF with all 73 present, and 164 % and 241 % of LoRa's duty at SF9 and SF12
   (below).
 
-An owner lists them unavailable, and no face lets them cross.
+An owner lists them unavailable, and no face lets them cross. Their largest frames, as `link.v1`
+0.16 §2.8 reads them (a 32-bit run, delta records where `keyframe_every` allows them), are 3.2's:
+
+| Frame resource | Record type · fields | Frame | Largest frame |
+|---|---|---|---:|
+| `frames/link` | `LinkReadings` · the four link readings, 63 bits, core §7.7's fixtures' `Link` | `keyframe_every = 1`; `freshness.ttl_s = 150` | 22 B |
+| `frames/sdu` | `Sdu` · the 9 `sdu/` counters | `keyframe_every = 15` | 52 B |
+| `frames/sched` | `Sched` · the 6 `sched/` readings | `keyframe_every = 15` | 33 B |
+| `frames/air` | `Air` · the 10 `air/` readings | `keyframe_every = 15` | 50 B |
+| `frames/layer` | `Layer` · the 23 `layer/` readings | `keyframe_every = 15` | 109 B |
+| `frames/if` | `If` · the 11 `if/` readings | `keyframe_every = 15` | 60 B |
+| `frames/radio` | `Radio` · the 6 `radio/` readings | `keyframe_every = 15` | 22 B |
+| `frames/bearer` | `Bearer` · the 8 `link/` readings | `keyframe_every = 15` | 33 B |
+| `frames/message` | `Message` · all 73, counters at 24 bits | `keyframe_every = 1` | 213 B |
 
 #### The ranges, from zenoh-modem's code
 

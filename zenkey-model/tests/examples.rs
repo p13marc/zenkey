@@ -110,13 +110,24 @@ fn every_example_contract_validates_fingerprints_and_bundles() {
 
 /// The streams whose `link.exposure` an example's later revision moved back
 /// to `host`, their readings crossing in a frame: `modem.v3` 3.2's four
-/// `link` streams, now in `frames/link` (#983's T4). Each is a review,
-/// `annotations_changed`, accepted when 3.2 was published.
-const HOST_AGAIN: [(&str, &str); 4] = [
+/// `link` streams, now in `frames/link` (#983's T4), and 3.3's nine
+/// deprecated frames, whose readings cross in `frames/fast`, `frames/slow`
+/// and `frames/paid` (#991). Each is a review, `annotations_changed`,
+/// accepted when its revision was published.
+const HOST_AGAIN: [(&str, &str); 13] = [
     ("zenoh-modem/modem.v3.toml", "sdu/dropped_total"),
     ("zenoh-modem/modem.v3.toml", "sched/queue_depth"),
     ("zenoh-modem/modem.v3.toml", "air/duty_cycle_available"),
     ("zenoh-modem/modem.v3.toml", "air/duty_cycle_wait_ms"),
+    ("zenoh-modem/modem.v3.toml", "frames/link"),
+    ("zenoh-modem/modem.v3.toml", "frames/sdu"),
+    ("zenoh-modem/modem.v3.toml", "frames/sched"),
+    ("zenoh-modem/modem.v3.toml", "frames/air"),
+    ("zenoh-modem/modem.v3.toml", "frames/layer"),
+    ("zenoh-modem/modem.v3.toml", "frames/if"),
+    ("zenoh-modem/modem.v3.toml", "frames/radio"),
+    ("zenoh-modem/modem.v3.toml", "frames/bearer"),
+    ("zenoh-modem/modem.v3.toml", "frames/message"),
 ];
 
 /// `examples/zk2/.history` (#618): every bundle verifies, every example's
@@ -357,9 +368,11 @@ fn the_zenoh_modem_catalog_holds_its_contracts() {
 /// Each adopter frame's largest frame, as `link.v1` §2.8 reads it for
 /// `frame_over_batch` (0.16, F-470): delta records that include every field
 /// where `keyframe_every` allows them. `examples/zk2/zenoh-modem/README.md`
-/// states `modem.v3`'s; zk2py's writer measured `frames/layer` and
-/// gendev's `frames/sample` so (round 99). `frames/message`, a full record
-/// every frame, still fits RF's 220-B batch.
+/// states `modem.v3`'s, 3.2's deprecated nine and 3.3's three (#991);
+/// zk2py's writer measured `frames/layer` and gendev's `frames/sample` so
+/// (round 99). `frames/message` and `frames/paid`, a full record every
+/// frame, and `frames/fast`, a delta of all 73 readings, fit RF's 220-B
+/// batch; only SF9's 117-B batch draws `frame_over_batch`.
 #[test]
 fn every_adopter_frame_has_its_largest_frame() {
     use std::collections::BTreeMap;
@@ -378,19 +391,25 @@ fn every_adopter_frame_has_its_largest_frame() {
     let want: BTreeMap<String, u64> = [
         ("frames/air", 50),
         ("frames/bearer", 33),
+        ("frames/fast", 216),
         ("frames/if", 60),
         ("frames/layer", 109),
         ("frames/link", 22),
         ("frames/message", 213),
+        ("frames/paid", 207),
         ("frames/radio", 22),
         ("frames/sched", 33),
         ("frames/sdu", 52),
+        ("frames/slow", 216),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_owned(), v))
     .collect();
     assert_eq!(modem, want, "zenoh-modem/README.md's payloads");
-    assert!(modem["frames/message"] <= 220, "RF's batch");
+    for f in ["frames/message", "frames/fast", "frames/paid"] {
+        assert!(modem[f] <= 220, "{f}: RF's batch");
+    }
+    assert!(modem["frames/fast"] > 117, "SF9's batch: frame_over_batch");
     let gendev = largest(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../docs/zk2/measurements/wire-baseline/contracts/gendev.v1.toml"),
