@@ -3067,15 +3067,32 @@ mod zk2fx {
         set
     }
 
-    /// The one revision `contracts()` holds of `iface`.
-    pub fn fp(iface: &str) -> String {
-        let id = iface.parse().expect("an interface");
+    /// The current revision of `iface`, as `contracts()` holds it: its
+    /// authoring file's, under a mapping of `examples/zk2/` or a profile's
+    /// standard contract. The history holds two revisions of most since
+    /// #978's F4 and F5 moved them to `freshness.v2`.
+    pub fn current(iface: &str) -> std::sync::Arc<zenkey_fleet::Revision> {
+        let id: zenkey_model::grammar::IfaceId = iface.parse().expect("an interface");
+        let (name, _) = iface.rsplit_once(".v").expect("<name>.v<N>");
+        let file = ["tcgui", "walkthrough", "zensight", "zenoh-modem"]
+            .iter()
+            .map(|d| examples().join(d).join(format!("{iface}.toml")))
+            .chain([examples().join(format!("../../spec/profiles/{name}/{iface}.toml"))])
+            .find(|p| p.is_file())
+            .unwrap_or_else(|| panic!("{iface} has an authoring file"));
+        let l = zenkey_model::contract::load_path(&file);
+        let c = l.contract.unwrap_or_else(|| panic!("{}", l.report));
+        let fp = zenkey_model::canonical::Fingerprint::of(&c).to_string();
         contracts()
             .of_iface(&id)
-            .next()
-            .unwrap_or_else(|| panic!("{iface} is published"))
-            .fingerprint()
-            .to_string()
+            .find(|r| r.fingerprint().to_string() == fp)
+            .cloned()
+            .unwrap_or_else(|| panic!("{iface} {fp} is published"))
+    }
+
+    /// The fingerprint of `iface`'s current revision.
+    pub fn fp(iface: &str) -> String {
+        current(iface).fingerprint().to_string()
     }
 
     fn fp16(iface: &str) -> String {
@@ -3146,11 +3163,11 @@ mod zk2fx {
                             {
                                 "iface": "tc.netif.v1",
                                 "contract": fp("tc.netif.v1"),
-                                "minor": 0,
+                                "minor": 1,
                                 "unavailable": [{"resource": "@op/diagnostics", "cause": "config", "reason": "disabled here"}],
                                 "cardinality": {"state/interfaces/{ns}/{iface}": 8},
                             },
-                            {"iface": "tc.netem.v1", "contract": fp("tc.netem.v1"), "minor": 0},
+                            {"iface": "tc.netem.v1", "contract": fp("tc.netem.v1"), "minor": 1},
                         ],
                         "capabilities": ["shaping"],
                     }),
@@ -3164,7 +3181,7 @@ mod zk2fx {
                     CAM,
                     json!({"interfaces": [
                         {"iface": "camera.v1", "contract": fp("camera.v1"), "minor": 0},
-                        {"iface": "health.v1", "contract": fp("health.v1"), "minor": 0, "token": false},
+                        {"iface": "health.v1", "contract": fp("health.v1"), "minor": 1, "token": false},
                     ]}),
                 ),
             ),
@@ -3198,9 +3215,7 @@ mod zk2fx {
 
     /// `schema show tc.netif.v1 bandwidth/{ns}/{iface}`.
     pub fn schema_view() -> SchemaView {
-        let set = contracts();
-        let id = "tc.netif.v1".parse().expect("iface");
-        let r = set.of_iface(&id).next().expect("published");
+        let r = current("tc.netif.v1");
         r.schema_view(Some("bandwidth/{ns}/{iface}"), true)
             .expect("the resource is declared")
     }
@@ -3209,9 +3224,7 @@ mod zk2fx {
     /// --contracts examples/zk2/.history`: one review change.
     pub fn compat_report() -> CompatReport {
         use zenkey_fleet::report::{CompatSide, ContractSource};
-        let set = contracts();
-        let id = "tc.netif.v1".parse().expect("iface");
-        let old = set.of_iface(&id).next().expect("published");
+        let old = current("tc.netif.v1");
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/cmd/fixtures/zk2/review/tc.netif.v1.toml");
         let l = zenkey_model::contract::load_path(&path);
