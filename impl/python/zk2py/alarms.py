@@ -1111,8 +1111,12 @@ class AlarmsOwner:
         return True
 
     def _resolve_key(self, key: str, held: Alarm) -> None:
-        self._put(key, self._doc(held, state=RESOLVED, observed_at_ms=None, timestamp=self._new_ts(key)))
-        self.owner.close_writer(key)  # §2.7: a resolved alarm is never confirmed
+        # §2.7: a resolved alarm is never confirmed; under freshness.v2 (0.11)
+        # "its bit is clear from its resolved put": the put and the cleared
+        # bit under the owner's one write lock, which its heartbeat takes too
+        with self.owner._writes:
+            self._put(key, self._doc(held, state=RESOLVED, observed_at_ms=None, timestamp=self._new_ts(key)))
+            self.owner.close_writer(key)
         self._delete(key)
 
     def stop_evaluating(self, rule: str, labels: dict[str, str] | None = None) -> None:
@@ -1123,9 +1127,15 @@ class AlarmsOwner:
 
     def confirm(self, rule: str, labels: dict[str, str] | None = None) -> None:
         """§2.7 (0.2): "An evaluation that finds the condition again confirms
-        it again": the document put again unchanged."""
+        it again". Under a revision using ``freshness.v1``, the document put
+        again unchanged; under ``freshness.v2`` (0.11) its bit set again, and
+        nothing put: "It never puts the document again unchanged to confirm
+        it"."""
         key = self.key_for(rule, labels)
         held = self.held[key]
+        if self.owner._covered(key) is not None:
+            self.owner.reopen_writer(key)
+            return
         payload = self.record.docs.get(key) or document_bytes(self._doc(held))
         self.owner.set_state(key, payload)
 
@@ -1323,6 +1333,8 @@ class AlarmsReader:
         self.unknown_start: dict[str, int] = {}
         self.subs: list[Any] = []
         self.seeds: dict[str, list[SeedGet]] = {}
+        #: owners whose revision uses freshness.v2, followed by heartbeat
+        self.v2: set[str] = set()
         #: losses a test notes by hand (``note_loss``): the reader's own
         #: queue overflowing, which a zenoh-python callback never does
         self.noted: list[int] = []
@@ -1385,6 +1397,9 @@ class AlarmsReader:
         sub, placed = live.watch_or_beside(self.session, f"zk2/{address}/@zk/instance/*",
                                            zenoh.handlers.Callback(got))
         self.subs.append(sub)
+        # 0.11 §2.15: an owner whose revision uses freshness.v2, as its
+        # descriptor names it, is followed by its heartbeats.
+        self._follow(address)
         pres = live.list_presence(self.session, f"zk2/{address}/@zk/instance/*")
         with self.lock:
             self.held_at_start[address] = pres.instances[0]["instance"] if pres.instances else None
@@ -1396,6 +1411,21 @@ class AlarmsReader:
                 # show it: owner_gap until a complete GET after this read.
                 self.unknown_start[address] = time.monotonic_ns()
 
+    def _follow(self, address: str) -> None:
+        """0.11: the revision of ``alarms.v1`` the owner's descriptor names;
+        where it uses ``freshness.v2``, the subscription follows the owner's
+        heartbeats covering it (``freshness.v2`` §2.5), and its window needs
+        the latest one in step (:meth:`window`)."""
+        from . import freshness_v2 as fv2
+
+        if self.session is None or address in self.v2 or not hasattr(self.subscriber, "follow"):
+            return
+        got = fv2.descriptor_revision(self.session, address, PROFILE, self.timeout)
+        if got is not None and fv2.uses_v2(got[0]):
+            self.subscriber.follow(address, got[0], got[1])
+            with self.lock:
+                self.v2.add(address)
+
     def note_loss(self) -> None:
         with self.lock:
             self.noted.append(time.monotonic_ns())
@@ -1403,6 +1433,9 @@ class AlarmsReader:
     def seed(self, address: str) -> SeedGet:
         g = seed_get(self.session, address, self.timeout)
         self.seeds.setdefault(address, []).append(g)
+        if g.complete and address in self.v2:
+            # freshness.v2 §2.5: the GET's answer replaces the view
+            self.subscriber.read_view(address, PROFILE, g.asked_ns, time.monotonic_ns(), g.replies)
         return g
 
     def gaps(self, address: str) -> list[int]:
@@ -1437,10 +1470,18 @@ class AlarmsReader:
         """§2.15's window for ``address``, judged at ``at_ns`` (now)."""
         now = time.monotonic_ns() if at_ns is None else at_ns
         lossless_qos, _ = bg.lossless(*self.qos)
-        return window_span(self.declared_ns + self.reply_timeout_ns, window_end_ns(now, *self.watch),
-                           [t for t in self.losses() if t <= now], [t for t in self.gaps(address) if t <= now],
-                           [g.asked_ns for g in self.seeds.get(address, []) if g.complete and g.asked_ns <= now],
-                           lossless_qos and self.subscriber.complete)
+        end = window_end_ns(now, *self.watch)
+        w = window_span(self.declared_ns + self.reply_timeout_ns, end,
+                        [t for t in self.losses() if t <= now], [t for t in self.gaps(address) if t <= now],
+                        [g.asked_ns for g in self.seeds.get(address, []) if g.complete and g.asked_ns <= now],
+                        lossless_qos and self.subscriber.complete)
+        if address not in self.v2:
+            return w
+        # 0.11 §2.15: "the latest heartbeat covering its alarms heard in the
+        # window is also in step with the reader's view"
+        start = end - int(w.listened_s * fr.NS)
+        return Window(w.listened_s, w.lossless, w.present_throughout,
+                      self.subscriber.in_step(address, PROFILE, f"{TOKEN}/{PREFIX}/{{alert_key}}", start))
 
     def read(self, address: str, *, get: bool = True, horizon: fr.Horizon = HORIZON,
              keys_known: Iterable[str] = ()) -> OwnerReading:
@@ -1643,6 +1684,7 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
     pres = live.list_presence(tool, f"zk2/{address}/@zk/**")
     presence = "present" if pres.instances else "absent" if pres.complete else "incomplete"
     descriptor, meta_zid = None, None
+    v2 = subscriber is not None and address in {a for a, _ in getattr(subscriber, "views", {})}
     if presence == "present":
         inst = pres.instances[0]["instance"]
         d = live.get_descriptor(tool, f"zk2/{address}/@zk/instance/{inst}", timeout=timeout)
@@ -1680,7 +1722,11 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
             for x in subscriber.of(key):
                 # core §4.2 (0.73): by the in-band stamp, the Zenoh one beside
                 if (x.stamp is not None or x.inband is not None) and x.refusal is None:
-                    cands.append((sd.Mark(x.inband, sd.Stamp.of(x.stamp)), x.kind, x.payload, x.stamp_id))
+                    # §2.14 step 5 (0.11): "Only a stamp its owner set is
+                    # attributed": a freshness.v2 owner's put carries none, so
+                    # a subscription's delivery is unattributable.
+                    sid_ = None if v2 else x.stamp_id
+                    cands.append((sd.Mark(x.inband, sd.Stamp.of(x.stamp)), x.kind, x.payload, sid_))
         if seed is not None:
             r = replies.get(key)
             if r is None:
@@ -1706,7 +1752,7 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
             else:
                 doc = decode(payload)
                 latest = "undecodable" if doc is None else doc.state
-                prev = meta_zid is not None and _zid(sid) != _zid(meta_zid)
+                prev = meta_zid is not None and sid is not None and _zid(sid) != _zid(meta_zid)
         out.readings[key] = Reading(presence, descriptor, None, obs, latest, prev,
                                     verdict.verdict == ESTABLISHED, left_out)
         out.documents[key], out.stamps[key] = doc, sid

@@ -1558,6 +1558,9 @@ class Owner:
                 # vouches for it later.
                 held.confirm = self.mint()
             self._held[key] = held
+            if key in self.closed_writers:
+                # a new writer's put: a writer closed had cleared its bit
+                self.unvouched.discard(key)
             self.closed_writers.discard(key)
             return stamp if stamp is not None else ib
 
@@ -1585,8 +1588,13 @@ class Owner:
             if att is not None:
                 kw["attachment"] = att
             self._publishers[key].delete(**kw)
-            self._held[key] = _Held(None, self._encodings[key], stamp, time.monotonic() - max(0.0, elapsed_s),
-                                    ib, att)
+            held = _Held(None, self._encodings[key], stamp, time.monotonic() - max(0.0, elapsed_s), ib, att)
+            if self._covered(key):
+                # core §4.3 "Minting" (0.85): "An owner mints one at each
+                # mutation of such a member, though its put carries none": a
+                # delete's reply_del carries it, its last confirmation (S2)
+                held.confirm = self.mint()
+            self._held[key] = held
             return stamp if stamp is not None else ib
 
     def remove_member(self, key: str) -> None:
@@ -1759,16 +1767,25 @@ class Owner:
     def close_writer(self, key: str) -> None:
         """freshness.v1 §2.4: "The re-puts stop … when its writer for that
         member closes." The owner still holds the value and answers GETs
-        with it, under its last stamp; nobody confirms it."""
+        with it, under its last stamp; nobody confirms it. Under
+        ``freshness.v2`` (round 97) the member's bit clears: its heartbeat
+        stops vouching for it (``alarms.v1`` 0.11 §2.7: "It clears the
+        alarm's bit and lets the alarm go stale"; ``health.v1`` 0.8 §2.3)."""
         with self._writes:
             self.closed_writers.add(key)
+            if self._covered(key) is not None:
+                self.unvouched.add(key)
 
     def reopen_writer(self, key: str) -> None:
         """The member's writer is back (``alarms.v1`` §2.7, 0.2: "An
         evaluation that finds the condition again confirms it again"): its
-        re-puts resume, the next one at once if its interval ran out."""
+        re-puts resume, the next one at once if its interval ran out. Under
+        ``freshness.v2`` its bit is set again: "An evaluation that finds the
+        condition again sets the bit again" (``alarms.v1`` 0.11)."""
         with self._writes:
             self.closed_writers.discard(key)
+            if self._covered(key) is not None:
+                self.unvouched.discard(key)
 
     # -- freshness.v1 §2.4 and core §4.3 -----------------------------------
 
@@ -2175,7 +2192,7 @@ class Owner:
             # as the delete's attachment", and the mutation's Zenoh
             # timestamp where it carried one.
             kw: dict[str, Any] = {} if held.stamp is None else {"timestamp": held.stamp}
-            if held.payload is not None and held.stamp is None and held.confirm is not None:
+            if held.stamp is None and held.confirm is not None:
                 # S2 (core 0.82): "The owner's reply of a member a
                 # freshness.v2 heartbeat confirms MUST carry instead that
                 # member's last confirmation".

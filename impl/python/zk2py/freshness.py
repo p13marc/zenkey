@@ -428,6 +428,11 @@ class Received:
     #: core §7.5's token where its envelope was refused (undecodable,
     #: observer §7.3): its ``payload`` empty, never read as one
     refusal: str | None = None
+    #: a ``freshness.v2`` heartbeat that confirmed the member, at its
+    #: arrival, its last put's record and stamps carried over: "its
+    #: judgement is v1's with a heartbeat counted as a confirmation"
+    #: (:meth:`Subscriber.follow`, round 97)
+    confirmation: bool = False
 
 
 class Subscriber:
@@ -471,8 +476,100 @@ class Subscriber:
         self.discarded: list[str] = []
         self.complete = True
         self.declared_ns = time.monotonic_ns()
+        self.session = session
         self.subs = [session.declare_subscriber(s, zenoh.handlers.Callback(self._received))
                      for s in ([selectors] if isinstance(selectors, str) else selectors)]
+        #: freshness.v2 (round 97): per followed owner and interface, its
+        #: view (:class:`zk2py.freshness_v2.View`), and every heartbeat read,
+        #: (arrival, the view's answer)
+        self.views: dict[tuple[str, str], Any] = {}
+        self.beats: dict[tuple[str, str], list[tuple[int, dict[str, Any]]]] = {}
+
+    def follow(self, address: str, canonical: dict[str, Any], fingerprint: str) -> None:
+        """Follow ``address``'s heartbeats covering the revision given
+        (``freshness.v2`` §2.5; ``health.v1`` 0.8, ``alarms.v1`` 0.11 and
+        ``config.v1`` 0.9 confirm their state so): a subscriber on its
+        heartbeat key, each heartbeat read by the rule's four steps over a
+        view of the members this subscription hears. A member a read
+        heartbeat confirms gets a delivery of its own, its last put's record
+        and stamps at the heartbeat's arrival (``confirmation``), so §2.5
+        judges it as v1's judgement with a heartbeat counted as a
+        confirmation; while the last read heartbeat followed a gap, every
+        member of the interface reads as after a lost delivery
+        (:meth:`observation`). No re-read is made: the readers built on this
+        subscription seed and re-read by their own S4 GETs."""
+        import zenoh
+
+        from . import freshness_v2, heartbeat
+
+        lo = heartbeat.layout_of(canonical, fingerprint)
+        k = (address, lo.interface)
+        with self.lock:
+            if k in self.views:
+                return
+            self.views[k] = freshness_v2.View(lo, [c.resource for c in lo.collections], address)
+            self.beats[k] = []
+        hb = heartbeat.heartbeat_key(*address.split("/"), lo.interface)
+        self.subs.append(self.session.declare_subscriber(
+            hb, zenoh.handlers.Callback(lambda smp, k=k: self._beat(k, smp))))
+
+    def _view_of(self, key: str) -> Any:
+        chunks = key.split("/")
+        return None if len(chunks) < 4 else self.views.get(("/".join(chunks[1:3]), chunks[3]))
+
+    def _beat(self, k: tuple[str, str], sample: Any) -> None:
+        arrival, utc = time.monotonic_ns(), time.time_ns()
+        try:
+            env = zk2c.parse(sample.payload.to_bytes(), "put")
+        except zk2c.Refused as e:
+            answer: dict[str, Any] = {"refused": e.token}
+            env = None
+        with self.lock:
+            view = self.views[k]
+            if env is not None:
+                answer = {"refused": "form"} if env.form != "heartbeat" else \
+                    view.heartbeat(env.tag, env.stamp, env.record or b"", arrival)
+            self.beats[k].append((arrival, answer))
+            for sec in answer.get("read", {}).get("sections", {}).values():
+                if not isinstance(sec, dict):
+                    continue
+                for key in sec["confirmed"]:
+                    got = self.deliveries.get(key)
+                    last = next((x for x in reversed(got or []) if x.kind == "put"), None)
+                    if last is None:
+                        continue
+                    self._record(key, Received("put", arrival, utc, last.payload, last.encoding, None, None, None,
+                                               last.inband, last.refusal, confirmation=True))
+
+    def read_view(self, address: str, iface: str, asked_ns: int, arrived_ns: int,
+                  replies: dict[str, Any]) -> None:
+        """A reader's complete S4 GET of a followed owner's collections, its
+        answer a read of each (``freshness.v2`` §2.5 "The re-read": "The
+        answer MUST then replace its view of the collection"). ``replies``
+        are :func:`zk2py.live.get_state`'s, by key."""
+        with self.lock:
+            view = self.views.get((address, iface))
+            if view is None:
+                return
+            for c in view.layout.collections:
+                ok = [(k, r.inband) for k, r in replies.items() if not r.deleted and r.refusal is None]
+                gone = [(k, r.inband) for k, r in replies.items() if r.deleted]
+                if any(view.collection_of(k) == c for k, _ in ok + gone):
+                    view.read(c.resource, asked_ns, arrived_ns, ok, gone)
+
+    def in_step(self, address: str, iface: str, resource: str, since_ns: int) -> bool:
+        """``alarms.v1`` §2.15 (0.11): whether the latest heartbeat covering
+        ``resource`` heard since ``since_ns`` was in step with the view, its
+        section's digest and live count the view's (``freshness.v2`` §2.5);
+        False when none was heard."""
+        with self.lock:
+            heard = [a for t, a in self.beats.get((address, iface), []) if t >= since_ns]
+        for a in reversed(heard):
+            secs = a.get("read", {}).get("sections")
+            if secs is None:
+                continue  # not read (another revision, refused, older): not counted
+            return isinstance(secs.get(resource), dict)
+        return False
 
     def _received(self, sample: Any) -> None:
         import zenoh
@@ -495,6 +592,9 @@ class Subscriber:
                        read.stamp, read.refusal)
         with self.lock:
             self._record(key, rec)
+            view = self._view_of(key)
+            if view is not None and not read.refused and view.collection_of(key) is not None:
+                view.mutate(key, read.stamp, arrival, kind == "put")
         if self.trust is not None and kind == "put" and stamp_ns is not None and sid is not None:
             self.trust.measure(sid, stamp_ns, utc)
 
@@ -539,7 +639,13 @@ class Subscriber:
         # A key it holds nothing of may be one the bound forgot: it has
         # listened for it, knowing nothing, only since the last forgetting.
         since = self.declared_ns if got or forgot is None else max(self.declared_ns, forgot)
-        return Subscription(now - since, self.complete, last)
+        # freshness.v2 §2.5 (round 97): "A subscriber MUST then read every
+        # member of the interface's collections as v1 §2.5 rule 3 reads a
+        # lost delivery, until a heartbeat arrives in sequence."
+        with self.lock:
+            view = self._view_of(key)
+            gap = view is not None and view.collection_of(key) is not None and view.gap
+        return Subscription(now - since, self.complete and not gap, last)
 
     def close(self) -> None:
         for s in self.subs:

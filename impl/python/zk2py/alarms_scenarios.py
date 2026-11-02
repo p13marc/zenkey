@@ -306,6 +306,11 @@ class Bus:
         time.sleep(0.2)
 
     def owner(self, address: str = ADDRESS, **kw: Any) -> Any:
+        # 0.11 (#978 F4): S follows the heartbeats of a revision that uses
+        # freshness.v2, its subscription declared before the owner starts.
+        c = kw.get("contract") or al.load()
+        if "freshness.v2" in c.canonical["uses"]:
+            self.s.follow(address, c.canonical, c.fingerprint)
         if self.mode == "zk2py":
             o: Any = PyAlarms(self.endpoint, address, **kw)
         else:
@@ -374,6 +379,33 @@ def _zid_eq(a: Any, b: Any) -> bool:
     return al._zid(a) is not None and al._zid(a) == al._zid(b)
 
 
+def _puts(xs: list[fr.Received]) -> list[fr.Received]:
+    """What the owner put or deleted, a heartbeat's confirmation set aside
+    (``fr.Received.confirmation``, 0.11)."""
+    return [x for x in xs if not x.confirmation]
+
+
+def _run_of(session: Any, address: str = ADDRESS) -> str | None:
+    """The run the owner's present instance states in its descriptor (core
+    §3.3), as 4 or 8 hex digits."""
+    from . import live
+
+    pres = live.list_presence(session, f"zk2/{address}/@zk/instance/*")
+    if not pres.instances:
+        return None
+    d = live.get_descriptor(session, f"zk2/{address}/@zk/instance/{pres.instances[0]['instance']}")
+    return None if len(d) != 1 or not d[0].ok else json.loads(d[0].payload).get("run")
+
+
+def _beats(bus: "Bus", since: int, address: str = ADDRESS) -> list[tuple[int, dict[str, Any]]]:
+    """The heartbeats covering alarms.v1 S read since ``since`` (0.11)."""
+    with bus.s.lock:
+        return [(t, a) for t, a in bus.s.beats.get((address, al.PROFILE), []) if t >= since]
+
+
+SECTION = f"{al.TOKEN}/{al.PREFIX}/{{alert_key}}"
+
+
 # -- §1 Raise ------------------------------------------------------------------------------
 
 def section1(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
@@ -395,19 +427,28 @@ def section1(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         got = bus.deliveries(k, mark)
         d = _doc(got[0]) if got else None
         g = bus.read(bus.g_session)
-        report.check(sec, "2. S receives one put on the key, stamped by the owner (core S1)",
-                     len(got) == 1 and got[0].kind == "put" and _zid_eq(got[0].stamp_id, g.meta_zid),
-                     f"{len(got)} deliveries, stamp {got[0].stamp_id if got else None}, meta.zid {g.meta_zid}, "
-                     f"act {act}")
+        run = _run_of(bus.g_session)
+        got = _puts(got)
+        # 0.11 (#978 F4): the put carries no Zenoh timestamp of the owner's
+        # (core §4.3's table); "stamped by the owner (core S1)" is its
+        # in-band stamp, under the run its descriptor states (F-459).
+        report.check(sec, "2. S receives one put on the key, stamped by the owner (core S1): its in-band stamp "
+                          "under the descriptor's run, and no Zenoh timestamp of the owner's",
+                     len(got) == 1 and got[0].kind == "put" and got[0].inband is not None
+                     and got[0].inband.run_hex() == run and not _zid_eq(got[0].stamp_id, g.meta_zid),
+                     f"{len(got)} puts, in-band {got[0].inband if got else None} (run {run}), Zenoh stamp "
+                     f"{got[0].stamp_id if got else None}, meta.zid {g.meta_zid}, act {act}")
         report.check(sec, "2. A firing, its timestamp within 1 s of the step, no observed_at_ms",
                      d is not None and d.firing and d.severity == "warning" and abs(d.timestamp - t0) <= 1000
                      and d.observed_at_ms is None, f"{d}")
         report.check(sec, "2. S reads it raised", bus.reads(k) == [al.RAISED], f"{bus.reads(k)}")
-        reply = g.stamps.get(k)
+        rg = fr.get_reading(bus.g_session, k)
         f1, _ = g.answers()[k] if k in g.readings else (None, None)
-        report.check(sec, "2. G's reply holds the same document under the same stamp (core S2)",
-                     bool(got) and reply == got[0].stamp_id and g.documents.get(k) == d,
-                     f"reply stamp {reply}, document {g.documents.get(k)}")
+        report.check(sec, "2. G's reply holds the same document under the same stamp (core S2): the put's "
+                          "in-band stamp, and the owner's Zenoh timestamp, its last confirmation (core 0.85 S2)",
+                     bool(got) and rg.inband == got[0].inband and _zid_eq(rg.stamp_id, g.meta_zid)
+                     and g.documents.get(k) == d,
+                     f"reply in-band {rg.inband}, stamp {rg.stamp_id}, document {g.documents.get(k)}")
         report.check(sec, "2. G judges yes, firing", f1 is not None and _pair(f1) == "yes, firing",
                      f1 and _pair(f1))
         mark = time.monotonic_ns()
@@ -460,26 +501,28 @@ def section2(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         report.check(sec, "2. the alert key unchanged: host.id is host-scoped (§2.2)",
                      r is not None and r.derive().key == A_KEY, r and r.derive().key)
         report.check(sec, "2. S reads it refreshed", bus.reads(k)[-1:] == [al.REFRESHED], f"{bus.reads(k)}")
+        # 0.11 (#978 F4): "The owner changes nothing for 905 s, and S judges"
+        # (here ttl + 1 s on the short copy, as §6 scales its 905 s).
         period = ttl / 2
-        wait = 455.0 if ttl == al.TTL_S else 3 * period + 0.5
+        wait = 905.0 if ttl == al.TTL_S else ttl + 1.0
         mark = time.monotonic_ns()
-        last_refresh = got[-1] if got else None
         time.sleep(wait)
-        conf = bus.deliveries(k, mark)
-        arrivals = [last_refresh.arrival_ns] + [x.arrival_ns for x in conf] if last_refresh else []
+        puts = _puts(bus.deliveries(k, mark))
+        report.check(sec, f"3. over {wait:.1f} s, S receives no put of A (freshness.v2 §2.4)", not puts,
+                     f"{len(puts)} puts")
+        beats = _beats(bus, mark)
+        arrivals = [mark] + [t for t, _ in beats]
         gaps = [(b - a) / fr.NS for a, b in zip(arrivals, arrivals[1:])]
-        report.check(sec, f"3. over {wait:.1f} s, S receives the refreshed document again, unchanged, "
-                          "observed_at_ms included", bool(conf) and all(_doc(x) == r for x in conf),
-                     f"{len(conf)} puts")
-        report.check(sec, f"3. no two deliveries more than ttl/2 ({period:g} s) apart, jitter {JITTER_S} s",
-                     bool(gaps) and max(gaps) <= period + JITTER_S, f"gaps {[round(x, 3) for x in gaps]}")
-        stamps = [(x.stamp_ns, x.stamp_id) for x in ([last_refresh] if last_refresh else []) + conf]
-        report.check(sec, "3. each under a later stamp of the same id (freshness.v1 §2.4)",
-                     len(stamps) > 1 and all(b[0] > a[0] and _zid_eq(a[1], b[1]) for a, b in zip(stamps, stamps[1:])),
-                     f"{len(stamps)} stamps")
-        n = len(conf)
-        report.check(sec, "3. S reads each confirmed", n > 0 and bus.reads(k)[-n:] == [al.CONFIRMED] * n,
-                     f"{bus.reads(k)[-n - 1:]}")
+        vouched = all(k in ((a.get("read") or {}).get("sections", {}).get(SECTION) or {}).get("confirmed", [])
+                      for _, a in beats)
+        report.check(sec, f"3. it receives a heartbeat at least every ttl/2 ({period:g} s, jitter {JITTER_S} s), "
+                          "whose alarms section vouches for A",
+                     bool(beats) and max(gaps) <= period + JITTER_S and vouched,
+                     f"{len(beats)} heartbeats, gaps {[round(x, 3) for x in gaps]}, each vouching {vouched}")
+        s_read = bus.read(bus.s_session, subscriber=bus.s, get=False, horizon=al.horizon_of(contract))
+        f1 = s_read.answers(al.horizon_of(contract)).get(k, (None, None))[0]
+        report.check(sec, f"3. at {wait:.1f} s, past the horizon, S judges A yes, firing: the heartbeats confirmed it",
+                     f1 is not None and _pair(f1) == "yes, firing", f1 and _pair(f1))
     finally:
         bus.close()
 
@@ -529,9 +572,16 @@ def section3(report: Report, mode: Any, ctx: dict[str, Any], reraise: bool = Fal
             report.check(sec, "1. S reads resolved, then retired",
                          bus.reads(k) == [al.RAISED, al.RESOLVED, al.RETIRED], f"{bus.reads(k)}")
             g = bus.read(bus.g_session)
-            report.check(sec, "2. within 1 s of the delete, G's reply holds a reply_del with the delete's stamp",
+            # 0.11: the delete carries no Zenoh timestamp of the owner's (core
+            # §4.3's table); "the delete's stamp" is its in-band stamp, its
+            # attachment, which the reply_del carries (core S2; F-459).
+            rg = fr.get_reading(bus.g_session, k)
+            report.check(sec, "2. within 1 s of the delete, G's reply holds a reply_del with the delete's stamp: its "
+                              "in-band stamp, the delete's attachment",
                          k in g.readings and g.readings[k].latest == "deleted" and dele is not None
-                         and g.stamps.get(k) == dele.stamp_id, f"latest {g.readings.get(k)}, stamp {g.stamps.get(k)}")
+                         and rg.reply == "delete" and rg.inband is not None and rg.inband == dele.inband,
+                         f"latest {g.readings.get(k) and g.readings[k].latest}, reply in-band {rg.inband}, S's "
+                         f"delete in-band {dele and dele.inband}")
             f1 = g.answers()[k][0] if k in g.readings else None
             report.check(sec, "2. G judges no, deleted", f1 is not None and _pair(f1) == "no, deleted", f1 and _pair(f1))
             if ctx.get("quick"):
@@ -651,10 +701,16 @@ def section5(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         g = bus.read(bus.g_session)
         a_new = bus.deliveries(ka, mark)
         first_a = a_new[0] if a_new else None
-        report.check(sec, "3. A firing, unchanged, timestamp t0 kept, under the new instance's stamp id",
+        new_run = _run_of(bus.g_session)
+        # 0.11: S's delivery carries no Zenoh timestamp of the owner's (core
+        # §4.3's table, §2.14 step 5): "under the new instance's stamp id" is
+        # read as its in-band stamp under the new instance's run (F-459).
+        report.check(sec, "3. A firing, unchanged, timestamp t0 kept, under the new instance's stamp: its in-band "
+                          "stamp under the new instance's run",
                      first_a is not None and _doc(first_a) is not None and _doc(first_a).firing  # type: ignore[union-attr]
-                     and _doc(first_a).timestamp == t0 and _zid_eq(first_a.stamp_id, g.meta_zid),  # type: ignore[union-attr]
-                     f"{first_a and _doc(first_a)}, stamp {first_a and first_a.stamp_id}, meta.zid {g.meta_zid}")
+                     and _doc(first_a).timestamp == t0 and first_a.inband is not None  # type: ignore[union-attr]
+                     and first_a.inband.run_hex() == new_run,
+                     f"{first_a and _doc(first_a)}, in-band {first_a and first_a.inband} (run {new_run})")
         st = at_token.get("st")
         rep_at = {} if st is None else {r.key: r for r in st.replies}
         a_at, b_at = rep_at.get(ka), rep_at.get(kb)
@@ -692,7 +748,7 @@ def section5(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
             report.check(sec, f"3. a delete of {name}'s key, which S reads retired (0.2)",
                          [x.kind for x in d] == ["delete"] and bus.reads(k) == [al.RETIRED],
                          f"{[x.kind for x in d]}, {bus.reads(k)}")
-        b = bus.deliveries(kb, mark)
+        b = _puts(bus.deliveries(kb, mark))
         report.check(sec, "3. B: a put unchanged, then a resolved put and a delete; S reads confirmed, resolved, "
                           "retired (0.2)",
                      [x.kind for x in b] == ["put", "put", "delete"] and bus.reads(kb)[-3:] == [
@@ -743,7 +799,11 @@ def section6(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         while (time.monotonic_ns() - last.arrival_ns) / fr.NS < wait:
             time.sleep(0.2)
         after = [x for x in bus.s.of(k) if x.arrival_ns > last.arrival_ns]
-        report.check(sec, "1. S receives nothing more of A", not after, f"{len(after)} more")
+        beats = _beats(bus, last.arrival_ns + 1)
+        clear = all(k not in ((a.get("read") or {}).get("sections", {}).get(SECTION) or {}).get("confirmed", [])
+                    for _, a in beats)
+        report.check(sec, "1. S receives no put of A, and heartbeats with A's bit clear (0.11)",
+                     not after and bool(beats) and clear, f"{len(after)} more, {len(beats)} heartbeats, bit clear {clear}")
         s_read = bus.read(bus.s_session, subscriber=bus.s, get=False, horizon=h)
         report.check(sec, "2. the owner's instance token is present", s_read.presence == "present", s_read.presence)
         f1, f4 = s_read.answers(h).get(k, (None, None))
@@ -1025,9 +1085,11 @@ def section10(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         c = al.any_firing("critical", [r.owner_read(h) for r in reads], scope_whole())
         report.check(sec, f"2. a window over {h.ttl_s} s, lossless, both present: at critical no, none_firing",
                      (c["answer"], c["reason"]) == (al.NO, "none_firing"), f"{c}, window {by['lab/b'].window}")
-        report.check(sec, "2. lab/b established by its window",
-                     by.get("lab/b") is not None and by["lab/b"].verdict.reason == "window",
-                     f"{by.get('lab/b') and by['lab/b'].verdict.expect()}")
+        report.check(sec, "2. lab/b established by its window, its latest heartbeat in the window in step with "
+                          "T's view: no alarm live (§2.15, 0.11)",
+                     by.get("lab/b") is not None and by["lab/b"].verdict.reason == "window"
+                     and by["lab/b"].window is not None and by["lab/b"].window.in_step is True,
+                     f"{by.get('lab/b') and by['lab/b'].verdict.expect()}, window {by.get('lab/b') and by['lab/b'].window}")
         got = report_changes(reads)
         report.check(sec, "extra (§2.16): A's confirmations since are no change to report", got == [], f"{got}")
         ob.raise_(B, "critical")
