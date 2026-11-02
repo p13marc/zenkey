@@ -11,7 +11,7 @@ templated resource no `--member` names gets two synthetic members, stated.
 
 ```console
 $ zenctl gen host-a/tc tc.netif.v1 --contracts ../examples/zk2/tcgui/tc.netif.v1.toml --member 'bandwidth/{ns}/{iface}=default/eth0' --dry-run --format table --color never
-plan: a mock owner at host-a/tc implementing tc.netif.v1@sha256:4f531ebec4c4eee0…, for 10s (seed 42)
+plan: a mock owner at host-a/tc implementing tc.netif.v1@sha256:3d688f1b0d4864a7…, for 10s (seed 42)
   zk2/host-a/tc/tc.netif.v1/@op/diagnostics [json:DiagnosticsResponse, application/json] answers calls
     ↳ answers each call with one synthesized response
   zk2/host-a/tc/tc.netif.v1/@op/interfaces/*/*/set [json:InterfaceControlResponse, application/json] answers calls
@@ -37,7 +37,7 @@ whatever `--pattern`. `tc.netem.v1`'s `applied` is `low`, one a minute.
 
 ```console
 $ zenctl gen host-a/tc tc.netem.v1 --contracts ../examples/zk2/tcgui/tc.netem.v1.toml --member 'config/{ns}/{iface}=default/eth0' --member 'plug/{ns}/{iface}=default/eth0' --member 'qdisc/{ns}/{iface}=default/eth0' --rate 10 --duration 300 --dry-run --format table --color never
-plan: a mock owner at host-a/tc implementing tc.netem.v1@sha256:30b491116ef6a534…, for 300s (seed 42)
+plan: a mock owner at host-a/tc implementing tc.netem.v1@sha256:1e7f691aeb09b124…, for 300s (seed 42)
   zk2/host-a/tc/tc.netem.v1/@op/config/*/*/set [json:TcResponse, application/json] answers calls
     ↳ answers each call with one synthesized response; served over its whole template
   zk2/host-a/tc/tc.netem.v1/@op/plug/*/*/set [json:PlugResponse, application/json] answers calls
