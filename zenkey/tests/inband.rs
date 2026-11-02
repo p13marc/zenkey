@@ -111,8 +111,9 @@ async fn the_consumer_delivers_the_record_and_counts_a_refused_envelope() {
     .await;
 
     put(&raw, ORIGIN, Run::U16(7), 3, "a plan").await;
-    // Today's JSON under `zenoh/bytes`: `{` is a reserved form. Refused,
-    // never read as a payload of today's wire.
+    // Today's JSON under `zenoh/bytes`: `{` is an error's CH, which a put
+    // does not carry (core 0.92). Refused, never read as a payload of
+    // today's wire.
     raw.put(ORIGIN, r#"{"plan":1}"#)
         .encoding(Encoding::ZENOH_BYTES)
         .await
@@ -571,8 +572,8 @@ async fn a_refused_envelope_does_not_refresh_a_consumers_freshness() {
         other => panic!("a put heard: {other:?}"),
     };
     tokio::time::sleep(Duration::from_millis(400)).await;
-    // An envelope refused (`{` is a reserved form), on the member and on a
-    // member never heard.
+    // An envelope refused (`{` is an error's CH, which a put does not
+    // carry), on the member and on a member never heard.
     const NEVER: &str = "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-03";
     for key in [ORIGIN, NEVER] {
         raw.put(key, r#"{"plan":2}"#)

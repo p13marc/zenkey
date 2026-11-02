@@ -414,7 +414,13 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   (#1011's item 3). Appendix B's "A lost declaration and a late reply",
   `scenarios/constrained.md` §8 and §9 (a proxy drops the declaration's
   batch, in process), `docs/zk2/upstream/declarations-are-never-repaired.md`;
-  230 rules.
+  230 rules. Core 0.92 (#985 C4a, for #980): §7.5 defines a call's forms,
+  a request `CH · record` (`request_run`), a value and an error (the
+  error byte, a message of up to 255 bytes cut at a character, a detail;
+  `cause`, `detail`, `extension`, `utf8`), adopted by no rule until C4c;
+  §5.1's as-of mark, §5.2's error form and a router's `Timeout`; E044
+  no longer reads an operation's types (`ok-packed-operation`);
+  `errors/forms.json`; 232 rules.
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`

@@ -1229,14 +1229,37 @@ fn envelope_carries() {
     );
 }
 
-/// `spec/conformance/envelope/vectors.json` (core §7.5, 0.72; #976): CH's
-/// three fields from one byte, and an envelope's bytes with its sample's
-/// kind → the parse or the refusal's token, the first in §7.5's order.
-/// Every header and every accepted envelope writes back to its bytes.
-/// Written by hand from the text, checked, never blessed.
+/// Bytes in lowercase hexadecimal, two digits a byte.
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// An error form's stamp, tag and error, as `errors/forms.json`'s `writes`
+/// and `reads` spell them.
+fn error_form_json(e: &zenkey_model::envelope::ErrorForm<'_>) -> Value {
+    json!({
+        "run_width": if e.stamp.run.is_wide() { 32 } else { 16 },
+        "run": e.stamp.run.value(),
+        "seq": e.stamp.seq.get(),
+        "tag": e.tag.get(),
+        "code": e.code.as_str(),
+        "cause": e.cause.map(|c| c.as_str()),
+        "message": e.message,
+        "detail": e.detail.map(hex),
+    })
+}
+
+/// `spec/conformance/envelope/vectors.json` (core §7.5, 0.72; #976; a
+/// call's forms, 0.92): CH's three fields from one byte, and an envelope's
+/// or a form's bytes with its sample → the parse or the refusal's token,
+/// the first in §7.5's order. Every header and every accepted case writes
+/// back to its bytes. Written by hand from the text, checked, never
+/// blessed.
 #[test]
 fn envelope_vectors() {
-    use zenkey_model::wire::{DeleteStamp, Envelope, Header, Stamp};
+    use zenkey_model::wire::{
+        DeleteStamp, Envelope, Header, Stamp, read_query, read_reply, read_reply_err,
+    };
     let doc = read_json(&spec().join("conformance/envelope/vectors.json"));
     let width = |h: Header| if h.wide { 32 } else { 16 };
     let parsed = |h: Header, s: Stamp, record: Value| {
@@ -1265,15 +1288,17 @@ fn envelope_vectors() {
     }
     let cases = doc["cases"].as_array().expect("cases");
     assert!(!cases.is_empty());
+    let mut samples = std::collections::BTreeSet::new();
     for case in cases {
         let note = &case["note"];
         let bytes = unhex(case["hex"].as_str().expect("hex"));
-        let got = match case["sample"].as_str() {
+        let sample = case["sample"].as_str();
+        samples.insert(sample.unwrap_or_default().to_owned());
+        let got = match sample {
             Some("put") => match Envelope::parse(&bytes) {
                 Ok(e) => {
                     assert_eq!(e.write(), bytes, "{note}: writes back");
-                    let record: String = e.record.iter().map(|b| format!("{b:02x}")).collect();
-                    parsed(e.header(), e.stamp, json!(record))
+                    parsed(e.header(), e.stamp, json!(hex(e.record)))
                 }
                 Err(r) => json!({"refused": r.token()}),
             },
@@ -1284,7 +1309,154 @@ fn envelope_vectors() {
                 }
                 Err(r) => json!({"refused": r.token()}),
             },
+            Some("query") => match read_query(&bytes) {
+                Ok(q) => {
+                    assert_eq!(q.write(), bytes, "{note}: writes back");
+                    json!({
+                        "form": q.header().form.as_str(),
+                        "run_width": null,
+                        "run": null,
+                        "seq": null,
+                        "tag": q.tag.get(),
+                        "record": hex(q.record),
+                    })
+                }
+                Err(r) => json!({"refused": r.token()}),
+            },
+            Some("reply") => match read_reply(&bytes) {
+                Ok(v) => {
+                    assert_eq!(v.write(), bytes, "{note}: writes back");
+                    parsed(v.header(), v.stamp, json!(hex(v.record)))
+                }
+                Err(r) => json!({"refused": r.token()}),
+            },
+            Some("reply_err") => match read_reply_err(&bytes) {
+                Ok(e) => {
+                    assert_eq!(e.write().as_ref(), Ok(&bytes), "{note}: writes back");
+                    let mut p = parsed(e.header(), e.stamp, Value::Null);
+                    p["error"] = json!({
+                        "code": e.code.as_str(),
+                        "cause": e.cause.map(|c| c.as_str()),
+                        "message": e.message,
+                        "detail": e.detail.map(hex),
+                    });
+                    p
+                }
+                Err(r) => json!({"refused": r.token()}),
+            },
             other => panic!("{note}: sample {other:?}"),
+        };
+        assert_eq!(case["expect"], got, "{note}");
+    }
+    assert_eq!(
+        samples.into_iter().collect::<Vec<_>>(),
+        ["delete", "put", "query", "reply", "reply_err"],
+        "every sample has cases"
+    );
+}
+
+/// `spec/conformance/errors/forms.json` (core 0.92 §7.5, §5.2 "The error
+/// form"; #980's C4a): every error byte read alone → its fields or the
+/// refusal (`bytes`); an error and its stamp → the reply error's payload,
+/// its message cut, or the writer's refusal (`writes`); a reply error's
+/// `Encoding` and payload → the error it carries, or the refusal (`reads`).
+/// Written by an independent reading of the text, checked, never blessed.
+#[test]
+fn error_forms() {
+    use zenkey_model::envelope::{Cause, Code, ErrorByte, ErrorForm};
+    use zenkey_model::wire::{Run, Seq, Stamp, Tag, read_reply_err};
+    let doc = read_json(&spec().join("conformance/errors/forms.json"));
+    assert_eq!(
+        doc["codes"],
+        json!(Code::ALL.map(Code::as_str)),
+        "§5.2's codes, in order"
+    );
+    let mut causes = vec![Value::Null];
+    causes.extend(Cause::ALL.map(|c| json!(c.as_str())));
+    assert_eq!(doc["causes"], Value::Array(causes), "none, then the causes");
+
+    let bytes = doc["bytes"].as_array().expect("bytes");
+    assert_eq!(bytes.len(), 256, "every byte");
+    for (i, case) in bytes.iter().enumerate() {
+        let byte = unhex(case["byte"].as_str().expect("byte"));
+        assert_eq!(byte, [u8::try_from(i).unwrap()], "in order");
+        let got = match ErrorByte::read(byte[0]) {
+            Ok(b) => {
+                assert_eq!(b.byte(), byte[0], "{i:02x}: writes back");
+                json!({
+                    "code": b.code.as_str(),
+                    "cause": b.cause.map(|c| c.as_str()),
+                    "detail": b.detail,
+                    "message": b.message,
+                })
+            }
+            Err(r) => json!({"refused": r.token()}),
+        };
+        assert_eq!(case["expect"], got, "byte {i:02x}");
+    }
+
+    let writes = doc["writes"].as_array().expect("writes");
+    assert!(!writes.is_empty());
+    for case in writes {
+        let note = &case["note"];
+        let v = &case["value"];
+        let run = v["run"].as_u64().expect("run");
+        let run = match v["run_width"].as_u64() {
+            Some(16) => Run::U16(u16::try_from(run).expect("a 16-bit run")),
+            Some(32) => Run::U32(u32::try_from(run).expect("a 32-bit run")),
+            other => panic!("{note}: run_width {other:?}"),
+        };
+        let seq = Seq::new(u32::try_from(v["seq"].as_u64().expect("seq")).unwrap()).expect("seq");
+        let tag = Tag::new(u8::try_from(v["tag"].as_u64().expect("tag")).unwrap()).expect("tag");
+        let code = Code::from_name(v["code"].as_str().expect("code")).expect("a code");
+        let cause = v["cause"]
+            .as_str()
+            .map(|c| Cause::from_name(c).expect("a cause"));
+        let detail = v["detail"].as_str().map(unhex);
+        let form = ErrorForm {
+            tag,
+            stamp: Stamp { run, seq },
+            code,
+            cause,
+            message: v["message"].as_str(),
+            detail: detail.as_deref(),
+        };
+        let got = match form.write() {
+            Ok(b) => {
+                // Every accepted write parses back to its value, with the
+                // message as cut.
+                let back = read_reply_err(&b).unwrap_or_else(|r| panic!("{note}: {r}"));
+                let mut want = v.clone();
+                if let Some(m) = case["expect"]
+                    .get("reads_as")
+                    .and_then(|r| r.get("message"))
+                {
+                    want["message"] = m.clone();
+                }
+                assert_eq!(error_form_json(&back), want, "{note}: reads back");
+                let mut got = json!({"hex": hex(&b)});
+                if back.message != form.message {
+                    got["reads_as"] = json!({"message": back.message});
+                }
+                got
+            }
+            Err(r) => json!({"refused": r.token()}),
+        };
+        assert_eq!(case["expect"], got, "{note}");
+    }
+
+    let reads = doc["reads"].as_array().expect("reads");
+    assert!(!reads.is_empty());
+    for case in reads {
+        let note = &case["note"];
+        let encoding = case["encoding"].as_str().expect("encoding");
+        let bytes = unhex(case["hex"].as_str().expect("hex"));
+        let got = match ErrorForm::read(encoding, &bytes) {
+            Ok(e) => {
+                assert_eq!(e.write().as_ref(), Ok(&bytes), "{note}: writes back");
+                json!({"error": error_form_json(&e)})
+            }
+            Err(r) => json!({"refused": r.token()}),
         };
         assert_eq!(case["expect"], got, "{note}");
     }
