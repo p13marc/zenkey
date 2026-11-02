@@ -29,8 +29,9 @@ Its seam crates are on crates.io for out-of-tree backends.
   v1's are in [`link.md`](link.md), a sketch now superseded by the profile
   [`link.v1`](../../../spec/profiles/link/v1.md) (#769). Since #988 L5 the routers run
   [`link.v2`](../../../spec/profiles/link/v2.md) policies, one router per medium, in
-  [`faces/`](faces/): RF, LoRa at SF7, SF9 and SF12, and SBD. `link.md`'s first note gives each
-  face's transport, the frames that cross it and its plan's warnings.
+  [`faces/`](faces/): RF, LoRa (a policy per spreading factor, SF7, SF9 and SF12), and SBD.
+  `link.md`'s first note gives each face's transport, the frames that cross it and its plan's
+  warnings.
 - What `modem-contract` becomes is in [`contract-crate.md`](contract-crate.md).
 - [`catalog.json`](catalog.json) is the deployment catalog ([core §8.6](../../../spec/core.md#86-the-deployment-catalog)),
   provisioned to rf0's host and to the ground. It indexes `modem.v3`, `config.v1` and

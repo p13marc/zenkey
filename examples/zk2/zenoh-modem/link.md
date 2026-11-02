@@ -16,8 +16,9 @@
 > | [`zenohd-lora0-sf12`](faces/zenohd-lora0-sf12.face.toml) | `lora0` | 293 | 1,080 s / 4, 1,080 s | 40 s, interests 40 s | 224 | the same eight, 900 s; the group frames' `keyframe_s` 3,600 | 1,800 | `frame_unlisted`, `keep_alive_not_suppressed`; on `frames/link`, `interval_over_horizon` and `horizon_under_face` |
 > | [`zenohd-sat0`](faces/zenohd-sat0.face.toml) | `h-71c0e2a9d4b3`, `sat0` | 2,400 | 3,600 s / 2, 3,600 s | 1,000 s | 271 | `frames/message` alone, 1,800 s | 3,600 | `frame_unlisted`, the other eight |
 >
-> Every face runs `16bit` sequence numbers. RF and LoRa lose 5 % and repair nothing, so their
-> linter also warns `no_arq`. SBD retries, so it has no loss and ARQ. What the plans say:
+> The three LoRa policies are alternatives for `lora0`'s one router, one per spreading factor. Every
+> face runs `16bit` sequence numbers. RF and LoRa lose 5 % and repair nothing, so their linter also
+> warns `no_arq`. SBD retries, so it has no loss and ARQ. What the plans say:
 > - **What crosses.** A listed frame crosses whole, never downsampled (`link.v2` §2.7, `link.v1`
 >   §2.8). Every frame a face leaves out is denied by name. So `stream:modem.v3` is the seven
 >   reading subtrees (`air`, `if`, `layer`, `link`, `radio`, `sched`, `sdu`) and `frames/message`
