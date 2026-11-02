@@ -56,8 +56,8 @@ The owner, consumer and caller sections each point to them.
 | [Caller](#caller) | 13 |
 | [Deployment](#deployment) | 17 |
 | [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 63, 25 of them a reader's |
-| [Implementation: the static rules](#implementation-the-static-rules) | 61 |
-| Every rule, once | 227 |
+| [Implementation: the static rules](#implementation-the-static-rules) | 63 |
+| Every rule, once | 229 |
 | [Rule ids](#rule-ids) | 85 |
 
 ## Owner
@@ -703,14 +703,16 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 |---|---|---|
 | [E024](core.md#71-type-identity) | The name MUST be unique across the listed packed files (E024). | `[F: contracts/e024-packed-ambiguous]` |
 | [E024](core.md#71-type-identity) | The name MUST be unique across the listed JSON Schema files (E024). | `[F: contracts/e023-type, e024-ambiguous, e025-media-param, e029-schema, e032-ref-dangling, e032-ref-outside, ok-json-qualified, ok-protobuf-well-known]` |
-| [E044](core.md#71-type-identity) | A packed type MUST be the `type` of a stream, a state or an event, never an explicit stream's (E044). | `[F: contracts/e044-packed-place, ok-packed]` |
+| [E044](core.md#71-type-identity) | A packed type MUST be the `type` of a stream that is not explicit, a state or an event, or an operation's `request`, `response`, `error` or `summary` (E044). | `[F: contracts/e044-packed-place, ok-packed, ok-packed-operation]` |
 
 ### [core §7.5 The zk2c envelope](core.md#75-the-zk2c-envelope)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§7.5](core.md#75-the-zk2c-envelope) | **Parsing.** … An implementation MUST refuse an envelope for the first of these that applies, in this order: (7 items) | `[F: envelope/vectors.json, carries.json]` |
-| [§7.5](core.md#75-the-zk2c-envelope) | Every envelope an implementation accepts MUST write back to the same bytes. | `[F: envelope/vectors.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | An implementation that writes an error MUST cut a message longer than 255 bytes to its longest prefix of whole characters within 255 bytes. | `[F: errors/forms.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | An implementation MUST NOT write an error with a cause on a code other than `unavailable`, `unavailable` without one, or a detail on a code other than `app`. | `[F: errors/forms.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | An implementation MUST refuse an envelope or a form for the first of these that applies, in this order: (9 items) | `[F: envelope/vectors.json, carries.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | Every envelope and form an implementation accepts MUST write back to the same bytes. | `[F: envelope/vectors.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | An implementation that writes a heartbeat MUST write its covered revision's tag in CH. | `[F: heartbeat/layouts.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | An implementation that writes a templated section MUST write the list only where it is shorter than the bitmap. | `[F: heartbeat/bodies.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | An implementation MUST compute a digest so. | `[F: heartbeat/digests.json]` |
@@ -889,7 +891,7 @@ MAY, and a row with no keyword, are listed here alone.
 | [E041](core.md#92-the-lints) | implementation | core §9.2 The lints | a packed field whose width is not from 1 to 64 bits, or an … |
 | [E042](core.md#92-the-lints) | implementation | core §9.2 The lints | a name repeated in a packed file … |
 | [E043](core.md#92-the-lints) | implementation | core §9.2 The lints | a packed field whose `type` names no field type of §7.6 |
-| [E044](core.md#92-the-lints) | implementation | core §9.2 The lints | a packed type with no envelope to carry it … |
+| [E044](core.md#92-the-lints) | implementation | core §9.2 The lints | a packed type with no CH to carry its tag … |
 | [E045](core.md#92-the-lints) | implementation | core §9.2 The lints | an extension marker misplaced … |
 | [E046](core.md#92-the-lints) | implementation | core §9.2 The lints | `frame` on a resource that is not a plain stream, or whose template has … |
 | [E047](core.md#92-the-lints) | implementation | core §9.2 The lints | a frame resource's type that is not packed, or a packed type with an … |

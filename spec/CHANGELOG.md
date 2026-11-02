@@ -3,6 +3,132 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.92 — 2026-11-02: a call's value and error forms defined (#980, #985)
+
+Epic #975, zk2c, makes the wire bandwidth-first. A call is still answered
+in §5.2's JSON, CBOR or protobuf envelope, 60 to 90 bytes for a refusal,
+and its request and its value carry no header. #985's design memo moved
+#980's C4 into #985, in four chunks. This version is C4a. §7.5 defines
+form 2, the value, and form 3, the error, which 0.72 reserved, and gives
+a request a header byte. No rule adopts them yet: C4b reads both wires,
+and C4c moves owners and callers onto the forms. 0.91 is held for
+another chunk.
+
+**Added: §7.5, a call's forms.**
+- **The layouts.** A request is a query's payload, `CH · record`. A value
+  is a reply's, `CH · run · seq · record`. An error is a `reply_err`'s,
+  `CH · run · seq · error`.
+- **CH.** A request and a value are form 2, and an error form 3. A
+  request's width bit is 0, since it carries no run.
+- **The tag** is the operation's `request`, `response` or `summary`
+  type's. An error's is its `error` type's, whether a detail follows or
+  not.
+- **The error** is one byte, then a message and a detail where its bits
+  say so. The byte holds the code in 3 bits, numbered in §5.2's table
+  order, and the cause in 2. Then come a detail bit, a message bit and an
+  extension bit, which is 0.
+- **A message** is a length byte and up to 255 bytes of UTF-8. **A
+  detail** is every byte after it: a value of the `error` type, as that
+  type encodes it.
+- **Writing.** A writer MUST cut a message over 255 bytes to whole
+  characters within 255 bytes. It MUST NOT write a cause, a missing
+  cause or a detail that the parse refuses.
+- **Sizes.** A refusal is 7 bytes with a 16-bit run, where §5.2's
+  envelope takes 60 to 90. A request is 1 byte over its record, and a
+  value 6, as a mutation is.
+
+**Changed: §7.5's parse.** The parser knows five samples: a put's
+payload, a delete's attachment, and a call's query, reply and
+`reply_err`. A GET's reply that represents a put is still a put, and a
+`reply_del` a delete. The refusals keep their order, with these added:
+- `sample_kind` reads the new samples. A query and a reply carry a
+  value, and a `reply_err` an error;
+- `request_run`, a request whose width bit is 1, after `tag`;
+- `short` counts an error's byte after the stamp;
+- then, on an error's byte: `cause`, `detail`, `extension`, a message
+  cut short (`short`), a message that is not UTF-8 (`utf8`), and
+  `trailing`.
+
+A value or an error on a put, or as a delete's attachment, is now
+`sample_kind`, where it was `form`. So is a JSON object there: `{` is an
+error's CH. Two forms stay reserved, 4 and 7. Every envelope and form
+accepted writes back to its bytes.
+
+**Added: §5.1, "The forms."** A value's and an error's run and seq are
+the replying instance's **as-of mark**. The run is the one it writes
+under, and the seq the last it minted for state and events under that
+run, 0 when none. A reply mints no seq, and a request carries none. An
+error's run attributes nothing: a fan-out's errors stay unattributed.
+
+**Added: §5.2, "The error form."** It carries the envelope's fields in
+bytes, under `zenoh/bytes`. Its parse refuses `cause` and `detail` as the
+envelope's decoding does, and no code is unknown. "Transport errors"
+gains a router's own reply error, the 7 bytes `Timeout` under
+`zenoh/bytes`. It is the transport's by the rule's encodings. It is no
+error form either, since `T` is a value's CH (`sample_kind`).
+
+**Added: Appendix B.** A router answers a query its timeout ends with
+`Timeout` under the empty Encoding, `zenoh/bytes` (`dispatcher/queries.rs`,
+`QueryCleanup`). The querier's session answers with `Timeout` under
+`zenoh/string`. Read from zenoh 1.10.1's source, not measured.
+
+**Changed: §7.1 and §9.2, E044 narrowed.** A packed type may be an
+operation's `request`, `response`, `error` or `summary`. Each travels in
+a form whose CH carries the tag. An explicit stream's type and an
+attachment still may not.
+
+**Changed: §12.** Parsing or writing a call's form joins the static acts,
+beside an envelope. Its rules are §7.5's, so the static sections are
+unchanged.
+
+**Decided here, where the memo left it open.**
+- **The summary type** may be packed too. The memo named the request,
+  the response and the error, but a summary reply is a value, whose CH
+  carries the tag.
+- **No seq minted yet** gives seq 0 in the as-of mark. A reader holds no
+  value of that run, so it reads nothing wrong from it.
+- **A GET's reply** that represents a put is a put to the parser, never
+  a call's reply. Only a call's replies carry a value.
+- **An empty message** is present: its bit is set and its length 0. It
+  reads back so, apart from an absent one.
+- **A message that is not UTF-8** is refused (`utf8`). The memo wrote
+  UTF-8 and named no refusal. A message its writer cut inside a
+  character is one.
+- **The order.** `request_run` comes after `tag`, among the checks on
+  CH. An error's checks come after `trailing`, in the order its bytes do.
+- **The reserved forms** are 4 and 7. The memo's "forms 4–7" predates
+  frames and heartbeats.
+
+**The evidence.**
+- **`envelope/vectors.json`:** 20 headers and 147 cases, 91 of them new,
+  on `query`, `reply` and `reply_err`. Four cases change their token from
+  `form` to `sample_kind`: a value and an error on a put, a JSON object
+  on a put, and a JSON Epoch as a delete's attachment.
+- **`errors/forms.json`,** new: all 256 error bytes, 22 writes and 17
+  reads. The reads hold a router's `Timeout` under `zenoh/bytes`, the
+  querier's under `zenoh/string`, and §5.2's three envelopes.
+- **`contracts/ok-packed-operation`,** new. `e044-packed-place` loses its
+  operation, and lists two E044 where it had four.
+- **Written by an independent reading** of the text, in Python with the
+  standard library, checked and never blessed. The new contract's
+  fingerprint and canonical bytes are the reference's to bless.
+
+**Deliberately not changed.**
+- **No rule adopts the forms.** Every call is answered in §5.2's
+  envelope. O1 to O7, §4.3's "What keeps its wire", §7.2's Encoding rule
+  and `carries.json` stand until C4c.
+- **No wire.** No owner, caller or tool writes a form.
+- **A packed operation type** lints from this version, and nothing
+  serves one before the flip. No contract in `examples/zk2/` declares
+  one.
+- **The envelope,** `core/error.proto`, `core/error.schema.json` and
+  `errors/cases.json` are unchanged.
+- **`observer.md`** is unchanged: how a tool shows a form is C4b's.
+- **No section number** and no fingerprint moves.
+
+**The figures.** `RULES.md` lists 229 rules, 2 more: §7.5's two writer
+rules. The glossary gains "Forms of a call".
+
 ## 0.90 — 2026-11-02: zk2py round 98's findings answered (#978, #983)
 
 zk2py's round 98 read `telemetry.v2` 0.1 (#983's T1 and T3), #978's F5
