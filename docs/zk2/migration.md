@@ -272,13 +272,15 @@ system that is the host id, implementing `modem.v3`: 86 resources, 80 of
 them optional with their v1 gates. `modem-contract` becomes a zk2 contract
 crate, without zenoh by default, and out-of-tree backends keep depending
 on `modem-device` unchanged ([`contract-crate.md`](../../examples/zk2/zenoh-modem/contract-crate.md)).
-The two profiles it needs are specified: `config.v1` for its
-configuration plane, whose types the crate depends on, and `link.v1` for
-its faces
+The profiles it needs are specified: `config.v1` for its configuration
+plane, whose types the crate depends on; `telemetry.v2` and
+`freshness.v2` for its frames and states; and `link.v2` for its faces
 ([`link.md`](../../examples/zk2/zenoh-modem/link.md)). Whether to split the
 SDU plane out of `modem.v3` must be decided before it freezes (the
 mapping's gap 6). Its constrained faces are core §8.5 and the constrained
-level of core §12.
+level of core §12. Its port onto zk2c, step by step, with what is landed,
+drafted and missing, is
+[`MIGRATION.md`](../../examples/zk2/zenoh-modem/MIGRATION.md).
 
 **ZenSight, the largest.** Its 22 registries (813 subjects, 200
 procedures) are mapped on paper, with twelve representative contracts and
