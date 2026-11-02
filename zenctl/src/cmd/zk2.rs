@@ -1167,7 +1167,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("hop.v1.toml"),
-            "[interface]\nname = \"hop\"\nmajor = 1\nminor = 0\n\
+            "[interface]\nname = \"hop\"\nmajor = 1\nminor = 0\nuses = [\"freshness.v1\"]\n\
              [resources.level]\nkind = \"stream\"\ntype = { raw = \"text/plain\" }\n\
              annotations = { \"freshness.ttl_s\" = 5 }\n\
              [resources.mode]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n",
