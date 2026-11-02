@@ -224,7 +224,7 @@ pub enum MockAnswer {
         bytes: Vec<u8>,
         summary: Option<Vec<u8>>,
     },
-    /// A refusal with this envelope (§5.2).
+    /// A refusal with this error (§5.2), answered in its form.
     Refuse(OpError),
 }
 

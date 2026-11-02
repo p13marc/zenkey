@@ -348,7 +348,13 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   bare wire); `bus::conform`'s fan-out probe and `tape::bench` classify by
   the runtime's `classify`, and `bus::config`'s refusal reads a
   `ConfigError` from either wire (`Refusal::detail_as`); `zk2_core.rs`'s
-  `a_call_is_read_from_its_form_or_the_bare_wire` runs them.
+  `a_call_is_read_from_its_form_or_the_bare_wire` runs them. The flip
+  (#985 C4c): every call goes through the runtime's `Client`/`Fleet`,
+  which write the request form, and `bus::conform`'s fan-out probe writes
+  it too (`Forms::request`, under `zenoh/bytes`); `render_resource`, the
+  mock's logged request, and `render`'s `request` member read a request
+  under `zenoh/bytes` as the form (its record, a packed one by CH's tag,
+  a refused one undecodable), and the mock owner answers in the forms.
   `link.v2` (#988 L2) runs through `model::acl`: a v2 face policy's
   `Transport`, `Binding` and catalog id ride `AclPlan::{transport,
   binding, catalog}` (absent for `link.v1`, so its pinned plans did not

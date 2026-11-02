@@ -689,12 +689,12 @@ async fn serve_of_a_governed_contract_stands_by_beside_a_serving_one() {
     let call = zenkey::Client::new(&tool, ledger.shared_contract(), &["lab/ledger"])
         .unwrap()
         .with_timeout(Duration::from_secs(5));
+    // The value form's record (core §5.1), after its CH and as-of mark.
     let answered = |o: &zenkey::Outcome, from: &str| -> Vec<u8> {
         o.answer()
             .unwrap_or_else(|| panic!("a value from the {from}: {o:?}"))
-            .payload()
-            .to_bytes()
-            .to_vec()
+            .record()
+            .expect("a value form")
     };
     for _ in 0..3 {
         let o = call
