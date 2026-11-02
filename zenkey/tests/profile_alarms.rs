@@ -396,6 +396,18 @@ fn pair(j: Judged) -> (Answer, Reason) {
     (j.answer, j.reason)
 }
 
+/// A Zenoh timestamp's instant, in milliseconds since the Unix epoch.
+fn unix_ms(t: Timestamp) -> u64 {
+    u64::try_from(
+        t.get_time()
+            .to_system_time()
+            .duration_since(UNIX_EPOCH)
+            .expect("after the epoch")
+            .as_millis(),
+    )
+    .expect("fits")
+}
+
 /// Milliseconds since the Unix epoch, on this host's clock.
 fn now_ms() -> u64 {
     u64::try_from(
@@ -619,6 +631,7 @@ async fn s3_resolve_then_delete() {
     let (_r1, ep) = router(None).await;
     let os = client(&ep).await;
     let rs = client(&ep).await;
+    let owner_zid = os.zid().to_string();
     let s = record(&rs).await;
     let g = reader(&rs);
     let (b, a) = owner(
@@ -635,6 +648,7 @@ async fn s3_resolve_then_delete() {
     deliveries(&s.log, A_KEY, 1).await;
 
     // 1. Resolved.
+    let before = now_ms();
     let done = a.resolve(A_KEY).await.unwrap().expect("A held");
     assert_eq!(done.act, Act::Resolved);
     let recs = deliveries(&s.log, A_KEY, 3).await;
@@ -659,7 +673,9 @@ async fn s3_resolve_then_delete() {
     assert!(a.held().await.is_empty());
     assert!(a.resolve(A_KEY).await.unwrap().is_none(), "nothing held");
 
-    // 2. Within 1 s of the delete: a reply_del, with the delete's stamp.
+    // 2. Within 1 s of the delete: a reply_del, with the delete's in-band
+    // stamp, and the timestamp the owner minted at the delete, its last
+    // confirmation (core S2, text 0.12, zk2py round 97's F-460).
     let answer = get(&g).await;
     let c = reply(&answer, A_KEY).expect("a reply for A");
     assert!(matches!(c, Current::Deleted { .. }), "{c:?}");
@@ -667,6 +683,26 @@ async fn s3_resolve_then_delete() {
         answer.mark(c),
         recs[2].inband.map(Mark::InBand),
         "the delete's in-band stamp (core S3)"
+    );
+    assert!(
+        recs[2]
+            .stamp
+            .is_none_or(|t| t.get_id().to_string() != owner_zid),
+        "the delete carries no Zenoh timestamp of the owner's (core §4.3's table): {:?}",
+        recs[2].stamp
+    );
+    let minted = c
+        .timestamp()
+        .expect("the reply_del carries the delete's last confirmation (core S2)");
+    assert_eq!(
+        minted.get_id().to_string(),
+        owner_zid,
+        "minted by the owner"
+    );
+    let minted_ms = unix_ms(minted);
+    assert!(
+        minted_ms + 1000 >= before && minted_ms <= now_ms() + 1000,
+        "minted at the delete, within 1 s of the step: {minted_ms} against {before}"
     );
     let (firing, _) = judge_g(&answer, A_KEY, presence, &zid);
     assert_eq!(pair(firing), (Answer::No, Reason::Deleted));
@@ -844,6 +880,11 @@ async fn s5_a_restart_mid_incident() {
         assert!(
             matches!(at_token.mark(c), Some(Mark::InBand(s)) if s.run == svc.minter().run()),
             "{k}'s delete stamped in band by the new instance's run"
+        );
+        assert_eq!(
+            c.clock().as_deref(),
+            Some(new_zid.as_str()),
+            "{k}'s reply_del carries the timestamp the new instance minted at its delete (core S2)"
         );
     }
 

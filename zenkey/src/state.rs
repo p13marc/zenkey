@@ -867,8 +867,17 @@ impl Store {
     }
 
     /// A delete recorded `age` ago: its tombstone is answered for what is
-    /// left of the window (S3), as a delete made then would be.
-    fn delete_aged(&self, key: &OwnedKeyExpr, stamped: Stamped, age: Duration) {
+    /// left of the window (S3), as a delete made then would be. A covered
+    /// member's (`freshness.v2`) `reply_del` carries `confirmed`, the
+    /// timestamp minted at the delete, its last confirmation (S2, core
+    /// §4.3's "Minting").
+    fn delete_aged(
+        &self,
+        key: &OwnedKeyExpr,
+        stamped: Stamped,
+        age: Duration,
+        confirmed: Option<Timestamp>,
+    ) {
         let now = Instant::now();
         let mut map = self.map.lock().expect("not poisoned");
         let old = map.insert(
@@ -878,7 +887,7 @@ impl Store {
                 attachment: None,
                 stamped,
                 at: now.checked_sub(age).unwrap_or(now),
-                confirmed: None,
+                confirmed,
             },
         );
         let old = old.and_then(|e| e.value.is_some().then_some(e.stamped.stamp));
@@ -910,8 +919,9 @@ impl Store {
     /// Answers a query: every matching live key with the bytes it put, its
     /// envelope included, and a `reply_del` whose attachment is the
     /// deletion's envelope for each matching key deleted within the window,
-    /// each with the mutation's Zenoh timestamp where it carried one (S2,
-    /// S3). Older tombstones are forgotten.
+    /// each with the mutation's Zenoh timestamp where it carried one, a
+    /// covered member's last confirmation in its place (S2, S3). Older
+    /// tombstones are forgotten.
     pub(crate) fn answer(&self, q: &Query) {
         {
             let mut asked = self.asked.lock().expect("not poisoned");
@@ -938,7 +948,7 @@ impl Store {
                 None => q
                     .reply_del(key.clone())
                     .attachment(e.stamped.delete_attachment())
-                    .timestamp(e.stamped.time)
+                    .timestamp(e.reply_time())
                     .wait(),
             };
         }
@@ -1429,7 +1439,8 @@ impl StateWriter {
         // A deleted member is not re-put (`freshness.v1` §2.4).
         held.value = None;
         held.at = tokio::time::Instant::now();
-        self.store.delete_aged(&self.key, stamped, age);
+        self.store
+            .delete_aged(&self.key, stamped, age, self.confirmed_at(&stamped));
         // §2.7: a deleted key is not live, so it frees a member.
         self.writer.release();
         let sent = self.writer.delete_stamped(&admitted, stamped).await;
