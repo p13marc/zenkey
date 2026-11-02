@@ -19,8 +19,10 @@
 # QoS comes from the interface defaults (draft 1, D2; README gap 4), expanded before
 # canonicalization, so writing a value out per resource would not change the fingerprint:
 # - telemetry keeps v1's `sampled` profile: best_effort, drop (the stream built-ins) and data_low;
-# - states keep v1's `refreshed` profile: best_effort, drop, data. Each document is re-put every
-#   ttl_s/2 (freshness.v1), which heals a lost put, and the owner's GET is the truth (S2);
+# - states keep v1's `refreshed` profile: best_effort, drop, data. Each document is put on change
+#   and vouched for by the owner's heartbeat every ttl_s/2, never re-put (freshness.v2, since
+#   revision 3.1, #978's F5): a reader that lost a put sees its collection's digest diverge and
+#   re-reads it, and the owner's GET is the truth (S2);
 # - the events keep v1's `transition` profile: reliable, block, data, the events kind's built-ins
 #   (D3: each occurrence on …/events/<template>/<ulid>, cardinality = rate x retention).
 #
@@ -30,9 +32,9 @@
 [interface]
 name    = "modem"
 major   = 3
-minor   = 0
+minor   = 1
 summary = "One modem device on a host: what its medium carries and loses, what it measures, what it is"
-uses    = ["telemetry.v1", "freshness.v1", "link.v1"]
+uses    = ["telemetry.v1", "freshness.v2", "link.v1"]
 
 [schemas]
 jsonschema = ["schemas/modem.json"]

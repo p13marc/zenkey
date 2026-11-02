@@ -110,8 +110,11 @@ fn every_example_contract_validates_fingerprints_and_bundles() {
 
 /// `examples/zk2/.history` (#618): every bundle verifies, every example's
 /// current revision is published there, and it is compatible with every
-/// earlier revision of its interface. After an intended change, publish the
-/// new revision with `zk2 contract bundle <file> --history examples/zk2/.history`.
+/// earlier revision of its interface, or a review its publication accepted:
+/// `uses_changed` alone, an example's move to `freshness.v2` (#978's F5), as
+/// `tests/profiles.rs` accepts a standard contract's. After an intended
+/// change, publish the new revision with
+/// `zk2 contract bundle <file> --history examples/zk2/.history`.
 #[test]
 fn every_example_is_published_and_compatible_with_its_history() {
     use zenkey_model::compat::{Class, Revision, check_history, same_revision};
@@ -134,8 +137,17 @@ fn every_example_is_published_and_compatible_with_its_history() {
             revs.iter().any(|r| same_revision(r, &new)),
             "{rel}: the current revision is not published; run zk2 contract bundle {rel} --history examples/zk2/.history"
         );
+        // A published revision's review findings were accepted when it was
+        // published, as zenkey-build reads them: the one an example takes is
+        // `uses_changed`, its move to freshness.v2 (#978's F5). Breaking is
+        // refused, always.
         let v = check_history(&revs, &new);
-        assert_eq!(v.class(), Class::Compatible, "{rel}: {:#?}", v.findings);
+        let accepted = v.findings.iter().all(|f| f.rule == "uses_changed");
+        assert!(
+            v.class() == Class::Compatible || (v.class() == Class::Review && accepted),
+            "{rel}: {:#?}",
+            v.findings
+        );
     }
 }
 

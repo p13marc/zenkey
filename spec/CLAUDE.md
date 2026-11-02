@@ -400,3 +400,12 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   included value; no value is never 0), §2.19 (the epoch is the run, a
   rewind a reset), §2.20 (a counter's width, its serial window) and
   §2.21 (the time base and its basis). No core or observer amendment.
+- **`freshness.v1`** is `experimental` since #978's F5 (a status entry in
+  `freshness/CHANGELOG.md`, text still 0.5): the adopters' contracts and
+  `nav.v2` moved to `freshness.v2`, each a `uses_changed` revision in
+  `examples/zk2/.history`. The contracts a text states on v1 keep it:
+  `beacon.v1` (its scenarios), `status` (`scenarios/state.md` §1),
+  `radio.v1` (`link.v1`'s scenarios, §6 liveness by re-puts) and
+  `tasking.v1` (`desired.v1`'s scenarios), and the conformance corpus's
+  contracts (`conformance/contracts/`, `link/conformance/contracts/
+  sampler.v1.toml`: streams alone, no collection).

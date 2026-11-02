@@ -111,7 +111,9 @@ Claude Code loads this file when working in `zengui/`; the root `CLAUDE.md` is t
   envelope's CH tag (the fleet's), so the Inspector shows it as its fields;
   `World::packed` (`lab/packed` on `zenkey/tests/contracts/packed/`, its
   sensor stream sealed in envelopes) feeds `inspector-packed`, S4's answer
-  for `reading/u1` read on `zenoh/bytes` (`World::state_read_on`). History
+  for `reading/u1` read on `zenoh/bytes` (`World::state_read_on`, which
+  stamps a `freshness.v2` collection's row with its last confirmation, as
+  the fleet does: `tc.netif.v1`'s interfaces since #978 F5). History
   rows stay structural, as for every type.
   **The Workbench**: nodes per address from presence (health read once per
   selection, a "clocks synced" toggle), and `redundancy.v1` read beside

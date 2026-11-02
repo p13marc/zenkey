@@ -15,9 +15,9 @@ The published revision of `tc.netif.v1` against its own authoring file: the
 same fingerprint, and compatible.
 
 ```console
-$ zenctl compat ../examples/zk2/.history/tc.netif.v1/4f531ebec4c4eee015c18f11aefbce9138b413cfdca6bf6b777ea0eb6f43b4e0.bundle.json ../examples/zk2/tcgui/tc.netif.v1.toml --format table
-old  tc.netif.v1  sha256:4f531ebec4c4eee0…  bundle  ../examples/zk2/.history/tc.netif.v1/4f531ebec4c4eee015c18f11aefbce9138b413cfdca6bf6b777ea0eb6f43b4e0.bundle.json
-new  tc.netif.v1  sha256:4f531ebec4c4eee0…  file    ../examples/zk2/tcgui/tc.netif.v1.toml
+$ zenctl compat ../examples/zk2/.history/tc.netif.v1/3d688f1b0d4864a7732171b9eab633ee2bc532f4f952f6d308ec605cd0762840.bundle.json ../examples/zk2/tcgui/tc.netif.v1.toml --format table
+old  tc.netif.v1  sha256:3d688f1b0d4864a7…  bundle  ../examples/zk2/.history/tc.netif.v1/3d688f1b0d4864a7732171b9eab633ee2bc532f4f952f6d308ec605cd0762840.bundle.json
+new  tc.netif.v1  sha256:3d688f1b0d4864a7…  file    ../examples/zk2/tcgui/tc.netif.v1.toml
 
 compatible
 0 finding(s), 0 warning(s); exit 0.
@@ -30,8 +30,8 @@ human accepts, exit 1:
 ```console
 $ zenctl compat ../examples/zk2/tcgui/tc.netif.v1.toml tests/cmd/fixtures/zk2/review/tc.netif.v1.toml --format table
 ? 1
-old  tc.netif.v1  sha256:4f531ebec4c4eee0…  file  ../examples/zk2/tcgui/tc.netif.v1.toml
-new  tc.netif.v1  sha256:94b92cc2ff1b030a…  file  tests/cmd/fixtures/zk2/review/tc.netif.v1.toml
+old  tc.netif.v1  sha256:3d688f1b0d4864a7…  file  ../examples/zk2/tcgui/tc.netif.v1.toml
+new  tc.netif.v1  sha256:b345eaa479da5fdc…  file  tests/cmd/fixtures/zk2/review/tc.netif.v1.toml
 
 review  cardinality_changed  resources."bandwidth/{ns}/{iface}"
   `cardinality` changed
@@ -45,10 +45,10 @@ A breaking one, with the old side named by interface and a fingerprint prefix
 out of `--contracts` — a `.history` root, the published bundles:
 
 ```console
-$ zenctl compat tc.netif.v1@4f53 tests/cmd/fixtures/zk2/breaking/tc.netif.v1.toml --contracts ../examples/zk2/.history --format table
+$ zenctl compat tc.netif.v1@3d68 tests/cmd/fixtures/zk2/breaking/tc.netif.v1.toml --contracts ../examples/zk2/.history --format table
 ? 1
-old  tc.netif.v1  sha256:4f531ebec4c4eee0…  history  tc.netif.v1@4f53
-new  tc.netif.v1  sha256:05e9f1168915c594…  file     tests/cmd/fixtures/zk2/breaking/tc.netif.v1.toml
+old  tc.netif.v1  sha256:3d688f1b0d4864a7…  history  tc.netif.v1@3d68
+new  tc.netif.v1  sha256:0f23fd66de030ac2…  file     tests/cmd/fixtures/zk2/breaking/tc.netif.v1.toml
 
 breaking  resource_removed  resources."namespaces"
   removed; a deprecated resource stays until the next major
@@ -64,8 +64,8 @@ rather than listing every resource as removed:
 ```console
 $ zenctl compat ../examples/zk2/tcgui/tc.netif.v1.toml ../examples/zk2/tcgui/tc.netem.v1.toml --format table
 ? 1
-old  tc.netif.v1  sha256:4f531ebec4c4eee0…  file  ../examples/zk2/tcgui/tc.netif.v1.toml
-new  tc.netem.v1  sha256:30b491116ef6a534…  file  ../examples/zk2/tcgui/tc.netem.v1.toml
+old  tc.netif.v1  sha256:3d688f1b0d4864a7…  file  ../examples/zk2/tcgui/tc.netif.v1.toml
+new  tc.netem.v1  sha256:1e7f691aeb09b124…  file  ../examples/zk2/tcgui/tc.netem.v1.toml
 
 breaking  interface_changed  interface
   the interface id differs

@@ -2,9 +2,9 @@
 [interface]
 name    = "tc.scenario"
 major   = 1
-minor   = 0
+minor   = 1
 summary = "Network scenarios and presets, and their execution on interfaces"
-uses    = ["freshness.v1"]
+uses    = ["freshness.v2"]
 
 [schemas]
 jsonschema = ["schemas/tc.json"]

@@ -145,6 +145,9 @@ async fn services_are_listed_from_tokens_and_descriptors() {
 
     let netif = Implementation::new(example("tcgui/tc.netif.v1"));
     let netem = Implementation::new(example("tcgui/tc.netem.v1"));
+    // Both use freshness.v2 since #978's F5: the runtime implements its
+    // standard contract beside them, its heartbeats' interface.
+    let fv2 = zenkey::heartbeat::implementation();
     let host_a = listing
         .services
         .iter()
@@ -169,6 +172,12 @@ async fn services_are_listed_from_tokens_and_descriptors() {
     assert_eq!(
         rows,
         [
+            (
+                "freshness.v2",
+                Some(fp16(&fv2).as_str()),
+                Some(fv2.fingerprint().to_string().as_str()),
+                false
+            ),
             (
                 "tc.netem.v1",
                 Some(fp16(&netem).as_str()),
@@ -637,15 +646,17 @@ async fn each_kind_decodes_or_renders_honestly() {
     })
     .await;
 
-    // Presence, descriptors, bundles: the tool's whole knowledge.
+    // Presence, descriptors, bundles: the tool's whole knowledge. Four
+    // interfaces and `freshness.v2`, which tc.netif.v1 and zs.parallax.v1
+    // use since #978's F5, its standard contract implemented beside them.
     eventually("every owner described", || async {
         observe(&tool, &Scope::all(), T)
             .await
-            .is_ok_and(|o| Catalog::new(&o).wanted().len() == 4)
+            .is_ok_and(|o| Catalog::new(&o).wanted().len() == 5)
     })
     .await;
     let catalog = Catalog::new(&observe(&tool, &Scope::all(), T).await.expect("observe"));
-    assert_eq!(catalog.wanted().len(), 4);
+    assert_eq!(catalog.wanted().len(), 5);
     let store = BundleStore::new(T);
     store.fetch_all(&tool, &catalog.wanted()).await;
 
@@ -935,7 +946,13 @@ async fn a_state_read_keeps_its_bytes_and_a_raw_get_reads_a_tombstone() {
     let tombstone = &answers[0];
     assert_eq!(tombstone.key, origin);
     assert_eq!(tombstone.kind, Some(SampleKind::Delete));
-    assert!(tombstone.timestamp.is_some(), "the deletion's stamp (S2)");
+    // tc.netif.v1 uses freshness.v2 since #978's F5: its delete carried no
+    // Zenoh timestamp, so its `reply_del` carries none (S2); the stamp is
+    // the delete's attachment, in band.
+    assert!(
+        tombstone.timestamp.is_none(),
+        "a freshness.v2 deletion carries no Zenoh timestamp (S2)"
+    );
     let Answer::Value(payload) = &tombstone.answer else {
         panic!("a delete is a sample, not an error reply: {tombstone:?}")
     };

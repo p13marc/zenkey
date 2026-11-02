@@ -6,11 +6,12 @@ opened — which is why it can sit beside a dead bus and still answer. The
 `--zenoh-config` below points at one, and nothing fails.
 
 The whole revision: every member's type, and each artifact by id, kind and
-name. A raw type names a media type and no schema.
+name. A raw type names a media type and no schema. The history holds two
+revisions of `tc.netif.v1` (#978's F5), so the case names one, `@3d68`.
 
 ```console
-$ zenctl schema show tc.netif.v1 --contracts ../examples/zk2/.history --zenoh-config tests/cmd/fixtures/dead-bus.json5 --format table
-tc.netif.v1 sha256:4f531ebec4c4eee015c18f11aefbce9138b413cfdca6bf6b777ea0eb6f43b4e0  (history)
+$ zenctl schema show tc.netif.v1@3d68 --contracts ../examples/zk2/.history --zenoh-config tests/cmd/fixtures/dead-bus.json5 --format table
+tc.netif.v1 sha256:3d688f1b0d4864a7732171b9eab633ee2bc532f4f952f6d308ec605cd0762840  (history)
   @op/diagnostics                  request   json:DiagnosticsRequest        sha256:b1e64344ce96a422…
   @op/diagnostics                  response  json:DiagnosticsResponse       sha256:b1e64344ce96a422…
   @op/interfaces/{ns}/{iface}/set  request   json:InterfaceControlRequest   sha256:b1e64344ce96a422…
@@ -69,7 +70,7 @@ contract — the frontend's bindings — is said on stderr and skipped.
 ```console
 $ zenctl schema show tc.netem.v1 --contracts ../examples/zk2/tcgui --format table
 contracts: ../examples/zk2/tcgui/frontend.bindings.toml: error[E000] file: TOML parse error at line 5, column 2   | 5 | [bindings.netif]   |  ^^^^^^^^ unknown field `bindings`, expected one of `interface`, `defaults`, `schemas`, `resources`, `requires`
-tc.netem.v1 sha256:30b491116ef6a534a3533741dc4003fe332c52ec84fcadcbd5dfa6f1be866245  (file)
+tc.netem.v1 sha256:1e7f691aeb09b1245f64385b83d4631db5de783b947d48c1f616a913b4f1c459  (file)
   @op/config/{ns}/{iface}/set  request   json:TcRequest           sha256:b1e64344ce96a422…
   @op/config/{ns}/{iface}/set  response  json:TcResponse          sha256:b1e64344ce96a422…
   @op/config/{ns}/{iface}/set  error     json:TcError             sha256:b1e64344ce96a422…
@@ -98,12 +99,12 @@ Error: camera.v1 declares no resource "nope"; it declares: @stream/image, state/
 
 ```
 
-Two revisions held and no fingerprint to choose between them:
+Revisions held, here three, and no fingerprint to choose between them:
 
 ```console
 $ zenctl schema show tc.netif.v1 --contracts ../examples/zk2/.history --contracts tests/cmd/fixtures/zk2/review/tc.netif.v1.toml
 ? 2
-Error: tc.netif.v1 has 2 revisions here: sha256:4f531ebec4c4eee015c18f11aefbce9138b413cfdca6bf6b777ea0eb6f43b4e0, sha256:94b92cc2ff1b030af3323e84ebf172c283af30d3b8dcfd21550a1738dd05f792 — name one with tc.netif.v1@<fingerprint>
+Error: tc.netif.v1 has 3 revisions here: sha256:3d688f1b0d4864a7732171b9eab633ee2bc532f4f952f6d308ec605cd0762840, sha256:4f531ebec4c4eee015c18f11aefbce9138b413cfdca6bf6b777ea0eb6f43b4e0, sha256:b345eaa479da5fdc127a6a3f70470f843aa85bb1c54a3efc8aa9033209b7d471 — name one with tc.netif.v1@<fingerprint>
 
 ```
 

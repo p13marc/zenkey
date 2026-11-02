@@ -11,9 +11,9 @@
 [interface]
 name    = "zs.snmp_poller"
 major   = 1
-minor   = 0
+minor   = 1
 summary = "An SNMP poller: its target set, subnet discovery and traps from unconfigured senders"
-uses    = ["freshness.v1"]
+uses    = ["freshness.v2"]
 
 [schemas]
 jsonschema = ["schemas/zs.common.json", "schemas/zs.snmp.v1.json"]

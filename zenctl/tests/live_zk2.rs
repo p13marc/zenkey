@@ -605,9 +605,16 @@ async fn service_list_shows_tokens_descriptors_and_the_tokenless_set() {
         .into_iter()
         .map(|r| (r["iface"].as_str().expect("iface").to_owned(), r))
         .collect();
+    // freshness.v2 beside them: tc.netem.v1 and tc.netif.v1 use it since
+    // #978's F5, and the runtime implements its standard contract.
     assert_eq!(
         by.keys().map(String::as_str).collect::<Vec<_>>(),
-        ["tc.netem.v1", "tc.netif.v1", "tc.scenario.v1"]
+        [
+            "freshness.v2",
+            "tc.netem.v1",
+            "tc.netif.v1",
+            "tc.scenario.v1"
+        ]
     );
     assert_eq!(by["tc.netem.v1"]["tokenless"], true);
     assert_eq!(
@@ -654,7 +661,11 @@ async fn service_show_is_the_descriptor_and_exits_2_on_silence() {
         .collect();
     assert_eq!(
         entries.into_iter().collect::<BTreeSet<_>>(),
-        BTreeSet::from([("tc.netem.v1", false), ("tc.netif.v1", true)])
+        BTreeSet::from([
+            ("freshness.v2", true),
+            ("tc.netem.v1", false),
+            ("tc.netif.v1", true)
+        ])
     );
 
     // The frontend's roles, as its descriptor declares them (R3).
@@ -1118,18 +1129,41 @@ async fn tc_instance(bus: &mut Bus, address: &str, how: Tc) -> Arc<Seen> {
 /// A tcgui `host-a/tc` implementing `tc.netif.v1`, every resource exposed,
 /// its state served: the owner of the state and the stream cases.
 async fn netif_owner(bus: &Bus) -> Service {
+    netif_owner_with(bus, Implementation::new(contract("tcgui/tc.netif.v1"))).await
+}
+
+/// `host-a/tc` implementing `imp`, a revision of `tc.netif.v1`, every
+/// resource exposed and its state served.
+async fn netif_owner_with(bus: &Bus, imp: Implementation) -> Service {
     let netif = iface("tc.netif.v1");
+    let names: Vec<String> = imp
+        .contract()
+        .resources
+        .iter()
+        .map(zenkey::implementation::resource_name)
+        .collect();
     let mut b = ServiceBuilder::new(
         &bus.owners,
         ServiceConfig::new("host-a/tc".parse().expect("an address")),
     );
-    b.implement(Implementation::new(contract("tcgui/tc.netif.v1")))
-        .expect("implement");
-    for r in &contract("tcgui/tc.netif.v1").resources {
-        let _ = b.expose(&netif, &zenkey::implementation::resource_name(r));
+    b.implement(imp).expect("implement");
+    for n in names {
+        let _ = b.expose(&netif, &n);
     }
     b.serve_state(&netif).expect("serve state");
     b.start().await.expect("start")
+}
+
+/// `tc.netif.v1`'s revision 1.0, as `examples/zk2/.history` publishes it:
+/// it uses `freshness.v1`, so its `interfaces` state, by its ttl, is on
+/// core §4.3's table (row 1). The current revision uses `freshness.v2`
+/// (#978's F5), whose puts carry no Zenoh timestamp.
+fn netif_1_0() -> Implementation {
+    let bundle = examples().join(
+        ".history/tc.netif.v1/4f531ebec4c4eee015c18f11aefbce9138b413cfdca6bf6b777ea0eb6f43b4e0.bundle.json",
+    );
+    Implementation::from_bundle(&std::fs::read(bundle).expect("published"))
+        .expect("the bundle verifies")
 }
 
 fn member(ns: &str, iface_name: &str) -> Bindings {
@@ -2803,7 +2837,18 @@ fn eth0(up: bool) -> Value {
 /// stamp, S1). The service is returned, for a case that closes it; the
 /// publishing task is too, and stops when dropped.
 async fn publishing_owner(bus: &Bus, extra: Value, state: bool) -> (Service, Task) {
-    let mut owner = netif_owner(bus).await;
+    let imp = Implementation::new(contract("tcgui/tc.netif.v1"));
+    publishing_owner_with(bus, imp, extra, state).await
+}
+
+/// [`publishing_owner`] over `imp`, a revision of `tc.netif.v1`.
+async fn publishing_owner_with(
+    bus: &Bus,
+    imp: Implementation,
+    extra: Value,
+    state: bool,
+) -> (Service, Task) {
+    let mut owner = netif_owner_with(bus, imp).await;
     let netif = iface("tc.netif.v1");
     let stream = owner
         .writer(
@@ -3360,8 +3405,9 @@ async fn rate_groups_by_resource_and_field_judges_paths_against_the_type() {
 /// resources either way, and the clocks are named. Every sample rides in
 /// its owner's envelope (core §4.3), so every lane counts in-band stamps,
 /// live and from the file alike. Live, a state on core §4.3's table
-/// (`state/interfaces`, by its ttl) also carries its owner's Zenoh
-/// timestamp, the zid its descriptor states; off the table
+/// (`state/interfaces`, by its ttl, in `tc.netif.v1`'s revision 1.0, which
+/// uses `freshness.v1`) also carries its owner's Zenoh timestamp, the zid
+/// its descriptor states; off the table
 /// (`state/namespaces`, the stream) the router stamps it — another clock,
 /// expected there (observer §4.4). From the file, which names no owner,
 /// the same lanes with every Zenoh timestamp unattributable (O7), never
@@ -3369,7 +3415,7 @@ async fn rate_groups_by_resource_and_field_judges_paths_against_the_type() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn timeline_names_its_clocks_live_and_reads_its_zrec_through_the_same_lanes() {
     let mut bus = Bus::bare(None).await;
-    let (mut owner, task) = publishing_owner(&bus, json!({}), true).await;
+    let (mut owner, task) = publishing_owner_with(&bus, netif_1_0(), json!({}), true).await;
     let namespaces = owner
         .state_writer(&iface("tc.netif.v1"), "state/namespaces", &Bindings::new())
         .await

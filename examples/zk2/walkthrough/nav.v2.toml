@@ -2,9 +2,9 @@
 [interface]
 name    = "nav"
 major   = 2
-minor   = 1
+minor   = 2
 summary = "Navigation solution of one vehicle"
-uses    = ["freshness.v1", "timing.v1"]
+uses    = ["freshness.v2", "timing.v1"]
 
 [schemas]
 protobuf = ["proto/nav/v2/nav.proto"]

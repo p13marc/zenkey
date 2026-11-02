@@ -37,9 +37,9 @@
 [interface]
 name    = "zs.catalog"
 major   = 1
-minor   = 0
+minor   = 1
 summary = "Fused host identity, topology, incidents and operator intent for the whole fleet"
-uses    = ["redundancy.v1", "freshness.v1"]
+uses    = ["redundancy.v1", "freshness.v2"]
 
 [schemas]
 jsonschema = ["schemas/zs.catalog.v1.json"]

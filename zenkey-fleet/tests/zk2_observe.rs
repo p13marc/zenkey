@@ -61,16 +61,38 @@ fn member(name: &str) -> Bindings {
 
 /// The owner: `host-a/tc` implementing `tc.netif.v1`, every resource
 /// exposed, its state served.
-async fn owner(session: &zenoh::Session) -> Service {
+async fn owner(session: &zenoh::Session, imp: Implementation) -> Service {
     let netif = iface("tc.netif.v1");
+    let names: Vec<String> = imp
+        .contract()
+        .resources
+        .iter()
+        .map(zenkey::implementation::resource_name)
+        .collect();
     let mut b = ServiceBuilder::new(session, config("host-a/tc"));
-    b.implement(Implementation::new(example("tcgui/tc.netif.v1")))
-        .expect("implement");
-    for r in &example("tcgui/tc.netif.v1").resources {
-        let _ = b.expose(&netif, &zenkey::implementation::resource_name(r));
+    b.implement(imp).expect("implement");
+    for n in names {
+        let _ = b.expose(&netif, &n);
     }
     b.serve_state(&netif).expect("serve state");
     b.start().await.expect("the owner")
+}
+
+/// `tc.netif.v1` as `examples/zk2/tcgui/` writes it: since #978's F5 it
+/// uses `freshness.v2`, so no state of it is on core §4.3's table.
+fn netif() -> Implementation {
+    Implementation::new(example("tcgui/tc.netif.v1"))
+}
+
+/// `tc.netif.v1`'s revision 1.0, as `examples/zk2/.history` publishes it:
+/// it uses `freshness.v1`, so its `interfaces` state, by its
+/// `freshness.ttl_s`, is on core §4.3's table (row 1).
+fn netif_1_0() -> Implementation {
+    let bundle = util::zk2::examples().join(
+        ".history/tc.netif.v1/4f531ebec4c4eee015c18f11aefbce9138b413cfdca6bf6b777ea0eb6f43b4e0.bundle.json",
+    );
+    Implementation::from_bundle(&std::fs::read(bundle).expect("published"))
+        .expect("the bundle verifies")
 }
 
 /// A deployment and a tool: the router, the owner's service, the tool's
@@ -84,9 +106,14 @@ struct Bed {
 }
 
 async fn bed() -> Bed {
+    bed_of(netif()).await
+}
+
+/// A bed whose owner implements `imp`, a revision of `tc.netif.v1`.
+async fn bed_of(imp: Implementation) -> Bed {
     let (router, ep) = router(None).await;
     let owners = client(&ep).await;
-    let service = owner(&owners).await;
+    let service = owner(&owners, imp).await;
     let tool = client(&ep).await;
     let store = BundleStore::new(T);
     Bed {
@@ -325,15 +352,15 @@ async fn field_judges_paths_against_the_declared_type() {
 /// The timeline's lanes are zk2 resources, and its clocks are named. Every
 /// sample rides in its owner's envelope (core §4.3), so every lane counts
 /// in-band stamps, the owner's run and seq. Beside them, a state on core
-/// §4.3's table (`state/interfaces`, by its `freshness.ttl_s`) carries its
-/// owner's Zenoh timestamp, whose id the descriptor states; off the table
-/// (`state/namespaces`, the stream) a sample arrives without one and the
-/// router stamps it — another clock, expected there and never a finding
-/// (observer §4.4). Two stampers, so the HLC axis claims no
-/// happened-before.
+/// §4.3's table (`state/interfaces`, by its `freshness.ttl_s`, in revision
+/// 1.0, which uses `freshness.v1`) carries its owner's Zenoh timestamp,
+/// whose id the descriptor states; off the table (`state/namespaces`, the
+/// stream) a sample arrives without one and the router stamps it — another
+/// clock, expected there and never a finding (observer §4.4). Two
+/// stampers, so the HLC axis claims no happened-before.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_timeline_names_the_owners_clock_and_the_routers() {
-    let mut bed = bed().await;
+    let mut bed = bed_of(netif_1_0()).await;
     let catalog = bed.catalog().await;
     let netif = iface("tc.netif.v1");
     // The interfaces state is on the table: its writer sets the owner's

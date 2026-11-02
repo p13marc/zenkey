@@ -479,7 +479,9 @@ async fn a_conforming_deployment_is_clean_and_an_unreachable_admin_space_is_no_v
     ] {
         clean(&r, id);
     }
-    assert!(clean(&r, CheckId::ContractUnavailable).starts_with("2 revision(s)"));
+    // tc.netem.v1, tc.netif.v1 and, since #978's F5 moved both onto it,
+    // freshness.v2's standard contract.
+    assert!(clean(&r, CheckId::ContractUnavailable).starts_with("3 revision(s)"));
     let f = found(
         &r,
         CheckId::BindingUnsatisfied,

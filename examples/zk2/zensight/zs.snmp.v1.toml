@@ -31,9 +31,9 @@
 [interface]
 name    = "zs.snmp"
 major   = 1
-minor   = 1
+minor   = 2
 summary = "One SNMP-polled device: its metric tree, interface table, traps and outlet control"
-uses    = ["telemetry.v1", "freshness.v1"]
+uses    = ["telemetry.v1", "freshness.v2"]
 
 [schemas]
 jsonschema = ["../../../spec/profiles/telemetry/telemetry.v1.json", "schemas/zs.common.json", "schemas/zs.snmp.v1.json"]

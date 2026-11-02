@@ -23,9 +23,9 @@
 [interface]
 name    = "zs.parallax"
 major   = 1
-minor   = 1
+minor   = 2
 summary = "Live video streams of one host: codec tiers, previews, status and receiver feedback"
-uses    = ["media.v1", "telemetry.v1", "freshness.v1"]
+uses    = ["media.v1", "telemetry.v1", "freshness.v2"]
 
 [schemas]
 jsonschema = ["../../../spec/profiles/telemetry/telemetry.v1.json", "schemas/zs.common.json", "schemas/zs.parallax.v1.json"]

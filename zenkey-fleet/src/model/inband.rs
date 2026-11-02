@@ -657,9 +657,11 @@ mod tests {
     use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
 
     /// Core §4.3's table, read from the contracts that exercise each row: a
-    /// state with a horizon, a desired resource, a state metric resource
-    /// and a lifespan's stream are on it; a plain state, a plain stream, a
-    /// stream metric resource and a stream without a lifespan are not.
+    /// `freshness.v1` state with a horizon, a desired resource, a state
+    /// metric resource and a lifespan's stream are on it; a plain state, a
+    /// plain stream, a stream metric resource, a stream without a lifespan
+    /// and a `freshness.v2` state with a horizon (`tc.netif.v1` since #978's
+    /// F5) are not.
     #[test]
     fn the_table_lists_what_core_4_3_names() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
@@ -672,8 +674,11 @@ mod tests {
         let on = |c: &zenkey_model::contract::Contract, key: &str| {
             on_the_table(c, resource_of(c, key).unwrap_or_else(|| panic!("{key}")))
         };
+        let beacon = load("zenkey/tests/contracts/beacon.v1.toml");
+        assert!(on(&beacon, "zk2/l/b/beacon.v1/state/status"));
+        assert!(!on(&beacon, "zk2/l/b/beacon.v1/state/note"));
         let netif = load("examples/zk2/tcgui/tc.netif.v1.toml");
-        assert!(on(
+        assert!(!on(
             &netif,
             "zk2/h/tc/tc.netif.v1/state/interfaces/default/eth0"
         ));

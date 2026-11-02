@@ -2,9 +2,9 @@
 [interface]
 name    = "tc.netem"
 major   = 1
-minor   = 0
+minor   = 1
 summary = "TC/netem on the interfaces of one host"
-uses    = ["freshness.v1"]
+uses    = ["freshness.v2"]
 
 [schemas]
 jsonschema = ["schemas/tc.json"]

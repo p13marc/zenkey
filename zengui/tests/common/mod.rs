@@ -1616,6 +1616,18 @@ impl World {
             resolved.revision.contract(),
             resolved.resource(),
         );
+        // A `freshness.v2` collection's member (`tc.netif.v1`'s interfaces
+        // since #978's F5): its reply carries its last confirmation as its
+        // Zenoh timestamp, as the fleet reads it (`bus::consume`).
+        let confirmed = zenkey_model::freshness::uses_v2(resolved.revision.contract())
+            && matches!(
+                zenkey_model::freshness::horizon_of(resolved.resource()),
+                zenkey_model::freshness::Horizon::Within(_)
+            );
+        let stamp = || zenkey_fleet::report::Stamp {
+            time: "2026-10-05T09:12:44.250000000Z".into(),
+            clock: "a1b2c3d4e5f60718".into(),
+        };
         let rows = body
             .map(|body| StateRow {
                 key: key.to_string(),
@@ -1627,11 +1639,8 @@ impl World {
                     run: "0003".into(),
                     seq: 12,
                 }),
-                timestamp: table.then(|| zenkey_fleet::report::Stamp {
-                    time: "2026-10-05T09:12:44.250000000Z".into(),
-                    clock: "a1b2c3d4e5f60718".into(),
-                }),
-                last_confirmation: None,
+                timestamp: (table || confirmed).then(stamp),
+                last_confirmation: confirmed.then(stamp),
                 confirmed: archive.map(|_| true),
                 identity: None,
             })
