@@ -13,8 +13,8 @@ Epic #975 makes the wire bandwidth-first. After #978's F4, `config.v1`
 re-puts nothing, but each change still puts a 1,476-byte view and a
 226-byte status. Every control reply carries a 1.3 KB read-back, the
 schema travels with the values, and a refusal is a 60 to 90 byte JSON
-envelope. This text is #985's G1, written against core 0.92 (C4a), which
-defines the request, value and error forms its operations answer in. The
+envelope. This text is #985's G1, written against core 0.94 (C4c), which
+adopts the request, value and error forms its operations answer in. The
 design is the one posted on #985 (its §1.3 to §1.9, §3 and §4).
 
 **Why a new id.** `config.v1`'s wire is its standard contract's JSON. A
@@ -86,7 +86,7 @@ Python, and a second reader, written apart, read 205 records and requests
 back.
 
 **Deliberately not changed.**
-- **No core amendment** beyond core 0.92's. W105 reads no `config`
+- **No core amendment** beyond core 0.94's. W105 reads no `config`
   vocabulary, since Appendix D lists none.
 - **`config.v1`**, its contract and its fixtures.
 - **Text parameters** wait for a packed format that carries them, so four

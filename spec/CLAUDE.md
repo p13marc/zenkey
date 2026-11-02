@@ -489,7 +489,7 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   (`examples/zk2/zenoh-modem/faces/`, `v2/plan.json` cases 14–18), and
   `link.v2` stays experimental, since `modem.v3` lists `link.v1`.
 - **`config.v2`** (#985 G1, text 0.1, `experimental`, written against
-  core 0.92) sits beside `config.v1` in `spec/profiles/config/`: `v2.md`,
+  core 0.94) sits beside `config.v1` in `spec/profiles/config/`: `v2.md`,
   `scenarios-v2.md`, `config.v2.json` (the change event), and
   `conformance/v2/{derive,records,validation,window,lifecycle,redaction}.json`,
   computed by an independent Python reading, never blessed, with
