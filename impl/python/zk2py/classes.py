@@ -318,6 +318,10 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "state_pairings §7 steps 1 to 5, the owner zk2py's or the Rust owner example) (round 93, core 0.73)"),
     ("consumer", "core §8.1", "Every instance MUST hold one, including pure consumers", MET,
      "every zk2py service is an owner.Owner, which holds one (presence_scenarios §1)"),
+    # core 0.91 (#988 L4): the far side's caller and reader, re-keyed in round 99.
+    ("consumer", "core §8.1", "A caller, a consumer or a tool across a constrained face whose face policy states a reply timeout", NOT_MET,
+     "zk2py's consumer GETs (live.get_state, seed) wait the timeout they are given, 1 s by default; nothing reads a "
+     "face's reply_timeout_ms (round 99, core 0.91)"),
     ("consumer", "core §8.4", "Every holder MUST declare a `complete` queryable on", MET,
      "a zk2py consumer is an owner.Owner service, and the bundles it holds, those of the interfaces it implements, "
      "are each on a complete queryable (live_interop's retrieval); it holds none of an interface it only requires"),
@@ -332,6 +336,9 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "owner.Owner.subscribe_role asks each provider for the resource its caller reads and nothing wider; a  "
      "rest parameter's selector is */**, never ** (face.template_selector, F-438) (constrained_live steps 6,  "
      "8a) (round 95, core 0.78)"),
+    ("consumer", "core §8.5", "A consumer or a tool across a constrained face whose medium repairs no lost frame", NOT_MET,
+     "owner.Owner.subscribe_role declares each subscription once; nothing reads a face's arq or declares a silent "
+     "subscription again (round 99, core 0.91)"),
     ("consumer", "core §11.1", "History (§2.5): a consumer's advanced subscriber MUST NOT", NA,
      "zk2py's consumers declare no advanced subscriber (budget_scenarios §3's, a measurement, declares no detection token)"),
     # -- caller --------------------------------------------------------------------------
@@ -349,6 +356,9 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "live.call sends what it is handed, and reads a refusal as an answer, never as a check"),
     ("caller", "core §8.1", "Every instance MUST hold one, including pure consumers", MET,
      "a zk2py service that calls is an owner.Owner, which holds one (presence_scenarios §1; F-361)"),
+    ("caller", "core §8.1", "A caller, a consumer or a tool across a constrained face whose face policy states a reply timeout", NOT_MET,
+     "live.call waits the caller's timeout, else the operation's timeout_ms, else 10 s (§5.1); nothing reads a "
+     "face's reply_timeout_ms (round 99, core 0.91)"),
     ("caller", "core §8.4", "Every holder MUST declare a `complete` queryable on", MET,
      "a zk2py service that calls is an owner.Owner, and the bundles it holds, its own interfaces', are each on a "
      "complete queryable (live_interop's retrieval); a tool session that calls holds none"),
@@ -379,6 +389,8 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "envelope.decode (errors family)"),
     ("observer", "core §8.1", "Every instance MUST hold one, including pure consumers", NA,
      "no zk2py tool is a service, so none is an instance (observer §7.1's refusal of a self.system provider, met)"),
+    ("observer", "core §8.1", "A caller, a consumer or a tool across a constrained face whose face policy states a reply timeout", NOT_MET,
+     "zk2py's tools' GETs wait their --timeout, 1 s by default; none reads a face policy (round 99, core 0.91)"),
     ("observer", "core §8.4", "Every holder MUST declare a `complete` queryable", NA,
      "no zk2py tool holds bundles"),
     ("observer", "core §8.4", "A caller or tool MUST retrieve a bundle", MET,
@@ -389,6 +401,8 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "core §8.4", "A caller or tool MUST NOT depend on the encoding", MET,
      "live.retrieve_bundle verifies the hash, never the encoding, for every tool (core 0.68, F-387)"),
     # core 0.79 (#980 C1a): a reader resolving a named id.
+    ("observer", "core §8.5", "A consumer or a tool across a constrained face whose medium repairs no lost frame", NOT_MET,
+     "echo_tool --across-face declares each scope once (round 99, core 0.91)"),
     ("observer", "core §8.6", "A reader MUST refuse each of these", MET,
      "catalog.resolve: through the named catalog, else the first held whose lineage holds it, below that  "
      "item's count; unknown_catalog and unknown_index (catalog family, succession.json's reads); echo_tool's  "
@@ -510,6 +524,9 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "echo_tool --across-face SYSTEM/SERVICE with --contracts: face.scopes, each concrete resource's exact key  "
      "and each template's selector, an event's ULID chunk a wildcard, a subscriber each (constrained_live step  "
      "5: 25, 31 and 27 B a put, §7 steps 1, 2 and 4's own) (round 95, observer 0.18)"),
+    # observer 0.23 (#988 L4): declaring again after silence, re-keyed in round 99.
+    ("observer", "observer §7.5", "A tool across a constrained face whose medium repairs no lost frame SHOULD declare a scope again", NOT_MET,
+     "echo_tool --across-face declares each scope once, and reads no face policy (round 99, observer 0.23)"),
     # observer 0.21 (#981 K2): §7.6, a tool's frames.
     ("observer", "observer §7.6", "A tool MUST show a scheduled record's time as scheduled, with its `jitter_ms`",
      MET, "echo_tool's frame row, frame.Reader's records: time scheduled, after_ms step_ms × i and jitter_ms, never "

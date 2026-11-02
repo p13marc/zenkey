@@ -4064,6 +4064,8 @@ def _round98_t2_readings(root: Path) -> list[tuple[str, Any, Any]]:
     """telemetry.v2 0.1 (#983; #609, round 98), offline: its text at its
     version; W105 under its vocabulary; §2.16's linter warning; the owner's
     meter (§2.19, §2.20); and zk2py's R surviving a put it cannot read."""
+    import re
+
     from . import frame, packed, telemetry_v2 as t2, zk2c
     from .contract import load_contract
     from .telemetry_v2_live import SeriesSubscriber
@@ -4082,8 +4084,11 @@ def _round98_t2_readings(root: Path) -> list[tuple[str, Any, Any]]:
     bad = load_contract(mf.parent / "zk2py-meterframe-bad.toml",
                         text=text.replace('rx = { kind = "counter", unit = "By" }', 'rx = { kind = "gauge", unit = "By" }'))
     out: list[tuple[str, Any, Any]] = [
-        ("telemetry.v2 0.1 with its entry, experimental, written against core 0.87",
-         missing(v2, "| **Text version** | 0.1", "| **Status** | experimental |", "core 0.87")
+        # Re-keyed in round 99: the text moves on (0.2, core 0.90); its 0.1
+        # entry stands.
+        ("telemetry.v2 at 0.1 or later, experimental, with its 0.1 entry",
+         missing(v2, "| **Status** | experimental |")
+         + ([] if re.search(r"\| \*\*Text version\*\* \| 0\.[1-9]\d* ", v2) else ["no text version 0.1 or later"])
          + missing(flat("profiles/telemetry/CHANGELOG.md"), "## telemetry.v2 0.1"), []),
         ("telemetry.v2 §1, §4: W105 reads its table, series beside v1's four keys; the same contract under "
          "telemetry.v1 draws W105 for each telemetry.series (v1 §4's four keys), and v1 reads no frame resource as "
