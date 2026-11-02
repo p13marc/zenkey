@@ -935,8 +935,9 @@ async fn a_seeded_watch_seeds_from_a_zk2_owner() {
     let owner = TimestampId::from(owners.zid());
     let key = |name: &str| format!("zk2/host-a/tc/tc.netif.v1/state/interfaces/default/{name}");
     // `interfaces` declares `freshness.ttl_s` and uses freshness.v2: its
-    // mutations carry no Zenoh timestamp, and a reply of a live member
-    // carries its last confirmation, the owner's (S2, core §4.3's table).
+    // mutations carry no Zenoh timestamp, and a reply of a live member, or
+    // a deleted one's reply_del, carries its last confirmation, the
+    // owner's (S2, core §4.3's table).
     assert_eq!(
         (put0.time, deleted.time),
         (None, None),
@@ -953,10 +954,16 @@ async fn a_seeded_watch_seeds_from_a_zk2_owner() {
         Some(owner),
         "its last confirmation, the owner's Zenoh timestamp (S2)"
     );
+    let (kind, tombstone, inband) = seen.get(&key("eth1")).expect("eth1's reply_del");
     assert_eq!(
-        seen.get(&key("eth1")),
-        Some(&(SampleKind::Delete, None, Some(deleted.stamp))),
+        (kind, inband),
+        (&SampleKind::Delete, &Some(deleted.stamp)),
         "the reply_del, a deletion with the deletion's in-band stamp (S3)"
+    );
+    assert_eq!(
+        tombstone.map(|t| *t.get_id()),
+        Some(owner),
+        "its last confirmation, minted at the delete: the owner's Zenoh timestamp (S2)"
     );
     assert_eq!(
         coverage.state,
