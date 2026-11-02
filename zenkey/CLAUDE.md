@@ -441,7 +441,15 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   sends nothing), counts silence from the latest of the declaration, the
   last sample and a transport event, and skips a session cut off; it
   repairs a lost `DeclareSubscriber`, never a lost `DeclareKeyExpr`
-  (zenoh declares a prefix once a transport, core Appendix B).
+  (zenoh declares a prefix once a transport, core Appendix B). #1047: it
+  awaits nothing under the slots lock (takes the due subscribers, declares
+  with it released, in `spawn_blocking` since zenoh declares in place and
+  a declaration behind a slow link held a worker and the runtime's timers,
+  stores by id; a slot unwatched meanwhile has its fresh subscriber
+  undeclared), and a failed declaration is counted
+  (`Redeclaring::failed`, `Subscription::redeclare_failed`) and warned of
+  once a horizon per slot; its unit test refuses declarations through a
+  `cfg(test)` counter (`Inner::refuse`).
   `common::lossy_link_to` + `Link::lose_up(text)` / `lose_next_up()` drop
   the next batch the dialler sends holding `text`, or the next but a
   keep-alive (stream-link framing), for `constrained.rs`'s §9; §8 is a 1.5 s raw queryable against

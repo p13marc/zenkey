@@ -334,8 +334,10 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `[transport]` (a stated key stands, the interests timeout at least
   `TOOL_INTERESTS_TIMEOUT`, the deadline `OPEN_TIMEOUT` past the face's
   `open_timeout_ms`); `Monitor::watch_across(selector, horizon)` declares
-  through `zenkey::redeclare::Redeclaring` (`Monitor::redeclared`),
-  `tests/redeclare.rs` is `constrained.md` §9 step 2 through a lossy relay.
+  through `zenkey::redeclare::Redeclaring` (`Monitor::redeclared`,
+  `redeclare_failed`), `tests/redeclare.rs` is `constrained.md` §9 step 2
+  through a lossy relay, and #1047's `unwatch` returning while a re-declare
+  waits behind a stalled relay (no QoS, blocking puts).
   A call's both wires (#985 C4b): `model::render`'s `read` reads a
   `response` or `summary` under `zenoh/bytes` as the value form
   (`Payload::Record`, or `Refused`, never sniffed), `render_detail` takes
