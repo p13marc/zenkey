@@ -7,6 +7,25 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `telemetry.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## 0.8 — 2026-11-02: editorial: Appendix B's zenoh-modem row reads `modem.v3` 3.2, no rule changed (#983 T4, #988 L5)
+
+#983's T4 moved `modem.v3` to `telemetry.v2` in its revision 3.2.
+Appendix B's zenoh-modem row still said that `sdu/dropped_total` crosses
+the RF face as a bare counter, a decrease there a reset.
+
+**Changed: Appendix B's zenoh-modem row, which states no rule.** It says
+that `modem.v3` listed this text until revision 3.1. From 3.2 it lists
+`telemetry.v2`, which restates these rules by reference, so its
+declarations stand. Its 73 streams stay on the host bus. The reading of
+`sdu/dropped_total` crosses in a frame, whose run is its epoch, in band
+(`telemetry.v2` §2.19). That closes the sketch's gap 1 across the face.
+
+**Deliberately not changed.**
+- **No rule and no fixture.**
+- **Written against core 0.35**, still.
+- **`telemetry.v2` restates text 0.7**, and stays correct: no rule moved.
+- **The status stays `draft`,** used by ZenSight's four contracts.
+
 ## telemetry.v2 draft — 2026-11-02: used by zenoh-modem (#983, T4)
 
 The text's status moves from `experimental` to `draft`, the status of a
