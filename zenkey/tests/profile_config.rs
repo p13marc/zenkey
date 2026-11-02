@@ -578,9 +578,8 @@ async fn s1_a_hot_set_read_back() {
         .unwrap();
     let end = at.max(status_at) + Duration::from_secs(65);
     tokio::time::sleep_until(end.into()).await;
-    let after = |xs: Vec<(Instant, Json)>, from: Instant| {
-        xs.iter().filter(|(t, _)| *t > from).count()
-    };
+    let after =
+        |xs: Vec<(Instant, Json)>, from: Instant| xs.iter().filter(|(t, _)| *t > from).count();
     assert_eq!(
         after(s.of("/config.v1/state/view"), at),
         0,

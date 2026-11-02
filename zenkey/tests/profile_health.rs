@@ -1046,10 +1046,9 @@ async fn s4_the_faults_stamp_measured() {
         "a router under drop_future_timestamp drops the fault: {heard:#?}"
     );
     assert!(
-        heard
-            .iter()
-            .all(|r| r.is_status()
-                && r.stamp.is_none_or(|t| t.get_id().to_string() != os.zid().to_string())),
+        heard.iter().all(|r| r.is_status()
+            && r.stamp
+                .is_none_or(|t| t.get_id().to_string() != os.zid().to_string())),
         "the status put carries no stamp of the owner's, so R1 lets it through: {heard:#?}"
     );
     let got = split(get_state(&rs, "lab/ahead").await);
