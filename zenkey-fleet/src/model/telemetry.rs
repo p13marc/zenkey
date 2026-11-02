@@ -1268,6 +1268,12 @@ impl TelemetryBook {
             Some(d) => d.iter().map(|f| (Some(f.index), Some(f))).collect(),
             None => vec![(None, None)],
         };
+        // A key that would take a fold past the folds' bound is refused
+        // before any member is made for it, so none is left holding nothing.
+        if series.is_some() && !self.folds.contains_key(&key) && self.folds.len() >= MAX_MEMBERS {
+            self.refused += 1;
+            return FrameSeen::default();
+        }
         if !self.frame_members(metric, &key, &slots) {
             return FrameSeen::default();
         }
@@ -1302,10 +1308,6 @@ impl TelemetryBook {
             }
         };
         let arrival_ns = self.arrival_ns(s.at);
-        if !self.folds.contains_key(&key) && self.folds.len() >= MAX_MEMBERS {
-            self.refused += 1;
-            return FrameSeen::default();
-        }
         let folded = self
             .folds
             .entry(key.clone())
@@ -2049,7 +2051,10 @@ mod tests {
                 assert_eq!(member.tally.total(), fixture as u64, "{note}: {}", s.field);
             }
         }
-        assert!(owned > 0, "a frame of another revision, read under its own layout");
+        assert!(
+            owned > 0,
+            "a frame of another revision, read under its own layout"
+        );
     }
 
     /// A frame its layout refuses, a mutation on a frame resource and a
