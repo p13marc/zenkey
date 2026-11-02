@@ -196,16 +196,82 @@ def family_descriptors(root: Path) -> list[Result]:
 # -- errors/ (core.md §5.2) --------------------------------------------------
 
 def family_errors(root: Path) -> list[Result]:
+    """``errors/``, every file, an unknown one failing: ``cases.json``, §5.2's
+    envelope decoded by its Encoding; ``forms.json`` (core 0.92), §7.5's
+    error form (:func:`_error_forms`)."""
     from .envelope import EnvelopeError, decode
 
-    out = []
-    for c in _load_json(root / "errors" / "cases.json")["cases"]:
-        payload = c["text"].encode("utf-8") if "text" in c else bytes.fromhex(c["hex"])
+    out: list[Result] = []
+    for path in sorted((root / "errors").iterdir()):
+        if path.name == "forms.json":
+            out += _error_forms(_load_json(path))
+            continue
+        if path.name != "cases.json":
+            out.append((f"errors/{path.name}", False, "an unknown fixture file: the runner does not read it"))
+            continue
+        for c in _load_json(path)["cases"]:
+            payload = c["text"].encode("utf-8") if "text" in c else bytes.fromhex(c["hex"])
+            try:
+                got: Any = decode(c["encoding"], payload)
+            except EnvelopeError as e:
+                got = {"refused": e.tag}
+            out.append(_check(c["name"], got, c["expect"]))
+    return out
+
+
+def _error_forms(data: dict[str, Any]) -> list[Result]:
+    """``errors/forms.json`` (core 0.92, §5.2 "The error form", §7.5): its
+    ``codes`` and ``causes`` in zk2py's order; every error byte read alone
+    (``bytes``); an error and its stamp written, or the writer's refusal,
+    each accepted write parsed back to its value with the message as cut
+    (``writes``); a reply error's Encoding and payload read (``reads``)."""
+    from . import zk2c
+
+    unknown = set(data) - {"description", "codes", "causes", "bytes", "writes", "reads"}
+    out: list[Result] = [("errors: forms.json holds codes, causes, bytes, writes and reads", not unknown,
+                          f"members the runner does not read: {sorted(unknown)}" if unknown else "")]
+    out.append(_check("errors: forms: §5.2's codes in the error byte's order", data["codes"],
+                      list(zk2c.ERROR_CODES)))
+    out.append(_check("errors: forms: the causes in the error byte's order", data["causes"],
+                      list(zk2c.ERROR_CAUSES)))
+    seen = sorted(int(c["byte"], 16) for c in data["bytes"])
+    out.append(_check("errors: forms: every error byte, once", seen, list(range(256))))
+    for c in data["bytes"]:
         try:
-            got: Any = decode(c["encoding"], payload)
-        except EnvelopeError as e:
-            got = {"refused": e.tag}
-        out.append(_check(c["name"], got, c["expect"]))
+            got: Any = zk2c.error_byte(int(c["byte"], 16))
+        except zk2c.Refused as r:
+            got = {"refused": r.token}
+        out.append(_check(f"errors: forms: byte {c['byte']}", got, c["expect"]))
+    for c in data["writes"]:
+        v = c["value"]
+        stamp = zk2c.InBand(v["run_width"], v["run"], v["seq"])
+        detail = None if v["detail"] is None else bytes.fromhex(v["detail"])
+        try:
+            raw = zk2c.write_error(stamp, v["code"], v["cause"], v["message"], detail, v["tag"])
+        except zk2c.Refused as r:
+            got = {"refused": r.token}
+        else:
+            got = {"hex": raw.hex()}
+            back = zk2c.parse(raw, "reply_err")
+            assert back.stamp is not None and back.error is not None
+            read = {"run_width": back.width, "run": back.run, "seq": back.seq, "tag": back.tag,
+                    **back.error.as_json()}
+            # "every accepted write parses back to its value with the message
+            # as cut (reads_as gives it where it was cut)"
+            out.append(_check(f"errors: forms: write {c['note'][:60]}: parses back", read,
+                              {**v, **c["expect"].get("reads_as", {})}))
+        want = {k: x for k, x in c["expect"].items() if k != "reads_as"}
+        out.append(_check(f"errors: forms: write {c['note'][:60]}", got, want))
+    for c in data["reads"]:
+        try:
+            e = zk2c.read_reply_err(c["encoding"], bytes.fromhex(c["hex"]))
+        except zk2c.Refused as r:
+            got = {"refused": r.token}
+        else:
+            assert e.error is not None
+            got = {"error": {"run_width": e.width, "run": e.run, "seq": e.seq, "tag": e.tag, **e.error.as_json()}}
+        out.append(_check(f"errors: forms: read {c['encoding']} {c['hex'][:32] or '(empty)'}: {c['note']}", got,
+                          c["expect"]))
     return out
 
 
@@ -756,9 +822,16 @@ def _link_interfaces(case: dict[str, Any]) -> dict[str, Any]:
             raise CannotRun(f"{rel}: {c.codes}")
         revisions.setdefault(c.interface, []).append(link.revision_of(c))
     # link.v1 0.11: a case may give both, its interfaces inline and the
-    # standard contracts by path (freshness.v2's).
+    # standard contracts by path (freshness.v2's). link.v2 0.6 (F-469): one
+    # interface id given both ways is two revisions of it, "the contract's
+    # … and one, inline", the contract's first.
     out: dict[str, Any] = {i: {"revisions": revs} for i, revs in revisions.items()}
-    out.update(case.get("interfaces", {}))
+    for i, entry in case.get("interfaces", {}).items():
+        if i not in out:
+            out[i] = entry
+            continue
+        inline = entry["revisions"] if isinstance(entry, dict) and "revisions" in entry else [entry]
+        out[i] = {"revisions": out[i]["revisions"] + list(inline)}
     return out
 
 
@@ -4231,25 +4304,36 @@ annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "1" }
     sizes = {f"{x['interface']}/{x['resource']}": x for x in rows}
     out.append(("#983 T4: modem.v3 3.2's nine frame resources and gendev.v1 1.1's frames/sample, each declared, "
                 "written by zk2py's Framer under a 32-bit run, read back envelope first, written again byte for byte, "
-                "and every series field of every record a sample of the value written; link.v1 §2.8's largest frame "
-                "measured at frame_facts' size, frames/link 22 B, frames/message 213 B and frames/sample 97 B as the "
-                "Rust side measured",
+                "and every series field of every record a sample of the value written; link.v1 "
+                "0.16 §2.8's largest frame measured at frame_facts' size, frames/link 22 B and frames/message 213 B "
+                "(keyframe_every 1) and frames/sample 100 B",
                 [len(rows), all(x["declared"] == "declared" and x["read_back"] and x["samples"]
                                 and x["follows"] == ["first", "continues"] for x in rows),
-                 all(x["full_frame_bytes"] == x["largest_bytes"] for x in rows),
-                 [sizes.get(k, {}).get("full_frame_bytes")
+                 all(x["largest_frame_bytes"] == x["largest_bytes"] for x in rows),
+                 [sizes.get(k, {}).get("largest_frame_bytes")
                   for k in ("modem.v3/frames/link", "modem.v3/frames/message", "gendev.v1/frames/sample")]],
-                [10, True, True, [22, 213, 97]]))
-    out.append(("F-470: a frame whose keyframe_every is above 1 puts delta records; one that includes every field "
-                "(\"Including an unchanged field is never wrong\") is a bit a field longer than link.v1 §2.8's full "
-                "record, so zk2py's writer puts frames/layer at 109 B and frames/sample at 100 B",
-                missing(core, "Including an unchanged field is never wrong.")
-                + [{k: (x["largest_bytes"], x["delta_frame_bytes"]) for k, x in sizes.items()
-                    if x["delta_frame_bytes"] != x["largest_bytes"]}],
-                [{"modem.v3/frames/air": (49, 50), "modem.v3/frames/bearer": (32, 33), "modem.v3/frames/if": (58, 60),
-                  "modem.v3/frames/layer": (106, 109), "modem.v3/frames/radio": (21, 22),
-                  "modem.v3/frames/sched": (32, 33), "modem.v3/frames/sdu": (51, 52),
-                  "gendev.v1/frames/sample": (97, 100)}]))
+                [10, True, True, [22, 213, 100]]))
+    # F-470 answered (link.v1 0.16 §2.8): "the largest frame holds records −
+    # ⌊records / keyframe_every⌋ such delta records, and full records for
+    # the rest". zk2py's writer never puts a frame above it, and puts it
+    # where every field changes; examples/zk2/zenoh-modem/README.md states
+    # the group frames' new sizes.
+    readme = (spec.parent / "examples" / "zk2" / "zenoh-modem" / "README.md").read_text(encoding="utf-8")
+    stated = {m.group(1): int(m.group(2)) for m in re.finditer(r"^\| `(frames/\w+)` \|.*\| (\d+) B \|$", readme, re.M)}
+    out.append(("F-470 at link.v1 0.16: the largest frame holds records − ⌊records / keyframe_every⌋ delta records "
+                "that include every field; zk2py's writer puts no frame above it and reaches it where every field "
+                "changes (frames/layer 109 B, frames/sample 100 B); zenoh-modem's README states each modem.v3 size "
+                "zk2py measures",
+                missing(flat("profiles/link/v1.md"), "so the largest frame holds `records` −")
+                + [all(x["delta_frame_bytes"] <= x["largest_bytes"] for x in rows),
+                   {k: (x["full_frame_bytes"], x["largest_bytes"]) for k, x in sizes.items()
+                    if x["full_frame_bytes"] != x["largest_bytes"]},
+                   {k.split("/", 1)[1]: x["largest_bytes"] for k, x in sizes.items() if k.startswith("modem.v3/")}
+                   == stated],
+                [True, {"modem.v3/frames/air": (49, 50), "modem.v3/frames/bearer": (32, 33),
+                        "modem.v3/frames/if": (58, 60), "modem.v3/frames/layer": (106, 109),
+                        "modem.v3/frames/radio": (21, 22), "modem.v3/frames/sched": (32, 33),
+                        "modem.v3/frames/sdu": (51, 52), "gendev.v1/frames/sample": (97, 100)}, True]))
 
     # Review-bot on round 98 (PR #1041): the meter accepts after the put.
     mf = spec / "profiles" / "telemetry" / "conformance" / "contracts" / "meterframe.v1.toml"
@@ -5253,9 +5337,10 @@ def _round94_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 [write(small, {"v": True}), write(count, {"v": True}), write(clock, {"v": False}, 0),
                  write(half, {"v": True}), write(flag, {"v": 1}), jcs.is_json_integer(True)],
                 [{"refused": "value"}] * 5 + [False]))
-    # 4. E044 per reference: an attachment's type and an operation's four
-    #    types; a stream's, a state's, an event's and an explicit state's
-    #    type are not.
+    # 4. E044 per reference: an attachment's type. A stream's, a state's,
+    #    an event's and an explicit state's type are not, and since core 0.92
+    #    (E044 narrowed, #985 C4a) neither are an operation's four types,
+    #    which travel in §7.5's forms behind a CH that holds their tag.
     placed = load_contract(root / "contracts" / "m.v1.toml", text="""[interface]
 name = "m"
 major = 1
@@ -5287,12 +5372,12 @@ error = "packed:Status"
 summary = "packed:Status"
 replies = "many"
 """)
-    out.append(("review-bot on PR #1014, 4: E044 on a state's and an event's attachment and on an operation's "
-                "request, response, error and summary; none on a stream's, a state's, an explicit state's or an "
-                "event's type",
+    out.append(("review-bot on PR #1014, 4, at core 0.92: E044 on a state's and an event's attachment; none on "
+                "a stream's, a state's, an explicit state's or an event's type, nor on an operation's request, "
+                "response, error and summary",
                 sorted(d.message.split(":")[0] + ":" + d.message.split(":")[1] for d in placed.diagnostics
                        if d.code == "E044"),
-                ["ev: attachment", "op: error", "op: request", "op: response", "op: summary", "st: attachment"]))
+                ["ev: attachment", "st: attachment"]))
     # Not a finding: reserved names in §7.6's order, whichever are declared.
     err = rec({"name": "v", "type": "int", "minimum": 0, "maximum": 2, "reserved": ["out_of_range", "error"]})
     out.append(("§7.6 \"from all ones down, in that order\": error alone above out_of_range takes all ones",
@@ -5562,15 +5647,16 @@ def _round93_readings(root: Path) -> list[tuple[str, Any, Any]]:
     refused = zk2c.read_put(key, "zenoh/bytes", b'{"a":1}')
     good = zk2c.read_put(key, "zenoh/bytes", zk2c.mutation(zk2c.InBand(16, 3, 9), b'{"a":1}'))
     out.append(("observer §7.3 (0.14): a state sample under zenoh/bytes with no envelope is refused (JSON's `{` is "
-                "form 3), its record None and its refusal named; an envelope's record is the payload",
+                "form 3, an error, which a put does not carry: sample_kind since core 0.92, where 0.72 reserved it, "
+                "form), its record None and its refusal named; an envelope's record is the payload",
                 [(refused.refused, refused.record, refused.refusal), (good.record, str(good.stamp)),
                  zk2c.read_put(key, "application/json", b'{"a":1}').record],
-                [(True, None, "form"), (b'{"a":1}', "run 0003 seq 9"), b'{"a":1}']))
+                [(True, None, "sample_kind"), (b'{"a":1}', "run 0003 seq 9"), b'{"a":1}']))
     row = echo_tool.row_of(key, False, 7, "zenoh/bytes", b'{"a":1}')
     ok_row = echo_tool.row_of(key, False, 13, "zenoh/bytes", zk2c.mutation(zk2c.InBand(32, 0xA1, 2), b"hi"))
     out.append(("observer §7.3 (0.14) in echo_tool: a refused envelope's row says undecodable, naming the refusal, "
                 "and sniffs nothing; an envelope's row shows its run and seq (observer §8.3) and sniffs its record",
-                [row["sniffed"], "form" in (row["undecodable"] or ""), ok_row["envelope"], ok_row["undecodable"],
+                [row["sniffed"], "sample_kind" in (row["undecodable"] or ""), ok_row["envelope"], ok_row["undecodable"],
                  ok_row["sniffed"] is not None],
                 [None, True, {"run": "000000a1", "seq": 2, "shown": "run 000000a1 seq 2"}, None, True]))
     lj = sd.LateJoiner(None, f"{key}", consumer=False)
@@ -8649,11 +8735,16 @@ def family_envelope(root: Path) -> list[Result]:
                 except zk2c.Refused as r:
                     got: Any = {"refused": r.token}
                 else:
+                    # core 0.92: a request's width, run and seq are null; an
+                    # error's parse adds `error`.
                     got = {"form": e.form, "run_width": e.width, "run": e.run, "seq": e.seq, "tag": e.tag,
                            "record": None if e.record is None else e.record.hex()}
-                    back = zk2c.write(e.form, e.width, e.run, e.seq, e.tag, e.record)
-                    out.append(_check(f"envelope: {c['sample']} {c['hex']} writes back", back.hex(), c["hex"]))
-                out.append(_check(f"envelope: {c['sample']} {c['hex'] or '(empty)'}: {c['note']}", got, c["expect"]))
+                    if e.error is not None:
+                        got["error"] = e.error.as_json()
+                    back = zk2c.write_back(e)
+                    out.append(_check(f"envelope: {c['sample']} {c['hex'][:64]} writes back", back.hex(), c["hex"]))
+                out.append(_check(f"envelope: {c['sample']} {c['hex'][:64] or '(empty)'}: {c['note']}", got,
+                                  c["expect"]))
         elif path.name == "carries.json":
             for c in data["cases"]:
                 out.append(_check(f"envelope: carries {c['key']} {c['encoding']}: {c['note']}",

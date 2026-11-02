@@ -503,13 +503,14 @@ class _Loader:
                     if mp is not None and mp not in tpl.single_chunk_params():
                         self.diag("E025", f"{text}: media_param {mp!r} is not a single-chunk parameter", text)
         self.c.types[text] = resolved
-        # §7.1 (0.75): "A packed type MUST be the type of a stream, a state or
-        # an event, never an explicit stream's (E044). It is never an
-        # attachment or an operation's type either." Per reference, on a
-        # reference that resolved.
+        # §7.1 (0.92): "A packed type MUST be the type of a stream that is
+        # not explicit, a state or an event, or an operation's request,
+        # response, error or summary (E044)"; "An explicit stream's type and
+        # an attachment travel with no CH … A packed type is never one."
+        # Per reference, on a reference that resolved.
         for f, obj in resolved.items():
-            if obj["kind"] == PACKED and (f != "type" or kind == "operation" or token == "@stream"):
-                self.diag("E044", f"{text}: {f}: a packed type with no envelope to carry it", text)
+            if obj["kind"] == PACKED and (f == "attachment" or (f == "type" and token == "@stream")):
+                self.diag("E044", f"{text}: {f}: a packed type with no CH to carry its tag", text)
 
         if "frame" in spec and kind == "stream" and not explicit and not tpl.param_names:
             self.check_frame(text, spec, resolved)

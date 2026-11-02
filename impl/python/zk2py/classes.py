@@ -591,15 +591,27 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("static", "core §7.1", "The name MUST be unique across the listed packed files", MET,
      "schemas.SchemaSet._resolve_packed, E023 and E024 (contracts family: e024-packed-ambiguous, e023-packed) "
      "(round 94, core 0.75)"),
-    ("static", "core §7.1", "A packed type MUST be the `type` of a stream, a state or an event", MET,
-     "contract's E044, per reference that resolved (contracts family: e044-packed-place, ok-packed) "
-     "(round 94, core 0.75)"),
-    # core 0.72 (#976): §7.5's two static rules.
-    ("static", "core §7.5", "An implementation MUST refuse an envelope for the first of these", MET,
-     "zk2c.parse, in §7.5's order, each token, a frame's key_kind on its key (envelope family, vectors.json, "
-     "carries.json's reads) (round 93, core 0.72; round 96, core 0.83)"),
-    ("static", "core §7.5", "Every envelope an implementation accepts MUST write back to the same bytes", MET,
-     "zk2c.write, every accepted case and header written back (envelope family) (round 93, core 0.72)"),
+    ("static", "core §7.1", "A packed type MUST be the `type` of a stream that is not explicit, a state or an "
+     "event, or an operation's", MET,
+     "contract's E044, per reference that resolved, on an attachment and an explicit stream's type alone "
+     "(contracts family: e044-packed-place, ok-packed, ok-packed-operation) (round 94, core 0.75; round 100, "
+     "core 0.92's narrowing)"),
+    # core 0.72 (#976): §7.5's two static rules; core 0.92 (#985 C4a): a
+    # call's forms beside them, and the error's two writer rules.
+    ("static", "core §7.5", "An implementation that writes an error MUST cut a message longer than 255 bytes",
+     MET, "zk2c.write_error through zk2c.cut_message: the longest prefix of whole code points within 255 bytes "
+     "(errors family: forms.json's writes, each parsed back as cut) (round 100, core 0.92)"),
+    ("static", "core §7.5", "An implementation MUST NOT write an error with a cause on a code other than", MET,
+     "zk2c.write_error refuses cause, then detail, as the parse would (errors family: forms.json's writes); no "
+     "zk2py owner answers in a form yet (core §5.1, \"The forms\") (round 100, core 0.92)"),
+    ("static", "core §7.5", "An implementation MUST refuse an envelope or a form for the first of these", MET,
+     "zk2c.parse, in §7.5's order, each token, on put, delete, query, reply and reply_err, a frame's key_kind "
+     "on its key, an error's byte and message after the stamp (envelope family: vectors.json, carries.json's "
+     "reads; errors family: forms.json's bytes and reads) (round 93, core 0.72; round 96, core 0.83; round 100, "
+     "core 0.92)"),
+    ("static", "core §7.5", "Every envelope and form an implementation accepts MUST write back to the same bytes",
+     MET, "zk2c.write_back, every accepted case and header written back, a request, a value and an error "
+     "included (envelope family) (round 93, core 0.72; round 100, core 0.92)"),
     # core 0.81 (#978 F1): the heartbeat's five static rules (round 96).
     ("static", "core §7.5", "An implementation that writes a heartbeat MUST write its covered revision's tag", MET,
      "heartbeat.tag_of, the fingerprint's last byte's low 4 bits, and zk2c.heartbeat under it (heartbeat family: "

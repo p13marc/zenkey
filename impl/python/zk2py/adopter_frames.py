@@ -10,15 +10,18 @@ schema files beside it are loaded by zk2py's contract reader, not read here).
 
 For each frame resource, with zk2py's own writer (:class:`zk2py.frame.Framer`)
 from its layout, under a 32-bit run, in core §7.5's envelope:
-1. **the largest frame link.v1 §2.8 names**: ``records`` full records, every
-   optional field present, every record after record 0 with its offset (the
-   records measured off their schedule). Its put's length is checked against
-   :func:`zk2py.link.frame_facts`' ``largest_bytes``;
+1. **the largest frame link.v1 §2.8 names**, at text 0.16 (F-470's answer):
+   ``records`` records, every optional field present, every record after
+   record 0 with its offset (the records measured off their schedule), of
+   which ``records`` − ⌊``records`` / ``keyframe_every``⌋ are delta records
+   that include every field and the rest full (:func:`largest_frame_bytes`).
+   Its put's length is checked against :func:`zk2py.link.frame_facts`'
+   ``largest_bytes``. The frame of full records alone, 0.15's figure, is
+   :func:`full_frame_bytes`;
 2. **the largest frame zk2py's writer puts**: the frame after it, every field
-   changed, so that every record is a delta record that includes every field.
-   A delta record carries one inclusion bit per field more than a full record
-   (core §7.7), so a frame resource whose ``keyframe_every`` is above 1 puts
-   frames up to one bit per field per record longer than (1) (F-470);
+   changed, so that every record is a delta record that includes every field,
+   but where ``keyframe_every`` asks a full one. A delta record carries one
+   inclusion bit per field more than a full record (core §7.7);
 3. **each put read back**, envelope first (:func:`zk2py.zk2c.read_put`): its
    body by the layout's tag, written again byte for byte, and through
    :class:`zk2py.telemetry_v2.SeriesReader`: every series field of every
@@ -124,6 +127,7 @@ def frames_of(contract: Any, r: dict[str, Any]) -> dict[str, Any]:
             "series": None if reader is None else len(reader.decl.series),
             "declared": None if reader is None else reader.decl.declaration,
             "largest_bytes": facts["largest_bytes"] if facts else None,
+            "largest_frame_bytes": largest_frame_bytes(contract, r),
             "full_frame_bytes": full_frame_bytes(contract, r), "first_frame_bytes": len(puts[0]["payload"]),
             "first_frame_records_full": [rec["full"] for rec in puts[0]["value"]["records"]],
             "delta_frame_bytes": len(puts[-1]["payload"]),
@@ -148,13 +152,29 @@ def run() -> list[dict[str, Any]]:
 def full_frame_bytes(contract: Any, r: dict[str, Any]) -> int:
     """A frame of ``records`` full records, every optional field present,
     later records with offsets, written by the layout itself under a 32-bit
-    run: link.v1 §2.8's largest frame, measured."""
+    run: link.v1 0.15 §2.8's largest frame, measured."""
+    return _frame_bytes(contract, r, 0)
+
+
+def largest_frame_bytes(contract: Any, r: dict[str, Any]) -> int:
+    """link.v1 0.16 §2.8's largest frame, measured: as
+    :func:`full_frame_bytes`, but "``records`` − ⌊``records`` /
+    ``keyframe_every``⌋ such delta records" that include every field, "and
+    full records for the rest". Which records are the deltas changes no
+    bit's count."""
+    lo = frame.layout_of(contract, r)
+    assert lo is not None
+    return _frame_bytes(contract, r, lo.decl.records - lo.decl.records // lo.decl.keyframe_every)
+
+
+def _frame_bytes(contract: Any, r: dict[str, Any], deltas: int) -> int:
     lo = frame.layout_of(contract, r)
     assert lo is not None
     d = lo.decl
     recs = []
     for i in range(d.records):
-        rec: dict[str, Any] = {"full": True, "values": {f.name: _value(f, 0) for f in lo.fields}, "absent": []}
+        rec: dict[str, Any] = {"full": i >= deltas, "values": {f.name: _value(f, 0) for f in lo.fields},
+                               "absent": []}
         if i >= 1:
             rec["at"] = min(i * ((d.step_ms or 0) + (d.jitter_ms or 0) + 1), (d.span_ms or 1) - 1)
         recs.append(rec)

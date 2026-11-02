@@ -585,7 +585,10 @@ def plan(policy_text: str, implements: dict[str, list[str]], interfaces: dict[st
             continue
         errors += [link.finding("contract_unknown", None, i) for i in implements[s] if i not in interfaces]
     if errors:
-        return {"refused": link.sort_findings(findings + errors)}
+        # §2.3 (0.6, F-468): "A refusal lists the deployment's errors alone,
+        # as link.v1 §2.3 says: no warning of the policy's or the plan's
+        # comes with it."
+        return {"refused": link.sort_findings(errors)}
     v1 = policy.as_v1()
     if policy.v1 is not None:
         # "A link.v1 policy's plan is link.v1's, finding for finding. It
