@@ -220,10 +220,11 @@ ANTECEDENTS = {
     ("core.md", "Its schema is"): ("Its", "the descriptor record's"),
     ("core.md", "The owner's descriptor MUST NOT raise it"): ("raise it", "a template's bound"),
     ("core.md", "it MUST fit one fragment"): ("it", "an owner's descriptor"),
-    # core S2: "It" is the owner, the row's label, whose deletions the
-    # sentence names; "them" is what its state queryables cover (F-384).
-    ("core.md", "It MUST answer a selector over them"): [
+    # core S2: "It" is the owner, the row's label, whose state queryables
+    # the sentence before names; "them" is what they cover (F-384).
+    ("core.md", "It MUST answer a GET over them per collection"): [
         ("It", "the owner"), ("over them", "its interfaces' `state/**` and `@state/**`")],
+    ("core.md", "It MUST also carry the mutation's Zenoh timestamp"): ("It", "an owner's per-key reply"),
     ("core.md", "It MUST keep the newer by its in-band stamp"): ("It", "a late joiner"),
     ("core.md", "It names the member each reply answers for"): ("It", "a server declared over the whole template"),
     ("core.md", "It MUST refuse:"): ("It", "a tool decoding an envelope"),
