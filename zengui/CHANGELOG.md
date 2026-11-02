@@ -4,6 +4,18 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — the Send tool reads both wires (#985 C4b, for #980)
+
+A call's reply is read by its `Encoding` alone, through the fleet's
+`call_operation`: under `zenoh/bytes` core §7.5's value or error form, and
+the bare wire's envelope or record otherwise. No owner answers in a form
+until C4c, so no scene moves.
+
+| Before | Now | Notes |
+|---|---|---|
+| a refusal's card: its code, message, cause and detail | an error form's also says its as-of mark, `as of run r, seq s`, and its detail is decoded as the `error` type | core §5.1, §5.2 |
+| a value's card | a value form's says its mark under the value; a replier's card the mark of each reply | absent on the bare wire |
+
 ## Unreleased (`main`, zk2) — the Series plots a frame's fields (#983, T2)
 
 `telemetry.v2` 0.1 binds a frame resource's fields to metric series.

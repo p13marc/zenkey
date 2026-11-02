@@ -146,7 +146,8 @@ Claude Code loads this file when working in `zengui/`; the root `CLAUDE.md` is t
   rows (`on_owner_state`), the mesh; Send publishes a foreign key only, on
   `WireQos` axes (P3 and wildcards refused, a tombstone behind
   `--i-know`), and calls an operation through its contract on `@op`
-  (`plan_call` refuses a forbidden fan-out before sending). **Replay**
+  (`plan_call` refuses a forbidden fan-out before sending), its reply read
+  from either wire, a form's as-of mark on its card (#985 C4b). **Replay**
   resolves through an offline `ReplayLens` (no catalog, the offline
   contracts, the capture's namespace) with a replay-scoped identity cache,
   and publish, call, record, why, fields and consumers are refused in every

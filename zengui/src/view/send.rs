@@ -44,7 +44,7 @@ use std::sync::Arc;
 use iced::widget::{Column, column, row};
 use iced::{Element, Length};
 use zenkey_fleet::report::{
-    CallMode, EnvelopeView, OperationAnswer, OperationReport, PayloadRendering,
+    CallMode, EnvelopeView, InbandStamp, OperationAnswer, OperationReport, PayloadRendering,
     PresenceAttribution, Rendered, RepliesView, TypeView,
 };
 use zenkey_fleet::{Revision, WireQos};
@@ -1383,7 +1383,7 @@ pub fn call_summary(report: &OperationReport) -> String {
         report.iface, report.operation, report.address
     );
     match &report.answer {
-        OperationAnswer::Value { reply } => {
+        OperationAnswer::Value { reply, .. } => {
             format!("{head} → value ({})", kit::plural(reply.size, "byte"))
         }
         OperationAnswer::Refused { envelope } => format!(
@@ -1482,7 +1482,17 @@ fn envelope_card<'a>(env: &EnvelopeView, sp: Spacing) -> Element<'a, Message> {
             serde_json::to_string(detail).unwrap_or_default()
         )));
     }
+    if let Some(mark) = &env.mark {
+        col = col.push(kit::muted(mark_words(mark)));
+    }
     kit::card(col)
+}
+
+/// A form's as-of mark (core §5.1): the replying instance's run, as its
+/// descriptor spells it, and the last seq it minted. It attributes no
+/// error: a `reply_err` carries no key.
+fn mark_words(m: &InbandStamp) -> String {
+    format!("as of run {}, seq {}", m.run, m.seq)
 }
 
 fn replies_view<'a>(r: &RepliesView, timeout_s: f64, sp: Spacing) -> Element<'a, Message> {
@@ -1515,6 +1525,14 @@ fn replies_view<'a>(r: &RepliesView, timeout_s: f64, sp: Spacing) -> Element<'a,
         }
         for reply in replier.replies.iter().chain(&replier.summaries) {
             card = card.push(rendering(reply, None, sp));
+        }
+        if !replier.marks.is_empty() {
+            let marks: Vec<String> = replier
+                .marks
+                .iter()
+                .map(|m| m.as_ref().map_or_else(|| "no mark".to_owned(), mark_words))
+                .collect();
+            card = card.push(kit::muted(marks.join("; ")));
         }
         col = col.push(kit::card(card));
     }
@@ -1582,11 +1600,13 @@ fn outcome_view<'a>(
         report.timeout_s
     )));
     col = col.push(match &report.answer {
-        OperationAnswer::Value { reply } => kit::card(rendering(
-            reply,
-            Some(kit::status_chip(Tone::Positive, "value")),
-            sp,
-        )),
+        OperationAnswer::Value { reply, mark } => {
+            let value = rendering(reply, Some(kit::status_chip(Tone::Positive, "value")), sp);
+            match mark {
+                Some(m) => kit::card(column![value, kit::muted(mark_words(m))].spacing(sp.xs)),
+                None => kit::card(value),
+            }
+        }
         OperationAnswer::Refused { envelope } => envelope_card(envelope, sp),
         OperationAnswer::Malformed { malformed } => kit::card(
             column![
