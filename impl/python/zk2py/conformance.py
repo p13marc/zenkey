@@ -4222,6 +4222,35 @@ annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "1" }
                   ("keep_alive_not_suppressed", "transport.keep_alive")],
                  ["freshness.v2/stream/heartbeat/probe.v1", "probe.v1/state/status", "probe.v1/stream/frames/link"]]))
 
+    # #983's last "Done when" item (main 2ed6d968, the coordinator's addition
+    # to round 99): modem.v3 3.2's frames and gendev.v1's frames/sample,
+    # written by zk2py's Framer and read back through its reader and R.
+    from . import adopter_frames
+
+    rows = adopter_frames.run()
+    sizes = {f"{x['interface']}/{x['resource']}": x for x in rows}
+    out.append(("#983 T4: modem.v3 3.2's nine frame resources and gendev.v1 1.1's frames/sample, each declared, "
+                "written by zk2py's Framer under a 32-bit run, read back envelope first, written again byte for byte, "
+                "and every series field of every record a sample of the value written; link.v1 §2.8's largest frame "
+                "measured at frame_facts' size, frames/link 22 B, frames/message 213 B and frames/sample 97 B as the "
+                "Rust side measured",
+                [len(rows), all(x["declared"] == "declared" and x["read_back"] and x["samples"]
+                                and x["follows"] == ["first", "continues"] for x in rows),
+                 all(x["full_frame_bytes"] == x["largest_bytes"] for x in rows),
+                 [sizes.get(k, {}).get("full_frame_bytes")
+                  for k in ("modem.v3/frames/link", "modem.v3/frames/message", "gendev.v1/frames/sample")]],
+                [10, True, True, [22, 213, 97]]))
+    out.append(("F-470: a frame whose keyframe_every is above 1 puts delta records; one that includes every field "
+                "(\"Including an unchanged field is never wrong\") is a bit a field longer than link.v1 §2.8's full "
+                "record, so zk2py's writer puts frames/layer at 109 B and frames/sample at 100 B",
+                missing(core, "Including an unchanged field is never wrong.")
+                + [{k: (x["largest_bytes"], x["delta_frame_bytes"]) for k, x in sizes.items()
+                    if x["delta_frame_bytes"] != x["largest_bytes"]}],
+                [{"modem.v3/frames/air": (49, 50), "modem.v3/frames/bearer": (32, 33), "modem.v3/frames/if": (58, 60),
+                  "modem.v3/frames/layer": (106, 109), "modem.v3/frames/radio": (21, 22),
+                  "modem.v3/frames/sched": (32, 33), "modem.v3/frames/sdu": (51, 52),
+                  "gendev.v1/frames/sample": (97, 100)}]))
+
     # Review-bot on round 98 (PR #1041): the meter accepts after the put.
     mf = spec / "profiles" / "telemetry" / "conformance" / "contracts" / "meterframe.v1.toml"
     decl = t2.contract_declarations(load_contract(mf))["frames/totals"]
@@ -4320,10 +4349,12 @@ def _round98_t2_readings(root: Path) -> list[tuple[str, Any, Any]]:
     bad = load_contract(mf.parent / "zk2py-meterframe-bad.toml",
                         text=text.replace('rx = { kind = "counter", unit = "By" }', 'rx = { kind = "gauge", unit = "By" }'))
     out: list[tuple[str, Any, Any]] = [
-        # Re-keyed in round 99: the text moves on (0.2, core 0.90); its 0.1
-        # entry stands.
-        ("telemetry.v2 at 0.1 or later, experimental, with its 0.1 entry",
-         missing(v2, "| **Status** | experimental |")
+        # Re-keyed in round 99: the text moves on (0.2, core 0.90), and on
+        # main 2ed6d968 its status to draft, used by zenoh-modem (its entry
+        # "telemetry.v2 draft"); its 0.1 entry stands.
+        ("telemetry.v2 at 0.1 or later, experimental or, with its entry, draft, with its 0.1 entry",
+         ([] if "| **Status** | experimental |" in v2 else missing(v2, "| **Status** | draft |")
+          + missing(flat("profiles/telemetry/CHANGELOG.md"), "## telemetry.v2 draft"))
          + ([] if re.search(r"\| \*\*Text version\*\* \| 0\.[1-9]\d* ", v2) else ["no text version 0.1 or later"])
          + missing(flat("profiles/telemetry/CHANGELOG.md"), "## telemetry.v2 0.1"), []),
         ("telemetry.v2 §1, §4: W105 reads its table, series beside v1's four keys; the same contract under "
