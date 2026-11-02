@@ -49,6 +49,7 @@ scenarios' own contracts. A profile leaves this table when one does
 | [`timing.v1`](timing/v1.md) | 0.10 | experimental | none | 0.83 | 2: `period_ms`, `deadline_ms`, `lifespan_ms`; 4 through `uses` | A stream's cadence, its deadline and its lifespan: the owner publishes each member at its period and no runtime repeats a sample; a reader reports a member missed when more than its deadline passes between two arrivals on its own monotonic clock, seen within max(deadline/50, 1 ms), and met at its next, a member never heard judged only when known and its owner present, and a miss never "down"; a sample arrives expired by its owner's stamp only against a clock bound ε the deployment states, never the HLC's delta, and with none nothing is discarded (core §2.7, §4.1, §8.1, R6) |
 | [`arbitration.v1`](arbitration/v1.md) | 0.6 | experimental | none | 0.83 | 2: `policy`, on a requirement; 4 through `uses` | One commander at a time: an arbitrated role follows the first provider, in its binding's order, whose stream arrives within its `timing.v1` deadline and whose interface token it has not heard withdrawn, and holds the dead-man when none is left, the safe value the application's; a withdrawal makes a provider ineligible at once, never absent, and only its token or a read re-admits it, never a sample; no hysteresis; a move of the consumer's own watch hands no authority over; the source from the key, never the payload (core R1, R3, R6, §8.1, §8.2) |
 | [`link.v2`](link/v2.md) | 0.6 | experimental | none | 0.91 | 2: `link.v1`'s `link.exposure`; 4 through `uses` | `link.v1` with the face's transport: a router-wide `[transport]` (lease, keep-alives, `wait_before_close` at least the lease, sequence width, batch, timeouts) that a generator writes into the router's configuration and for the far end, linted per medium for keep-alives that flap, a sequence window one lease can fill and timeouts below the handshake; the binding the router runs, naming its link protocols; the catalog the far side decodes with, a crossing revision it lacks refused; and per face the loss, the ARQ, the reply timeout, the frames that cross at their cadences and the shortest horizon it affords, which a far side's callers and readers follow: at least the reply timeout, and a silent subscription declared again where the medium repairs no lost frame. A contract that lists it exposes only packed resources, and a timed stream is denied, never thinned. A tool checks a router's transport against the policy, read at the binding's defaults where omitted, and the two ends against each other (core §7.6, §7.7, §8.1, §8.5, §11.3) |
+| [`config.v2`](config/v2.md) | 0.1 | experimental | none | 0.92 | 1: a standard schema, [`config.v2.json`](config/config.v2.json); 2: `config.groups`; 4 through `uses` (`freshness.v2`) | `config.v1` by reference, on a packed wire: each configured kind of device declares its groups in its own contract (`config.groups`: a class, a packed type of `int` and `bool` parameters, units, sensitive names), from which `Record`, one `Set<T>` per hot or reach group, `Control` and `Error` are derived and linted; one record replaces the view and the status, put before every reply, which answers it in core §7.5's value form or refuses in its error form; a contract group has no `set`; tokens are the run and a 16-bit counter, a new run before it ends; times are whole seconds from the deployment epoch, rounded up; a retry's first answer is replayed byte for byte; a sensitive value has no bit on the wire (core §5, §7.5, §7.6, O7) |
 
 ## Layout
 
@@ -62,7 +63,7 @@ profiles/
     scenarios.md          the rules a fixture cannot check; scenarios-v<major>.md for a later major
     conformance/          fixtures; each file states its format in its description; v<major>/ for a later major
     <name>.v<major>.toml  the standard contract, for a profile that defines one
-    <name>.v<major>.json  the standard schema, for a profile that defines one (core §10 point 1: telemetry.v1, desired.v1)
+    <name>.v<major>.json  the standard schema, for a profile that defines one (core §10 point 1: telemetry.v1, desired.v1, config.v2)
 ```
 
 ## The template
@@ -178,6 +179,10 @@ thing in the same place.
     guard does not hold, rather than by its status;
   - `config.v1`: no change, since core §7.3's `oneOf` expresses its
     discriminated replies;
+  - `config.v2`: that §7.5 defines a call's request, value and error
+    forms, and that §7.1 lets an operation's types be packed, carried in
+    those forms. Its derived types and its lint needed no change: they
+    are its own, on §7.6's packed types;
   - `link.v1`: that Appendix D publishes its vocabulary, `exposure`, and
     drops the interim `downsample_ms`, the rate being the face policy's.
     Then that §8.5 says what a south region's declaration grant covers:

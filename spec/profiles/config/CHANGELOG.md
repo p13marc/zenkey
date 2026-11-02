@@ -1,8 +1,98 @@
-# `config.v1` changelog
+# `config` changelog
 
-Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
-what deliberately did not, and why. A breaking change is a new major, a new
-file, never an entry here ([`../README.md`](../README.md)).
+Versions of the texts of [`v1.md`](v1.md) (`config.v1`) and
+[`v2.md`](v2.md) (`config.v2`). Each entry records what changed, what
+deliberately did not, and why. A breaking change is a new major, a new
+file, never an entry here ([`../README.md`](../README.md)). An entry
+headed `config.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
+`v1.md`'s.
+
+## config.v2 0.1 — 2026-11-02: the schema in the contract, one packed record (#985, G1)
+
+Epic #975 makes the wire bandwidth-first. After #978's F4, `config.v1`
+re-puts nothing, but each change still puts a 1,476-byte view and a
+226-byte status. Every control reply carries a 1.3 KB read-back, the
+schema travels with the values, and a refusal is a 60 to 90 byte JSON
+envelope. This text is #985's G1, written against core 0.92 (C4a), which
+defines the request, value and error forms its operations answer in. The
+design is the one posted on #985 (its §1.3 to §1.9, §3 and §4).
+
+**Why a new id.** `config.v1`'s wire is its standard contract's JSON. A
+new wire is a new major, so `config.v2` restates `config.v1` 0.9 by
+reference and replaces what its wire touches. `config.v1` stays defined.
+
+**Added:**
+- **§2.2, the declaration.** `config.groups` on the state `config`: each
+  group's name, class and packed type, its units and its sensitive
+  parameters, and markers for growth. A parameter is an `int` or a
+  `bool`. The lint reads it, and the contract's resources, as
+  `derive.json` does, and reports an error, never a warning.
+- **§2.3 and §3, the record.** One `Record` replaces the view and the
+  status: a header, then each group's bits and each parameter's source,
+  `differs` and value. The reader refuses a record whose fields do not
+  hold together.
+- **§2.5, the requests and refusals.** `Set<T>` per settable group, rows
+  3, 8 and 11 gone, and every refusal in core §7.5's error form, its
+  detail an `Error{code}`.
+- **§2.6, tokens:** the run, then a 16-bit counter, a new run before it
+  passes 65,535, its start drawn at random.
+- **§2.8, times:** whole seconds from the deployment epoch, rounded up,
+  acted on at the instant stated.
+- **§2.9, every reply the record,** put first, under core §5.1's as-of
+  mark.
+- **§2.14:** a 32-bit key, equal bytes, and the first answer replayed
+  byte for byte, its mark included.
+- **§2.17:** `config.v2.json`'s `ConfigChangeEvent`, a standard schema,
+  its edits in the contract's order.
+
+**Departures from the design.**
+- **A flat record.** The packed format has no nesting, so the design's
+  optional sections are optional fields. A parameter costs a bit more,
+  and the record is 1 to 2 bytes over the design's: 30 bytes idle and 44
+  with a reach change pending, for the SX1262.
+- **No `applied` bit.** A pending change is applied when no
+  `pending_apply_at` is present, so the bit would only repeat it.
+- **Each group's bits beside its parameters,** never in header bitmaps.
+  A group appended behind a marker then grows the record compatibly.
+- **Rows 3 and 11 go too,** beside row 8. A call to another key reaches
+  no queryable, and the request's type holds the values.
+- **Names.** `device_refused` and its desired code have underscores,
+  since a packed enum's names do. Group and parameter names have no
+  double underscore, which the derived field names use.
+- **The change event's schema.** The design named `json:ConfigChangeEvent`
+  without a file. A standard schema, `config.v2.json`, holds it, with the
+  instance number and the token as integers.
+- **The derived types' names** are free: the lint compares fields.
+- **Desired refusals** name groups and parameters by index, none for an
+  undeclared one, and a revision above 32 bits is refused whole.
+- **Growth is a review,** not compatible: core §9.8 reads the
+  annotation's change as one, and the record's growth as compatible.
+
+**Readings the design left open.**
+- **A replayed first answer** keeps its as-of mark. A later mark would
+  let a caller order an older record over a newer put.
+- **An event after its reply,** so that a reply's seq is its put's.
+- **`apply_at`** is the last joined reach group's while it waits.
+- **The fixtures' messages:** a message with `device_refused` alone, the
+  device's words.
+
+**The evidence.** `conformance/v2/`'s six files: `derive.json` (49
+declarations and 33 contracts), `records.json` (16 writes, 28 reads and
+4 across two revisions), `validation.json` (65 requests and 18
+documents), `window.json` (15), `lifecycle.json` (17 sequences, 61
+steps) and `redaction.json` (7, and a pair). The test contract is `conformance/contracts/rfcfg.v1`.
+Every value was computed by an independent reading of the text in
+Python, and a second reader, written apart, read 205 records and requests
+back.
+
+**Deliberately not changed.**
+- **No core amendment** beyond core 0.92's. W105 reads no `config`
+  vocabulary, since Appendix D lists none.
+- **`config.v1`**, its contract and its fixtures.
+- **Text parameters** wait for a packed format that carries them, so four
+  of zenoh-modem's six backends stay on `config.v1`.
+- **No adopter.** The status is `experimental`, and zenoh-modem's binding
+  moves in #985's G4.
 
 ## 0.9 — 2026-11-01: the view and the status confirmed by `freshness.v2`'s heartbeat, never re-put (#978)
 
