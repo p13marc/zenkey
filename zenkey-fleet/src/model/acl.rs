@@ -17,6 +17,13 @@
 //!    liveliness reads on the `@zk` subtree of each provider named: a
 //!    refused presence read is answered complete and empty (§8.1), so a
 //!    principal that may consume from a service must also see it alive.
+//!    Since 0.86 (#978's F4), each provider's heartbeat covering a bound
+//!    interface whose contract uses `freshness.v2`, where the binding
+//!    consumes one of its collections:
+//!    `zk2/<provider>/freshness.v2/stream/heartbeat/<iface>`. Without it a
+//!    far consumer under `deny` hears no confirmation, and every member it
+//!    follows reads stale. The owner serves it beside the interface, a
+//!    surface of its own for the fan-in and the allow posture's complement.
 //! 3. **Call.** Query on the specific `…/@op/<op>` keys, and the same
 //!    liveliness reads on each service called.
 //! 4. **Egress is checked by inclusion** against the query's or
@@ -318,7 +325,9 @@ const CITE_FAN_IN_REPLY: &str = "§11.2: the same selectors for this provider's 
      and is checked against the selector; a value reply is checked against its own key, which \
      Own includes (measured, #612 FJ7)";
 const CITE_CONSUME_IN: &str = "§11.1 Consume: subscribe or GET on what the bindings name, one \
-     selector per bound provider (R1), R2's parameter bindings applied";
+     selector per bound provider (R1), R2's parameter bindings applied, and (0.86) each bound \
+     provider's heartbeat covering a bound interface that uses freshness.v2, where the binding \
+     consumes one of its collections (§7.5, freshness.v2 §2.5)";
 const CITE_CONSUME_OUT: &str = "§11.1 Consume, egress: the samples and replies those selectors \
      receive";
 const CITE_HISTORY_IN: &str = "§11.1 Consume, §2.5: the `@adv` subtrees of what is read with \
@@ -836,6 +845,13 @@ fn compile_binding(
         }
     };
     let params = resolve_params(&spec.params, me, &consumed, &what)?;
+    // §11.1 Consume (0.86, #978's F4): an interface whose contract uses
+    // freshness.v2 confirms its collections by its owner's heartbeat, so a
+    // binding consuming one of them hears each provider's heartbeat too.
+    let beats = contracts
+        .contracts(&iface)
+        .iter()
+        .any(|c| heartbeat_covers(c, &consumed));
     // Everything, unparameterized: the prefixes the binding names, one per
     // kind token (§11.1), so a fan-in over an interface's whole state is
     // granted. Otherwise each resource's own selector.
@@ -875,6 +891,9 @@ fn compile_binding(
                     format!("zk2/{addr}/{iface}/{}/**", t.as_str()),
                 );
             }
+        }
+        if beats {
+            push_unique(&mut h.data, heartbeat_pattern(&addr, &iface));
         }
         push_unique(&mut h.presence, format!("zk2/{addr}/@zk/**"));
         dep.check_provider(h, p, &iface, &what);
@@ -1050,12 +1069,36 @@ fn roles_of(
     Ok(out.into_iter().map(|(k, (r, _))| (k, r)).collect())
 }
 
+/// Whether `c` uses `freshness.v2` and `consumed` holds one of its
+/// collections (core §7.5): a state with a horizon above 0, which its
+/// owner's heartbeat confirms.
+fn heartbeat_covers(c: &Contract, consumed: &[&Resource]) -> bool {
+    if !zenkey_model::freshness::uses_v2(c) {
+        return false;
+    }
+    let layout = zenkey_model::heartbeat::Layout::of(c);
+    consumed.iter().any(|r| {
+        layout
+            .index_of(&format!("{}/{}", r.token, r.template))
+            .is_some()
+    })
+}
+
+/// The key of `addr`'s heartbeat covering `iface` (`freshness.v2` §3), its
+/// chunks as a provider names them, `*` kept.
+fn heartbeat_pattern(addr: &str, iface: &IfaceId) -> String {
+    format!(
+        "zk2/{addr}/{}/stream/heartbeat/{iface}",
+        zenkey_model::heartbeat::PROFILE
+    )
+}
+
 /// What a service serves, enumerated from its contracts: each resource's
 /// pattern, its `@adv` subtree where it declares history, and its `@zk`
 /// subtree. A service that implements nothing (a pure consumer) serves its
 /// presence alone. `None` when a contract it implements was not given: its
 /// Own patterns then stand in, for the fan-in and the allow posture's
-/// complement alike.
+/// complement alike. The heartbeats it sends (0.86) are its caller's to add.
 fn surfaces_of(addr: &str, implements: &[(IfaceId, Option<Vec<Resource>>)]) -> Option<Vec<String>> {
     let mut out = Vec::new();
     for (iface, resources) in implements {
@@ -1127,6 +1170,22 @@ fn compile_service(
         compile_calls(&mut h, dep, contracts, Some(addr), c)?;
     }
     h.surfaces = surfaces_of(&label, &implemented);
+    // `freshness.v2` §3 (0.86): the runtime implements the profile's
+    // standard contract beside each interface whose contract uses it and
+    // has a collection, and sends its heartbeat covering that interface.
+    if let Some(s) = &mut h.surfaces {
+        for (iface, resources) in &implemented {
+            let Some(rs) = resources else { continue };
+            let all: Vec<&Resource> = rs.iter().collect();
+            if contracts
+                .contracts(iface)
+                .iter()
+                .any(|c| heartbeat_covers(c, &all))
+            {
+                push_unique(s, heartbeat_pattern(&label, iface));
+            }
+        }
+    }
     Ok(h)
 }
 
@@ -4540,12 +4599,18 @@ type = { raw = "text/plain" }
             ["zk2/vehicle-01/*/thruster.v1/state/status"]
         );
         // The vehicle's notifier reads health.v1 on `*/*` (#614, FL3): the
-        // two providers of health.v1 get that selector, and nothing of the
-        // tracker's detections, whose providers they are not.
+        // two providers of health.v1 get that selector, and the heartbeat
+        // covering it (core 0.86, #978's F4: health.v1 uses freshness.v2),
+        // and nothing of the tracker's detections, whose providers they
+        // are not.
         for provider in ["vehicle-01/navigation", "vehicle-01/zenwatch"] {
             assert_eq!(
                 rule_of(&plan, &format!("fan-in:{provider}")).key_exprs,
-                ["zk2/*/*/health.v1/state/**", "zk2/*/*/health.v1/stream/**"],
+                [
+                    "zk2/*/*/health.v1/state/**",
+                    "zk2/*/*/health.v1/stream/**",
+                    "zk2/*/*/freshness.v2/stream/heartbeat/health.v1"
+                ],
                 "{provider}"
             );
         }

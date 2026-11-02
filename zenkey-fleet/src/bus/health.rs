@@ -6,7 +6,10 @@
 //! 1. with a window, first: a subscription to every status and to the
 //!    faults, through the runtime's consumer on the standard contract (R4:
 //!    any revision of the major reads the interface). It confirms a status
-//!    on this host's monotonic clock (`freshness.v1` §2.5), measures each
+//!    on this host's monotonic clock, by its puts and, since `health.v1`
+//!    0.8, by the owner's heartbeats that vouch for it (`freshness.v2`
+//!    §2.5; #978's F4), each one a confirmation §5's clock question
+//!    reads, as a put is. It measures each
 //!    stamping clock on live puts (§2.6, ground 2), and records the order
 //!    of status puts and faults that §5's clock question reads;
 //! 2. presence and every instance's descriptor (core §8.1, §3.3): a service
@@ -482,7 +485,7 @@ pub async fn observe(
     let t = spec.timeout;
     let fresh = presence.is_none();
     let window = match spec.window {
-        Some(_) => Some(Window::open(session, &target).await),
+        Some(_) => Some(Window::open(session, &target, t).await),
         None => None,
     };
     let presence = match (spec.face, presence) {
@@ -633,8 +636,16 @@ struct Window {
 
 impl Window {
     /// Subscribes to the target's status and faults through the runtime's
-    /// consumer, at once and without presence (R1).
-    async fn open(session: &Session, target: &HealthTarget) -> Result<Window, String> {
+    /// consumer, at once and without presence (R1), then seeds the status's
+    /// views by S4's GET, as a late joiner does (`freshness.v2` §2.5; #978's
+    /// F4): a status put before the window is in the view, so the owner's
+    /// next heartbeat confirms it. A GET that fails seeds nothing, and the
+    /// subscription re-reads after two heartbeats out of step.
+    async fn open(
+        session: &Session,
+        target: &HealthTarget,
+        timeout: Duration,
+    ) -> Result<Window, String> {
         let provider = target.provider();
         let consumer = zenkey::consumer::Consumer::for_tool(
             session,
@@ -655,8 +666,9 @@ impl Window {
         }
         let heard: Arc<Mutex<BTreeMap<Addr, ServiceHeard>>> = Arc::default();
         let h = Arc::clone(&heard);
+        let confirmed = Arc::clone(&heard);
         let status = consumer
-            .subscribe(
+            .subscribe_confirmed(
                 zenkey::health::STATUS,
                 move |d: zenkey::consumer::Delivery| {
                     let mut all = h.lock().expect("not poisoned");
@@ -670,6 +682,17 @@ impl Window {
                         value: Some(StatusValue::decode(&d.sample.payload().to_bytes())),
                         stamp: Stamped::of(&d.sample),
                     });
+                },
+                // A heartbeat that vouched for the status confirms it, as a
+                // put does (`freshness.v2` §2.5): §5's clock question reads
+                // it so, and a status the heartbeat confirms after a
+                // `clock_ahead` fault says the guard released.
+                move |c: zenkey::consumer::Confirmation| {
+                    if c.keys.is_empty() {
+                        return;
+                    }
+                    let mut all = confirmed.lock().expect("not poisoned");
+                    all.entry(c.provider).or_default().push(Heard::Status);
                 },
             )
             .await
@@ -704,6 +727,13 @@ impl Window {
             )
             .await
             .map_err(|e| e.to_string())?;
+        let asked = Instant::now();
+        if let Ok(answer) = consumer
+            .get_answer(zenkey::health::STATUS, None, timeout)
+            .await
+        {
+            status.seed(&answer, asked);
+        }
         Ok(Window {
             status,
             faults,

@@ -4,6 +4,70 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.8 — 2026-11-01: the status confirmed by `freshness.v2`'s heartbeat, never re-put (#978)
+
+Epic #975 makes the wire bandwidth-first. Under `freshness.v1` an owner
+re-put its status, unchanged, every 30 s: about 240 KB a day on W2
+(#989). `freshness.v2`, text 0.1 (#978's F3), confirms a state member by
+a heartbeat per interface instead, which vouches for it by a bit. This
+text, #978's F4, moves `health.v1` onto it.
+
+**The contract: revision 1.1,** `sha256:60a43745…`, published in
+`../.history/health.v1/`. Its `uses` is `freshness.v2`, where 1.0's was
+`freshness.v1`: a review (core §9.8, `uses_changed`), no resource
+changed. Revision 1.0 stays defined, and its owners re-put.
+
+**Changed: §2.3's "Confirmed every 30 s".**
+- **Before:** the owner confirms its status at least every 30 s, by a
+  change or a re-put of the value unchanged (`freshness.v1` §2.4).
+- **Now:** by a change or by its heartbeat, as `freshness.v2` §2.4
+  requires. The heartbeat sets the status's bit while the owner vouches
+  for its level, and the owner never puts the status again unchanged.
+- **§2.3's table** names its last column "Confirmed": the status by its
+  heartbeat, at least every 30 s, never re-put.
+
+**Restated over the heartbeat, no rule changed.**
+- **§2.4:** freshness is `freshness.v2`'s, whose judgement is v1's with a
+  heartbeat counted as a confirmation. "Why one heartbeat" is "Why one
+  bit".
+- **§2.5:** the guard holds the heartbeat's bits too, and once it
+  releases, the next heartbeat vouches again, where the status was
+  re-put. §2.5's rules move with #978's F6, not here.
+- **§2.8:** a status that crosses brings its heartbeat with it
+  (`link.v1` §2.9), which is the liveness evidence. The face's cost is
+  that heartbeat, about 10 B every 28.5 s.
+- **§2.7:** each owner implements `freshness.v2` beside `health.v1`, an
+  interface token more, which the tokenless set holds too (core §8.1).
+- **§1, §3, Appendix A and Appendix B** name `freshness.v2`.
+
+**`scenarios.md`.** S hears the heartbeat key too, and G and T take the
+deployment's word for their clock: a status put carries no Zenoh
+timestamp of the owner's, so G can no longer measure it from S's
+deliveries. §1's `lab/quiet` and §5's 100 services hold `freshness.v2` in
+their tokenless set too. §1 waits 65 s, past the horizon, and S judges the status
+fresh with no re-put. §2 confirms for 65 s first, then stops vouching:
+`set_confirming(false)` clears the status's bit, where the owner closed
+its writer. §4's step 3 is a heartbeat that vouches again. §4's step 4 hears the
+status put while ahead: it carries no Zenoh timestamp of the owner's, so a
+router under `drop_future_timestamp` stamps it and lets it through, and
+drops only the fault. §8's run A hears the heartbeats that cross with the
+status.
+
+**`link.v1`'s `plan.json`.** zenoh-modem's RF face denies the
+heartbeats covering `health.v1` and `config.v1`, `stream:freshness.v2`,
+as `link.v1` §2.9 says: none of their collections crosses that face. The
+case's expectation follows, and no rule of `link.v1` changed.
+
+**Written against core 0.82,** where it said 0.73: the heartbeat is core
+0.82's §7.5 form 6, and its stamps §4.3's table. The index's row follows.
+
+**Deliberately not changed.**
+- **The horizon:** 60 s. **Every judgement:** §2.11's steps, the
+  verdicts, the reasons and `judgements.json`.
+- **Checks:** still no horizon, so no heartbeat covers them, and the
+  status vouches for them.
+- **§2.5's fault cadence:** once per status interval, 30 s.
+
 ## 0.7 — 2026-11-01: editorial: §2.5's fault stamp read under core 0.73's session posture, no rule changed (#976)
 
 Core 0.73 orders state by an owner's run and seq, carried in band. It

@@ -50,6 +50,15 @@
 //! window opens once the feed is open, its subscriptions declared and its
 //! first refresh read after them (zk2py round 47's F-154, #819 TE), so the
 //! router holds them, and a put from then on is heard.
+//!
+//! **Heartbeats** (`freshness.v2`, alarms.v1 text 0.11; #978's F4): a
+//! subscription to each owner's heartbeat covering `alarms.v1` folds into
+//! the book's view of its alarms, and a heartbeat in step with the view
+//! confirms each alarm it vouches for. Every complete GET re-reads the view
+//! of each owner it answers. A live reader, the watchdog's or a notifier's,
+//! refreshes on its tick, so a view out of step is mended at the next one;
+//! [`observe`]'s window has no tick, and refreshes once a view is due a
+//! re-read, after two heartbeats out of step.
 
 use std::collections::BTreeSet;
 use std::str::FromStr;
@@ -925,10 +934,20 @@ pub async fn observe(
         listening();
         let end = Instant::now() + w + spec.book().tail();
         let deadline = tokio::time::Instant::from_std(end);
+        let mut reread_at = None;
         loop {
             tokio::select! {
                 () = tokio::time::sleep_until(deadline) => break,
                 d = feed.next() => if d.is_none() { break },
+            }
+            // `freshness.v2` §2.5 (#978's F4): two heartbeats in a row out
+            // of step with a view are a re-read, the refresh's GET, whose
+            // answer replaces the view. A live reader refreshes on its own
+            // tick, so only this one-shot window asks it here.
+            let beats = feed.book().heartbeats_read();
+            if feed.book().reread_due() && reread_at != Some(beats) {
+                reread_at = Some(beats);
+                feed.refresh().await;
             }
         }
         listened = feed.book().declared().map(|d| d.elapsed());

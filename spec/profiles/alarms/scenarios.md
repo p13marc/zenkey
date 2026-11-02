@@ -11,7 +11,7 @@ T being `zenctl alarms` and, in §8, the watchdog's `alert-firing`).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.5) are v1.md's rules; core
-  sections say "core", and `freshness.v1`'s say so.
+  sections say "core", and `freshness.v2`'s say so.
 - **The bus.** R1 is a router with timestamping on, as a router's default
   is. Owners, the subscriber S, the GET reader G and the tool T are its
   clients. Timeouts are 1 s unless stated.
@@ -22,21 +22,25 @@ T being `zenctl alarms` and, in §8, the watchdog's `alert-firing`).
   alert key `a659f813308ad1da` (§2.2), at severity `warning` unless a step
   says otherwise. "A firing" is A's document with `state: firing`.
 - **S** subscribes to `zk2/lab/svc/alarms.v1/**` before the owner starts,
-  and records each delivery's arrival on its monotonic clock, its key, its
-  kind, its payload and its stamp. **G** GETs
+  and to its heartbeat key covering `alarms.v1`,
+  `zk2/lab/svc/freshness.v2/stream/heartbeat/alarms.v1`. It records each
+  delivery's arrival on its monotonic clock. It records its key, kind,
+  payload and stamp too. It reads each heartbeat as `freshness.v2` §2.5
+  says. **G** GETs
   `zk2/lab/svc/alarms.v1/state/alarms/*` as core S4 says. "Reads" applies
   v1.md §2.6 to S's deliveries, and "judges" §2.14 to the reading at that
   instant, the descriptor read as core §3.3 says.
 - **The clock.** G and T take the deployment's word for their clock
-  (`freshness.v1` §2.6, ground 1): every session of a scenario runs on one
+  (`freshness.v2` §2.6, ground 1): every session of a scenario runs on one
   host. §6 measures nothing else.
-- **The horizon** is the contract's, 900 s, so the owner confirms each
-  firing alarm at least every 450 s. §2 waits 455 s, §6 about 910 s and
-  §10's step 2 listens 905 s, and a runner MAY keep them in a slow tier.
-  The reference keeps them there, and its default run checks what §2's
-  and §6's owner puts on a copy of the standard contract with
-  `freshness.ttl_s = 4`, made in memory and never published, and §10's
-  steps 1 and 3.
+- **The horizon** is the contract's, 900 s. The owner's heartbeat
+  confirms each firing alarm at least every 450 s, the reference's every
+  427.5 s. §2 waits 905 s, §6 about 910 s and §10's step 2 listens 905 s.
+  A runner MAY keep them in a slow tier. The reference keeps them
+  there, and its default run checks what §2's and §6's owner puts on a
+  copy of the standard contract with `freshness.ttl_s = 4`, made in memory
+  and never published, and §10's steps 1 and 3. S reads the copy's
+  heartbeats with the copy.
 - **The owner example.** The reference's owner,
   `zenkey/examples/owner.rs` run with `--alarms`, is the one a black-box
   runner drives. `owner --help` is its agreed interface: its options,
@@ -73,7 +77,7 @@ T being `zenctl alarms` and, in §8, the watchdog's `alert-firing`).
 1. The owner escalates A to `critical`.
 2. The owner refreshes A: its summary changes, and a label `host.id`
    is added.
-3. The owner changes nothing for 455 s.
+3. The owner changes nothing for 905 s, and S judges.
 
 **Expected.**
 1. S receives a put on the same key, `critical`, its `timestamp` later
@@ -81,9 +85,10 @@ T being `zenctl alarms` and, in §8, the watchdog's `alert-firing`).
 2. S receives a put on the same key: the escalation's `timestamp`, kept,
    and `observed_at_ms` at least that `timestamp`. The alert key is
    unchanged: `host.id` is host-scoped (§2.2). S reads it **refreshed**.
-3. S receives the refreshed document again, unchanged, `observed_at_ms`
-   included, no two of its deliveries more than 450 s apart, under a later
-   stamp of the same id (`freshness.v1` §2.4). S reads each **confirmed**.
+3. S receives no put of A (`freshness.v2` §2.4). It receives a heartbeat
+   at least every 450 s, whose alarms section vouches for A. At 905 s, past
+   the horizon, S judges A **yes**, `firing`: the heartbeats confirmed
+   it.
 
 ## §3 Resolve, then delete (§2.5, §2.6)
 
@@ -152,16 +157,17 @@ holds two more documents, written by a test before the restart:
 
 **Steps.** A firing, confirmed by the owner.
 1. The owner stops evaluating A's rule, and so stops confirming A
-   (the reference: its writer's re-puts turned off). It keeps its tokens
-   and answers its GETs.
-2. 905 s after S's last delivery of A, S judges, and G GETs and judges.
+   (the reference: `Alarms::set_confirming`). It keeps its tokens, sends
+   its heartbeats and answers its GETs.
+2. 905 s after the last heartbeat that vouched for A, S judges. G GETs
+   and judges.
 
 **Expected.**
-1. S receives nothing more of A.
+1. S receives no put of A, and heartbeats with A's bit clear.
 2. Presence: the owner's instance token is present. S judges §5's first
    question **unobservable**, `stale`, and its last **yes**, `stale`. G's
-   reply holds A firing under a stamp more than 900.5 s old, and G judges
-   the same. Neither reports A firing now, nor resolved (§2.7).
+   reply holds A firing, stamped more than 900.5 s ago. G judges the same.
+   Neither reports A firing now, nor resolved (§2.7).
 
 ## §7 At the bound (§2.8)
 
@@ -240,4 +246,6 @@ holds nothing, and has `alarms.v1` in its tokenless set (core §8.1).
    `lab/b` by its descriptor, though it holds no `alive/alarms.v1/…`
    token (§2.13).
 2. **No**, `none_firing`: `lab/b` is established by its window (`window`).
+   Its latest heartbeat in the window is in step with T's view: no alarm
+   live (§2.15).
 3. **Yes**, `any_firing`, 1.

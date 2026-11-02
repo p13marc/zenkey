@@ -950,6 +950,10 @@ pub enum Reason {
     /// An owner's alarms unobservable: the owner was not present
     /// throughout the window.
     OwnerGap,
+    /// An owner's alarms unobservable: its revision uses `freshness.v2`,
+    /// and the latest heartbeat of its alarms heard in the window was not
+    /// in step with the reader's view, or none was heard (text 0.11).
+    WindowUnconfirmed,
     /// Anything firing, yes.
     AnyFiring,
     /// Anything firing, no.
@@ -1010,6 +1014,7 @@ impl Reason {
             Self::WindowLost => "window_lost",
             Self::WindowShort => "window_short",
             Self::OwnerGap => "owner_gap",
+            Self::WindowUnconfirmed => "window_unconfirmed",
             Self::AnyFiring => "any_firing",
             Self::NoneFiring => "none_firing",
             Self::OwnerUnobservable => "owner_unobservable",
@@ -1063,6 +1068,9 @@ impl Reason {
             Self::WindowLost => "the window lost a delivery",
             Self::WindowShort => "the window was no longer than 900 s",
             Self::OwnerGap => "its owner was not present throughout the window",
+            Self::WindowUnconfirmed => {
+                "no heartbeat of its owner in the window said the reader holds its alarms"
+            }
             Self::AnyFiring => "an alarm at or above the severity fires",
             Self::NoneFiring => "no alarm at or above the severity fires",
             Self::OwnerUnobservable => "an owner's alarms are not known whole",
@@ -1279,6 +1287,12 @@ pub struct Window {
     /// lease after its end (core §2.7). Not asked across a face, where
     /// presence does not cross.
     pub present_throughout: bool,
+    /// Of an owner whose revision uses `freshness.v2` (§2.15, text 0.11):
+    /// whether the latest heartbeat covering its alarms heard in the
+    /// window was in step with the reader's view, its section's digest and
+    /// live count the view's; `Some(false)` too when none was heard. `None`
+    /// for an owner that re-puts, under `freshness.v1`.
+    pub in_step: Option<bool>,
 }
 
 /// Whether an owner's alarms are known whole (§2.15).
@@ -1351,6 +1365,7 @@ pub fn owner_set(presence: Presence, seed: Option<Seed>, window: Option<Window>)
     match window {
         None => j(Unobservable, Reason::NoMember),
         Some(w) if w.listened <= TTL => j(Unobservable, Reason::WindowShort),
+        Some(w) if w.in_step == Some(false) => j(Unobservable, Reason::WindowUnconfirmed),
         Some(_) => j(Established, Reason::Window),
     }
 }
@@ -1743,6 +1758,7 @@ mod tests {
                 listened: Duration::from_secs(901),
                 lossless: true,
                 present_throughout: true,
+                in_step: None,
             }),
         );
         assert_eq!(est.verdict, SetVerdict::Established);

@@ -9,7 +9,7 @@ that reads `config.v1`.
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.9) are v1.md's rules; core
-  sections say "core", and `freshness.v1`'s say so.
+  sections say "core", and `freshness.v2`'s say so.
 - **The bus.** R1 is a router with timestamping on. The owner, the caller
   C, the subscriber S and the tool T are its clients. Timeouts are 1 s,
   except a call's, which is 2 s, unless stated.
@@ -33,8 +33,10 @@ that reads `config.v1`.
   `state/status`, `Op(x)` its `@op/x`, and `Ev` its
   `events/change/*`.
 - **S** subscribes to `zk2/lab/rf0/config.v1/**` and `zk2/lab/rf0/@zk/**`
-  before the owner starts, and records each delivery's arrival, key, kind
-  and payload. **C** calls as core O1 says, with the call metadata
+  before the owner starts. It subscribes to its heartbeat key too,
+  `zk2/lab/rf0/freshness.v2/stream/heartbeat/config.v1`. It records each
+  delivery's arrival, key, kind and payload. It reads each heartbeat as
+  `freshness.v2` §2.5 says. **C** calls as core O1 says, with the call metadata
   `{"actor": "ops", "request_id": …}` (core O7), and GETs as core S4 says.
 - **"The fixture's step"** names a step of `lifecycle.json` whose replies,
   events and state the scenario observes on the bus: the reply on the
@@ -48,7 +50,7 @@ that reads `config.v1`.
    the owner's instance token.
 2. C calls `Op(set/duty)` with `{"values": {"fraction_ppm": 20000}}`.
 3. C GETs `V` and `St`.
-4. The owner puts nothing for 35 s.
+4. The owner puts nothing for 65 s, and S judges `V` and `St`.
 
 **Expected.**
 1. Both of T's GETs answer: revision 0, nothing pending, no last change,
@@ -60,8 +62,9 @@ that reads `config.v1`.
    10000 → 20000, `actor` `"ops"`, before or after `V` and `St`, which S
    receives once each with revision 1.
 3. `V` and `St` answer revision 1, and agree (§2.19).
-4. S receives `V` and `St` again within 30 s, unchanged (`freshness.v1`
-   §2.4). S receives no delete of either.
+4. S receives no put or delete of `V` or `St` (`freshness.v2` §2.4). It
+   receives a heartbeat at least every 30 s, which vouches for both. At
+   65 s, past the horizon, S judges both fresh.
 
 ## §2 A reach set, confirmed (§2.8, §2.9, §2.10)
 

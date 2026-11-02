@@ -52,7 +52,7 @@ access_control: {
     { id: "fan-in-reply:lab/radio-b", permission: "allow", flows: ["ingress"],
       messages: ["reply"],
       key_exprs: ["zk2/lab/*/radio.v1/@stream/**", "zk2/lab/*/radio.v1/events/**", "zk2/lab/*/radio.v1/state/**", "zk2/lab/*/radio.v1/stream/**", "zk2/lab/*/radio.v1/@op/reset"] },
-    // consume (tool.console): §11.1 Consume: subscribe or GET on what the bindings name, one selector per bound provider (R1), R2's parameter bindings applied
+    // consume (tool.console): §11.1 Consume: subscribe or GET on what the bindings name, one selector per bound provider (R1), R2's parameter bindings applied, and (0.86) each bound provider's heartbeat covering a bound interface that uses freshness.v2, where the binding consumes one of its collections (§7.5, freshness.v2 §2.5)
     { id: "consume-in:tool.console", permission: "allow", flows: ["ingress"],
       messages: ["declare_subscriber", "query"],
       key_exprs: ["zk2/lab/*/radio.v1/@stream/**", "zk2/lab/*/radio.v1/events/**", "zk2/lab/*/radio.v1/state/**", "zk2/lab/*/radio.v1/stream/**"] },

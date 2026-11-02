@@ -27,9 +27,9 @@
 //! | §2.5 a new `timestamp` later than the one before it on that key | the minter's clock, or the previous plus 1, from the alarm held, or the last transition of a key no longer held, of which the last 1024 are kept |
 //! | §2.5 a resolve: the resolved put, then the delete, at once | [`Alarms::resolve`]; a delete that fails leaves the alarm held resolved, not confirmed, and the next resolve of it deletes it |
 //! | §2.5 no delete of a firing alarm without its resolved put | no call deletes one; adoption's retirements are §2.9's exception |
-//! | §2.7 each firing alarm it evaluates confirmed within 450 s | each alarm's [`StateWriter`] re-puts its document unchanged, `observed_at_ms` included, every 427.5 s, from the contract's `freshness.ttl_s = 900` (`freshness.v1` §2.4) |
-//! | §2.7 no confirmation of an alarm it no longer evaluates | [`Alarms::set_confirming`], [`Alarms::set_confirming_all`]: it goes stale; any act on it is an evaluation, and turns its confirmation back on |
-//! | §2.7 a resolved alarm never confirmed | its confirmation is turned off at its resolved put |
+//! | §2.7 each firing alarm it evaluates confirmed within 450 s, never re-put | the contract uses `freshness.v2`: the heartbeat covering `alarms.v1` ([`crate::heartbeat`]) vouches for each firing alarm by its bit every 427.5 s, from the contract's `freshness.ttl_s = 900` (`freshness.v2` §2.4); a revision that uses `freshness.v1` ([`ServiceBuilder::alarms_with`]) has each alarm's [`StateWriter`] re-put it instead |
+//! | §2.7 no confirmation of an alarm it no longer evaluates | [`Alarms::set_confirming`], [`Alarms::set_confirming_all`]: its bit cleared, it goes stale; any act on it is an evaluation, and sets its bit again |
+//! | §2.7 a resolved alarm never confirmed | its bit is cleared before its resolved put, so no heartbeat vouches for the resolved document |
 //! | §2.8 at most 256, or the descriptor's bound; a raise past it refused, its writer told | the resource's budget (core §2.7): [`Startup::cardinality`] or [`ServiceBuilder::cardinality`]; the raise returns [`Error::Budget`], nothing put |
 //! | §2.8 no firing alarm resolved or deleted to make room | nothing is evicted |
 //! | §2.8 SHOULD report the refusal (`health.v1`) | the application's: the refusal names the resource, the bound and whose it is |
@@ -66,8 +66,9 @@
 //! once the adoption ends, so the next start redoes nothing done, and
 //! settles what is left. An act on such a key supersedes what was found.
 //!
-//! **The contract is the published bundle**, revision 1.0
-//! ([`FINGERPRINT`]), embedded byte for byte from
+//! **The contract is the published bundle**, revision 1.1
+//! ([`FINGERPRINT`]), the one that uses `freshness.v2` (text 0.11, #978's
+//! F4), embedded byte for byte from
 //! `spec/profiles/.history/alarms.v1/` and served as it is, as `health.v1`'s
 //! is ([`crate::health`]). [`ServiceBuilder::alarms_with`] implements
 //! another revision of the major (R4), the confirmation period following
@@ -77,8 +78,10 @@
 //! **The owner's clock** is [`Minter`]'s, to the millisecond: the
 //! session's `new_timestamp()`, which is the wall clock on a session
 //! without timestamping, as an owner's runs (core §4.3, "Minting"; §8.2).
-//! An alarm's state carries `freshness.ttl_s`, so its Zenoh timestamps are
-//! on core §4.3's table and carry the same clock.
+//! An alarm's state carries `freshness.ttl_s`, and its contract uses
+//! `freshness.v2`, so its puts leave core §4.3's table, and its GET
+//! replies carry its last confirmation, from the same clock (`freshness.v2`
+//! §2.4).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -103,14 +106,15 @@ use crate::service::ServiceBuilder;
 use crate::state::{Minter, StateWriter, Store};
 use crate::writer::Writer;
 
-/// The standard contract's bundle, revision 1.0 as published in
-/// `spec/profiles/.history/alarms.v1/` (§3), byte for byte.
+/// The standard contract's bundle, revision 1.1 as published in
+/// `spec/profiles/.history/alarms.v1/` (§3), byte for byte: it uses
+/// `freshness.v2`, so its owner's heartbeat confirms each firing alarm.
 pub const BUNDLE: &[u8] = include_bytes!(
-    "../../spec/profiles/.history/alarms.v1/95579151aa231d2ba1224eae828083bdfc7f4f9403a80c831c1915decca9e8b6.bundle.json"
+    "../../spec/profiles/.history/alarms.v1/e2b48d58709a99de7b71065b09c4c042a9fcb25a3cb3e6a395f8f8bc74787eed.bundle.json"
 );
 
 /// Its fingerprint (§3).
-pub const FINGERPRINT: &str = "95579151aa231d2ba1224eae828083bdfc7f4f9403a80c831c1915decca9e8b6";
+pub const FINGERPRINT: &str = "e2b48d58709a99de7b71065b09c4c042a9fcb25a3cb3e6a395f8f8bc74787eed";
 
 /// The alarms' template, as the descriptor names it.
 pub const ALARMS: &str = "state/alarms/{alert_key}";
@@ -812,9 +816,14 @@ impl Alarms {
             };
             let payload = e.writer.writer().encode(&doc)?;
             self.fault()?;
-            e.writer.put(payload.clone()).await?;
-            // §2.7: a resolved alarm is never confirmed.
+            // §2.7: a resolved alarm is never confirmed, so its bit is clear
+            // before its resolved put is recorded; a put that fails leaves the
+            // firing alarm confirmed, as it was.
             e.writer.set_refresh(false);
+            if let Err(err) = e.writer.put(payload.clone()).await {
+                e.writer.set_refresh(true);
+                return Err(err);
+            }
             e.doc = doc;
             e.payload = payload;
             self.save(&st).await;
@@ -835,8 +844,9 @@ impl Alarms {
     /// Turns the confirmation of the alarm on `alert_key` off, or back on
     /// (§2.7): an owner that has stopped evaluating its condition, its
     /// evaluator stuck or its source gone, lets it go stale rather than
-    /// confirm what it no longer sees. Turned back on, it is re-put at once
-    /// if its interval has run out. `false`, nothing changed, when no firing
+    /// confirm what it no longer sees. Under `freshness.v2` it is the
+    /// alarm's bit in its owner's heartbeat; turned back on, the next
+    /// heartbeat vouches for it again. `false`, nothing changed, when no firing
     /// alarm is held there: none at all, or one held resolved, which is
     /// never confirmed.
     pub async fn set_confirming(&self, alert_key: &str, on: bool) -> bool {
@@ -861,11 +871,15 @@ impl Alarms {
         }
     }
 
-    /// Whether the alarm on `alert_key` is being confirmed; `None` when no
+    /// Whether the alarm on `alert_key` is being confirmed: by its owner's
+    /// heartbeat under `freshness.v2`, by re-puts under `freshness.v1`, and
+    /// [`Alarms::set_confirming`] has not turned that off; `None` when no
     /// alarm is held there.
     pub async fn is_confirming(&self, alert_key: &str) -> Option<bool> {
         let st = self.inner.held.lock().await;
-        st.alarms.get(alert_key).map(|e| e.writer.is_refreshing())
+        st.alarms
+            .get(alert_key)
+            .map(|e| e.writer.confirm_period().is_some() && e.writer.is_vouched())
     }
 
     /// The writer of the alarm on `alert_key`: zenoh stays reachable.
@@ -1087,10 +1101,11 @@ impl Alarms {
                 let w = self.writer(&k.alert_key).await?;
                 let payload = w.writer().encode(&resolved)?;
                 self.fault()?;
+                // §2.7: never confirmed once resolved, its bit clear first.
+                w.set_refresh(false);
                 w.put(payload.clone()).await?;
                 // The resolved document is the record's from here on.
                 kept.payload = payload;
-                w.set_refresh(false);
                 self.fault()?;
                 w.delete().await
             };
@@ -1194,6 +1209,7 @@ mod tests {
         let imp = implementation();
         assert_eq!(imp.fingerprint().hex().to_string(), FINGERPRINT);
         assert_eq!(&**imp.bundle_bytes(), BUNDLE, "served byte for byte");
+        assert!(zenkey_model::freshness::uses_v2(imp.contract()));
         let r = imp.resource(super::ALARMS).unwrap();
         assert_eq!(
             zenkey_model::freshness::horizon_of(r).refresh_bound(),

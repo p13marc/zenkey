@@ -21,12 +21,12 @@
 //! | §2.2 the status never better than its worst current check | every call puts the declared level raised to the worst check's ([`Effective`]) |
 //! | §2.2 the order of the puts | a check worse than the published status: the status first; otherwise the check first, then the status if it moves |
 //! | §2.3 the status before §8.2 step 4 | `start()` puts it before step 3, `UNSPECIFIED` with reason `"starting"` unless [`Health::set_status`] came first |
-//! | §2.3 confirmed every 30 s | the status's [`StateWriter`] re-puts it, from the contract's `freshness.ttl_s = 60` (`freshness.v1` §2.4) |
+//! | §2.3 confirmed every 30 s, never re-put | the contract uses `freshness.v2`: the heartbeat covering `health.v1` ([`crate::heartbeat`]) vouches for the status every 28.5 s, from its `freshness.ttl_s = 60`, while [`Health::set_confirming`] leaves its bit set (`freshness.v2` §2.4) |
 //! | §2.3 never deleted while the service runs | no call deletes it; closing the service leaves it |
 //! | §2.3 checks on change, deleted when retired, at most 64 | [`Health::set_check`] puts only a change; [`Health::retire_check`] deletes; the 65th is refused, or past a lowered bound |
 //! | §2.3 faults as occurrences | [`Health::fault`]: one sample each, on the stream, with the contract's QoS |
-//! | §2.5 `clock_ahead` | on the guard's first hold, again every status interval (28.5 s, the refresher's period) while it holds, none after it releases; the `detail` names the offset |
-//! | §2.5 the status stale, then re-put | the guard stops the refresher and every state call ([`Error::ClockAhead`]); once it releases, the held re-put goes out within a second (`freshness.v1` §2.10) |
+//! | §2.5 `clock_ahead` | on the guard's first hold, again every status interval (28.5 s, the status's confirmation period, [`StateWriter::confirm_period`]) while it holds, none after it releases; the `detail` names the offset |
+//! | §2.5 the status stale, then confirmed again | while the guard holds, every state call is refused ([`Error::ClockAhead`]) and each heartbeat vouches for nothing (`freshness.v2` §2.10); once it releases, the next heartbeat vouches for the status again |
 //! | §2.6 `UNSPECIFIED` | the status only at start; a check only through [`Health::set_check_unknown`] |
 //! | §2.10 fault codes | an application's code in the form, or refused; the profile's codes are the runtime's |
 //!
@@ -35,8 +35,9 @@
 //! established its level, and §2.11 step 5 reads a bad check under an
 //! unknown status as unhealthy without the owner claiming a level.
 //!
-//! **The contract is the published bundle**, revision 1.0
-//! ([`FINGERPRINT`]), embedded byte for byte from
+//! **The contract is the published bundle**, revision 1.1
+//! ([`FINGERPRINT`]), the one that uses `freshness.v2` (text 0.8, #978's
+//! F4), embedded byte for byte from
 //! `spec/profiles/.history/health.v1/` and served as it is. The path
 //! reaches outside this crate's directory, which publishing it (#606) will
 //! have to revisit: the bundle would be copied in, or the profile become a
@@ -206,14 +207,15 @@ pub mod v1 {
     }
 }
 
-/// The standard contract's bundle, revision 1.0 as published in
-/// `spec/profiles/.history/health.v1/` (§3), byte for byte.
+/// The standard contract's bundle, revision 1.1 as published in
+/// `spec/profiles/.history/health.v1/` (§3), byte for byte: it uses
+/// `freshness.v2`, so its owner's heartbeat confirms the status.
 pub const BUNDLE: &[u8] = include_bytes!(
-    "../../spec/profiles/.history/health.v1/e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df.bundle.json"
+    "../../spec/profiles/.history/health.v1/60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f.bundle.json"
 );
 
 /// Its fingerprint (§3).
-pub const FINGERPRINT: &str = "e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df";
+pub const FINGERPRINT: &str = "60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f";
 
 /// The status, as the descriptor names it.
 pub const STATUS: &str = "state/status";
@@ -524,7 +526,7 @@ impl Health {
         let period = self
             .inner
             .status
-            .refresh_period()
+            .confirm_period()
             .unwrap_or(model::STATUS_REFRESH);
         let task = rt.spawn(clock_ahead(
             Arc::clone(&self.inner.faults),
@@ -650,23 +652,23 @@ impl Health {
     }
 
     /// Turns the confirmation of the status off, or back on
-    /// (`freshness.v1` §2.4, "only a value it holds current"): an owner
-    /// that can no longer vouch for its level stops re-putting it, and a
-    /// reader judges it stale 60 s after its last confirmation (§2.4),
-    /// rather than reading a level the owner cannot back as current. The
-    /// status is never deleted (§2.3). Turned back on, it is re-put at once
-    /// if its interval has run out.
+    /// (`freshness.v2` §2.4, "only a value it holds current"): an owner
+    /// that can no longer vouch for its level clears the status's bit in
+    /// its heartbeat, and a reader judges it stale 60 s after its last
+    /// confirmation (§2.4), rather than reading a level the owner cannot
+    /// back as current. The status is never deleted (§2.3). Turned back
+    /// on, the next heartbeat vouches for it again.
     pub fn set_confirming(&self, on: bool) {
-        self.inner.status.set_refresh(on);
+        self.inner.status.set_vouched(on);
     }
 
-    /// Whether the status is being confirmed: the contract's horizon turns
-    /// the re-puts on, and [`Health::set_confirming`] has not turned them
-    /// off. A clock guard holding writes stops them without turning them
-    /// off.
+    /// Whether the status is being confirmed: the contract's horizon
+    /// confirms it, by the heartbeat under `freshness.v2`, and
+    /// [`Health::set_confirming`] has not turned that off. A clock guard
+    /// holding writes clears every bit without turning it off.
     #[must_use]
     pub fn is_confirming(&self) -> bool {
-        self.inner.status.is_refreshing()
+        self.inner.status.confirm_period().is_some() && self.inner.status.is_vouched()
     }
 
     /// Whether the clock guard holds this owner's state writes (core §4.3,
@@ -992,11 +994,13 @@ mod tests {
         );
     }
 
-    /// The standard contract carries the horizon the status's re-puts come
-    /// from, and the checks' bound.
+    /// The standard contract carries the horizon the status's heartbeat
+    /// confirms it within, under `freshness.v2` (text 0.8), and the
+    /// checks' bound.
     #[test]
     fn the_contract_drives_the_refresh_and_the_bound() {
         let imp = implementation();
+        assert!(zenkey_model::freshness::uses_v2(imp.contract()));
         let status = imp.resource(super::STATUS).unwrap();
         assert_eq!(
             zenkey_model::freshness::horizon_of(status).refresh_bound(),

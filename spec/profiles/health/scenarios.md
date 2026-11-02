@@ -9,7 +9,7 @@ reference tool runs them (`zenctl/tests/live_zk2.rs`, `zenctl health`).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.3) are v1.md's rules; core
-  sections say "core", and `freshness.v1`'s say so.
+  sections say "core", and `freshness.v2`'s say so.
 - **The bus.** R1 is a router with timestamping on, as a router's default
   is, and without `timestamping.drop_future_timestamp`. Owners, the
   subscriber S, the GET reader G and the tool T are its clients. Timeouts
@@ -24,28 +24,30 @@ reference tool runs them (`zenctl/tests/live_zk2.rs`, `zenctl health`).
   `zk2/lab/svc/health.v1/state/checks/<check>` and
   `zk2/lab/svc/health.v1/stream/faults`.
 - **S** subscribes to `zk2/lab/svc/health.v1/**` before the owner starts,
-  and records each delivery's arrival on its monotonic clock, its key,
-  kind, payload and stamp. **G** GETs `zk2/lab/svc/health.v1/state/**` as
-  core S4 says, and measures its clock from S's deliveries
-  (`freshness.v1` §2.6, ground 2). "Judges" applies v1.md §2.11 to the
-  reading at that instant, the descriptor read as core §3.3 says.
-- **T's clock.** T reads by presence and GET, and a GET reader ages
-  a reply only with a trusted clock (`freshness.v1` §2.6). In §5 to §7, T
-  takes the deployment's word, `freshness.v1` §2.6's ground 1: every
-  session of a scenario runs on one host, whose one clock keeps the word.
-  T measures nothing, and its verdicts rest on no subscription.
+  and to its heartbeat key covering `health.v1`,
+  `zk2/lab/svc/freshness.v2/stream/heartbeat/health.v1`. It records each
+  delivery's arrival on its monotonic clock. It records its key, kind,
+  payload and stamp too. It reads each heartbeat as `freshness.v2` §2.5
+  says. **G** GETs
+  `zk2/lab/svc/health.v1/state/**` as core S4 says. "Judges" applies
+  v1.md §2.11 to the reading at that instant, the descriptor read as core
+  §3.3 says.
+- **G's and T's clock.** G and T read by GET. A GET reader ages a reply
+  only with a trusted clock (`freshness.v2` §2.6). G and T take the
+  deployment's word, `freshness.v1` §2.6's ground 1. Every session of a
+  scenario runs on one host, whose one clock keeps the word. They measure
+  nothing, and T's verdicts rest on no subscription.
   - A tool in a deployment takes that word only as its operator's option
-    (`freshness.v1` §2.6). Without it, a tool measures its clock from puts
-    it hears during its reading. The status is re-put every 30 s. So such
-    a tool's reading lasts 30 s, unless its subscription is declared
-    before the owners start.
-  - §5 to §7 check health's reading, not the grounds of a clock's trust,
-    which `freshness.v1`'s scenarios check (its §4 and §6). In §1 to §4, G
-    measures its clock from S's deliveries, as above.
-- **The horizon** is the contract's, 60 s, so the owner confirms its status
-  at least every 30 s. §2, §4 and §8 wait it out, §2 for about 70 s, §4
-  for about 100 s and §8 for about 200 s, and a runner MAY keep them in a
-  slow tier.
+    (`freshness.v1` §2.6). Without it, a tool measures its clock from the
+    owner's stamped puts it hears. The status's puts carry no Zenoh
+    timestamp of the owner's (core §4.3's table). Such a tool measures from
+    what else the owner stamps.
+  - These scenarios check health's reading. `freshness.v1`'s scenarios
+    check the grounds of a clock's trust (its §4 and §6).
+- **The horizon** is the contract's, 60 s. The owner's heartbeat confirms
+  its status at least every 30 s, the reference's every 28.5 s. §1, §2,
+  §4 and §8 wait it out: §1 about 70 s, §2 about 135 s, §4 about 100 s
+  and §8 about 200 s. A runner MAY keep them in a slow tier.
 - **Jitter.** A gap between deliveries is measured at S, which adds the
   bus's jitter to what the owner sent. The reference allows 200 ms on
   loopback.
@@ -58,41 +60,48 @@ reference tool runs them (`zenctl/tests/live_zk2.rs`, `zenctl health`).
    history, GETs the owner's `health.v1/state/**` the moment it sees the
    owner's instance token, and again the moment it sees its
    `alive/health.v1/…` token.
-2. A second owner, `lab/quiet`, starts with `health.v1` in its tokenless
-   set (core §8.1) and status `OK`. T GETs its descriptor and its
-   `health.v1/state/**` the moment it sees its instance token.
+2. A second owner, `lab/quiet`, starts with `health.v1` and
+   `freshness.v2` in its tokenless set (core §8.1) and status `OK`. T
+   GETs its descriptor and its `health.v1/state/**` the moment it sees
+   its instance token.
 3. The owner puts status `OK`, reason `"serving"`. G GETs.
-4. The owner puts nothing for 35 s.
+4. The owner puts nothing for 65 s, and S judges.
 5. The owner closes. S listens 3 s more.
 
 **Expected.**
 1. Both of T's GETs answer the status: `UNSPECIFIED`, `"starting"`,
    stamped by the owner's session. It was put before the tokens (§2.3).
-2. `lab/quiet` holds an instance token and no `alive/health.v1/…` token,
-   its descriptor lists `health.v1` with `"token": false`, and T's GET at
-   the instance token answers its status `OK`.
+2. `lab/quiet` holds an instance token and no `alive/health.v1/…` or
+   `alive/freshness.v2/…` token. Its descriptor lists `health.v1` with
+   `"token": false`, and T's GET at the instance token answers its status
+   `OK`.
 3. G's reply is `OK`, `"serving"`, with `since_ns` later than the first
    status's.
-4. S receives the status again at least once, no two deliveries more than
-   30 s apart: the same payload, `since_ns` included, under a later stamp
-   of the same id (`freshness.v1` §2.4).
+4. S receives no put of the status (`freshness.v2` §2.4). It receives a
+   heartbeat at least every 30 s, of form 6. Its tag is that of
+   `health.v1`'s revision 1.1, and its section vouches for the status. At
+   65 s, past the horizon, S judges **healthy**, `ok`.
 5. S receives no delete of the status, before or after the close (§2.3).
 
 ## §2 A stale status (§2.4)
 
 **Steps.**
-1. The owner puts status `OK`, and goes on confirming it. S and G judge
-   (G with the descriptor read, and the owner present).
-2. The owner closes its writer for the status, and keeps its service up:
-   its tokens held, its GETs answered.
-3. 65 s after S's last delivery of the status, S judges, and G GETs and
-   judges.
+1. The owner puts status `OK`, and goes on confirming it for 65 s. S and
+   G judge (G with the descriptor read, and the owner present).
+2. The owner stops vouching for its status (the reference:
+   `Health::set_confirming(false)`). Its service stays up: its tokens
+   held, its heartbeats sent, its GETs answered.
+3. 65 s after the last heartbeat that vouched for the status, S judges.
+   G GETs and judges.
 
 **Expected.**
-1. Both: **healthy**, `ok`.
+1. Both: **healthy**, `ok`, past the horizon. S has received no put of
+   the status since step 1's. G's reply is stamped with the status's last
+   confirmation (`freshness.v2` §2.4).
+2. S receives heartbeats, each with the status's bit clear, and no put.
 3. Presence: the owner's instance and interface tokens are present.
    S: **stale**, `beyond_horizon`. G: **stale**, `beyond_horizon`, the
-   reply's stamp more than 60.5 s old against its measured clock. Neither
+   reply's stamp more than 60.5 s old. Neither
    reports the service unhealthy or `FAILED`, and neither reports `OK` as
    current (§2.4, `freshness.v1` §2.11).
 
@@ -163,21 +172,23 @@ conventions say.
      a future-dated put (core §4.1).
    - Without root, the fault's stamp is the owner's honest one, set or
      re-stamped by its own session (v1.md §2.5), and is not checked.
-3. S receives the status again, re-put within a few seconds of the
-   correction (`freshness.v1` §2.10), and no `clock_ahead` fault after
-   it. S judges **healthy**, `ok`, and the clock question no.
-4. **[moved clock]** S receives neither the fault nor the status put
-   while the owner was ahead: R1 dropped both (v1.md §2.5). G's reply
-   holds the status, under the owner's stamp, since a router never drops
-   or re-stamps a reply (core §4.1). That deployment's readers have only
-   the status's staleness to go on (v1.md §2.5).
+3. Within 30 s of the correction, S receives a heartbeat that vouches for
+   the status again (`freshness.v2` §2.10). It receives no put of the
+   status, and no `clock_ahead` fault after it. S judges **healthy**,
+   `ok`, and the clock question no.
+4. **[moved clock]** S receives no fault: R1 dropped it (v1.md §2.5). The
+   status put carries no Zenoh timestamp of the owner's (`freshness.v2`
+   §2.4), so R1 stamps it itself, and S receives it. G's reply holds the
+   status, under the owner's stamp, since a router never drops or
+   re-stamps a reply (core §4.1). That deployment's readers have only the
+   status's staleness to go on (v1.md §2.5).
 
 ## §5 A tokenless set of 100 (§2.7)
 
 **Setup.** `spec/scenarios/presence.md` §5's, with the standard contract:
-100 services `p5/dev0` to `p5/dev99`, each implementing `health.v1`, in
-its tokenless set, and `nav.v2`, each with status `OK` put before it
-starts. The tool T takes the deployment's word for its clock (the
+100 services `p5/dev0` to `p5/dev99`, each implementing `health.v1` and
+`nav.v2`, `health.v1` and `freshness.v2` in its tokenless set, each with
+status `OK` put before it starts. The tool T takes the deployment's word for its clock (the
 conventions).
 
 **Steps.** T lists `zk2/p5/*/@zk/**`, then `zk2/p5/*/@zk/alive/health.v1/**`,
@@ -186,7 +197,8 @@ then GETs each instance's descriptor, and each listed service's
 
 **Expected.**
 - 200 tokens: an instance token and an `alive/nav.v2/…` token each, and no
-  `alive/health.v1/…` token. The second read finds nothing.
+  `alive/health.v1/…` or `alive/freshness.v2/…` token. The second read
+  finds nothing.
 - Every descriptor lists `health.v1` with `"token": false`. T finds all
   100 providers, and judges each **healthy**, `ok`: none is reported as
   not implementing `health.v1` because it holds no interface token.
@@ -209,7 +221,7 @@ takes the deployment's word for its clock (the conventions).
 3. The owner's tokens are gone, and its GET draws no reply. T judges **not
    asked**, `absent`: never `FAILED`, never stale. It shows the archived
    status, `DEGRADED`, as last-known, with its stamp and the archive's
-   `confirmed`, never as current (core S6, `freshness.v1` §2.8).
+   `confirmed`, never as current (core S6, `freshness.v2` §2.8).
 
 ## §7 An inconsistent status, for a tool (§2.2)
 
@@ -243,14 +255,15 @@ from its configuration that `vehicle-01/nav` implements `health.v1`.
 1. G subscribes to the owner's status statically, without presence, before
    the owner starts, and listens 65 s, then judges.
 2. The owner starts. G listens 65 s, then judges.
-3. In run A, the owner closes its writer for the status. G listens 65 s
+3. In run A, the owner stops vouching for its status. G listens 65 s
    more, and judges.
 
 **Expected.**
 - **Run A:**
   1. G receives nothing, and judges **unobservable**, `nothing_crossed`:
      it knows of no status yet, and does not call one stale (§2.8).
-  2. G receives the status and its re-puts, and judges **healthy**, `ok`.
+  2. G receives the status, and the heartbeats that vouch for it
+     (`link.v1` §2.9). G judges **healthy**, `ok`.
   3. G judges **stale**: never down, never `FAILED`, and never absent,
      since presence does not cross.
 - **Run B:** nothing of the status crosses at any step. G judges

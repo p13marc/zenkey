@@ -4,6 +4,49 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.9 — 2026-11-01: the view and the status confirmed by `freshness.v2`'s heartbeat, never re-put (#978)
+
+Epic #975 makes the wire bandwidth-first. Under `freshness.v1` an owner
+re-put its 1,286-byte view and its 330-byte status, unchanged, every
+30 s: about 6.24 MB a day on W2, its largest item (#989). `freshness.v2`,
+text 0.1 (#978's F3), confirms a state member by a heartbeat per
+interface instead, which vouches for it by a bit. This text, #978's F4,
+moves `config.v1` onto it.
+
+**The contract: revision 1.1,** `sha256:4778b0aa…`, published in
+`../.history/config.v1/`. Its `uses` is `freshness.v2`, where 1.0's was
+`freshness.v1`: a review (core §9.8, `uses_changed`), no resource
+changed. Revision 1.0 stays defined, and its owners re-put.
+
+**Changed: §2.3's confirmation.**
+- **Before:** the owner confirms the view and the status at least every
+  30 s, by a change or a re-put of the value unchanged (`freshness.v1`
+  §2.4).
+- **Now:** by a change or by its heartbeat, which vouches for each by its
+  bit (`freshness.v2` §2.4). It never puts either again unchanged to
+  confirm it. `[Sc: §1]`
+- **The acts' puts stay:** an arm, a join, an extend, a confirm, a cancel
+  with nothing applied, a persist and a desired report each put both
+  again at the same revision, a change of the documents' content.
+
+**Restated over the heartbeat, no rule changed.** §2.19's "The status's
+refresh" is its confirmation: the heartbeat covering `config.v1`, about
+14 B every 28.5 s, which crosses where the status does (`link.v1` §2.9),
+and a GET's reply carries the status's last confirmation. §1, §3 and §5
+name `freshness.v2`.
+
+**`scenarios.md`.** S hears the heartbeat key too. §1's step 4 waits
+65 s, past the horizon, and S judges `V` and `St` fresh with no re-put.
+
+**Written against core 0.82,** where it said 0.28: the heartbeat is core
+0.82's §7.5 form 6. The index's row follows.
+
+**Deliberately not changed.**
+- **The horizon:** 60 s, on both.
+- **§2.18's "a freshness re-put"** of a `DesiredConfig`: it is the
+  author's contract's, which F5 moves.
+- **Every fixture.**
+
 ## 0.8 — 2026-10-30: editorial: §2.18's instance is `desired.v1`'s run, for round 87's F-336 (#935)
 
 zk2py round 87 (PR #961) found a contradiction between this text and

@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.85** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.86** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -3843,7 +3843,7 @@ The format is the generator's own. The reference reads an enrollment file
 | Grant | Rule |
 |---|---|
 | **Own** | A service principal puts, deletes, declares queryables, replies and declares tokens under `zk2/<system>/<service>/**`, on ingress. It also holds each verbatim subtree, spelled out because `**` never crosses one: `…/*/@stream/**`, `…/*/@state/**`, `…/*/@op/**`, `…/@zk/**`. A service using advanced publication (§2.5) also holds `…/*/stream/**/@adv/**` and `…/*/state/**/@adv/**`. On egress, it receives queries and subscriber declarations on the same keys (spike S14). |
-| **Consume** | Subscribe or GET on the prefixes a principal's bindings name, plus their `@adv` subtrees where the consumer uses history, plus **presence**: liveliness reads (GETs and subscriptions, §8.1) and the descriptor's GET and subscription (§3.3) on the `…/@zk/**` subtree of each provider they name. |
+| **Consume** | Subscribe or GET on the prefixes a principal's bindings name, plus their `@adv` subtrees where the consumer uses history, plus **presence**: liveliness reads (GETs and subscriptions, §8.1) and the descriptor's GET and subscription (§3.3) on the `…/@zk/**` subtree of each provider they name. Plus each **heartbeat** a binding needs: where a bound interface's contract uses `freshness.v2` and the binding consumes one of its collections (§7.5), the subscription to each named provider's `…/freshness.v2/stream/heartbeat/<iface>`. A consumer denied it hears no confirmation, and every member it follows goes stale (`freshness.v2` §2.5). |
 | **Call** | Query on specific `…/@op/<op>` keys, plus presence on the `…/@zk/**` subtree of each service whose operations it calls. |
 | **Tool** | A role a principal plays, with no address of its own: Consume and Call on what it reads and calls, and presence on the services it inspects. **Inspection** is presence alone, on the `…/@zk/**` subtree of each service named, exact or wildcard, and none of its data. A tool drawing the graph (R3), a doctor, or a service listing reads descriptors through presence. A tool that checks S4, runs a doctor or draws the mesh (§4.2) also holds the **admin read**: `query` on `@/*/router`, `@/*/router/status/plugins/storage_manager/storages/**` and `@/*/*`, and their `reply`, never namespaced. Under `deny`, no other grant reaches the admin space. |
 

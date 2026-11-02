@@ -16,9 +16,9 @@
 [interface]
 name    = "zenwatch"
 major   = 1
-minor   = 1
+minor   = 2
 summary = "A notifier's announced rules, its scheduled doctor's last report, and what its bounds cost"
-uses    = ["freshness.v1"]
+uses    = ["freshness.v2"]
 
 [schemas]
 jsonschema = ["schemas/zenwatch.json"]
@@ -26,8 +26,9 @@ jsonschema = ["schemas/zenwatch.json"]
 # State, reliable and blocking (core §2.4's SHOULD): a reader must not lose
 # the put that says a rule fired, nor the delete that says it went quiet,
 # and only a reliable, blocking resource reads clean for its population
-# (§2.7). Re-put every ttl/2 by the runtime, so a subscriber can age the
-# document of a notifier that died without deleting it.
+# (§2.7). Vouched for by the runtime's heartbeat every ttl/2, never re-put
+# (freshness.v2 §2.4, minor 2), so a subscriber can age the document of a
+# notifier that died without deleting it.
 [resources."firing/{rule_id}"]
 kind        = "state"
 type        = "json:FiringRule"

@@ -25,7 +25,7 @@
 //! | Rule | Here |
 //! |---|---|
 //! | §2.1 exposure; `persist` optional | every resource served; `persist` without a persisted layer is listed unavailable, cause `config`, and the core answers it before any handler (O3) |
-//! | §2.3 the view and the status put before §8.2 step 4, on every change, confirmed every 30 s, never deleted | put when [`ServiceBuilder::config_v1`] declares them; after every step that changes either, before the call's reply; their [`StateWriter`]s re-put them from the contract's `freshness.ttl_s = 60`; no call deletes them |
+//! | §2.3 the view and the status put before §8.2 step 4, on every change, confirmed every 30 s, never re-put, never deleted | put when [`ServiceBuilder::config_v1`] declares them; after every step that changes either, before the call's reply; the contract uses `freshness.v2`, so the heartbeat covering `config.v1` ([`crate::heartbeat`]) vouches for both every 28.5 s, from their `freshness.ttl_s = 60` (`freshness.v2` §2.4); no call deletes them |
 //! | §2.5 the order of refusals | the core's first (O2's `fanout_forbidden`, O3's `unavailable`, a key that names no member, a request that does not decode), then [`Owner::set`]'s rows 1 to 14 |
 //! | §2.6–§2.11 changes, tokens, joining, the window, hot and reach, the undo once | [`Owner`]; each [`Act`] performed once on the [`Device`], its result reported with [`Owner::finish`] |
 //! | §2.7 one act at a time, `busy` meanwhile | the owner is unlocked while the device acts, so a call that arrives meanwhile is answered `busy` by the model, never queued |
@@ -61,8 +61,9 @@
 //! instance's values, and the view would then show values the device does
 //! not hold.
 //!
-//! **The contract is the published bundle**, revision 1.0
-//! ([`FINGERPRINT`]), embedded byte for byte from
+//! **The contract is the published bundle**, revision 1.1
+//! ([`FINGERPRINT`]), the one that uses `freshness.v2` (text 0.9, #978's
+//! F4), embedded byte for byte from
 //! `spec/profiles/.history/config.v1/` and served as it is, as `health.v1`'s
 //! is ([`crate::health`]).
 //!
@@ -96,14 +97,16 @@ use crate::service::ServiceBuilder;
 use crate::state::StateWriter;
 use crate::writer::EventWriter;
 
-/// The standard contract's bundle, revision 1.0 as published in
-/// `spec/profiles/.history/config.v1/` (§3), byte for byte.
+/// The standard contract's bundle, revision 1.1 as published in
+/// `spec/profiles/.history/config.v1/` (§3), byte for byte: it uses
+/// `freshness.v2`, so its owner's heartbeat confirms the view and the
+/// status.
 pub const BUNDLE: &[u8] = include_bytes!(
-    "../../spec/profiles/.history/config.v1/727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1.bundle.json"
+    "../../spec/profiles/.history/config.v1/4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501.bundle.json"
 );
 
 /// Its fingerprint (§3).
-pub const FINGERPRINT: &str = "727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1";
+pub const FINGERPRINT: &str = "4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501";
 
 /// The read-back, as the descriptor names it (§2.3).
 pub const VIEW: &str = "state/view";
@@ -1194,6 +1197,7 @@ mod tests {
             assert!(imp.resource(r).is_ok(), "{r}");
         }
         assert!(imp.resource(super::PERSIST).unwrap().optional);
+        assert!(zenkey_model::freshness::uses_v2(imp.contract()));
         assert_eq!(
             zenkey_model::freshness::horizon_of(imp.resource(super::VIEW).unwrap()).refresh_bound(),
             Some(std::time::Duration::from_secs(30))

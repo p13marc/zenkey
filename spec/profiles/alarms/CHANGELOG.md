@@ -4,6 +4,92 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.11 — 2026-11-01: each firing alarm confirmed by `freshness.v2`'s heartbeat, and §2.15's window read over it (#978)
+
+Epic #975 makes the wire bandwidth-first. Under `freshness.v1` an owner
+re-put each firing alarm, unchanged, every 450 s: 121 KB a day on W2
+(#989). `freshness.v2`, text 0.1 (#978's F3), confirms a state member by
+a heartbeat per interface instead, which vouches for it by a bit. This
+text, #978's F4, moves `alarms.v1` onto it.
+
+**The contract: revision 1.1,** `sha256:e2b48d58…`, published in
+`../.history/alarms.v1/`. Its `uses` is `freshness.v2`, where 1.0's was
+`freshness.v1`: a review (core §9.8, `uses_changed`), no resource
+changed. Revision 1.0 stays defined, and its owners re-put.
+
+**Changed: §2.7's "Confirmed every 450 s".**
+- **Before:** an owner MUST put each firing alarm whose condition it
+  evaluates at least every 450 s, a transition, a refresh, or a re-put of
+  the document unchanged (`freshness.v1` §2.4).
+- **Now:** it MUST confirm each such alarm that often. A transition or a
+  refresh does, and so does its heartbeat, by the alarm's bit
+  (`freshness.v2` §2.4). It never puts the document again unchanged to
+  confirm it. `[Sc: §2]`
+- **"Only while it still evaluates it"** clears the alarm's bit, where it
+  turned the re-puts off. A resolved alarm's bit is clear from its
+  resolved put.
+- **§2.5:** the confirm row is the heartbeat's bit, no put, and a
+  duplicate observation puts nothing while the heartbeat goes on
+  confirming. `observed_at_ms` still moves only on a refresh.
+
+**Changed: §2.15's `window`, a reader's rule.** "The owner puts every
+firing alarm at least every 450 s, so a lossless window longer than the
+horizon has heard each one" is false of a `freshness.v2` owner, which
+puts none again.
+- **Now:** for an owner whose revision uses `freshness.v2`, as its
+  descriptor names it, `window` also needs the latest heartbeat covering
+  its alarms heard in the window to be in step with the reader's view:
+  its section's digest and live count the view's (`freshness.v2` §2.5).
+  Its heartbeat's digest covers every live alarm, so one in step says the
+  reader holds each one. `[F: conclusions.json]`
+- **The order** gains step 7: a window out of step, or one that heard no
+  heartbeat, is **unobservable**, `window_unconfirmed`. `window` is step 8.
+- **A `freshness.v1` owner's window** reads as before.
+- **`conclusions.json`** gains four cases, `in_step` on a window: in
+  step, out of step, none heard, and a short window out of step, which
+  `window_short` answers first. Its earlier cases, with no `in_step`, are
+  a `freshness.v1` owner's, read as before.
+
+**Changed: §2.14 step 5, whose stamp is attributed.** `previous_instance`
+compares a put's stamp with the descriptor's `meta.zid`. Under
+`freshness.v2` an alarm's put carries no Zenoh timestamp of its owner's
+(core §4.3's table), so a subscription's delivery arrives under a
+router's stamp, or none. Read as before, every live alarm behind a router
+with timestamping on would read `previous_instance`.
+- **Now:** only a stamp its owner set is attributed. A subscription's
+  delivery of a `freshness.v2` owner's alarm is unattributable, and the
+  reader goes on to step 6. A GET's reply carries the alarm's last
+  confirmation, which its owner stamps, and is read as before.
+- **What it costs.** A subscriber no longer tells an earlier instance's
+  last put by its stamp. An alarm the new instance did not put again is
+  left out of the GET that establishes its owner's alarms, and reads
+  `not_held` (step 5), or goes stale.
+
+**Restated over the heartbeat, no rule changed.** §1, §2.11, §2.14, §3,
+§5 and Appendix A name `freshness.v2`. The cost in §2.7 is one heartbeat
+per owner every 450 s, about 45 B with 256 alarms firing, where re-puts
+cost one put every 1.8 s. §2.11's later minor that exposes the resource
+lets its owner's heartbeat cross with it (`link.v1` §2.9).
+
+**`scenarios.md`.** S hears the heartbeat key too. §2's step 3 waits
+905 s, past the horizon, and S judges A firing with no re-put. §6 stops
+vouching for A (`set_confirming`, A's bit cleared). §10's step 2 is
+established by a window whose heartbeat is in step. The default run's
+copy with `freshness.ttl_s = 4` heartbeats every 1.9 s.
+
+**Written against core 0.82,** where it said 0.34: the heartbeat is core
+0.82's §7.5 form 6. The index's row follows.
+
+**Deliberately not changed.**
+- **The horizon:** 900 s. **§2.14's steps** and every reason of a key's
+  reading.
+- **§2.9's puts at a restart or a re-mint:** each alarm kept is still put
+  again from the new instance, so its replies carry the new instance's
+  stamps.
+- **A re-read.** A reader that follows heartbeats re-reads an owner's
+  alarms after two out of step (`freshness.v2` §2.5), and the GET that
+  answers them establishes them by `answered`. No rule here adds one.
+
 ## 0.10 — 2026-10-30: editorial: round 87's F-337 and F-338, no rule changed (#935)
 
 zk2py round 87 (PR #961) read 0.9 cold, beside `telemetry.v1` 0.6 and

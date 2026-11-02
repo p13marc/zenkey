@@ -24,7 +24,9 @@ Claude Code loads this file when working in `zenwatch/`; the root `CLAUDE.md` is
   **`zenwatch.v1`** (`contracts/`, its own `.history`; Rust-first: its
   types are `publish.rs`'s structs bound by `json_type`, the committed
   schema held to them by `check_schema`; `build.rs` is zk2's
-  `zenkey-build`). zenwatch links no v1 crate. A rule is one spelling of the **closed**
+  `zenkey-build`; minor 2, #978 F4, uses `freshness.v2`: its states, and
+  health.v1 1.1's status, are confirmed by the runtime's heartbeats, never
+  re-put, and `tests/publish.rs` checks the descriptor lists `freshness.v2`). zenwatch links no v1 crate. A rule is one spelling of the **closed**
   vocabulary — `zenctl watchdog`'s zk2 eight on the fleet's watchdog
   (`rate-above`, `rate-below`, `silent-for`, `invalid-payload`,
   `qos-mismatch`, `doctor`, `alert-firing <SEL> [info|warning|critical]`,

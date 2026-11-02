@@ -18,7 +18,6 @@ use common::{
 };
 use zenkey::archive::{self, Archive, ArchiveConfig, Recorded};
 use zenkey::consumer::Consumer;
-use zenkey::health::Level;
 use zenkey::model::grammar::IfaceId;
 use zenkey::model::seed::{Held, Mark, admits_mark};
 use zenkey::model::template::Bindings;
@@ -303,8 +302,9 @@ fn delete_stamp(s: &Sample) -> InBand {
 /// disabled, nothing of `plans/{vehicle}` carries a Zenoh timestamp,
 /// which is #976's capture; through R2, which stamps, each put arrives
 /// with R2's zid, its delete and its reply with none. `status`
-/// (`health.v1`, `freshness.ttl_s` 60, on the table) carries the owner's
-/// zid through either.
+/// (`status.v1`, which uses `freshness.v1`, `freshness.ttl_s` 60, on the
+/// table) carries the owner's zid through either. Since #978's F4,
+/// `health.v1`'s status uses `freshness.v2`, whose puts leave the table.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s1_in_band_stamps_and_no_per_put_hlc() {
     in_band_stamps(false).await;
@@ -329,12 +329,20 @@ async fn in_band_stamps(stamping: bool) {
     let consumer = client(&ep).await;
     let third = client(&ep).await;
     let (_plans, plans) = capture(&consumer, "zk2/ground/fleet-mgr/mission_plan.v1/**").await;
-    let (_status, status) = capture(&consumer, "zk2/ground/fleet-mgr/health.v1/**").await;
+    let (_status, status) = capture(&consumer, "zk2/ground/fleet-mgr/status.v1/**").await;
     let (_control, control) = capture(&consumer, "control/**").await;
 
     let mut b = ServiceBuilder::new(&owner, config("ground/fleet-mgr"));
     b.implement(imp("mission_plan.v1")).unwrap();
-    let health = b.health().await.unwrap();
+    b.implement(status_v1()).unwrap();
+    let status_w = b
+        .declare_state_writer(
+            &"status.v1".parse().unwrap(),
+            "state/status",
+            &Bindings::new(),
+        )
+        .await
+        .unwrap();
     let w = b
         .declare_state_writer(&plan(), "state/plans/{vehicle}", &vehicle("vehicle-01"))
         .await
@@ -374,8 +382,8 @@ async fn in_band_stamps(stamping: bool) {
     let v4 = w.put("v4").await.unwrap();
     // 4. `status` twice, then its GET.
     let mark = status.lock().unwrap().len();
-    health.set_status(Level::Ok, "one").await.unwrap();
-    health.set_status(Level::Ok, "two").await.unwrap();
+    status_w.put("one").await.unwrap();
+    status_w.put("two").await.unwrap();
 
     eventually("every mutation arrives", || async {
         plans.lock().unwrap().len() >= 5
@@ -448,7 +456,7 @@ async fn in_band_stamps(stamping: bool) {
     for s in &puts {
         assert_eq!(sealed(s).0.run.hex(), run, "{through}: status's run");
     }
-    let reply = raw_get(&consumer, "zk2/ground/fleet-mgr/health.v1/state/status").await;
+    let reply = raw_get(&consumer, "zk2/ground/fleet-mgr/status.v1/state/status").await;
     assert_eq!(
         reply[0].timestamp().map(|t| t.get_id().to_string()),
         Some(owner.zid().to_string()),
@@ -456,6 +464,17 @@ async fn in_band_stamps(stamping: bool) {
     );
     drop(w);
     svc.close().await.unwrap();
+}
+
+/// `status.v1`: one state, `freshness.ttl_s` 60, under `freshness.v1`, so
+/// core §4.3's table lists it (row 1) and its puts carry the owner's Zenoh
+/// timestamp. Never published.
+fn status_v1() -> zenkey::Implementation {
+    let text = "[interface]\nname = \"status\"\nmajor = 1\nminor = 0\nuses = [\"freshness.v1\"]\n\
+                [resources.status]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n\
+                annotations = { \"freshness.ttl_s\" = 60 }\n";
+    let l = zenkey::model::contract::load_str(text, std::path::Path::new("."), None);
+    zenkey::Implementation::new(l.contract.unwrap_or_else(|| panic!("{}", l.report)))
 }
 
 /// §2: within the window, a deleted key answers `reply_del` whose

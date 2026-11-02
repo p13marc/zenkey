@@ -211,7 +211,8 @@ fn standard_contracts() -> Vec<PathBuf> {
 /// bundles, is named by its interface id, and is published in
 /// `spec/profiles/.history` (core §9.7), compatible with every earlier
 /// revision of its interface there, as `tests/examples.rs` requires of
-/// `examples/zk2/`. Every interface published there has its contract in the
+/// `examples/zk2/`, or a review its publication accepted: `uses_changed`
+/// alone, a standard contract's move to `freshness.v2` (#978's F4). Every interface published there has its contract in the
 /// tree. After an intended change, publish the new revision with
 /// `zk2 contract bundle <file> --history spec/profiles/.history`.
 #[test]
@@ -258,8 +259,17 @@ fn every_standard_contract_is_published_and_compatible() {
             revs.iter().any(|r| same_revision(r, &new)),
             "{rel}: the current revision is not published; run zk2 contract bundle spec/profiles/{rel} --history spec/profiles/.history"
         );
+        // A published revision's review findings were accepted when it was
+        // published, as zenkey-build reads them: the one a standard contract
+        // takes is `uses_changed`, its move to freshness.v2 (#978's F4).
+        // Breaking is refused, always.
         let v = check_history(&revs, &new);
-        assert_eq!(v.class(), Class::Compatible, "{rel}: {:#?}", v.findings);
+        let accepted = v.findings.iter().all(|f| f.rule == "uses_changed");
+        assert!(
+            v.class() == Class::Compatible || (v.class() == Class::Review && accepted),
+            "{rel}: {:#?}",
+            v.findings
+        );
         ifaces.push(c.iface.to_string());
     }
     for dir in sorted_entries(&root) {
@@ -2434,6 +2444,7 @@ fn alarms_conclusions() {
                         present_throughout: w["present_throughout"]
                             .as_bool()
                             .expect("present_throughout"),
+                        in_step: w.get("in_step").map(|v| v.as_bool().expect("in_step")),
                     }),
                 };
                 let s = alarms::owner_set(alarms_presence(case), seed, window);

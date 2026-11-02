@@ -96,6 +96,21 @@
                   "egress",
                   "ingress"
                 ],
+                "id": "stream:freshness.v2",
+                "key_exprs": [
+                  "zk2/*/*/freshness.v2/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
                 "id": "stream:health.v1",
                 "key_exprs": [
                   "zk2/*/*/health.v1/stream/**"

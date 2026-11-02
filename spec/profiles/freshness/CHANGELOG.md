@@ -5,6 +5,17 @@ entry naming its text. Each entry records what changed, what deliberately
 did not, and why. A breaking change is a new major, a new file, never an
 entry here ([`../README.md`](../README.md)).
 
+## `v2.md` 0.3 — 2026-11-02: draft, used by the adopters and zenwatch (#978)
+
+#978's F4 moves `health.v1`, `alarms.v1` and `config.v1` onto this text,
+and zenwatch's own `zenwatch.v1` with them. The adopters' mappings use
+those profiles, and zenwatch ships, so this text is no longer
+experimental. Its status is `draft`, and the index lists it in its first
+table.
+
+**Deliberately not changed.** No rule, fixture or scenario. Written
+against core 0.85, as 0.2 was.
+
 ## `v2.md` 0.2 — 2026-11-01: zk2py round 96's findings answered (#978)
 
 zk2py's round 96 read text 0.1 cold and filed six findings on it and

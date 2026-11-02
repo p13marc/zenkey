@@ -631,8 +631,9 @@ async fn s3_epochs_and_re_minting() {
     svc.close().await.unwrap();
 }
 
-/// §5: with `health.v1` in the tokenless set, 100 services hold 200 tokens,
-/// and a tool still finds every `health.v1` provider. `health.v1` is the
+/// §5: with `health.v1` in the tokenless set, and `freshness.v2`, which
+/// every `health.v1` owner implements beside it (#978's F4), 100 services
+/// hold 200 tokens, and a tool still finds every `health.v1` provider. `health.v1` is the
 /// standard contract, implemented by the runtime (#721); its verdicts are
 /// `profile_health.rs` §5's.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -646,7 +647,9 @@ async fn s5_a_tokenless_set() {
     for i in 0..N {
         let address = format!("p5/dev{i}");
         // The deployment's tokenless set.
-        let cfg = config(&address).tokenless(health.clone());
+        let cfg = config(&address)
+            .tokenless(health.clone())
+            .tokenless(zenkey::heartbeat::iface());
         let (mut b, held) = nav_builder_with(&host, cfg).await;
         b.health()
             .await

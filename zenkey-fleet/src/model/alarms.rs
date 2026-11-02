@@ -366,6 +366,10 @@ struct InstanceSeen {
     listing: Listing,
     /// Its `meta.zid`, by value; `None` when it carries none.
     zid: Option<String>,
+    /// Its descriptor names the revision of `alarms.v1` the book reads
+    /// heartbeats with, which uses `freshness.v2` (text 0.11): its alarms
+    /// are confirmed by heartbeat, never re-put.
+    heartbeats: bool,
 }
 
 /// One owner, as this reader knows it.
@@ -480,8 +484,15 @@ pub struct AlarmBook {
     clocks: BTreeMap<String, ClockMeasure>,
     archived: BTreeMap<String, ArchivedAlarm>,
     /// Each owner's alarms as its heartbeats confirm them (core §7.5's
-    /// form 6, #978's F2): fed by every sample the merge admits.
+    /// form 6, #978's F2): fed by every sample the merge admits, and
+    /// re-read from each complete GET that answers the owner (#978's F4).
     views: BTreeMap<Addr, View<Instant>>,
+    /// Each owner's latest heartbeat read, when it arrived, and whether its
+    /// alarms' section was in step with the view (§2.15, text 0.11).
+    beats: BTreeMap<Addr, (Instant, bool)>,
+    /// The GET in flight: each owner's members it answered with a value,
+    /// with their in-band stamps, for the views' re-read.
+    pending_live: BTreeMap<Addr, Vec<(String, Option<zenkey_model::wire::Stamp>)>>,
 }
 
 /// alarms.v1's layout for its heartbeat: the embedded standard revision's
@@ -492,6 +503,13 @@ fn alarms_layout() -> &'static zenkey_model::heartbeat::Layout {
             zenkey_model::heartbeat::Layout::of(zenkey::alarms::implementation().contract())
         });
     &LAYOUT
+}
+
+/// The index of `state/alarms/{alert_key}` among the layout's collections.
+fn alarms_index() -> usize {
+    alarms_layout()
+        .index_of(zenkey::alarms::ALARMS)
+        .expect("alarms.v1's one collection")
 }
 
 /// A view of one owner's alarms, following its one collection.
@@ -533,6 +551,8 @@ impl AlarmBook {
             clocks: BTreeMap::new(),
             archived: BTreeMap::new(),
             views: BTreeMap::new(),
+            beats: BTreeMap::new(),
+            pending_live: BTreeMap::new(),
         }
     }
 
@@ -649,17 +669,23 @@ impl AlarmBook {
                     .as_ref()
                     .and_then(|ds| ds.get(&(addr.clone(), instance.clone())))
                     .map(|read| match read.descriptor() {
-                        Some(d) => InstanceSeen {
-                            listing: d
-                                .interfaces
-                                .iter()
-                                .find(|e| e.iface == am::IFACE)
-                                .map_or(Listing::NotListed, |e| Listing::Listed { token: e.token }),
-                            zid: d.meta.get("zid").and_then(|v| v.as_str()).map(zid_value),
-                        },
+                        Some(d) => {
+                            let entry = d.interfaces.iter().find(|e| e.iface == am::IFACE);
+                            InstanceSeen {
+                                listing: entry.map_or(Listing::NotListed, |e| Listing::Listed {
+                                    token: e.token,
+                                }),
+                                zid: d.meta.get("zid").and_then(|v| v.as_str()).map(zid_value),
+                                heartbeats: entry.is_some_and(|e| {
+                                    e.contract.strip_prefix("sha256:")
+                                        == Some(zenkey::alarms::FINGERPRINT)
+                                }),
+                            }
+                        }
                         None => InstanceSeen {
                             listing: Listing::Unread,
                             zid: None,
+                            heartbeats: false,
                         },
                     });
                 held.entry(addr.clone())
@@ -781,6 +807,13 @@ impl AlarmBook {
             self.pending_keys.insert(s.key.clone());
             if !s.delete {
                 *self.pending.entry(owner.clone()).or_default() += 1;
+                if !matches!(envelope, Some(Err(_))) {
+                    let inband = envelope.and_then(Result::ok);
+                    self.pending_live
+                        .entry(owner.clone())
+                        .or_default()
+                        .push((s.key.clone(), inband));
+                }
             }
         }
         let entry = self.keys.entry(s.key.clone()).or_insert_with(|| KeyEntry {
@@ -868,8 +901,32 @@ impl AlarmBook {
         if iface != alarms_layout().iface || !self.scope.selects_owner(&owner) {
             return None;
         }
-        let view = self.views.entry(owner).or_insert_with(alarms_view);
-        Some(view.apply(tag, stamp, body, at))
+        let view = self.views.entry(owner.clone()).or_insert_with(alarms_view);
+        let applied = view.apply(tag, stamp, body, at);
+        // §2.15 (text 0.11): a heartbeat read is in step when its alarms'
+        // section confirmed, its digest and live count the view's; one of
+        // another revision, refused or older says nothing of the view.
+        if let Applied::Read { gap, sections } = &applied {
+            let in_step = !gap
+                && sections
+                    .iter()
+                    .any(|s| matches!(s, zenkey_model::freshness::SectionRead::Confirmed(_)));
+            self.beats.insert(owner, (at, in_step));
+        }
+        Some(applied)
+    }
+
+    /// Whether a view is due a re-read: two heartbeats in a row out of
+    /// step with it (`freshness.v2` §2.5). The next complete GET re-reads
+    /// it ([`AlarmBook::seeded`]).
+    pub fn reread_due(&self) -> bool {
+        self.views.values().any(|v| !v.reread_due().is_empty())
+    }
+
+    /// How many heartbeats the book read, every owner's: a reader that
+    /// re-reads when one leaves a view due asks once per heartbeat at most.
+    pub fn heartbeats_read(&self) -> u64 {
+        self.views.values().map(View::heartbeats).sum()
     }
 
     /// A GET was asked at `asked_at`: its replies follow as samples
@@ -878,6 +935,7 @@ impl AlarmBook {
     pub fn seeding(&mut self) {
         self.pending.clear();
         self.pending_keys.clear();
+        self.pending_live.clear();
     }
 
     /// The GET ended: the owners' seed (§2.15). A complete one heals a loss
@@ -886,6 +944,31 @@ impl AlarmBook {
     pub fn seeded(&mut self, end: SeedEnd, now: Instant, wall: SystemTime) -> Vec<AlarmTransition> {
         let members = std::mem::take(&mut self.pending);
         let answered = std::mem::take(&mut self.pending_keys);
+        let mut live = std::mem::take(&mut self.pending_live);
+        // `freshness.v2` §2.5 (#978's F4): a complete GET's answer is each
+        // owner's live alarms (core S2), so it replaces the owner's view,
+        // merged with what was heard since it was asked, and the next
+        // heartbeat whose digest is the owner's confirms them. An owner it
+        // answered with a value, and one whose view is due a re-read: an
+        // empty answer is no verdict (core O5), but a view it empties only
+        // confirms less, and the next two heartbeats out of step ask again,
+        // so a re-read comes at most once every two heartbeats.
+        if end.complete {
+            for (owner, view) in &self.views {
+                if !view.reread_due().is_empty() {
+                    live.entry(owner.clone()).or_default();
+                }
+            }
+            for (owner, keys) in live {
+                let view = self.views.entry(owner).or_insert_with(alarms_view);
+                view.reread(
+                    alarms_index(),
+                    keys.iter().map(|(k, s)| (k.as_str(), *s)),
+                    end.asked_at,
+                    now,
+                );
+            }
+        }
         if let Some(l) = &mut self.loss {
             l.heal(end);
         }
@@ -1150,10 +1233,28 @@ impl AlarmBook {
                 None => present = false,
             }
         }
+        // §2.15 (text 0.11): an owner whose revision uses freshness.v2, or
+        // whose heartbeat was heard, establishes a window only by its
+        // latest heartbeat since the window's start in step with the view.
+        let beat = self.beats.get(addr).filter(|(at, _)| *at >= start);
+        let in_step = (beat.is_some() || self.confirms_by_heartbeat(addr))
+            .then(|| beat.is_some_and(|(_, ok)| *ok));
         Some(Window {
             listened: now.saturating_duration_since(start + self.spec.tail()),
             lossless,
             present_throughout: present,
+            in_step,
+        })
+    }
+
+    /// Whether a descriptor of `addr` read last names the revision of
+    /// `alarms.v1` that uses `freshness.v2` (text 0.11): its alarms are
+    /// confirmed by heartbeat, and its puts carry no stamp of its own.
+    fn confirms_by_heartbeat(&self, addr: &Addr) -> bool {
+        self.owners.get(addr).is_some_and(|o| {
+            o.instances
+                .values()
+                .any(|s| s.as_ref().is_some_and(|s| s.heartbeats))
         })
     }
 
@@ -1238,10 +1339,16 @@ impl AlarmBook {
             Some(Err(_)) => Latest::Undecodable,
         });
         let zids = self.zids(&e.owner);
+        // §2.14 step 5 (text 0.11): only a stamp its owner set is
+        // attributed. A freshness.v2 owner's put carries none, so a
+        // subscription's delivery arrives under a router's stamp or none;
+        // a GET's reply carries its last confirmation, the owner's.
+        let by_heartbeat = self.confirms_by_heartbeat(&e.owner);
         let stamp_id = e
             .latest
             .as_ref()
             .filter(|l| l.doc.is_some())
+            .filter(|l| l.via == AlarmVia::Get || !by_heartbeat)
             .and_then(|l| l.stamp.as_ref())
             .map(|t| zid_value(&t.get_id().to_string()));
         let previous_instance = !zids.is_empty() && stamp_id.is_some_and(|id| !zids.contains(&id));
@@ -1567,13 +1674,23 @@ mod tests {
         }
     }
 
+    /// `alarms.v1`'s revision 1.0, which uses `freshness.v1`: its owner
+    /// re-puts each firing alarm, and its puts carry its own stamp.
+    const REVISION_1_0: &str = "95579151aa231d2ba1224eae828083bdfc7f4f9403a80c831c1915decca9e8b6";
+
+    /// A present owner at revision 1.0, listing `alarms.v1` or not.
     fn presence(listed: bool, zid: Option<&str>) -> Observed {
+        presence_at(listed, zid, REVISION_1_0)
+    }
+
+    /// A present owner whose descriptor names `revision` of `alarms.v1`.
+    fn presence_at(listed: bool, zid: Option<&str>, revision: &str) -> Observed {
         let keys = vec!["zk2/lab/svc/@zk/instance/000000000000000a".to_owned()];
         let mut o = Observed::from_keys("zk2/lab/*/@zk/**", &keys, true);
         let mut ds = BTreeMap::new();
         let interfaces = if listed {
             serde_json::json!([{"iface": "alarms.v1",
-                "contract": format!("sha256:{}", zenkey::alarms::FINGERPRINT),
+                "contract": format!("sha256:{revision}"),
                 "minor": 0, "token": false}])
         } else {
             serde_json::json!([])
@@ -2226,6 +2343,187 @@ mod tests {
         assert_eq!(
             b.any_firing(Severity::Info, later, wall()).reason,
             Reason::NoneFiring
+        );
+    }
+
+    /// A heartbeat covering `lab/svc`'s alarms, at `seq` of one run, whose
+    /// section says `live` alarms under `digest`, `vouched` among them.
+    fn beat(
+        b: &mut AlarmBook,
+        seq: u32,
+        digest: zenkey_model::heartbeat::Digest,
+        live: u64,
+        vouched: &[u64],
+        at: Instant,
+    ) -> Applied {
+        use zenkey_model::heartbeat::{Heartbeat, Members, Section, Time};
+        use zenkey_model::wire::{Run, Seq, Stamp};
+        let layout = alarms_layout();
+        let body = Heartbeat {
+            time: Time::Unknown,
+            sections: vec![Some(Section {
+                digest,
+                members: Members::templated(live, vouched.iter().copied()),
+            })],
+        }
+        .write(layout)
+        .unwrap();
+        let stamp = Stamp {
+            run: Run::U16(7),
+            seq: Seq::new(seq).unwrap(),
+        };
+        b.heartbeat(
+            "zk2/lab/svc/freshness.v2/stream/heartbeat/alarms.v1",
+            stamp,
+            layout.tag,
+            &body,
+            at,
+        )
+        .expect("this book's")
+    }
+
+    /// §2.15 (text 0.11, #978's F4): a `freshness.v2` owner, one whose
+    /// descriptor names the revision that uses it, is established by its
+    /// window only once its latest heartbeat in it is in step with the
+    /// view: none heard, or one out of step, is `window_unconfirmed`; an
+    /// owner of revision 1.0 is established by the window's length alone.
+    #[test]
+    fn a_freshness_v2_owners_window_waits_for_a_heartbeat_in_step() {
+        use zenkey_model::heartbeat::Digest;
+        use zenkey_model::wire::{Run, Seq, Stamp};
+        let owner: Addr = "lab/svc".parse().unwrap();
+        let t0 = Instant::now();
+        let mut b = book(true);
+        b.subscribed(t0);
+        b.presence_read(
+            &presence_at(true, Some(ZID), zenkey::alarms::FINGERPRINT),
+            t0,
+        );
+        get(&mut b, t0, vec![]);
+        let later = t0 + Duration::from_secs(1000);
+        assert_eq!(b.owner_set(&owner, later).reason, Reason::WindowUnconfirmed);
+        // A heartbeat out of step: the owner holds an alarm the view lacks.
+        let x = Stamp {
+            run: Run::U32(1),
+            seq: Seq::new(1).unwrap(),
+        };
+        beat(
+            &mut b,
+            0,
+            Digest::of([(A, x)]),
+            1,
+            &[0],
+            t0 + Duration::from_secs(400),
+        );
+        assert_eq!(b.owner_set(&owner, later).reason, Reason::WindowUnconfirmed);
+        // The next in step: the owner holds none, as the view does.
+        beat(
+            &mut b,
+            1,
+            Digest::EMPTY,
+            0,
+            &[],
+            t0 + Duration::from_secs(800),
+        );
+        let set = b.owner_set(&owner, later);
+        assert_eq!(
+            (set.verdict, set.reason),
+            (SetVerdict::Established, Reason::Window)
+        );
+        // Revision 1.0's owner re-puts: its window's length is enough.
+        let mut v1 = book(true);
+        v1.subscribed(t0);
+        v1.presence_read(&presence(true, Some(ZID)), t0);
+        get(&mut v1, t0, vec![]);
+        assert_eq!(v1.owner_set(&owner, later).reason, Reason::Window);
+    }
+
+    /// §2.14 step 5 (text 0.11): a `freshness.v2` owner's put carries no
+    /// stamp of its own, so a subscription's delivery under another id is
+    /// unattributable, never a previous instance's; a GET's reply carries
+    /// the owner's confirmation stamp, and is read as before.
+    #[test]
+    fn a_freshness_v2_owners_delivery_is_unattributable() {
+        let t0 = Instant::now();
+        let mut b = book(true);
+        b.subscribed(t0);
+        b.presence_read(
+            &presence_at(true, Some(ZID), zenkey::alarms::FINGERPRINT),
+            t0,
+        );
+        let mut s = put(t0, 10, doc("warning", "firing", 1), AlarmVia::Subscription);
+        s.stamp = Some(stamp(10, "b2"));
+        b.sample(s);
+        let r = b.reading(A, t0, wall()).unwrap();
+        assert!(!r.previous_instance, "a router's stamp is no instance's");
+        assert!(!b.foreign_stamp(A, t0, wall()));
+        let mut g = put(t0, 5, doc("warning", "firing", 2), AlarmVia::Get);
+        g.stamp = Some(stamp(5, "b2"));
+        get(&mut b, t0, vec![g]);
+        assert!(
+            b.reading(A, t0, wall()).unwrap().previous_instance,
+            "a reply under another id is another instance's"
+        );
+    }
+
+    /// `freshness.v2` §2.5 (#978's F4): a complete GET re-reads the view of
+    /// each owner it answers, so an alarm the view held and the owner no
+    /// longer does leaves it, and the next heartbeat in step confirms the
+    /// rest; a view two heartbeats left out of step is due a re-read until
+    /// then.
+    #[test]
+    fn a_complete_get_re_reads_the_view() {
+        use zenkey_model::heartbeat::Digest;
+        use zenkey_model::wire::{Run, Seq, Stamp};
+        let t0 = Instant::now();
+        let mut b = book(true);
+        b.subscribed(t0);
+        b.presence_read(
+            &presence_at(true, Some(ZID), zenkey::alarms::FINGERPRINT),
+            t0,
+        );
+        let a = Stamp {
+            run: Run::U32(9),
+            seq: Seq::new(1).unwrap(),
+        };
+        let gone = Stamp {
+            run: Run::U32(9),
+            seq: Seq::new(2).unwrap(),
+        };
+        b.sample_enveloped(
+            put(t0, 10, doc("warning", "firing", 1), AlarmVia::Subscription),
+            Some(Ok(a)),
+        );
+        let mut phantom = put(t0, 10, doc("info", "firing", 3), AlarmVia::Subscription);
+        phantom.key = B.into();
+        b.sample_enveloped(phantom, Some(Ok(gone)));
+        // The owner holds A alone: its heartbeats are out of step.
+        let only_a = Digest::of([(A, a)]);
+        let t1 = t0 + Duration::from_secs(10);
+        beat(&mut b, 0, only_a, 1, &[0], t1);
+        beat(&mut b, 1, only_a, 1, &[0], t1 + Duration::from_secs(1));
+        assert!(b.reread_due(), "two heartbeats out of step");
+        // A complete GET answers A: the view is A alone.
+        let asked = t1 + Duration::from_secs(2);
+        b.seeding();
+        b.sample_enveloped(
+            put(asked, 10, doc("warning", "firing", 1), AlarmVia::Get),
+            Some(Ok(a)),
+        );
+        b.seeded(
+            SeedEnd {
+                asked_at: asked,
+                complete: true,
+            },
+            asked,
+            wall(),
+        );
+        assert!(!b.reread_due());
+        let applied = beat(&mut b, 2, only_a, 1, &[0], asked + Duration::from_secs(1));
+        assert!(
+            matches!(&applied, Applied::Read { sections, .. }
+                if sections[0] == zenkey_model::freshness::SectionRead::Confirmed(vec![A.into()])),
+            "{applied:?}"
         );
     }
 

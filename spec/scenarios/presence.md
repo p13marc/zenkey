@@ -160,12 +160,15 @@ GET. zenoh-python has no unbounded handler.*
 
 ## §5 A tokenless set (§8.1, U22)
 
-**Setup.** A deployment configures 100 services with `health.v1` in their
-tokenless set; each also implements `nav.v2`.
+**Setup.** A deployment configures 100 services with `health.v1` and
+`freshness.v2` in their tokenless set; each also implements `nav.v2`.
+Every `health.v1` owner implements `freshness.v2` beside it
+(`profiles/freshness/v2.md` §3).
 
 **Expected.**
-- Each instance holds an instance token and an `alive/nav.v2/…` token, and
-  no `alive/health.v1/…` token: 200 tokens instead of 300.
+- Each instance holds an instance token and an `alive/nav.v2/…` token. It
+  holds no `alive/health.v1/…` token and no `alive/freshness.v2/…` token:
+  200 tokens instead of 400.
 - Each descriptor marks `health.v1` with `"token": false`.
 - A tool lists the `health.v1` providers from instance tokens and
   descriptors, and finds all 100.

@@ -8,6 +8,8 @@
 //! One history root serves all three directories: `health.v1`'s revision
 //! 1.0 was published in `examples/zk2/.history` before the contract moved,
 //! and that root is append-only (its own root is `spec/profiles/.history`).
+//! Its revision 1.1, which uses `freshness.v2` (#978's F4), is published in
+//! both, so a build here does not warn its review again.
 
 use std::path::PathBuf;
 

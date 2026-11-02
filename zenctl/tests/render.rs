@@ -3268,7 +3268,7 @@ host-b/tc
 vehicle-01/cam-front
   instance 0000000000000002                    descriptor served
     camera.v1                0f66b421dc6decf2  sha256:0f66b421dc6decf2…  minor 0
-    health.v1                tokenless         sha256:e9dbcdcb2fc325ca…  minor 0
+    health.v1                tokenless         sha256:60a4374513172609…  minor 0
 
 ws-01/tcgui-frontend
   instance 0000000000000003                    descriptor served
@@ -3338,7 +3338,7 @@ fn an_iface_listing_names_providers_consumers_and_revisions() {
         str![[r#"
 INTERFACE       PROVIDERS                          CONSUMERS             REVISIONS
 camera.v1       vehicle-01/cam-front                                     sha256:0f66b421dc6decf2…
-health.v1       vehicle-01/cam-front  [tokenless]                        sha256:e9dbcdcb2fc325ca…
+health.v1       vehicle-01/cam-front  [tokenless]                        sha256:60a4374513172609…
 tc.netem.v1     host-a/tc                                                sha256:30b491116ef6a534…
 tc.netif.v1     host-a/tc, host-b/tc               ws-01/tcgui-frontend  sha256:4f531ebec4c4eee0…
 tc.scenario.v1                                     ws-01/tcgui-frontend
