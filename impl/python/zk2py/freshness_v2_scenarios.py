@@ -195,10 +195,11 @@ class RustOwner:
         self.command(f"vouch {IFACE} {self._resource(rel)} {'on' if on else 'off'}")
 
     def ahead(self) -> bool:
-        """Whether its guard holds its writes: a put refused for it."""
+        """Whether its guard holds (core 0.88): it says so on stderr, "this
+        owner's clock is ahead of its router", since its guard refuses no
+        put of a freshness.v2 member any longer."""
         if not self._ahead:
-            got = self.try_put("status") or ""
-            self._ahead = got.startswith("refused")
+            self._ahead = any("clock is ahead of its router" in x for x in self.p.stderr)
         return self._ahead
 
     def zid(self) -> str:
@@ -260,10 +261,10 @@ class ZWatch:
         return sorted({r.get("row", "?") for _, r in self.rows})
 
 
-def zget(ep: str, rel: str, extra: list[str] | None = None) -> dict[str, Any] | None:
-    """``zenctl get state lab/beacon beacon.v2 <rel>`` as JSON, or None."""
+def zget(ep: str, rel: str, extra: list[str] | None = None, address: str = "lab/beacon") -> dict[str, Any] | None:
+    """``zenctl get state <address> beacon.v2 <rel>`` as JSON, or None."""
     exe = BLACKBOX / "zenctl"
-    r = subprocess.run([str(exe), "get", "state", "lab/beacon", IFACE, rel, "--format", "json", "-c", ep,
+    r = subprocess.run([str(exe), "get", "state", address, IFACE, rel, "--format", "json", "-c", ep,
                         "--timeout", "1", *(extra or [])],
                        capture_output=True, text=True, timeout=60)
     try:
@@ -286,7 +287,8 @@ def zget_reading(ep: str, key: str) -> tuple[fr.GetReading, dict[str, Any] | Non
     ``last_confirmation`` (else its ``timestamp``)."""
     rel = key.split(f"/{IFACE}/state/", 1)[1]
     doc = zget(ep, rel.split("/", 1)[0] if "/" in rel else rel,
-               ["--param", f"peer={rel.split('/', 1)[1]}"] if "/" in rel else None)
+               ["--param", f"peer={rel.split('/', 1)[1]}"] if "/" in rel else None,
+               address="/".join(key.split("/")[1:3]))
     rows = [] if doc is None else [r for r in doc.get("rows", []) if r.get("key") == key]
     if not rows:
         return fr.GetReading(None), doc
@@ -628,7 +630,8 @@ def section2(report: Report, pairing: str) -> None:
         report.check(pairing, sec, "step 3: fresh again from the next heartbeat",
                      v3 is not None and v3.verdict == fr.FRESH and again[0] - t3 <= int((1.0 + JITTER_S) * NS),
                      f"first confirmation {(again[0] - t3) / NS if again else None} s after; {None if v3 is None else v3.pair()}")
-        # Step 4: a second owner, its clock 2 s ahead.
+        # Step 4 (freshness.v2 0.4, core 0.88, #978 F6): a second owner, its
+        # clock 2 s ahead; its guard holds no put of a member of this profile.
         beat = "zk2py/freshness-v2/clock-reference"
         ahead_key = "zk2/lab/ahead/beacon.v2/state/status"
         if reader == "py":
@@ -636,54 +639,87 @@ def section2(report: Report, pairing: str) -> None:
             h2 = subscriber(bus.h_session, [], service="ahead")
             bus.closers += [s2, h2]
         else:
-            zs2 = ZWatch(bus.endpoint, "lab/ahead", IFACE, "state/status", 14)
-            zh2 = ZWatch(bus.endpoint, "lab/ahead", fv2.PROFILE, "heartbeat/{iface}", 14)
+            zs2 = ZWatch(bus.endpoint, "lab/ahead", IFACE, "state/status", 16)
+            zh2 = ZWatch(bus.endpoint, "lab/ahead", fv2.PROFILE, "heartbeat/{iface}", 16)
             time.sleep(1.0)
         since2 = time.monotonic_ns()
         oa = make_owner(impl, bus.endpoint, service="ahead", ahead_beat=beat)
         bus.closers.append(oa)
         time.sleep(0.3)
+        first_put = "ok"
         try:
             oa.put("status", b"up")
-        except Exception:  # noqa: BLE001 - the guard may hold already
-            pass
-        deadline = time.monotonic() + 8.0
-        while time.monotonic() < deadline and not oa.ahead():
-            bus.g_session.put(beat, b"beat")  # no timestamp: R1 stamps it
-            time.sleep(0.2)
-        held = time.monotonic_ns()
+        except Exception as e:  # noqa: BLE001 - named
+            first_put = f"{type(e).__name__}: {e}"
         stop = threading.Event()
 
         def beats() -> None:
-            while not stop.wait(0.3):
-                bus.g_session.put(beat, b"beat")
+            while not stop.wait(0.2):
+                bus.g_session.put(beat, b"beat")  # no timestamp: R1 stamps it
 
         threading.Thread(target=beats, daemon=True).start()
+        deadline = time.monotonic() + 8.0
+        while time.monotonic() < deadline and not oa.ahead():
+            time.sleep(0.1)
+        held = time.monotonic_ns()
+        second = "ok"
+        try:
+            oa.put("status", b"still up")
+        except Exception as e:  # noqa: BLE001 - named
+            second = f"{type(e).__name__}: {e}"
         time.sleep(4.0)
-        stop.set()
+        at4 = time.monotonic_ns()
+        trust = fr.ClockTrust(fr.DEFAULT_DELTA_NS, word=True)
         if reader == "py":
+            gr = fr.get_reading(bus.g_session, ahead_key)
+        else:
+            gr, _ = zget_reading(bus.endpoint, ahead_key)
+        g_now = time.time_ns()
+        vg = fr.judge_get(fr.Horizon("within", 2), gr.observation(trust, g_now))
+        stop.set()
+        report.check(pairing, sec, "step 4: the owner's guard holds (it detects the drift); its puts of status, "
+                                   "before and once the guard holds, both go on: neither carries a Zenoh timestamp "
+                                   "(§2.10)",
+                     oa.ahead() and first_put == "ok" and second == "ok", f"guard {oa.ahead()}, puts {first_put}, {second}")
+        if reader == "py":
+            # the owner puts status at its start too (§8.2's state values), so
+            # "the second put" is the one heard after the guard held
+            puts = [x for x in s2.samples if x[1] == ahead_key and x[2] == "put" and x[0] >= held]
+            last = puts[-1][3] if puts else None
+            want = None if last is None else f"{heartbeat.digest([(ahead_key, last.width, last.run, last.seq)]):08x}"
             vals = [x.value for x in h2.answers(held + 1_100_000_000) if x.value is not None]
-            clear = bool(vals) and all(x["time"] is None and all(
-                (not sec_["vouched"]) if isinstance(sec_["vouched"], bool) else not sec_["vouched"]
-                for sec_ in x["sections"].values()) for x in vals)
-            report.check(pairing, sec, "step 4: H2 still hears heartbeats while the guard holds, each bit clear and "
-                                       "the time unknown, all 42 bits set",
-                         oa.ahead() and clear, f"guard {oa.ahead()}, {len(vals)} heartbeats: "
-                                               f"{vals[-1] if vals else None}")
-            v4 = s2.judge(ahead_key, held + 2_100_000_000)
-            report.check(pairing, sec, "step 4: S2 judges status stale more than 2 s after the guard held",
-                         v4.verdict == fr.STALE, f"{v4.pair()}")
+            exposed = {"state/status", "state/peer/{peer}"} | ({"state/route"} if impl == "rust" else set())
+            ok = bool(vals) and all(x["time"] is None and set(x["sections"]) == exposed
+                                    and x["sections"]["state/status"]["vouched"] is True
+                                    and x["sections"]["state/status"]["digest"] == want for x in vals)
+            report.check(pairing, sec, "step 4: S2 receives the second put; H2 hears heartbeats while the guard "
+                                       "holds, the time unknown (all 42 bits set), the map as §1's, each vouching "
+                                       "for status, its digest over the second put's stamp",
+                         len(puts) == 1 and ok,
+                         f"{len(puts)} put heard after the guard held, {last}; {len(vals)} heartbeats: "
+                         f"{vals[-1] if vals else None}"
+                         f" (want digest {want})")
+            v4 = s2.judge(ahead_key, at4)
+            report.check(pairing, sec, "step 4: S2 judges status fresh 4 s on, past its horizon: the heartbeats "
+                                       "confirmed it", v4.verdict == fr.FRESH, f"{v4.pair()}")
         else:
             zh2.wait()
             zs2.wait()
+            puts = [r for t, r in zs2.samples(ahead_key) if r.get("kind") != "delete" and t >= held]
             n = len(_z_beats(zh2, held + 1_100_000_000))
             conf = [t for t in zs2.confirmations(ahead_key) if t >= held + 1_100_000_000]
-            report.check(pairing, sec, "step 4: zenctl watch still hears heartbeats while the guard holds, and no "
-                                       "confirmation row (zenctl shows no body)", oa.ahead() and n >= 2 and not conf,
-                         f"guard {oa.ahead()}, {n} heartbeats, {len(conf)} confirmations")
-            v4 = _judge_rows(zs2, ahead_key, 2, held + 2_100_000_000, since2)
-            report.check(pairing, sec, "step 4: status of lab/ahead judged stale more than 2 s after the guard held, "
-                                       "from zenctl's rows", v4.verdict == fr.STALE, f"{v4.pair()}")
+            report.check(pairing, sec, "step 4: zenctl watch receives the second put and hears heartbeats while the "
+                                       "guard holds, with confirmation rows of status (zenctl shows no body)",
+                         len(puts) == 1 and n >= 2 and bool(conf),
+                         f"{len(puts)} put after the guard held, {n} heartbeats, {len(conf)} confirmations")
+            v4 = _judge_rows(zs2, ahead_key, 2, at4, since2)
+            report.check(pairing, sec, "step 4: status of lab/ahead judged fresh 4 s on, from zenctl's rows",
+                         v4.verdict == fr.FRESH, f"{v4.pair()}")
+        ahead_ns = None if gr.stamp_ns is None else gr.stamp_ns - g_now
+        report.check(pairing, sec, "step 4: G's reply carries the owner's stamp from the clock ahead, ahead of G's "
+                                   "clock beyond the delta; G judges status unobservable (v1 §2.6's band)",
+                     ahead_ns is not None and ahead_ns > fr.DEFAULT_DELTA_NS and vg.verdict == fr.UNOBSERVABLE,
+                     f"stamp {gr.stamp}, {None if ahead_ns is None else ahead_ns / NS} s ahead of G, {vg.pair()}")
         # Step 5.
         o.close()
         t5 = time.monotonic_ns()
