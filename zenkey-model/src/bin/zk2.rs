@@ -23,7 +23,8 @@
 //! finding (an invalid contract, a review or breaking change, a history
 //! problem, a catalog refused, one that does not succeed its predecessor,
 //! or a contract it does not hold), 2 no verdict (usage, an unreadable
-//! input).
+//! input). `compat --history` of a revision the history holds reports its
+//! review as accepted and exits 0 (core §9.7); breaking is still 1.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -153,7 +154,8 @@ fn revision(file: &str) -> Result<Revision, ExitCode> {
     }
 }
 
-fn report(class: Class, v: &zenkey_model::compat::Verdict) -> ExitCode {
+/// Prints a verdict's findings, warnings and class.
+fn print_verdict(class: Class, v: &zenkey_model::compat::Verdict) {
     for f in &v.findings {
         println!("{} [{}] {}: {}", f.class.as_str(), f.rule, f.at, f.detail);
     }
@@ -161,6 +163,10 @@ fn report(class: Class, v: &zenkey_model::compat::Verdict) -> ExitCode {
         println!("warning [{}] {}: {}", w.rule, w.at, w.detail);
     }
     println!("{}", class.as_str());
+}
+
+fn report(class: Class, v: &zenkey_model::compat::Verdict) -> ExitCode {
+    print_verdict(class, v);
     if class == Class::Compatible {
         ExitCode::SUCCESS
     } else {
@@ -202,7 +208,8 @@ fn compat_history(root: &str, file: &str) -> ExitCode {
         }
     }
     let new = Revision::of(&c);
-    if revs.iter().any(|r| same_revision(r, &new)) {
+    let published = revs.iter().any(|r| same_revision(r, &new));
+    if published {
         println!("same revision as a published one: the retention rule keeps its bundle");
     }
     println!(
@@ -211,6 +218,14 @@ fn compat_history(root: &str, file: &str) -> ExitCode {
         c.iface
     );
     let v = check_history(&revs, &new);
+    // Core §9.7: a revision in the history root passed its review when it
+    // was published. Its review is reported as accepted, never refused; a
+    // breaking change still is.
+    if published && v.class() == Class::Review {
+        print_verdict(v.class(), &v);
+        println!("accepted: the revision is published (core §9.7)");
+        return ExitCode::SUCCESS;
+    }
     report(v.class(), &v)
 }
 
