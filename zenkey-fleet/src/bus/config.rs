@@ -30,6 +30,29 @@
 //!
 //! Nothing is judged here: [`crate::judge::config`] answers §5's questions
 //! from the [`ConfigObservation`] this returns.
+//!
+//! **`config.v2`** (#985 G3, `spec/profiles/config/v2.md`). A service
+//! whose descriptor lists `config.v1` is read as above. One whose
+//! descriptor's `profiles` lists `config.v2` is read through its own config
+//! interface: the revision its descriptor names whose contract uses
+//! `config.v2`, held offline (`ConfigSpec::contracts`) or retrieved (core
+//! §8.4), and refused when its lint has a finding (v2 §2.2). Across a face
+//! the deployment's word names it: a revision in hand that uses
+//! `config.v2` (`--iface` among several). Then:
+//! 1. presence and the descriptors first, since the interface is the
+//!    descriptor's (a `config.v1` reading's window opens after them too);
+//! 2. with a window, a subscription to the record and the change events
+//!    through the runtime's consumer on that contract, seeded by S4's GET,
+//!    the record confirmed by the owner's heartbeat (`freshness.v2`);
+//! 3. one S4 GET of `<iface>/state/config`, the one record (v2 §2.3), read
+//!    by the contract's layout under CH's tag and the deployment epoch the
+//!    catalogs give (core §8.6);
+//! 4. a replay of the change events, as above.
+//!
+//! An act writes the group's `Set<T>` or a `Control` record in the request
+//! form through the runtime's `Client` on that contract, and reads every
+//! value reply as the record, a refusal as the error form with its `Error`
+//! detail read by the contract's layout (v2 §2.9).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
@@ -48,10 +71,15 @@ use zenoh::Session;
 use zenoh::query::{ConsolidationMode, QueryTarget};
 use zenoh::sample::{Sample, SampleKind};
 
+use crate::bus::contracts::BundleStore;
 use crate::bus::health::{Replied, Stamped};
 use crate::bus::presence::Scope;
-use crate::model::catalog::Observed;
-use crate::model::config::{redact_status, redact_view, scrub};
+use crate::model::catalog::{Catalog, ContractSet, Observed};
+use crate::model::config::{
+    RecordGot, V2Target, V2Unread, listing, listing_v2, named_revisions, redact_status,
+    redact_view, scrub, uses_v2, view_of,
+};
+use crate::model::deployment::{Catalogs, Stated};
 use crate::report::{
     ConfigActAnswer, ConfigActReport, ConfigChecked, ConfigRefusal, ConfigReport, MalformedReply,
     SilenceView,
@@ -119,6 +147,8 @@ impl ConfigTarget {
 pub struct ServiceDocs {
     pub view: Option<Replied<Doc<ConfigView>>>,
     pub status: Option<Replied<Doc<ConfigStatus>>>,
+    /// `config.v2`'s record (v2 §2.3), read through its contract.
+    pub record: Option<Replied<Doc<RecordGot>>>,
 }
 
 /// One GET of `config.v1/state/**`, every service's answer by address.
@@ -245,6 +275,23 @@ pub struct ConfigSpec {
     /// The desired document's revision asked about (§5's last row); `None`:
     /// the last one the owner acted on.
     pub desired_revision: Option<u64>,
+    /// Contracts held offline (`--contracts`): a `config.v2` owner's
+    /// config interface is read by one of these before any is retrieved,
+    /// and across a face they are the deployment's word for it.
+    pub contracts: ContractSet,
+    /// The deployment catalogs (`--catalog`): the epoch a `config.v2`
+    /// record's times count from (core §8.6).
+    pub catalogs: Catalogs,
+    /// Across a face, the config interface among several in hand that use
+    /// `config.v2`.
+    pub iface: Option<IfaceId>,
+    /// A store to retrieve contracts through, shared with the caller's;
+    /// `None`: one of this reading's own, seeded with `contracts`.
+    pub store: Option<BundleStore>,
+    /// A `config.v2` owner's config interface the caller already decided
+    /// (`check conform`'s): read by it, never looked for again. `None`:
+    /// [`observe`] decides.
+    pub v2: Option<Result<V2Target, V2Unread>>,
 }
 
 impl ConfigSpec {
@@ -259,6 +306,11 @@ impl ConfigSpec {
             token: None,
             instance: None,
             desired_revision: None,
+            contracts: ContractSet::new(),
+            catalogs: Catalogs::default(),
+            iface: None,
+            store: None,
+            v2: None,
         }
     }
 }
@@ -273,6 +325,8 @@ pub struct ConfigWindow {
     /// The last view and status put heard.
     pub view: Option<Replied<Doc<ConfigView>>>,
     pub status: Option<Replied<Doc<ConfigStatus>>>,
+    /// `config.v2`: the last record put heard.
+    pub record: Option<Replied<Doc<RecordGot>>>,
     /// Each document's `freshness.v1` observation at the window's end
     /// (§2.5), by its key.
     pub seen: BTreeMap<String, Observation>,
@@ -310,6 +364,10 @@ pub struct ConfigObservation {
     pub window: Option<Result<ConfigWindow, String>>,
     /// The replay, when a token was asked about.
     pub replay: Option<Result<ConfigReplay, String>>,
+    /// `config.v2`'s config interface (#985 G3): `None` for a `config.v1`
+    /// reading; else the interface the reading read by, or why it held
+    /// none to read by.
+    pub v2: Option<Result<V2Target, V2Unread>>,
 }
 
 impl ConfigObservation {
@@ -320,7 +378,13 @@ impl ConfigObservation {
         if let Some(Ok(p)) = &self.presence {
             out.push(p.selector.clone());
         }
-        out.push(ConfigTarget::One(self.address.clone()).state_selector(self.spec.status_only));
+        match &self.v2 {
+            None => out.push(
+                ConfigTarget::One(self.address.clone()).state_selector(self.spec.status_only),
+            ),
+            Some(Ok(t)) => out.push(t.record_key(&self.address)),
+            Some(Err(_)) => {}
+        }
         if let Some(Ok(w)) = &self.window {
             out.extend(w.selectors.iter().cloned());
         }
@@ -355,10 +419,6 @@ pub async fn observe(
 ) -> ConfigObservation {
     let t = spec.timeout;
     let declared = Instant::now();
-    let window = match spec.window {
-        Some(_) => Some(Window::open(session, &address, t).await),
-        None => None,
-    };
     let presence = match (spec.across_face, presence) {
         (true, _) => None,
         (false, Some(p)) => Some(Ok(p)),
@@ -368,15 +428,33 @@ pub async fn observe(
                 .map_err(|e| crate::one_line(&e)),
         ),
     };
+    let v2 = match &spec.v2 {
+        Some(decided) => Some(decided.clone()),
+        None => find_v2(session, &address, &spec, presence.as_ref()).await,
+    };
+    let window = match (spec.window, &v2) {
+        (None, _) | (Some(_), Some(Err(_))) => None,
+        (Some(_), None) => Some(Window::open(session, &address, t).await),
+        (Some(_), Some(Ok(target))) => Some(Window::open_v2(session, &address, target, t).await),
+    };
     if let Some(w) = spec.window {
         tokio::time::sleep((declared + w).saturating_duration_since(Instant::now())).await;
     }
-    let selector = ConfigTarget::One(address.clone()).state_selector(spec.status_only);
-    let get = get(session, &selector, t).await;
+    let get = match &v2 {
+        None => {
+            let selector = ConfigTarget::One(address.clone()).state_selector(spec.status_only);
+            get(session, &selector, t).await
+        }
+        Some(Ok(target)) => get_records(session, &[(address.clone(), target.clone())], t).await,
+        Some(Err(u)) => Err(u.why.clone()),
+    };
     let window = window.map(|w| w.map(|w| w.close(&address)));
-    let replay = match &spec.token {
-        Some(token) => Some(replay(session, &address, token, t).await),
-        None => None,
+    let replay = match (&spec.token, &v2) {
+        (Some(token), None) => Some(replay(session, &address, None, token, t).await),
+        (Some(token), Some(Ok(target))) => {
+            Some(replay(session, &address, Some(target), token, t).await)
+        }
+        _ => None,
     };
     ConfigObservation {
         namespace: namespace.to_owned(),
@@ -386,6 +464,210 @@ pub async fn observe(
         get,
         window,
         replay,
+        v2,
+    }
+}
+
+/// Whether an act on `address` is a `config.v2` owner's, and by which
+/// config interface (#985 G3), as [`observe`] decides it: presence and the
+/// descriptors read first unless across a face, where the contracts in
+/// hand are the deployment's word. `None`: `config.v1`'s.
+pub async fn resolve(
+    session: &Session,
+    address: &Addr,
+    spec: &ConfigSpec,
+) -> Option<Result<V2Target, V2Unread>> {
+    let presence = if spec.across_face {
+        None
+    } else {
+        Some(
+            crate::bus::presence::observe(session, &Scope::service(address), spec.timeout)
+                .await
+                .map_err(|e| crate::one_line(&e)),
+        )
+    };
+    find_v2(session, address, spec, presence.as_ref()).await
+}
+
+/// Whether `address` is read as a `config.v2` owner, and by which config
+/// interface (v2 §2.1): `None` for `config.v1` (its descriptor lists
+/// `config.v1`, or neither, or presence was not read, which the premise
+/// then says). Across a face, the contracts in hand that use `config.v2`
+/// are the deployment's word.
+pub async fn find_v2(
+    session: &Session,
+    address: &Addr,
+    spec: &ConfigSpec,
+    presence: Option<&Result<Observed, String>>,
+) -> Option<Result<V2Target, V2Unread>> {
+    let unread = |why: String| V2Unread {
+        premise: crate::report::ConfigPremise::ContractUnread,
+        why,
+    };
+    match presence {
+        None => {
+            let held: Vec<_> = spec
+                .contracts
+                .iter()
+                .filter(|r| uses_v2(r.contract()))
+                .filter(|r| spec.iface.as_ref().is_none_or(|i| r.iface() == i))
+                .collect();
+            match held.as_slice() {
+                [] if spec.iface.is_some() => Some(Err(unread(format!(
+                    "no revision of {} in hand (--contracts) uses config.v2",
+                    spec.iface.as_ref().expect("checked")
+                )))),
+                [] => None,
+                [one] => Some(V2Target::of(
+                    one.shared_contract(),
+                    one.fingerprint().clone(),
+                    spec.catalogs.epoch(Stated::Unread),
+                )),
+                several => Some(Err(unread(format!(
+                    "across a face the deployment's word names one config interface, and \
+                     {} revisions in hand use config.v2 ({}): name one with --iface, or give \
+                     one revision",
+                    several.len(),
+                    several
+                        .iter()
+                        .map(|r| format!(
+                            "{} {}",
+                            r.iface(),
+                            &r.fingerprint().hex().to_string()[..8]
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )))),
+            }
+        }
+        Some(Err(_)) => None,
+        Some(Ok(o)) => {
+            if listing(o, address) == crate::report::ConfigPremise::Listed
+                || listing_v2(o, address) != crate::report::ConfigPremise::Listed
+            {
+                return None;
+            }
+            let store = spec.store.clone().unwrap_or_else(|| {
+                let s = BundleStore::new(spec.timeout);
+                s.seed(&spec.contracts);
+                s
+            });
+            let named = named_revisions(o, address);
+            let answers = store.fetch_all(session, &named).await;
+            let mut found = Vec::new();
+            let mut missing = Vec::new();
+            for ((iface, fp), a) in named.iter().zip(answers) {
+                match a {
+                    Ok(state) => match state.revision() {
+                        Some(r) if uses_v2(r.contract()) => found.push(Arc::clone(r)),
+                        Some(_) => {}
+                        None => missing.push(format!(
+                            "{iface} {} ({})",
+                            &fp.hex().to_string()[..8],
+                            match &state {
+                                crate::model::catalog::ContractState::Unreadable { reason } =>
+                                    reason.clone(),
+                                _ => "unavailable".to_owned(),
+                            }
+                        )),
+                    },
+                    Err(e) => missing.push(format!(
+                        "{iface} {}: {}",
+                        &fp.hex().to_string()[..8],
+                        crate::one_line(&e)
+                    )),
+                }
+            }
+            let epoch = spec
+                .catalogs
+                .epoch(Stated::of(&Catalog::new(o).stated_catalogs(address)));
+            Some(match found.as_slice() {
+                [one] => V2Target::of(one.shared_contract(), one.fingerprint().clone(), epoch),
+                [] => Err(unread(format!(
+                    "its descriptor lists config.v2, and no revision it names that uses \
+                     config.v2 is in hand{}",
+                    if missing.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" (not held: {})", missing.join("; "))
+                    }
+                ))),
+                several => Err(unread(format!(
+                    "its descriptors name {} revisions that use config.v2, and an instance \
+                     implements one config contract (config.v2 §2.1)",
+                    several.len()
+                ))),
+            })
+        }
+    }
+}
+
+/// One S4 GET per `config.v2` owner of its record (v2 §2.3): target
+/// `All`, consolidation `Latest`, each reply read by its owner's contract
+/// under CH's tag. A reply on another key, or a wildcard key, is no member
+/// (R6). The GETs run at once.
+pub async fn get_records(
+    session: &Session,
+    owners: &[(Addr, V2Target)],
+    timeout: Duration,
+) -> Result<ConfigGet, String> {
+    let selector = match owners {
+        [(a, t)] => t.record_key(a),
+        _ => "zk2/*/*/*/state/config".to_owned(),
+    };
+    let mut asks = Vec::new();
+    for (addr, target) in owners {
+        let key = target.record_key(addr);
+        let replies = session
+            .get(&key)
+            .target(QueryTarget::All)
+            .consolidation(ConsolidationMode::Latest)
+            .timeout(timeout)
+            .await
+            .map_err(|e| format!("GET {key}: {e}"))?;
+        asks.push((addr, target, key, replies));
+    }
+    let mut out = ConfigGet {
+        selector,
+        read_at: SystemTime::now(),
+        complete: true,
+        services: BTreeMap::new(),
+    };
+    for (addr, target, key, replies) in asks {
+        while let Ok(reply) = replies.recv_async().await {
+            let Ok(sample) = reply.result() else {
+                out.complete = false;
+                continue;
+            };
+            if sample.key_expr().as_str() != key {
+                continue;
+            }
+            let value = (sample.kind() == SampleKind::Put).then(|| record_got(target, sample));
+            out.services.entry(addr.clone()).or_default().record = Some(Replied {
+                value,
+                stamp: stamped(sample),
+            });
+        }
+    }
+    out.read_at = SystemTime::now();
+    Ok(out)
+}
+
+/// A put of the record read: its envelope (core §7.5), then its bytes by
+/// the contract's layout under CH's tag (core §7.6, v2 §2.3).
+fn record_got(target: &V2Target, sample: &Sample) -> Doc<RecordGot> {
+    let bytes = sample.payload().to_bytes();
+    let encoding = sample.encoding().to_string();
+    match crate::model::inband::payload(sample.key_expr().as_str(), Some(&encoding), &bytes) {
+        crate::model::inband::Payload::Record { record, stamp, tag } => Ok(RecordGot {
+            state: target.read(tag.get(), record)?,
+            inband: Some(stamp),
+            size: bytes.len(),
+        }),
+        crate::model::inband::Payload::Refused(r) => Err(r.reason()),
+        _ => Err(format!(
+            "not in a zk2c envelope under zenoh/bytes ({encoding}): a record is (core §7.5)"
+        )),
     }
 }
 
@@ -402,13 +684,47 @@ struct Events {
 
 /// The window's subscriptions, while they listen.
 struct Window {
-    view: zenkey::consumer::Subscription,
-    status: zenkey::consumer::Subscription,
+    /// `config.v1`'s view and status, or `config.v2`'s record alone.
+    docs: Docs,
     events: zenkey::consumer::Subscription,
-    last_view: Last<ConfigView>,
-    last_status: Last<ConfigStatus>,
     heard: Arc<Mutex<Events>>,
     selectors: Vec<String>,
+}
+
+/// The documents a window follows.
+enum Docs {
+    V1 {
+        view: zenkey::consumer::Subscription,
+        status: zenkey::consumer::Subscription,
+        last_view: Last<ConfigView>,
+        last_status: Last<ConfigStatus>,
+    },
+    V2 {
+        key: String,
+        record: zenkey::consumer::Subscription,
+        last: Last<RecordGot>,
+    },
+}
+
+/// Keeps one change event a window heard, the latest [`EVENT_CAP`].
+fn keep_event(h: &Mutex<Events>, ev: Doc<ConfigChangeEvent>) {
+    let mut e = h.lock().expect("not poisoned");
+    match ev {
+        Ok(ev) => {
+            if e.kept.len() >= EVENT_CAP {
+                e.kept.remove(0);
+                e.dropped += 1;
+            }
+            e.kept.push(ev);
+        }
+        Err(_) => e.undecodable += 1,
+    }
+}
+
+/// A `config.v2` change event's bytes, as `config.v1`'s is read (v2
+/// §2.17).
+fn decode_v2_event(bytes: &[u8]) -> Doc<ConfigChangeEvent> {
+    decode::<zenkey_model::config::v2::ChangeEvent>(bytes).map(crate::model::config::event_of)
 }
 
 fn keep<T: serde::de::DeserializeOwned>(last: &Last<T>, d: &zenkey::consumer::Delivery) {
@@ -465,17 +781,10 @@ impl Window {
         let h = Arc::clone(&heard);
         let events = consumer
             .subscribe(config_v1::CHANGE, move |d: zenkey::consumer::Delivery| {
-                let mut e = h.lock().expect("not poisoned");
-                match decode::<ConfigChangeEvent>(&d.sample.payload().to_bytes()) {
-                    Ok(ev) => {
-                        if e.kept.len() >= EVENT_CAP {
-                            e.kept.remove(0);
-                            e.dropped += 1;
-                        }
-                        e.kept.push(ev);
-                    }
-                    Err(_) => e.undecodable += 1,
-                }
+                keep_event(
+                    &h,
+                    decode::<ConfigChangeEvent>(&d.sample.payload().to_bytes()),
+                );
             })
             .await
             .map_err(|e| e.to_string())?;
@@ -486,47 +795,152 @@ impl Window {
             }
         }
         Ok(Window {
-            view,
-            status,
+            docs: Docs::V1 {
+                view,
+                status,
+                last_view,
+                last_status,
+            },
             events,
-            last_view,
-            last_status,
+            heard,
+            selectors,
+        })
+    }
+
+    /// A `config.v2` owner's window: its record and its change events
+    /// through the runtime's consumer on its own contract, under the
+    /// deployment epoch, the record's view seeded by S4's GET, so the
+    /// owner's next heartbeat confirms it (`freshness.v2` §2.5).
+    async fn open_v2(
+        session: &Session,
+        address: &Addr,
+        target: &V2Target,
+        timeout: Duration,
+    ) -> Result<Window, String> {
+        let provider = address.to_string();
+        let consumer = zenkey::consumer::Consumer::for_tool(
+            session,
+            Arc::clone(&target.contract),
+            &[provider.as_str()],
+            &BTreeMap::new(),
+        )
+        .map_err(|e| e.to_string())?
+        .with_deployment_epoch(target.epoch);
+        let mut selectors = Vec::new();
+        for r in [zenkey::config_v2::RECORD, zenkey::config_v2::CHANGE] {
+            selectors.extend(
+                consumer
+                    .selectors(r)
+                    .map_err(|e| e.to_string())?
+                    .iter()
+                    .map(|k| k.as_str().to_owned()),
+            );
+        }
+        let last: Last<RecordGot> = Arc::default();
+        let (l, t) = (Arc::clone(&last), target.clone());
+        let record = consumer
+            .subscribe(
+                zenkey::config_v2::RECORD,
+                move |d: zenkey::consumer::Delivery| {
+                    let bytes = d.sample.payload().to_bytes();
+                    let value = (d.sample.kind() == SampleKind::Put).then(|| match d.tag {
+                        Some(tag) => t.read(tag.get(), &bytes).map(|state| RecordGot {
+                            state,
+                            inband: d.inband,
+                            size: bytes.len() + d.inband.map_or(0, |s| s.envelope_bytes()),
+                        }),
+                        None => Err("not in a zk2c envelope: a record is (core §7.5)".to_owned()),
+                    });
+                    *l.lock().expect("not poisoned") = Some(Replied {
+                        value,
+                        stamp: stamped(&d.sample),
+                    });
+                },
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let heard: Arc<Mutex<Events>> = Arc::default();
+        let h = Arc::clone(&heard);
+        let events = consumer
+            .subscribe(
+                zenkey::config_v2::CHANGE,
+                move |d: zenkey::consumer::Delivery| {
+                    keep_event(&h, decode_v2_event(&d.sample.payload().to_bytes()));
+                },
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let asked = Instant::now();
+        if let Ok(answer) = consumer
+            .get_answer(zenkey::config_v2::RECORD, None, timeout)
+            .await
+        {
+            record.seed(&answer, asked);
+        }
+        Ok(Window {
+            docs: Docs::V2 {
+                key: target.record_key(address),
+                record,
+                last,
+            },
+            events,
             heard,
             selectors,
         })
     }
 
     /// What the window heard, read now: each document's observation (§2.5),
-    /// and each clock's measurement across the three subscriptions.
+    /// and each clock's measurement across its subscriptions.
     fn close(self, address: &Addr) -> ConfigWindow {
-        let mut clocks = self.view.clock_offsets();
-        for sub in [&self.status, &self.events] {
-            for (clock, m) in sub.clock_offsets() {
-                clocks
-                    .entry(clock)
-                    .and_modify(|all| *all = all.merge(m))
-                    .or_insert(m);
-            }
-        }
-        let seen = BTreeMap::from([
-            (view_key(address), self.view.freshness(&view_key(address))),
-            (
-                status_key(address),
-                self.status.freshness(&status_key(address)),
-            ),
-        ]);
         let heard = std::mem::take(&mut *self.heard.lock().expect("not poisoned"));
-        ConfigWindow {
+        let merge = |subs: &[&zenkey::consumer::Subscription]| {
+            let mut clocks = BTreeMap::new();
+            for sub in subs {
+                for (clock, m) in sub.clock_offsets() {
+                    clocks
+                        .entry(clock)
+                        .and_modify(|all: &mut ClockMeasure| *all = all.merge(m))
+                        .or_insert(m);
+                }
+            }
+            clocks
+        };
+        let mut out = ConfigWindow {
             selectors: self.selectors,
-            listened: self.view.listened(),
-            view: self.last_view.lock().expect("not poisoned").clone(),
-            status: self.last_status.lock().expect("not poisoned").clone(),
-            seen,
+            listened: Duration::ZERO,
+            view: None,
+            status: None,
+            record: None,
+            seen: BTreeMap::new(),
             events: heard.kept,
             events_dropped: heard.dropped,
             events_undecodable: heard.undecodable,
-            clocks,
+            clocks: BTreeMap::new(),
+        };
+        match self.docs {
+            Docs::V1 {
+                view,
+                status,
+                last_view,
+                last_status,
+            } => {
+                out.clocks = merge(&[&view, &status, &self.events]);
+                out.seen = BTreeMap::from([
+                    (view_key(address), view.freshness(&view_key(address))),
+                    (status_key(address), status.freshness(&status_key(address))),
+                ]);
+                out.listened = view.listened();
+                out.view = last_view.lock().expect("not poisoned").clone();
+                out.status = last_status.lock().expect("not poisoned").clone();
+            }
+            Docs::V2 { key, record, last } => {
+                out.clocks = merge(&[&record, &self.events]);
+                out.seen = BTreeMap::from([(key.clone(), record.freshness(&key))]);
+                out.listened = record.listened();
+                out.record = last.lock().expect("not poisoned").clone();
+            }
         }
+        out
     }
 }
 
@@ -537,10 +951,23 @@ impl Window {
 async fn replay(
     session: &Session,
     address: &Addr,
+    v2: Option<&V2Target>,
     token: &str,
     timeout: Duration,
 ) -> Result<ConfigReplay, String> {
-    let selector = format!("{}/*", member(address, "events", cm::CHANGE));
+    let selector = match v2 {
+        None => format!("{}/*", member(address, "events", cm::CHANGE)),
+        Some(t) => [
+            GRAMMAR,
+            address.system.as_str(),
+            address.service.as_str(),
+            &t.iface.to_string(),
+            "events",
+            cm::CHANGE,
+            "*",
+        ]
+        .join("/"),
+    };
     let replies = session
         .get(&selector)
         .target(QueryTarget::All)
@@ -564,7 +991,11 @@ async fn replay(
             out.undecodable += 1;
             continue;
         };
-        match decode::<ConfigChangeEvent>(&bytes) {
+        let event = match v2 {
+            None => decode::<ConfigChangeEvent>(&bytes),
+            Some(_) => decode_v2_event(&bytes),
+        };
+        match event {
             Ok(e) if e.token == token => out.events.push(e),
             Ok(_) => {}
             Err(_) => out.undecodable += 1,
@@ -640,6 +1071,10 @@ pub struct ConfigCall<'a> {
     pub across_face: bool,
     /// What a `set` read and checked first.
     pub checked: Option<ConfigChecked>,
+    /// A `config.v2` owner's config interface (#985 G3): the request is
+    /// then written as its `Set<T>` or `Control` record, and every reply
+    /// read as its record. `None`: `config.v1`'s.
+    pub v2: Option<V2Target>,
 }
 
 /// A runtime error, in the crate's terms: a contract the call breaks is the
@@ -673,11 +1108,200 @@ fn refusal(env: &zenkey::call::Refusal, secrets: &[String]) -> ConfigRefusal {
         cause: env.cause.clone(),
         error,
         detail_undecodable,
+        mark: env.form.map(|f| f.stamp.into()),
     }
+}
+
+/// A `config.v2` owner's refusal (v2 §2.5, §2.9): core §7.5's error form,
+/// its `app` detail `Error` read by the contract's layout under the form's
+/// tag; `device_refused` is `config.v1`'s `device-refused`. Every sensitive
+/// value sent is taken out of its words.
+fn refusal_v2(env: &zenkey::call::Refusal, target: &V2Target, secrets: &[String]) -> ConfigRefusal {
+    let (error, detail_undecodable) = match (&env.detail, env.form) {
+        (None, _) => (None, None),
+        (Some(zenkey_model::envelope::Detail::Bytes(b)), Some(form)) => {
+            match target
+                .interface
+                .derived
+                .error()
+                .read(form.tag.get(), b, None)
+            {
+                Ok(f) if f["code"] == zenkey_model::config::v2::DEVICE_REFUSED => (
+                    Some(ConfigError {
+                        code: zenkey_model::config::ErrorCode::DeviceRefused,
+                        detail: None,
+                    }),
+                    None,
+                ),
+                Ok(f) => (
+                    None,
+                    Some(format!(
+                        "an Error code this revision does not name: {f} (config.v2 §4)"
+                    )),
+                ),
+                Err(r) => (
+                    None,
+                    Some(format!(
+                        "not {}'s Error (config.v2 §3): {}",
+                        target.iface,
+                        r.token()
+                    )),
+                ),
+            }
+        }
+        (Some(_), _) => (
+            None,
+            Some("a detail not in the error form's own bytes (core §5.2)".to_owned()),
+        ),
+    };
+    ConfigRefusal {
+        code: env.code.clone(),
+        message: scrub(&env.message, secrets),
+        cause: env.cause.clone(),
+        error,
+        detail_undecodable,
+        mark: env.form.map(|f| f.stamp.into()),
+    }
+}
+
+/// The act on a `config.v2` owner: the request, `config.v1`'s as the tool
+/// typed and checked it, written as the group's `Set<T>` or a `Control`
+/// record ([`crate::model::config::set_of`], `control_of`), sent through
+/// the runtime's `Client` on the owner's contract in the request form; a
+/// value reply read as the record (v2 §2.9). The record is never shown
+/// with a sensitive value: it has no bits for one (v2 §2.15).
+async fn call_v2(
+    session: &Session,
+    c: ConfigCall<'_>,
+    target: &V2Target,
+) -> crate::Result<ConfigActReport> {
+    let address = c.address.to_string();
+    let unaskable = |why: String| crate::Error::unaskable(&address, why);
+    let iface = &target.interface;
+    let (resource, record) = match &c.op {
+        ConfigOp::Set { group } => {
+            let req: zenkey_model::config::SetRequest =
+                serde_json::from_value(c.request.clone())
+                    .map_err(|e| unaskable(format!("not a set's request: {e}")))?;
+            let set = crate::model::config::set_of(iface, group, &req).map_err(unaskable)?;
+            let (_, layout) = iface
+                .derived
+                .set(group)
+                .ok_or_else(|| unaskable(format!("group {group:?} has no set (config.v2 §2.4)")))?;
+            let rec = layout.write(&set.to_json(), None).map_err(|r| {
+                unaskable(format!(
+                    "refused here, nothing sent — the request is not {group}'s Set<T>: {} \
+                     (core §7.6)",
+                    r.token()
+                ))
+            })?;
+            (zenkey::config_v2::set(group), rec.bytes)
+        }
+        op => {
+            let req: zenkey_model::config::ControlRequest =
+                serde_json::from_value(c.request.clone())
+                    .map_err(|e| unaskable(format!("not a control request: {e}")))?;
+            let control = crate::model::config::control_of(&req).map_err(unaskable)?;
+            let rec = iface
+                .derived
+                .control()
+                .write(&control.to_json(), None)
+                .map_err(|r| {
+                    unaskable(format!(
+                        "refused here, nothing sent — the request is not a Control: {} (core \
+                         §7.6)",
+                        r.token()
+                    ))
+                })?;
+            (format!("@op/{}", op.name()), rec.bytes)
+        }
+    };
+    let request_bytes = record.len() + 1;
+    let mut client =
+        zenkey::Client::new(session, Arc::clone(&target.contract), &[address.as_str()])
+            .map_err(|e| runtime(&address, e))?
+            .with_timeout(c.timeout)
+            .with_deployment_epoch(target.epoch);
+    if let Some(m) = c.metadata.clone() {
+        client = client.with_metadata(m);
+    }
+    if c.across_face {
+        client = client.with_presence(zenkey::consumer::Presence::Unavailable);
+    }
+    let values = Bindings::new();
+    let key = client
+        .key(c.address, &resource, &values)
+        .map_err(|e| runtime(&address, e))?
+        .as_str()
+        .to_owned();
+    let outcome = client
+        .call(c.address, &resource, &values, record)
+        .await
+        .map_err(|e| runtime(&key, e))?;
+    let answer = match outcome {
+        zenkey::call::Outcome::Value(a) => {
+            let size = a.payload().len();
+            match (a.tag(), a.record()) {
+                (Some(tag), Ok(bytes)) => match target.read(tag.get(), &bytes) {
+                    Ok(state) => ConfigActAnswer::Record {
+                        view: Box::new(view_of(iface, &state, &address)),
+                        record: Box::new(state),
+                        size,
+                        mark: a.mark().map(Into::into),
+                    },
+                    Err(reason) => ConfigActAnswer::Undecodable { reason, size },
+                },
+                _ => ConfigActAnswer::Undecodable {
+                    reason: "not core §7.5's value form: config.v2 answers every call with its \
+                             record in it (config.v2 §2.9)"
+                        .to_owned(),
+                    size,
+                },
+            }
+        }
+        zenkey::call::Outcome::Refused(env) => ConfigActAnswer::Refused {
+            refusal: refusal_v2(&env, target, &c.secrets),
+        },
+        zenkey::call::Outcome::Malformed(m) => ConfigActAnswer::Malformed {
+            malformed: MalformedReply {
+                encoding: m.encoding.clone(),
+                error: m.error.to_string(),
+            },
+        },
+        zenkey::call::Outcome::NoAnswer(s) => ConfigActAnswer::Silent {
+            silence: SilenceView {
+                attempts: s.attempts,
+                transport: s.transport.as_ref().map(ToString::to_string),
+                presence: crate::bus::operation::attribution(s.presence),
+            },
+        },
+    };
+    let (actor, request_id) = match &c.metadata {
+        Some(m) => (m.actor.clone(), m.request_id.clone()),
+        None => (None, None),
+    };
+    Ok(ConfigActReport {
+        namespace: c.namespace.to_owned(),
+        service: address,
+        profile: crate::report::ConfigProfile::V2,
+        operation: c.op.name(),
+        key,
+        request: c.shown,
+        request_bytes: Some(request_bytes),
+        actor,
+        request_id,
+        checked: c.checked,
+        across_face: c.across_face,
+        timeout_s: c.timeout.as_secs_f64(),
+        answer,
+    })
 }
 
 /// Makes the act, and reads its reply as its union.
 pub async fn call(session: &Session, c: ConfigCall<'_>) -> crate::Result<ConfigActReport> {
+    if let Some(target) = c.v2.clone() {
+        return call_v2(session, c, &target).await;
+    }
     let address = c.address.to_string();
     let mut client = zenkey::Client::new(
         session,
@@ -738,9 +1362,11 @@ pub async fn call(session: &Session, c: ConfigCall<'_>) -> crate::Result<ConfigA
     Ok(ConfigActReport {
         namespace: c.namespace.to_owned(),
         service: address,
+        profile: crate::report::ConfigProfile::V1,
         operation: c.op.name(),
         key,
         request: c.shown,
+        request_bytes: None,
         actor,
         request_id,
         checked: c.checked,
