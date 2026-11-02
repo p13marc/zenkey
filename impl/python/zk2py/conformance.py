@@ -837,6 +837,19 @@ def _link_v2(path: Path) -> list[Result]:
     return out
 
 
+def _telemetry_v2_not_read(path: Path) -> list[Result]:
+    """``telemetry.v2`` 0.1 (#983 T1, main 7597efb8): its fixtures under
+    ``conformance/v2/`` and the contracts they load under ``contracts/``.
+    Keyed as present and not read this round: round 97 reads #981's frames
+    and #978's F4, and #983's own round reads ``telemetry.v2`` after its
+    owner chunk lands. So each entry is named, never failed as unknown, and
+    never counted as read."""
+    print(f"NOTE telemetry: {path.name}/ is telemetry.v2 0.1's (#983 T1): present, not read this round",
+          file=sys.stderr)
+    return [(f"{path.name}/ (telemetry.v2 0.1, #983 T1): present, not read this round, for #983's own round", True,
+             "")]
+
+
 def _alarms_keys(path: Path) -> list[Result]:
     """alarms.v1 §2.2, §2.3, §2.12: `derive`, `host_scoped`, `ref` and
     `parse`, each by its `op`. A `derive` case also checks that framed input
@@ -1432,7 +1445,8 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
     "alarms": {"keys.json": _alarms_keys, "documents.json": _alarms_documents,
                "transitions.json": _alarms_transitions, "conclusions.json": _alarms_conclusions},
     "telemetry": {"schema.json": _telemetry_schema, "declarations.json": _telemetry_declarations,
-                  "samples.json": _telemetry_samples, "continuity.json": _telemetry_continuity},
+                  "samples.json": _telemetry_samples, "continuity.json": _telemetry_continuity,
+                  "v2": _telemetry_v2_not_read, "contracts": _telemetry_v2_not_read},
     "desired": {"schema.json": _desired_schema, "declarations.json": _desired_declarations,
                 "bindings.json": _desired_bindings, "order.json": _desired_order, "reports.json": _desired_reports,
                 "conclusions.json": _desired_conclusions, "slices.json": _desired_slices},

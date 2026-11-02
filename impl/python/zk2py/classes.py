@@ -86,6 +86,8 @@ PROFILES = {
                 "its scenarios' §1, a router over a relay counting keep-alives, is not run"),
     "alarms.v1": ("owner, tool (the reader and §5)", ""),
     "telemetry.v1": ("owner, tool (§5's reader)", ""),
+    "telemetry.v2": ("none yet", "text 0.1 (#983 T1) is present on main and not read by round 97: #983's own round "
+                                 "reads it after its owner chunk lands"),
     "desired.v1": ("owner (author), consumer (target), tool (§2.17)",
                    "no archive's last-known, so §2.9's store-and-forward is not run"),
     "redundancy.v1": ("owner (a candidate), consumer (the follower), tool (§5)", ""),
