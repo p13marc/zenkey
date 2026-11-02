@@ -954,7 +954,11 @@ async fn a_record_past_the_span_opens_the_next_frame() {
         .record(BYTES, json!({"rx": 30}), t + s(5))
         .await
         .expect("past the span: the open frame put first");
-    assert_eq!(o.w(BYTES).open().await, 1, "the record opens the next frame");
+    assert_eq!(
+        o.w(BYTES).open().await,
+        1,
+        "the record opens the next frame"
+    );
     r.wait(BYTES, 1).await;
     let f = r.fold(BYTES);
     assert_eq!(f.frames.len(), 1);
@@ -962,10 +966,7 @@ async fn a_record_past_the_span_opens_the_next_frame() {
     assert_eq!(f.frames[0].1.records.len(), 2, "10 and 20, not 30");
     // A new run while 30 is in the open frame: 30 is the new run's.
     o.svc.new_epoch().await.unwrap();
-    let e = o
-        .w(BYTES)
-        .record_json_at(&json!({"rx": 5}), t + s(6))
-        .await;
+    let e = o.w(BYTES).record_json_at(&json!({"rx": 5}), t + s(6)).await;
     assert_eq!(
         refusal(e.unwrap_err()),
         Reason::FieldDecreased {
@@ -981,7 +982,10 @@ async fn a_record_past_the_span_opens_the_next_frame() {
     let f = r.fold(BYTES);
     assert_eq!(f.frames[1].1.records.len(), 2);
     assert_eq!(
-        f.pairs("rx").iter().map(|(a, b, _)| (*a, *b)).collect::<Vec<_>>(),
+        f.pairs("rx")
+            .iter()
+            .map(|(a, b, _)| (*a, *b))
+            .collect::<Vec<_>>(),
         [(10, 20), (20, 30), (30, 40)]
     );
     assert_eq!(

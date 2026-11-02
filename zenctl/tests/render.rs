@@ -629,7 +629,9 @@ telemetry under every metric resource in namespace "acme" — 4 metric resource(
 #[test]
 fn a_telemetry_reading_of_frames_names_each_series() {
     let report = fx::telemetry_frames_report();
-    assert_data_eq!(table(&report), str![[r#"
+    assert_data_eq!(
+        table(&report),
+        str![[r#"
 telemetry under zk2/lab/meterframe/** in namespace "acme" — 2 metric resource(s), 3 member(s): 8 sample(s), 8 conform, 0 do not; 4 pair(s), 0 decreased (4 established, 0 assumed); 1 member(s) could not tell whether they went backwards
 ✓  lab/meterframe meterframe.v1 stream/frames/bytes  declared (telemetry.v2): a frame's 1 series, rx a counter of 24 bits in By; each epoch its run, in band; 1 member(s) heard
 ✓  lab/meterframe meterframe.v1 stream/frames/link   declared (telemetry.v2): a frame's 2 series, dropped a counter of 32 bits in 1, mirroring sdu/dropped_total; queue_depth a gauge in 1; each epoch its run, in band; 2 member(s) heard
@@ -644,7 +646,8 @@ telemetry under zk2/lab/meterframe/** in namespace "acme" — 2 metric resource(
     20 → 15  unobservable (wrap_or_decrease), established in-band; no rate (wrap_or_decrease)
 ·  zk2/lab/meterframe/meterframe.v1/stream/frames/link field queue_depth  gauge, unit 1; 2 sample(s), 2 conform; records with no sample: beyond_range ×1; latest 6
 
-"#]]);
+"#]]
+    );
     let lines: Vec<serde_json::Value> = ndjson(&report)
         .lines()
         .map(|l| serde_json::from_str(l).expect("one object per line"))
