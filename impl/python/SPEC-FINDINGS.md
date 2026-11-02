@@ -24339,3 +24339,178 @@ though its first sentence is "A frame resource MAY declare `history`";
 - **Resolved: F-442 to F-454**, as the answers above say.
 - **Open:** F-436 (not re-run), F-437 to F-441, F-455 to F-460. F-365
   stays open as #965's.
+
+## At core 0.89 and telemetry.v2 0.1 (#983, #978 F5–F6)
+
+Round 98 read, cold, the texts at main f42e9742: core 0.88 and 0.89,
+observer 0.22, `freshness.v2` 0.4, `freshness.v1`'s status, `health.v1`
+0.9, `alarms.v1` 0.12 and 0.13, `link.v1` 0.14, and `telemetry.v2` 0.1
+whole with `scenarios-v2.md`, each changelog entry first. Then core §4.3's
+"Ahead" and "Minting", S2, §7.7's interval and §9.7, `freshness.v2` §2.4
+and §2.10, `health.v1` §2.5 and §5, and `state.md` §7 step 6. Its
+evidence: `telemetry/conformance/v2/` (declarations 41 and the contract,
+readings 10, continuity 13) and `conformance/contracts/`,
+`health/conformance/clock.json` (29), `contracts/w108-frame-horizon`'s
+`frames/unread`, `plan.json`'s new case, the examples' revisions moved
+onto `freshness.v2` in `examples/zk2/.history`, and the scenarios run live.
+
+**Round 97's answers hold.** Main took core 0.89, observer 0.22,
+`link.v1` 0.14 and `alarms.v1` 0.13 during the round; zk2py rebased onto
+them and read each entry:
+- **F-455** (`link.v1` 0.14 §2.9): `freshness.v2` a listed interface of
+  each service implementing an interface with a heartbeat, named or not.
+  zk2py read it so since round 97, and `plan.json`'s cases pass.
+- **F-456** (core 0.89 §9.7, "A published revision was accepted"): zk2py's
+  examples family accepts the review of a revision whose own bundle is in
+  the root, byte for byte, and refuses a breaking change whatever is
+  published. Its round-98 narrowing (review-bot's note) is tied to it.
+- **F-457** (core 0.89 §7.7): the interval is the period of a declaration
+  `timing.v1` §2.2 reads valid. zk2py read it so; `frames/unread` draws no
+  W108, and `plan.json`'s frames case passes.
+- **F-458** (observer 0.22 §7.6): "one reply of a GET, an archive's or a
+  history cache's". zk2py's runner answers as an archive would.
+- **F-459** (`alarms.v1` 0.13's scenarios §1, §3, §5): stamped in band.
+  zk2py's runner already read them so; §1, §3 and §5 pass with zk2py's
+  owner and the owner example of f42e9742, 27 of 27 each.
+- **F-460** (core 0.89 S2, "Minting"): a deleted member's `reply_del`
+  carries the timestamp minted at its delete. zk2py's owner did, and the
+  owner example now does: §3 step 2 and §5 step 3 now require it, and pass
+  against both.
+
+**The rules changed.** zk2py diffed every keyword sentence of
+`core.md`, `observer.md`, `RULES.md` and the profiles between 7597efb8
+(round 97's texts) and f42e9742. Gone: §4.3's "MUST stop writing state"
+(0.88), `freshness.v2` §2.10's "MUST NOT vouch for any member" (0.4).
+New: §4.3's MUST over "the state writes that carry a Zenoh timestamp"
+(0.88), `freshness.v2` §2.10's MUST to write all ones (0.4), `health.v1`
+§2.5's SHOULD per heartbeat period (0.9), and `telemetry.v2`'s whole text
+(0.1). S2's scope reaches a deleted member's `reply_del` (0.89, its
+entry's "Changed"). `RULES.md` keeps 227 rules. **No rule changed beyond
+what the changelogs state.**
+
+### F-461 · contradiction · core §4.3 "Ahead" and `freshness.v2` §2.10: a member on a session that stamps
+
+> Core §4.3 "Ahead" (0.88): "**What it holds.** A state write carries a
+> Zenoh timestamp where the table lists its resource. On a session with
+> timestamping enabled (§8.2), every state write carries one." /
+> "**What goes on.** … A state of a contract that uses `freshness.v2` is
+> one: its heartbeat goes on vouching for it, with its time unknown".
+>
+> §8.2: "**The exception** is a candidate of a governed interface:
+> `redundancy.v1` §2.10 asks it to enable timestamping."
+>
+> `freshness.v2` §2.10 (0.4): "The puts and deletes of a member of this
+> profile carry none, so the guard holds none of them. - **The heartbeats
+> go on,** as at any other time: each sets a member's bit while the owner
+> vouches for it (§2.4)." §2.4: "An owner that can no longer vouch for a
+> value … clears its bit … A bit left set would turn a stale value fresh."
+
+- **The contradiction.** `zs.catalog.v1` and `zs.desired.v1` use
+  `redundancy.v1` and, since #978's F5, `freshness.v2`. Their candidate's
+  session stamps every write (§8.2's exception), so "What it holds" holds
+  every write of their `freshness.v2` members, while "What goes on" and
+  §2.10 say none is held and the heartbeat goes on. A held put of a new
+  value leaves the owner holding a value it can no longer make current,
+  and the heartbeat, vouching "as at any other time", turns it fresh.
+- **What zk2py does:** its guard holds a write wherever the table lists
+  the key or the session stamps (`Owner._stamped`), and when it holds a
+  write of a covered member it clears that member's bit until a put of it
+  goes through (`Owner._unvouch_held`), by §2.4's "Only a value it holds
+  current". The reference was not measured: no runner here drives a
+  candidate of a `freshness.v2` contract with its clock ahead.
+- **Fix:** §4.3 "What goes on" and §2.10: "on a session without
+  timestamping"; and §2.10: "Where the guard holds a member's write (a
+  candidate's session stamps every write), the owner clears its bit until
+  a write of it goes on."
+- **Changes:** a candidate's heartbeat while its clock is ahead.
+
+### F-462 · ambiguity · core §4.3's table: a state metric resource of a contract that uses `telemetry.v2`
+
+> Core §4.3's table: "| A state that is a `telemetry.v1` metric resource
+> | a rate's time base (`telemetry.v1` §2.11) | S1, S2 |". §8.2: "An owner
+> MUST NOT set a Zenoh timestamp on a put or a delete of a data key,
+> except on a resource §4.3's table lists."
+>
+> `telemetry.v2` §0: "Every rule of `telemetry.v1` holds for a contract
+> that uses `telemetry.v2`, as written, on every resource that is no frame
+> resource." v1 §2.11: "The time base is the first that both samples
+> have: … 2. for state, the owner's stamp (core §4.1, S2)".
+
+- **The ambiguity.** A contract that moves its `uses` to `telemetry.v2`
+  (the text's own example, `modem.v3`'s path) keeps its state counters,
+  read by v1 §2.11's base 2. The table's row names a `telemetry.v1` metric
+  resource. Read by the letter, such a state is on no row, so §8.2 forbids
+  its owner the stamp v2 reads by reference, and every rate of it falls to
+  the arrivals. Read through v2's "as written", it is on the row.
+- **The two implementations disagree.** The owner example of f42e9742
+  stamps such a state: its put and its GET reply carry its own Zenoh
+  timestamp, as for a `telemetry.v1` one. Measured with two probe
+  contracts that differ only in `uses`, a state `count` with
+  `telemetry.kind = "counter"`, on a router that stamps nothing.
+- **What zk2py does:** `keeps_timestamp` keeps the table's letter: no
+  stamp on a `telemetry.v2` contract's state metric resource, so §8.2
+  holds and its rates are timed by arrival.
+- **Fix:** the row: "A state that is a metric resource of `telemetry.v1`,
+  or of `telemetry.v2` and no frame resource".
+- **Changes:** the stamps of such a state, and its rates' basis.
+
+### F-463 · gap · core §10 point 2 and Appendix D: `telemetry`'s published vocabulary per major
+
+> Core §10, point 2: "A published vocabulary replaces its interim table,
+> and W105 reads it the same way. The first is `freshness.v1`'s …
+> `telemetry.v1`'s (`profiles/telemetry/v1.md` §4) …" / "A key names its
+> profile without a major, so a contract uses one major of a profile".
+>
+> Appendix D: "| `telemetry` | `kind`, `unit`, `buckets`, `semantic` |
+> `profiles/telemetry/v1.md` §4 |". W105: "an annotation key outside its
+> profile's vocabulary: the table the profile publishes".
+>
+> `telemetry.v2` §1: "v1's four keys and `series` (§4). W105 reads this
+> table for a contract that uses `telemetry.v2`." Its entry: "**The core
+> and the observer text:** no amendment."
+
+- **The gap.** W105's table is found by the key's profile name,
+  `telemetry`, and the core gives that name one table, v1's, with no row
+  for a second major's. At the round's start zk2py's linter, keyed by the
+  core's table, drew W105 three times on `meterframe.v1`, one per
+  `telemetry.series`; the reference CLI draws none.
+- **What zk2py does:** W105 reads the table of the major the contract
+  uses (`contract.VOCABULARY_BY_MAJOR`): `telemetry.v2`'s five keys.
+  `meterframe.v1` loads with no finding; the same contract under
+  `telemetry.v1` still draws three.
+- **Fix:** §10 point 2: "W105 reads the table of the major the contract
+  uses", and Appendix D's row: "`telemetry.v2` §4 adds `series`".
+- **Changes:** a linter's W105 on a `telemetry.v2` contract.
+
+### F-464 · ambiguity · `telemetry.v2` §2.20 and §5: an incomparable pair's epoch
+
+> §2.20: "Two counter samples of two widths are incomparable, v1 §2.10's
+> `unobservable`, with no rate (`kind`)." §5: "**Unobservable:**
+> `wrap_or_decrease`, `incomparable`." / "Every pair of a frame's series
+> is established, so its epoch is never assumed."
+>
+> `continuity.json`'s description: "`continuity`, `epoch` and `via` as
+> telemetry.v1's continuity.json spells them". v1's spells an unobservable
+> pair `epoch` null, `via` null; v2's cases spell `wrap_or_decrease`
+> `established`, `in_band`.
+
+- **The ambiguity.** An incomparable pair's epoch is v1's null by the
+  first sentence and the fixture's rule, or `established`, `in_band` by
+  §5's "every pair … is established" and `wrap_or_decrease`'s spelling.
+  No case has one. A reader holding one layout per frame key never forms
+  one; a tool holding two revisions of one key, its counter at two widths,
+  would.
+- **What zk2py does:** `epoch` null, `via` null, `why` `incomparable`,
+  `no_rate` `kind`, as v1 spells an incomparable pair.
+- **Fix:** §2.20: "… incomparable: `unobservable`, its epoch as for any
+  pair of the series", and a case.
+- **Changes:** a tool's pair over two revisions.
+
+### Counts at core 0.89 and telemetry.v2 0.1
+
+464 entries.
+- **New: F-461 to F-464,** four: a contradiction (F-461), a gap (F-463)
+  and two ambiguities (F-462, F-464). None is a blocker.
+- **Resolved: F-455 to F-460**, as the answers above say.
+- **Open:** F-436 (not re-run), F-437 to F-441, F-461 to F-464. F-365
+  stays open as #965's.

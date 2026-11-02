@@ -5593,6 +5593,142 @@ The profiles' scenarios on their revisions 1.1:
 Round 97 found F-455 to F-460, six, none a blocker. See "At core 0.87
 and observer 0.21" in `SPEC-FINDINGS.md`.
 
+## Core 0.88 and 0.89, observer 0.22, `freshness.v2` 0.4, `health.v1` 0.9, `alarms.v1` 0.12 and 0.13, `link.v1` 0.14, and `telemetry.v2` 0.1: frames as metric series (round 98)
+
+Since round 97 main took:
+- **`telemetry.v2` 0.1** (#983 T1, keyed present by round 97, read now):
+  a frame's fields as metric series, §2.16 to §2.21 over v1's §2.1 to
+  §2.15 by reference, and its owner (T3, no text change);
+- **#978's F5:** the adopters' contracts and `nav.v2` onto
+  `freshness.v2`, each a `uses_changed` revision in
+  `examples/zk2/.history`; `freshness.v1` 0.5 experimental;
+- **#978's F6:** core 0.88, the clock guard narrowed to the state writes
+  that carry a Zenoh timestamp; `freshness.v2` 0.4, heartbeats vouching
+  with their time all ones; `health.v1` 0.9, the status not held and the
+  clock question by the heartbeats' time, with `clock.json`; `alarms.v1`
+  0.12;
+- **mid-round, f42e9742:** core 0.89, observer 0.22, `link.v1` 0.14 and
+  `alarms.v1` 0.13, the answers to round 97's F-455 to F-460. zk2py
+  rebased onto them, and each answer holds.
+
+zk2py diffed every keyword sentence of the changed texts between 7597efb8
+and f42e9742. **No rule changed beyond what the changelogs state.**
+
+### The classes zk2py claims
+
+Unchanged at the core: the **owner**, **consumer**, **caller** and
+**observer** classes, at the full level. It now follows `telemetry.v2`:
+an owner (its frames metered) and a tool (R).
+
+### Its walk of `RULES.md` at 0.89
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 75 | 64 | 3 | 8 |
+| consumer | 21 | 17 | 0 | 4 |
+| caller | 13 | 13 | 0 | 0 |
+| observer | 83 | 79 | 2 | 2 |
+| static, in every class | 62 | 60 | 0 | 2 |
+
+- **228 rows walked of 228, none without a verdict.** The walk was
+  re-keyed first, in its own commit: §4.3's "Ahead" MUST now keyed to "the
+  state writes that carry a Zenoh timestamp" (met). 0.89 moved no row.
+- **Not met:** unchanged, the owner's three SHOULDs and observer §7.3's
+  two decoding MUSTs.
+
+### What round 98 changed in zk2py
+
+- **The guard** (core 0.88): `Owner._stamped`, a write on §4.3's table or
+  on a session that stamps, is refused while the guard holds, re-puts
+  included; every other state write goes on. `freshness.v2` heartbeats go
+  on vouching, their time all ones, each still minting the members' last
+  confirmation from the clock ahead. A covered member whose write the
+  guard holds (a candidate's session) has its bit cleared until a put of
+  it goes through (F-461's reading).
+- **`health.v1` 0.9:** `clock_question` over `heartbeat`,
+  `heartbeat_held`, `status_put` and the faults, `time_unknown` among its
+  reasons; `heard_from` reads the subscriber's heartbeats and their time
+  (`freshness.Subscriber` keeps each body's `time`); the `clock_ahead`
+  repeat at the heartbeat's period, 28.5 s.
+- **`telemetry_v2`:** §2.16's declaration, §2.18's readings, §2.19 to
+  §2.21's pairs (the run as the epoch, the serial window, the time base
+  and its basis, a scheduled rate's bound), §5 over many pairs, and the
+  owner's `Meter`. `Owner.record_frame` meters a `telemetry.v2` frame
+  key: a count below one written in the run is refused before the
+  reduction, each count written modulo its width, the counts started
+  again under a new run, and an increase past 2^(w−1) named.
+  `Owner.raw_frame` is the scenarios' raw step.
+- **`telemetry_v2_live.SeriesSubscriber`**, the scenarios' R: one series
+  reader per frame key, the bare metric streams by v1 with no presence.
+- **W105** reads `telemetry.v2`'s vocabulary, `series` beside v1's four
+  keys (F-463).
+- **The interop contracts (#978 F5):** `desired/configs.v1` moves onto
+  `freshness.v2` (revision 1.1), as the reference's copy moved; its one
+  state has no horizon, so it forms no collection. Kept on `freshness.v1`,
+  each mirroring a text that keeps it or zk2py's own reading of v1:
+  `freshness/beacon.v1` (its scenarios'), `state/zk2py_ground.v1`
+  (`state.md` §1's `status`), the three `tasking.v1` and
+  `zk2py_tasking2.v1` (`desired.v1`'s scenarios'), `freshness/zk2py_fresh.v1`
+  (its re-puts, read by the Rust `consume` example) and `zk2py_probe.v1`
+  (zk2py's own, its re-puts checked by the live runner).
+- **The mend of round 97's review (PR #1037):** `frame_live`'s callback
+  records any put it cannot read, `{"undecodable": why}`; a `within`
+  field's `since` checked against the owner's across full records, which
+  cannot drift; `alarms_scenarios`' 900 s contract and 905 s waits only by
+  `--full`; `except Exception`; the published-review acceptance tied to
+  core 0.89 §9.7.
+- **`readings`: 860, up from 840.**
+
+**`just py-conformance`: 5113 of 5113**, on main f42e9742: `telemetry`
+350 (`v2/` and `conformance/contracts/` read), `health` 120 (`clock.json`
+29), `readings` 860.
+
+### Live
+
+`python -m zk2py.telemetry_v2_scenarios`, `scenarios-v2.md` §1 to §7
+against the black boxes of main f42e9742, over `meterframe.v1`:
+
+| Section | zk2py owner, zk2py R | owner example, zk2py R | zk2py owner, zenctl |
+|---|---|---|---|
+| §1 rates, measured and scheduled | 7/7 | 7/7 | 4/4, 5 not judged |
+| §2 a restart, a reset | 5/5 | 5/5 | 2/2, 3 not judged |
+| §3 a 24-bit wrap | 3/3 | 3/3 | 2/2, 2 not judged |
+| §4 a lost frame | 4/4 | 4/4 | 2/2, 1 not judged |
+| §5 a 64-bit decrease across a face | 4/4 | 4/4 | 3/3, 2 not judged |
+| §6 a rewind under a restored run file | 3/3 | 3/3 | 2/2, 1 not judged |
+| §7 one counter, two series | 4/4 | 4/4 | 3/3, 3 not judged |
+
+- **zenctl** (`watch`, and `get` reading the captured frames one reply
+  each) shows each record's field states; its telemetry verbs read no
+  frame yet (#983 T2), so every step of a series, a pair or a rate is
+  "not judged". `zenctl telemetry` reads `meterframe.v1`'s bare counter
+  by v1's rules and no frame resource.
+- **The owner example's instants** of two records measured 1 s apart
+  differ at times by 999 ms; the rates are checked as the formula's over
+  the elapsed time read, that time within the conventions' 50 ms.
+
+F6, live:
+
+| Scenario | zk2py's owner | The owner example |
+|---|---|---|
+| `state.md` §7 step 6 | 3/3 | 3/3 |
+| `freshness.v2` `scenarios-v2.md` §2 step 4 | 4/4, and 4/4 with zenctl | 4/4 |
+| `health.v1` scenarios §4 steps 1 to 4 | 6/6, [moved clock] 2/2 | 5/5 (`--only 4r`), steps 1 to 3 |
+| `alarms.v1` 0.13 §1, §3, §5 | 27/27 | 27/27 |
+
+Each was run again against the black boxes of f42e9742, with
+`freshness.v1`'s §2 (5/5) and `frames.md` §1 to §6: 125 of 126 once,
+`rust-py` §2's wire wait ending before seq 15 arrived, then 6/6 on two
+reruns.
+
+**Not run:** the [moved clock] tier against the owner example (the
+runner drives zk2py's session clock); a candidate of a `freshness.v2`
+contract with its clock ahead (F-461); `link.v2`'s scenarios §1 and
+F-436's fix, as before.
+
+Round 98 found F-461 to F-464, four, none a blocker. See "At core 0.89
+and telemetry.v2 0.1" in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -5644,6 +5780,10 @@ and observer 0.21" in `SPEC-FINDINGS.md`.
   zk2py's owner holds values only for parameterless state. It answers
   templated operations through the handlers and members it is given, and
   otherwise names no member.
+- **Of `telemetry.v2`** (round 98): a candidate of a `freshness.v2`
+  contract with its clock ahead, live (F-461); zk2py's echo tool shows a
+  frame's field states, never its series; histograms, which no field
+  carries at 0.1.
 - **Building bundles with extras.** The spec names no source for the
   documents `views.document` references (F-26). The builder refuses such a
   contract, as the reference builder does. Verification of extras is
@@ -5752,6 +5892,13 @@ impl/python/
                                 a pair's epoch, continuity and rate, a contract's and a bundle's resources
     telemetry_scenarios.py telemetry.v1 scenarios.md §1–§9 against zk2py's owner or the Rust owner example, §8 across a face too,
                                 and zenctl telemetry judging beside zk2py's reader
+    telemetry_v2.py   telemetry.v2 a frame's fields as series: §2.16's declaration, §2.18's readings, §2.19–§2.21's
+                                pairs (the run as the epoch, the serial window, the time base and its basis), §5 over
+                                many pairs, the owner's meter (round 98)
+    telemetry_v2_live.py telemetry.v2 scenarios-v2.md's R on a bus: one series reader per frame key, the bare
+                                metric streams by v1 with no presence (round 98)
+    telemetry_v2_scenarios.py telemetry.v2 scenarios-v2.md §1–§7 in three pairings: zk2py's owner and R, the Rust
+                                owner with zk2py's R, zk2py's owner with zenctl watch, get and telemetry (round 98)
     desired_live.py   desired.v1 the author and the target on a bus, the scenarios' drive
     desired_owner.py  desired.v1 either party as a process, driven as the owner example's --desired-* are
     desired_scenarios.py desired.v1 scenarios.md §1–§12, edges, a re-mint and the tool's shapes, with any two
@@ -5832,7 +5979,8 @@ impl/python/
                       timing.v1's scenarios' contract; arbitration/ steer.v1 and rudder.v1,
                       arbitration.v1's scenarios' contracts; grammar/ zk2py_guard.v1, grammar.md §1's owner;
                       operations/ zk2py_frozen.v1, operations.md §5's frozen server;
-                      desired/ also configs.v1 and zk2py_configured.v1, desired.v1 scenarios §12's author
+                      desired/ also configs.v1 (revision 1.1 on freshness.v2 since round 98) and
+                      zk2py_configured.v1, desired.v1 scenarios §12's author
                       and the role of zk2py's config.v1 owner; classes/ zk2py_replica.v1, three operations
                       for the owner rules round 89's walk found (§5.1, §5.2, O6); state/ zk2py_ground.v1,
                       state.md's plans, status and streams at 0.73, and zk2py_relay.v1, §13's governed stream;
