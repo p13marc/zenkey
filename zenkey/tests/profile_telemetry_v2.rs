@@ -26,6 +26,10 @@
 
 mod common;
 
+#[allow(dead_code)]
+#[path = "../examples/owner/config.rs"]
+mod sim;
+
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -103,10 +107,16 @@ struct Owner {
 async fn start(ep: &str, runs: Option<&Path>) -> Owner {
     let session = client(ep).await;
     let mut b = ServiceBuilder::new(&session, config(SVC));
-    b.implement(Implementation::new(meterframe())).unwrap();
     if let Some(p) = runs {
         b.run_store(Arc::new(FileRunStore::new(p))).unwrap();
     }
+    owner_of(session, b).await
+}
+
+/// O on `session`, from `b`, which may implement more beside
+/// `meterframe.v1`.
+async fn owner_of(session: zenoh::Session, mut b: ServiceBuilder) -> Owner {
+    b.implement(Implementation::new(meterframe())).unwrap();
     let mut frames = BTreeMap::new();
     for r in [LINK, TOTALS, BYTES] {
         let w = b
@@ -932,6 +942,190 @@ async fn a_restarted_counter_takes_a_new_run() {
         None
     );
     assert!(bytes.flush().await.unwrap().is_some());
+    o.end().await;
+}
+
+/// #1055: a `config.v1` owner whose device restarts, its counters with
+/// it, takes a new run within its instance ([`Service::new_run`]), since a
+/// new instance would restart its configuration (`config.v1` §2.12) and is
+/// refused. R pairs each counter across as a reset, in band, never a
+/// decrease (§2.19). The configuration's view, its pending change's token
+/// and the instance's tokens stand, and the next put of the view goes
+/// under the new run.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_config_v1_owners_device_restart_takes_a_new_run() {
+    use zenkey::config_v1::{self, ConfigView};
+    use zenkey::{CallMetadata, Client, Outcome};
+
+    /// A call of `config.v1`'s `resource` at O, as `ops`: its value reply.
+    async fn call(s: &zenoh::Session, resource: &str, group: Option<&str>, body: Value) -> Value {
+        let c = Client::new(s, config_v1::implementation().shared_contract(), &[SVC])
+            .unwrap()
+            .with_timeout(Duration::from_secs(2))
+            .with_metadata(CallMetadata::new("ops", resource));
+        let values: Bindings = group
+            .map(|g| [("group".to_owned(), vec![g.to_owned()])].into())
+            .unwrap_or_default();
+        match c
+            .call_value(&SVC.parse().unwrap(), resource, &values, &body)
+            .await
+            .unwrap()
+        {
+            Outcome::Value(a) => a.value::<Value>().unwrap(),
+            other => panic!("a value reply, not {other:?}"),
+        }
+    }
+
+    let (_r1, ep) = router(None).await;
+    let rs = client(&ep).await;
+    let r = reader(&rs).await;
+    // What R hears of O's tokens, and of its configuration's state with
+    // the run each put is under.
+    let heard: Arc<Mutex<Vec<String>>> = Arc::default();
+    let (h1, h2) = (Arc::clone(&heard), Arc::clone(&heard));
+    let _tokens = rs
+        .liveliness()
+        .declare_subscriber("zk2/lab/meterframe/@zk/**")
+        .callback(move |x: Sample| {
+            let line = format!("{:?} {}", x.kind(), x.key_expr());
+            h1.lock().unwrap().push(line);
+        })
+        .await
+        .unwrap();
+    let _state = rs
+        .declare_subscriber("zk2/lab/meterframe/config.v1/state/**")
+        .callback(move |x: Sample| {
+            let bytes = x.payload().to_bytes();
+            let run = Envelope::parse(&bytes).map(|e| e.stamp.run.hex());
+            let line = format!("{:?} {} run={run:?}", x.kind(), x.key_expr());
+            h2.lock().unwrap().push(line);
+        })
+        .await
+        .unwrap();
+    let since = |mark: usize| heard.lock().unwrap()[mark..].to_vec();
+
+    // O: meterframe.v1's frames, and config.v1 on the owner example's
+    // simulated device.
+    let session = client(&ep).await;
+    let mut b = ServiceBuilder::new(&session, config(SVC));
+    let startup = sim::rf_startup(false, 10, Duration::from_secs(1), false);
+    let device = Arc::new(sim::SimDevice::new(&startup));
+    let cfg = b
+        .config_v1(startup, Arc::clone(&device) as Arc<dyn config_v1::Device>)
+        .await
+        .unwrap();
+    let mut o = owner_of(session, b).await;
+    let instance = o.svc.instance().to_string();
+    eventually("R hears O's instance token", || async {
+        since(0).iter().any(|h| h.contains("/@zk/instance/"))
+    })
+    .await;
+    let duty = || device.holds("duty", "fraction_ppm");
+
+    // 1. A pending change of the hot group `duty` (config.v1 §2.6).
+    let set = call(
+        &rs,
+        config_v1::SET,
+        Some("duty"),
+        json!({"values": {"fraction_ppm": 20000}, "confirm_s": 60}),
+    )
+    .await;
+    let view: ConfigView = serde_json::from_value(set["applied"].clone()).unwrap();
+    let token = view.pending.expect("pending").token;
+    assert_eq!(duty(), Some(config_v1::Value::Integer(20000)));
+    eventually(
+        "R hears the view and the status, at start and pending",
+        || async { since(0).iter().filter(|h| h.contains("/state/")).count() >= 4 },
+    )
+    .await;
+
+    // 2. Within the run r0: 100, then 120; rx 100 in the open frame.
+    let t = Instant::now();
+    let r0 = o.totals(100, "21.5", t).await.run;
+    o.totals(120, "21.5", t + s(1)).await;
+    assert_eq!(o.record(BYTES, json!({"rx": 100}), t).await, None);
+
+    // 3. The device restarts, its counters from 0: below the last within
+    // r0, refused; a new instance, a restart of the configuration, refused.
+    let below = json!({"frames_total": 5, "temperature": "21.5"});
+    let e = o.w(TOTALS).record_json_at(&below, t + s(2)).await;
+    assert!(matches!(
+        refusal(e.unwrap_err()),
+        Reason::FieldDecreased { .. }
+    ));
+    let e = o.svc.new_epoch().await.expect_err("config.v1 §2.12");
+    assert!(e.to_string().contains("config.v1 §2.12"), "{e}");
+
+    // 4. The open frame flushed under r0, then a new run, r1, in the same
+    // instance: the descriptor states it (core §3.3).
+    assert_eq!(o.w(BYTES).flush().await.unwrap().expect("rx 100").run, r0);
+    let view0 = cfg.view().await;
+    let mark = since(0).len();
+    let r1 = o.svc.new_run();
+    assert_ne!(r1, r0, "a new run");
+    assert_eq!(o.svc.minter().run(), r1);
+    let d: Value = serde_json::from_slice(&o.svc.descriptor_bytes()).unwrap();
+    assert_eq!(d["run"], r1.hex(), "the descriptor states it");
+    assert_eq!(o.svc.instance().to_string(), instance, "no new instance");
+
+    // 5. The restarted counts, under r1.
+    let b = o.totals(5, "21.5", t + s(2)).await;
+    assert_eq!((b.run, b.seq.get()), (r1, 0), "the key's seqs from 0");
+    o.totals(9, "21.5", t + s(3)).await;
+    assert_eq!(o.record(BYTES, json!({"rx": 5}), t + s(2)).await, None);
+    assert_eq!(o.w(BYTES).flush().await.unwrap().expect("rx 5").run, r1);
+    r.wait(TOTALS, 4).await;
+    r.wait(BYTES, 2).await;
+
+    // R: 100 → 120 within r0; r1's first frame another run's, a keyframe;
+    // 120 → 5 a reset, in band, with no rate; 5 → 9 within r1; no pair a
+    // decrease, on either key.
+    let f = r.fold(TOTALS);
+    let p = f.pair("frames_total", 100, 120);
+    assert_eq!((p.continuity, p.basis), (Continuity::SameEpoch, IN_BAND));
+    let (_, frame, folded) = &f.frames[2];
+    assert_eq!(folded.applied.follows, Follows::Run);
+    assert!(frame.records[0].full);
+    let p = f.pair("frames_total", 120, 5);
+    assert_eq!((p.continuity, p.basis), (Continuity::Reset, IN_BAND));
+    assert_eq!(p.rate, Err(NoRate::Reset));
+    let p = f.pair("frames_total", 5, 9);
+    assert_eq!((p.continuity, p.basis), (Continuity::SameEpoch, IN_BAND));
+    let bytes = r.fold(BYTES);
+    let p = bytes.pair("rx", 100, 5);
+    assert_eq!((p.continuity, p.basis), (Continuity::Reset, IN_BAND));
+    for (field, x) in [("frames_total", &f), ("rx", &bytes)] {
+        assert!(
+            x.pairs(field)
+                .iter()
+                .all(|(_, _, p)| p.continuity != Continuity::Decreased),
+            "{field}: {:?}",
+            x.pairs(field)
+        );
+    }
+
+    // 6. The configuration stands: its view, the device's values, and
+    // every token of the instance; nothing of its state put again.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(cfg.view().await, view0);
+    assert_eq!(duty(), Some(config_v1::Value::Integer(20000)));
+    assert_eq!(since(mark), Vec::<String>::new(), "nothing moved");
+
+    // 7. The pending change's token still names it: confirmed, and the
+    // view put after it is under r1.
+    let ok = call(&rs, config_v1::CONFIRM, None, json!({"token": token})).await;
+    let view: ConfigView = serde_json::from_value(ok["view"].clone()).unwrap();
+    assert_eq!(view.pending, None);
+    assert_eq!(view.last_change.map(|l| l.token), Some(token));
+    assert_eq!((view.instance, view.revision), (instance, view0.revision));
+    let want = format!(
+        "Put zk2/lab/meterframe/config.v1/state/view run=Ok({:?})",
+        r1.hex()
+    );
+    eventually("R hears the view put under r1", || async {
+        since(mark).contains(&want)
+    })
+    .await;
     o.end().await;
 }
 

@@ -19,7 +19,7 @@
 //!   4. the instance token, then the interface tokens
 //!        │
 //!        ▼
-//!     Service ─ set_capabilities / new_epoch / declare_member / cycle_member
+//!     Service ─ set_capabilities / new_epoch / new_run / declare_member / cycle_member
 //! ```
 //!
 //! A service implementing `health.v1` through [`ServiceBuilder::health`]
@@ -2157,6 +2157,39 @@ impl Service {
         }
         drop(remints);
         Ok(next)
+    }
+
+    /// Takes a new run within this instance (core §4.3's MAY) and returns
+    /// it: every stream, state and event key of the service is written
+    /// under it from now on, each seq from 0. The descriptor stating it is
+    /// put first (§3.3), under the minter's lock, so nothing is written
+    /// under the new run before it.
+    ///
+    /// - **Nothing else moves.** The instance id and its tokens, every
+    ///   member's epoch, and what `config.v1`, `alarms.v1` and `desired.v1`
+    ///   hold stay as they are. Nothing is put again: a value keeps the
+    ///   stamp it was put under, which a consumer orders against the new
+    ///   run's as another run's (§4.3's consumer rule).
+    /// - **On a `config.v1` service** ([`ServiceBuilder::config_v1`]) it is
+    ///   allowed, where [`Service::new_epoch`] is refused: a run that
+    ///   changes within an instance mints no new instance (§4.3), so the
+    ///   configuration does not restart (`config.v1` §2.12). The view, the
+    ///   status, a pending change and every change token stand.
+    /// - **A frame's restarted counter** (`telemetry.v2` §2.19, whose epoch
+    ///   is the run): flush each open frame
+    ///   ([`crate::frame::FrameWriter::flush`]), take a new run, then
+    ///   record the restarted counts. A record still open is put under the
+    ///   new run, so a restarted count below it is refused
+    ///   ([`crate::telemetry::Reason::FieldDecreased`]). A reader pairs the
+    ///   counts across as a reset, established in band, never a decrease.
+    /// - **No `telemetry.v1` epoch moves.** A metric's epoch there is the
+    ///   instance id, or a member's (§2.9): a restarted `telemetry.v1`
+    ///   counter is still refused below its last until
+    ///   [`Service::new_epoch`] or [`Service::cycle_member`]. Core §1.5
+    ///   still asks a new instance id whenever an owner's counters reset
+    ///   (#1055).
+    pub fn new_run(&self) -> zenkey_model::wire::Run {
+        self.minter.new_run()
     }
 
     /// Declares the member token of `value` (§8.1), for the interface's
