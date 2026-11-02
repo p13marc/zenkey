@@ -347,6 +347,13 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   member of a templated operation in place (`"set/duty"`,
   `examples/zk2/acl/config.enrollment.toml`). Scenarios §13–§14 run live
   in `tests/live_zk2.rs` against the owner example's simulated device.
+  `config.v2` (#985 G3): the same verbs on an owner whose descriptor's
+  `profiles` lists it, through its config interface (`--contracts`,
+  `--catalog`; across a face `--iface` and `--face-policy F --face NAME`,
+  `cli::ConfigV2Args`); the record stands for the view, every act answers
+  `record`, a contract group's `set` and `--status` are refused here.
+  `live_zk2.rs`'s `config_v2_*` run scenarios-v2 §13–§14 and the doctor
+  and `check conform` against `rfcfg.v1` on the owner example's device.
   **Tree (#307)**, and the depth carries meaning: a **noun** is something
   declared, alive or persisted and gets verbs under it (`service
   list|show`, `iface list|show`, `schema show`, `namespace list`,

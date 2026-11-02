@@ -512,10 +512,24 @@ pub async fn observe(
         let Ok(o) = &presence else {
             return None;
         };
-        if crate::model::config::listing(o, &address) != crate::report::ConfigPremise::Listed {
+        if crate::model::config::listing(o, &address) == crate::report::ConfigPremise::Listed {
+            return Some(config_suite(session, &bus.namespace, &address, o, None, spec).await);
+        }
+        // config.v2 (#985 G3): asked of the config interface itself.
+        if crate::model::config::listing_v2(o, &address) != crate::report::ConfigPremise::Listed {
             return None;
         }
-        Some(config_suite(session, &bus.namespace, &address, o, spec).await)
+        let cspec = crate::bus::config::ConfigSpec {
+            contracts: offline.clone(),
+            store: Some(store.clone()),
+            ..crate::bus::config::ConfigSpec::new(t)
+        };
+        let target =
+            crate::bus::config::find_v2(session, &address, &cspec, Some(&Ok(o.clone()))).await?;
+        if target.as_ref().is_ok_and(|t| t.iface != iface) {
+            return None;
+        }
+        Some(config_suite(session, &bus.namespace, &address, o, Some(target), spec).await)
     };
     let alarms = async {
         let Ok(o) = &presence else {
@@ -1134,6 +1148,14 @@ pub const PROBE_TOKEN: &str = "zk2-conform-probe";
 /// owner that skipped the row under test refuses it at row 7.
 pub const PROBE_REVISION: u64 = 1 << 40;
 
+/// `config.v2`'s refusal probe's revision: the most its 32 bits hold
+/// (v2 §2.3), which no owner reaches in an instance.
+pub const PROBE_REVISION_V2: u32 = u32::MAX;
+
+/// `config.v2`'s control probe's token: the widest 48 bits, run
+/// `ffffffff` and count 65,535 (v2 §2.6), which no owner is near minting.
+pub const PROBE_TOKEN_V2: u64 = zenkey_model::config::v2::TOKEN_MAX;
+
 /// What the text says a probe is answered (§2.5, §2.9, §2.10, §2.13).
 #[derive(Debug, Clone)]
 pub enum ProbeExpect {
@@ -1187,11 +1209,23 @@ pub struct ConfigConform {
     pub first: std::result::Result<crate::bus::config::ConfigGet, String>,
     pub reading: crate::bus::config::ConfigObservation,
     pub probes: Vec<ConfigProbe>,
+    /// A `config.v2` owner's config interface (#985 G3), or why none could
+    /// be read; `None` for `config.v1`.
+    pub v2:
+        Option<std::result::Result<crate::model::config::V2Target, crate::model::config::V2Unread>>,
 }
 
 /// Whether `address`'s descriptors list `config.v1`'s `persist` unavailable
 /// with cause `config` (§2.13, core §3.3).
-fn persist_unavailable(presence: &Observed, address: &Addr) -> bool {
+fn persist_unavailable(
+    presence: &Observed,
+    address: &Addr,
+    v2: Option<&crate::model::config::V2Target>,
+) -> bool {
+    let iface = v2.map_or_else(
+        || zenkey_model::config::IFACE.to_owned(),
+        |t| t.iface.to_string(),
+    );
     presence
         .descriptors
         .iter()
@@ -1199,7 +1233,7 @@ fn persist_unavailable(presence: &Observed, address: &Addr) -> bool {
         .filter(|((a, _), _)| a == address)
         .filter_map(|(_, r)| r.descriptor())
         .flat_map(|d| d.interfaces.iter())
-        .filter(|e| e.iface == zenkey_model::config::IFACE)
+        .filter(|e| e.iface == iface)
         .flat_map(|e| e.unavailable.iter())
         .any(|u| {
             u.resource == zenkey::config_v1::PERSIST
@@ -1216,6 +1250,7 @@ async fn probe_call(
     op: crate::bus::config::ConfigOp,
     body: serde_json::Value,
     timeout: Duration,
+    v2: Option<&crate::model::config::V2Target>,
 ) -> ProbeOutcome {
     let call = crate::bus::config::ConfigCall {
         namespace,
@@ -1232,6 +1267,7 @@ async fn probe_call(
         timeout,
         across_face: false,
         checked: None,
+        v2: v2.cloned(),
     };
     ProbeOutcome::Call(
         crate::bus::config::call(session, call)
@@ -1253,13 +1289,22 @@ async fn config_probes(
     presence: &Observed,
     view: Option<&zenkey_model::config::ConfigView>,
     spec: ConformSpec,
+    v2: Option<&crate::model::config::V2Target>,
 ) -> Vec<ConfigProbe> {
     use crate::bus::config::ConfigOp;
     use crate::report::CaseId;
     let t = spec.timeout;
+    // config.v2's fields are narrower (v2 §2.3, §2.6): a revision and a
+    // token no owner reaches within them.
     let refusal_body = serde_json::json!({
-        "values": {}, "dry_run": true, "expected_revision": PROBE_REVISION,
+        "values": {}, "dry_run": true,
+        "expected_revision": if v2.is_some() { u64::from(PROBE_REVISION_V2) } else { PROBE_REVISION },
     });
+    let probe_token = if v2.is_some() {
+        PROBE_TOKEN_V2.to_string()
+    } else {
+        PROBE_TOKEN.to_owned()
+    };
     let mut out = Vec::new();
     let probe = |case, subject: String, expect, outcome| ConfigProbe {
         case,
@@ -1310,14 +1355,14 @@ async fn config_probes(
                 })
                 .find(|n| !v.groups.iter().any(|g| &g.name == n))
                 .expect("a name the view does not declare");
-            out.push(probe(
-                CaseId::ConfigRefusal,
-                format!("@op/set/{unknown}"),
-                ProbeExpect::Refused {
-                    codes: NOT_FOUND,
-                    rule: "a set on a group the schema does not declare is refused not_found \
-                           (config.v1 §2.5, row 3)",
-                },
+            let undeclared = if v2.is_some() {
+                ProbeOutcome::NotMade(
+                    "config.v2 serves a set for each settable group alone: a group the contract \
+                     does not declare has no key, and a call there reaches no queryable \
+                     (config.v2 §2.4)"
+                        .into(),
+                )
+            } else {
                 probe_call(
                     session,
                     namespace,
@@ -1327,8 +1372,19 @@ async fn config_probes(
                     },
                     refusal_body.clone(),
                     t,
+                    v2,
                 )
-                .await,
+                .await
+            };
+            out.push(probe(
+                CaseId::ConfigRefusal,
+                format!("@op/set/{unknown}"),
+                ProbeExpect::Refused {
+                    codes: NOT_FOUND,
+                    rule: "a set on a group the schema does not declare is refused not_found \
+                           (config.v1 §2.5, row 3)",
+                },
+                undeclared,
             ));
             let shut = v.groups.iter().find(|g| !g.writable);
             out.push(probe(
@@ -1354,6 +1410,7 @@ async fn config_probes(
                             },
                             refusal_body.clone(),
                             t,
+                            v2,
                         )
                         .await
                     }
@@ -1364,7 +1421,7 @@ async fn config_probes(
             ));
             let pending = v.pending.is_some();
             for (op, subject) in controls {
-                let mut body = serde_json::json!({"token": PROBE_TOKEN});
+                let mut body = serde_json::json!({"token": probe_token});
                 if op == ConfigOp::Extend {
                     body["confirm_s"] = serde_json::json!(1);
                 }
@@ -1375,7 +1432,7 @@ async fn config_probes(
                             .into(),
                     )
                 } else {
-                    probe_call(session, namespace, address, op, body, t).await
+                    probe_call(session, namespace, address, op, body, t, v2).await
                 };
                 out.push(probe(
                     CaseId::ConfigRefusal,
@@ -1388,8 +1445,8 @@ async fn config_probes(
                     outcome,
                 ));
             }
-            let body = serde_json::json!({"token": PROBE_TOKEN});
-            let (expect, outcome) = if persist_unavailable(presence, address) {
+            let body = serde_json::json!({"token": probe_token});
+            let (expect, outcome) = if persist_unavailable(presence, address, v2) {
                 (
                     ProbeExpect::Refused {
                         codes: UNAVAILABLE,
@@ -1397,7 +1454,7 @@ async fn config_probes(
                                unavailable with that cause before any handler runs (config.v1 \
                                §2.13, core O3)",
                     },
-                    probe_call(session, namespace, address, ConfigOp::Persist, body, t).await,
+                    probe_call(session, namespace, address, ConfigOp::Persist, body, t, v2).await,
                 )
             } else {
                 let expect = ProbeExpect::Refused {
@@ -1418,7 +1475,8 @@ async fn config_probes(
                 } else {
                     (
                         expect,
-                        probe_call(session, namespace, address, ConfigOp::Persist, body, t).await,
+                        probe_call(session, namespace, address, ConfigOp::Persist, body, t, v2)
+                            .await,
                     )
                 }
             };
@@ -1467,6 +1525,7 @@ async fn config_probes(
                         },
                         body,
                         t,
+                        v2,
                     )
                     .await;
                     out.push(probe(
@@ -1483,6 +1542,19 @@ async fn config_probes(
                 }
             }
         }
+    }
+    if v2.is_some() {
+        out.push(probe(
+            CaseId::ConfigRefusal,
+            "@op/set/*".to_owned(),
+            ProbeExpect::Nothing,
+            ProbeOutcome::NotMade(
+                "config.v2's operations are concrete, one key per settable group: no template \
+                 to fan out over (config.v2 §2.21)"
+                    .into(),
+            ),
+        ));
+        return out;
     }
     let config = zenkey::config_v1::implementation();
     let set = config
@@ -1520,21 +1592,46 @@ async fn config_suite(
     namespace: &str,
     address: &Addr,
     presence: &Observed,
+    v2: Option<std::result::Result<crate::model::config::V2Target, crate::model::config::V2Unread>>,
     spec: ConformSpec,
 ) -> ConfigConform {
     let t = spec.timeout;
-    let selector = crate::bus::config::ConfigTarget::One(address.clone()).state_selector(false);
-    let first = crate::bus::config::get(session, &selector, t).await;
+    let target = v2.as_ref().and_then(|v| v.as_ref().ok());
+    let first = match &v2 {
+        None => {
+            let selector =
+                crate::bus::config::ConfigTarget::One(address.clone()).state_selector(false);
+            crate::bus::config::get(session, &selector, t).await
+        }
+        Some(Ok(target)) => {
+            crate::bus::config::get_records(session, &[(address.clone(), target.clone())], t).await
+        }
+        Some(Err(u)) => Err(u.why.clone()),
+    };
     let view = first
         .as_ref()
         .ok()
         .and_then(|g| g.services.get(address))
-        .and_then(|d| d.view.as_ref())
-        .and_then(|r| r.value.clone())
-        .and_then(|v| v.ok());
+        .and_then(|d| match target {
+            None => d
+                .view
+                .as_ref()
+                .and_then(|r| r.value.clone())
+                .and_then(|v| v.ok()),
+            Some(target) => d
+                .record
+                .as_ref()
+                .and_then(|r| r.value.as_ref())
+                .and_then(|v| v.as_ref().ok())
+                .map(|g| {
+                    crate::model::config::view_of(&target.interface, &g.state, &address.to_string())
+                }),
+        });
     let cspec = crate::bus::config::ConfigSpec {
         window: Some(spec.window),
         clocks_synced: spec.clocks_synced,
+        // The interface is decided: the reading reads by it.
+        v2: v2.clone(),
         ..crate::bus::config::ConfigSpec::new(t)
     };
     let reading = crate::bus::config::observe(
@@ -1544,12 +1641,29 @@ async fn config_suite(
         cspec,
         Some(presence.clone()),
     );
-    let probes = config_probes(session, namespace, address, presence, view.as_ref(), spec);
+    // An interface that could not be read asks nothing of the owner.
+    let unread = matches!(v2, Some(Err(_)));
+    let probes = async {
+        if unread {
+            return Vec::new();
+        }
+        config_probes(
+            session,
+            namespace,
+            address,
+            presence,
+            view.as_ref(),
+            spec,
+            target,
+        )
+        .await
+    };
     let (reading, probes) = tokio::join!(reading, probes);
     ConfigConform {
         first,
         reading,
         probes,
+        v2,
     }
 }
 

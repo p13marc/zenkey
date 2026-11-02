@@ -361,6 +361,25 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   and `OperationReport::request_epoch_assumed` says an assumed one;
   `render`'s `own_encoding` reads a form's record, request and detail on
   its own resource's `encoding`, never another sharing its type (F-478).
+  `config.v2` (#985 G3) rides `config.v1`'s four layers: `bus::config`
+  finds a v2 owner by its descriptor's `profiles` (`model::config::
+  listing_v2`, `named_revisions`, `find_v2`/`resolve`; across a face the
+  `ConfigSpec::contracts` in hand, `iface` among several), reads its config
+  interface as a `model::config::V2Target` (refused `ContractInvalid` on a
+  `lint_contract` finding, `ContractUnread` when no revision is held; the
+  epoch from `ConfigSpec::catalogs`), GETs its one record
+  (`get_records`, `ServiceDocs::record`, `RecordGot`), windows it through
+  the runtime's consumer on the owner's contract (`Window::open_v2`), and
+  acts through `Client` on it (`ConfigCall::v2`: `set_of`/`control_of`
+  write `Set<T>`/`Control` from `config.v1`'s requests, a reply read as
+  `ConfigActAnswer::Record`, a refusal's `Error` by the layout).
+  `model::config::view_of` reads the record as the view, so every §5 judge
+  runs on it (`ConfigReading::profile`, `differs` for "survives",
+  `Fresh::Record`, projection not asked); `ConfigReport` gains `profile`,
+  `record` (`ConfigRecordRead`) and an `Asked` status. The doctor's
+  `config-*` add each v2 owner (`config_v2_targets`, `config_records`),
+  and `check conform <addr> <config iface>` probes one
+  (`ConfigConform::v2`, `PROBE_TOKEN_V2`, `PROBE_REVISION_V2`).
   `link.v2` (#988 L2) runs through `model::acl`: a v2 face policy's
   `Transport`, `Binding` and catalog id ride `AclPlan::{transport,
   binding, catalog}` (absent for `link.v1`, so its pinned plans did not

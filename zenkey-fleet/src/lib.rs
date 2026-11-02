@@ -308,7 +308,8 @@ pub use judge::conform::judge as judge_conform;
 // two in a row.
 pub use bus::config::{
     ConfigCall, ConfigGet, ConfigObservation, ConfigOp, ConfigSpec, ConfigTarget, ConfigWindow,
-    call as call_config, get as get_config, observe as observe_config, run_config,
+    call as call_config, get as get_config, get_records as get_config_records,
+    observe as observe_config, resolve as resolve_config, run_config,
 };
 pub use bus::health::{
     AcrossFace, HealthObservation, HealthOpening, HealthSpec, HealthTarget,

@@ -26,6 +26,14 @@
 //! stale, or that a GET did not draw, answers nothing: unobservable, never a
 //! no (core O5). An event is evidence whenever it was read (§2.17): a change
 //! ends once.
+//!
+//! **`config.v2`** (#985 G3, v2 §5): "v1 §5 holds, read from the record and
+//! the contract. A fresh record is a fresh view and status." Each question
+//! is put to the record as the view reads it
+//! ([`crate::model::config::view_of`]), with two differences the record
+//! makes: a value survives a restart unless its `differs` bit is set, the
+//! record carrying no startup value; and the projection is not asked, one
+//! record replacing the two documents.
 
 use std::collections::BTreeSet;
 
@@ -33,11 +41,14 @@ use zenkey_model::config::{self as cm, Class, ConfigChangeEvent, DesiredOutcome,
 use zenkey_model::freshness::{self as fresh, Observation};
 
 use crate::bus::config::{ConfigObservation, ServiceDocs, status_key, view_key};
-use crate::model::config::{ConfigReading, DocRead, Got, doc_read, premise_in, projection_holds};
+use crate::model::config::{
+    ConfigReading, DocRead, Got, RecordGot, doc_read, doc_read_within, listing_v2, premise_in,
+    projection_holds, view_of,
+};
 use crate::model::health::Trust;
 use crate::report::{
     Asked, ChangeAnswers, ConfigAnswer, ConfigAnswerToken as A, ConfigPremise, ConfigPresenceRead,
-    ConfigReport, DesiredAnswer, GroupAnswer, ParameterAnswer,
+    ConfigProfile, ConfigRecordRead, ConfigReport, DesiredAnswer, GroupAnswer, ParameterAnswer,
 };
 
 /// The answer a premise forces, or `None` when the question is put (§5).
@@ -47,7 +58,8 @@ pub fn premise(p: ConfigPremise) -> Option<ConfigAnswer> {
         ConfigPremise::NotListed => Some(ConfigAnswer::new(
             A::NotAsked,
             "not_listed",
-            "its descriptor does not list config.v1: it implements none (config.v1 §2.1)",
+            "its descriptor lists neither config.v1 nor config.v2: it implements neither \
+             (config.v1 §2.1, config.v2 §2.1)",
         )),
         ConfigPremise::Absent => Some(ConfigAnswer::new(
             A::NotAsked,
@@ -58,7 +70,20 @@ pub fn premise(p: ConfigPremise) -> Option<ConfigAnswer> {
         ConfigPremise::DescriptorUnread => Some(ConfigAnswer::new(
             A::Unobservable,
             "descriptor_unread",
-            "no descriptor of it read: whether it implements config.v1 cannot be told",
+            "no descriptor of it read: whether it implements config.v1 or config.v2 cannot be \
+             told",
+        )),
+        ConfigPremise::ContractUnread => Some(ConfigAnswer::new(
+            A::Unobservable,
+            "contract_unread",
+            "its descriptor lists config.v2, and its config contract is not in hand: the record \
+             is read by it alone (config.v2 §2.2)",
+        )),
+        ConfigPremise::ContractInvalid => Some(ConfigAnswer::new(
+            A::Unobservable,
+            "contract_invalid",
+            "its config contract has a config.v2 lint finding: its records are unobservable \
+             (config.v2 §2.2)",
         )),
         ConfigPremise::Incomplete => Some(ConfigAnswer::new(
             A::Unobservable,
@@ -73,6 +98,32 @@ pub fn premise(p: ConfigPremise) -> Option<ConfigAnswer> {
 /// `need_view` when only the view could answer (its class, `writable`,
 /// `startup`).
 pub fn none_fresh(r: &ConfigReading, need_view: bool) -> ConfigAnswer {
+    if r.profile == ConfigProfile::V2 {
+        let (fresh, read) = r
+            .view
+            .as_ref()
+            .map_or((r.status.fresh, false), |v| (v.fresh, v.value.is_some()));
+        let hint = if fresh.reason == fresh::Reason::ClockUntrusted {
+            "; a GET's reply carries its last confirmation, aged only against a clock trusted \
+             to the HLC delta: measured on a live put (--for) or on the deployment's word \
+             (--clocks-synced)"
+        } else {
+            ""
+        };
+        return ConfigAnswer::new(
+            A::Unobservable,
+            "no_fresh_record",
+            format!(
+                "no fresh record — the record {} ({}){hint}",
+                if read {
+                    fresh.reason.says().to_owned()
+                } else {
+                    format!("was not read ({})", fresh.reason.says())
+                },
+                fresh.verdict
+            ),
+        );
+    }
     let of = |name: &str, fresh: fresh::Judged, read: bool| {
         if read {
             format!("the {name} {} ({})", fresh.reason.says(), fresh.verdict)
@@ -377,6 +428,32 @@ pub fn survives(r: &ConfigReading, group: &str, parameter: &str) -> ConfigAnswer
             "write-only: its startup value is never shown (config.v1 §2.15)",
         );
     }
+    if r.profile == ConfigProfile::V2 {
+        let differs = r
+            .differs
+            .contains(&(group.to_owned(), parameter.to_owned()));
+        return match (&p.value, differs) {
+            (None, _) => ConfigAnswer::new(
+                A::Unobservable,
+                "value_unknown",
+                "its owner cannot read its value back: unknown (config.v2 §2.3)",
+            ),
+            (Some(value), true) => ConfigAnswer::new(
+                A::No,
+                "startup_differs",
+                format!(
+                    "it runs {value}, and its startup value differs, which the record says \
+                     without saying what it is (config.v2 §2.3): a divergence an operator may \
+                     want persisted or undone (config.v1 §2.13)"
+                ),
+            ),
+            (Some(value), false) => ConfigAnswer::new(
+                A::Yes,
+                "runs_startup",
+                format!("it runs {value}, its startup value"),
+            ),
+        };
+    }
     match (&p.value, &p.startup) {
         (None, _) => ConfigAnswer::new(
             A::Unobservable,
@@ -482,6 +559,14 @@ pub fn converged(r: &ConfigReading, revision: Option<u64>) -> ConfigAnswer {
 /// (§2.19, F-112): informative, since a view and a status a put apart pair
 /// wrongly; a finding is two readings' (`check conform`, `doctor`).
 pub fn projection(r: &ConfigReading) -> ConfigAnswer {
+    if r.profile == ConfigProfile::V2 {
+        return ConfigAnswer::new(
+            A::NotAsked,
+            "one_record",
+            "config.v2 has one record, which replaces the view and the status: there is no \
+             projection to judge (config.v2 §2.3)",
+        );
+    }
     let Some(v) = &r.view else {
         return ConfigAnswer::new(
             A::NotAsked,
@@ -512,6 +597,9 @@ pub fn projection(r: &ConfigReading) -> ConfigAnswer {
 /// `config get`'s reading of one service, from what [`crate::bus::config`]
 /// read: presence, the GET, the window and a replay.
 pub fn reading(obs: &ConfigObservation) -> ConfigReading {
+    if obs.v2.is_some() {
+        return reading_v2(obs);
+    }
     let window = match &obs.window {
         Some(Ok(w)) => Some(w),
         _ => None,
@@ -580,11 +668,24 @@ pub fn reading(obs: &ConfigObservation) -> ConfigReading {
         }),
         &trust,
     );
+    ConfigReading {
+        profile: ConfigProfile::V1,
+        premise,
+        view,
+        status,
+        events: merged_events(obs),
+        differs: BTreeSet::new(),
+    }
+}
+
+/// The change events read: a replay's, then the window's not already
+/// among them.
+fn merged_events(obs: &ConfigObservation) -> Vec<ConfigChangeEvent> {
     let mut events: Vec<ConfigChangeEvent> = Vec::new();
     if let Some(Ok(rp)) = &obs.replay {
         events.extend(rp.events.iter().cloned());
     }
-    if let Some(w) = window {
+    if let Some(Ok(w)) = &obs.window {
         let seen: BTreeSet<(String, String)> = events
             .iter()
             .map(|e| (e.instance.clone(), e.token.clone()))
@@ -596,12 +697,129 @@ pub fn reading(obs: &ConfigObservation) -> ConfigReading {
                 .cloned(),
         );
     }
+    events
+}
+
+/// A `config.v2` reading (#985 G3): the premise from presence and the
+/// descriptor's `profiles`, then the record, the GET's reply over the
+/// window's last put, judged at the contract's `freshness.ttl_s`, read as
+/// the view.
+fn reading_v2(obs: &ConfigObservation) -> ConfigReading {
+    let window = match &obs.window {
+        Some(Ok(w)) => Some(w),
+        _ => None,
+    };
+    let trust = if obs.spec.clocks_synced {
+        Trust::Word
+    } else if let Some(w) = window {
+        Trust::Measured(&w.clocks)
+    } else {
+        Trust::None
+    };
+    let premise = match (&obs.presence, &obs.v2) {
+        (_, Some(Err(u))) => u.premise,
+        (None, _) => ConfigPremise::AcrossFace,
+        (Some(Ok(o)), _) => match premise_in(o, &obs.address) {
+            ConfigPremise::Listed => ConfigPremise::Listed,
+            ConfigPremise::NotListed => listing_v2(o, &obs.address),
+            other => other,
+        },
+        (Some(Err(_)), _) => ConfigPremise::Incomplete,
+    };
+    let Some(Ok(target)) = &obs.v2 else {
+        return ConfigReading {
+            profile: ConfigProfile::V2,
+            premise,
+            view: None,
+            status: doc_read(Got::NotMade, None, &trust),
+            events: Vec::new(),
+            differs: BTreeSet::new(),
+        };
+    };
+    let empty = ServiceDocs::default();
+    let (docs, at) = match &obs.get {
+        Ok(g) => (
+            g.services.get(&obs.address).unwrap_or(&empty),
+            Some(g.read_at),
+        ),
+        Err(_) => (&empty, None),
+    };
+    let got: Got<'_, RecordGot> = match (&docs.record, at) {
+        (Some(reply), Some(at)) => Got::Answered { reply, at },
+        (None, Some(_)) => Got::Silent,
+        _ => Got::NotMade,
+    };
+    let key = target.record_key(&obs.address);
+    let unheard = |w: &crate::bus::config::ConfigWindow| Observation::Subscribed {
+        last: None,
+        listened: w.listened,
+        complete: true,
+    };
+    let record = doc_read_within(
+        &target.horizon(),
+        got,
+        window.map(|w| {
+            (
+                w.seen.get(&key).copied().unwrap_or(unheard(w)),
+                w.record.as_ref(),
+            )
+        }),
+        &trust,
+    );
+    let service = obs.address.to_string();
+    let differs = record
+        .value()
+        .map(|g| crate::model::config::differs_of(&g.state))
+        .unwrap_or_default();
+    let view = DocRead {
+        value: record.value.as_ref().map(|v| {
+            v.as_ref()
+                .map(|g| view_of(&target.interface, &g.state, &service))
+                .map_err(Clone::clone)
+        }),
+        via: record.via,
+        stamp: record.stamp.clone(),
+        fresh: record.fresh,
+    };
     ConfigReading {
+        profile: ConfigProfile::V2,
         premise,
-        view,
-        status,
-        events,
+        view: Some(view),
+        status: doc_read(Got::NotMade, None, &trust),
+        events: merged_events(obs),
+        differs,
     }
+}
+
+/// What a `config.v2` reading read of the record, as the report spells it.
+fn record_read(obs: &ConfigObservation) -> Option<ConfigRecordRead> {
+    let Some(Ok(target)) = &obs.v2 else {
+        return None;
+    };
+    let from_get = obs
+        .get
+        .as_ref()
+        .ok()
+        .and_then(|g| g.services.get(&obs.address))
+        .and_then(|d| d.record.as_ref());
+    let from_window = match &obs.window {
+        Some(Ok(w)) => w.record.as_ref(),
+        _ => None,
+    };
+    let got = from_get
+        .or(from_window)
+        .and_then(|r| r.value.as_ref())
+        .and_then(|v| v.as_ref().ok());
+    Some(ConfigRecordRead {
+        iface: target.iface.to_string(),
+        contract: target.fingerprint.to_string(),
+        key: target.record_key(&obs.address),
+        epoch: target.epoch,
+        epoch_assumed: target.epoch_assumed,
+        record: got.map(|g| g.state.clone()),
+        inband: got.and_then(|g| g.inband).map(Into::into),
+        size: got.map(|g| g.size),
+    })
 }
 
 /// Every answer of one reading, as `config get` reports it.
@@ -612,7 +830,9 @@ pub fn judge(obs: &ConfigObservation) -> ConfigReport {
         _ => None,
     };
     let mut unobservable = None;
-    if let Err(e) = &obs.get {
+    if let Err(e) = &obs.get
+        && !matches!(obs.v2, Some(Err(_)))
+    {
         unobservable = Some(format!("the GET could not be made: {e}"));
     }
     // A read not made is the premise's possibly incomplete reading, and its
@@ -683,10 +903,15 @@ pub fn judge(obs: &ConfigObservation) -> ConfigReport {
         }),
         _ => None,
     };
+    if let Some(Err(u)) = &obs.v2 {
+        unobservable.get_or_insert_with(|| u.why.clone());
+    }
     ConfigReport {
         namespace: obs.namespace.clone(),
         service: obs.address.to_string(),
+        profile: r.profile,
         premise: r.premise,
+        record: record_read(obs),
         presence,
         window_s: window.map(|w| w.listened.as_secs_f64()),
         clock: trust_ground,
@@ -695,7 +920,10 @@ pub fn judge(obs: &ConfigObservation) -> ConfigReport {
             Some(v) => Asked::Asked(v.report()),
             None => Asked::NotAsked,
         },
-        status: r.status.report(),
+        status: match r.profile {
+            ConfigProfile::V1 => Asked::Asked(r.status.report()),
+            ConfigProfile::V2 => Asked::NotAsked,
+        },
         projection: projection(&r),
         pending,
         pending_change,
@@ -766,10 +994,12 @@ mod tests {
     fn fresh_reading(v: ConfigView) -> ConfigReading {
         let s = ConfigStatus::of(&v);
         ConfigReading {
+            profile: ConfigProfile::V1,
             premise: ConfigPremise::Listed,
             view: Some(doc(Some(v), Verdict::Fresh, Reason::WithinHorizon)),
             status: doc(Some(s), Verdict::Fresh, Reason::WithinHorizon),
             events: vec![],
+            differs: BTreeSet::new(),
         }
     }
 
@@ -794,6 +1024,7 @@ mod tests {
             get: Err("GET zk2/lab/rf0/config.v1/@state/**: refused".into()),
             window: None,
             replay: None,
+            v2: None,
         };
         let r = judge(&obs);
         assert_eq!(r.premise, ConfigPremise::Incomplete);

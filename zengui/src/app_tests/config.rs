@@ -63,6 +63,7 @@ fn report(view: &ConfigView) -> std::sync::Arc<zenkey_fleet::report::ConfigRepor
             value: Some(Ok(ConfigStatus::of(view))),
             stamp,
         }),
+        record: None,
     };
     let mut spec = zenkey_fleet::ConfigSpec::new(Duration::from_secs(1));
     spec.clocks_synced = true;
@@ -80,6 +81,7 @@ fn report(view: &ConfigView) -> std::sync::Arc<zenkey_fleet::report::ConfigRepor
             }),
             window: None,
             replay: None,
+            v2: None,
         },
     ))
 }
@@ -95,6 +97,7 @@ fn reading(view: &ConfigView) -> Zengui {
             namespace: String::new(),
             why: ReadWhy::Asked,
             report: report(view),
+            v2: None,
             at: SystemTime::now(),
         }),
     );
@@ -231,9 +234,11 @@ fn act(answer: ConfigActAnswer) -> ConfigActReport {
     ConfigActReport {
         namespace: String::new(),
         service: "lab/rf0".into(),
+        profile: zenkey_fleet::report::ConfigProfile::V1,
         operation: "set/duty".into(),
         key: "zk2/lab/rf0/config.v1/@op/set/duty".into(),
         request: serde_json::json!({}),
+        request_bytes: None,
         actor: None,
         request_id: None,
         checked: None,
@@ -328,6 +333,7 @@ fn a_landing_about_another_deployment_is_dropped() {
             namespace: "elsewhere".into(),
             why: ReadWhy::Asked,
             report: report(&view(true)),
+            v2: None,
             at: SystemTime::now() + Duration::from_secs(5),
         }),
     );

@@ -4,6 +4,16 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — the Config tool on a `config.v2` owner (#985 G3)
+
+| Before | Now | Notes |
+|---|---|---|
+| the Config tool read `config.v1` alone | a service whose descriptor's `profiles` lists `config.v2` is read through its config interface: the form drawn from its contract's `config.groups`, the values, pending and last change its record's, a PROFILE field naming the interface | `config.v2` §2.2, §2.3 |
+| a value's startup line | for `config.v2`, "its startup value differs" when the record's bit says so | v2 §2.3 |
+| an act's answer card | `config.v2`'s record: answered, pending before its apply, or a dry run | v2 §2.9 |
+| an idempotency key a ULID | for `config.v2`, a 32-bit nonce | v2 §2.14 |
+| — | shots scene `workbench-config-v2` | `lab/rf0` on the spec's `rfcfg.v1` |
+
 ## Unreleased (`main`, zk2) — Send calls a packed operation (#609, #985)
 
 Core 0.95 answers zk2py's round 101 (F-472 to F-479).

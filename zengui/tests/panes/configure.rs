@@ -35,6 +35,7 @@ fn state(view: &ConfigView) -> ConfigState {
             world.config_events(),
             Some(&format!("{RF0_INSTANCE}-2")),
         ),
+        v2: None,
         at: config_read_at(),
     });
     s.now = Some(config_now());
@@ -173,6 +174,7 @@ fn a_sensitive_value_is_never_rendered() {
                         detail: None,
                     }),
                     detail_undecodable: None,
+                    mark: None,
                 },
             },
         ))),
@@ -247,6 +249,7 @@ fn each_answer_renders_by_its_union() {
                         detail: None,
                     }),
                     detail_undecodable: None,
+                    mark: None,
                 },
             },
             "ConfigError restart-required",
@@ -334,9 +337,11 @@ fn act_report(operation: &str, answer: ConfigActAnswer) -> ConfigActReport {
     ConfigActReport {
         namespace: String::new(),
         service: RF0.into(),
+        profile: zenkey_fleet::report::ConfigProfile::V1,
         operation: operation.into(),
         key: format!("zk2/{RF0}/config.v1/@op/{operation}"),
         request: serde_json::json!({}),
+        request_bytes: None,
         actor: Some("ops".into()),
         request_id: None,
         checked: None,

@@ -1,5 +1,7 @@
 //! The Config tool (#768, CD): one service's `config.v1`, in the Workbench
-//! (`spec/profiles/config/v1.md`, text 0.3).
+//! (`spec/profiles/config/v1.md`, text 0.3), or a `config.v2` owner's
+//! record, its form drawn from its contract (#985 G3,
+//! `spec/profiles/config/v2.md`).
 //!
 //! It shows what the owner serves and what the engine concluded from it:
 //! the view's groups by class, each parameter with its value, source,
@@ -211,6 +213,16 @@ fn header<'a>(addr: &'a Addr, d: &ConfigData<'a>) -> Element<'a, Message> {
     ]
     .spacing(sp.sm);
     let mut fields = Vec::new();
+    if let Some(t) = s.v2() {
+        fields.push(kit::field(
+            "PROFILE",
+            kit::mono(format!(
+                "config.v2 — {} ({}), its form from the contract",
+                t.iface,
+                &t.fingerprint.hex().to_string()[..8]
+            )),
+        ));
+    }
     if let Some(v) = s.view() {
         fields.push(kit::field("INSTANCE", kit::mono(v.instance.clone())));
         fields.push(kit::field("REVISION", kit::mono(v.revision.to_string())));
@@ -282,10 +294,19 @@ fn reading<'a>(
     d: &ConfigData<'a>,
 ) -> Column<'a, Message> {
     let sp = d.sp;
+    let v2 = report.profile == zenkey_fleet::report::ConfigProfile::V2;
+    let doc = if v2 { "record" } else { "view" };
     if let Some(premise) = zenkey_fleet::judge::config::premise(report.premise) {
         col = col.push(kit::callout(
             Tone::Neutral,
-            kit::caption(answer_line("config.v1 here:", &premise)),
+            kit::caption(answer_line(
+                if v2 {
+                    "config.v2 here:"
+                } else {
+                    "config.v1 here:"
+                },
+                &premise,
+            )),
         ));
     }
     if let Some(why) = &report.unobservable {
@@ -296,24 +317,34 @@ fn reading<'a>(
     }
     let mut fresh = column![].spacing(sp.xs);
     if let Some(v) = report.view.as_option() {
-        fresh = fresh.push(kit::muted(freshness_line("view", v, report.clock)));
+        fresh = fresh.push(kit::muted(freshness_line(doc, v, report.clock)));
         if let Some(u) = &v.undecodable {
             fresh = fresh.push(kit::status_chip(
                 Tone::Caution,
-                format!("the view's bytes are no ConfigView — {u}"),
+                if v2 {
+                    format!("the record does not read by its contract — {u}")
+                } else {
+                    format!("the view's bytes are no ConfigView — {u}")
+                },
             ));
         }
     }
-    fresh = fresh.push(kit::muted(freshness_line(
-        "status",
-        &report.status,
-        report.clock,
-    )));
+    if let Some(st) = report.status.as_option() {
+        fresh = fresh.push(kit::muted(freshness_line("status", st, report.clock)));
+    }
     col = col.push(fresh);
 
     let Some(view) = d.state.view() else {
         // The schema is the view's to serve (§2.2): without one nothing can
         // be typed, so nothing is offered.
+        if v2 {
+            return col.push(kit::empty(
+                kit::EmptyKind::Silent,
+                "No record",
+                "no record was read: its contract declares the form, and the record holds the \
+                 values a change is checked against (config.v2 §2.2, §2.3)",
+            ));
+        }
         return col.push(kit::empty(
             kit::EmptyKind::Silent,
             "No view",
@@ -644,6 +675,27 @@ fn param_row<'a>(
                     c = c.push(kit::muted(format!(
                         "startup {s} — what a restart runs (§2.3)"
                     )));
+                }
+                // A config.v2 record says whether the startup value
+                // differs, never what it is (v2 §2.3).
+                let differs = d
+                    .state
+                    .shown()
+                    .and_then(|r| r.report.record.as_ref())
+                    .and_then(|r| r.record.as_ref())
+                    .and_then(|st| st.groups.get(&g.name))
+                    .and_then(|gs| gs.params.get(&p.name))
+                    .is_some_and(|ps| {
+                        matches!(
+                            ps,
+                            zenkey_model::config::v2::ParamState::Plain { differs: true, .. }
+                        )
+                    });
+                if differs {
+                    c = c.push(kit::muted(
+                        "its startup value differs — a restart would not keep this (config.v2 \
+                         §2.3)",
+                    ));
                 }
                 c.into()
             }
@@ -1023,6 +1075,39 @@ fn landed<'a>(r: &'a ConfigActReport, act: &Act, sp: Spacing) -> Element<'a, Mes
         ]
         .spacing(sp.xs)
         .into(),
+        ConfigActAnswer::Record {
+            view, record, size, ..
+        } => {
+            let head = if record.would_be {
+                kit::status_chip(
+                    Tone::Info,
+                    format!(
+                        "dry run — the record as it would read, {size} B; nothing was touched \
+                         (config.v2 §2.9)"
+                    ),
+                )
+            } else if record
+                .pending
+                .as_ref()
+                .is_some_and(|p| p.apply_at.is_some())
+            {
+                kit::status_chip(
+                    Tone::Info,
+                    format!(
+                        "pending — the record before the apply, {size} B: confirm over the new \
+                         link once it shows applied (config.v2 §2.9)"
+                    ),
+                )
+            } else {
+                kit::status_chip(
+                    Tone::Positive,
+                    format!("answered — the record after the act, {size} B (config.v2 §2.9)"),
+                )
+            };
+            column![head, kit::muted(view_summary(view))]
+                .spacing(sp.xs)
+                .into()
+        }
         ConfigActAnswer::Pending { pending } => column![
             kit::status_chip(
                 Tone::Info,

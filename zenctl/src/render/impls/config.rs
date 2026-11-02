@@ -9,11 +9,16 @@
 //!   are shown as written, named as the owner's clock (§2.8).
 //! * **A sensitive value is never drawn** (§2.15): a write-only parameter
 //!   reads `<sensitive: write-only>`, whatever a document carried.
+//!
+//! A `config.v2` reading (#985 G3) draws its record as the view, through
+//! its contract, with the interface and the revision it was read by; a
+//! parameter whose startup value differs says so, the record carrying no
+//! startup value. Every act's answer is the record.
 
 use zenkey_fleet::report::{
     Asked, ConfigActAnswer, ConfigActReport, ConfigAnswer, ConfigAnswerToken, ConfigCheckedRead,
-    ConfigDocument, ConfigFreshness, ConfigPremise, ConfigRefusal, ConfigReport, ConfigTyping,
-    ConfigVia, FreshnessToken,
+    ConfigDocument, ConfigFreshness, ConfigPremise, ConfigProfile, ConfigRefusal, ConfigReport,
+    ConfigTyping, ConfigVia, FreshnessToken, InbandStamp,
 };
 use zenkey_model::config::{ConfigStatus, ConfigView, Kind, Parameter, Value};
 
@@ -74,9 +79,19 @@ fn value_text(p: &Parameter, v: &Value) -> String {
     }
 }
 
+/// An as-of mark, as `call` draws one.
+fn mark_words(m: &InbandStamp) -> String {
+    format!("as of run {}, seq {}", m.run, m.seq)
+}
+
+/// `config.v2`'s parameters whose startup value differs, from a record.
+fn differs_in(r: &zenkey_model::config::v2::State) -> std::collections::BTreeSet<(String, String)> {
+    zenkey_fleet::model::config::differs_of(r)
+}
+
 /// One parameter's line: its value, source and startup value, or why there
-/// is none to draw.
-fn parameter_cells(p: &Parameter) -> [Cell; 3] {
+/// is none to draw; `differs`, a `config.v2` record's bit (v2 §2.3).
+fn parameter_cells(p: &Parameter, differs: bool) -> [Cell; 3] {
     let value = if p.sensitive {
         Cell::styled("<sensitive: write-only>", style::UNPROVEN)
     } else {
@@ -95,12 +110,25 @@ fn parameter_cells(p: &Parameter) -> [Cell; 3] {
             value_text(p, startup)
         ));
     }
+    if differs && !p.sensitive {
+        rest.push_str("  its startup value differs — a restart would not keep it");
+    }
     [Cell::text(format!("  {}", p.name)), value, Cell::text(rest)]
 }
 
 /// The view as a grid: a heading per group, its class and `writable`, a
 /// row per parameter.
 fn view_grid(t: &mut Table, v: &ConfigView) {
+    view_grid_with(t, v, &std::collections::BTreeSet::new());
+}
+
+/// [`view_grid`], each parameter in `differs` said to differ from its
+/// startup value (a `config.v2` record's view).
+fn view_grid_with(
+    t: &mut Table,
+    v: &ConfigView,
+    differs: &std::collections::BTreeSet<(String, String)>,
+) {
     let mut g = Grid::unheaded(3);
     for group in &v.groups {
         g.group(format!(
@@ -115,7 +143,10 @@ fn view_grid(t: &mut Table, v: &ConfigView) {
             group.description
         ));
         for p in &group.parameters {
-            g.row(parameter_cells(p));
+            g.row(parameter_cells(
+                p,
+                differs.contains(&(group.name.clone(), p.name.clone())),
+            ));
         }
     }
     t.grid(g);
@@ -224,19 +255,48 @@ impl Render for ConfigReport {
     }
 
     fn table(&self, t: &mut Table) {
+        let profile = self.profile.as_str();
         t.line(format!(
-            "config.v1 of {} in {}",
+            "{profile} of {} in {}",
             self.service,
             namespace_words(&self.namespace)
         ));
+        if let Some(r) = &self.record {
+            t.line(format!(
+                "  interface {} ({}), its record `{}`, times from epoch {}{}{}",
+                r.iface,
+                &r.contract[..r.contract.len().min(15)],
+                r.key,
+                r.epoch,
+                if r.epoch_assumed { " (assumed)" } else { "" },
+                match (r.size, &r.inband) {
+                    (Some(n), Some(m)) => format!("; {n} B, run {}, seq {}", m.run, m.seq),
+                    (Some(n), None) => format!("; {n} B"),
+                    _ => String::new(),
+                }
+            ));
+        }
+        let name = match self.profile {
+            ConfigProfile::V1 => "view",
+            ConfigProfile::V2 => "record",
+        };
         let view = match &self.view {
             Asked::Asked(d) => {
-                t.line(format!("  {}", document_words("view", d)));
+                t.line(format!("  {}", document_words(name, d)));
                 d.value.as_ref()
             }
             Asked::NotAsked => None,
         };
-        t.line(format!("  {}", document_words("status", &self.status)));
+        let status = self.status.as_option();
+        if let Some(s) = status {
+            t.line(format!("  {}", document_words("status", s)));
+        }
+        let differs = self
+            .record
+            .as_ref()
+            .and_then(|r| r.record.as_ref())
+            .map(differs_in)
+            .unwrap_or_default();
         if let Some(v) = view {
             facts_lines(
                 t,
@@ -247,8 +307,8 @@ impl Render for ConfigReport {
                 v.last_change.as_ref(),
                 v.desired.as_ref(),
             );
-            view_grid(t, v);
-        } else if let Some(s) = &self.status.value {
+            view_grid_with(t, v, &differs);
+        } else if let Some(s) = status.and_then(|s| s.value.as_ref()) {
             facts_lines(
                 t,
                 &s.instance,
@@ -261,7 +321,7 @@ impl Render for ConfigReport {
             status_grid(t, s);
         }
         t.blank();
-        t.line("what a tool may conclude (config.v1 §5):");
+        t.line(format!("what a tool may conclude ({profile} §5):"));
         t.line(format!(
             "  is a change pending: {}",
             answer_text(&self.pending)
@@ -349,7 +409,10 @@ impl Render for ConfigReport {
                     "across a constrained face: presence and descriptors do not cross, and the \
                      deployment's word stands for the descriptor",
                 )
-                .cite("config.v1 §2.19"),
+                .cite(match self.profile {
+                    ConfigProfile::V1 => "config.v1 §2.19",
+                    ConfigProfile::V2 => "config.v2 §2.19",
+                }),
             ),
             (Some(p), premise) => {
                 notes.push(
@@ -359,12 +422,22 @@ impl Render for ConfigReport {
                         p.instances.len(),
                         self.service,
                         match premise {
+                            ConfigPremise::Listed if self.profile == ConfigProfile::V2 =>
+                                "its descriptor's profiles list config.v2, and its config \
+                                 interface is read by its contract",
                             ConfigPremise::Listed => "its descriptor lists config.v1",
                             ConfigPremise::NotListed =>
-                                "no descriptor of it lists config.v1, so nothing is asked of it",
+                                "no descriptor of it lists config.v1 or config.v2, so nothing is \
+                                 asked of it",
                             ConfigPremise::DescriptorUnread =>
                                 "no descriptor of it read, so whether it implements config.v1 \
-                                 cannot be told",
+                                 or config.v2 cannot be told",
+                            ConfigPremise::ContractUnread =>
+                                "its descriptor lists config.v2, and its config contract is not \
+                                 in hand, so its record cannot be read",
+                            ConfigPremise::ContractInvalid =>
+                                "its config contract has a config.v2 lint finding, so its \
+                                 records are unobservable",
                             ConfigPremise::Absent =>
                                 "absent from a complete read, so nothing is asked of it",
                             ConfigPremise::Incomplete if p.cut_off_during =>
@@ -376,7 +449,10 @@ impl Render for ConfigReport {
                             ConfigPremise::AcrossFace => "",
                         }
                     ))
-                    .cite("config.v1 §2.1"),
+                    .cite(match self.profile {
+                        ConfigProfile::V1 => "config.v1 §2.1",
+                        ConfigProfile::V2 => "config.v2 §2.1",
+                    }),
                 );
             }
             (None, _) => {}
@@ -421,6 +497,9 @@ fn refusal_lines(t: &mut Table, r: &ConfigRefusal) {
     if let Some(c) = &r.cause {
         head.push_str(&format!(" (cause: {c})"));
     }
+    if let Some(m) = &r.mark {
+        head.push_str(&format!(" ({})", mark_words(m)));
+    }
     t.line_styled(head, style::ERROR);
     if let Some(e) = &r.error {
         t.line(format!(
@@ -463,12 +542,18 @@ impl Render for ConfigActReport {
             }
         ));
         t.line(format!(
-            "  request {}",
-            serde_json::to_string(&self.request).unwrap_or_default()
+            "  request {}{}",
+            serde_json::to_string(&self.request).unwrap_or_default(),
+            self.request_bytes
+                .map(|n| format!(" — {n} B as {}'s record", self.operation))
+                .unwrap_or_default()
         ));
         if let Some(c) = &self.checked {
             let read = match c.read {
                 ConfigCheckedRead::View => "checked first against its view",
+                ConfigCheckedRead::Record => {
+                    "checked first against its record, read by its contract"
+                }
                 ConfigCheckedRead::Status => "typed against its status (no schema, no class)",
                 ConfigCheckedRead::Nothing => "sent unchecked (--no-precheck)",
             };
@@ -555,6 +640,55 @@ impl Render for ConfigActReport {
                 );
                 status_grid(t, status);
             }
+            ConfigActAnswer::Record {
+                view,
+                record,
+                size,
+                mark,
+            } => {
+                let at = mark.as_ref().map(mark_words).unwrap_or_default();
+                if record.would_be {
+                    t.line_styled(
+                        format!(
+                            "a dry run — the record as it would read, never its state, {size} B \
+                             {at}"
+                        ),
+                        style::PASS,
+                    );
+                } else {
+                    t.line_styled(
+                        format!(
+                            "answered — its record after the act, revision {}, {size} B {at}",
+                            view.revision
+                        ),
+                        style::PASS,
+                    );
+                }
+                if let Some(p) = &record.pending {
+                    let when = |ms: i64| zenkey_model::config::Time::from_millis(ms).rfc3339();
+                    t.line_styled(
+                        format!(
+                            "  pending change {}: {}deadline {} (the owner's clock)",
+                            p.token,
+                            p.apply_at
+                                .map(|a| format!("applies at {}, ", when(a)))
+                                .unwrap_or_else(|| "applied, ".to_owned()),
+                            when(p.deadline)
+                        ),
+                        style::WARNING,
+                    );
+                }
+                facts_lines(
+                    t,
+                    &view.instance,
+                    view.revision,
+                    view.confirm_floor_s,
+                    view.pending.as_ref(),
+                    view.last_change.as_ref(),
+                    view.desired.as_ref(),
+                );
+                view_grid_with(t, view, &differs_in(record));
+            }
             ConfigActAnswer::Refused { refusal } => refusal_lines(t, refusal),
             ConfigActAnswer::Malformed { malformed } => {
                 t.line_styled(
@@ -601,6 +735,16 @@ impl Render for ConfigActReport {
             notes.push(Note::next_step(format!(
                 "read its view over the new link, then: zenctl config confirm {} {}",
                 self.service, pending.token
+            )));
+        }
+        if let ConfigActAnswer::Record { record, .. } = &self.answer
+            && let Some(p) = record.pending.as_ref().filter(|_| !record.would_be)
+            && self.operation.starts_with("set/")
+        {
+            notes.push(Note::next_step(format!(
+                "read its record over the new link once applied, then: zenctl config confirm {} \
+                 {}",
+                self.service, p.token
             )));
         }
         notes

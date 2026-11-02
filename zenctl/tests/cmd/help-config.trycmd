@@ -8,9 +8,9 @@ read; an act 0 answered, 1 refused, 2 silence or an input refused here.
 
 ```console
 $ zenctl config --help
-A running service's configuration, through config.v1.
+A running service's configuration, through config.v1 or config.v2.
 
-config.v1 (spec/profiles/config/v1.md), through a session in the deployment's namespace: `get` reads a service's view (the served schema beside every running value, where each came from, and what a restart would run) or its compact status, with what a tool may conclude from them (§5); `set` changes one group, its values typed and checked against the served schema before anything is sent; `confirm`, `cancel`, `extend` and `persist` drive a pending change to its end. Each act is its own key, so a deployment grants each separately (§2.21).
+config.v1 (spec/profiles/config/v1.md), through a session in the deployment's namespace: `get` reads a service's view (the served schema beside every running value, where each came from, and what a restart would run) or its compact status, with what a tool may conclude from them (§5); `set` changes one group, its values typed and checked against the served schema before anything is sent; `confirm`, `cancel`, `extend` and `persist` drive a pending change to its end. Each act is its own key, so a deployment grants each separately (§2.21). A service whose descriptor's profiles list config.v2 (spec/profiles/config/v2.md) is read through its own config contract, held (--contracts) or retrieved: its one record stands for the view, its schema is the contract's, and every act answers the record.
 
 Usage: zenctl config <COMMAND>
 
@@ -58,7 +58,26 @@ Options:
           This host's clock and the owner's agree within the HLC delta (500 ms), as the deployment keeps them: a reply's stamp is then aged against this clock (freshness.v1 §2.6)
 
       --across-face
-          The service sits across a constrained face (spec §8.5), where presence and descriptors do not cross: the deployment's word that it implements config.v1 (§2.19, R7)
+          The service sits across a constrained face (spec §8.5), where presence and descriptors do not cross: the deployment's word that it implements config.v1, or, with a revision in --contracts that uses config.v2, that config interface (§2.19, R7)
+
+      --contracts <PATH>
+          Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
+          
+          They seed the contract store, so a revision held here is never retrieved from the bus (spec §8.5) — and a question they answer alone opens no session at all. A file that is not a valid contract is reported on stderr; a path that loads nothing is refused (exit 2).
+
+      --catalog <PATH>
+          The deployment catalog (core §8.6), repeatable: a `zk2-catalog/1` file the deployment provisions, never fetched from the bus.
+          
+          An owner's packed `time` fields are then read under the epoch of the catalog its descriptor names, read through these (a successor included); with no descriptor in hand, across a constrained face or from a capture, these state it, the deployment's word. Without one, an owner whose descriptor names no catalog counts from 0, and one that names a catalog none of these is or succeeds is refused (`unknown_catalog`). `gen` and `serve` write under the one given, and state its id in their descriptor; the doctor's `catalog-missing` judges each running revision against it; `check face` compares the one the far side holds with the face policy's `catalog` (link.v2 §2.19). A file that is not a catalog is refused (exit 2).
+
+      --iface <IFACE>
+          Across a face, the config interface (`<name>.v<major>`) among the revisions in hand that use config.v2: the deployment's word for the service's, since no descriptor crosses (config.v2 §2.1)
+
+      --face-policy <FILE>
+          With --face, the `link.v2` face policy the service sits across: the default --timeout is the face's `reply_timeout_ms` (core §8.1), and the session runs its `[transport]` (#988 L4). A `link.v1` policy is refused, exit 2
+
+      --face <NAME>
+          The face of --face-policy, by its name (`[face.<name>]`)
 
       --namespace <NS>
           The deployment namespace: the session is opened in it.
@@ -162,6 +181,25 @@ Options:
       --request-id <ID>
           The request id the change event records. Default: a fresh ULID
 
+      --contracts <PATH>
+          Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
+          
+          They seed the contract store, so a revision held here is never retrieved from the bus (spec §8.5) — and a question they answer alone opens no session at all. A file that is not a valid contract is reported on stderr; a path that loads nothing is refused (exit 2).
+
+      --catalog <PATH>
+          The deployment catalog (core §8.6), repeatable: a `zk2-catalog/1` file the deployment provisions, never fetched from the bus.
+          
+          An owner's packed `time` fields are then read under the epoch of the catalog its descriptor names, read through these (a successor included); with no descriptor in hand, across a constrained face or from a capture, these state it, the deployment's word. Without one, an owner whose descriptor names no catalog counts from 0, and one that names a catalog none of these is or succeeds is refused (`unknown_catalog`). `gen` and `serve` write under the one given, and state its id in their descriptor; the doctor's `catalog-missing` judges each running revision against it; `check face` compares the one the far side holds with the face policy's `catalog` (link.v2 §2.19). A file that is not a catalog is refused (exit 2).
+
+      --iface <IFACE>
+          Across a face, the config interface (`<name>.v<major>`) among the revisions in hand that use config.v2: the deployment's word for the service's, since no descriptor crosses (config.v2 §2.1)
+
+      --face-policy <FILE>
+          With --face, the `link.v2` face policy the service sits across: the default --timeout is the face's `reply_timeout_ms` (core §8.1), and the session runs its `[transport]` (#988 L4). A `link.v1` policy is refused, exit 2
+
+      --face <NAME>
+          The face of --face-policy, by its name (`[face.<name>]`)
+
       --namespace <NS>
           The deployment namespace: the session is opened in it.
           
@@ -242,6 +280,25 @@ Options:
 
       --request-id <ID>
           The request id the change event records. Default: a fresh ULID
+
+      --contracts <PATH>
+          Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
+          
+          They seed the contract store, so a revision held here is never retrieved from the bus (spec §8.5) — and a question they answer alone opens no session at all. A file that is not a valid contract is reported on stderr; a path that loads nothing is refused (exit 2).
+
+      --catalog <PATH>
+          The deployment catalog (core §8.6), repeatable: a `zk2-catalog/1` file the deployment provisions, never fetched from the bus.
+          
+          An owner's packed `time` fields are then read under the epoch of the catalog its descriptor names, read through these (a successor included); with no descriptor in hand, across a constrained face or from a capture, these state it, the deployment's word. Without one, an owner whose descriptor names no catalog counts from 0, and one that names a catalog none of these is or succeeds is refused (`unknown_catalog`). `gen` and `serve` write under the one given, and state its id in their descriptor; the doctor's `catalog-missing` judges each running revision against it; `check face` compares the one the far side holds with the face policy's `catalog` (link.v2 §2.19). A file that is not a catalog is refused (exit 2).
+
+      --iface <IFACE>
+          Across a face, the config interface (`<name>.v<major>`) among the revisions in hand that use config.v2: the deployment's word for the service's, since no descriptor crosses (config.v2 §2.1)
+
+      --face-policy <FILE>
+          With --face, the `link.v2` face policy the service sits across: the default --timeout is the face's `reply_timeout_ms` (core §8.1), and the session runs its `[transport]` (#988 L4). A `link.v1` policy is refused, exit 2
+
+      --face <NAME>
+          The face of --face-policy, by its name (`[face.<name>]`)
 
       --namespace <NS>
           The deployment namespace: the session is opened in it.
@@ -324,6 +381,25 @@ Options:
       --request-id <ID>
           The request id the change event records. Default: a fresh ULID
 
+      --contracts <PATH>
+          Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
+          
+          They seed the contract store, so a revision held here is never retrieved from the bus (spec §8.5) — and a question they answer alone opens no session at all. A file that is not a valid contract is reported on stderr; a path that loads nothing is refused (exit 2).
+
+      --catalog <PATH>
+          The deployment catalog (core §8.6), repeatable: a `zk2-catalog/1` file the deployment provisions, never fetched from the bus.
+          
+          An owner's packed `time` fields are then read under the epoch of the catalog its descriptor names, read through these (a successor included); with no descriptor in hand, across a constrained face or from a capture, these state it, the deployment's word. Without one, an owner whose descriptor names no catalog counts from 0, and one that names a catalog none of these is or succeeds is refused (`unknown_catalog`). `gen` and `serve` write under the one given, and state its id in their descriptor; the doctor's `catalog-missing` judges each running revision against it; `check face` compares the one the far side holds with the face policy's `catalog` (link.v2 §2.19). A file that is not a catalog is refused (exit 2).
+
+      --iface <IFACE>
+          Across a face, the config interface (`<name>.v<major>`) among the revisions in hand that use config.v2: the deployment's word for the service's, since no descriptor crosses (config.v2 §2.1)
+
+      --face-policy <FILE>
+          With --face, the `link.v2` face policy the service sits across: the default --timeout is the face's `reply_timeout_ms` (core §8.1), and the session runs its `[transport]` (#988 L4). A `link.v1` policy is refused, exit 2
+
+      --face <NAME>
+          The face of --face-policy, by its name (`[face.<name>]`)
+
       --namespace <NS>
           The deployment namespace: the session is opened in it.
           
@@ -404,6 +480,25 @@ Options:
 
       --request-id <ID>
           The request id the change event records. Default: a fresh ULID
+
+      --contracts <PATH>
+          Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
+          
+          They seed the contract store, so a revision held here is never retrieved from the bus (spec §8.5) — and a question they answer alone opens no session at all. A file that is not a valid contract is reported on stderr; a path that loads nothing is refused (exit 2).
+
+      --catalog <PATH>
+          The deployment catalog (core §8.6), repeatable: a `zk2-catalog/1` file the deployment provisions, never fetched from the bus.
+          
+          An owner's packed `time` fields are then read under the epoch of the catalog its descriptor names, read through these (a successor included); with no descriptor in hand, across a constrained face or from a capture, these state it, the deployment's word. Without one, an owner whose descriptor names no catalog counts from 0, and one that names a catalog none of these is or succeeds is refused (`unknown_catalog`). `gen` and `serve` write under the one given, and state its id in their descriptor; the doctor's `catalog-missing` judges each running revision against it; `check face` compares the one the far side holds with the face policy's `catalog` (link.v2 §2.19). A file that is not a catalog is refused (exit 2).
+
+      --iface <IFACE>
+          Across a face, the config interface (`<name>.v<major>`) among the revisions in hand that use config.v2: the deployment's word for the service's, since no descriptor crosses (config.v2 §2.1)
+
+      --face-policy <FILE>
+          With --face, the `link.v2` face policy the service sits across: the default --timeout is the face's `reply_timeout_ms` (core §8.1), and the session runs its `[transport]` (#988 L4). A `link.v1` policy is refused, exit 2
+
+      --face <NAME>
+          The face of --face-policy, by its name (`[face.<name>]`)
 
       --namespace <NS>
           The deployment namespace: the session is opened in it.
@@ -488,6 +583,25 @@ Options:
 
       --request-id <ID>
           The request id the change event records. Default: a fresh ULID
+
+      --contracts <PATH>
+          Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
+          
+          They seed the contract store, so a revision held here is never retrieved from the bus (spec §8.5) — and a question they answer alone opens no session at all. A file that is not a valid contract is reported on stderr; a path that loads nothing is refused (exit 2).
+
+      --catalog <PATH>
+          The deployment catalog (core §8.6), repeatable: a `zk2-catalog/1` file the deployment provisions, never fetched from the bus.
+          
+          An owner's packed `time` fields are then read under the epoch of the catalog its descriptor names, read through these (a successor included); with no descriptor in hand, across a constrained face or from a capture, these state it, the deployment's word. Without one, an owner whose descriptor names no catalog counts from 0, and one that names a catalog none of these is or succeeds is refused (`unknown_catalog`). `gen` and `serve` write under the one given, and state its id in their descriptor; the doctor's `catalog-missing` judges each running revision against it; `check face` compares the one the far side holds with the face policy's `catalog` (link.v2 §2.19). A file that is not a catalog is refused (exit 2).
+
+      --iface <IFACE>
+          Across a face, the config interface (`<name>.v<major>`) among the revisions in hand that use config.v2: the deployment's word for the service's, since no descriptor crosses (config.v2 §2.1)
+
+      --face-policy <FILE>
+          With --face, the `link.v2` face policy the service sits across: the default --timeout is the face's `reply_timeout_ms` (core §8.1), and the session runs its `[transport]` (#988 L4). A `link.v1` policy is refused, exit 2
+
+      --face <NAME>
+          The face of --face-policy, by its name (`[face.<name>]`)
 
       --namespace <NS>
           The deployment namespace: the session is opened in it.

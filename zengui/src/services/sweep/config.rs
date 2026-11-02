@@ -3,7 +3,9 @@
 //! and the descriptor (the premise of every §5 row), an optional window of
 //! listening to the view, the status and the change events, then one S4
 //! GET of the owner's `config.v1/state/**`, and §5's answers judged from
-//! what was read (`spec/profiles/config/v1.md` §5).
+//! what was read (`spec/profiles/config/v1.md` §5). A `config.v2` owner
+//! (#985 G3) is read through its own config interface, which lands beside
+//! the report so the tool's acts go through it.
 
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -29,12 +31,15 @@ pub fn config(
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let report = zenkey_fleet::run_config(&session, &namespace, addr.clone(), spec).await;
+            let obs =
+                zenkey_fleet::observe_config(&session, &namespace, addr.clone(), spec, None).await;
+            let report = zenkey_fleet::judge_config(&obs);
             ReadLanding {
                 addr,
                 namespace,
                 why,
                 report: Arc::new(report),
+                v2: obs.v2.and_then(Result::ok),
                 at: SystemTime::now(),
             }
         },

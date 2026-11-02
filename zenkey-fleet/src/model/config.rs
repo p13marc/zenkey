@@ -27,26 +27,46 @@
 //! and startup value from a view whatever an owner put there, and
 //! [`scrub`] takes the values a tool sent out of any text an owner sends
 //! back.
+//!
+//! **`config.v2`** (#985 G3, `spec/profiles/config/v2.md`). A service is
+//! configurable when its descriptor's `profiles` lists `config.v2`
+//! ([`listing_v2`]); its config interface is the one whose contract uses
+//! it, read through [`V2Target::of`], which refuses a contract whose
+//! `config.v2` lint has a finding (v2 §2.2). Its record, read by the
+//! contract's layout under the deployment epoch, is read as the view
+//! ([`view_of`]: "a fresh record is a fresh view and status", v2 §5), so
+//! every question above is put to it unchanged, but "will this value
+//! survive a restart?", which reads the record's `differs` bit
+//! ([`differs_of`]) since the record carries no startup value. A change is
+//! typed and checked as above against that view, then written as the
+//! group's `Set<T>` ([`set_of`]) or a `Control` ([`control_of`]).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::SystemTime;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use serde_json::Value as Json;
+use zenkey_model::canonical::Fingerprint;
+use zenkey_model::config::v2::{self as cv2, ChangeEvent, Interface, ParamState, State};
 use zenkey_model::config::{
     self as cm, Admitted, Class, ConfigStatus, ConfigView, Facts, Kind, LastFacts, PendingFacts,
     Refusal, Schema, SetRequest, Value,
 };
+use zenkey_model::contract::Contract;
 use zenkey_model::freshness::{
     self as fresh, ClockTrust, Horizon, Judged, Observation, Reply, StampAge,
 };
-use zenkey_model::grammar::Addr;
+use zenkey_model::grammar::{Addr, IfaceId, KindToken};
+
+use crate::model::deployment::Epoch;
 
 use crate::bus::config::Doc;
 use crate::bus::health::{Replied, Stamped};
 use crate::model::catalog::{Catalog, Observed};
 use crate::model::health::Trust;
 use crate::report::{
-    ConfigDocument, ConfigFreshness, ConfigPremise, ConfigTyping, ConfigVia, FreshnessToken,
+    ConfigDocument, ConfigFreshness, ConfigPremise, ConfigProfile, ConfigTyping, ConfigVia,
+    FreshnessToken,
 };
 
 /// The view's and the status's horizon, their `freshness.ttl_s = 60`
@@ -193,12 +213,23 @@ pub fn doc_read<T: Clone>(
     heard: Option<(Observation, Option<&Replied<Doc<T>>>)>,
     trust: &Trust<'_>,
 ) -> DocRead<T> {
+    doc_read_within(&horizon(), got, heard, trust)
+}
+
+/// [`doc_read`] at `horizon`: `config.v2`'s record has its contract's
+/// `freshness.ttl_s` (v2 §2.3).
+pub fn doc_read_within<T: Clone>(
+    horizon: &Horizon,
+    got: Got<'_, T>,
+    heard: Option<(Observation, Option<&Replied<Doc<T>>>)>,
+    trust: &Trust<'_>,
+) -> DocRead<T> {
     let mut observations = Vec::new();
     let mut out = DocRead {
         value: None,
         via: None,
         stamp: None,
-        fresh: fresh::judge_all(&horizon(), &[]),
+        fresh: fresh::judge_all(horizon, &[]),
     };
     // A subscription's silence judges only a member the reader knows: one
     // it heard, or one the GET showed a value of (`freshness.v1` §2.5,
@@ -239,19 +270,28 @@ pub fn doc_read<T: Clone>(
             out.stamp = reply.stamp.clone();
         }
     }
-    out.fresh = fresh::judge_all(&horizon(), &observations);
+    out.fresh = fresh::judge_all(horizon, &observations);
     out
 }
 
 /// One reading of one service, as values: what §5's questions are put to.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConfigReading {
+    /// `config.v2`'s readings put the same questions to its record (#985
+    /// G3).
+    pub profile: ConfigProfile,
     pub premise: ConfigPremise,
-    /// The view; `None` when only the status was asked.
+    /// The view; `None` when only the status was asked. For `config.v2`,
+    /// the record as the view reads it ([`view_of`]).
     pub view: Option<DocRead<ConfigView>>,
+    /// For `config.v2`, never read: the record replaces it.
     pub status: DocRead<ConfigStatus>,
     /// The change events read: the window's, and a replay's.
     pub events: Vec<cm::ConfigChangeEvent>,
+    /// For `config.v2`: the parameters whose startup value differs from
+    /// the running one, by group and name, from the record the view was
+    /// read from (v2 §2.3). The view then carries no startup value.
+    pub differs: BTreeSet<(String, String)>,
 }
 
 /// The fresh documents of a reading, the later-stamped first: §5 answers
@@ -261,6 +301,8 @@ pub struct ConfigReading {
 pub enum Fresh<'r> {
     View(&'r ConfigView),
     Status(&'r ConfigStatus),
+    /// `config.v2`'s record, as the view reads it.
+    Record(&'r ConfigView),
 }
 
 impl Fresh<'_> {
@@ -269,33 +311,34 @@ impl Fresh<'_> {
         match self {
             Fresh::View(_) => "view",
             Fresh::Status(_) => "status",
+            Fresh::Record(_) => "record",
         }
     }
 
     pub fn instance(&self) -> &str {
         match self {
-            Fresh::View(v) => &v.instance,
+            Fresh::View(v) | Fresh::Record(v) => &v.instance,
             Fresh::Status(s) => &s.instance,
         }
     }
 
     pub fn pending(&self) -> Option<&cm::Pending> {
         match self {
-            Fresh::View(v) => v.pending.as_ref(),
+            Fresh::View(v) | Fresh::Record(v) => v.pending.as_ref(),
             Fresh::Status(s) => s.pending.as_ref(),
         }
     }
 
     pub fn last_change(&self) -> Option<&cm::LastChange> {
         match self {
-            Fresh::View(v) => v.last_change.as_ref(),
+            Fresh::View(v) | Fresh::Record(v) => v.last_change.as_ref(),
             Fresh::Status(s) => s.last_change.as_ref(),
         }
     }
 
     pub fn desired(&self) -> Option<&cm::DesiredReport> {
         match self {
-            Fresh::View(v) => v.desired.as_ref(),
+            Fresh::View(v) | Fresh::Record(v) => v.desired.as_ref(),
             Fresh::Status(s) => s.desired.as_ref(),
         }
     }
@@ -308,8 +351,11 @@ impl ConfigReading {
     }
 
     /// The fresh documents, the later-stamped first; the view first when
-    /// neither stamp orders them.
+    /// neither stamp orders them. `config.v2`'s one record alone.
     pub fn fresh(&self) -> Vec<Fresh<'_>> {
+        if self.profile == ConfigProfile::V2 {
+            return self.fresh_view().map(Fresh::Record).into_iter().collect();
+        }
         let view = self
             .view
             .as_ref()
@@ -613,6 +659,437 @@ pub fn scrub(text: &str, secrets: &[String]) -> String {
         out = out.replace(s.as_str(), cm::REDACTED);
     }
     out
+}
+
+// ─── config.v2 (#985 G3) ─────────────────────────────────────────────────────
+
+/// What `addr`'s descriptors say of `config.v2` (v2 §2.1): listed by any
+/// served descriptor's `profiles`; else unread when an instance's
+/// descriptor did not read, or descriptors were not asked; else not
+/// listed.
+pub fn listing_v2(o: &Observed, addr: &Addr) -> ConfigPremise {
+    let Some(descriptors) = &o.descriptors else {
+        return ConfigPremise::DescriptorUnread;
+    };
+    let mut unread = false;
+    for ((a, _), read) in descriptors {
+        if a != addr {
+            continue;
+        }
+        match read.descriptor() {
+            Some(d) if d.profiles.iter().any(|p| p == cv2::PROFILE) => {
+                return ConfigPremise::Listed;
+            }
+            Some(_) => {}
+            None => unread = true,
+        }
+    }
+    if unread {
+        ConfigPremise::DescriptorUnread
+    } else {
+        ConfigPremise::NotListed
+    }
+}
+
+/// The revisions `addr`'s served descriptors name, in order: its config
+/// interface is the one of them whose contract uses `config.v2` (v2 §2.1).
+pub fn named_revisions(o: &Observed, addr: &Addr) -> Vec<(IfaceId, Fingerprint)> {
+    let mut out = BTreeSet::new();
+    for ((a, _), read) in o.descriptors.iter().flatten() {
+        if a != addr {
+            continue;
+        }
+        for e in read
+            .descriptor()
+            .into_iter()
+            .flat_map(|d| d.interfaces.iter())
+        {
+            if let (Ok(i), Ok(f)) = (e.iface.parse(), Fingerprint::parse(&e.contract)) {
+                out.insert((i, f));
+            }
+        }
+    }
+    out.into_iter().collect()
+}
+
+/// Whether a contract uses `config.v2` (v2 §2.1).
+pub fn uses_v2(c: &Contract) -> bool {
+    c.uses.iter().any(|u| u.to_string() == cv2::PROFILE)
+}
+
+/// A `config.v2` owner's config interface, as a reader holds it: the
+/// contract, its declaration and derived types, the record's horizon, and
+/// the deployment epoch its times count from.
+#[derive(Debug, Clone)]
+pub struct V2Target {
+    pub iface: IfaceId,
+    pub fingerprint: Fingerprint,
+    pub contract: Arc<Contract>,
+    pub interface: Arc<Interface>,
+    /// The record's `freshness.ttl_s` (v2 §2.3).
+    pub ttl: Duration,
+    /// The epoch its times count from, seconds since the Unix epoch.
+    pub epoch: i64,
+    /// Nothing stated the epoch: 0 is assumed (core §8.6).
+    pub epoch_assumed: bool,
+}
+
+/// Why a reader holds no config interface to read a `config.v2` owner by.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V2Unread {
+    /// [`ConfigPremise::ContractUnread`] or
+    /// [`ConfigPremise::ContractInvalid`].
+    pub premise: ConfigPremise,
+    pub why: String,
+}
+
+impl V2Target {
+    /// `contract`'s config interface under `epoch` (core §8.6), refused
+    /// when its `config.v2` lint has a finding: "a reader MUST NOT read a
+    /// record by a contract that has one" (v2 §2.2). A refused epoch
+    /// refuses it too, since the record holds `time` fields.
+    ///
+    /// # Errors
+    /// The [`V2Unread`].
+    pub fn of(
+        contract: Arc<Contract>,
+        fingerprint: Fingerprint,
+        epoch: Epoch,
+    ) -> Result<V2Target, V2Unread> {
+        let invalid = |why: String| V2Unread {
+            premise: ConfigPremise::ContractInvalid,
+            why,
+        };
+        let findings = cv2::lint_contract(&contract);
+        if !findings.is_empty() {
+            let named: Vec<String> = findings
+                .iter()
+                .map(|f| format!("{} at {}", f.reason.token(), f.at))
+                .collect();
+            return Err(invalid(format!(
+                "{} {}'s config.v2 lint finds {}: its records are unobservable (config.v2 §2.2)",
+                contract.iface,
+                &fingerprint.hex().to_string()[..8],
+                named.join(", ")
+            )));
+        }
+        let interface = Interface::of(&contract).map_err(|e| {
+            invalid(format!(
+                "{} {}: {e} (config.v2 §2.2)",
+                contract.iface,
+                &fingerprint.hex().to_string()[..8]
+            ))
+        })?;
+        if let Some(why) = epoch.refusal() {
+            return Err(V2Unread {
+                premise: ConfigPremise::ContractUnread,
+                why: format!("{}'s record: {why}", contract.iface),
+            });
+        }
+        let ttl = contract
+            .resource(KindToken::State, cv2::CONFIG)
+            .and_then(|r| r.annotations.get("freshness.ttl_s"))
+            .and_then(Json::as_u64)
+            .map_or(cm::TTL, Duration::from_secs);
+        Ok(V2Target {
+            iface: contract.iface.clone(),
+            fingerprint,
+            interface: Arc::new(interface),
+            contract,
+            ttl,
+            epoch: epoch
+                .given()
+                .unwrap_or(zenkey_model::catalog::EPOCH_WITHOUT_CATALOG),
+            epoch_assumed: epoch == Epoch::Assumed,
+        })
+    }
+
+    /// The record's horizon.
+    pub fn horizon(&self) -> Horizon {
+        Horizon::Within(self.ttl)
+    }
+
+    /// `zk2/<addr>/<iface>/state/config`, the record's key.
+    pub fn record_key(&self, addr: &Addr) -> String {
+        [
+            zenkey_model::grammar::GRAMMAR,
+            addr.system.as_str(),
+            addr.service.as_str(),
+            &self.iface.to_string(),
+            "state",
+            cv2::CONFIG,
+        ]
+        .join("/")
+    }
+
+    /// The record's bytes read under `tag` (core §7.6, v2 §2.3).
+    ///
+    /// # Errors
+    /// The refusal, its token named.
+    pub fn read(&self, tag: u8, bytes: &[u8]) -> Result<State, String> {
+        self.interface
+            .read_record(tag, bytes, self.epoch)
+            .map_err(|r| {
+                format!(
+                    "not {}'s Record (config.v2 §2.3): {}",
+                    self.iface,
+                    r.token()
+                )
+            })
+    }
+}
+
+/// A `config.v2` record as one read answered it: the record, the stamp of
+/// the put it was, and its payload's size.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecordGot {
+    pub state: State,
+    pub inband: Option<zenkey_model::wire::Stamp>,
+    pub size: usize,
+}
+
+/// The record as the view reads it (v2 §5: "a fresh record is a fresh view
+/// and status"): the schema the contract declares, each group writable as
+/// the record's bit says, each parameter's value and source the record's;
+/// tokens and the instance number in decimal, the deadline in RFC 3339 on
+/// the owner's clock. No startup value: the record says only whether it
+/// differs ([`differs_of`]). A desired outcome this revision does not name
+/// (the escape) is no desired report.
+pub fn view_of(iface: &Interface, s: &State, service: &str) -> ConfigView {
+    let writable: BTreeSet<String> = s
+        .groups
+        .iter()
+        .filter(|(_, g)| g.writable == Some(true))
+        .map(|(n, _)| n.clone())
+        .collect();
+    let schema = iface.schema(&writable);
+    ConfigView {
+        service: service.to_owned(),
+        instance: s.instance.to_string(),
+        revision: s.revision.into(),
+        confirm_floor_s: s.floor_s.into(),
+        pending: s.pending.as_ref().map(|p| cm::Pending {
+            token: p.token.to_string(),
+            groups: p.groups.clone(),
+            deadline: cm::Time::from_millis(p.deadline).rfc3339(),
+            applied: p.applied,
+        }),
+        last_change: s.last.as_ref().map(|l| cm::LastChange {
+            token: l.token.to_string(),
+            groups: l.groups.clone(),
+        }),
+        desired: s.desired.as_ref().and_then(|d| {
+            Some(cm::DesiredReport {
+                observed_revision: d.observed_revision.into(),
+                outcome: d.outcome?,
+                refusal: d.refusal.as_ref().and_then(|r| {
+                    Some(cm::DesiredRefusal {
+                        code: desired_code(r.code?),
+                        group: r.group.clone().unwrap_or_else(|| "(undeclared)".to_owned()),
+                        parameter: r.parameter.clone(),
+                    })
+                }),
+            })
+        }),
+        groups: schema
+            .groups
+            .into_iter()
+            .map(|g| {
+                let held = s.groups.get(&g.name);
+                cm::GroupView {
+                    parameters: g
+                        .parameters
+                        .into_iter()
+                        .map(|p| {
+                            let (value, source) = match held.and_then(|h| h.params.get(&p.name)) {
+                                Some(ParamState::Plain { source, value, .. }) => {
+                                    (value.clone(), *source)
+                                }
+                                Some(ParamState::Sensitive { source }) => (None, *source),
+                                None => (None, None),
+                            };
+                            cm::Parameter {
+                                name: p.name,
+                                kind: p.kind,
+                                description: p.description,
+                                sensitive: p.sensitive,
+                                value: if p.sensitive { None } else { value },
+                                source,
+                                startup: None,
+                            }
+                        })
+                        .collect(),
+                    name: g.name,
+                    class: g.class,
+                    description: g.description,
+                    writable: g.writable,
+                }
+            })
+            .collect(),
+    }
+}
+
+fn desired_code(c: cv2::DesiredCode) -> cm::DesiredCode {
+    use cm::DesiredCode as V1;
+    use cv2::DesiredCode as V2;
+    match c {
+        V2::Reach => V1::Reach,
+        V2::Contract => V1::Contract,
+        V2::Sensitive => V1::Sensitive,
+        V2::NotFound => V1::NotFound,
+        V2::InvalidRequest => V1::InvalidRequest,
+        V2::Unavailable => V1::Unavailable,
+        V2::Busy => V1::Busy,
+        V2::DeviceRefused => V1::DeviceRefused,
+    }
+}
+
+/// The parameters whose startup value differs from the running one, by
+/// group and name: the record's `differs` bits (v2 §2.3).
+pub fn differs_of(s: &State) -> BTreeSet<(String, String)> {
+    s.groups
+        .iter()
+        .flat_map(|(g, gs)| {
+            gs.params
+                .iter()
+                .filter(|(_, ps)| matches!(ps, ParamState::Plain { differs: true, .. }))
+                .map(move |(p, _)| (g.clone(), p.clone()))
+        })
+        .collect()
+}
+
+/// A `config.v2` change event as `config.v1`'s is read (v2 §2.17): the
+/// instance number and the token in decimal, its edits as they came.
+pub fn event_of(e: ChangeEvent) -> cm::ConfigChangeEvent {
+    cm::ConfigChangeEvent {
+        service: e.service,
+        instance: e.instance.to_string(),
+        revision: e.revision,
+        token: e.token.to_string(),
+        outcome: e.outcome,
+        edits: e.edits,
+        actor: e.actor,
+        request_id: e.request_id,
+        claimed_source: e.claimed_source,
+    }
+}
+
+/// A number of the command line as `config.v2`'s field of `bits` reads it.
+fn number<T: TryFrom<u64>>(what: &str, text: &str, bits: u32, cite: &str) -> Result<T, String> {
+    text.parse::<u64>()
+        .ok()
+        .and_then(|n| T::try_from(n).ok())
+        .ok_or_else(|| {
+            format!(
+                "{what} {text:?} is no config.v2 {what}: an integer from 0 to 2^{bits} − 1 ({cite})"
+            )
+        })
+}
+
+/// A `set`'s request, typed and checked as `config.v1`'s ([`type_values`],
+/// [`precheck`]), as `group`'s `Set<T>` (v2 §2.5): each value the group
+/// declares at its kind, a token as 48 bits, an expected revision and an
+/// idempotency key as 32, a window as 16 (v2 §2.8, §2.14).
+///
+/// # Errors
+/// What cannot be written as one, in words: nothing is sent.
+pub fn set_of(iface: &Interface, group: &str, req: &SetRequest) -> Result<cv2::Set, String> {
+    let Some(g) = iface.groups.settable(group) else {
+        return Err(match iface.groups.group(group) {
+            Some(_) => format!(
+                "group {group:?} is contract: its contract serves no set for it, so a call would \
+                 reach no queryable (config.v2 §2.4)"
+            ),
+            None => format!(
+                "{} declares no group {group:?} (config.v2 §2.2)",
+                "the contract"
+            ),
+        });
+    };
+    let mut values = BTreeMap::new();
+    for (name, v) in &req.values {
+        let Some(p) = g.parameters.iter().find(|p| &p.name == name) else {
+            return Err(format!(
+                "group {group:?} declares no parameter {name:?}: its Set<T> has no field for it \
+                 (config.v2 §2.5)"
+            ));
+        };
+        let value = match (&p.kind, v) {
+            (cv2::ParamKind::Bool, Json::Bool(b)) => Value::Bool(*b),
+            (cv2::ParamKind::Int { .. }, Json::Number(n)) if n.as_i64().is_some() => {
+                Value::Integer(n.as_i64().expect("checked"))
+            }
+            (kind, _) => {
+                return Err(format!(
+                    "{group}.{name} is {}: {v} is not one (config.v2 §2.2)",
+                    match kind {
+                        cv2::ParamKind::Bool => "a bool".to_owned(),
+                        cv2::ParamKind::Int { minimum, maximum } =>
+                            format!("an int from {minimum} to {maximum}"),
+                    }
+                ));
+            }
+        };
+        values.insert(name.clone(), value);
+    }
+    Ok(cv2::Set {
+        values,
+        confirm_s: req
+            .confirm_s
+            .map(|c| number("window", &c.to_string(), 16, "config.v2 §2.8"))
+            .transpose()?,
+        token: req
+            .token
+            .as_deref()
+            .map(|t| {
+                number::<u64>("token", t, 48, "config.v2 §2.6").and_then(|n| {
+                    (n <= cv2::TOKEN_MAX).then_some(n).ok_or_else(|| {
+                        format!("token {t:?} is wider than 48 bits (config.v2 §2.6)")
+                    })
+                })
+            })
+            .transpose()?,
+        expected_revision: req
+            .expected_revision
+            .map(|r| number("revision", &r.to_string(), 32, "config.v2 §2.3"))
+            .transpose()?,
+        idempotency_key: req
+            .idempotency_key
+            .as_deref()
+            .map(|k| number("idempotency key", k, 32, "config.v2 §2.14"))
+            .transpose()?,
+        dry_run: req.dry_run,
+    })
+}
+
+/// A control operation's request as `Control` (v2 §2.10): its token as 48
+/// bits, `extend`'s window as 16. `answer = "status"` is `config.v1`'s,
+/// and refused: every `config.v2` reply is the record.
+///
+/// # Errors
+/// What cannot be written as one, in words: nothing is sent.
+pub fn control_of(req: &cm::ControlRequest) -> Result<cv2::Control, String> {
+    if req.answer.is_some() {
+        return Err(
+            "a config.v2 owner answers every operation with its record, and has no answer = \
+             \"status\" (config.v2 §2.10)"
+                .to_owned(),
+        );
+    }
+    let token: u64 = number("token", &req.token, 48, "config.v2 §2.6")?;
+    if token > cv2::TOKEN_MAX {
+        return Err(format!(
+            "token {:?} is wider than 48 bits (config.v2 §2.6)",
+            req.token
+        ));
+    }
+    Ok(cv2::Control {
+        token,
+        confirm_s: req
+            .confirm_s
+            .map(|c| number("window", &c.to_string(), 16, "config.v2 §2.8"))
+            .transpose()?,
+    })
 }
 
 #[cfg(test)]
@@ -919,5 +1396,238 @@ mod tests {
         assert!(projection_holds(&v, &s));
         s.revision += 1;
         assert!(!projection_holds(&v, &s));
+    }
+
+    /// The spec's `rfcfg.v1` (#985 G3), read as a reader holds it.
+    fn rfcfg() -> V2Target {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../spec/profiles/config/conformance/contracts/rfcfg.v1.toml");
+        let l = zenkey_model::contract::load_path(&path);
+        let c = l
+            .contract
+            .unwrap_or_else(|| panic!("rfcfg.v1:\n{}", l.report));
+        let fp = Fingerprint::of(&c);
+        V2Target::of(Arc::new(c), fp, Epoch::Stated(0)).expect("rfcfg.v1 reads")
+    }
+
+    /// `records.json`'s idle record with a last change on `duty`, its
+    /// fraction differing from its startup value; `radio` pending when
+    /// asked.
+    fn record(pending: bool) -> State {
+        let mut v = json!({
+            "instance": 4660, "revision": 1, "floor_s": 10, "would_be": false,
+            "pending": null, "last": {"token": 305438721u64, "groups": ["duty"]}, "desired": null,
+            "groups": {
+                "duty": {"writable": true, "params": {
+                    "fraction_ppm": {"source": "runtime", "differs": true, "value": 20000},
+                    "period_s": {"source": "default", "differs": false, "value": 3600},
+                    "enforce": {"source": "default", "differs": false, "value": true}}},
+                "radio": {"writable": true, "params": {
+                    "frequency_hz": {"source": "file", "differs": false, "value": 868100000}}},
+                "link": {"writable": true, "params": {
+                    "net_id": {"source": "default", "differs": false, "value": 1}}},
+                "sim": {"writable": true, "params": {
+                    "pin": {"source": "file"},
+                    "attempts": {"source": "default", "differs": false, "value": 3}}},
+                "queue": {"writable": false, "params": {
+                    "tx_queue_len": {"source": "default", "differs": false, "value": 100}}},
+                "modulation": {"params": {
+                    "spreading_factor": {"source": "file", "differs": false, "value": 9}}}
+            }
+        });
+        if pending {
+            v["pending"] = json!({"token": 305438722u64, "groups": ["radio"],
+                "apply_at": 61_000, "deadline": 180_000, "applied": false});
+        }
+        serde_json::from_value(v).unwrap()
+    }
+
+    /// A record read as the view (v2 §5): the contract's schema, each
+    /// group writable by its bit, a sensitive parameter with its source
+    /// alone, tokens and the instance in decimal, the deadline in RFC 3339,
+    /// no startup value; `differs` beside it; and the record's bytes round
+    /// trip through the contract's layout.
+    #[test]
+    fn a_config_v2_record_reads_as_the_view() {
+        let t = rfcfg();
+        assert_eq!(t.ttl, Duration::from_secs(60));
+        assert_eq!(
+            t.record_key(&"lab/rf0".parse().unwrap()),
+            "zk2/lab/rf0/rfcfg.v1/state/config"
+        );
+        let s = record(true);
+        let v = view_of(&t.interface, &s, "lab/rf0");
+        assert_eq!(
+            (v.instance.as_str(), v.revision, v.confirm_floor_s),
+            ("4660", 1, 10)
+        );
+        let p = v.pending.as_ref().unwrap();
+        assert_eq!((p.token.as_str(), p.applied), ("305438722", false));
+        assert_eq!(p.deadline, "1970-01-01T00:03:00.000Z");
+        assert_eq!(v.last_change.as_ref().unwrap().token, "305438721");
+        let group = |n: &str| v.groups.iter().find(|g| g.name == n).unwrap();
+        assert!(!group("queue").writable && group("duty").writable);
+        assert_eq!(group("modulation").class, Class::Contract);
+        let pin = &group("sim").parameters[0];
+        assert!(pin.sensitive && pin.value.is_none() && pin.source.is_some());
+        assert!(
+            v.groups
+                .iter()
+                .flat_map(|g| &g.parameters)
+                .all(|p| p.startup.is_none())
+        );
+        assert_eq!(
+            differs_of(&s),
+            BTreeSet::from([("duty".to_owned(), "fraction_ppm".to_owned())])
+        );
+        let bytes = t.interface.write_record(&s, 0).unwrap().bytes;
+        let tag = t.interface.derived.record().tag();
+        assert_eq!(t.read(tag, &bytes).unwrap(), s);
+        assert!(t.read(tag ^ 1, &bytes).unwrap_err().contains("tag"));
+    }
+
+    /// A tool's request as `config.v2` writes it (v2 §2.5, §2.10): values
+    /// at their kinds, a token in 48 bits, a key in 32; a contract group, an
+    /// undeclared parameter, a wrong kind, a wide token and `answer =
+    /// "status"` refused, nothing sent.
+    #[test]
+    fn a_config_v2_request_is_written_or_refused_here() {
+        let t = rfcfg();
+        let req = SetRequest {
+            values: [("frequency_hz".to_owned(), json!(869525000))].into(),
+            confirm_s: Some(120),
+            token: None,
+            expected_revision: Some(0),
+            idempotency_key: Some("4242".into()),
+            dry_run: false,
+        };
+        let set = set_of(&t.interface, "radio", &req).unwrap();
+        assert_eq!(set.values["frequency_hz"], Value::Integer(869525000));
+        assert_eq!(
+            (set.confirm_s, set.idempotency_key),
+            (Some(120), Some(4242))
+        );
+        let bytes = t.interface.encode_set("radio", &set).unwrap();
+        assert!(bytes.len() <= 16, "{} bytes", bytes.len());
+        assert!(
+            set_of(&t.interface, "modulation", &req)
+                .unwrap_err()
+                .contains("contract")
+        );
+        let wrong = SetRequest {
+            values: [("frequency_hz".to_owned(), json!("fast"))].into(),
+            ..SetRequest::default()
+        };
+        assert!(set_of(&t.interface, "radio", &wrong).is_err());
+        let unknown = SetRequest {
+            values: [("nope".to_owned(), json!(1))].into(),
+            ..SetRequest::default()
+        };
+        assert!(
+            set_of(&t.interface, "radio", &unknown)
+                .unwrap_err()
+                .contains("nope")
+        );
+        let keyed = SetRequest {
+            idempotency_key: Some("01J0ABC".into()),
+            ..SetRequest::default()
+        };
+        assert!(
+            set_of(&t.interface, "duty", &keyed)
+                .unwrap_err()
+                .contains("2^32")
+        );
+        let c = control_of(&cm::ControlRequest {
+            token: "305438722".into(),
+            confirm_s: None,
+            answer: None,
+        })
+        .unwrap();
+        assert_eq!(c.token, 305438722);
+        assert!(
+            control_of(&cm::ControlRequest {
+                token: (1u64 << 48).to_string(),
+                confirm_s: None,
+                answer: None,
+            })
+            .is_err()
+        );
+        assert!(
+            control_of(&cm::ControlRequest {
+                token: "1".into(),
+                confirm_s: None,
+                answer: Some(cm::Answer::Status),
+            })
+            .is_err()
+        );
+    }
+
+    /// zenoh-modem's `sx1262_config.v1` (#985 G4), a real config contract,
+    /// reads as `rfcfg.v1` does: its catalog's epoch, its three groups,
+    /// `modulation` contract-class with no `set`; a record with a reach
+    /// change pending dates its deadline from the epoch, round trips through
+    /// its layout, and a `set/radio` is at most 16 bytes (v2 §3's sizes).
+    #[test]
+    fn zenoh_modems_sx1262_config_reads_as_a_config_interface() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2/zenoh-modem");
+        let l = zenkey_model::contract::load_path(&root.join("config/sx1262_config.v1.toml"));
+        let c = l
+            .contract
+            .unwrap_or_else(|| panic!("sx1262_config.v1:\n{}", l.report));
+        let catalog = crate::model::deployment::Catalogs::load(&root.join("catalog.json")).unwrap();
+        let fp = Fingerprint::of(&c);
+        assert!(
+            catalog.index_of(&c.iface, &fp).is_some(),
+            "the catalog lists it"
+        );
+        let epoch = crate::model::deployment::Catalogs::new(vec![catalog.clone()])
+            .epoch(crate::model::deployment::Stated::Unread);
+        let t = V2Target::of(Arc::new(c), fp, epoch).expect("sx1262_config.v1 reads");
+        assert_eq!((t.epoch, t.epoch_assumed), (catalog.epoch(), false));
+        let names: Vec<&str> = t.interface.groups.iter().map(|g| g.name.as_str()).collect();
+        assert_eq!(names, ["duty", "radio", "modulation"]);
+        assert!(t.interface.groups.settable("modulation").is_none());
+        let deadline = (t.epoch + 600) * 1000;
+        let s: State = serde_json::from_value(json!({
+            "instance": 7, "revision": 3, "floor_s": 10, "would_be": false,
+            "pending": {"token": 458753u64, "groups": ["radio"], "apply_at": deadline - 120_000,
+                        "deadline": deadline, "applied": false},
+            "last": null, "desired": null,
+            "groups": {
+                "duty": {"writable": true, "params": {
+                    "fraction_ppm": {"source": "file", "differs": false, "value": 10000},
+                    "period_s": {"source": "default", "differs": false, "value": 3600}}},
+                "radio": {"writable": true, "params": {
+                    "frequency_hz": {"source": "runtime", "differs": true, "value": 869525000}}},
+                "modulation": {"params": {
+                    "spreading_factor": {"source": "file", "differs": false, "value": 9}}}
+            }
+        }))
+        .unwrap();
+        let bytes = t.interface.write_record(&s, t.epoch).unwrap().bytes;
+        assert!(
+            bytes.len() + 6 <= 64,
+            "{} bytes with its envelope",
+            bytes.len() + 6
+        );
+        assert_eq!(
+            t.read(t.interface.derived.record().tag(), &bytes).unwrap(),
+            s
+        );
+        let v = view_of(&t.interface, &s, "h-c2a95e41d7f0/lora0");
+        assert_eq!(
+            v.pending.as_ref().map(|p| p.deadline.as_str()),
+            Some(cm::Time::from_millis(deadline).rfc3339().as_str())
+        );
+        let req = SetRequest {
+            values: [("frequency_hz".to_owned(), json!(869525000))].into(),
+            confirm_s: Some(120),
+            expected_revision: Some(3),
+            idempotency_key: Some("4242".into()),
+            ..SetRequest::default()
+        };
+        let set = set_of(&t.interface, "radio", &req).unwrap();
+        assert!(t.interface.encode_set("radio", &set).unwrap().len() <= 16);
     }
 }

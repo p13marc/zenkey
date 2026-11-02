@@ -3642,7 +3642,9 @@ pub fn config_report() -> ConfigReport {
     ConfigReport {
         namespace: "acme".into(),
         service: "lab/rf0".into(),
+        profile: zenkey_fleet::report::ConfigProfile::V1,
         premise: ConfigPremise::Listed,
+        record: None,
         presence: Some(ConfigPresenceRead {
             selector: "zk2/lab/rf0/@zk/**".into(),
             complete: true,
@@ -3664,13 +3666,13 @@ pub fn config_report() -> ConfigReport {
             stamp: Some(stamp.clone()),
             freshness: fresh(),
         }),
-        status: ConfigDocument {
+        status: Asked::Asked(ConfigDocument {
             value: Some(status),
             undecodable: None,
             via: Some(ConfigVia::Get),
             stamp: Some(stamp),
             freshness: fresh(),
-        },
+        }),
         projection: config_answer(
             A::Yes,
             "projection",
@@ -3775,13 +3777,15 @@ pub fn config_status_report() -> ConfigReport {
     ConfigReport {
         namespace: String::new(),
         service: "lab/rf0".into(),
+        profile: zenkey_fleet::report::ConfigProfile::V1,
         premise: ConfigPremise::AcrossFace,
+        record: None,
         presence: None,
         window_s: None,
         clock: ClockGround::None,
         asked: vec!["zk2/lab/rf0/config.v1/state/status".into()],
         view: Asked::NotAsked,
-        status: ConfigDocument {
+        status: Asked::Asked(ConfigDocument {
             value: Some(status),
             undecodable: None,
             via: Some(ConfigVia::Get),
@@ -3790,7 +3794,7 @@ pub fn config_status_report() -> ConfigReport {
                 clock: "751033f1fbbb816bc6f7bad180995fa2".into(),
             }),
             freshness: untrusted,
-        },
+        }),
         projection: config_answer(
             A::NotAsked,
             "view_not_asked",
@@ -3819,9 +3823,11 @@ fn config_act(
     ConfigActReport {
         namespace: "acme".into(),
         service: "lab/rf0".into(),
+        profile: zenkey_fleet::report::ConfigProfile::V1,
         operation: operation.into(),
         key: format!("zk2/lab/rf0/config.v1/@op/{operation}"),
         request,
+        request_bytes: None,
         actor: Some("ops".into()),
         request_id: Some("r-2".into()),
         checked: None,
@@ -3872,6 +3878,7 @@ pub fn config_act_refused() -> ConfigActReport {
                     detail: None,
                 }),
                 detail_undecodable: None,
+                mark: None,
             },
         },
     )

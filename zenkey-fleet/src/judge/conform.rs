@@ -2461,10 +2461,23 @@ fn config_cases(obs: &ConformObservation) -> Vec<ConformCase> {
                         obs.address
                     ),
                 ),
+                ConfigPremise::NotListed
+                    if crate::model::config::listing_v2(o, &obs.address)
+                        == ConfigPremise::Listed =>
+                {
+                    every(
+                        not,
+                        format!(
+                            "its descriptor lists config.v2, and {} is not its config interface: \
+                             the config cases are asked of that one (config.v2 §2.1)",
+                            obs.iface
+                        ),
+                    )
+                }
                 ConfigPremise::NotListed => every(
                     not,
-                    "its descriptor does not list config.v1, so config.v1 is not asked of it \
-                     (config.v1 §2.1)"
+                    "its descriptor lists neither config.v1 nor config.v2, so neither is asked \
+                     of it (config.v1 §2.1, config.v2 §2.1)"
                         .to_owned(),
                 ),
                 _ => every(
@@ -2478,6 +2491,11 @@ fn config_cases(obs: &ConformObservation) -> Vec<ConformCase> {
     };
     let present = matches!(&obs.presence, Ok(o) if !o.tokens.is_empty());
     let granted = obs.spec.calls_granted;
+    match &c.v2 {
+        None => {}
+        Some(Err(u)) => return every(unseen, u.why.clone()),
+        Some(Ok(target)) => return config_v2_cases(obs, c, target, present, granted),
+    }
     let reading = crate::judge::config::reading(&c.reading);
     let docs_of = |g: &std::result::Result<crate::bus::config::ConfigGet, String>| {
         g.as_ref()
@@ -2509,6 +2527,112 @@ fn config_cases(obs: &ConformObservation) -> Vec<ConformCase> {
             .and_then(|d| d.view.as_ref())
             .and_then(|r| r.stamp.as_ref()),
     ));
+    for p in &c.probes {
+        out.push(match p.case {
+            CaseId::ConfigDryRun => config_dry_run_case(p, present, granted),
+            _ => config_refusal_case(p, present, granted),
+        });
+    }
+    out
+}
+
+/// `config.v2` (#985 G3): the projection not asked, one record replacing
+/// the view and the status (v2 §2.3); the record fresh at the window's
+/// end, by the owner's heartbeat or the GET's reply against a trusted
+/// clock; the record read by its contract, each of v2 §2.3's checks
+/// passing, as the view it reads as; then the probes, as `config.v1`'s.
+fn config_v2_cases(
+    obs: &ConformObservation,
+    c: &crate::bus::conform::ConfigConform,
+    target: &crate::model::config::V2Target,
+    present: bool,
+    granted: bool,
+) -> Vec<ConformCase> {
+    const S: &str = "state/config";
+    let reading = crate::judge::config::reading(&c.reading);
+    let mut out = vec![ConformCase::not_asked(
+        CaseId::ConfigProjection,
+        "service",
+        "config.v2 has one record, which replaces the view and the status: no projection to \
+         judge (config.v2 §2.3)",
+    )];
+    if let Some(v) = &reading.view {
+        out.push(match v.fresh.verdict {
+            Verdict::Stale => ConformCase::failed(
+                CaseId::ConfigFresh,
+                S,
+                format!(
+                    "{}: an owner confirms its record by its heartbeat, at least every half \
+                     its {} s horizon (config.v2 §2.3, freshness.v2 §2.4)",
+                    v.fresh.reason.says(),
+                    target.ttl.as_secs()
+                ),
+            ),
+            Verdict::NotAsked => ConformCase::failed(
+                CaseId::ConfigFresh,
+                S,
+                "deleted while its owner runs: an owner MUST NOT delete it (config.v2 §2.3)",
+            ),
+            _ => config_fresh_case(S, v.fresh),
+        });
+    }
+    let record = c
+        .reading
+        .get
+        .as_ref()
+        .ok()
+        .and_then(|g| g.services.get(&obs.address))
+        .and_then(|d| d.record.as_ref())
+        .and_then(|r| r.value.clone());
+    out.push(match record {
+        None => ConformCase::unobservable(CaseId::ConfigView, S, "no record was read"),
+        Some(Err(why)) => ConformCase::failed(
+            CaseId::ConfigView,
+            S,
+            format!("the record does not read by its contract: {why}"),
+        ),
+        Some(Ok(g)) => {
+            let mut broken = Vec::new();
+            if g.state.would_be {
+                broken.push(
+                    "the record its owner holds has would_be set, which only a dry run's reply \
+                     sets (config.v2 §2.9)"
+                        .to_owned(),
+                );
+            }
+            for grp in target.interface.groups.iter().filter(|grp| grp.settable()) {
+                if g.state
+                    .groups
+                    .get(&grp.name)
+                    .and_then(|h| h.writable)
+                    .is_none()
+                {
+                    broken.push(format!(
+                        "group {} carries no writable bit: an owner MUST state it in each \
+                         settable group (config.v2 §2.16)",
+                        grp.name
+                    ));
+                }
+            }
+            if broken.is_empty() {
+                ConformCase::passed(
+                    CaseId::ConfigView,
+                    S,
+                    format!(
+                        "read by {} {}'s layout, every check of config.v2 §2.3 passing: {} \
+                         group(s), revision {}, {} B",
+                        target.iface,
+                        &target.fingerprint.hex().to_string()[..8],
+                        g.state.groups.len(),
+                        g.state.revision,
+                        g.size
+                    ),
+                )
+            } else {
+                ConformCase::failed(CaseId::ConfigView, S, broken.join("; "))
+            }
+        }
+    });
     for p in &c.probes {
         out.push(match p.case {
             CaseId::ConfigDryRun => config_dry_run_case(p, present, granted),
@@ -2803,7 +2927,8 @@ fn config_refusal_case(p: &ConfigProbe, present: bool, granted: bool) -> Conform
         ConfigActAnswer::Applied { .. }
         | ConfigActAnswer::Pending { .. }
         | ConfigActAnswer::View { .. }
-        | ConfigActAnswer::Status { .. } => ConformCase::failed(
+        | ConfigActAnswer::Status { .. }
+        | ConfigActAnswer::Record { .. } => ConformCase::failed(
             C,
             s,
             format!(
@@ -2827,6 +2952,78 @@ fn config_refusal_case(p: &ConfigProbe, present: bool, granted: bool) -> Conform
             ),
         ),
         ConfigActAnswer::Silent { .. } => config_silent(C, s, present, granted),
+    }
+}
+
+/// A dry run's would-be view judged against the view read first (§2.9);
+/// `would_be`, a `config.v2` record's bit, set (v2 §2.9).
+#[allow(clippy::too_many_arguments)]
+fn dry_run_read(
+    case: CaseId,
+    s: &str,
+    view: &zenkey_model::config::ConfigView,
+    got: &zenkey_model::config::ConfigView,
+    group: &str,
+    parameter: &str,
+    value: &zenkey_model::config::Value,
+    would_be: Option<bool>,
+) -> ConformCase {
+    let mut broken = Vec::new();
+    if got.revision != view.revision {
+        broken.push(format!(
+            "the revision moved, {} to {}",
+            view.revision, got.revision
+        ));
+    }
+    if got.pending != view.pending {
+        broken.push("the pending change differs".to_owned());
+    }
+    if got.last_change != view.last_change {
+        broken.push("the last change differs".to_owned());
+    }
+    if would_be == Some(false) {
+        broken.push(
+            "its record's would_be is clear: a dry run's reply sets it (config.v2 §2.9)".to_owned(),
+        );
+    }
+    let shown = got
+        .groups
+        .iter()
+        .find(|g| g.name == group)
+        .and_then(|g| g.parameters.iter().find(|q| q.name == parameter));
+    match shown {
+        Some(q)
+            if q.value.as_ref() == Some(value)
+                && q.source == Some(zenkey_model::config::Source::Runtime) => {}
+        Some(q) => broken.push(format!(
+            "{group}.{parameter} reads {} at source {}, not {value} at runtime",
+            q.value
+                .as_ref()
+                .map_or("no value".to_owned(), ToString::to_string),
+            q.source.map_or("none", |s| s.as_str())
+        )),
+        None => broken.push(format!("the would-be view lacks {group}.{parameter}")),
+    }
+    if broken.is_empty() {
+        ConformCase::passed(
+            case,
+            s,
+            format!(
+                "applied: {group}.{parameter} at runtime, revision {} and the changes as \
+                         they were",
+                view.revision
+            ),
+        )
+    } else {
+        ConformCase::failed(
+            case,
+            s,
+            format!(
+                "a dry run's view is the view with its values applied, touching nothing \
+                         else (config.v1 §2.9): {}",
+                broken.join("; ")
+            ),
+        )
     }
 }
 
@@ -2858,59 +3055,20 @@ fn config_dry_run_case(p: &ConfigProbe, present: bool, granted: bool) -> Conform
     };
     match &report.answer {
         ConfigActAnswer::Applied { view: got } => {
-            let mut broken = Vec::new();
-            if got.revision != view.revision {
-                broken.push(format!(
-                    "the revision moved, {} to {}",
-                    view.revision, got.revision
-                ));
-            }
-            if got.pending != view.pending {
-                broken.push("the pending change differs".to_owned());
-            }
-            if got.last_change != view.last_change {
-                broken.push("the last change differs".to_owned());
-            }
-            let shown = got
-                .groups
-                .iter()
-                .find(|g| &g.name == group)
-                .and_then(|g| g.parameters.iter().find(|q| &q.name == parameter));
-            match shown {
-                Some(q)
-                    if q.value.as_ref() == Some(value)
-                        && q.source == Some(zenkey_model::config::Source::Runtime) => {}
-                Some(q) => broken.push(format!(
-                    "{group}.{parameter} reads {} at source {}, not {value} at runtime",
-                    q.value
-                        .as_ref()
-                        .map_or("no value".to_owned(), ToString::to_string),
-                    q.source.map_or("none", |s| s.as_str())
-                )),
-                None => broken.push(format!("the would-be view lacks {group}.{parameter}")),
-            }
-            if broken.is_empty() {
-                ConformCase::passed(
-                    C,
-                    s,
-                    format!(
-                        "applied: {group}.{parameter} at runtime, revision {} and the changes as \
-                         they were",
-                        view.revision
-                    ),
-                )
-            } else {
-                ConformCase::failed(
-                    C,
-                    s,
-                    format!(
-                        "a dry run's view is the view with its values applied, touching nothing \
-                         else (config.v1 §2.9): {}",
-                        broken.join("; ")
-                    ),
-                )
-            }
+            dry_run_read(C, s, view, got, group, parameter, value, None)
         }
+        ConfigActAnswer::Record {
+            view: got, record, ..
+        } => dry_run_read(
+            C,
+            s,
+            view,
+            got,
+            group,
+            parameter,
+            value,
+            Some(record.would_be),
+        ),
         ConfigActAnswer::Pending { .. } => ConformCase::failed(
             C,
             s,
@@ -5502,7 +5660,7 @@ mod tests {
                 c.detail
                     .as_deref()
                     .unwrap()
-                    .contains("does not list config.v1")
+                    .contains("lists neither config.v1 nor config.v2")
             );
         }
 
@@ -5542,6 +5700,7 @@ mod tests {
                     clock: OWNER.into(),
                 }),
             }),
+            record: None,
         };
         let get = |d: ServiceDocs| ConfigGet {
             selector: "zk2/lab/m/config.v1/state/**".into(),
@@ -5553,9 +5712,11 @@ mod tests {
             ProbeOutcome::Call(Ok(Box::new(ConfigActReport {
                 namespace: String::new(),
                 service: "lab/m".into(),
+                profile: crate::report::ConfigProfile::V1,
                 operation: op.into(),
                 key: format!("zk2/lab/m/config.v1/@op/{op}"),
                 request: json!({}),
+                request_bytes: None,
                 actor: None,
                 request_id: None,
                 checked: None,
@@ -5571,6 +5732,7 @@ mod tests {
                 cause: cause.map(str::to_owned),
                 error: None,
                 detail_undecodable: None,
+                mark: None,
             },
         };
         let refusal = |subject: &str, codes, outcome| ConfigProbe {
@@ -5616,8 +5778,10 @@ mod tests {
                     get: Ok(get(last)),
                     window: None,
                     replay: None,
+                    v2: None,
                 },
                 probes,
+                v2: None,
             });
             judge(&o)
         };

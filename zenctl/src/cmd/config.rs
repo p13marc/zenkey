@@ -21,6 +21,15 @@
 //! refuses before sending anything: a `NAME=VALUE` that is not one, a
 //! sensitive value given inline, a change the owner's own checks refuse
 //! against the view just read, a reach change with no yes.
+//!
+//! **`config.v2`** (#985 G3, `spec/profiles/config/v2.md`): a service whose
+//! descriptor's `profiles` lists `config.v2` is read and changed through
+//! its own config interface, the revision its descriptor names that uses
+//! `config.v2` (`--contracts` holds it offline, else it is retrieved);
+//! across a face a revision in `--contracts` is the deployment's word, and
+//! `--catalog` the epoch its times count from. The same verbs, the same
+//! exits: the record stands where the view stands, a `set` is typed and
+//! checked against it, and every reply is the record.
 
 use std::collections::BTreeSet;
 use std::io::{IsTerminal as _, Read as _};
@@ -33,8 +42,54 @@ use zenkey_fleet::{ConfigCall, ConfigOp, ConfigSpec, ConfigTarget};
 use zenkey_model::config::{Answer, ConfigStatus, ConfigView, ControlRequest, SetRequest};
 
 use crate::bus::Deployment;
-use crate::cli::{ClaimArgs, ConfigExtendArgs, ConfigGetArgs, ConfigSetArgs, ConfigTokenArgs};
+use crate::cli::{
+    ClaimArgs, ConfigExtendArgs, ConfigGetArgs, ConfigSetArgs, ConfigTokenArgs, ConfigV2Args,
+};
 use crate::exit::unaskable;
+
+/// `config.v2`'s part of a spec (#985 G3): the contracts in hand, the
+/// catalogs, the interface named across a face; and the deployment read
+/// across the face its policy names, when one is given.
+fn v2_spec(
+    dep: Deployment,
+    v2: &ConfigV2Args,
+    mut spec: ConfigSpec,
+) -> Result<(Deployment, ConfigSpec)> {
+    spec.contracts = super::zk2::load_contracts(&v2.contracts)?;
+    spec.catalogs = super::zk2::load_catalogs(&v2.contracts)?;
+    spec.iface = v2
+        .iface
+        .as_deref()
+        .map(|i| {
+            i.parse()
+                .map_err(|e| unaskable!("--iface {i:?}: not an interface id: {e}"))
+        })
+        .transpose()?;
+    let dep = match (&v2.face_policy, &v2.face) {
+        (Some(policy), Some(face)) => dep.across(super::zk2::far_side(policy, face)?),
+        _ => dep,
+    };
+    spec.timeout = dep.timeout();
+    Ok((dep, spec))
+}
+
+/// The config interface an act goes through (#985 G3): `None` for
+/// `config.v1`, a `config.v2` owner's otherwise; one that cannot be read
+/// is refused here, nothing sent.
+async fn v2_target(
+    session: &zenoh::Session,
+    address: &zenkey_model::grammar::Addr,
+    spec: &ConfigSpec,
+) -> Result<Option<zenkey_fleet::model::config::V2Target>> {
+    match zenkey_fleet::resolve_config(session, address, spec).await {
+        None => Ok(None),
+        Some(Ok(t)) => Ok(Some(t)),
+        Some(Err(u)) => Err(unaskable!(
+            "{address}: {} — nothing sent (config.v2 §2.2)",
+            u.why
+        )),
+    }
+}
 
 /// The exit a report chose: through `main` for 0, the process's for the
 /// rest, as `call` exits.
@@ -56,6 +111,7 @@ pub async fn get(cli: ConfigGetArgs) -> Result<()> {
         for_secs,
         clocks_synced,
         across_face,
+        v2,
         ns,
     } = cli;
     let dep = Deployment::resolve(&ns)?;
@@ -63,7 +119,6 @@ pub async fn get(cli: ConfigGetArgs) -> Result<()> {
         .map(|s| super::positive_secs("--for", s))
         .transpose()?;
     let spec = ConfigSpec {
-        timeout: dep.timeout(),
         window,
         clocks_synced,
         across_face,
@@ -71,12 +126,14 @@ pub async fn get(cli: ConfigGetArgs) -> Result<()> {
         token,
         instance,
         desired_revision,
+        ..ConfigSpec::new(dep.timeout())
     };
+    let (dep, spec) = v2_spec(dep, &v2, spec)?;
     let session = dep.session().await?;
     if let Some(w) = window {
         eprintln!(
-            "config get: listening {}s to the view, the status and the change events before the \
-             GET (--for)",
+            "config get: listening {}s to the view, the status (or a config.v2 owner's record) \
+             and the change events before the GET (--for)",
             w.as_secs_f64()
         );
     }
@@ -191,13 +248,41 @@ pub async fn set(cli: ConfigSetArgs) -> Result<()> {
         across_face,
         i_know,
         claim,
+        v2,
         ns,
     } = cli;
     // Everything this tool can refuse of the command line, before a session.
     let given = assignments(&values)?;
     let dep = Deployment::resolve(&ns)?;
+    let spec = ConfigSpec {
+        across_face,
+        ..ConfigSpec::new(dep.timeout())
+    };
+    let (dep, spec) = v2_spec(dep, &v2, spec)?;
     let session = dep.session().await?;
     let t = dep.timeout();
+    if let Some(target) = v2_target(&session, &address, &spec).await? {
+        return set_v2(
+            SetV2 {
+                address,
+                group,
+                given,
+                confirm_s,
+                join,
+                expected_revision,
+                idempotency_key,
+                dry_run,
+                no_precheck,
+                across_face,
+                i_know,
+                claim,
+            },
+            &dep,
+            &session,
+            target,
+        )
+        .await;
+    }
     // What to check against: the view (its schema and its facts), or across
     // a face the status (its values), or nothing.
     let read = if no_precheck {
@@ -208,7 +293,7 @@ pub async fn set(cli: ConfigSetArgs) -> Result<()> {
         ConfigCheckedRead::View
     };
     let (view, status): (Option<ConfigView>, Option<ConfigStatus>) = match read {
-        ConfigCheckedRead::Nothing => (None, None),
+        ConfigCheckedRead::Nothing | ConfigCheckedRead::Record => (None, None),
         ConfigCheckedRead::View | ConfigCheckedRead::Status => {
             let selector = match read {
                 ConfigCheckedRead::View => zenkey_fleet::bus::config::view_key(&address),
@@ -260,7 +345,7 @@ pub async fn set(cli: ConfigSetArgs) -> Result<()> {
         ));
     }
     let no_class = match read {
-        ConfigCheckedRead::Nothing => "--no-precheck read no view",
+        ConfigCheckedRead::Nothing | ConfigCheckedRead::Record => "--no-precheck read no view",
         ConfigCheckedRead::Status => "across a face the status is read, which carries no class",
         ConfigCheckedRead::View if view.is_some() => "the view declares no such group",
         ConfigCheckedRead::View => "no view answered",
@@ -306,6 +391,7 @@ pub async fn set(cli: ConfigSetArgs) -> Result<()> {
             timeout: dep.chosen_timeout().unwrap_or(t),
             across_face,
             checked: Some(checked),
+            v2: None,
         },
     )
     .await?;
@@ -318,6 +404,173 @@ pub async fn set(cli: ConfigSetArgs) -> Result<()> {
             "config set: whether it lands: zenctl config get {address} --token {} --instance \
              {instance}",
             pending.token
+        );
+    }
+    exit(report.exit_code())
+}
+
+/// A `config set` on a `config.v2` owner, its command line read.
+struct SetV2 {
+    address: zenkey_model::grammar::Addr,
+    group: String,
+    given: Vec<Assignment>,
+    confirm_s: Option<u64>,
+    join: Option<String>,
+    expected_revision: Option<u64>,
+    idempotency_key: Option<String>,
+    dry_run: bool,
+    no_precheck: bool,
+    across_face: bool,
+    i_know: bool,
+    claim: ClaimArgs,
+}
+
+/// `config set` on a `config.v2` owner (#985 G3): its record read first
+/// by S4's GET, through its contract, and read as the view (v2 §5); the
+/// values typed by the contract's kinds, the owner's own checks run
+/// against it (v2 §2.5, a contract group having no `set` at all, §2.4);
+/// then the group's `Set<T>`, whose reply is the record (§2.9).
+async fn set_v2(
+    a: SetV2,
+    dep: &Deployment,
+    session: &zenoh::Session,
+    target: zenkey_fleet::model::config::V2Target,
+) -> Result<()> {
+    let t = dep.timeout();
+    let address = a.address;
+    let group = a.group;
+    let view: Option<ConfigView> = if a.no_precheck {
+        None
+    } else {
+        let got =
+            zenkey_fleet::get_config_records(session, &[(address.clone(), target.clone())], t)
+                .await
+                .map_err(|e| anyhow::anyhow!("config set: reading the record: {e}"))?;
+        let record = got
+            .services
+            .get(&address)
+            .and_then(|d| d.record.as_ref())
+            .and_then(|r| r.value.clone());
+        match record {
+            Some(Ok(g)) => Some(zenkey_fleet::model::config::view_of(
+                &target.interface,
+                &g.state,
+                &address.to_string(),
+            )),
+            Some(Err(why)) => {
+                return Err(unaskable!(
+                    "config set: `{}` answered a record that does not read: {why} — nothing \
+                     sent",
+                    target.record_key(&address)
+                ));
+            }
+            None => {
+                eprintln!(
+                    "config set: `{}` answered no record within {}s: the values are typed by \
+                     the contract's kinds, nothing else is checked here, and the owner judges \
+                     the rest",
+                    target.record_key(&address),
+                    t.as_secs_f64()
+                );
+                None
+            }
+        }
+    };
+    // With no record read, the contract still declares the schema: the
+    // values are its kinds', and the class is its.
+    let schema_view = view.clone().unwrap_or_else(|| {
+        zenkey_fleet::model::config::view_of(
+            &target.interface,
+            &zenkey_model::config::v2::State {
+                instance: 0,
+                revision: 0,
+                floor_s: 1,
+                would_be: false,
+                pending: None,
+                last: None,
+                desired: None,
+                groups: Default::default(),
+            },
+            &address.to_string(),
+        )
+    });
+    let typed = mc::type_values(Some(&schema_view), None, &group, &a.given)
+        .map_err(|e| unaskable!("{e}"))?;
+    let request = SetRequest {
+        values: typed.values.clone(),
+        confirm_s: a.confirm_s,
+        token: a.join,
+        expected_revision: a.expected_revision,
+        idempotency_key: a.idempotency_key,
+        dry_run: a.dry_run,
+    };
+    let secrets = secrets(&a.given, &typed.read);
+    zenkey_fleet::model::config::set_of(&target.interface, &group, &request)
+        .map_err(|e| unaskable!("refused here, nothing sent — {e}"))?;
+    if let Some(v) = &view
+        && let Err(refusal) = mc::precheck(v, &group, &request)
+    {
+        let refusal = mc::scrub(&refusal.to_string(), &secrets);
+        return Err(unaskable!(
+            "refused here, nothing sent — {refusal}: the owner refuses this change so against \
+             the record just read (instance {}, revision {}; config.v2 §2.5). --no-precheck \
+             sends it anyway",
+            v.instance,
+            v.revision
+        ));
+    }
+    if let Some(claim) = mc::consent(
+        Some(&schema_view),
+        &address.to_string(),
+        &group,
+        &request,
+        "the contract declares no such group",
+    ) {
+        consent(&claim, a.i_know)?;
+    }
+    let checked = ConfigChecked {
+        read: if view.is_some() {
+            ConfigCheckedRead::Record
+        } else {
+            ConfigCheckedRead::Nothing
+        },
+        typed_by: zenkey_fleet::report::ConfigTyping::Schema,
+        instance: view.as_ref().map(|v| v.instance.clone()),
+        revision: view.as_ref().map(|v| v.revision),
+        class: schema_view
+            .groups
+            .iter()
+            .find(|g| g.name == group)
+            .map(|g| g.class),
+    };
+    let report = zenkey_fleet::call_config(
+        session,
+        ConfigCall {
+            namespace: dep.namespace(),
+            address: &address,
+            op: ConfigOp::Set {
+                group: group.clone(),
+            },
+            request: serde_json::to_value(&request)?,
+            shown: mc::shown_request(&request, Some(&schema_view), &group, &typed.read),
+            secrets,
+            sensitive: mc::sensitive_params(Some(&schema_view)),
+            metadata: Some(claimed(&a.claim)),
+            timeout: dep.chosen_timeout().unwrap_or(t),
+            across_face: a.across_face,
+            checked: Some(checked),
+            v2: Some(target),
+        },
+    )
+    .await?;
+    crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
+    if let ConfigActAnswer::Record { record, .. } = &report.answer
+        && let Some(p) = &record.pending
+        && !record.would_be
+    {
+        eprintln!(
+            "config set: whether it lands: zenctl config get {address} --token {} --instance {}",
+            p.token, record.instance
         );
     }
     exit(report.exit_code())
@@ -344,6 +597,7 @@ async fn control(cli: ConfigTokenArgs, op: ConfigOp, confirm_s: Option<u64>) -> 
         status,
         across_face,
         claim,
+        v2,
         ns,
     } = cli;
     let dep = Deployment::resolve(&ns)?;
@@ -352,7 +606,17 @@ async fn control(cli: ConfigTokenArgs, op: ConfigOp, confirm_s: Option<u64>) -> 
         confirm_s,
         answer: status.then_some(Answer::Status),
     };
+    let spec = ConfigSpec {
+        across_face,
+        ..ConfigSpec::new(dep.timeout())
+    };
+    let (dep, spec) = v2_spec(dep, &v2, spec)?;
     let session = dep.session().await?;
+    let target = v2_target(&session, &address, &spec).await?;
+    if target.is_some() {
+        zenkey_fleet::model::config::control_of(&request)
+            .map_err(|e| unaskable!("refused here, nothing sent — {e}"))?;
+    }
     let request = serde_json::to_value(&request)?;
     let report = zenkey_fleet::call_config(
         &session,
@@ -368,6 +632,7 @@ async fn control(cli: ConfigTokenArgs, op: ConfigOp, confirm_s: Option<u64>) -> 
             timeout: dep.timeout(),
             across_face,
             checked: None,
+            v2: target,
         },
     )
     .await?;
