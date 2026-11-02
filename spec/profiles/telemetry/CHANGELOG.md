@@ -7,6 +7,49 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `telemetry.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## 0.8 — 2026-11-02: editorial: Appendix B's zenoh-modem row reads `modem.v3` 3.2, no rule changed (#983 T4, #988 L5)
+
+#983's T4 moved `modem.v3` to `telemetry.v2` in its revision 3.2.
+Appendix B's zenoh-modem row still said that `sdu/dropped_total` crosses
+the RF face as a bare counter, a decrease there a reset.
+
+**Changed: Appendix B's zenoh-modem row, which states no rule.** It says
+that `modem.v3` listed this text until revision 3.1. From 3.2 it lists
+`telemetry.v2`, which restates these rules by reference, so its
+declarations stand. Its 73 streams stay on the host bus. The reading of
+`sdu/dropped_total` crosses in a frame, whose run is its epoch, in band
+(`telemetry.v2` §2.19). That closes the sketch's gap 1 across the face.
+
+**Deliberately not changed.**
+- **No rule and no fixture.**
+- **Written against core 0.35**, still.
+- **`telemetry.v2` restates text 0.7**, and stays correct: no rule moved.
+- **The status stays `draft`,** used by ZenSight's four contracts.
+
+## telemetry.v2 draft — 2026-11-02: used by zenoh-modem (#983, T4)
+
+The text's status moves from `experimental` to `draft`, the status of a
+profile an adopter's mapping uses ([`../README.md`](../README.md), "The
+process"). #983's T4 moves zenoh-modem's `modem.v3` onto this text. Its
+revision 3.2 is a review-class `uses_changed`, published in
+`examples/zk2/.history`. It lists `telemetry.v2` in place of
+`telemetry.v1`, and adds nine frame resources whose `telemetry.series`
+mirror its JSON streams. The four streams it exposed `link` are `host`
+again, their readings crossing in `frames/link`.
+
+**Changed: the status, and Appendix B.** The index lists `telemetry.v2`
+in its first table, used by zenoh-modem, and the header's status reads
+`draft`. Appendix B, which said no adopter's contract used the text, now
+says which of modem.v3's frame resources carry which readings.
+`telemetry.v1`'s row reads used by ZenSight alone.
+
+**Deliberately not changed.**
+- **No rule.** The text stays 0.2, written against core 0.90, and its
+  fixtures, scenarios, runtime and tools are as they were.
+- **`telemetry.v1` stays draft,** used by ZenSight's four contracts.
+- **The ranges and widths** in modem.v3's packed schema are illustrative.
+  #991 fixes them, with each counter's worst rate (§2.20).
+
 ## telemetry.v2 0.2 — 2026-11-02: an incomparable pair states no epoch (#983)
 
 zk2py's round 98 found an incomparable pair's epoch ambiguous (F-464).

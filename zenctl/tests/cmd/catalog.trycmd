@@ -8,29 +8,32 @@ every entry, each with whether `--contracts` holds that revision.
 
 ```console
 $ zenctl catalog show --catalog ../examples/zk2/zenoh-modem/catalog.json --contracts ../examples/zk2/zenoh-modem/modem.v3.toml --format table
-36c25c0f
+ab76ec37
 file      ../examples/zk2/zenoh-modem/catalog.json
 epoch     1767225600 (2026-01-01T00:00:00Z)
 succeeds  0a90fd61 (3 entries)
 succeeds  ea268fad (5 entries)
+succeeds  36c25c0f (6 entries)
   0  modem.v3   sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953  not held
   1  config.v1  sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1  not held
   2  health.v1  sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df  not held
   3  config.v1  sha256:4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501  not held
   4  health.v1  sha256:60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f  not held
-  5  modem.v3   sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66  held
+  5  modem.v3   sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66  not held
+  6  modem.v3   sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404  held
 
 ```
 
 ```console
 $ zenctl catalog show --catalog ../examples/zk2/zenoh-modem/catalog.json --format ndjson
-{"epoch":1767225600,"epoch_utc":"2026-01-01T00:00:00Z","id":"36c25c0f","lineage":[{"entries":3,"id":"0a90fd61"},{"entries":5,"id":"ea268fad"}],"path":"../examples/zk2/zenoh-modem/catalog.json","report":"catalog"}
+{"epoch":1767225600,"epoch_utc":"2026-01-01T00:00:00Z","id":"ab76ec37","lineage":[{"entries":3,"id":"0a90fd61"},{"entries":5,"id":"ea268fad"},{"entries":6,"id":"36c25c0f"}],"path":"../examples/zk2/zenoh-modem/catalog.json","report":"catalog"}
 {"contract":"sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953","iface":"modem.v3","index":0,"row":"entry"}
 {"contract":"sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1","iface":"config.v1","index":1,"row":"entry"}
 {"contract":"sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df","iface":"health.v1","index":2,"row":"entry"}
 {"contract":"sha256:4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501","iface":"config.v1","index":3,"row":"entry"}
 {"contract":"sha256:60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f","iface":"health.v1","index":4,"row":"entry"}
 {"contract":"sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66","iface":"modem.v3","index":5,"row":"entry"}
+{"contract":"sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404","iface":"modem.v3","index":6,"row":"entry"}
 
 ```
 
@@ -40,17 +43,19 @@ in it, exit 0.
 
 ```console
 $ zenctl catalog check --catalog ../examples/zk2/zenoh-modem/catalog.json --contracts ../examples/zk2/zenoh-modem/modem.v3.toml --format table
-36c25c0f
+ab76ec37
 file      ../examples/zk2/zenoh-modem/catalog.json
 epoch     1767225600 (2026-01-01T00:00:00Z)
 succeeds  0a90fd61 (3 entries)
 succeeds  ea268fad (5 entries)
+succeeds  36c25c0f (6 entries)
   0  modem.v3   sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953  not held
   1  config.v1  sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1  not held
   2  health.v1  sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df  not held
   3  config.v1  sha256:4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501  not held
   4  health.v1  sha256:60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f  not held
-  5  modem.v3   sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66  held
+  5  modem.v3   sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66  not held
+  6  modem.v3   sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404  held
 
 ```
 
@@ -60,17 +65,19 @@ the finding, exit 1.
 ```console
 $ zenctl catalog check --catalog ../examples/zk2/zenoh-modem/catalog.json --contracts ../examples/zk2/walkthrough/camera.v1.toml --format table
 ? 1
-36c25c0f
+ab76ec37
 file      ../examples/zk2/zenoh-modem/catalog.json
 epoch     1767225600 (2026-01-01T00:00:00Z)
 succeeds  0a90fd61 (3 entries)
 succeeds  ea268fad (5 entries)
+succeeds  36c25c0f (6 entries)
   0  modem.v3   sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953  not held
   1  config.v1  sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1  not held
   2  health.v1  sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df  not held
   3  config.v1  sha256:4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501  not held
   4  health.v1  sha256:60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f  not held
   5  modem.v3   sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66  not held
+  6  modem.v3   sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404  not held
   missing  camera.v1  sha256:0f66b421dc6decf2b28bf4b8f0c6006cbdbb7fe0a4d9a997e637f9105dc0ea98
 a revision the catalog lacks has no index a far side can read: append it with `zk2 catalog add` and provision the successor (core §8.6)
 
@@ -143,7 +150,7 @@ one does not list it.
 ```console
 $ zenctl schema show camera.v1 --contracts ../examples/zk2/walkthrough/camera.v1.toml --catalog ../examples/zk2/zenoh-modem/catalog.json --catalog tests/cmd/fixtures/catalog/successor.json --zenoh-config tests/cmd/fixtures/dead-bus.json5 --format table
 camera.v1 sha256:0f66b421dc6decf2b28bf4b8f0c6006cbdbb7fe0a4d9a997e637f9105dc0ea98  (file)
-  catalog 36c25c0f: not listed
+  catalog ab76ec37: not listed
   catalog 9da7c4a4 index 3
   @stream/image  type        raw image/jpeg
   @stream/image  attachment  camera.v1.FrameMeta  sha256:287bf0fa9f9251ed…

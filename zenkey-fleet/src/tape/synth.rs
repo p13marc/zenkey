@@ -872,7 +872,7 @@ impl<'b> JsonWalk<'_, 'b> {
 mod tests {
     use super::*;
     use crate::report::ContractSource;
-    use zenkey_model::decode::{Rendered, decode};
+    use zenkey_model::decode::{Rendered, decode, decode_in};
 
     /// A contract from `toml` and its schema files, in a directory of its
     /// own per call (#766): the tests build the same contract at once, and
@@ -1125,11 +1125,13 @@ message Pose {
 
     /// Every member of every resource of every example contract
     /// (`examples/zk2`): a JSON value that validates, a protobuf message
-    /// that decodes, a raw type of its size.
+    /// that decodes, a raw type of its size, a packed record that its
+    /// layout reads under the tag its envelope would carry (core §7.6;
+    /// modem.v3's frame resources' records since 3.2).
     #[test]
     fn every_example_contract_synthesizes() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-        let mut checked = 0;
+        let (mut checked, mut packed) = (0, 0);
         for dir in [
             "examples/zk2/tcgui",
             "examples/zk2/walkthrough",
@@ -1154,8 +1156,17 @@ message Pose {
                         Member::Error,
                         Member::Summary,
                     ] {
-                        let Some(_) = member_type(r, member) else {
+                        let Some((type_id, _)) = member_type(r, member) else {
                             continue;
+                        };
+                        let context = match rev.contract().packed_layout(type_id).unwrap() {
+                            Some(l) => {
+                                packed += 1;
+                                zenkey_model::decode::Context::tagged(
+                                    zenkey_model::wire::Tag::new(l.tag()).unwrap(),
+                                )
+                            }
+                            None => zenkey_model::decode::Context::default(),
                         };
                         for tick in [0, 7] {
                             let s =
@@ -1171,7 +1182,7 @@ message Pose {
                                 member.as_str(),
                             )
                             .unwrap();
-                            let rendered = decode(rev.bundle(), ty, None, &s.bytes);
+                            let rendered = decode_in(rev.bundle(), ty, None, &s.bytes, context);
                             assert!(
                                 matches!(rendered, Rendered::Value(_) | Rendered::Opaque { .. }),
                                 "{} {}/{} {member:?}: {rendered:?}",
@@ -1186,6 +1197,7 @@ message Pose {
             }
         }
         assert!(checked > 50, "the examples were walked: {checked}");
+        assert!(packed > 0, "a packed type was walked");
     }
 
     /// A metric resource's samples are ones its writer accepts

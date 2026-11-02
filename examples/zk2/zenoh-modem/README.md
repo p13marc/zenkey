@@ -18,16 +18,25 @@ Its seam crates are on crates.io for out-of-tree backends.
 - One **service per device** (`rf0`, `sat0`, `wwan0`) on a **system that is the host id**.
 - [`modem.v3.toml`](modem.v3.toml) holds 86 resources, 80 of them optional with their v1 gates.
   Their payloads are in [`schemas/modem.json`](schemas/modem.json).
+- Since revision 3.2 (#983 T4), it also holds 9 frame resources (core §7.7), which carry the 73
+  readings in packed records ([`schemas/modem-frames.json`](schemas/modem-frames.json)) across the
+  radios, each field a [`telemetry.v2`](../../../spec/profiles/telemetry/v2.md) series. "Frames
+  (9)", below, lists them.
 - The configuration plane's 8 gated entries are `config.v1`, bound in
   [`config.v1-binding.md`](config.v1-binding.md). That file also explains why the far side of a
   radio can arm a reach change today but never keep it, and gives the zk2 grants that fix it.
 - The radio faces, the rules a generator would emit, and the declaration cost of zk2 keys against
   v1's are in [`link.md`](link.md), a sketch now superseded by the profile
-  [`link.v1`](../../../spec/profiles/link/v1.md) (#769), whose Appendix B gives the two faces.
+  [`link.v1`](../../../spec/profiles/link/v1.md) (#769). Since #988 L5 the routers run
+  [`link.v2`](../../../spec/profiles/link/v2.md) policies, one router per medium, in
+  [`faces/`](faces/): RF, LoRa (a policy per spreading factor, SF7, SF9 and SF12), and SBD.
+  `link.md`'s first note gives each face's transport, the frames that cross it and its plan's
+  warnings.
 - What `modem-contract` becomes is in [`contract-crate.md`](contract-crate.md).
 - [`catalog.json`](catalog.json) is the deployment catalog ([core §8.6](../../../spec/core.md#86-the-deployment-catalog)),
   provisioned to rf0's host and to the ground. It indexes `modem.v3`, `config.v1` and
-  `health.v1` at their current revisions, and dates times from 2026-01-01. A new revision goes in
+  `health.v1` at their current revisions (`modem.v3` 3.2 at index 6, catalog `ab76ec37`), and
+  dates times from 2026-01-01. A new revision goes in
   with `zk2 catalog add`, which writes the catalog's successor.
 
 **The verdict.** Every v1 entry maps or is deleted for a stated reason, and the constrained-face
@@ -70,7 +79,7 @@ The gaps below are the draft-0 record, kept as written; r3.3 §0.3 says where ea
 | `service` | one per device the host serves: `rf0`, `sat0`, `wwan0`, `lora0`, `dlep0`. They are hosted by one driver process (`modem-mgmt`'s `Host` with N `Node`s), one session, one instance id per service. |
 | interfaces | `modem.v3` on every device service; `config.v1` where the device has a configuration plane (v1 `capability:config`); `health.v1` ([`spec/profiles/health/health.v1.toml`](../../../spec/profiles/health/health.v1.toml), the profile [`health.v1`](../../../spec/profiles/health/v1.md)) recommended, though none of it crosses the RF face ([`health.v1`](../../../spec/profiles/health/v1.md) §2.8), its status derived from `oper` (`up` → ok; `down` and recoverable → degraded; `down` and not recoverable → failed) |
 | presence | per device service: an instance token, plus one interface token per interface the device exposes something of. A netdev holds no SDU resource, but it still implements `modem.v3`, because its `oper`, `identity` and `security` are always exposed. |
-| continuity epoch | a new instance id whenever a device's counters reset: re-enumeration, ifindex change, restart |
+| continuity epoch | a new instance id whenever a device's counters reset: re-enumeration, ifindex change, restart; a frame resource's is its run, in band, which a new instance renews (`telemetry.v2` §2.19) |
 | ownership | every resource `exclusive`; both operations `fanout = "forbidden"`; config writes serialized per device by the server, which is v1's single-writer rule |
 | schema kind | **jsonschema**, Rust-first: schemars output committed ([crate](contract-crate.md) §2) |
 
@@ -113,7 +122,10 @@ zk2/*/*/@zk/alive/config.v1/**                                     "which device
   - Their content goes to the descriptor, the bundle and the instance and interface tokens.
   - The capabilities that `sensor` listed per device are each device service's descriptor's.
   - Its `config_hash` belongs to `config.v1`.
-- **Exposure defaults to `host`.** Only the four v1 `link` streams carry `link.exposure`.
+- **Exposure defaults to `host`.** Until revision 3.1, only the four v1 `link` streams carried
+  `link.exposure = "link"`. Since 3.2 they are `host` again, written out, and only the nine frame
+  resources are `link`: the four readings cross in `frames/link` ([link](link.md), the note at its
+  top).
 
 ## Every v1 entry, mapped
 
@@ -122,7 +134,7 @@ Generated from `modem.toml` v2.14 against `modem.v3.toml`. The zk2 column is rel
 
 ### Telemetry (73) → `modem.v3` streams
 
-Key: `zk2/<host-id>/<device>/modem.v3/stream/<resource>`; every one keeps v1's `sampled` QoS (`priority = "data_low"`) and carries `telemetry.kind` (and `telemetry.unit` where v1 had one).
+Key: `zk2/<host-id>/<device>/modem.v3/stream/<resource>`; every one keeps v1's `sampled` QoS (`priority = "data_low"`) and carries `telemetry.kind` (and `telemetry.unit` where v1 had one). The four v1 `link` streams are `host` since revision 3.2: their readings cross in `frames/link` (below).
 
 | # | v1 `telemetry/modem/…` | Gate (`capability:`) | zk2 resource | Type · kind · unit |
 |---|---|---|---|---|
@@ -130,7 +142,7 @@ Key: `zk2/<host-id>/<device>/modem.v3/stream/<resource>`; every one keeps v1's `
 | 2 | `device/{device}/sdu/tx_bytes_total` | `sdu` | `sdu/tx_bytes_total` | `Counter` · counter · `By` |
 | 3 | `device/{device}/sdu/rx_sdus_total` | `sdu` | `sdu/rx_sdus_total` | `Counter` · counter |
 | 4 | `device/{device}/sdu/rx_bytes_total` | `sdu` | `sdu/rx_bytes_total` | `Counter` · counter · `By` |
-| 5 | `device/{device}/sdu/dropped_total` | `sdu` | `sdu/dropped_total` | `Counter` · counter · **`link.exposure = "link"`** |
+| 5 | `device/{device}/sdu/dropped_total` | `sdu` | `sdu/dropped_total` | `Counter` · counter · **`link.exposure = "link"`** until 3.1, `host` since 3.2 |
 | 6 | `device/{device}/sdu/tx_failed_total` | `sdu` | `sdu/tx_failed_total` | `Counter` · counter |
 | 7 | `device/{device}/sdu/rx_unroutable_total` | `sdu` | `sdu/rx_unroutable_total` | `Counter` · counter |
 | 8 | `device/{device}/sdu/rx_oversize_total` | `sdu` | `sdu/rx_oversize_total` | `Counter` · counter |
@@ -138,7 +150,7 @@ Key: `zk2/<host-id>/<device>/modem.v3/stream/<resource>`; every one keeps v1's `
 | 10 | `device/{device}/sched/dropped_total` | `sdu` | `sched/dropped_total` | `Counter` · counter |
 | 11 | `device/{device}/sched/stale_total` | `sdu` | `sched/stale_total` | `Counter` · counter |
 | 12 | `device/{device}/sched/peerless_total` | `sdu` | `sched/peerless_total` | `Counter` · counter |
-| 13 | `device/{device}/sched/queue_depth` | `sdu` | `sched/queue_depth` | `Gauge` · gauge · **`link.exposure = "link"`** |
+| 13 | `device/{device}/sched/queue_depth` | `sdu` | `sched/queue_depth` | `Gauge` · gauge · **`link.exposure = "link"`** until 3.1, `host` since 3.2 |
 | 14 | `device/{device}/sched/lane_backlog_bytes` | `lane_backlog` | `sched/lane_backlog_bytes` | `Gauge` · gauge · `By` |
 | 15 | `device/{device}/sched/lane_backlog_drain_ms` | `lane_backlog` ∧ `sdu_time` | `sched/lane_backlog_drain_ms` | `Gauge` · gauge · `ms` |
 | 16 | `device/{device}/air/tx_frames_total` | `framing` | `air/tx_frames_total` | `Counter` · counter |
@@ -172,8 +184,8 @@ Key: `zk2/<host-id>/<device>/modem.v3/stream/<resource>`; every one keeps v1's `
 | 44 | `device/{device}/air/retransmits_total` | `retransmits` | `air/retransmits_total` | `Counter` · counter |
 | 45 | `device/{device}/air/bytes_wasted_total` | `slot_accounting` | `air/bytes_wasted_total` | `Counter` · counter · `By` |
 | 46 | `device/{device}/air/rx_errors_total` | `rx_errors` | `air/rx_errors_total` | `Counter` · counter |
-| 47 | `device/{device}/air/duty_cycle_available` | `duty_cycle` | `air/duty_cycle_available` | `Gauge` · gauge · **`link.exposure = "link"`** |
-| 48 | `device/{device}/air/duty_cycle_wait_ms` | `duty_cycle` | `air/duty_cycle_wait_ms` | `Gauge` · gauge · `ms` · **`link.exposure = "link"`** |
+| 47 | `device/{device}/air/duty_cycle_available` | `duty_cycle` | `air/duty_cycle_available` | `Gauge` · gauge · **`link.exposure = "link"`** until 3.1, `host` since 3.2 |
+| 48 | `device/{device}/air/duty_cycle_wait_ms` | `duty_cycle` | `air/duty_cycle_wait_ms` | `Gauge` · gauge · `ms` · **`link.exposure = "link"`** until 3.1, `host` since 3.2 |
 | 49 | `device/{device}/radio/signal_bars` | `signal_bars` | `radio/signal_bars` | `Gauge` · gauge |
 | 50 | `device/{device}/if/in_octets` | `netdev` | `if/in_octets` | `Counter` · counter · `By` |
 | 51 | `device/{device}/if/out_octets` | `netdev` | `if/out_octets` | `Counter` · counter · `By` |
@@ -199,6 +211,45 @@ Key: `zk2/<host-id>/<device>/modem.v3/stream/<resource>`; every one keeps v1's `
 | 71 | `device/{device}/link/resources` | `resources` | `link/resources` | `Measure` · gauge · `%` |
 | 72 | `device/{device}/link/rx_quality` | `link_quality` | `link/rx_quality` | `Measure` · gauge · `%` |
 | 73 | `device/{device}/link/tx_quality` | `link_quality` | `link/tx_quality` | `Measure` · gauge · `%` |
+
+### Frames (9) → `modem.v3` frame resources, since revision 3.2
+
+No v1 entry: v1 had no frame. Since revision 3.2 (#983 T4, with #991), `modem.v3` lists
+[`telemetry.v2`](../../../spec/profiles/telemetry/v2.md) in place of `telemetry.v1`, and carries the
+73 readings above in packed records as well (core §7.6, §7.7), typed in
+[`schemas/modem-frames.json`](schemas/modem-frames.json). Each frame resource:
+- is a plain stream, `priority = "data"`, exposed `link`;
+- holds one record a frame, its time measured, so its cadence is its owner's configuration: rf0
+  every minute, LoRa SF9 every 2, SF12 every 15 (#991's per-medium table);
+- is optional, gated `config:frames.<name>`: a device publishes the frames its medium affords and
+  lists the others unavailable;
+- declares `telemetry.series`, each field a mirror of its JSON stream, which lends the series its
+  kind and unit. The series is the frame key and the field, never the mirrored stream
+  (`telemetry.v2` §2.17), and its epoch is the frame's run (§2.19).
+
+Every field is optional, as `modem_device::Report` is all `Option`: absent is not zero. The
+ranges and widths are illustrative, and #991 fixes them. A payload below is the largest frame's,
+every field present, after an envelope with a 32-bit run (`link.v1` §2.8's `frame_over_batch`).
+
+| Frame resource | Record type · fields | Frame | Payload |
+|---|---|---|---:|
+| `frames/link` | `LinkReadings` · `sdu/dropped_total` (a 32-bit counter), `sched/queue_depth`, `air/duty_cycle_available`, `air/duty_cycle_wait_ms`: 63 bits, core §7.7's fixtures' `Link` | `keyframe_every = 1`; `freshness.ttl_s = 150` | 22 B |
+| `frames/sdu` | `Sdu` · the 9 `sdu/` counters | `keyframe_every = 15` | 51 B |
+| `frames/sched` | `Sched` · the 6 `sched/` readings | `keyframe_every = 15`; deadbands on `queue_depth` (4) and `lane_backlog_bytes` (1,024 B) | 32 B |
+| `frames/air` | `Air` · the 10 `air/` readings | `keyframe_every = 15` | 49 B |
+| `frames/layer` | `Layer` · the 23 `layer/` readings | `keyframe_every = 15` | 106 B |
+| `frames/if` | `If` · the 11 `if/` readings, `in_octets` and `out_octets` at 40 bits | `keyframe_every = 15`; deadbands on `qdisc_backlog_bytes` (4,096 B) and `qdisc_backlog_pkts` (4) | 58 B |
+| `frames/radio` | `Radio` · the 6 `radio/` readings | `keyframe_every = 15`; deadbands on `rssi` and `snr` (1 dB) | 21 B |
+| `frames/bearer` | `Bearer` · the 8 `link/` readings: `frames/link` is the four link readings' | `keyframe_every = 15` | 32 B |
+| `frames/message` | `Message` · all 73, counters at 24 bits | `keyframe_every = 1` | 213 B |
+
+A group frame's counters are 32 bits, a declared loss (`telemetry.v2` §2.20): a 32-bit counter
+reads in a window of 2^31 between two samples, so `if/in_octets` at 40 bits holds a 1 Gbit/s
+bearer's minute. `frames/message`'s 24-bit counters suit an SBD terminal's, not an IP modem's
+(#991 states each counter's worst rate). Each deadband allows 5 records omitted.
+
+The 73 JSON streams stay, at 5 s on the host bus, for host tools: one reading, two series, which
+a tool labels apart ("`sdu/dropped_total` (`frames/link`)").
 
 ### State (9)
 
@@ -292,7 +343,8 @@ v1's `[[deprecated]]` ledger retired the 1.x paths in 2.0 (#120). **None is carr
 - 8 → `config.v1`, all gated `config`, so 80 + 8 = v1's 88;
 - 3 deleted (`sensor`, `describe`, `introspect`).
 
-Plus 3 errors, 2 tokens and 26 retired paths. Nothing in `modem.toml` is left unmapped.
+Plus 3 errors, 2 tokens and 26 retired paths. Nothing in `modem.toml` is left unmapped. The 9
+frame resources of revision 3.2 map no v1 entry: they carry the 73 readings again, packed.
 
 ## Gaps found
 
@@ -312,6 +364,13 @@ Each gap gives what is missing, the evidence, and a proposed correction. "r3.2" 
      epoch in an attachment typed `telemetry.v1.Epoch` (§2.4, §2.9), which `link.v1` §2.13 cites.
      `modem.v3` declares none yet: adding it to `sdu/dropped_total` is a revision, review under
      core §9.8.
+   - *Status since `modem.v3` 3.2 and the `link.v2` faces (#983 T4, #988 L5):* **closed on every
+     face.** No JSON stream crosses. Each counter crosses as a frame's field: `frames/link` and
+     the group frames over RF and LoRa, `frames/message` over SBD. Its epoch is the frame's run, in
+     band ([`telemetry.v2`](../../../spec/profiles/telemetry/v2.md) §2.19), at no byte, and
+     [`link.v2`](../../../spec/profiles/link/v2.md) §2.13 reads it so across a face. A decrease
+     within one run is not a reset there: at 32 bits, or 24 in `frames/message`, it is
+     `wrap_or_decrease` (§2.20). The JSON stream on the host bus reads as before, by presence.
 2. **Occurrence-keyed streams cannot state a rate, so their population bound is uncheckable.** v1's
    `rate = rare | low | burst(600/h)` is enforced by the publisher, which folds the excess into
    `occurrences`. The cardinalities in `modem.v3.toml` (168 to 14,400; 100,800 for `config.v1`) are
@@ -382,6 +441,12 @@ Each gap gives what is missing, the evidence, and a proposed correction. "r3.2" 
     - *Correction:* `link.v1` states that face policy is per router transport. A two-radio node
       uses `zids` subjects per lane peer (unauthenticated, but the peer is configured) or a router
       per radio. S3 and S14 test `zids` subjects.
+    - *Status since #988 L5:* **narrowed.** A `link.v2` policy states the router's transport,
+      which zenoh reads once per router, so a router per medium is the rule (`link.v2` §2.16):
+      RF's 240 s lease and SBD's 3,600 s cannot share one. [`faces/`](faces/) gives each medium
+      its router, each carrying one device. A node with two radios stays open: a face's `frames`
+      names an interface's frame resource, not a service's, so a router that also carried the
+      other device's traffic would let its listed frames across too.
 11. **Every key under one downsampling rule shares its timer.**
     - *Evidence:* zenoh 1.10.1 `interceptor/downsampling.rs:208-251, 281-304`. v1's
       `zenohd-rf0.json5:118-121` rules span `*` devices: a latent v1 bug on a two-device node.
@@ -395,6 +460,10 @@ Each gap gives what is missing, the evidence, and a proposed correction. "r3.2" 
     - *Correction:* the generator offers the fail-closed shape ([link](link.md) §4): default deny
       plus a `tcp` host-face subject. That contradicts zenoh-modem's "only shape"
       (`architecture.md:286-296`) whenever the host face is a distinct protocol. S14 runs it.
+    - *Status since `modem.v3` 3.2:* **narrowed, still open.** `sdu/`, `sched/` and `air/` hold no
+      crossing resource now, so each is denied whole. Only `frames/` mixes, and every resource
+      under it crosses: a `host` resource a later minor added there would cross until the plan is
+      derived again.
 13. **§3.13's grants are written as allows, and allow rules are inert under `allow`.** A grant is
     the absence of a deny in the principal's policy, plus a deny on the enumerated complement.
     - *Evidence:*
@@ -409,6 +478,13 @@ Each gap gives what is missing, the evidence, and a proposed correction. "r3.2" 
     - *Evidence:* r3.2 l.307; `zenohd-sat0-gateway.json5:99-102`.
     - *Correction:* R7 reads "the freshness of whatever `link.v1` exposes". Over SBD, liveness
       across the face is unobservable by design.
+    - *Status since `modem.v3` 3.2 and the `link.v2` faces (#983 T4, #988 L5):* **closed for RF
+      and for LoRa at SF7 and SF9, open at SF12 and for SBD.** `frames/link` declares
+      `freshness.ttl_s = 150`, so it is liveness evidence across each of those faces (`link.v1`
+      §2.12), which carry it every minute. SF12's carries it every 15 minutes: a far reader finds
+      it stale between two frames (`interval_over_horizon`, `horizon_under_face`), and a horizon
+      that medium can carry is `modem.v3`'s to choose (#991). SBD now carries `frames/message`,
+      which declares no horizon, so liveness across it stays unobservable by design.
 15. **The descriptor's ≤ 1 KB target fails for a union contract.** Listing unavailable optional
     resources one by one costs 4.5–5.4 KB per device (wwan0: 69 entries; rf0 and sat0: 57).
     - *Evidence:* r3.2 l.444-447, 458.
@@ -449,6 +525,10 @@ Each gap gives what is missing, the evidence, and a proposed correction. "r3.2" 
     - *Evidence:* r3.2 l.128; draft 0 l.128-132.
     - *Correction:* face and role files may expose resources per principal. `link.v1` defines that
       vocabulary beside the contract annotation.
+    - *Status since #988 L5:* **open.** A `link.v2` face lists which of a contract's exposed frames
+      cross it (`link.v2` §2.7): exposure chosen by the deployment, but per face, among frames the
+      contract already exposes. It is not per principal, and reaches no standard profile's
+      resource: `config.v1`'s view still crosses only as a GET, by grant (`link.v1` §2.9).
 21. **`claimed_source` has no zk2 source.** O7 carries `{actor, request_id}` only, and zenoh's
     `SourceInfo` is unstable. (Minor.)
     - *Evidence:* `zenkey/src/config.rs:780-784`; r3.2 l.384, §3.8.

@@ -1,0 +1,200 @@
+{
+  "description": "modem.v3's frame records (core section 7.6, 7.7; telemetry.v2, #983 T4). Every field is optional: a device that cannot answer writes it absent, never 0. The ranges and widths are illustrative, and #991 fixes them. A group frame's counters are 32 bits, the kernel's octet counters 40; frames/message's are 24.",
+  "types": {
+    "LinkReadings": {
+      "description": "frames/link: sdu/dropped_total, sched/queue_depth, air/duty_cycle_available and air/duty_cycle_wait_ms, as core section 7.7's fixtures' Link (63 bits)",
+      "fields": [
+        {"name": "dropped", "type": "counter", "width": 32, "optional": true},
+        {"name": "queue_depth", "type": "int", "minimum": 0, "maximum": 1022, "reserved": ["out_of_range"], "optional": true},
+        {"name": "duty_available", "type": "int", "minimum": 0, "maximum": 1, "optional": true},
+        {"name": "duty_wait_ms", "type": "fixed", "minimum": "0", "maximum": "3600000", "resolution": "100", "reserved": ["out_of_range"], "optional": true}
+      ]
+    },
+    "Sdu": {
+      "description": "frames/sdu: the SDU plane's nine counters",
+      "fields": [
+        {"name": "tx_sdus_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "tx_bytes_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "rx_sdus_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "rx_bytes_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "dropped_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "tx_failed_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "rx_unroutable_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "rx_oversize_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "tx_oversize_total", "type": "counter", "width": 32, "optional": true}
+      ]
+    },
+    "Sched": {
+      "description": "frames/sched: the scheduler's counters, its queue and the lane backlog",
+      "fields": [
+        {"name": "dropped_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "stale_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "peerless_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "queue_depth", "type": "int", "minimum": 0, "maximum": 1022, "reserved": ["out_of_range"], "optional": true},
+        {"name": "lane_backlog_bytes", "type": "int", "minimum": 0, "maximum": 1048574, "reserved": ["out_of_range"], "optional": true},
+        {"name": "lane_backlog_drain_ms", "type": "fixed", "minimum": "0", "maximum": "3600000", "resolution": "100", "reserved": ["out_of_range"], "optional": true}
+      ]
+    },
+    "Air": {
+      "description": "frames/air: what the module frames and the medium spends: frames, listen-before-talk, airtime, ARQ, slot waste, receive errors, the duty cycle",
+      "fields": [
+        {"name": "tx_frames_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "rx_frames_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "cad_deferrals_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "cad_forced_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "airtime_ms_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "retransmits_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "bytes_wasted_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "rx_errors_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "duty_cycle_available", "type": "int", "minimum": 0, "maximum": 1, "optional": true},
+        {"name": "duty_cycle_wait_ms", "type": "fixed", "minimum": "0", "maximum": "3600000", "resolution": "100", "reserved": ["out_of_range"], "optional": true}
+      ]
+    },
+    "Layer": {
+      "description": "frames/layer: what each configured layer refuses and does: aead, address, fec, fragment, compress",
+      "fields": [
+        {"name": "aead_auth_failures_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "aead_replays_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "aead_unknown_key_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "aead_send_key_id", "type": "int", "minimum": 0, "maximum": 255, "optional": true},
+        {"name": "address_foreign_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "address_unknown_source_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "fec_repair_frames_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "fec_repaired_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "fec_unrecoverable_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "fec_late_repair_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "fec_unused_repair_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "fec_malformed_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "fragment_fragments_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "fragment_reassembled_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "fragment_rcs_failures_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "fragment_timeouts_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "fragment_oversize_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "fragment_malformed_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "compress_compressed_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "compress_stored_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "compress_bytes_saved_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "compress_dictionary_mismatch_total", "type": "counter", "width": 32, "optional": true},
+        {"name": "compress_malformed_total", "type": "counter", "width": 32, "optional": true}
+      ]
+    },
+    "If": {
+      "description": "frames/if: the kernel's interface counters and its queue disciplines",
+      "fields": [
+        {"name": "in_octets", "type": "counter", "width": 40, "optional": true},
+        {"name": "out_octets", "type": "counter", "width": 40, "optional": true},
+        {"name": "in_errors", "type": "counter", "width": 32, "optional": true},
+        {"name": "out_errors", "type": "counter", "width": 32, "optional": true},
+        {"name": "in_discards", "type": "counter", "width": 32, "optional": true},
+        {"name": "out_discards", "type": "counter", "width": 32, "optional": true},
+        {"name": "in_multicast_pkts", "type": "counter", "width": 32, "optional": true},
+        {"name": "in_pkts", "type": "counter", "width": 32, "optional": true},
+        {"name": "out_pkts", "type": "counter", "width": 32, "optional": true},
+        {"name": "qdisc_backlog_bytes", "type": "int", "minimum": 0, "maximum": 16777214, "reserved": ["out_of_range"], "optional": true},
+        {"name": "qdisc_backlog_pkts", "type": "int", "minimum": 0, "maximum": 65534, "reserved": ["out_of_range"], "optional": true}
+      ]
+    },
+    "Radio": {
+      "description": "frames/radio: what the radio measures: bars, RSSI, RSRP, RSRQ, SNR, error rate",
+      "fields": [
+        {"name": "signal_bars", "type": "int", "minimum": 0, "maximum": 5, "optional": true},
+        {"name": "rssi", "type": "fixed", "minimum": "-160", "maximum": "0", "resolution": "0.5", "reserved": ["out_of_range"], "optional": true},
+        {"name": "rsrp", "type": "int", "minimum": -160, "maximum": -30, "reserved": ["out_of_range"], "optional": true},
+        {"name": "rsrq", "type": "fixed", "minimum": "-35", "maximum": "5", "resolution": "0.5", "reserved": ["out_of_range"], "optional": true},
+        {"name": "snr", "type": "fixed", "minimum": "-30", "maximum": "40", "resolution": "0.25", "reserved": ["out_of_range"], "optional": true},
+        {"name": "error_rate", "type": "fixed", "minimum": "0", "maximum": "100", "resolution": "0.01", "optional": true}
+      ]
+    },
+    "Bearer": {
+      "description": "frames/bearer: what a bearer reports of its link (DLEP RFC 8175 section 13): rates, latency, resources, quality",
+      "fields": [
+        {"name": "rx_rate", "type": "fixed", "minimum": "0", "maximum": "10000000000", "resolution": "1000", "reserved": ["out_of_range"], "optional": true},
+        {"name": "tx_rate", "type": "fixed", "minimum": "0", "maximum": "10000000000", "resolution": "1000", "reserved": ["out_of_range"], "optional": true},
+        {"name": "rx_max_rate", "type": "fixed", "minimum": "0", "maximum": "10000000000", "resolution": "1000", "reserved": ["out_of_range"], "optional": true},
+        {"name": "tx_max_rate", "type": "fixed", "minimum": "0", "maximum": "10000000000", "resolution": "1000", "reserved": ["out_of_range"], "optional": true},
+        {"name": "latency", "type": "fixed", "minimum": "0", "maximum": "60000000", "resolution": "100", "reserved": ["out_of_range"], "optional": true},
+        {"name": "resources", "type": "int", "minimum": 0, "maximum": 100, "optional": true},
+        {"name": "rx_quality", "type": "int", "minimum": 0, "maximum": 100, "optional": true},
+        {"name": "tx_quality", "type": "int", "minimum": 0, "maximum": 100, "optional": true}
+      ]
+    },
+    "Message": {
+      "description": "frames/message: all 73 readings, in the contract's order, every counter at 24 bits (a declared loss: each wraps at 2^24)",
+      "fields": [
+        {"name": "sdu_tx_sdus_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "sdu_tx_bytes_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "sdu_rx_sdus_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "sdu_rx_bytes_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "sdu_dropped_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "sdu_tx_failed_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "sdu_rx_unroutable_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "sdu_rx_oversize_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "sdu_tx_oversize_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "sched_dropped_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "sched_stale_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "sched_peerless_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "sched_queue_depth", "type": "int", "minimum": 0, "maximum": 1022, "reserved": ["out_of_range"], "optional": true},
+        {"name": "sched_lane_backlog_bytes", "type": "int", "minimum": 0, "maximum": 1048574, "reserved": ["out_of_range"], "optional": true},
+        {"name": "sched_lane_backlog_drain_ms", "type": "fixed", "minimum": "0", "maximum": "3600000", "resolution": "100", "reserved": ["out_of_range"], "optional": true},
+        {"name": "air_tx_frames_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "air_rx_frames_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "air_cad_deferrals_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "air_cad_forced_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "layer_aead_auth_failures_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "layer_aead_replays_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "layer_aead_unknown_key_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "layer_aead_send_key_id", "type": "int", "minimum": 0, "maximum": 255, "optional": true},
+        {"name": "layer_address_foreign_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "layer_address_unknown_source_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "layer_fec_repair_frames_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "layer_fec_repaired_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "layer_fec_unrecoverable_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "layer_fec_late_repair_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "layer_fec_unused_repair_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "layer_fec_malformed_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "layer_fragment_fragments_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "layer_fragment_reassembled_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "layer_fragment_rcs_failures_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "layer_fragment_timeouts_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "layer_fragment_oversize_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "layer_fragment_malformed_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "layer_compress_compressed_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "layer_compress_stored_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "layer_compress_bytes_saved_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "layer_compress_dictionary_mismatch_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "layer_compress_malformed_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "air_airtime_ms_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "air_retransmits_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "air_bytes_wasted_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "air_rx_errors_total", "type": "counter", "width": 24, "optional": true},
+        {"name": "air_duty_cycle_available", "type": "int", "minimum": 0, "maximum": 1, "optional": true},
+        {"name": "air_duty_cycle_wait_ms", "type": "fixed", "minimum": "0", "maximum": "3600000", "resolution": "100", "reserved": ["out_of_range"], "optional": true},
+        {"name": "radio_signal_bars", "type": "int", "minimum": 0, "maximum": 5, "optional": true},
+        {"name": "if_in_octets", "type": "counter", "width": 24, "optional": true},
+        {"name": "if_out_octets", "type": "counter", "width": 24, "optional": true},
+        {"name": "if_in_errors", "type": "counter", "width": 24, "optional": true},
+        {"name": "if_out_errors", "type": "counter", "width": 24, "optional": true},
+        {"name": "if_in_discards", "type": "counter", "width": 24, "optional": true},
+        {"name": "if_out_discards", "type": "counter", "width": 24, "optional": true},
+        {"name": "if_in_multicast_pkts", "type": "counter", "width": 24, "optional": true},
+        {"name": "if_in_pkts", "type": "counter", "width": 24, "optional": true},
+        {"name": "if_out_pkts", "type": "counter", "width": 24, "optional": true},
+        {"name": "if_qdisc_backlog_bytes", "type": "int", "minimum": 0, "maximum": 16777214, "reserved": ["out_of_range"], "optional": true},
+        {"name": "if_qdisc_backlog_pkts", "type": "int", "minimum": 0, "maximum": 65534, "reserved": ["out_of_range"], "optional": true},
+        {"name": "radio_rssi", "type": "fixed", "minimum": "-160", "maximum": "0", "resolution": "0.5", "reserved": ["out_of_range"], "optional": true},
+        {"name": "radio_rsrp", "type": "int", "minimum": -160, "maximum": -30, "reserved": ["out_of_range"], "optional": true},
+        {"name": "radio_rsrq", "type": "fixed", "minimum": "-35", "maximum": "5", "resolution": "0.5", "reserved": ["out_of_range"], "optional": true},
+        {"name": "radio_snr", "type": "fixed", "minimum": "-30", "maximum": "40", "resolution": "0.25", "reserved": ["out_of_range"], "optional": true},
+        {"name": "radio_error_rate", "type": "fixed", "minimum": "0", "maximum": "100", "resolution": "0.01", "optional": true},
+        {"name": "link_rx_rate", "type": "fixed", "minimum": "0", "maximum": "10000000000", "resolution": "1000", "reserved": ["out_of_range"], "optional": true},
+        {"name": "link_tx_rate", "type": "fixed", "minimum": "0", "maximum": "10000000000", "resolution": "1000", "reserved": ["out_of_range"], "optional": true},
+        {"name": "link_rx_max_rate", "type": "fixed", "minimum": "0", "maximum": "10000000000", "resolution": "1000", "reserved": ["out_of_range"], "optional": true},
+        {"name": "link_tx_max_rate", "type": "fixed", "minimum": "0", "maximum": "10000000000", "resolution": "1000", "reserved": ["out_of_range"], "optional": true},
+        {"name": "link_latency", "type": "fixed", "minimum": "0", "maximum": "60000000", "resolution": "100", "reserved": ["out_of_range"], "optional": true},
+        {"name": "link_resources", "type": "int", "minimum": 0, "maximum": 100, "optional": true},
+        {"name": "link_rx_quality", "type": "int", "minimum": 0, "maximum": 100, "optional": true},
+        {"name": "link_tx_quality", "type": "int", "minimum": 0, "maximum": 100, "optional": true}
+      ]
+    }
+  }
+}
