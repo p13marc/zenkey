@@ -95,10 +95,10 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   `start()`, beside `redundancy()`; else a random 32-bit run, drawn again
   while it equals one used; `new_epoch` takes a new run, puts the new
   instance's descriptor stating it, then alarms' and desired's re-puts
-  under it, then the tokens; `Service::new_run` (#1055) takes one within
-  the instance, as a spent seq does (`Minter::new_run`, the descriptor put
-  under the runs lock), nothing else moved or re-put, allowed on a
-  `config.v1` service; §4.3's table's Zenoh timestamps still minted
+  under it, then the tokens; `Service::new_run` takes one within the
+  instance, as a spent seq does (`Minter::new_run`, the descriptor put
+  under the runs lock), nothing else moved or re-put, never for a counter
+  reset (core §1.5: that is `new_epoch`); §4.3's table's Zenoh timestamps still minted
   above the last, catch-up included; the clock guard stops only a state
   write that carries a Zenoh timestamp since #978 F6 (`mint_state`
   refuses when `timed` or the session stamps; `new_epoch` refuses early
@@ -246,8 +246,14 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   own), serves the five operations, puts the view and the status before
   the tokens and after every step that moves them, runs the deadline timer
   at `Owner::next_due`, and converges desired state; a restart is a new
-  service from `Startup` (`new_epoch` is refused while it runs, `new_run`
-  is not and restarts nothing), and the
+  service from `Startup`, and `new_epoch` restarts it in place (§2.12,
+  #1055): `Configuration::restarting` cancels a pending change, sends
+  `Owner::restart_plan` to `Device::restore_startup` (by default refused)
+  when a parameter runs off its startup value, and holds the owner, then
+  `Restarting::start` runs `Owner::restart` and puts the view and the
+  status before the new tokens; refused while an act is in flight, for a
+  runtime value that starts unknown, and when fed through `desired.v1`
+  (§2.16). The
   owner example's `--config` drives it from stdin.
   `config_v2` (#985 G2) is `config.v2`'s owner over the service's own
   config contract, implemented first: `ServiceBuilder::config_v2(Startup,
@@ -314,15 +320,15 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   every counter reduced modulo 2^w (on any frame resource); a code past
   its field's width is the framer's `range`, its one width guard. A count is of
   the run its frame is put under, a record in the open frame of the run
-  it will take, so a restart flushes, then `new_run` (or `new_epoch`); an
-  increase past
+  it will take, so a restart flushes, then `new_epoch`; an increase past
   2^(w−1) is a warning. It builds no `Sampled` and calls no `pair`.
   `tests/profile_telemetry_v2.rs` is `scenarios-v2.md` §1–§7 over the
   spec's `meterframe.v1`, R a `telemetry::frames::Fold` per key; the
   owner example's `--telemetry-v2` embeds that contract and drives it
   (`telemetry frame record|flush|lose|mutation|raw <resource>`, `telemetry
   frame new-epoch|new-run`; `owner/frames.rs`, its K3 drive generalised);
-  `a_config_v1_owners_device_restart_takes_a_new_run` is #1055's.
+  `a_config_v1_owners_device_reset_is_a_new_instance` is #1055's (the
+  frames reset in band, the bare counter by presence).
   `desired` (#840, DC) is `desired.v1`'s runtime over
   `zenkey_model::desired`'s state machine.
   `ServiceBuilder::desired_author(iface, resource, AuthorStartup)` →

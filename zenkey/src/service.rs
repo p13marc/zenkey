@@ -722,7 +722,11 @@ impl ServiceBuilder {
             )));
         }
         let cfg = match (self.config_v1.clone(), self.config_v2.clone()) {
-            (Some(c), _) => crate::desired::Configured::V1(c),
+            (Some(c), _) => {
+                // desired.v1 §2.16: its re-mint is refused.
+                c.fed_by_desired();
+                crate::desired::Configured::V1(c)
+            }
             (None, Some(c)) => crate::desired::Configured::V2(c),
             (None, None) => {
                 return Err(Error::Contract(
@@ -2056,11 +2060,25 @@ impl Service {
     /// a new session, so that the table's timestamps' id changes too
     /// (§1.5), is the caller's: the runtime never owns the session.
     ///
-    /// Refused for a service implementing `config.v1` through
-    /// [`ServiceBuilder::config_v1`], or `config.v2` through
-    /// [`ServiceBuilder::config_v2`]: a new instance is a restart of its
-    /// configuration (`config.v1` §2.12), which the runtime makes as a new
-    /// service, from the startup values ([`crate::config_v1`]).
+    /// A service implementing `config.v1` through
+    /// [`ServiceBuilder::config_v1`] restarts its configuration with it
+    /// (`config.v1` §2.12, "A re-mint is a restart"): a pending change is
+    /// cancelled first, as `cancel` does; the device is returned to its
+    /// startup values where a runtime change left a parameter elsewhere
+    /// ([`crate::config_v1::Device::restore_startup`]); and the new instance
+    /// starts from its startup values, revision 0, nothing pending, no last
+    /// change, no idempotency key held, the last hour's change events still
+    /// counted (§2.17). Its view and status are put under the new run,
+    /// before its tokens (§2.3). Refused, the instance running on (a cancel
+    /// made stays made), while an act is in flight, when a parameter set at
+    /// runtime starts unknown, when the device refuses to return, and for
+    /// an owner fed through `desired.v1` ([`ServiceBuilder::desired_config`],
+    /// `desired.v1` §2.16).
+    ///
+    /// Refused for a service implementing `config.v2` through
+    /// [`ServiceBuilder::config_v2`]: its re-mint, a restart too (`config.v1`
+    /// §2.12, which `config.v2` keeps), is not made in place at this
+    /// version, so a restart is a new service ([`crate::config_v2`]).
     ///
     /// A service implementing `alarms.v1` through [`ServiceBuilder::alarms`]
     /// puts every alarm it holds again from the new instance, after its
@@ -2073,10 +2091,11 @@ impl Service {
     /// with the old instance kept, writing under the new run, which its
     /// descriptor is put again stating (§3.3).
     pub async fn new_epoch(&mut self) -> Result<InstanceId> {
-        if self.config_v1.is_some() || self.config_v2.is_some() {
+        if self.config_v2.is_some() {
             return Err(Error::Contract(
-                "config.v1, config.v2: a new instance is a restart of the configuration, from \
-                 its startup values (config.v1 §2.12): close this service and start another"
+                "config.v2: a new instance is a restart of the configuration, from its startup \
+                 values (config.v1 §2.12), not made in place at this version: close this \
+                 service and start another"
                     .to_owned(),
             ));
         }
@@ -2088,6 +2107,14 @@ impl Service {
         if (timed_alarms || !self.desired_authors.is_empty()) && self.minter.is_ahead() {
             return Err(Error::ClockAhead);
         }
+        // config.v1 §2.12: a re-mint is a restart of the configuration,
+        // readied first (nothing pending, the device at its startup values)
+        // and held until the new instance starts it, or refused.
+        let config = self.config_v1.clone();
+        let restarting = match &config {
+            Some(c) => Some(c.restarting().await?),
+            None => None,
+        };
         let next = mint();
         // Core §1.5, §4.3: the new instance's run, which its descriptor
         // states before anything is written under it.
@@ -2102,6 +2129,11 @@ impl Service {
         let (q, current) = self.serve_descriptor(&next, run).await?;
         self.minter.begin(run);
         self.served.set_run(run);
+        // config.v1 §2.3, §2.12: the new instance's view and status, under
+        // its run, before its tokens.
+        if let Some(r) = restarting {
+            r.start(&next.to_string()).await;
+        }
         // alarms.v1 §2.9: each alarm kept put again from the new instance,
         // under its run, before its new instance token. desired.v1 §2.11:
         // so is each document an author keeps, and each delete within its
@@ -2163,31 +2195,24 @@ impl Service {
     /// it: every stream, state and event key of the service is written
     /// under it from now on, each seq from 0. The descriptor stating it is
     /// put first (§3.3), under the minter's lock, so nothing is written
-    /// under the new run before it.
+    /// under the new run before it. A run that changes within an instance
+    /// mints no new instance (§4.3).
     ///
+    /// - **Not for a counter reset.** An owner whose counters reset (a
+    ///   process's restart, a device re-enumerated) mints a new instance
+    ///   (core §1.5): [`Service::new_epoch`], which takes a new run too, and
+    ///   on a `config.v1` service restarts its configuration (`config.v1`
+    ///   §2.12).
     /// - **Nothing else moves.** The instance id and its tokens, every
     ///   member's epoch, and what `config.v1`, `alarms.v1` and `desired.v1`
     ///   hold stay as they are. Nothing is put again: a value keeps the
     ///   stamp it was put under, which a consumer orders against the new
     ///   run's as another run's (§4.3's consumer rule).
-    /// - **On a `config.v1` service** ([`ServiceBuilder::config_v1`]) it is
-    ///   allowed, where [`Service::new_epoch`] is refused: a run that
-    ///   changes within an instance mints no new instance (§4.3), so the
-    ///   configuration does not restart (`config.v1` §2.12). The view, the
-    ///   status, a pending change and every change token stand.
-    /// - **A frame's restarted counter** (`telemetry.v2` §2.19, whose epoch
-    ///   is the run): flush each open frame
-    ///   ([`crate::frame::FrameWriter::flush`]), take a new run, then
-    ///   record the restarted counts. A record still open is put under the
-    ///   new run, so a restarted count below it is refused
-    ///   ([`crate::telemetry::Reason::FieldDecreased`]). A reader pairs the
-    ///   counts across as a reset, established in band, never a decrease.
-    /// - **No `telemetry.v1` epoch moves.** A metric's epoch there is the
-    ///   instance id, or a member's (§2.9): a restarted `telemetry.v1`
-    ///   counter is still refused below its last until
-    ///   [`Service::new_epoch`] or [`Service::cycle_member`]. Core §1.5
-    ///   still asks a new instance id whenever an owner's counters reset
-    ///   (#1055).
+    /// - **A frame's counter** is compared with nothing across it, and a
+    ///   reader pairs its counts across as a reset, in band, with no rate
+    ///   (`telemetry.v2` §2.19): the counter did not restart. A
+    ///   `telemetry.v1` epoch, the instance id or a member's (§2.9), does
+    ///   not move.
     pub fn new_run(&self) -> zenkey_model::wire::Run {
         self.minter.new_run()
     }

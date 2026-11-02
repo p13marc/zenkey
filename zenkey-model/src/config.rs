@@ -2424,6 +2424,39 @@ impl Owner {
         }
     }
 
+    /// What a re-mint returns the device to first (§2.12, "A re-mint is a
+    /// restart"): each parameter whose running value is not its startup
+    /// value, unknown included, at its startup value (the persisted
+    /// layer's, else the startup file's or the default), in the schema's
+    /// order. Empty when the device runs its startup values. `Err` names
+    /// the first parameter that runs a value but starts unknown, which
+    /// nothing returns it to. Read with nothing pending: a pending change
+    /// is cancelled first.
+    ///
+    /// # Errors
+    ///
+    /// `(group, parameter)` of a parameter with a running value and no
+    /// startup value.
+    pub fn restart_plan(&self) -> Result<Vec<Restore>, (String, String)> {
+        let mut plan = Vec::new();
+        for g in &self.schema.groups {
+            for p in &g.parameters {
+                let k = key(&g.name, &p.name);
+                let running = self.slots.get(&k).and_then(|s| s.value.as_ref());
+                match (running, self.startup_value(&k)) {
+                    (r, Some((v, _))) if r != Some(&v) => plan.push(Restore {
+                        group: g.name.clone(),
+                        parameter: p.name.clone(),
+                        value: v,
+                    }),
+                    (Some(_), None) => return Err(k),
+                    _ => {}
+                }
+            }
+        }
+        Ok(plan)
+    }
+
     fn render(&self, slots: &BTreeMap<Key, Slot>) -> ConfigView {
         let groups = self
             .schema
@@ -3419,6 +3452,38 @@ mod tests {
         let later = Time::from_millis(3_600_000);
         assert_eq!(o.published(later), vec![t], "an hour on, the first is out");
         assert_eq!(o.restart("i2").published(later), vec![t]);
+    }
+
+    /// §2.12: a re-mint returns the device to its startup values first,
+    /// each parameter whose running value is not one; a parameter set at
+    /// runtime that starts unknown cannot be.
+    #[test]
+    fn a_restart_plan_returns_what_runs_off_its_startup_value() {
+        let mut o = rf();
+        let t = Time::from_millis(3_000_000);
+        assert_eq!(o.restart_plan(), Ok(Vec::new()), "the startup values run");
+        let set = |p: &str, v: Json| SetRequest {
+            values: BTreeMap::from([(p.to_owned(), v)]),
+            ..SetRequest::default()
+        };
+        let _ = o.set(t, "tx", &set("power", 3.into()), &Call::default());
+        let _ = o.finish(t, DeviceResult::Ok);
+        assert_eq!(
+            o.restart_plan(),
+            Ok(vec![Restore {
+                group: "tx".into(),
+                parameter: "power".into(),
+                value: Value::Integer(14),
+            }])
+        );
+        let _ = o.set(t, "sim", &set("pin", "1234".into()), &Call::default());
+        let _ = o.finish(t, DeviceResult::Ok);
+        assert_eq!(
+            o.restart_plan(),
+            Err(key("sim", "pin")),
+            "pin starts unknown"
+        );
+        assert_eq!(o.restart("i2").restart_plan(), Ok(Vec::new()));
     }
 
     /// §2.15: the device's words about an act that sets a sensitive value,

@@ -17,7 +17,7 @@
 //! `telemetry frame …` takes the same verbs on `meterframe.v1`, its records
 //! metered (`telemetry.v2` §2.19: a counter field's count given unwrapped,
 //! refused below its last within the run, written modulo its width; a
-//! restarted one written after `flush`, then `new-run`), and one more:
+//! restarted one written after `flush`, then `new-epoch`), and one more:
 //!
 //! ```text
 //! telemetry frame raw <resource> <json>      a frame of one full record, from the session, unchecked,

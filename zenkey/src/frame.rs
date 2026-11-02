@@ -30,9 +30,9 @@
 //!   its last count within the run is refused, [`Error::Telemetry`], and
 //!   the record joins no frame. A counter that restarts is written under
 //!   a new run (`telemetry.v2` §2.19): flush the open frame
-//!   ([`FrameWriter::flush`]), take a new run ([`crate::Service::new_run`],
-//!   or a new instance's, [`crate::Service::new_epoch`]), then record the
-//!   restarted count.
+//!   ([`FrameWriter::flush`]), mint a new instance, which takes one
+//!   ([`crate::Service::new_epoch`], core §1.5), then record the restarted
+//!   count.
 //!
 //! A frame is put when it holds `records` records, or when a record lies
 //! past its span; [`FrameWriter::flush`] puts the open frame earlier.
@@ -324,7 +324,7 @@ impl FrameWriter {
 
     /// Puts the open frame now, if it holds a record: an owner that sends
     /// what it measured so far, or stops, or whose counter restarts, before
-    /// [`crate::Service::new_run`] (the module doc's counters).
+    /// [`crate::Service::new_epoch`] (the module doc's counters).
     ///
     /// # Errors
     /// A put's, the frame then dropped.

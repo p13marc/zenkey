@@ -984,8 +984,7 @@ telemetry.v2 (spec/profiles/telemetry/v2.md)
   metered by its FrameWriter, record by record: each counter field is given as
   counted, unwrapped, refused below its last count within the run, and written
   modulo its width; a series field's code its type does not read is refused.
-  A restarted counter takes a new run: flush the open frame, then new-run
-  (new-epoch, a new instance, is refused with --config).
+  A restarted counter takes a new run: flush the open frame, then new-epoch.
 
   --telemetry-v2                  implement meterframe.v1, the scenarios'
                                   contract (scenarios-v2.md, Conventions),

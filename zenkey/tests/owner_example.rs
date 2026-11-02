@@ -3041,8 +3041,8 @@ async fn the_owner_example_meters_telemetry_frames() {
     )
     .await;
     assert_eq!(a["put"]["run"], n["run"], "{a}");
-    // A new run in the same instance (#1055): the next restart's count
-    // written under it.
+    // A new run in the same instance, no restart (core §4.3): the next
+    // count written under it.
     let r = ask_json(&o, "telemetry frame new-run").await;
     assert_eq!(
         (&r["frame"], &r["instance"]),
@@ -3051,7 +3051,7 @@ async fn the_owner_example_meters_telemetry_frames() {
     assert_ne!(r["run"], n["run"]);
     let a = ask_json(
         &o,
-        &format!("telemetry frame record frames/totals {}", totals(1)),
+        &format!("telemetry frame record frames/totals {}", totals(4)),
     )
     .await;
     assert_eq!(a["put"]["run"], r["run"], "{a}");
