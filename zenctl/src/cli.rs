@@ -1625,7 +1625,11 @@ pub(crate) enum CheckCmd {
     ///                              flows that no deny of the far principal's
     ///                              policies denies on the namespace's
     ///                              zk2/**/@zk/**; read subject by subject,
-    ///                              since any allow wins across subjects
+    ///                              since any allow wins across subjects. On
+    ///                              a link.v2 device face, link.v2 §2.6's
+    ///                              carve: every @zk form but the instance
+    ///                              subtree on every pair, and that on the
+    ///                              eleven outside core §11.2's Own row
     ///   wildcard_downsampling      a downsampling rule on the face's
     ///                              transports that is not one concrete key
     ///   intersecting_downsampling  two of them that intersect
@@ -1951,7 +1955,9 @@ pub(crate) enum AclCmd {
     ///   services = ["radio-a"]                 # the services it carries
     ///   [face.radio]
     ///   far          = "ground"                # the far principal: its policy gets the denies
-    ///   attach       = "client"                # or "south-region", with region = "…"
+    ///   attach       = "client"                # or "south-region", with region = "…";
+    ///                                          #   or link.v2's "device", with
+    ///                                          #   devices = ["<system>/<service>", …]
     ///   select       = { link_protocols = ["unixsock-stream"] }
     ///   class        = "constrained"
     ///   expose       = "link"                  # or "none": no push crosses

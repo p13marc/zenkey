@@ -371,6 +371,11 @@ const CITE_FACE_DECLARATIONS: &str = "§8.5, U23: a far router in a south region
      has learnt; the queryables over what the far side may GET or call are declared toward it \
      (measured, #612 FJ7: without this rule its GET gets no reply). A client principal needs \
      none: it sends every query to its router";
+const CITE_FACE_CARVE: &str = "link.v2 §2.6: on a device face `zk` is carved, so that a \
+     device's instance key crosses on core §11.2's Own row's seven pairs alone, its token, its \
+     descriptor's queryable, puts and replies, and a near reader's GET and subscription; its \
+     far principal's Own grant decides whose instance keys, and every other `@zk` key stays \
+     denied on every pair";
 const CITE_FACE_PRESENCE: &str = "link.v1 §2.6, §8.5: no `@zk` traffic across a constrained \
      face, never omitted. Bindings resolve statically (R7), bundles are held on each side, and \
      presence never crosses; `**` matches zero chunks, so the contract keys are included";
@@ -2167,7 +2172,10 @@ fn face_policy(parsed: &link::Parsed) -> Result<&FacePolicy> {
 /// services on the policy's system, each listed interface's resources from
 /// the contracts given. A listed service the enrollment does not declare
 /// (`service_unknown`), or an interface no contract was given for
-/// (`contract_unknown`), refuses it.
+/// (`contract_unknown`), refuses it. A device face's devices (link.v2
+/// §2.5) are named by their addresses, on any system, and read as listed
+/// services; one implementing `archive.v1` or a governed interface is
+/// `presence_required`.
 fn plan_faces(
     policy: &FacePolicy,
     enrollment: &Enrollment,
@@ -2188,12 +2196,19 @@ fn plan_faces(
                 .or_default()
                 .extend(s.implements.iter().cloned());
         }
+        // A device is named by its address (link.v2 §2.3).
+        if policy.device_face(&s.address).is_some() {
+            dep.implements
+                .entry(s.address.clone())
+                .or_default()
+                .extend(s.implements.iter().cloned());
+        }
     }
     // Every revision given of each listed interface: the plan reads them
     // together, and lets a resource cross only where every one exposes it
     // (link.v1 §2.3, 0.3, F-119), warning of each it does not.
-    for s in &policy.services {
-        for i in dep.implements.get(s).cloned().unwrap_or_default() {
+    for s in policy.owners() {
+        for i in dep.implements.get(s.key).cloned().unwrap_or_default() {
             if dep.interfaces.contains_key(&i) {
                 continue;
             }
@@ -2249,7 +2264,11 @@ fn plan_faces(
 /// under the namespace except the admin space's, which has none (§0).
 fn face_rule(ns: &str, face: &FacePlan, d: &link::Deny, holder: &str) -> AclRule {
     let (grant, cite) = match d.id.as_str() {
+        "zk" if face_is_device(face) => (AclGrantKind::FacePresence, CITE_FACE_CARVE),
         "zk" => (AclGrantKind::FacePresence, CITE_FACE_PRESENCE),
+        "zk:instance:egress" | "zk:instance:ingress" => {
+            (AclGrantKind::FacePresence, CITE_FACE_CARVE)
+        }
         "adv" => (AclGrantKind::FaceAdv, CITE_FACE_ADV),
         "admin" => (AclGrantKind::FaceAdmin, CITE_FACE_ADMIN),
         _ => (AclGrantKind::FaceExposure, CITE_FACE_EXPOSURE),
@@ -2285,6 +2304,11 @@ fn face_rule(ns: &str, face: &FacePlan, d: &link::Deny, holder: &str) -> AclRule
         holder: Some(holder.to_owned()),
         cite: cite.to_owned(),
     }
+}
+
+/// Whether `face` is a device face (link.v2 §2.5).
+fn face_is_device(face: &FacePlan) -> bool {
+    matches!(face.attach, link::AttachPlan::Device { .. })
 }
 
 /// The near router's `gateway` block for the faces attached in a south
@@ -2488,6 +2512,18 @@ pub fn link_says(code: link::Code) -> &'static str {
             "a revision of an interface that crosses the face is not an entry of the \
              catalog the far side holds: it could not decode what that revision's owners \
              put (link.v2 §2.18)"
+        }
+        C::DeviceListed => {
+            "a device listed among the services or on another face: a device is listed once, \
+             on the face it attaches over (link.v2 §2.1, §2.5)"
+        }
+        C::PresenceRequired => {
+            "a device on a first hop implements archive.v1 or a governed interface, each of \
+             which needs presence on its peers' side of the face (link.v2 §2.5, core §8.1)"
+        }
+        C::EpochOnDevice => {
+            "a device's template declares an epoch: its member tokens cross the face at each \
+             transport, and the face denies them (link.v2 §2.5)"
         }
         _ => "the face policy's linter refuses it (§2.1)",
     }
@@ -2937,7 +2973,7 @@ pub fn to_json5(plan: &AclPlan) -> String {
                 link::AttachPlan::SouthRegion { region, .. } => {
                     Some(format!("{} (face {}, far {})", js(region), f.name, f.far))
                 }
-                link::AttachPlan::Client => None,
+                link::AttachPlan::Client | link::AttachPlan::Device { .. } => None,
             })
             .collect();
         let _ = writeln!(
@@ -2980,14 +3016,29 @@ pub fn to_json5(plan: &AclPlan) -> String {
         transport_json5(&mut out, t, Some(b), "this router");
     }
     for f in &plan.faces {
-        if matches!(f.attach, link::AttachPlan::Client) {
-            let _ = writeln!(
-                out,
-                "// Face {}: the far side ({}) attaches as a client of this router (link.v1 §2.5):\n\
-                 // it receives only the declarations its interests ask for, and the face's denies\n\
-                 // keep @zk, @adv, the admin space and every push that does not cross off it.",
-                f.name, f.far
-            );
+        match &f.attach {
+            link::AttachPlan::Client => {
+                let _ = writeln!(
+                    out,
+                    "// Face {}: the far side ({}) attaches as a client of this router (link.v1 §2.5):\n\
+                     // it receives only the declarations its interests ask for, and the face's denies\n\
+                     // keep @zk, @adv, the admin space and every push that does not cross off it.",
+                    f.name, f.far
+                );
+            }
+            link::AttachPlan::Device { devices } => {
+                let _ = writeln!(
+                    out,
+                    "// Face {}: each device ({}), an owner on a first hop, attaches as a client of\n\
+                     // this router, its far principal {} (link.v2 §2.5): its instance token and\n\
+                     // descriptor cross toward this side on its Own grant's pairs, and the carved `zk`\n\
+                     // keeps the rest of @zk off the face (link.v2 §2.6).",
+                    f.name,
+                    devices.join(", "),
+                    f.far
+                );
+            }
+            link::AttachPlan::SouthRegion { .. } => {}
         }
     }
     out
@@ -3062,16 +3113,32 @@ pub fn far_json5(plan: &AclPlan) -> Option<String> {
     use std::fmt::Write as _;
     let t = plan.transport.as_ref()?;
     let mut out = String::new();
+    // A device face's far end is each device's session (link.v2 §2.5,
+    // §2.18): its devices are named, each to run this block.
+    let devices = plan.faces.iter().any(face_is_device);
     let _ = writeln!(
         out,
         "// The far end's transport, generated by `zenctl acl gen --far-config` (link.v2 §2.18):\n\
-         // the far router's config, or the gateway client's session config, across {}.",
+         // the far router's config, {}, across {}.",
+        if devices {
+            "the gateway client's session config, or each device's session config"
+        } else {
+            "or the gateway client's session config"
+        },
         if plan.faces.is_empty() {
             "the face".to_owned()
         } else {
             plan.faces
                 .iter()
-                .map(|f| format!("face {} (far {})", f.name, f.far))
+                .map(|f| match &f.attach {
+                    link::AttachPlan::Device { devices } => format!(
+                        "face {} (far {}, devices {})",
+                        f.name,
+                        f.far,
+                        devices.join(", ")
+                    ),
+                    _ => format!("face {} (far {})", f.name, f.far),
+                })
                 .collect::<Vec<_>>()
                 .join(", ")
         }
@@ -3931,6 +3998,7 @@ pub fn check_face(
             denies += deny.len();
             findings.extend(link::check_block(
                 name,
+                face.attach.is_device(),
                 &link::Block {
                     namespace: plan.namespace.clone(),
                     // zenoh's loader reads an absent `enabled` as false, and
