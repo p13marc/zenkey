@@ -3,11 +3,12 @@
 //!
 //! Three rules, each with a place in the rendering:
 //!
-//! * **O5's cases stay apart.** A value, an envelope, a malformed envelope
-//!   and silence are four different first words, and silence is never
-//!   drawn as an empty value. Its attribution through presence is worded as
-//!   what this reader could see: a refused presence read is empty too
-//!   (spec §8.1, 0.8).
+//! * **O5's cases stay apart.** A value, an owner's error, a malformed
+//!   envelope and silence are four different first words, and silence is
+//!   never drawn as an empty value. Its attribution through presence is
+//!   worded as what this reader could see: a refused presence read is
+//!   empty too (spec §8.1, 0.8). A value or an error that came in its form
+//!   says its as-of mark, `as of run r, seq s` (core §5.1, observer §7.3).
 //! * **Current and last-known never look alike** (S6). The first line of a
 //!   state read says which question was asked, and a last-known read says
 //!   which archive answered and whether alignment confirmed each key.
@@ -17,7 +18,7 @@
 //!   do not decode with the reason, the structural ladder with why.
 
 use zenkey_fleet::report::{
-    CallMode, EnvelopeView, OperationAnswer, OperationReport, PayloadRendering,
+    CallMode, EnvelopeView, InbandStamp, OperationAnswer, OperationReport, PayloadRendering,
     PresenceAttribution, Rendered, RepliesView, Stamp, StateReading, StateReport, StateValue,
     Unresolved, WatchEvent, WatchSample, WatchSummary,
 };
@@ -80,18 +81,32 @@ pub fn stamp_text(s: &Stamp) -> String {
 
 // ── call ───────────────────────────────────────────────────────────────────
 
+/// An owner's error on one line: its code, its message when it has one (an
+/// error form may carry none), and its cause.
 fn envelope_text(e: &EnvelopeView) -> String {
-    let mut s = format!("{} — {}", e.code, e.message);
+    let mut s = e.code.clone();
+    if !e.message.is_empty() {
+        s.push_str(&format!(" — {}", e.message));
+    }
     if let Some(c) = &e.cause {
         s.push_str(&format!(" (cause: {c})"));
     }
     s
 }
 
+/// A form's as-of mark (core §5.1): the replying instance's run, as its
+/// descriptor spells it, and the last seq it minted.
+fn mark_text(m: &InbandStamp) -> String {
+    format!("as of run {}, seq {}", m.run, m.seq)
+}
+
 fn envelope_lines(t: &mut Table, e: &EnvelopeView, lead: &str) {
     t.line_styled(format!("{lead}{}", envelope_text(e)), style::ERROR);
     if let Some(d) = &e.detail {
         t.line(format!("  detail: {}", rendered_text(d, 0)));
+    }
+    if let Some(m) = &e.mark {
+        t.line(format!("  {}", mark_text(m)));
     }
 }
 
@@ -142,6 +157,17 @@ fn replies_table(t: &mut Table, r: &RepliesView) {
                     .iter()
                     .map(|s| format!("  summary: {}", payload_text(s))),
             );
+            if !p.marks.is_empty() {
+                let marks: Vec<String> = p
+                    .marks
+                    .iter()
+                    .map(|m| match m {
+                        Some(m) => format!("run {}, seq {}", m.run, m.seq),
+                        None => "no mark".to_owned(),
+                    })
+                    .collect();
+                more.push(format!("  as of: {}", marks.join("; ")));
+            }
             if p.possibly_partial == Some(true) {
                 more.push(format!(
                     "  possibly partial: {} summaries, not exactly one",
@@ -204,9 +230,12 @@ impl Render for OperationReport {
             self.timeout_s
         ));
         match &self.answer {
-            OperationAnswer::Value { reply } => {
+            OperationAnswer::Value { reply, mark } => {
                 t.line(format!("key    {}", reply.key));
                 t.line_styled(format!("value  {}", payload_text(reply)), style::PASS);
+                if let Some(m) = mark {
+                    t.line(format!("       {}", mark_text(m)));
+                }
             }
             OperationAnswer::Refused { envelope } => envelope_lines(t, envelope, "refused  "),
             OperationAnswer::Malformed { malformed } => {

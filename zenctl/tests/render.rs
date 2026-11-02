@@ -3715,6 +3715,44 @@ mod actfx {
         call(
             OperationAnswer::Value {
                 reply: reply(key, "response", "@op/diagnostics", json!({"ok": true})),
+                mark: None,
+            },
+            CallMode::Concrete,
+            "host-a/tc",
+        )
+    }
+
+    /// The as-of mark of an owner answering in the value and error forms
+    /// (core §5.1, #980's C4b).
+    pub fn mark() -> zenkey_fleet::report::InbandStamp {
+        zenkey_fleet::report::InbandStamp {
+            run: "0001".into(),
+            seq: 7,
+        }
+    }
+
+    pub fn value_in_form() -> OperationReport {
+        let key = "zk2/host-a/tc/tc.netif.v1/@op/diagnostics";
+        call(
+            OperationAnswer::Value {
+                reply: reply(key, "response", "@op/diagnostics", json!({"ok": true})),
+                mark: Some(mark()),
+            },
+            CallMode::Concrete,
+            "host-a/tc",
+        )
+    }
+
+    pub fn refused_in_form() -> OperationReport {
+        call(
+            OperationAnswer::Refused {
+                envelope: EnvelopeView {
+                    code: "busy".into(),
+                    message: String::new(),
+                    cause: None,
+                    detail: None,
+                    mark: Some(mark()),
+                },
             },
             CallMode::Concrete,
             "host-a/tc",
@@ -3733,6 +3771,7 @@ mod actfx {
                         value: json!({"kind": "kernel"}),
                         epoch_assumed: None,
                     }),
+                    mark: None,
                 },
             },
             CallMode::Concrete,
@@ -3772,6 +3811,7 @@ mod actfx {
             summaries: (0..summaries)
                 .map(|_| reply(key, "summary", "@op/diagnostics", json!({"n": 1})))
                 .collect(),
+            marks: vec![],
             possibly_partial: Some(summaries != 1),
         };
         call(
@@ -3784,6 +3824,7 @@ mod actfx {
                         message: "a scan is running".into(),
                         cause: None,
                         detail: None,
+                        mark: None,
                     }],
                     malformed: vec![],
                     transport: vec![],
@@ -3933,6 +3974,46 @@ presence   no token of the service is visible to this reader: it may be gone, or
     assert_eq!(actfx::value().exit_code(), 0);
     assert_eq!(actfx::refused().exit_code(), 1);
     assert_eq!(silent.exit_code(), 2);
+}
+
+/// An owner answering in the value and error forms (core §5.1, §5.2,
+/// #980's C4b): each answer says its as-of mark, an error form with no
+/// message says none, and the documents carry `mark` where the bare wire's
+/// carry nothing.
+#[test]
+fn a_call_in_the_forms_says_its_as_of_mark() {
+    assert_data_eq!(
+        table(&actfx::value_in_form()),
+        str![[r#"
+call host-a/tc tc.netif.v1@sha256:4f534f534f534f53… @op/diagnostics  (one address, 5s)
+key    zk2/host-a/tc/tc.netif.v1/@op/diagnostics
+value  json:DiagnosticsResponse {"ok":true}
+       as of run 0001, seq 7
+
+"#]]
+    );
+    assert_data_eq!(
+        table(&actfx::refused_in_form()),
+        str![[r#"
+call host-a/tc tc.netif.v1@sha256:4f534f534f534f53… @op/diagnostics  (one address, 5s)
+refused  busy
+  as of run 0001, seq 7
+
+"#]]
+    );
+    let doc = |r: &zenkey_fleet::report::OperationReport| -> serde_json::Value {
+        serde_json::from_str(ndjson(r).lines().next().expect("a line")).expect("json")
+    };
+    assert_eq!(
+        doc(&actfx::value_in_form())["mark"],
+        serde_json::json!({"run": "0001", "seq": 7})
+    );
+    assert_eq!(
+        doc(&actfx::refused_in_form())["envelope"],
+        serde_json::json!({"code": "busy", "message": "", "mark": {"run": "0001", "seq": 7}})
+    );
+    assert!(doc(&actfx::value()).get("mark").is_none(), "the bare wire");
+    assert!(doc(&actfx::refused())["envelope"].get("mark").is_none());
 }
 
 /// Silence is attributed through presence as what this reader could see
