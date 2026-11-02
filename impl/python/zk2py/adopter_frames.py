@@ -26,7 +26,10 @@ from its layout, under a 32-bit run, in core §7.5's envelope:
    body by the layout's tag, written again byte for byte, and through
    :class:`zk2py.telemetry_v2.SeriesReader`: every series field of every
    record a sample, its value the one written (a count modulo its width),
-   each frame following the one before in the run.
+   each frame following the one before in the run. A record read back is
+   paired with the values written by its seq, the frame's seq plus its
+   place, never by the order of the writes (review-bot on round 99, PR
+   #1049, 4).
 """
 
 from __future__ import annotations
@@ -82,7 +85,10 @@ def frames_of(contract: Any, r: dict[str, Any]) -> dict[str, Any]:
     d = lo.decl
     # off-schedule records, inside the span: every later record has its offset
     gap_ns = ((d.step_ms or 0) + (d.jitter_ms or 0) + 1) * 1_000_000 if d.step_ms is not None else 0
-    puts, values_written = [], []
+    puts: list[dict[str, Any]] = []
+    #: the values each record put carries, by its seq: "Record i's is that
+    #: seq plus i, modulo 2^24" (core §7.7)
+    written_at: dict[int, dict[str, Any]] = {}
     mono = 10**12
     for which in (0, 1):
         ready: list[Any] = []
@@ -90,7 +96,6 @@ def frames_of(contract: Any, r: dict[str, Any]) -> dict[str, Any]:
             # record i alternates within the frame, so every delta record
             # includes every field
             vals = {f.name: _value(f, (which + i) % 2) for f in lo.fields}
-            values_written.append(vals)
             ready += fr_.record(vals, mono, TIME)
             mono += gap_ns if i + 1 < d.records else 10**10
         if len(ready) != 1:
@@ -98,13 +103,14 @@ def frames_of(contract: Any, r: dict[str, Any]) -> dict[str, Any]:
         for rd in ready:
             seq = sum(len(p["value"]["records"]) for p in puts)
             value = fr_.seal(rd, RUN)
+            for j, m in enumerate(rd.records):
+                written_at[(seq + j) % (zk2c.SEQ_MAX + 1)] = m.values
             body = lo.write(value)
             puts.append({"value": value, "payload": zk2c.write("frame", RUN[0], RUN[1], seq, lo.tag, body),
                          "body": body})
     key = f"zk2/lab/node/{contract.interface}/stream/{r['template']}"
     reader = t2.SeriesReader(lo, decl) if isinstance(decl, t2.FrameDeclaration) else None
     back, follows, samples_ok = [], [], True
-    i_rec = 0
     for p in puts:
         read = zk2c.read_put(key, zk2c.ENCODING, p["payload"])
         got = lo.read(read.tag, read.record or b"")
@@ -114,8 +120,10 @@ def frames_of(contract: Any, r: dict[str, Any]) -> dict[str, Any]:
             g = reader.read_put(read)
             follows.append(g.get("follows"))
             for rec in g.get("records", []):
-                written = values_written[i_rec]
-                i_rec += 1
+                written = written_at.get(rec["seq"])
+                if written is None:
+                    samples_ok = False
+                    continue
                 for s in reader.decl.series:
                     f = next(x for x in lo.fields if x.name == s.field)
                     x = rec["fields"][s.field]

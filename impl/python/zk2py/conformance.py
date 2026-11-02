@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import textwrap
 import threading
 import time
 import traceback
@@ -4182,7 +4183,6 @@ annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "1" }
     # core §8.1, §5.1 (0.91): the reply timeout across a face.
     faced = load_contract(repo / "zenkey" / "tests" / "contracts" / "faced.v1.toml")
     fr_ = {r["template"]: r for r in faced.canonical["resources"]}
-    pol = (repo / "impl" / "python" / "zk2py" / "far_side_live.py")
     from .far_side_live import policy
 
     radio, repaired = far_side.far_side(policy(False), "radio"), far_side.far_side(policy(True), "radio")
@@ -4193,11 +4193,11 @@ annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "1" }
                               "reply timeout",
                         "Across a constrained face, it waits at least the face's reply timeout (§8.1).")
                 + missing(l2, "A face's `reply_timeout_ms` is core §8.1's reply timeout.")
-                + [pol.is_file(), fr_["slow"].get("timeout_ms"),
+                + [fr_["slow"].get("timeout_ms"),
                    far_side.call_timeout_s(None, 1000, None), far_side.call_timeout_s(None, 1000, radio),
                    far_side.call_timeout_s(None, None, None), far_side.call_timeout_s(0.5, 1000, radio),
                    radio.get_timeout_s(1.0), radio.get_timeout_s(5.0)],
-                [True, 1000, 1.0, 3.0, 10.0, 0.5, 3.0, 5.0]))
+                [1000, 1.0, 3.0, 10.0, 0.5, 3.0, 5.0]))
     # core §8.5, observer §7.5 (0.91, 0.23): a subscription's horizon.
     beacon = load_contract(repo / "impl" / "python" / "interop" / "freshness" / "beacon.v2.toml")
     fv2c = load_contract(spec / "profiles" / "freshness" / "freshness.v2.toml")
@@ -4216,13 +4216,16 @@ annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "1" }
                    radio.redeclares, repaired.redeclares],
                 [1.0, None, 2.0, True, False]))
 
-    # Redeclaring on a fake session and a fake clock.
+    # Redeclaring on a fake session and a fake clock, its tick driven
+    # directly: no watcher thread, no real sleep (review-bot on round 99, PR
+    # #1049, 1).
     class Sub:
         def __init__(self, log: list[str], key: str) -> None:
-            self.log, self.key = log, key
+            self.log, self.key, self.undeclared = log, key, False
             log.append(f"declare {key}")
 
         def undeclare(self) -> None:
+            self.undeclared = True
             self.log.append(f"undeclare {self.key}")
 
     class Info:
@@ -4239,35 +4242,56 @@ annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "1" }
         def __init__(self) -> None:
             self.log: list[str] = []
             self.info = Info()
+            self.subs: list[Sub] = []
+            #: run before the next declaration, then cleared
+            self.before_declare: Callable[[], None] | None = None
 
         def declare_subscriber(self, key: str, handler: Any) -> Sub:
-            return Sub(self.log, key)
+            hook, self.before_declare = self.before_declare, None
+            if hook is not None:
+                hook()
+            self.subs.append(Sub(self.log, key))
+            return self.subs[-1]
 
-    def run(horizon: float | None, steps: list[float], up: bool = True, redeclare: bool = True) -> list[str]:
+    def run(horizon: float | None, steps: list[float], up: bool = True,
+            redeclare: bool = True) -> tuple[list[str], list[bool]]:
         sess, now = Session(), [0.0]
         sess.info.up = [object()] if up else []
-        r = far_side.Redeclaring(sess, "k", lambda _s: None, horizon, redeclare=redeclare, clock=lambda: now[0])
+        r = far_side.Redeclaring(sess, "k", lambda _s: None, horizon, redeclare=redeclare, clock=lambda: now[0],
+                                 watch=False)
+        ticks = []
         for t in steps:
             now[0] = t
-            time.sleep(0.25)
+            ticks.append(r.tick())
         r.undeclare()
-        return sess.log
+        return sess.log, ticks
 
-    import time
-
-    out.append(("core §8.5 (0.91): declared again after two horizons of silence, its transport up, undeclared and "
-                "then declared anew; never at 1.9 horizons, never with no open transport, never with arq true or no "
-                "horizon (far_side.Redeclaring, a fake session and clock)",
+    d, u = "declare k", "undeclare k"
+    out.append(("core §8.5 (0.91): declared again after two horizons of silence, its transport up: undeclared, "
+                "then declared anew, the silence counted again from it; never at 1.9 horizons, never with no open "
+                "transport, never with arq true or no horizon (far_side.Redeclaring, a fake session and clock, its "
+                "tick driven directly)",
                 missing(core, "**Declaring again** undeclares the subscription, then declares it anew.",
                         "Through a session cut off from every router nothing is declared.")
-                + [run(1.0, [1.9]), run(1.0, [2.0]), run(1.0, [2.0], up=False), run(1.0, [2.0], redeclare=False),
-                   run(None, [5.0])],
-                [["declare k", "undeclare k"], ["declare k", "undeclare k", "declare k", "undeclare k"],
-                 ["declare k", "undeclare k"], ["declare k", "undeclare k"], ["declare k", "undeclare k"]]))
+                + [run(1.0, [1.9]), run(1.0, [2.0]), run(1.0, [2.0, 3.9, 4.0]), run(1.0, [2.0], up=False),
+                   run(1.0, [2.0], redeclare=False), run(None, [5.0])],
+                [([d, u], [False]), ([d, u, d, u], [True]), ([d, u, d, u, d, u], [True, False, True]),
+                 ([d, u], [False]), ([d, u], [False]), ([d, u], [False])]))
+    # review-bot on round 99 (PR #1049, 2): undeclare() between the old
+    # subscriber's undeclare and the new one's declaration leaks no
+    # subscriber: the tick sees it stopped, and undeclares the new one.
+    sess, now = Session(), [0.0]
+    r = far_side.Redeclaring(sess, "k", lambda _s: None, 1.0, clock=lambda: now[0], watch=False)
+    sess.before_declare = r.undeclare
+    now[0] = 2.0
+    raced = r.tick()
+    out.append(("review-bot on PR #1049, 2: undeclare() while a re-declaration is in flight keeps no subscriber: "
+                "the tick declares, sees it stopped and undeclares the new one; every subscriber declared is "
+                "undeclared, and none is declared again after",
+                [raced, r.redeclared, [x.undeclared for x in sess.subs], r.sub is sess.subs[0], r.tick(), sess.log],
+                [False, [], [True, True], True, False, [d, u, u, d, u]]))
 
     # link.v2 0.3's scenarios-v2.md §2, expected 1 and 2: the plan alone.
-    import textwrap
-
     from . import link, link_v2
 
     sc2 = (spec / "profiles" / "link" / "scenarios-v2.md").read_text(encoding="utf-8")
@@ -4304,7 +4328,7 @@ annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "1" }
     sizes = {f"{x['interface']}/{x['resource']}": x for x in rows}
     out.append(("#983 T4: modem.v3 3.2's nine frame resources and gendev.v1 1.1's frames/sample, each declared, "
                 "written by zk2py's Framer under a 32-bit run, read back envelope first, written again byte for byte, "
-                "and every series field of every record a sample of the value written; link.v1 "
+                "and every series field of every record a sample of the value written, paired by seq; link.v1 "
                 "0.16 §2.8's largest frame measured at frame_facts' size, frames/link 22 B and frames/message 213 B "
                 "(keyframe_every 1) and frames/sample 100 B",
                 [len(rows), all(x["declared"] == "declared" and x["read_back"] and x["samples"]
