@@ -279,7 +279,11 @@ class PyReader:
         self.s = SeriesSubscriber(session, ADDRESS, contract())
 
     def frames(self, res: str, n: int, timeout: float = 5.0) -> list[dict[str, Any]]:
-        return [g for g in self.s.wait(key_of(res), n, timeout) if "undecodable" not in g]
+        got = self.s.wait(key_of(res), n, timeout)
+        if self.s.errors():
+            # R's own failure (round 99's mend): never read as the owner's.
+            raise RuntimeError(f"zk2py's R raised: {self.s.errors()}")
+        return [g for g in got if "undecodable" not in g]
 
     def pairs(self, res: str) -> list[t2.Pair]:
         return self.s.pairs(key_of(res))

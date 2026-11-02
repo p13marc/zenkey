@@ -4157,8 +4157,11 @@ def _round98_t2_readings(root: Path) -> list[tuple[str, Any, Any]]:
 
     sub = SeriesSubscriber(Fake(), "lab/meterframe", load_contract(mf))
     sub._heard(Smp())
-    out.append(("zk2py's R (round 98): a put whose reading raises inside zenoh's callback is recorded undecodable, "
-                "named", sub.undecodable(), ["RuntimeError: a payload that cannot be read"]))
+    # Mended in round 99 (review-bot on round 98): an exception in zk2py's
+    # own code is recorded as R's error, apart from an undecodable payload.
+    out.append(("zk2py's R (rounds 98, 99): a put whose reading raises inside zenoh's callback is recorded, named, "
+                "as zk2py's own error and never as an undecodable payload",
+                [sub.errors(), sub.undecodable()], [["RuntimeError: a payload that cannot be read"], []]))
     return out
 
 

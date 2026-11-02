@@ -2062,8 +2062,23 @@ class Owner:
                 meter.check(run, values)
             ready = fr_.record(values, mono, wall)
             if meter is not None:
-                meter.accept(run, values)
-            return [self._put_frame(key, fr_, r) for r in ready]
+                meter.gather(run, values)
+            return [self._put_metered(key, fr_, r, meter) for r in ready]
+
+    def _put_metered(self, key: str, fr_: Any, ready: Any, meter: Any) -> dict[str, Any]:
+        """A ready frame put, its records' counts accepted by the meter once
+        the put went through, and forgotten if it raised (review-bot on round
+        98: "Accept after the put succeeds")."""
+        n = len(ready.records)
+        try:
+            out = self._put_frame(key, fr_, ready)
+        except BaseException:
+            if meter is not None:
+                meter.unsent(n)
+            raise
+        if meter is not None:
+            meter.put(n)
+        return out
 
     def _meter(self, key: str) -> Any:
         """``telemetry.v2``'s meter of a frame key (§2.19), or None where its
@@ -2090,7 +2105,7 @@ class Owner:
         fr_ = self._framer(key)
         with self._frames_lock:
             ready = fr_.end()
-            return None if ready is None else self._put_frame(key, fr_, ready)
+            return None if ready is None else self._put_metered(key, fr_, ready, self._meter(key))
 
     def _frame_wall(self, mono: int) -> dict[str, int] | None:
         """A record's wall time (core §7.7 "Times") for its instant ``mono``
@@ -2162,15 +2177,23 @@ class Owner:
             n = len(value["records"])
             seq = self._stream_seq.get(key, 0)
             self._stream_seq[key] = (seq + n) % 2**24
-        body = fr_.layout.write(value, self.writing_epoch())
-        payload = zk2c.write("frame", run[0], run[1], seq, fr_.layout.tag, body)
         lost = key in self._frames_lost
+        try:
+            body = fr_.layout.write(value, self.writing_epoch())
+            payload = zk2c.write("frame", run[0], run[1], seq, fr_.layout.tag, body)
+            if not lost:
+                if key not in self._publishers:
+                    self._member_publisher(key)
+                self._publishers[key].put(payload, encoding=zk2c.ENCODING)
+        except BaseException:
+            # A frame never sent gives its seqs back, where no later put took
+            # the ones after them, so that its reader reads no gap.
+            with self._seq_lock:
+                if self._stream_seq.get(key) == (seq + n) % 2**24:
+                    self._stream_seq[key] = seq
+            raise
         if lost:
             self._frames_lost.discard(key)
-        else:
-            if key not in self._publishers:
-                self._member_publisher(key)
-            self._publishers[key].put(payload, encoding=zk2c.ENCODING)
         out = {"run": zk2c.InBand(run[0], run[1], 0).run_hex(), "seq": seq, "records": value,
                "bytes": len(payload), "lost": lost}
         self.frames_put.append((key, out))

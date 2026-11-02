@@ -214,13 +214,20 @@ def clock_question(presence: str, descriptor: dict[str, Any] | None, heard: list
     unknown), ``status_put``, ``status_deleted``, ``clock_ahead`` (a fault of
     that code, whatever its level and stamp) and ``fault`` (another code).
     Not asked as the first question's for an absent service or one whose
-    descriptor does not list health.v1. Else yes on a clock_ahead fault with
-    no heartbeat whose time is known after it; no when the last heartbeat
-    heard has its time known (after the last fault, or with none);
-    unobservable ``time_unknown`` when the last heartbeat's time is unknown,
-    and ``nothing_heard`` when no heartbeat and no fault was heard. A put or
-    a delete of the status says nothing of the clock. A fault heard is the
-    service's own word, whatever else presence says."""
+    descriptor does not list health.v1. Else, the first that holds, in the
+    order the checks run:
+    1. **yes** (``clock_ahead``): a clock_ahead fault was heard, and no
+       heartbeat whose time is known came after the last one. A fault after
+       the last known heartbeat is yes, whatever held heartbeats follow it;
+    2. **no** (``confirmed``): the last heartbeat heard has its time known;
+    3. **unobservable** ``time_unknown``: the last heartbeat heard has its
+       time unknown;
+    4. **unobservable** ``nothing_heard``: no heartbeat, and no clock_ahead
+       fault, was heard.
+    A put or a delete of the status says nothing of the clock, and neither
+    does a fault of another code. A fault heard is the service's own word,
+    whatever else presence says (review-bot on round 98: the docstring in
+    the checks' order)."""
     if presence == "absent":
         return NOT_ASKED, "absent"
     if presence == "present" and descriptor is not None and not descriptor.get("lists"):
