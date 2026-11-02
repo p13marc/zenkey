@@ -418,9 +418,21 @@ class Resource:
     merged_horizon: freshness.Horizon | None = None
     #: 0.13: a frame resource's facts (core §7.7), from the first declaring
     #: revision that loads a contract: ``{"interval_ms", "largest_bytes",
-    #: "history"}``; None for any other resource, and for every inline one
-    #: ("An inline resource declares no history and no frame table").
+    #: "history", "keyframe_every"}``; None for any other resource, and for
+    #: every inline one ("An inline resource declares no history and no frame
+    #: table"). ``keyframe_every`` is the least over the declaring revisions
+    #: (link.v2 0.3 §2.7: "Across revisions, the plan reads the least").
     frame: dict[str, Any] | None = None
+    #: link.v2 0.3 (§2.8, §2.16, §2.17), over every declaring revision:
+    #: packed only where every one types it packed; ``block`` where any one's
+    #: congestion is block (core §2.4's default by token where a revision
+    #: states none); its longest put, the longest any packed revision writes
+    #: (None where none is packed: "Another type's length is unbounded");
+    #: timed where any one's annotations hold ``timing.deadline_ms``.
+    packed: bool = False
+    block: bool = False
+    longest_put: int | None = None
+    timed: bool = False
 
     @property
     def name(self) -> str:
@@ -484,10 +496,12 @@ def merge_revisions(iface: str, revisions: list[list[dict[str, Any]]]) -> list[R
     above 0; its horizon is then the least of them". Resources keep the
     order of their first declaration. One revision is read as itself."""
     if len(revisions) == 1:
-        return [Resource(iface, r["token"], r["template"], r.get("annotations") or {}, frame=r.get("frame"))
+        return [_contract_side(Resource(iface, r["token"], r["template"], r.get("annotations") or {},
+                                        frame=r.get("frame")), [r])
                 for r in revisions[0]]
     order: list[tuple[str, str]] = []
     declared: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    rows: dict[tuple[str, str], list[dict[str, Any]]] = {}
     framed: dict[tuple[str, str], dict[str, Any]] = {}
     for rev in revisions:
         for r in rev:
@@ -495,9 +509,15 @@ def merge_revisions(iface: str, revisions: list[list[dict[str, Any]]]) -> list[R
             if k not in declared:
                 order.append(k)
                 declared[k] = []
+                rows[k] = []
             declared[k].append(r.get("annotations") or {})
+            rows[k].append(r)
             if r.get("frame") is not None:
-                framed.setdefault(k, r["frame"])
+                if k not in framed:
+                    framed[k] = dict(r["frame"])
+                elif "keyframe_every" in r["frame"]:
+                    framed[k]["keyframe_every"] = min(framed[k].get("keyframe_every", r["frame"]["keyframe_every"]),
+                                                      r["frame"]["keyframe_every"])
     out = []
     for token, template in order:
         anns = declared[(token, template)]
@@ -516,8 +536,29 @@ def merge_revisions(iface: str, revisions: list[list[dict[str, Any]]]) -> list[R
             h = freshness.Horizon("within", min(x.ttl_s for x in hs))
         else:
             h = freshness.Horizon("none")
-        out.append(Resource(iface, token, template, anns[0], exp, disagrees, h, framed.get((token, template))))
+        out.append(_contract_side(Resource(iface, token, template, anns[0], exp, disagrees, h,
+                                           framed.get((token, template))), rows[(token, template)]))
     return out
+
+
+#: core §2.4's table: a congestion's default by kind token.
+_DEFAULT_CONGESTION = {"stream": "drop", "@stream": "drop", "state": "block", "@state": "block", "events": "block",
+                       "@op": "drop"}
+
+
+def _contract_side(r: Resource, rows: list[dict[str, Any]]) -> Resource:
+    """link.v2 0.3's reading of a resource over its declaring revisions'
+    rows (:attr:`Resource.packed` and the three beside it). A row states its
+    type's kind as ``type`` (plan.json: "``packed`` is packed, and any other
+    or none is not"), and may state ``congestion`` and ``longest_bytes``."""
+    r.packed = all(row.get("type") == "packed" for row in rows)
+    r.block = any(row.get("congestion", _DEFAULT_CONGESTION.get(r.token, "drop")) == "block" for row in rows)
+    puts = [(row["frame"]["largest_bytes"] if row.get("frame") else row.get("longest_bytes")) for row in rows
+            if row.get("type") == "packed"]
+    puts = [p for p in puts if p is not None]
+    r.longest_put = max(puts) if puts else None
+    r.timed = any("timing.deadline_ms" in (row.get("annotations") or {}) for row in rows)
+    return r
 
 
 def frame_facts(contract: Any, r: dict[str, Any]) -> dict[str, Any] | None:
@@ -543,25 +584,54 @@ def frame_facts(contract: Any, r: dict[str, Any]) -> dict[str, Any] | None:
         interval = None if any(v is None for v in read.values()) else read.get(timing.PERIOD)
     rec = sum((1 if f.optional else 0) + f.width for f in lo.fields)
     bits = 42 + lo.count_bits + (1 + rec) + (d.records - 1) * (1 + 1 + (lo.offset_bits or 0) + rec)
-    return {"interval_ms": interval, "largest_bytes": 8 + (bits + 7) // 8, "history": r.get("history") is not None}
+    return {"interval_ms": interval, "largest_bytes": 8 + (bits + 7) // 8, "history": r.get("history") is not None,
+            "keyframe_every": d.keyframe_every}
+
+
+#: link.v2 0.3 §2.16: "A packed record's longest put is its longest record,
+#: every optional field present, after an 8-byte envelope."
+ENVELOPE_BYTES = 8
+
+
+def longest_bytes(contract: Any, r: dict[str, Any]) -> int | None:
+    """A packed resource's longest put (link.v2 §2.16): its record type's
+    longest record in bytes, after the envelope; None for another type, whose
+    length is unbounded."""
+    if r.get("type", {}).get("kind") != "packed":
+        return None
+    rec = contract.schemas.packed_record(r["type"])
+    if rec is None:
+        return None
+    return ENVELOPE_BYTES + (rec.bit_bounds()[1] + 7) // 8
 
 
 def resources_of(contract: Any) -> list[dict[str, Any]]:
     """A loaded contract's resolved resources, as plan.json writes them, a
-    frame resource's facts beside (0.13, :func:`frame_facts`)."""
+    frame resource's facts beside (0.13, :func:`frame_facts`), and what
+    link.v2 0.3 reads of each (§2.16, §2.17): its type's kind, its congestion
+    and, for a packed one, its longest put."""
     out = []
     for r in contract.canonical["resources"]:
-        row = {"template": r["template"], "token": r["token"], "annotations": dict(r["annotations"])}
+        row = {"template": r["template"], "token": r["token"], "annotations": dict(r["annotations"]),
+               "type": (r.get("type") or {}).get("kind"), "congestion": r.get("congestion")}
+        for k in ("type", "congestion"):
+            if row[k] is None:
+                del row[k]
         facts = frame_facts(contract, r) if r.get("frame") is not None else None
         if facts is not None:
             row["frame"] = facts
+        elif row.get("type") == "packed":
+            row["longest_bytes"] = longest_bytes(contract, r)
         out.append(row)
     return out
 
 
 def revision_of(contract: Any) -> dict[str, Any]:
-    """A loaded contract as an inline revision, ``{uses, resources}``."""
-    return {"uses": list(contract.canonical["uses"]), "resources": resources_of(contract)}
+    """A loaded contract as an inline revision, ``{uses, resources}``, with
+    its fingerprint (link.v2 0.3 §2.18: "A revision is looked up by its
+    interface id and fingerprint")."""
+    return {"uses": list(contract.canonical["uses"]), "resources": resources_of(contract),
+            "fingerprint": contract.fingerprint}
 
 
 def plan(policy_text: str, implements: dict[str, list[str]], interfaces: dict[str, Any]) -> dict[str, Any]:
@@ -639,12 +709,25 @@ def _with_heartbeats(listed: list[str], interfaces: dict[str, Any],
 
 
 def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
-              interfaces: dict[str, Any]) -> dict[str, Any]:
+              interfaces: dict[str, Any], v2: Any = None) -> dict[str, Any]:
+    """One face's plan (§2.3). ``v2`` is link.v2's reading of the face
+    (:class:`zk2py.link_v2.FaceReading`), None for a link.v1 policy: what it
+    denies of what link.v1 lets cross (§2.7's unlisted frames, §2.8's timed
+    streams), a listed frame's cadence in place of its interval (§2.8), and
+    its own warnings and members (§2.3)."""
     listed = sorted({i for s in policy.services for i in implements[s]}, key=_bytes)
     res = {i: merge_revisions(i, revisions_of(interfaces[i])) for i in listed}
+    named = set(listed)
     listed = _with_heartbeats(listed, interfaces, res)
+    # An implied freshness.v2 (§2.9, "listed with it", where the deployment
+    # does not name it) gets its stream deny, carved from the heartbeats, and
+    # no other: link.v2's plan.json gives probe.v1's faces no
+    # state:freshness.v2 beside probe.v1's crossing states, where §2.7's step
+    # 2 reads one (F-466).
+    implied = set(listed) - named
     expose = face.expose
-    crosses = {(r.iface, r.token, r.template): r.crossing(expose) for i in listed for r in res[i]}
+    crosses = {(r.iface, r.token, r.template): r.crossing(expose) and not (v2 is not None and v2.denies(r))
+               for i in listed for r in res[i]}
     warnings: list[dict[str, Any]] = []
     if expose == "link":
         # §2.3 (0.3): "On a face that exposes, a resource the revisions of
@@ -660,6 +743,8 @@ def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
             deny.append({"id": k, "flows": list(FLOWS), "messages": list(PUSH), "key_exprs": [f"zk2/*/*/*/{k}/**"]})
             continue
         for i in listed:
+            if i in implied and k != "stream":
+                continue
             mine = [r for r in res[i] if r.token == k]
             root = f"zk2/*/*/{i}/{k}"
             if not any(crosses[(r.iface, r.token, r.template)] for r in mine):
@@ -695,7 +780,7 @@ def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
                         # own cadence, so interval_over_horizon reads its
                         # interval, not interval_s: 2 × interval > ttl. An
                         # unstated interval draws none." §2.8's warnings.
-                        iv = r.frame["interval_ms"]
+                        iv = r.frame["interval_ms"] if v2 is None else v2.cadence_ms(r)
                         if h.horizon == "within" and iv is not None and 2 * iv > h.ttl_s * 1000:
                             warnings.append(finding("interval_over_horizon", face.name, r.name, "warning"))
                         if iv is not None and iv < (face.interval_s or 0) * 1000:
@@ -739,10 +824,14 @@ def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
         attach = {"shape": "south-region", "region": face.region,
                   "gateway": {"south": [{"filters": [{"modes": ["peer", "client"]}]},
                                         {"filters": [{"region_names": [face.region]}]}]}}
+    members: dict[str, Any] = {}
+    if v2 is not None and expose == "link":
+        more, members = v2.after(listed, res, crossing_res, beats)
+        warnings += more
     return {"name": face.name, "far": face.far, "attach": attach, "deny": deny, "downsampling": downsampling,
             "windows": sorted(windows, key=lambda w: _bytes(w["service"])),
             "liveness": sorted(liveness, key=lambda w: _bytes(w["service"])),
-            "findings": sort_findings(warnings)}
+            "findings": sort_findings(warnings), **members}
 
 
 # -- §2.11, §2.15 the checks -----------------------------------------------------------------

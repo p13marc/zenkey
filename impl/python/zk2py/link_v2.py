@@ -1,5 +1,5 @@
-"""``link.v2``, text 0.1 (``spec/profiles/link/v2.md``, experimental, written
-against core 0.77; #988 L1 and L2): a constrained face, and the transport it
+"""``link.v2``, text 0.1 to 0.4 (``spec/profiles/link/v2.md``, experimental,
+written against core 0.77 to 0.91; #988 L1 to L4): a constrained face, and the transport it
 runs. Read cold by zk2py in round 96 (#609).
 
 It restates ``link.v1`` by reference (§0), and :mod:`zk2py.link` keeps those
@@ -16,8 +16,24 @@ rules. This module holds what the text adds:
 - **the transport block** (§2.18) and **its checks** (§2.19):
   :func:`emit` and :func:`check_transport`.
 
+**Text 0.3** (#988 L3; round 99), the contract side and frames per face:
+- a face's ``frames`` and ``horizon_s`` (§2.1), each entry checked alone
+  (:func:`frame_name`);
+- the plan's reading of each face (:class:`FaceReading`, handed to
+  :func:`zk2py.link.plan_face`): an unlisted frame and a timed stream
+  denied (§2.7, §2.8), a listed frame's cadence its ``every_s``, and the
+  warnings ``not_packed``, ``timed_downsampled``, ``horizon_under_face``,
+  ``block_over_batch`` and ``keep_alive_not_suppressed``; across the faces,
+  ``frame_unlisted``, and the refusals ``packed_required`` (§2.17),
+  ``frame_unknown``, ``keyframe_unreachable`` (§2.7) and, given the far
+  side's catalog, ``catalog_missing`` (§2.18);
+- ``v2/exposure.json``'s one resource (:func:`exposure`).
+
+**Text 0.4** (#988 L4) adds §2.20 and §2.21, which point at core §8.1 and
+§8.5: :mod:`zk2py.far_side` reads them.
+
 The fixtures are ``conformance/v2/`` (``lints.json``, ``plan.json``,
-``transport.json``).
+``exposure.json``, ``transport.json``).
 """
 
 from __future__ import annotations
@@ -63,7 +79,9 @@ DEFAULTS = {
                      "interests_timeout_ms": 10_000},
 }
 FACE_KEYS = ("far", "attach", "region", "select", "class", "expose", "interval_s", "max_outage_s", "link_bps",
-             "loss_ppm", "arq", "reply_timeout_ms")
+             "loss_ppm", "arq", "reply_timeout_ms", "frames", "horizon_s")
+#: §2.1 (0.3): an entry of ``frames``'s own keys.
+FRAME_KEYS = ("every_s", "keyframe_s")
 MOVED = ("lease_ms", "batch_bytes")
 
 
@@ -77,6 +95,14 @@ class FaceV2:
     loss_ppm: int
     arq: bool
     reply_timeout_ms: int
+    #: §2.7 (0.3): the frame resource each entry names,
+    #: ``<iface>/stream/<template>``, to ``{every_s, keyframe_s}``
+    #: (``keyframe_s`` absent where the entry states none); None for a face
+    #: with no ``frames``. An empty ``frames`` lists no frame: a face *with*
+    #: ``frames``, which lets no frame cross (zk2py's reading, F-465).
+    frames: dict[str, dict[str, int]] | None = None
+    #: §2.12 (0.3): the shortest horizon the face affords, or None.
+    horizon_s: int | None = None
 
 
 @dataclass
@@ -287,6 +313,12 @@ def _face(name: str, body: dict[str, Any], protocols_of: list[str] | None, trans
         bad("arq", "missing_field")
     elif type(body["arq"]) is not bool:
         bad("arq")
+    frames = _frames(body, expose, bad)
+    horizon = body.get("horizon_s")
+    if "horizon_s" in body and (not _int_in(horizon, 1, U32_MAX) or expose == "none"):
+        # "frames and horizon_s on a face whose expose is "none" are
+        # bad_value, as its interval_s is: nothing crosses there."
+        bad("horizon_s")
     # The checks that read [transport], "made when the keys it reads are
     # valid, whatever else the policy holds".
     t = transport or {}
@@ -314,16 +346,235 @@ def _face(name: str, body: dict[str, Any], protocols_of: list[str] | None, trans
         return None, protocols
     f = link.Face(name, far, attach, region, protocols or [], expose, interval if expose == "link" else None,
                   body["max_outage_s"], t["batch_bytes"], bps, t["lease_ms"])
-    return FaceV2(f, loss, body["arq"], rt), protocols
+    return FaceV2(f, loss, body["arq"], rt, frames, horizon), protocols
 
 
-# -- §2.18 the plan --------------------------------------------------------------------------
+def _frames(body: dict[str, Any], expose: Any, bad: Any) -> dict[str, dict[str, int]] | None:
+    """§2.1 (0.3): a face's ``frames``, each entry checked alone. "A key of
+    the wrong form, or a value that is not a table, is bad_value at
+    frames.<key>. Its own keys are at frames.<key>.every_s and
+    frames.<key>.keyframe_s, and any other is unknown_field there." On a face
+    that exposes none, ``frames`` is ``bad_value`` and its entries go
+    unread."""
+    if "frames" not in body:
+        return None
+    table = body["frames"]
+    if type(table) is not dict or expose == "none":
+        bad("frames")
+        return None
+    out: dict[str, dict[str, int]] = {}
+    for key, entry in table.items():
+        at = f"frames.{key}"
+        name = frame_name(key)
+        if name is None or type(entry) is not dict:
+            # "each entry reported once" (lints.json): the key's form and
+            # the value's are one bad_value.
+            bad(at)
+            continue
+        ok = True
+        for k in entry:
+            if k not in FRAME_KEYS:
+                bad(f"{at}.{k}", "unknown_field")
+                ok = False
+        if "every_s" not in entry:
+            bad(f"{at}.every_s", "missing_field")
+            ok = False
+        elif not _int_in(entry["every_s"], 1, U32_MAX):
+            bad(f"{at}.every_s")
+            ok = False
+        if "keyframe_s" in entry and not _int_in(entry["keyframe_s"], 1, U32_MAX):
+            bad(f"{at}.keyframe_s")
+            ok = False
+        if ok:
+            out[name] = {k: entry[k] for k in FRAME_KEYS if k in entry}
+    return out
 
-def plan(policy_text: str, implements: dict[str, list[str]], interfaces: dict[str, Any]) -> dict[str, Any]:
+
+def frame_name(key: Any) -> str | None:
+    """§2.1, §2.7 (0.3): "An entry of frames is keyed by an interface id, /,
+    and a template with no parameter"; "An entry <iface>/<template> names the
+    frame resource <iface>/stream/<template>". None for a key of another
+    form."""
+    from . import templates
+    from .lexical import is_interface_id
+
+    if type(key) is not str or "/" not in key:
+        return None
+    iface, _, template = key.partition("/")
+    if not is_interface_id(iface) or not templates.is_template(template):
+        return None
+    if any(seg.kind != templates.LITERAL for seg in templates.parse_template(template).segments):
+        return None
+    return f"{iface}/stream/{template}"
+
+
+# -- §2.3 the plan (0.3: §2.7, §2.8, §2.12, §2.16, §2.17, §2.18) -----------------------------
+
+HEARTBEAT_AT = link.HEARTBEAT_IFACE + "/stream/heartbeat/"
+
+
+class FaceReading:
+    """link.v2's reading of one face of a link.v2 policy, given to
+    :func:`zk2py.link.plan_face`: what it denies of what link.v1 lets cross,
+    a listed frame's cadence, and after the plan its warnings and its
+    ``frames`` member. It keeps what crossed (:attr:`crossed`,
+    :attr:`beats`) for the policy's own checks (§2.7's ``frame_unlisted`` and
+    ``keyframe_unreachable``, §2.18's ``catalog_missing``)."""
+
+    def __init__(self, f: FaceV2, transport: dict[str, Any]) -> None:
+        self.f, self.transport = f, transport
+        self.crossed: dict[str, link.Resource] = {}
+        self.beats: dict[str, bool] = {}
+        self.res: dict[str, list[link.Resource]] = {}
+
+    @property
+    def name(self) -> str:
+        return self.f.face.name
+
+    def listed(self, r: link.Resource) -> bool:
+        return self.f.frames is None or r.name in self.f.frames
+
+    def denies(self, r: link.Resource) -> bool:
+        """§2.7: "On a face with frames, a generator MUST let a frame resource
+        of a listed interface cross only when the face lists it and its
+        contract exposes it link." §2.8: "A generator MUST NOT emit a
+        downsampling rule for a timed stream. It denies the stream instead"
+        ("The key is read, not its value"); a frame resource is never
+        downsampled, so its deadline denies nothing."""
+        if r.frame is not None:
+            return not self.listed(r)
+        return r.token in ("stream", "@stream") and r.timed
+
+    def cadence_ms(self, r: link.Resource) -> int | None:
+        """§0: "A crossing frame resource's cadence on a face is its entry's
+        every_s when it is listed, and its interval otherwise (core §7.7)";
+        §2.8: frame_over_interval and interval_over_horizon read it."""
+        if self.f.frames is not None and r.name in self.f.frames:
+            return self.f.frames[r.name]["every_s"] * 1000
+        return r.frame["interval_ms"] if r.frame is not None else None
+
+    def after(self, listed: list[str], res: dict[str, list[link.Resource]], crossing: Any,
+              beats: dict[str, bool]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """§2.3's warnings this face draws of its own, and its ``frames``
+        member (§2.3: "each listed frame that crosses it, as {resource,
+        every_s, keyframe_s}, sorted by name. It is absent for a face with no
+        frames")."""
+        face, out = self.f.face, []
+        self.res, self.beats = res, dict(beats)
+        self.crossed = {r.name: r for i in listed for r in res[i] if crossing(r)}
+
+        def warn(code: str, at: str) -> None:
+            out.append(link.finding(code, face.name, at, "warning"))
+
+        for i in listed:
+            for r in res[i]:
+                if r.exposure() == "link" and link._reading(r.token, r.template, "link", face.expose)["reason"] \
+                        == "exposed" and r.frame is None and r.token in ("stream", "@stream") and r.timed:
+                    warn("timed_downsampled", r.name)                                  # §2.8
+        for r in self.crossed.values():
+            if not r.packed:
+                warn("not_packed", r.name)                                             # §2.17
+            if r.block and r.longest_put is not None and r.longest_put > self.transport["batch_bytes"]:
+                warn("block_over_batch", r.name)                                       # §2.16
+            if self.f.horizon_s is not None and r.frame is not None:
+                h = r.horizon()
+                if h.horizon == "within" and h.ttl_s < self.f.horizon_s:
+                    warn("horizon_under_face", r.name)                                 # §2.12
+        cadences = [c for r in self.crossed.values() if r.frame is not None
+                    for c in [self.cadence_ms(r)] if c is not None]
+        for i, crosses in sorted(beats.items()):
+            if not crosses:
+                continue
+            h = heartbeat_horizon(res[i])
+            if h is None:
+                continue
+            if self.f.horizon_s is not None and h < self.f.horizon_s:
+                warn("horizon_under_face", HEARTBEAT_AT + i)                           # §2.12
+            # §2.16: "each crossing heartbeat's period, half its horizon"
+            cadences.append(h * 500)
+        if cadences and min(cadences) * self.transport["keep_alive"] > self.transport["lease_ms"]:
+            warn("keep_alive_not_suppressed", "transport.keep_alive")                  # §2.16
+        if self.f.frames is None:
+            return out, {}
+        rows = []
+        for name in sorted(self.f.frames, key=link._bytes):
+            if name in self.crossed and self.crossed[name].frame is not None:
+                rows.append({"resource": name, **self.f.frames[name]})
+        return out, {"frames": rows}
+
+
+def heartbeat_horizon(resources: list[link.Resource]) -> int | None:
+    """§2.12: "A heartbeat's horizon is the shortest of the collections it
+    covers": the least horizon of the interface's states with one, the
+    revisions read together (``freshness.v2`` §2.4)."""
+    hs = [r.horizon().ttl_s for r in resources if r.token in ("state", "@state") and r.horizon().horizon == "within"]
+    return min(hs) if hs else None
+
+
+def packed_required(interfaces: dict[str, Any], listed: list[str]) -> list[dict[str, Any]]:
+    """§2.17: "A contract that lists link.v2 MUST type every resource it
+    exposes link as packed": each resource of a revision given that lists
+    ``link.v2``, a stream, a state or an event exposed ``link``, whose type is
+    not packed, at its name with no face. One finding per resource, however
+    many revisions draw it."""
+    out = []
+    for i in listed:
+        entry = interfaces[i]
+        for uses, rev in zip(link.uses_of(entry), link.revisions_of(entry)):
+            if PROFILE not in uses:
+                continue
+            for r in rev:
+                if r["token"] == "@op" or link.exposure_of(r["token"], r.get("annotations") or {}) != "link":
+                    continue
+                if r.get("type") != "packed":
+                    out.append(link.finding("packed_required", None, f"{i}/{r['token']}/{r['template']}"))
+    return out
+
+
+def contract_finding(uses: list[str], token: str, annotations: dict[str, Any], kind: str | None) -> str | None:
+    """exposure.json's ``finding``, the contract side's (§2.17)."""
+    if PROFILE not in uses or token == "@op" or link.exposure_of(token, annotations) != "link":
+        return None
+    return None if kind == "packed" else "packed_required"
+
+
+def exposure(r: dict[str, Any]) -> dict[str, Any]:
+    """``v2/exposure.json``'s reading of one resource on a face of a link.v2
+    policy: link.v1's tokens, "the first of these that holds, in this order:
+    requests_only, invalid, host, face_closed, templated, unlisted, timed,
+    exposed"; a frame resource that crosses is ``whole``; and the contract
+    side's finding."""
+    token, template, ann = r["token"], r["template"], r["annotations"]
+    reading = link.exposure(token, template, ann, r["expose"])
+    if reading["reason"] == "exposed":
+        if r["frame"]:
+            if r["listed"] is False:
+                reading = {**reading, "pushes": "denied", "reason": "unlisted"}
+            else:
+                reading = {**reading, "pushes": "whole"}
+        elif token in ("stream", "@stream") and "timing.deadline_ms" in ann:
+            reading = {**reading, "pushes": "denied", "reason": "timed"}
+    return {**reading, "finding": contract_finding(r["uses"], token, ann, r["type"])}
+
+
+def _catalog(doc: Any) -> Any:
+    """The case's catalog, read as core §8.6 reads one (§2.18)."""
+    import json
+
+    from . import catalog
+
+    return catalog.read(json.dumps(doc, ensure_ascii=False))
+
+
+def plan(policy_text: str, implements: dict[str, list[str]], interfaces: dict[str, Any],
+         catalog_doc: Any = None) -> dict[str, Any]:
     """``plan.json``'s ``expect``: the binding, the catalog id, the transport
-    (None for a ``link.v1`` policy) and each face's ``link.v1`` plan with its
-    ``reply_timeout_ms`` (none for a ``link.v1`` face); or ``{refused}``, the
-    policy's findings, or the deployment's errors."""
+    (None for a ``link.v1`` policy) and each face's plan, a link.v2 face's
+    with its ``reply_timeout_ms`` and, with ``frames``, its listed frames; or
+    ``{refused}``: the policy's findings, or the deployment's errors (§2.3's
+    refusals: ``packed_required``, ``frame_unknown``,
+    ``keyframe_unreachable``, ``catalog_missing``). ``catalog_doc`` is the
+    core §8.6 catalog the far side holds (§2.18), or None."""
     policy, findings = parse_policy(policy_text)
     if policy is None:
         return {"refused": findings}
@@ -336,13 +587,85 @@ def plan(policy_text: str, implements: dict[str, list[str]], interfaces: dict[st
     if errors:
         return {"refused": link.sort_findings(findings + errors)}
     v1 = policy.as_v1()
+    if policy.v1 is not None:
+        # "A link.v1 policy's plan is link.v1's, finding for finding. It
+        # takes none of this section."
+        return {"binding": policy.binding, "catalog": None, "transport": None,
+                "faces": [link.plan_face(v1, f.face, implements, interfaces) for f in policy.faces]}
+    listed = sorted({i for s in policy.services for i in implements[s]}, key=link._bytes)
+    errors = packed_required(interfaces, listed)
+    readings = [FaceReading(f, policy.transport) for f in policy.faces]
     faces = []
-    for f in policy.faces:
-        fp = link.plan_face(v1, f.face, implements, interfaces)
-        if policy.v1 is None:
-            fp["reply_timeout_ms"] = f.reply_timeout_ms
+    for f, rd in zip(policy.faces, readings):
+        fp = link.plan_face(v1, f.face, implements, interfaces, rd)
+        fp["reply_timeout_ms"] = f.reply_timeout_ms
         faces.append(fp)
+    errors += _face_errors(policy, readings, listed, faces)
+    if catalog_doc is not None:
+        errors += _catalog_missing(_catalog(catalog_doc), interfaces, readings)
+    if errors:
+        return {"refused": link.sort_findings(errors)}
     return {"binding": policy.binding, "catalog": policy.catalog, "transport": policy.transport, "faces": faces}
+
+
+def _lets_cross(rd: FaceReading, r: link.Resource) -> bool:
+    """Whether a face of the policy lets an exposed frame resource cross:
+    it exposes, and it lists the frame or lists none (§2.7)."""
+    return rd.f.face.expose == "link" and r.exposure() == "link" and rd.listed(r)
+
+
+def _face_errors(policy: PolicyV2, readings: list[FaceReading], listed: list[str],
+                 faces: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """§2.7's refusals per face, ``frame_unknown`` and
+    ``keyframe_unreachable``, and its ``frame_unlisted`` warning, added to
+    the face's plan."""
+    errors = []
+    for rd, fp in zip(readings, faces):
+        if rd.f.frames is None:
+            continue
+        frames_of = {r.name: r for i in listed for r in rd.res.get(i, []) if r.frame is not None}
+        for name, entry in rd.f.frames.items():
+            if name not in frames_of:
+                errors.append(link.finding("frame_unknown", rd.name, name))
+                continue
+            r = rd.crossed.get(name)
+            if r is None or "keyframe_s" not in entry:
+                continue
+            # "keyframe_s > keyframe_every × every_s, in integers, is
+            # unreachable"; "Across revisions, the plan reads the least
+            # keyframe_every."
+            if entry["keyframe_s"] > r.frame["keyframe_every"] * entry["every_s"]:
+                errors.append(link.finding("keyframe_unreachable", rd.name, name))
+        more = []
+        for name, r in frames_of.items():
+            if name in rd.f.frames or r.exposure() != "link":
+                continue
+            if not any(_lets_cross(other, r) for other in readings):
+                more.append(link.finding("frame_unlisted", rd.name, name, "warning"))
+        if more:
+            fp["findings"] = link.sort_findings(fp["findings"] + more)
+    return errors
+
+
+def _catalog_missing(held: Any, interfaces: dict[str, Any], readings: list[FaceReading]) -> list[dict[str, Any]]:
+    """§2.18: "A generator given the catalog the far side holds MUST refuse a
+    deployment in which a revision of an interface with something crossing
+    is not an entry"; "Something crossing a face is a crossing resource of
+    the interface, or the heartbeat covering it"; "A revision is looked up by
+    its interface id and fingerprint. One given as its resources alone, with
+    no contract, has no fingerprint, and is not looked up." """
+    crossing = {r.iface for rd in readings for r in rd.crossed.values()}
+    crossing |= {i for rd in readings for i, c in rd.beats.items() if c}
+    entries = set(held.entries)
+    out = []
+    for i in sorted(crossing, key=link._bytes):
+        entry = interfaces.get(i)
+        revs = entry["revisions"] if isinstance(entry, dict) and "revisions" in entry else [entry]
+        for rev in revs:
+            fp = rev.get("fingerprint") if isinstance(rev, dict) else None
+            if fp is not None and (i, fp) not in entries:
+                out.append(link.finding("catalog_missing", None, f"{i}@{fp}"))
+    return out
 
 
 def narrowed(policy: PolicyV2, principal: str) -> list[str] | None:

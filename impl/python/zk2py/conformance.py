@@ -818,14 +818,17 @@ def _link_lints(path: Path) -> list[Result]:
 
 
 def _link_v2(path: Path) -> list[Result]:
-    """``conformance/v2/`` (link.v2 text 0.1, #988 L1 and L2), every file, an
-    unknown one failing, through :mod:`zk2py.link_v2`. ``lints.json``: a
-    policy -> every finding. ``plan.json``: a policy and a deployment -> the
-    binding, the catalog, the transport and each face's plan with its reply
-    timeout, or the refusal; ``narrow``'s principals -> the link protocols a
-    subject bound to each is selected by. ``transport.json``: a policy, a
-    router's and a far end's configuration, and a catalog -> what a generator
-    emits, and every finding."""
+    """``conformance/v2/`` (link.v2 text 0.1, #988 L1 and L2; text 0.3, L3),
+    every file, an unknown one failing, through :mod:`zk2py.link_v2`.
+    ``lints.json``: a policy -> every finding. ``plan.json``: a policy, a
+    deployment and the far side's catalog -> the binding, the catalog, the
+    transport and each face's plan with its reply timeout and its frames, or
+    the refusal; ``narrow``'s principals -> the link protocols a subject bound
+    to each is selected by. ``exposure.json`` (0.3): one resource on a face of
+    a link.v2 policy -> link.v1's reading as link.v2 reads it, and the
+    contract side's finding. ``transport.json``: a policy, a router's and a
+    far end's configuration, and a catalog -> what a generator emits, and
+    every finding."""
     from . import link_v2
 
     out: list[Result] = []
@@ -834,9 +837,12 @@ def _link_v2(path: Path) -> list[Result]:
         if f.name == "lints.json":
             for c in data["cases"]:
                 out.append(_check(f"v2 lints: {c['note']}", link_v2.lint(c["policy"]), c["expect"]))
+        elif f.name == "exposure.json":
+            for c in data["cases"]:
+                out.append(_check(f"v2 exposure: {c['note']}", link_v2.exposure(c), c["expect"]))
         elif f.name == "plan.json":
             for c in data["cases"]:
-                got = link_v2.plan(c["policy"], c["implements"], _link_interfaces(c))
+                got = link_v2.plan(c["policy"], c["implements"], _link_interfaces(c), c.get("catalog"))
                 if "narrow" in c:
                     pol, _ = link_v2.parse_policy(c["policy"])
                     got["narrowed"] = None if pol is None else {n: link_v2.narrowed(pol, n) for n in c["narrow"]}
