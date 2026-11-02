@@ -2767,6 +2767,7 @@ pub fn acl_check() -> AclCheck {
     AclCheck {
         namespace: String::new(),
         against: "router.json5".into(),
+        read: zenkey_fleet::report::ConfigRead::Zenoh,
         planned_rules: 18,
         observed_rules: 17,
         planned_subjects: 3,
@@ -2898,6 +2899,7 @@ pub fn face_check() -> FaceCheck {
     FaceCheck {
         namespace: String::new(),
         against: "router.json5".into(),
+        read: zenkey_fleet::report::ConfigRead::Zenoh,
         faces: vec![FaceBlock {
             face: "radio".into(),
             far: "ground".into(),
@@ -2926,6 +2928,7 @@ pub fn face_check() -> FaceCheck {
         comparison: AclCheck {
             namespace: String::new(),
             against: "router.json5".into(),
+        read: zenkey_fleet::report::ConfigRead::Zenoh,
             planned_rules: 18,
             observed_rules: 18,
             planned_subjects: 3,

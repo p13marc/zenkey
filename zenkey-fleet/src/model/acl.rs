@@ -120,10 +120,12 @@ use crate::report::{
     AclCheck, AclConfigDoc, AclDecision, AclDirection, AclExplain, AclFinding, AclFindingKind,
     AclFlow, AclGateway, AclGrantKind, AclMessage, AclPermission, AclPlan, AclPolicy, AclRefusal,
     AclRule, AclSubject, AclVia, AclWarning, AclWarningKind, Asked, BindingSpec, CallsSpec,
-    DownsamplingDoc, Enrollment, FaceBlock, FaceCatalog, FaceCheck, FaceTransportKey, FaceWindow,
-    GatewayFilter, GatewaySouth, Judgement, PrincipalSpec,
+    ConfigRead, DownsamplingDoc, Enrollment, FaceBlock, FaceCatalog, FaceCheck, FaceTransportKey,
+    FaceWindow, GatewayFilter, GatewaySouth, Judgement, PrincipalSpec,
 };
 use crate::{Error, Result};
+
+mod data;
 
 /// What the caller decided: the namespace, the posture, and the faces.
 #[derive(Debug, Clone)]
@@ -3189,9 +3191,10 @@ fn downsampling_shape(
 
 /// A router's configuration, the observed side of a check (§11.3,
 /// `link.v1` §2.15, `link.v2` §2.19): its `access_control`, `downsampling`
-/// and `gateway` blocks as zenoh's own loader parsed them, and the
-/// transport keys the file states, by zenoh's configuration key. What the
-/// router runs is not on the bus, so this is the file somebody says it
+/// and `gateway` blocks as zenoh's own loader parsed them, or as data under
+/// a binding whose zenoh is not stock ([`RouterConfig::read_data`]), and
+/// the transport keys the file states, by zenoh's configuration key. What
+/// the router runs is not on the bus, so this is the file somebody says it
 /// runs.
 #[derive(Debug, Clone, Default)]
 pub struct RouterConfig {
@@ -3202,6 +3205,8 @@ pub struct RouterConfig {
     /// The keys it states (`link::StatedTransport::read` over the file's
     /// own JSON tree): a key it omits runs at the binding's default.
     pub transport: link::StatedTransport,
+    /// How it was read (#1044).
+    pub read: ConfigRead,
 }
 
 impl RouterConfig {
@@ -3248,7 +3253,24 @@ impl RouterConfig {
             downsampling,
             gateway,
             transport,
+            read: ConfigRead::Zenoh,
         })
+    }
+
+    /// A router's configuration read as data (#1044, [`ConfigRead::Data`]):
+    /// the blocks and transport keys `stated`, the file's own tree
+    /// ([`RouterConfig::stated_tree`]), carries, in zenoh 1.10.1's shapes,
+    /// each link protocol one of `binding`'s (`link.v2` §2.4). It is how a
+    /// router whose zenoh is not stock has its configuration read: stock
+    /// zenoh's loader refuses the fork's link protocols. A block or field
+    /// the file omits takes zenoh's default, and a stated transport key is
+    /// read as written. Every key that does not read is named in the error,
+    /// at its path.
+    pub fn read_data(
+        stated: &serde_json::Value,
+        binding: link::Binding,
+    ) -> std::result::Result<RouterConfig, String> {
+        data::read(stated, binding)
     }
 
     /// A configuration file's own text as a JSON tree: what it states, a key
@@ -3275,6 +3297,23 @@ impl RouterConfig {
             &config,
             &RouterConfig::stated_tree(text, ConfigDialect::Json5)?,
         )
+    }
+
+    /// A JSON5 configuration's text read as a router of `binding` has it
+    /// read ([`ConfigRead::of`]): through zenoh's own loader
+    /// ([`RouterConfig::from_json5`]) under stock zenoh, as data
+    /// ([`RouterConfig::read_data`]) under any other binding.
+    pub fn from_json5_for(
+        text: &str,
+        binding: link::Binding,
+    ) -> std::result::Result<RouterConfig, String> {
+        match ConfigRead::of(binding) {
+            ConfigRead::Zenoh => RouterConfig::from_json5(text),
+            ConfigRead::Data => RouterConfig::read_data(
+                &RouterConfig::stated_tree(text, ConfigDialect::Json5)?,
+                binding,
+            ),
+        }
     }
 }
 
@@ -3706,6 +3745,7 @@ pub fn check_acl(plan: &AclPlan, config: &RouterConfig, against: &str) -> AclChe
     AclCheck {
         namespace: plan.namespace.clone(),
         against: against.to_string(),
+        read: config.read,
         planned_rules: plan.rules.len(),
         observed_rules: observed.rules.len(),
         planned_subjects: plan.subjects.len(),
@@ -4008,6 +4048,7 @@ pub fn check_face(
     FaceCheck {
         namespace: plan.namespace.clone(),
         against: against.to_owned(),
+        read: config.read,
         faces,
         findings,
         windows,
@@ -4235,6 +4276,7 @@ mod tests {
             downsampling: ds.to_vec(),
             gateway: gw.cloned(),
             transport: link::StatedTransport::default(),
+            read: ConfigRead::Zenoh,
         }
     }
 
@@ -4301,6 +4343,140 @@ mod tests {
             assert_eq!(ConfigDialect::of_path(&path), None, ".{ext}");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Read as data (#1044), a block the generator writes for stock zenoh
+    /// reads as zenoh's own loader reads it: the access control, the
+    /// downsampling, the south region and the transport, under both
+    /// postures, a south region and a `link.v2` transport among them. Only
+    /// how it was read differs.
+    #[test]
+    fn a_block_read_as_data_reads_as_zenohs_loader_reads_it() {
+        let media = examples().join("link/media/rf.face.toml");
+        let rf = std::fs::read_to_string(media).unwrap();
+        let mut plans = Vec::new();
+        for posture in [AclPermission::Deny, AclPermission::Allow] {
+            let (_, _, policy) = radio();
+            plans.push(radio_plan(posture, &policy, ""));
+            plans.push(radio_plan(posture, &rf, "fleet-a"));
+            plans.push(
+                plan_acl(
+                    &enrollment("walkthrough"),
+                    &contracts(&["walkthrough"]),
+                    &face_opts(posture, walkthrough_face(true)),
+                )
+                .unwrap(),
+            );
+        }
+        for plan in &plans {
+            let text = format!("{{\n{}}}", to_json5(plan));
+            let zenoh = RouterConfig::from_json5(&text).unwrap();
+            let tree = RouterConfig::stated_tree(&text, ConfigDialect::Json5).unwrap();
+            let data = RouterConfig::read_data(&tree, link::Binding::Zenoh1_10_1)
+                .unwrap_or_else(|e| panic!("{e}\n{text}"));
+            assert_eq!(data.acl, zenoh.acl);
+            assert_eq!(data.downsampling, zenoh.downsampling);
+            assert_eq!(
+                observed_south(data.gateway.as_ref()),
+                observed_south(zenoh.gateway.as_ref())
+            );
+            assert_eq!(data.transport, zenoh.transport);
+            assert_eq!(
+                (zenoh.read, data.read),
+                (ConfigRead::Zenoh, ConfigRead::Data)
+            );
+        }
+        assert!(plans.iter().any(|p| p.gateway.is_some()));
+        assert!(plans.iter().any(|p| p.transport.is_some()));
+        // A file that states no block reads at zenoh's defaults: access
+        // control not enabled, under deny, nothing else.
+        let none =
+            RouterConfig::read_data(&serde_json::json!({}), link::Binding::Zm1_10_2R1).unwrap();
+        let zenoh = RouterConfig::from_json5("{}").unwrap();
+        assert_eq!(none.acl, zenoh.acl);
+        assert!(!none.acl.enabled && none.acl.default_permission == "deny");
+        assert!(none.downsampling.is_empty() && none.gateway.is_none());
+    }
+
+    /// Read as data (#1044), each link protocol is the binding's
+    /// (`link.v2` §2.4): the fork's `unixsock-dgram` reads under
+    /// `zm-1.10.2-r1` and not under stock zenoh, as zenoh's loader refuses
+    /// it. Every key that does not read as zenoh 1.10.1's shapes is named
+    /// at its path, all of them.
+    #[test]
+    fn a_block_read_as_data_names_every_key_that_does_not_read() {
+        let block = |protocol: &str| {
+            serde_json::json!({ "access_control": {
+                "enabled": true,
+                "subjects": [{ "id": "local", "usernames": ["local"],
+                               "link_protocols": ["tcp", protocol] }],
+            }})
+        };
+        let fork =
+            RouterConfig::read_data(&block("unixsock-dgram"), link::Binding::Zm1_10_2R1).unwrap();
+        assert_eq!(
+            fork.acl.subjects[0].link_protocols.as_deref(),
+            Some(&["tcp".to_owned(), "unixsock-dgram".to_owned()][..])
+        );
+        let stock = RouterConfig::read_data(&block("unixsock-dgram"), link::Binding::Zenoh1_10_1)
+            .unwrap_err();
+        assert!(
+            stock.contains(
+                "access_control.subjects (id \"local\"): \"unixsock-dgram\" is not a link \
+                 protocol of zenoh-1.10.1"
+            ),
+            "{stock}"
+        );
+        assert!(zenoh::Config::from_json5(&block("unixsock-dgram").to_string()).is_err());
+
+        let broken = serde_json::json!({
+            "access_control": {
+                "enabled": true,
+                "default_permision": "deny",
+                "rules": [
+                    { "id": "ok", "key_exprs": ["zk2/**"], "messages": ["put"],
+                      "permission": "allow" },
+                    { "id": "zk", "key_exprs": ["zk2/**/@zk/**"], "messages": ["put"] },
+                    { "id": "wide", "key_exprs": ["zk2/**/**"], "messages": ["put"],
+                      "permission": "deny" },
+                    { "id": "none", "key_exprs": [], "messages": ["put"], "permission": "deny" },
+                ],
+                "subjects": [{ "id": "radio", "link_protocols": ["unixsock-dgrm"] }],
+                "policies": [{ "rules": ["ok"] }],
+            },
+            "downsampling": [{ "id": "radio", "messages": ["push"],
+                               "rules": [{ "key_expr": "zk2/a", "freq": 1 }] }],
+            "gateway": { "south": [{ "filters": [{ "modes": ["satellite"] }] }] },
+        });
+        // The block refused for the stray field reads none of its lists.
+        let err = RouterConfig::read_data(&broken, link::Binding::Zm1_10_2R1).unwrap_err();
+        assert!(err.contains("3 key(s)"), "{err}");
+        for at in [
+            "access_control: unknown field `default_permision`",
+            "downsampling[0] (id \"radio\"): unknown variant `push`",
+            "gateway.south[0].filters[0]: unknown variant `satellite`",
+        ] {
+            assert!(err.contains(at), "{at}: {err}");
+        }
+        let mut acl = broken.clone();
+        acl["access_control"]
+            .as_object_mut()
+            .unwrap()
+            .remove("default_permision");
+        acl.as_object_mut().unwrap().remove("downsampling");
+        acl.as_object_mut().unwrap().remove("gateway");
+        let err = RouterConfig::read_data(&acl, link::Binding::Zm1_10_2R1).unwrap_err();
+        for at in [
+            "access_control.rules[1] (id \"zk\"): missing field `permission`",
+            "access_control.rules (id \"wide\"): \"zk2/**/**\" is not a key expression",
+            "access_control.rules[3] (id \"none\"): invalid length 0, expected a non-empty list",
+            "access_control.subjects (id \"radio\"): \"unixsock-dgrm\" is not a link protocol \
+             of zm-1.10.2-r1",
+            "access_control.policies[0]: missing field `subjects`",
+        ] {
+            assert!(err.contains(at), "{at}: {err}");
+        }
+        assert!(err.contains("5 key(s)"), "{err}");
     }
 
     /// The example directories' contracts, with the contracts an example
