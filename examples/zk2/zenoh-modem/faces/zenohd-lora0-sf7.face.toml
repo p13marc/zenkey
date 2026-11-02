@@ -1,0 +1,57 @@
+# zenoh-modem's LoRa node at SF7 (link.v2, spec/profiles/link/v2.md;
+# #988 L5): the router of host h-c2a95e41d7f0, which carries lora0, an
+# SX1262 at 5,469 bit/s under EU868's 1 % duty, 864 s of air a day. One
+# router per medium (v2 §2.16). Planned as zenohd-rf0.face.toml says, with
+# this file as --face-policy.
+#
+# The transport: 60 s with 2 keep-alives closed the link at every lost
+# keep-alive (the wire baseline's LoRa runs, 9 of 9), and each reopen cost
+# more air than the keep-alives it saved. 120 s with 4 sends as many, 5,760
+# a day, and needs three losses in a row to close: 0.72 false closes a day
+# at 5 % loss.
+#
+# Across the face: the frames at one a minute, where zk2c fits all 73
+# readings. A keep-alive interval of 30 s is below that cadence, so the
+# plan warns `keep_alive_not_suppressed`: the uplink pays one keep-alive
+# between two frames, 1,440 a day and 74 s of air in the baseline's SF7
+# runs. frames/message is SBD's (`frame_unlisted`), and the chip has no
+# ARQ (`no_arq`).
+profile  = "link.v2"
+system   = "h-c2a95e41d7f0"
+services = ["lora0"]
+binding  = "zm-1.10.2-r1"
+catalog  = "ab76ec37"
+
+[transport]
+lease_ms             = 120000
+keep_alive           = 4
+wait_before_close_ms = 120000
+sequence             = "16bit"
+batch_bytes          = 224          # the chip's 222 B frame and 2 B of stream framing
+open_timeout_ms      = 10000
+accept_timeout_ms    = 10000
+interests_timeout_ms = 10000
+
+[face.lora]
+far              = "ground"
+attach           = "client"
+select           = { link_protocols = ["unixsock-stream"] }
+class            = "constrained"
+expose           = "link"
+interval_s       = 60
+max_outage_s     = 3600
+link_bps         = 5469
+loss_ppm         = 50000
+arq              = false
+reply_timeout_ms = 15000
+horizon_s        = 120
+
+[face.lora.frames]
+"modem.v3/frames/link"   = { every_s = 60 }
+"modem.v3/frames/sdu"    = { every_s = 60 }
+"modem.v3/frames/sched"  = { every_s = 60 }
+"modem.v3/frames/air"    = { every_s = 60 }
+"modem.v3/frames/layer"  = { every_s = 60 }
+"modem.v3/frames/if"     = { every_s = 60 }
+"modem.v3/frames/radio"  = { every_s = 60 }
+"modem.v3/frames/bearer" = { every_s = 60 }

@@ -1,0 +1,47 @@
+# zenoh-modem's SBD terminal (link.v2, spec/profiles/link/v2.md; #988 L5):
+# the router of host h-71c0e2a9d4b3, which carries sat0, and its Iridium
+# short-burst-data lane to the ground gateway, billed by the message.
+# Planned as zenohd-rf0.face.toml says, with this file as --face-policy.
+#
+# The transport is zenoh-modem's tuned one, unchanged
+# (configs/zenohd-sat0.json5): 3,600 s with 2 keep-alives, 96 messages a
+# day. The service retries, so a keep-alive is late rather than lost: no
+# loss, and ARQ.
+#
+# Across the face: frames/message alone, all 73 readings in one paid
+# message (213 B of payload), once a keep-alive interval, so that it replaces
+# a keep-alive the link pays anyway. It has no horizon, so liveness across
+# SBD stays unobservable. The plan warns `frame_unlisted` of the other
+# eight frames: sat0 does not publish them.
+profile  = "link.v2"
+system   = "h-71c0e2a9d4b3"
+services = ["sat0"]
+binding  = "zm-1.10.2-r1"
+catalog  = "ab76ec37"
+
+[transport]
+lease_ms             = 3600000
+keep_alive           = 2
+wait_before_close_ms = 3600000
+sequence             = "16bit"
+batch_bytes          = 271          # a message's 270 B, as configs/zenohd-sat0.json5 ships it
+open_timeout_ms      = 1000000
+accept_timeout_ms    = 1000000
+interests_timeout_ms = 1000000
+
+[face.sbd]
+far              = "ground-gateway"
+attach           = "client"
+select           = { link_protocols = ["unixsock-stream"] }
+class            = "constrained"
+expose           = "link"
+interval_s       = 1800
+max_outage_s     = 86400
+link_bps         = 2400
+loss_ppm         = 0
+arq              = true
+reply_timeout_ms = 1000000
+horizon_s        = 3600
+
+[face.sbd.frames]
+"modem.v3/frames/message" = { every_s = 1800 }
