@@ -2594,8 +2594,7 @@ async fn a_candidate_on_a_session_without_timestamping_is_refused() {
     b.implement(common::imp("ledger.v1")).unwrap();
     let refused = b
         .redundancy(RedundancyStartup::new(session(&ep, None).await))
-        .err()
-        .expect("refused");
+        .expect_err("refused");
     assert!(
         matches!(&refused, Error::Contract(m) if m.contains("§2.10") && m.contains("timestamping")),
         "{refused}"
