@@ -880,13 +880,14 @@ struct Point {
     pair: Option<zenkey_fleet::PairSeen>,
 }
 
-/// One folded ring entry: a frame's records, each its series' points; or a
-/// frame that could not be read.
+/// One folded ring entry: a frame's records, each its series' points by
+/// series index (`None` for a series the fold read nothing of); or a frame
+/// that could not be read.
 #[derive(Debug, Clone)]
 struct FoldedFrame {
     seq: u64,
     unread: bool,
-    records: Vec<Vec<Point>>,
+    records: Vec<Vec<Option<Point>>>,
 }
 
 /// One slot's frame key, its series folded as its ring grows (telemetry.v2,
@@ -1040,13 +1041,23 @@ impl FrameFold {
             envelope,
         );
         self.decoded += 1;
+        let width = self
+            .metric
+            .frame
+            .as_ref()
+            .and_then(|f| f.declared())
+            .map_or(0, <[_]>::len);
         let mut records = Vec::new();
         if let Some(folded) = &seen.folded {
             for (r, rec) in folded.records.iter().enumerate() {
-                let mut points = Vec::new();
+                // By series index, as `snapshot` reads them.
+                let mut points: Vec<Option<Point>> = vec![None; width];
                 for read in &rec.fields {
+                    let Some(slot) = points.get_mut(read.series) else {
+                        continue;
+                    };
                     let sample = read.reading.sample();
-                    points.push(Point {
+                    *slot = Some(Point {
                         sample: sample.is_some(),
                         reading: read.reading.as_str(),
                         value: sample.and_then(|v| plotted(&v.measure)),
@@ -1112,7 +1123,11 @@ impl FrameFold {
                     continue;
                 }
                 for rec in &e.records {
-                    let Some(p) = rec.get(k) else {
+                    // A record keeps its point in every chart: one the fold
+                    // read nothing of for this series is a gap.
+                    let Some(p) = rec.get(k).and_then(Option::as_ref) else {
+                        f.value.push_gap();
+                        rate.push_gap();
                         continue;
                     };
                     if p.sample {
