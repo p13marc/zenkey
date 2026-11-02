@@ -60,8 +60,11 @@ const KNOWN: &[(&str, &str)] = &[
     ("link", "v2/lints.json"),
     ("link", "v2/plan.json"),
     ("link", "v2/transport.json"),
+    ("link", "v2/exposure.json"),
     ("link", "contracts/sampler.v1.toml"),
     ("link", "contracts/sampler.json"),
+    ("link", "contracts/probe.v1.toml"),
+    ("link", "contracts/probe.json"),
     ("alarms", "keys.json"),
     ("alarms", "documents.json"),
     ("alarms", "transitions.json"),
@@ -1773,15 +1776,17 @@ fn link_resources(rs: &Value) -> Vec<link::Res> {
     rs.as_array()
         .expect("resources")
         .iter()
-        .map(|r| link::Res {
-            template: Template::parse(r["template"].as_str().expect("template"))
-                .expect("a template"),
-            token: link_token(&r["token"]),
-            annotations: annotations(&r["annotations"]),
-            // Inline resources hold no `history` and no `frame` table: a
-            // case about either loads a contract.
-            history: false,
-            frame: None,
+        .map(|r| {
+            // Inline resources hold no `history` and no `frame` table, and
+            // no layout: a case about any of them loads a contract. One may
+            // state its type's kind, `packed` or another (link.v2 §2.17).
+            let mut res = link::Res::new(
+                Template::parse(r["template"].as_str().expect("template")).expect("a template"),
+                link_token(&r["token"]),
+                annotations(&r["annotations"]),
+            );
+            res.packed = r.get("type").and_then(Value::as_str) == Some("packed");
+            res
         })
         .collect()
 }
@@ -1791,15 +1796,24 @@ fn link_resources(rs: &Value) -> Vec<link::Res> {
 fn link_revision(d: &mut link::Deployment, iface: &str, rev: &Value) {
     match rev.get("resources") {
         Some(rs) => {
-            let v2 = rev["uses"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .any(|u| u.as_str() == Some(zenkey_model::freshness::PROFILE_V2));
-            if v2 {
+            let uses = |p: &str| {
+                rev["uses"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|u| u.as_str() == Some(p))
+            };
+            if uses(zenkey_model::freshness::PROFILE_V2) {
                 d.heartbeats.insert(iface.to_owned());
             }
-            d.add_revision(iface.to_owned(), link_resources(rs));
+            let mut resources = link_resources(rs);
+            // A revision that lists link.v2 types what it exposes packed
+            // (link.v2 §2.17).
+            let link_v2 = uses(link::PROFILE_V2);
+            for r in &mut resources {
+                r.link_v2 = link_v2;
+            }
+            d.add_revision(iface.to_owned(), resources);
         }
         None => d.add_revision(iface.to_owned(), link_resources(rev)),
     }
@@ -2072,6 +2086,52 @@ fn link_v2_lints() {
     }
 }
 
+/// `link/conformance/v2/exposure.json`: one resource, its contract's
+/// `uses`, its type's kind and the face's `frames` → link.v2's reading of
+/// it, and the contract side's finding (link.v2 §2.7, §2.8, §2.17).
+#[test]
+fn link_v2_exposure() {
+    let path = profiles().join("link/conformance/v2/exposure.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let what = format!("{}", case["note"]);
+        let token = link_token(&case["token"]);
+        let template =
+            Template::parse(case["template"].as_str().expect("template")).expect("a template");
+        let ann = annotations(&case["annotations"]);
+        let e = link::exposure(link::kind_of(token), &ann);
+        let expose = match case["expose"].as_str().expect("expose") {
+            "link" => link::Expose::Link,
+            "none" => link::Expose::None,
+            other => panic!("expose {other}"),
+        };
+        let frame = case["frame"].as_bool().expect("frame");
+        let shape = link::Shape::of(token, template.has_params(), frame, &ann);
+        let c = link::crossing_v2(token, shape, &e, expose, case["listed"].as_bool());
+        let uses_v2 = case["uses"]
+            .as_array()
+            .expect("uses")
+            .iter()
+            .any(|u| u.as_str() == Some(link::PROFILE_V2));
+        let packed = case["type"].as_str() == Some("packed");
+        let finding = link::packed_required(uses_v2, token, &e, packed)
+            .then_some(link::Code::PackedRequired.as_str());
+        expect(
+            case,
+            json!({
+                "exposure": e.as_str(),
+                "pushes": c.pushes.as_str(),
+                "reason": c.reason.as_str(),
+                "finding": finding,
+            }),
+            &what,
+        );
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
 /// `link/conformance/v2/plan.json`: a face policy and a deployment → the
 /// plan, with the router's transport, binding and catalog, and the link
 /// protocols each principal named in `narrow` keeps (link.v2 §2.4, §2.18).
@@ -2082,7 +2142,14 @@ fn link_v2_plan() {
     for case in doc["cases"].as_array_mut().expect("cases") {
         let what = format!("{}", case["note"]);
         let parsed = link::parse(case["policy"].as_str().expect("policy"));
-        let deployment = link_deployment(case).expect("implements");
+        let mut deployment = link_deployment(case).expect("implements");
+        // The catalog the far side holds, a core §8.6 document (§2.18).
+        if let Some(c) = case.get("catalog") {
+            deployment.catalog = Some(
+                zenkey_model::catalog::Catalog::parse(&c.to_string())
+                    .unwrap_or_else(|r| panic!("{what}: core §8.6 refuses the catalog: {r}")),
+            );
+        }
         let got = match parsed.policy {
             None => json!({"refused": findings_json(&parsed.findings)}),
             Some(policy) => match link::plan(&policy, &deployment) {
