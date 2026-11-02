@@ -637,6 +637,20 @@ class _Loader:
                                       f"{interval} past the deadline {deadline}", text)
         if read.get(timing.LIFESPAN) is not None:
             self.diag("E050", f"{text}: timing.lifespan_ms on a frame resource", text)
+        # W108 (core 0.87): "a frame resource whose interval (§7.7) is above
+        # half its freshness.ttl_s"; "W108 waits for E048's none too. It
+        # reads the horizon as freshness.v1 §2.1 reads one, and an unstated
+        # interval gives none." The interval is the span with a step, else
+        # the timing.period_ms read with the declaration above (none of an
+        # invalid one, as E050 reads it).
+        if n == 0:
+            from . import freshness
+
+            interval = span if has_step else period
+            h = freshness.horizon("stream", ann)
+            if interval is not None and h.horizon == "within" and 2 * interval > h.ttl_s * 1000:
+                self.diag("W108", f"{text}: an interval of {interval} ms above half the horizon of {h.ttl_s} s, "
+                                  "so its owner, which puts a frame at least every ttl/2, cannot keep it", text)
         if n == 0 and e049 == 0 and rec is not None and len(good_db) == len(deadband or {}):
             self.frames[text] = frame.declaration(table)
 

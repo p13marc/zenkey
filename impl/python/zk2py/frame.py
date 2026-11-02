@@ -1,5 +1,5 @@
-"""Core §7.7, frames (core 0.83, #981 K1; the reader, observer 0.21, K2):
-several records of one packed type (§7.6) under one
+"""Core §7.7, frames (core 0.83, #981 K1; the reader, observer 0.21, K2; the
+owner, core 0.87, K3): several records of one packed type (§7.6) under one
 envelope and one time. Session-free; built on :mod:`zk2py.packed`'s fields
 and codes: the declaration, the tag, the body written and read
 (:class:`Layout`); the reader's field states over one key's frames
@@ -476,3 +476,155 @@ def layout_of(contract: Any, resource: dict[str, Any]) -> Layout | None:
     rec = contract.schemas.packed_record(resource["type"])
     return None if rec is None else Layout(rec, declaration(resource["frame"]))
 
+
+# -- the owner's frames (core §7.7 "The owner's frames", 0.87; #981 K3) ----------------------
+
+@dataclass
+class _Measured:
+    """One record as its owner measured it: every field's value, an absent
+    optional field left out (§7.6's JSON reading), and its instant on the
+    owner's monotonic clock."""
+
+    values: dict[str, Any]
+    mono_ns: int
+
+
+@dataclass
+class Ready:
+    """A frame to put: its records as measured, and record 0's wall time
+    (``{s, ms}`` from the deployment epoch, or None while the owner's clock
+    is unknown)."""
+
+    records: list[_Measured]
+    time: dict[str, int] | None
+
+
+class Framer:
+    """One frame key's writer, session-free: it gathers an owner's records
+    into frames (:meth:`record`, :meth:`end`) and writes each frame's value
+    when it is put (:meth:`seal`), under the run it is put in.
+
+    - **Frames** hold 1 to ``records`` records in the order measured. A frame
+      is ready when it holds ``records``; "A record that would lie at or past
+      its frame's span ends the frame, and starts the next one as its record
+      0"; and "An owner MAY end a frame before it holds records records, and
+      puts it then" (:meth:`end`, 0.87).
+    - **Full records**: the first frame of a key in a run starts with one,
+      and one comes at least once every ``keyframe_every`` records.
+    - **Delta records**, against the record before: every field with no
+      deadband whose code or presence differs is included. A field with a
+      deadband is omitted only while it is present and holds a value, not a
+      reserved code, so did the last record that included it, the two differ
+      by at most ``delta``, and fewer than ``max_records`` records have
+      passed since that inclusion: "An owner MUST include the field in any
+      other case, and in at least one of every max_records records".
+    - **Times**: record 0's from the wall clock; a later record's offset on
+      the monotonic clock from record 0, in whole milliseconds, ``scheduled``
+      only when within ``jitter_ms`` of ``step_ms`` × i."""
+
+    def __init__(self, layout: Layout, epoch: int = 0) -> None:
+        self.layout = layout
+        self.epoch = epoch
+        self.open: list[_Measured] = []
+        self.open_time: dict[str, int] | None = None
+        #: the run the state below belongs to; the record before, by field
+        #: (its code, or None for absent); records since the last full one;
+        #: each deadband field's last inclusion (its value or None for no
+        #: value) and the records since it
+        self.run: Any = None
+        self.prev: dict[str, int | None] | None = None
+        self.since_full = 0
+        self.included: dict[str, tuple[Any, int]] = {}
+
+    def _offset(self, m: _Measured) -> int:
+        return (m.mono_ns - self.open[0].mono_ns) // 1_000_000
+
+    def record(self, values: dict[str, Any], mono_ns: int, wall: dict[str, int] | None) -> list[Ready]:
+        """One record measured at ``mono_ns`` (``wall``, the wall clock then,
+        as a frame's time, or None while unknown) -> the frames now ready, in
+        order: the open frame its span ends, and this record's own frame when
+        it is full."""
+        fields = {f.name: f for f in self.layout.fields}
+        for n in values:
+            if n not in fields:
+                raise Refused("unknown", f"{n!r} is no field of {self.layout.record.name}")
+        for f in self.layout.fields:
+            if not f.optional and f.name not in values:
+                raise Refused("missing", f"{f.name} is not optional")
+            if f.name in values:
+                packed.encode(f, values[f.name], self.epoch)  # packed.Refused: value, range
+        out: list[Ready] = []
+        span = self.layout.decl.span_ms
+        m = _Measured(dict(values), mono_ns)
+        if self.open and (span is None or self._offset(m) >= span):
+            out.append(self.end_open())
+        if not self.open:
+            self.open_time = wall
+        self.open.append(m)
+        if len(self.open) >= self.layout.decl.records:
+            out.append(self.end_open())
+        return out
+
+    def end_open(self) -> Ready:
+        r = Ready(self.open, self.open_time)
+        self.open, self.open_time = [], None
+        return r
+
+    def end(self) -> Ready | None:
+        """§7.7's MAY: the open frame ended before it holds ``records``
+        records, to be put now; None with none open."""
+        return self.end_open() if self.open else None
+
+    def _code(self, name: str, values: dict[str, Any]) -> int | None:
+        f = next(x for x in self.layout.fields if x.name == name)
+        return None if name not in values else packed.encode(f, values[name], self.epoch)
+
+    def seal(self, ready: Ready, run: Any) -> dict[str, Any]:
+        """The frame's value (``bodies.json``'s spelling, for
+        :meth:`Layout.write`) as its owner writes it, put under ``run``: the
+        first frame of a run starts with a full record."""
+        if run != self.run:
+            self.run, self.prev, self.since_full, self.included = run, None, 0, {}
+        decl, recs = self.layout.decl, []
+        for i, m in enumerate(ready.records):
+            full = self.prev is None or self.since_full + 1 >= decl.keyframe_every
+            codes = {f.name: self._code(f.name, m.values) for f in self.layout.fields}
+            include: set[str] = set()
+            for f in self.layout.fields:
+                if full:
+                    include.add(f.name)
+                    continue
+                db = decl.deadband.get(f.name)
+                if db is None:
+                    if codes[f.name] != self.prev[f.name]:
+                        include.add(f.name)
+                    continue
+                v = m.values.get(f.name)
+                last = self.included.get(f.name)
+                valued = f.name in m.values and not (isinstance(v, str) and v in f.reserved)
+                if not (valued and last is not None and last[0] is not None
+                        and abs(packed.read_decimal(str(v)) - packed.read_decimal(str(last[0]))) <= db.delta
+                        and last[1] + 1 < db.max_records):
+                    include.add(f.name)
+            for f in self.layout.fields:
+                if f.name not in decl.deadband:
+                    continue
+                if f.name in include:
+                    v = m.values.get(f.name)
+                    valued = f.name in m.values and not (isinstance(v, str) and v in f.reserved)
+                    self.included[f.name] = (v if valued else None, 0)
+                elif f.name in self.included:
+                    v, n = self.included[f.name]
+                    self.included[f.name] = (v, n + 1)
+            self.since_full = 0 if full else self.since_full + 1
+            self.prev = codes
+            rec: dict[str, Any] = {"full": full,
+                                   "values": {n: m.values[n] for n in sorted(include) if n in m.values},
+                                   "absent": [f.name for f in self.layout.fields
+                                              if f.name in include and f.name not in m.values]}
+            if i >= 1:
+                off = (m.mono_ns - ready.records[0].mono_ns) // 1_000_000
+                step, jitter = decl.step_ms, decl.jitter_ms or 0
+                rec["at"] = "scheduled" if step is not None and abs(off - step * i) <= jitter else off
+            recs.append(rec)
+        return {"time": ready.time, "records": recs}

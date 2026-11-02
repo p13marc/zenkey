@@ -583,21 +583,21 @@ WALK: list[tuple[str, str, str, str, str]] = [
     # were n/a at round 96; observer 0.21 and core 0.87 (#981 K2, K3) bring
     # zk2py's reader and owner (round 97).
     # core 0.87 (#981 K3): never a mutation on a frame resource's key.
-    ("owner", "core §7.7", "An owner MUST NOT put a mutation (§7.5) on a frame resource's key", NA,
-     "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it "
-     "puts nothing on one (re-keyed to core 0.87)"),
-    ("owner", "core §7.7", 'An owner MUST give a frame the seq of its record 0', NA,
-     "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it writes no frame, as core 0.83 says nothing does yet (K3's) (round 96, core 0.83)"),
-    ("owner", "core §7.7", "An owner MUST start a key's first frame in a run with a full record", NA,
-     "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it writes no frame, as core 0.83 says nothing does yet (K3's) (round 96, core 0.83)"),
-    ("owner", "core §7.7", 'An owner MUST write a full record at least once every', NA,
-     "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it writes no frame, as core 0.83 says nothing does yet (K3's) (round 96, core 0.83)"),
-    ("owner", "core §7.7", 'In a delta record, an owner MUST include each field with no deadband', NA,
-     "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it writes no frame, as core 0.83 says nothing does yet (K3's) (round 96, core 0.83)"),
-    ("owner", "core §7.7", 'An owner MUST include the field in any other case', NA,
-     "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it writes no frame, as core 0.83 says nothing does yet (K3's) (round 96, core 0.83)"),
-    ("owner", "core §7.7", 'An owner MUST mark a record scheduled only when', NA,
-     "zk2py's owner refuses a contract with a frame resource before anything is declared (owner.OwnerRefused): it writes no frame, as core 0.83 says nothing does yet (K3's) (round 96, core 0.83)"),
+    ("owner", "core §7.7", "An owner MUST NOT put a mutation (§7.5) on a frame resource's key", MET,
+     "owner.Owner.publish and stream_envelope refuse a frame resource's key (OwnerRefused); record_frame writes "
+     "frames alone (frames_scenarios §1 step 4: refused, no mutation on the wire) (round 97, core 0.87)"),
+    ("owner", "core §7.7", "An owner MUST give a frame the seq of its record 0", MET,
+     "owner.Owner._put_frame: record 0 the key's next stream seq, the seq advanced by the record count (frames_scenarios §1 steps 1 to 3, §3, in py-py and py-zenctl; the owner example's in rust-py) (round 97, core 0.87)"),
+    ("owner", "core §7.7", "An owner MUST start a key's first frame in a run with a full record", MET,
+     "frame.Framer.seal: a run it has not written in starts with a full record (frames_scenarios §1 step 1, §5 step 2 'a keyframe though nothing changed') (round 97, core 0.87)"),
+    ("owner", "core §7.7", "An owner MUST write a full record at least once every", MET,
+     "frame.Framer.seal: full once keyframe_every - 1 records followed the last full one (frames_scenarios §1 step 2, seq 15; §2 step 4) (round 97, core 0.87)"),
+    ("owner", "core §7.7", "In a delta record, an owner MUST include each field with no deadband", MET,
+     "frame.Framer.seal: every field with no deadband whose code or presence differs from the record before (frames_scenarios §1 steps 1 and 3, the fields each delta includes, read on the wire) (round 97, core 0.87)"),
+    ("owner", "core §7.7", "An owner MUST include the field in any other case", MET,
+     "frame.Framer.seal: a deadband field omitted only while valued, within delta of its last inclusion, and fewer than max_records records after it (frames_scenarios §4 steps 2 to 4) (round 97, core 0.87)"),
+    ("owner", "core §7.7", "An owner MUST mark a record scheduled only when", MET,
+     "frame.Framer.seal: scheduled only within jitter_ms of step_ms × i on the monotonic clock, else its offset (frames_scenarios §3, the wire) (round 97, core 0.87)"),
     ("consumer", "core §7.7", 'A consumer or a tool MUST turn every field `unknown` at a gap', MET,
      "frame.Reader (frame_live.FrameSubscriber, a consumer of an owner's frame keys): every field unknown at a gap, a rewind and another run, the first frame included (frame family: apply.json; frames_scenarios §2, §5, §6 in py-py and rust-py) (round 97, observer 0.21)"),
     ("consumer", "core §7.7", 'A consumer or a tool MUST turn a field with a deadband `unknown`', MET,
@@ -769,6 +769,15 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "observer §8.2", "Across a constrained face the three are too wide", MET,
      "echo_tool --across-face subscribes by observer §7.5's scopes, refused beside a SELECTOR, and its scope  "
      "names what it excludes (constrained_live step 5; readings) (round 95, observer 0.18)"),
+    # core 0.87 (#981 K3): a MAY the index does not list, and §7.7's
+    # "History", which states no keyword.
+    ("owner", "core §7.7", "An owner MAY end a frame before it holds `records` records, and puts it then", MET,
+     "owner.Owner.end_frame, frame.Framer.end; and new_epoch ends every open frame under its own run "
+     "(frames_scenarios §3 step 3, the one record at seq 5) (round 97, core 0.87)"),
+    ("consumer", "core §7.7", "A late joiner hands its reader the cache's frames before the frames it hears live", NA,
+     "zk2py's owner publishes no stream with history (no advanced publisher), so no frame cache is held for a late "
+     "joiner to read; a frame key's late joiner reads its first frame as a first frame (frames_scenarios §6) "
+     "(round 97, core 0.87)"),
     # core 0.82 (#978 F3): stated without a keyword.
     ("owner", "core §4.2", "Under `freshness.v2` an owner puts no member again to confirm it", MET,
      "owner.Owner: no member of a freshness.v2 contract is registered for re-puts, and its heartbeat vouches "
