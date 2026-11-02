@@ -523,9 +523,10 @@ impl<T: Send + 'static, S: Send + 'static> Sink<T, S> {
 }
 
 /// An error reply under one of the bare wire's envelope encodings that
-/// does not decode as one (§5.2's decoding refusals): a broken server, not
-/// a silent one. An error form the parse refuses is the transport's
-/// ([`Transport`]), never this.
+/// does not decode as one (§5.2's decoding refusals). No reply is read so
+/// since core 0.95: a malformed error is the transport's on either wire
+/// ([`Transport`]; zk2py round 101's F-473), and C4d removes this with the
+/// bare wire.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Malformed {
     pub encoding: String,
@@ -670,7 +671,8 @@ impl std::ops::Deref for Refusal {
 /// A reply error that is the transport's, never an owner's (core §5.2,
 /// "Transport errors"): a querier's own `Timeout` under `zenoh/string`, a
 /// router's under `zenoh/bytes`, any `zenoh/bytes` reply error the error
-/// form's parse refuses, or one under an `Encoding` that carries no error.
+/// form's parse refuses, one under an `Encoding` that carries no error,
+/// or the bare wire's envelope its decoding refuses (core 0.95, F-473).
 /// A caller reads it as silence, and may retry after it (§5.1, "Retries").
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Transport {
@@ -679,7 +681,8 @@ pub struct Transport {
     /// Its bytes, as they arrived.
     pub payload: Vec<u8>,
     /// Under `zenoh/bytes`, why it is no error form (`sample_kind` for a
-    /// router's `Timeout`); `None` under any other `Encoding`.
+    /// router's `Timeout`); `None` under any other `Encoding`, the bare
+    /// wire's included.
     pub refusal: Option<wire::Refusal>,
 }
 
@@ -770,7 +773,7 @@ pub enum Outcome<T> {
     /// A `reply_err` carrying an owner's error, in its form or the bare
     /// wire's envelope (O3, §5.2).
     Refused(Refusal),
-    /// A `reply_err` claiming an envelope encoding that does not decode.
+    /// Unproduced since core 0.95 ([`Malformed`]): C4d removes it.
     Malformed(Malformed),
     /// No answer.
     NoAnswer(Silence),

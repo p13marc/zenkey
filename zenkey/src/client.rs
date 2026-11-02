@@ -192,22 +192,27 @@ impl Answer {
 }
 
 /// What an error reply is (§5.2), by its `Encoding` alone: an owner's
-/// error from either wire, a bare wire's envelope that does not decode, or
-/// the transport's own error.
+/// error from either wire, or the transport's own error.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ErrorReply {
     /// The error form under `zenoh/bytes`, or the bare wire's envelope.
     Refused(Refusal),
-    /// An envelope encoding whose bytes are no envelope.
+    /// No reply is classified so since core 0.95: a bare wire's envelope
+    /// its decoding refuses is the transport's (zk2py round 101's F-473).
+    /// C4d removes it with the bare wire.
     Malformed(Malformed),
     /// A querier's or a router's own `Timeout`, a `zenoh/bytes` error the
-    /// form's parse refuses, or one under an `Encoding` that carries none.
+    /// form's parse refuses, one under an `Encoding` that carries none, or
+    /// the bare wire's envelope its decoding refuses: a malformed error.
     Transport(Transport),
 }
 
 /// Classifies an error reply by its `Encoding` alone (core §5.2, "Reading
 /// an error", with the bare wire beside it, §5.1):
-/// [`zenkey_model::envelope::read_error`]'s reading, kept.
+/// [`zenkey_model::envelope::read_error`]'s reading, kept. A malformed
+/// error is the transport's, on either wire (§5.2, "Transport errors"):
+/// an error form the parse refuses, and an envelope its decoding refuses,
+/// which a caller reads as silence and retries after (core 0.95, F-473).
 #[must_use]
 pub fn classify(e: &ReplyError) -> ErrorReply {
     let encoding = e.encoding().to_string();
@@ -215,7 +220,11 @@ pub fn classify(e: &ReplyError) -> ErrorReply {
     match envelope::read_error(&encoding, &bytes) {
         ErrorReading::Form(f) => ErrorReply::Refused(Refusal::of_form(&f)),
         ErrorReading::Envelope(Ok(env)) => ErrorReply::Refused(Refusal::of_envelope(env)),
-        ErrorReading::Envelope(Err(error)) => ErrorReply::Malformed(Malformed { encoding, error }),
+        ErrorReading::Envelope(Err(_)) => ErrorReply::Transport(Transport {
+            payload: bytes.into_owned(),
+            encoding,
+            refusal: None,
+        }),
         ErrorReading::Transport(refusal) => ErrorReply::Transport(Transport {
             payload: bytes.into_owned(),
             encoding,

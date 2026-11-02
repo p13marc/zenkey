@@ -252,6 +252,31 @@ async fn the_owner_example_as_a_client_of_a_separate_router() {
     let err = fan.iter().find_map(|r| r.result().err()).expect("answered");
     assert_eq!(error_of(err).0, "internal");
 
+    // The consume example against it, in process: a raw value prints its
+    // record alone, never its form's CH and mark (core §5.1; zk2py round
+    // 101's F-479), and a refusal its code and message.
+    for (op, want) in [
+        ("@op/echo", "call value ping"),
+        ("@op/typed", "call refused app "),
+    ] {
+        let args: Vec<String> = vec![
+            ep.clone(),
+            "ex/owner".into(),
+            contract.display().to_string(),
+            "state/status".into(),
+            op.into(),
+        ];
+        let mut said = Vec::new();
+        consume::run(&args, |l| said.push(l)).await.unwrap();
+        assert_eq!(said.len(), 3, "{op}: {said:?}");
+        assert_eq!(said[0], "present ex/owner", "{op}");
+        assert_eq!(said[1], format!("state {state_key} - ok"), "{op}");
+        assert!(said[2].starts_with(want), "{op}: {said:?}");
+        if op == "@op/echo" {
+            assert_eq!(said[2], want, "the record alone");
+        }
+    }
+
     stop.send(()).unwrap();
     running.await.unwrap().unwrap();
 }

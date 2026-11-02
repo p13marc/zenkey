@@ -419,8 +419,9 @@ pub enum ErrorReading<'a> {
     /// Under `zenoh/bytes`, an error form the parse accepts: the owner's.
     Form(ErrorForm<'a>),
     /// Under one of the envelope's three encodings ([`JSON`], [`CBOR`],
-    /// [`PROTOBUF`]), the bare wire's envelope: decoded, or refused by
-    /// [`decode`]. Either is the owner's answer.
+    /// [`PROTOBUF`]), the bare wire's envelope: decoded, the owner's
+    /// answer, or refused by [`decode`], a malformed error and so the
+    /// transport's (core 0.95 §5.2, zk2py round 101's F-473).
     Envelope(Result<Envelope, EnvelopeError>),
     /// The transport's: under `zenoh/bytes`, bytes the parse refuses (its
     /// refusal), such as a router's `Timeout` (`sample_kind`); under any

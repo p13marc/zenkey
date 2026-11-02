@@ -12,13 +12,15 @@
 //! ```text
 //! present <system>/<service>
 //! state <key> <stamp> <payload, lossy UTF-8>     (or: state deleted <key> / state silent)
-//! call value <payload>                            (or: call refused <code> <message> / call malformed / call silent)
+//! call value <record>                             (or: call refused <code> <message> / call malformed / call silent)
 //! ```
 //!
 //! Resources are named `<kind token>/<template>` (`state/status`, `@op/echo`)
 //! and must have no template parameters. A raw request is sent as the
-//! bytes `ping`. Exit 0 when every line was printed, 2 on usage or setup
-//! errors.
+//! bytes `ping`. A value's line is its record, lossy UTF-8, after the
+//! value form's CH and as-of mark; one the form's parse refuses is `call
+//! malformed <refusal>` (core §5.1). Exit 0 when every line was printed, 2
+//! on usage or setup errors.
 //!
 //! **`--timing`** (`timing.v1`, #908) is a reader of one timed stream, as
 //! `spec/profiles/timing/scenarios.md`'s C is, for a black-box runner to
@@ -104,7 +106,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if args.first().map(String::as_str) == Some("--timing") {
         return timing::run(&args[1..]).await;
     }
-    let [endpoint, provider, file, state, op] = args.as_slice() else {
+    run(&args, |l| println!("{l}")).await
+}
+
+/// The default mode: each line handed to `say` (`main` prints them), so a
+/// test runs the example in process.
+pub async fn run(
+    args: &[String],
+    mut say: impl FnMut(String),
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let [endpoint, provider, file, state, op] = args else {
         eprintln!(
             "usage: consume <endpoint> <system>/<service> <contract.toml> <state> <operation>"
         );
@@ -137,33 +148,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         eprintln!("no provider appeared");
         std::process::exit(2);
     };
-    println!("present {addr}");
+    say(format!("present {addr}"));
 
-    match consumer.get(state, None, t).await? {
+    say(match consumer.get(state, None, t).await? {
         StateGet::Answered(v) => match &v[0] {
-            Current::Value { key, sample } => println!(
+            Current::Value { key, sample } => format!(
                 "state {key} {} {}",
                 sample
                     .timestamp()
                     .map_or_else(|| "-".to_owned(), ToString::to_string),
                 String::from_utf8_lossy(&sample.payload().to_bytes())
             ),
-            Current::Deleted { key, .. } => println!("state deleted {key}"),
+            Current::Deleted { key, .. } => format!("state deleted {key}"),
         },
-        StateGet::Silent => println!("state silent"),
-    }
+        StateGet::Silent => "state silent".to_owned(),
+    });
 
-    match client.call(&addr, op, &Bindings::new(), "ping").await? {
-        Outcome::Value(a) => println!(
-            "call value {}",
-            String::from_utf8_lossy(&a.payload().to_bytes())
-        ),
-        Outcome::Refused(e) => println!("call refused {} {}", e.code, e.message),
-        Outcome::Malformed(_) => println!("call malformed"),
-        Outcome::NoAnswer(_) => println!("call silent"),
-    }
+    say(call_line(
+        &client.call(&addr, op, &Bindings::new(), "ping").await?,
+    ));
     svc.close().await?;
     Ok(())
+}
+
+/// The call's line. A value prints its record alone, after the value
+/// form's CH and as-of mark (core §5.1, "Reading a value"; zk2py round
+/// 101's F-479), and one the form's parse refuses is malformed, its
+/// refusal named: an answer all the same.
+pub fn call_line(outcome: &Outcome) -> String {
+    match outcome {
+        Outcome::Value(a) => match a.record() {
+            Ok(record) => format!("call value {}", String::from_utf8_lossy(&record)),
+            Err(refusal) => format!("call malformed {}", refusal.token()),
+        },
+        Outcome::Refused(e) => format!("call refused {} {}", e.code, e.message),
+        Outcome::Malformed(_) => "call malformed".to_owned(),
+        Outcome::NoAnswer(_) => "call silent".to_owned(),
+    }
 }
 
 /// `--timing`: a reader of one timed stream (`timing.v1`, #908).
