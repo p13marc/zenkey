@@ -217,7 +217,12 @@ pub async fn run(cli: crate::cli::ServeArgs) -> Result<()> {
                     .map_err(|why| unaskable!("{name}: {why}"))
             };
             let bytes = match &typed {
-                Some(input) => zenkey_fleet::encode_response(&revision, r, input)?,
+                Some(input) => zenkey_fleet::encode_response(
+                    &revision,
+                    r,
+                    input,
+                    catalog.as_ref().map(zenkey_fleet::DeploymentCatalog::epoch),
+                )?,
                 None => synthesized(zenkey_fleet::Member::Response)?,
             };
             let summary = match &r.body {

@@ -4187,6 +4187,7 @@ mod tests {
             selectors: vec![format!("zk2/lab/m/m.v1/{op}")],
             mode: CallMode::Concrete,
             timeout_s: 1.0,
+            request_epoch_assumed: None,
             answer,
         }
     }

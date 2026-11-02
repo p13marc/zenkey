@@ -32,8 +32,9 @@ use zenkey_model::contract::{Replies as RepliesKind, Resource};
 use zenoh::Session;
 
 use crate::model::catalog::Revision;
-use crate::model::render::{Member, render_detail, render_with};
-use crate::model::target::CallPlan;
+use crate::model::deployment::Epoch;
+use crate::model::render::{Member, render_detail, render_with_in};
+use crate::model::target::{CallPlan, request_epoch_assumed};
 use crate::report::{
     CallMode, EnvelopeView, MalformedReply, OperationAnswer, OperationReport, PayloadRendering,
     PresenceAttribution, ReplierView, RepliesView, SelectionPresence, SilenceView,
@@ -44,8 +45,13 @@ use crate::{Error, Result};
 pub struct OperationCall<'a> {
     pub revision: &'a Revision,
     pub plan: &'a CallPlan,
-    /// The request, encoded as the operation's `request` type.
+    /// The request, encoded as the operation's `request` type
+    /// ([`crate::model::target::encode_request_in`], under `epoch`).
     pub request: Vec<u8>,
+    /// The deployment epoch the request's packed `time` fields were written
+    /// under, and every reply's are read under (core §7.6, §8.6): a
+    /// `--catalog`'s, else [`Epoch::Assumed`], which the report says.
+    pub epoch: Epoch,
     /// How long to wait for replies.
     pub timeout: Duration,
     /// Retries after silence: honoured for an idempotent operation alone
@@ -72,6 +78,7 @@ pub async fn call(session: &Session, c: OperationCall<'_>) -> Result<OperationRe
         revision,
         plan,
         request,
+        epoch,
         timeout,
         retries,
     } = c;
@@ -97,14 +104,14 @@ pub async fn call(session: &Session, c: OperationCall<'_>) -> Result<OperationRe
                 let presence =
                     selection_presence(address, revision, &replies, client.presence(timeout).await);
                 OperationAnswer::Replies {
-                    replies: replies_view(revision, &plan.resource, replies, presence),
+                    replies: replies_view(revision, &plan.resource, replies, presence, epoch),
                 }
             } else {
                 let outcome = client
                     .call(addr, name, &plan.values, request)
                     .await
                     .map_err(|e| runtime("call", &key, e))?;
-                one_reply(revision, &plan.resource, outcome)
+                one_reply(revision, &plan.resource, outcome, epoch)
             };
             (CallMode::Concrete, vec![key], answer)
         }
@@ -128,7 +135,7 @@ pub async fn call(session: &Session, c: OperationCall<'_>) -> Result<OperationRe
                 CallMode::Fanout,
                 selectors,
                 OperationAnswer::Replies {
-                    replies: replies_view(revision, &plan.resource, replies, presence),
+                    replies: replies_view(revision, &plan.resource, replies, presence, epoch),
                 },
             )
         }
@@ -142,19 +149,25 @@ pub async fn call(session: &Session, c: OperationCall<'_>) -> Result<OperationRe
         selectors,
         mode,
         timeout_s: timeout.as_secs_f64(),
+        request_epoch_assumed: request_epoch_assumed(revision, plan, epoch),
         answer,
     })
 }
 
 /// A one-reply call's outcome (O5): four cases, kept apart.
-fn one_reply(revision: &Revision, r: &Resource, outcome: zenkey::Outcome) -> OperationAnswer {
+fn one_reply(
+    revision: &Revision,
+    r: &Resource,
+    outcome: zenkey::Outcome,
+    epoch: Epoch,
+) -> OperationAnswer {
     match outcome {
         zenkey::call::Outcome::Value(a) => OperationAnswer::Value {
-            reply: reply(revision, &a, Member::Response),
+            reply: reply(revision, &a, Member::Response, epoch),
             mark: a.mark().map(Into::into),
         },
         zenkey::call::Outcome::Refused(refusal) => OperationAnswer::Refused {
-            envelope: envelope_view(revision, r, &refusal),
+            envelope: envelope_view(revision, r, &refusal, epoch),
         },
         zenkey::call::Outcome::Malformed(m) => OperationAnswer::Malformed {
             malformed: malformed(&m),
@@ -182,15 +195,22 @@ pub fn attribution(a: zenkey::call::Attribution) -> PresenceAttribution {
 }
 
 /// One reply, rendered through the contract's `member` type: a value
-/// form's record, or a bare reply's payload (observer §7.3).
-fn reply(revision: &Revision, a: &zenkey::client::Answer, member: Member) -> PayloadRendering {
+/// form's record, on the operation's own `encoding` (observer §7.3), a
+/// packed one's `time` fields under `epoch`.
+fn reply(
+    revision: &Revision,
+    a: &zenkey::client::Answer,
+    member: Member,
+    epoch: Epoch,
+) -> PayloadRendering {
     let encoding = a.sample.encoding().to_string();
-    render_with(
+    render_with_in(
         revision,
         a.key(),
         member,
         Some(&encoding),
         &a.payload().to_bytes(),
+        epoch,
     )
 }
 
@@ -201,6 +221,7 @@ fn envelope_view(
     revision: &Revision,
     r: &Resource,
     refusal: &zenkey::call::Refusal,
+    epoch: Epoch,
 ) -> EnvelopeView {
     let tag = refusal.form.map(|m| m.tag);
     EnvelopeView {
@@ -210,7 +231,7 @@ fn envelope_view(
         detail: refusal
             .detail
             .as_ref()
-            .map(|d| render_detail(revision, r, d, tag)),
+            .map(|d| render_detail(revision, r, d, tag, epoch)),
         mark: refusal.mark().map(Into::into),
     }
 }
@@ -229,6 +250,7 @@ fn replies_view(
     r: &Resource,
     replies: zenkey::client::Replies,
     presence: SelectionPresence,
+    epoch: Epoch,
 ) -> RepliesView {
     let declared = replies.summary_declared;
     RepliesView {
@@ -243,12 +265,12 @@ fn replies_view(
                 replies: p
                     .values
                     .iter()
-                    .map(|a| reply(revision, a, Member::Response))
+                    .map(|a| reply(revision, a, Member::Response, epoch))
                     .collect(),
                 summaries: p
                     .summaries
                     .iter()
-                    .map(|a| reply(revision, a, Member::Summary))
+                    .map(|a| reply(revision, a, Member::Summary, epoch))
                     .collect(),
                 marks: marks(p),
                 possibly_partial: declared.then(|| p.summary().is_none()),
@@ -257,7 +279,7 @@ fn replies_view(
         refusals: replies
             .refusals
             .iter()
-            .map(|e| envelope_view(revision, r, e))
+            .map(|e| envelope_view(revision, r, e, epoch))
             .collect(),
         malformed: replies.malformed.iter().map(malformed).collect(),
         transport: replies.transport.iter().map(ToString::to_string).collect(),

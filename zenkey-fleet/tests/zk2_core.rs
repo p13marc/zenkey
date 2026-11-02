@@ -1014,6 +1014,7 @@ async fn a_call_is_read_from_its_form_or_the_bare_wire() {
                     revision: rev,
                     plan: &plan,
                     request: request.to_vec(),
+                    epoch: zenkey_fleet::DeploymentEpoch::Assumed,
                     timeout: std::time::Duration::from_millis(500),
                     retries: 1,
                 },

@@ -1425,6 +1425,125 @@ async fn call_reads_an_owner_answering_in_the_forms_and_the_bare_wire() {
     );
 }
 
+/// zk2py round 101's F-477 and F-478 (core 0.95), through `call`: a packed
+/// request is written as core §7.6's record of the JSON given, under CH
+/// with the `request` type's tag (`envelope/calls.json`'s `46 4cea1bdcaa`),
+/// and the packed value read back by its tag; and each operation's form
+/// is read on its own `encoding`, where `json` and `cbor` share their
+/// types (`encodings.v1`). A raw owner on `zk2/s1/*/*/@op/*` (a `**`
+/// never crosses the verbatim `@op`, core §1.3) keeps each query.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn call_writes_a_packed_request_and_reads_each_operations_encoding() {
+    use zenkey_model::wire::{Envelope, Tag};
+    let mut bus = Bus::bare(None).await;
+    /// Each query's key and payload, as the raw owner heard them.
+    type Heard = Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
+    let heard: Heard = Arc::default();
+    let kept = Arc::clone(&heard);
+    let owner = bus
+        .owners
+        .declare_queryable("zk2/s1/*/*/@op/*")
+        .complete(true)
+        .callback(move |q| {
+            use zenoh::Wait;
+            let key = q.key_expr().as_str().to_owned();
+            let payload = q
+                .payload()
+                .map(|p| p.to_bytes().to_vec())
+                .unwrap_or_default();
+            kept.lock().unwrap().push((key.clone(), payload));
+            let mark = forms_owner::mark();
+            let reply = if key.ends_with("/@op/calibrate") {
+                // A Status record under Status's tag, 14 (calls.json).
+                Envelope::value(Tag::new(14).unwrap(), mark, &[0x1f, 0x59, 0x00]).write()
+            } else if key.ends_with("/@op/cbor") {
+                let mut cbor = Vec::new();
+                ciborium::into_writer(&json!({"up": true}), &mut cbor).unwrap();
+                Envelope::value(Tag::NONE, mark, &cbor).write()
+            } else {
+                Envelope::value(Tag::NONE, mark, br#"{"up":true}"#).write()
+            };
+            let _ = q.reply(q.key_expr().clone(), reply).wait();
+        })
+        .await
+        .unwrap();
+    bus.keep(owner);
+    let request_of = |op: &str| {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|(k, _)| k.ends_with(&format!("/@op/{op}")))
+            .map(|(_, p)| p.clone())
+    };
+
+    let packed = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../spec/conformance/contracts/ok-packed-operation.toml");
+    let sensor =
+        r#"{"temperature": "21.5", "humidity": "40", "pressure": "1013.2", "battery": "3.7"}"#;
+    let args = [
+        "call",
+        "s1/seed",
+        "seed.v1",
+        "calibrate",
+        sensor,
+        "--contracts",
+        packed.to_str().unwrap(),
+        "--timeout",
+        "1",
+        "--format",
+        "json",
+    ];
+    let run = bus.until(&args, |r| r.code == 0).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(
+        request_of("calibrate").as_deref(),
+        Some(&[0x46, 0x4c, 0xea, 0x1b, 0xdc, 0xaa][..]),
+        "CH 0x46, Sensor's tag 6, then its record: {run}"
+    );
+    assert_eq!(doc["reply"]["declared"], "packed:Status", "{run}");
+    assert_eq!(
+        doc["reply"]["value"],
+        json!({"duty_available": "12.5", "signal_bars": 3, "oper": "up", "admin": true}),
+        "{run}"
+    );
+    assert!(
+        doc.get("request_epoch_assumed").is_none(),
+        "Sensor holds no time field: {run}"
+    );
+
+    let encodings = scenario_path("encodings.v1");
+    for op in ["cbor", "json"] {
+        let args = [
+            "call",
+            "s1/enc",
+            "encodings.v1",
+            op,
+            r#"{"up":true}"#,
+            "--contracts",
+            encodings.to_str().unwrap(),
+            "--timeout",
+            "1",
+            "--format",
+            "json",
+        ];
+        let run = bus.until(&args, |r| r.code == 0).await;
+        exits(&run, 0);
+        let doc = run.json();
+        assert_eq!(doc["reply"]["value"], json!({"up": true}), "{op}: {run}");
+        let request = request_of(op).expect("the query");
+        assert_eq!(request[0], 0x40, "{op}");
+        let record: Value = if op == "cbor" {
+            ciborium::from_reader(&request[1..]).expect("CBOR")
+        } else {
+            serde_json::from_slice(&request[1..]).expect("JSON")
+        };
+        assert_eq!(record, json!({"up": true}), "{op}");
+    }
+}
+
 /// operations.md §2 and §5, through `call`: a fan-out to an operation that
 /// allows one reaches every holder of the interface, each value attributed
 /// by its key; a `busy` envelope is reported unattributed, and the holder

@@ -1839,6 +1839,9 @@ enum PingAnswer {
     BusyUnderString,
     Busy,
     Frozen,
+    /// The bare wire's JSON envelope with no `message`, which its decoding
+    /// refuses (`decode`): the transport's (core 0.95, F-473).
+    MalformedEnvelope,
 }
 
 /// §9: every query arrives under `zenoh/bytes` as `CH · record`, every
@@ -1849,7 +1852,8 @@ enum PingAnswer {
 /// instance's its own run and seq 0; a reply error that is no error form,
 /// or under another `Encoding`, is the transport's, silence an idempotent
 /// call is retried after; a frozen server is silence; the bare wire's
-/// envelope is read as `busy`.
+/// envelope is read as `busy`, and one its decoding refuses as the
+/// transport's.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s9_a_calls_forms() {
     use zenkey::model::wire::Run;
@@ -2275,6 +2279,10 @@ async fn s9_a_calls_forms() {
                     held.lock().unwrap().push(q);
                     Ok(())
                 }
+                PingAnswer::MalformedEnvelope => q
+                    .reply_err(br#"{"code":"busy"}"#.to_vec())
+                    .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
+                    .wait(),
             };
         })
         .await
@@ -2360,5 +2368,21 @@ async fn s9_a_calls_forms() {
         .unwrap();
     let r = out.refusal().expect("busy, read on the bare wire");
     assert_eq!((r.code.as_str(), r.form), ("busy", None));
+    // An envelope its decoding refuses is a malformed error, the
+    // transport's (core 0.95, zk2py round 101's F-473): silence, after
+    // which the idempotent `ping` is called again.
+    *mode.lock().unwrap() = PingAnswer::MalformedEnvelope;
+    let before = pings.load(Ordering::SeqCst);
+    let out = ping
+        .call_value(&h2, DIAGNOSTICS, &Bindings::new(), &json!({}))
+        .await
+        .unwrap();
+    let silence = out
+        .silence()
+        .unwrap_or_else(|| panic!("a malformed envelope: silence, not {out:?}"));
+    assert_eq!(silence.attempts, 2, "called twice");
+    let t = silence.transport.as_ref().expect("the transport's error");
+    assert_eq!((t.encoding.as_str(), t.refusal), ("application/json", None));
+    assert_eq!(pings.load(Ordering::SeqCst) - before, 2);
     drop((servers2, frozen));
 }

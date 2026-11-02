@@ -271,6 +271,15 @@ impl Render for OperationReport {
 
     fn notes(&self) -> Vec<Note> {
         let mut notes = Vec::new();
+        if let Some(e) = self.request_epoch_assumed {
+            notes.push(
+                Note::caveat(format!(
+                    "the request's time fields were written under epoch {e}, assumed: no \
+                     --catalog states the deployment's, and the owner reads them under its own"
+                ))
+                .cite("core §7.6, §8.6"),
+            );
+        }
         match &self.answer {
             OperationAnswer::Silent { .. } => notes.push(
                 Note::silence(

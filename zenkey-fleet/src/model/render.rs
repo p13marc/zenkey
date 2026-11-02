@@ -406,10 +406,13 @@ fn render_read(
         }
     };
     // zenoh's default, `zenoh/bytes`, is "unsaid", not "bytes on purpose":
-    // the contract speaks next (§7.2's order). A packed record is read by
-    // its envelope's tag (core §7.6), its `time` fields under the epoch in
-    // force (§8.6), or one assumed and said so.
-    let encoding = encoding.filter(|e| *e != "zenoh/bytes");
+    // the contract speaks next (§7.2's order), this resource's own
+    // `encoding`. A packed record is read by its envelope's tag (core
+    // §7.6), its `time` fields under the epoch in force (§8.6), or one
+    // assumed and said so.
+    let encoding = encoding
+        .filter(|e| *e != "zenoh/bytes")
+        .or_else(|| own_encoding(r, member, ty));
     let (decoded, epoch_assumed) = decode_under(revision.bundle(), ty, encoding, bytes, tag, epoch);
     let rendered = rendered(ty, decoded, epoch_assumed);
     PayloadRendering {
@@ -560,7 +563,9 @@ pub fn render_resource(
         },
         _ => (bytes, None),
     };
-    let encoding = encoding.filter(|e| *e != "zenoh/bytes");
+    let encoding = encoding
+        .filter(|e| *e != "zenoh/bytes")
+        .or_else(|| own_encoding(r, member, ty));
     PayloadRendering {
         key: key.to_owned(),
         size: record.len(),
@@ -577,6 +582,38 @@ pub fn render_resource(
             None,
         ),
     }
+}
+
+/// The wire a JSON Schema `member` of `r` is read on when its sample's
+/// `Encoding` says none, as a form's record under `zenoh/bytes` does: `r`'s
+/// own `encoding`, or `attachment_encoding` for an attachment (core §7.2;
+/// observer §7.3). Read from the resource, never from the type: two
+/// resources can share one type on two wires, as an operation and its CBOR
+/// variant do (zk2py round 101's F-478). `None` for any other kind, and
+/// where `r` states none (JSON).
+fn own_encoding(
+    r: &zenkey_model::contract::Resource,
+    member: Member,
+    ty: &serde_json::Value,
+) -> Option<&'static str> {
+    use zenkey_model::authoring::Encoding;
+    use zenkey_model::contract::Body;
+    if ty["kind"] != "jsonschema" {
+        return None;
+    }
+    let wire = match (&r.body, member) {
+        (Body::Data(d), Member::Type) => d.encoding,
+        (Body::Data(d), Member::Attachment) => d.attachment_encoding,
+        (
+            Body::Operation(op),
+            Member::Request | Member::Response | Member::Error | Member::Summary,
+        ) => op.encoding,
+        _ => None,
+    };
+    wire.map(|e| match e {
+        Encoding::Json => "application/json",
+        Encoding::Cbor => "application/cbor",
+    })
 }
 
 /// `zenkey_model::decode` of `ty` under the epoch in force (core §7.6,
@@ -636,18 +673,20 @@ fn rendered(ty: &serde_json::Value, d: Decoded, epoch_assumed: Option<i64>) -> R
 
 /// An `app` error's detail (§5.2), rendered through operation `r`'s
 /// declared `error` type. From an error form (`form` its CH tag): the
-/// type's own bytes, decoded as the type says on the contract's
-/// `encoding`, a packed one under that tag, a raw one shown as its media
-/// type. From the bare wire's envelope (`form` `None`): a JSON or CBOR
-/// envelope's value as carried, a protobuf envelope's bytes decoded as the
-/// message, a raw type's base64 text shown as its media type. An operation
-/// that declares no `error` type has no detail to send, and one that
-/// arrives anyway is rendered structurally, saying so.
+/// type's own bytes, decoded as the type says on `r`'s own `encoding`, a
+/// packed one under that tag and its `time` fields under `epoch` (§8.6), a
+/// raw one shown as its media type. From the bare wire's envelope (`form`
+/// `None`): a JSON or CBOR envelope's value as carried, a protobuf
+/// envelope's bytes decoded as the message, a raw type's base64 text shown
+/// as its media type. An operation that declares no `error` type has no
+/// detail to send, and one that arrives anyway is rendered structurally,
+/// saying so.
 pub fn render_detail(
     revision: &Revision,
     r: &zenkey_model::contract::Resource,
     detail: &zenkey_model::envelope::Detail,
     form: Option<zenkey_model::wire::Tag>,
+    epoch: Epoch,
 ) -> Rendered {
     use zenkey_model::envelope::Detail;
     let ty = decode::type_of(
@@ -658,8 +697,8 @@ pub fn render_detail(
     );
     match (ty, detail) {
         (Some(ty), Detail::Bytes(bytes)) if form.is_some() => {
-            let (decoded, assumed) =
-                decode_under(revision.bundle(), ty, None, bytes, form, Epoch::Assumed);
+            let wire = own_encoding(r, Member::Error, ty);
+            let (decoded, assumed) = decode_under(revision.bundle(), ty, wire, bytes, form, epoch);
             rendered(ty, decoded, assumed)
         }
         (Some(ty), Detail::Bytes(bytes)) => rendered(
@@ -889,6 +928,88 @@ mod tests {
                 r.rendered
             );
         }
+    }
+
+    /// A form's record is read on its own operation's `encoding`, never on
+    /// another resource's that shares its types (zk2py round 101's F-478,
+    /// `operations.md` §9 step 1): `set` is JSON and `set-cbor` CBOR, over
+    /// one request, response and `error` type, so the type alone cannot
+    /// say which.
+    #[test]
+    fn a_form_is_read_on_its_own_operations_encoding() {
+        use zenkey_model::envelope::Detail;
+        use zenkey_model::wire::{Envelope, Form, Run, Seq, Stamp, Tag};
+        let rev = revision(
+            "[interface]\nname = \"m\"\nmajor = 1\nminor = 0\n\
+             [schemas]\njsonschema = [\"s.json\"]\n\
+             [resources.set]\nkind = \"operation\"\nrequest = \"json:Req\"\n\
+             response = \"json:Res\"\nerror = \"json:Err\"\nencoding = \"json\"\n\
+             [resources.set-cbor]\nkind = \"operation\"\nrequest = \"json:Req\"\n\
+             response = \"json:Res\"\nerror = \"json:Err\"\nencoding = \"cbor\"\n",
+            &[(
+                "s.json",
+                r#"{"$defs": {"Req": {"type": "object"}, "Res": {"type": "object"},
+                    "Err": {"type": "object"}}}"#,
+            )],
+        );
+        let cbor = |v: serde_json::Value| {
+            let mut out = Vec::new();
+            ciborium::into_writer(&v, &mut out).expect("cbor");
+            out
+        };
+        let value = |declared: &str, v: serde_json::Value| Rendered::Value {
+            declared: declared.into(),
+            value: v,
+            epoch_assumed: None,
+        };
+        let applied = cbor(json!({"applied": true}));
+        let reply = Envelope {
+            form: Form::Value,
+            tag: Tag::NONE,
+            stamp: Stamp {
+                run: Run::U16(1),
+                seq: Seq::new(0).expect("a seq"),
+            },
+            record: &applied,
+        }
+        .write();
+        let key = "zk2/lab/m/m.v1/@op/set-cbor";
+        let r = render_with(&rev, key, Member::Response, Some("zenoh/bytes"), &reply);
+        assert_eq!(r.rendered, value("json:Res", json!({"applied": true})));
+
+        let request = [&[0x40][..], &cbor(json!({"mtu": 9000}))].concat();
+        let want = value("json:Req", json!({"mtu": 9000}));
+        let r = render_with(&rev, key, Member::Request, Some("zenoh/bytes"), &request);
+        assert_eq!(r.rendered, want);
+        let cbor_op = rev
+            .contract()
+            .resources
+            .iter()
+            .find(|r| r.template.as_str() == "set-cbor")
+            .expect("set-cbor");
+        let r = render_resource(
+            &rev,
+            cbor_op,
+            key,
+            Member::Request,
+            zenkey_model::template::Bindings::new(),
+            Some("zenoh/bytes"),
+            &request,
+        );
+        assert_eq!(r.rendered, want, "the mock's log");
+
+        let detail = Detail::Bytes(cbor(json!({"reason": "mtu 9000 refused"})));
+        assert_eq!(
+            render_detail(&rev, cbor_op, &detail, Some(Tag::NONE), Epoch::Assumed),
+            value("json:Err", json!({"reason": "mtu 9000 refused"}))
+        );
+        // The JSON variant still reads JSON, and CBOR there is refused.
+        let json_op = &rev.contract().resources[0];
+        assert_eq!(json_op.template.as_str(), "set");
+        assert!(matches!(
+            render_detail(&rev, json_op, &detail, Some(Tag::NONE), Epoch::Assumed),
+            Rendered::Undecodable { reason, .. } if reason.starts_with("as json:")
+        ));
     }
 
     /// Raw is its media type and size; bytes that do not decode as their

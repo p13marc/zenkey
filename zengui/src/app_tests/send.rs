@@ -177,6 +177,7 @@ fn a_silent_call_lands_as_an_answer_not_a_failure() {
         selectors: vec!["zk2/robot9/nav/nav.v2/@op/set_origin".into()],
         mode: CallMode::Concrete,
         timeout_s: 2.0,
+        request_epoch_assumed: None,
         answer,
     };
     let mut app = test_app();

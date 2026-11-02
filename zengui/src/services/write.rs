@@ -148,6 +148,9 @@ pub fn call(c: Call) -> Task<Message> {
                     revision: &revision,
                     plan: &plan,
                     request,
+                    // No catalog in hand: a packed request's `time` fields
+                    // under 0, which the report says (core §8.6).
+                    epoch: zenkey_fleet::DeploymentEpoch::Assumed,
                     timeout,
                     // A tool's call is asked once: a retry is the operator's
                     // to make, by calling again.

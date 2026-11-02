@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.24 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.25 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.94 ([`core.md`](core.md)) |
+| **Written against** | core 0.95 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
@@ -1078,6 +1078,9 @@ This is core §7.1's and §7.2's tool half; type identity and the sample's
   - **A refused value** is undecodable, and the tool names the refusal.
     The tool MUST NOT decode or sniff a refused value's bytes as a bare
     record. `[F: envelope/vectors.json]`
+  - **Another `Encoding`.** A reply under any other `Encoding` is no
+    value form, and is undecodable as a refused one is, unless the tool
+    reads the bare wire (below; core §5.1, "Reading a value").
   - **An error** is shown by its code, its cause and its message. Its
     detail is decoded as the operation's `error` type where the tool
     holds it, a packed one under CH's tag, and shown as its bytes

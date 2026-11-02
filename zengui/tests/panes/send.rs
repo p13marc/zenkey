@@ -50,6 +50,7 @@ fn report(answer: OperationAnswer) -> OperationReport {
         selectors: vec!["zk2/robot1/nav/nav.v2/@op/set_origin".into()],
         mode: CallMode::Concrete,
         timeout_s: 2.0,
+        request_epoch_assumed: None,
         answer,
     }
 }

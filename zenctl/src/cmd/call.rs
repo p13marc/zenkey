@@ -11,8 +11,13 @@
 //!
 //! The call itself is the runtime's (`zenkey_fleet::call_operation` over
 //! its `Client` and `Fleet`), and the exit code keeps v1's mapping: 0 a
-//! value and no error reply, 1 an envelope (the finding), 2 silence —
-//! never a verdict (O5).
+//! value and no error reply, 1 an owner's error (the finding), 2 silence
+//! — never a verdict (O5).
+//!
+//! The request travels in core §7.5's request form, written by the
+//! runtime's client; a packed one is §7.6's record of the JSON given, its
+//! `time` fields under the `--catalog`'s epoch, else 0, assumed, which the
+//! report says (`request_epoch_assumed`).
 
 use anyhow::Result;
 use zenkey_fleet::{OperationCall, ResolvedTarget};
@@ -26,6 +31,10 @@ use crate::exit::unaskable;
 pub async fn run(cli: crate::cli::CallArgs) -> Result<()> {
     let dep = Deployment::resolve(&cli.ns)?;
     let contracts = zk2::load_contracts(&cli.contracts)?;
+    // A packed request's `time` fields count from the deployment epoch
+    // (core §7.6, §8.6): a `--catalog`'s, the deployment's word, else 0,
+    // assumed and said so in the report.
+    let epoch = zk2::load_catalogs(&cli.contracts)?.epoch(zenkey_fleet::CatalogStated::Unread);
     let target = ResolvedTarget::parse(&cli.address)?;
     let values = zk2::bindings(&cli.params);
     // A request that cannot be read is this tool refusing its input, before
@@ -47,7 +56,7 @@ pub async fn run(cli: crate::cli::CallArgs) -> Result<()> {
         TypeId::Raw { .. } => Vec::new(),
         _ => b"{}".to_vec(),
     });
-    let encoded = zenkey_fleet::encode_request(&revision, &plan, &input)?;
+    let encoded = zenkey_fleet::encode_request_in(&revision, &plan, &input, epoch)?;
     let session = match session {
         Some(s) => s,
         None => dep.session().await?,
@@ -67,6 +76,7 @@ pub async fn run(cli: crate::cli::CallArgs) -> Result<()> {
             revision: &revision,
             plan: &plan,
             request: encoded,
+            epoch,
             timeout,
             retries: cli.retries,
         },

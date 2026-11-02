@@ -38,6 +38,7 @@ pub async fn call(cli: crate::cli::BenchCallArgs) -> Result<()> {
         contracts,
         ns: _,
     } = cli;
+    let epoch = zk2::load_catalogs(&contracts)?.epoch(zenkey_fleet::CatalogStated::Unread);
     let contracts = zk2::load_contracts(&contracts)?;
     let target = ResolvedTarget::parse(&address)?;
     let values = zk2::bindings(&params);
@@ -61,7 +62,15 @@ pub async fn call(cli: crate::cli::BenchCallArgs) -> Result<()> {
     // engine): a repeated write, or a bench of nothing — the act itself,
     // ahead of what it would carry.
     zenkey_fleet::check_bench(&revision, &plan, calls, i_know)?;
-    let encoded = zenkey_fleet::encode_request(&revision, &plan, &input)?;
+    // A packed request's `time` fields under the `--catalog`'s epoch, else
+    // 0, assumed and said so (core §7.6, §8.6), as `call` writes them.
+    let encoded = zenkey_fleet::encode_request_in(&revision, &plan, &input, epoch)?;
+    if let Some(e) = zenkey_fleet::request_epoch_assumed(&revision, &plan, epoch) {
+        eprintln!(
+            "note: the request's time fields are written under epoch {e}, assumed: no \
+             --catalog states the deployment's (core §8.6)"
+        );
+    }
     let session = match session {
         Some(s) => s,
         None => dep.session().await?,

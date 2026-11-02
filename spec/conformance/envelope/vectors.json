@@ -1055,7 +1055,7 @@
       }
     },
     {
-      "note": "a JSON array of 8 bytes or more with no CH parses as a value: only the Encoding tells them apart (§5.2)",
+      "note": "a JSON array of 8 bytes or more with no CH parses as a value: only the Encoding tells them apart (core §5.1, \"Reading a value\": a value form is read only under zenoh/bytes)",
       "sample": "reply",
       "hex": "5b312c322c332c345d",
       "expect": {

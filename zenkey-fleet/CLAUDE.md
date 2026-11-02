@@ -355,6 +355,12 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   mock's logged request, and `render`'s `request` member read a request
   under `zenoh/bytes` as the form (its record, a packed one by CH's tag,
   a refused one undecodable), and the mock owner answers in the forms.
+  Round 101 (core 0.95): `encode_request_in(…, Epoch)` writes a packed
+  request as §7.6's record of its JSON (F-477; `encode_response` takes
+  the owner's epoch), `OperationCall::epoch` reads the replies under it
+  and `OperationReport::request_epoch_assumed` says an assumed one;
+  `render`'s `own_encoding` reads a form's record, request and detail on
+  its own resource's `encoding`, never another sharing its type (F-478).
   `link.v2` (#988 L2) runs through `model::acl`: a v2 face policy's
   `Transport`, `Binding` and catalog id ride `AclPlan::{transport,
   binding, catalog}` (absent for `link.v1`, so its pinned plans did not

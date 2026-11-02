@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.94** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.95** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -1460,10 +1460,15 @@ form's record is encoded as its type says, on the contract's `encoding`
   tag is the `response` type's, or the `summary` type's on a summary
   reply (O6). `[F: envelope/calls.json, vectors.json]`
   `[Sc: operations.md §1, §9]`
-- **Reading a value.** A caller reads a reply by §7.5's parse, and its
-  record as the `response` type, or the `summary` type on a summary
-  reply. A reply the parse or the type refuses is malformed, and an
-  answer all the same (above). `[F: envelope/calls.json]`
+- **Reading a value.** A caller reads a reply under `zenoh/bytes` by
+  §7.5's parse, and its record as the `response` type, or the `summary`
+  type on a summary reply. A reply the parse or the type refuses is
+  malformed, and an answer all the same (above). `[F: envelope/calls.json]`
+  - **Under another `Encoding`** a reply is no value form, so it is
+    malformed too, unless the caller reads the bare wire (below).
+  - **Only the `Encoding` tells them apart:** a bare record can parse as
+    a form, as `vectors.json`'s JSON array of 8 bytes does.
+    `[F: envelope/vectors.json]`
 - **Its errors** travel in the error form (§5.2).
 - **The as-of mark.** A value's and an error's run and seq are the
   replying instance's **as-of mark**. The run is the one it writes under
@@ -1480,6 +1485,12 @@ form's record is encoded as its type says, on the contract's `encoding`
   presence. A run that changes is a new instance, or one that took a new
   run (§4.3). Within one run, it can order the reply against the state it
   holds, by seq.
+  - **At or after.** A mark of seq n, once its run has minted n, is at
+    or after the write of seq n, and before the write of n + 1.
+  - **Seq 0 twice.** An instance that has minted no seq under its run
+    answers seq 0 too, before every write of the run. A caller cannot
+    tell the two apart, so it orders a mark of seq 0 before the write of
+    seq 1, and not against the write of seq 0. `[Sc: operations.md §9]`
 - **A request** carries no run: its caller need not be an owner.
 - **An error's run** attributes nothing. A `reply_err` still carries no
   key, so a fan-out's errors stay unattributed (above). A tool that holds
@@ -1489,7 +1500,7 @@ form's record is encoded as its type says, on the contract's `encoding`
   `Encoding` (§7.2), and its error in §5.2's envelope.
   - An implementation MAY read a call's sample whose `Encoding` is not
     `zenoh/bytes` as the bare wire. It tells the two wires apart by the
-    `Encoding` alone: a bare record can parse as a form (§7.5).
+    `Encoding` alone ("Reading a value", above).
   - None writes the bare wire: the rules above say what each writes.
 
 ### 5.2 Errors
@@ -1575,7 +1586,9 @@ another `Encoding`. `[F: errors/forms.json]` `[Sc: operations.md §9]`
   `error` type.
 - **The bare wire.** A reader of the bare wire (§5.1) reads a `reply_err`
   under one of the envelope's three encodings as that envelope (below),
-  not as the transport's.
+  not as the transport's. One its decoding refuses (below, "Decoding") is
+  a malformed error, the transport's, as an error form the parse refuses
+  is. `[Sc: operations.md §9]`
 
 **Transport errors.** Zenoh answers some calls with a reply error of its
 own (Appendix B).
