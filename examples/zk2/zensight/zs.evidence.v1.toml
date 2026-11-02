@@ -20,9 +20,9 @@
 [interface]
 name    = "zs.evidence"
 major   = 1
-minor   = 0
+minor   = 1
 summary = "Identity claims a service makes about its own host and about what it observes"
-uses    = ["freshness.v1"]
+uses    = ["freshness.v2"]
 
 [schemas]
 jsonschema = ["schemas/zs.evidence.v1.json"]

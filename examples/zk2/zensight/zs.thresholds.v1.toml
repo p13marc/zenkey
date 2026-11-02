@@ -12,9 +12,9 @@
 [interface]
 name    = "zs.thresholds"
 major   = 1
-minor   = 0
+minor   = 1
 summary = "The threshold rules a service evaluates against its own telemetry, and what is in force"
-uses    = ["freshness.v1"]
+uses    = ["freshness.v2"]
 
 [schemas]
 jsonschema = ["schemas/zs.common.json"]

@@ -81,7 +81,7 @@ name    = "nav"               # [a-z][a-z0-9_]* segments, dot-separated ("acme.n
 major   = 2                   # the key chunk is "<name>.v<major>": nav.v2
 minor   = 1                   # an informative label; CI keeps it monotonic; not in the fingerprint
 summary = "Navigation solution of one vehicle"   # documentation: not in the fingerprint
-uses    = ["freshness.v1"]    # the profiles whose annotations this contract uses (in the fingerprint)
+uses    = ["freshness.v2"]    # the profiles whose annotations this contract uses (in the fingerprint)
 ```
 
 ### ✱ `[defaults]` and `[defaults.<kind>]` (D2)
@@ -208,7 +208,7 @@ profile must be listed in `uses`.
 
 | Profile | Keys |
 |---|---|
-| `freshness.v1` | `ttl_s` (seconds; `0` = never stale) |
+| `freshness.v1`, `freshness.v2` | `ttl_s` (seconds; `0` = never stale). The adopters' contracts and the walkthrough's list `freshness.v2` (#978), whose owner confirms a state by its heartbeat where `freshness.v1`'s re-puts it; `link/radio.v1` keeps `freshness.v1`, as `link.v1`'s scenarios state it |
 | `timing.v1` | `period_ms`, `deadline_ms`, `lifespan_ms` (whole milliseconds, meaningful on a stream): published by [`timing.v1`](../../spec/profiles/timing/v1.md) §4 (core 0.53), unchanged from the interim row. A deadline is judged on the reader's monotonic clock, and a lifespan against the owner's stamp only on a clock bound the deployment states, never the HLC's delta |
 | `telemetry.v1` | `kind` (`counter` \| `gauge` \| `histogram` \| `text` \| `boolean` \| `binary`), `unit` (UCUM SHOULD, compared byte for byte), `buckets` (iff `histogram`), `semantic`: published by [`telemetry.v1`](../../spec/profiles/telemetry/v1.md) §4 (core 0.35), which also holds the standard schema, `telemetry.v1.Point` among it |
 | `link.v1` | `exposure` (`host` \| `link`, default `host`): published by [`link.v1`](../../spec/profiles/link/v1.md) §4 (core 0.29), which dropped `downsample_ms`, a face's rate being its face policy's `interval_s` |

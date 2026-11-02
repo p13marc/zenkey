@@ -35,9 +35,9 @@
 [interface]
 name    = "zs.desired"
 major   = 1
-minor   = 0
+minor   = 1
 summary = "Fleet runtime policy for every host's services, as documents keyed by target"
-uses    = ["desired.v1", "redundancy.v1", "freshness.v1"]
+uses    = ["desired.v1", "redundancy.v1", "freshness.v2"]
 
 [schemas]
 jsonschema = ["schemas/zs.common.json", "schemas/zs.snmp.v1.json", "schemas/zs.desired.v1.json"]

@@ -28,9 +28,9 @@
 [interface]
 name    = "zs.netring"
 major   = 1
-minor   = 1
+minor   = 2
 summary = "Wire-level flow, L7 and NDR telemetry of one host's capture points, and its controls"
-uses    = ["telemetry.v1", "freshness.v1"]
+uses    = ["telemetry.v1", "freshness.v2"]
 
 [schemas]
 jsonschema = ["../../../spec/profiles/telemetry/telemetry.v1.json", "schemas/zs.common.json", "schemas/zs.netring.v1.json"]
