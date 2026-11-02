@@ -537,8 +537,10 @@ def frame_facts(contract: Any, r: dict[str, Any]) -> dict[str, Any] | None:
     if d.span_ms is not None:
         interval = d.span_ms
     else:
-        v = r["annotations"].get(timing.PERIOD)
-        interval = None if v is None else timing.value_ms(v)
+        # the period as timing.v1 §2.2 reads a declaration: none of an
+        # invalid one, as core cascade 8 reads it for E050 and W108 (F-457)
+        read = {k: timing.value_ms(r["annotations"][k]) for k in timing.KEYS if k in r["annotations"]}
+        interval = None if any(v is None for v in read.values()) else read.get(timing.PERIOD)
     rec = sum((1 if f.optional else 0) + f.width for f in lo.fields)
     bits = 42 + lo.count_bits + (1 + rec) + (d.records - 1) * (1 + 1 + (lo.offset_bits or 0) + rec)
     return {"interval_ms": interval, "largest_bytes": 8 + (bits + 7) // 8, "history": r.get("history") is not None}

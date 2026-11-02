@@ -3540,8 +3540,234 @@ def family_readings(root: Path) -> list[Result]:
         + _round88_readings(root) + _round89_readings(root) + _round90_readings(root) \
         + _round91_readings(root) + _round92_readings(root) + _mend93_readings(root) + _round93_readings(root) \
         + _mend_after_round93_readings(root) + _round94_readings(root) + _mend_after_round94_readings(root) \
-        + _round95_readings(root) + _round96_readings(root) + _round96_k1_readings(root)
+        + _round95_readings(root) + _round96_readings(root) + _round96_k1_readings(root) + _round97_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _round97_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.84 to 0.87, observer 0.20 and 0.21, link.v1 0.12 and 0.13 and
+    the profiles onto freshness.v2 (#609, round 97; #981 K2 and K3, #978
+    F4): each text at its version with its entry; the sentences zk2py now
+    keeps, read where they are stated; zk2py's readings of F-455 to F-459;
+    and what it does, through :mod:`zk2py.frame`, :mod:`zk2py.echo_tool`,
+    :mod:`zk2py.link`, :mod:`zk2py.acl`, :mod:`zk2py.freshness` and
+    :class:`zk2py.owner.Owner` before it starts. No session is opened."""
+    import re
+
+    from . import acl, echo_tool, frame, freshness as fr, freshness_v2 as fv2, heartbeat, link, packed, zk2c
+    from .contract import load_contract
+    from .owner import Owner
+
+    spec = root.parent
+    repo = spec.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, obs, l1 = flat("core.md"), flat("observer.md"), flat("profiles/link/v1.md")
+    al_, he, co = flat("profiles/alarms/v1.md"), flat("profiles/health/v1.md"), flat("profiles/config/v1.md")
+    fm, v2 = flat("scenarios/frames.md"), flat("profiles/freshness/v2.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.87 or later, observer 0.21, link.v1 0.13, freshness.v2 0.3, health.v1 0.8, alarms.v1 0.11 and "
+         "config.v1 0.9, each with its entry",
+         [core_v >= (0, 87)] + entry("CHANGELOG.md", "0.87", "frames written")
+         + entry("CHANGELOG.md", "0.86", "freshness.v2")
+         + entry("observer-CHANGELOG.md", "0.21", "frames read")
+         + entry("profiles/link/CHANGELOG.md", "0.13", "never downsampled")
+         + entry("profiles/freshness/CHANGELOG.md", "`v2.md` 0.3", "draft")
+         + entry("profiles/health/CHANGELOG.md", "0.8", "freshness.v2")
+         + entry("profiles/alarms/CHANGELOG.md", "0.11", "freshness.v2")
+         + entry("profiles/config/CHANGELOG.md", "0.9", "freshness.v2"),
+         [True]),
+    ]
+    # §7.7's owner, offline: frames.md §1's records through a Framer.
+    doc = _load_json(spec / "conformance" / "contracts" / "schemas" / "packed" / "frames.json")
+    lt = packed.lint(doc)
+    link_lo = frame.Layout(lt.types["Link"], frame.declaration(
+        {"keyframe_every": 15, "deadband": {"queue_depth": {"delta": "4", "max_records": 5}}}))
+    samp_lo = frame.Layout(lt.types["Sample"], frame.declaration(
+        {"records": 3, "step_ms": 10000, "jitter_ms": 500, "keyframe_every": 3}))
+    base = {"dropped": 7, "queue_depth": 12, "duty_available": 1, "duty_wait_ms": "1500"}
+    fw, kinds = frame.Framer(link_lo), []
+    recs = [base, {**base, "queue_depth": 30, "duty_wait_ms": "2500"}] + [
+        {**base, "queue_depth": 30 + 10 * k, "duty_wait_ms": "2500"} for k in range(1, 15)]
+    for v in recs:
+        for r in fw.record(v, 0, {"s": 1, "ms": 0}):
+            val = fw.seal(r, (16, 1))
+            kinds.append("F" if val["records"][0]["full"] else "D:" + ",".join(
+                sorted([*val["records"][0]["values"], *val["records"][0]["absent"]])))
+    out.append(("core §7.7 (0.87): the owner's seqs, full records and deltas, frames.md §1 steps 1 and 2 through "
+                "frame.Framer: a keyframe, a delta of the two fields that moved, deltas, and a full record 15 "
+                "records after the last",
+                missing(core, "An owner MUST NOT put a mutation (§7.5) on a frame resource's key: a reader has no "
+                              "reading of one (below).",
+                        "An owner MAY end a frame before it holds `records` records, and puts it then.")
+                + [kinds[0], kinds[1], kinds[2], kinds[15], len(kinds)],
+                ["F", "D:duty_wait_ms,queue_depth", "D:queue_depth", "F", 16]))
+    fs = frame.Framer(samp_lo)
+    s0 = {"temperature": "21.5", "rssi": -80, "link_up": True, "mode": "rx"}
+    ready = []
+    for at in (0, 10_200, 20_700, 30_100, 39_700, 65_100):
+        ready += fs.record(s0, at * 1_000_000, {"s": 1, "ms": 0})
+    ready.append(fs.end())
+    shape = [[r.get("at", 0) for r in fs.seal(x, (16, 1))["records"]] for x in ready]
+    out.append(("core §7.7 (0.87): a record scheduled only within jitter_ms, one at or past the span ending the frame, "
+                "and the MAY to end one early (frames.md §3)", shape, [[0, "scheduled", 20700], [0, "scheduled"], [0]]))
+    # W108 and F-457: the interval of an invalid timing declaration.
+    probe = """[interface]
+name  = "probe"
+major = 1
+minor = 0
+uses  = ["freshness.v1", "timing.v1"]
+[schemas]
+packed = ["schemas/packed/frames.json"]
+[resources."frames/a"]
+kind        = "stream"
+type        = "packed:frames#Link"
+frame       = { records = 1 }
+annotations = { "timing.period_ms" = 60000, "timing.deadline_ms" = "x", "freshness.ttl_s" = 100 }
+[resources."frames/b"]
+kind        = "stream"
+type        = "packed:frames#Link"
+frame       = { records = 1 }
+annotations = { "timing.period_ms" = 60000, "freshness.ttl_s" = 100 }
+"""
+    pc = load_contract(spec / "conformance" / "contracts" / "zk2py-f457.toml", text=probe)
+    out.append(("F-457: W108 reads the horizon as freshness.v1 §2.1 does, and says nothing of a period beside an "
+                "invalid timing declaration; zk2py's reading, the reference CLI's too: frames/a draws no W108, "
+                "frames/b one; link.v1's frame interval read so too",
+                missing(core, "W108 waits for E048's none too. It reads the horizon as `freshness.v1` §2.1 reads one, "
+                              "and an unstated interval gives none.")
+                + [[d.message.split(":")[0] for d in pc.diagnostics if d.code == "W108"],
+                   [link.frame_facts(pc, r)["interval_ms"] for r in pc.canonical["resources"]]],
+                [["frames/b"], [None, 60000]]))
+    # F-455: freshness.v2 denied as a listed interface the deployment does not list.
+    case = _load_json(spec / "profiles" / "link" / "conformance" / "plan.json")["cases"][0]
+    got = link.plan(case["policy"], case["implements"], _link_interfaces(case))
+    out.append(("F-455: link.v1 §2.7 step 2 denies per listed interface, and plan.json's RF face denies "
+                "stream:freshness.v2, which rf0's implements does not list; zk2py's reading: freshness.v2 a listed "
+                "interface wherever a listed interface has a heartbeat",
+                missing(l1, "**Interfaces no listed service implements** are in step 1's whole denies, and in no "
+                            "step 2 deny.")
+                + ["freshness.v2" in sum(case["implements"].values(), []),
+                   [d["key_exprs"] for d in got["faces"][0]["deny"] if d["id"] == "stream:freshness.v2"]],
+                [False, [["zk2/*/*/freshness.v2/stream/**"]]]))
+    # observer §7.3 (0.20): a heartbeat's row; observer §7.6 (0.21): a frame's.
+    beacon = load_contract(repo / "impl" / "python" / "interop" / "freshness" / "beacon.v2.toml")
+    blo = heartbeat.layout_of(beacon.canonical, beacon.fingerprint)
+    hbk = heartbeat.heartbeat_key("lab", "beacon", "beacon.v2")
+    beat = zk2c.heartbeat(zk2c.InBand(16, 1, 3), heartbeat.write(blo, {"time": None, "sections": {}}), blo.tag)
+    bare = echo_tool.row_of(hbk, False, len(beat), zk2c.ENCODING, beat)
+    held = echo_tool.row_of(hbk, False, len(beat), zk2c.ENCODING, beat, held=echo_tool.Held([beacon]))
+    out.append(("observer §7.3 (0.20): zk2py's echo tool never reads a heartbeat's body as a record: by its envelope "
+                "without the covered revision, read with its collections with it, never sniffed",
+                missing(obs, "A tool MUST NOT decode, render or judge a heartbeat's body as a record of its "
+                             "resource's type.")
+                + [bare["sniffed"], {k: bare["heartbeat"][k] for k in ("form", "covers", "vouches")},
+                   held["sniffed"], held["heartbeat"]["vouches"]],
+                [None, {"form": "heartbeat", "covers": "beacon.v2", "vouches": None}, None,
+                 {"time": None, "sections": {}}]))
+    lf = load_contract(repo / "impl" / "python" / "interop" / "frames" / "linkframes.v1.toml")
+    fk = "zk2/lab/modem/linkframes.v1/stream/frames/sample"
+    fh = echo_tool.Held([lf])
+    sealed = zk2c.write("frame", 16, 1, 0, samp_lo.tag, samp_lo.write(fs.seal(ready[0], (16, 2))))
+    r_held = echo_tool.row_of(fk, False, len(sealed), zk2c.ENCODING, sealed, held=fh)
+    r_bare = echo_tool.row_of(fk, False, len(sealed), zk2c.ENCODING, sealed)
+    rec1 = r_held["frame"]["records"][1]
+    out.append(("observer §7.6 (0.21): zk2py's echo tool shows a scheduled record with its jitter, never as measured; "
+                "without the declaration, a frame by its envelope, never sniffed",
+                missing(obs, "A tool MUST show a scheduled record's time as scheduled, with its `jitter_ms`, never "
+                             "as a measured or exact time.", "A tool MUST show a `within` field with its `delta`, "
+                                                             "never as its value alone.")
+                + [{k: rec1.get(k) for k in ("time", "after_ms", "jitter_ms")}, r_held["sniffed"],
+                   {k: r_bare["frame"][k] for k in ("form", "run", "seq")}, r_bare["sniffed"]],
+                [{"time": "scheduled", "after_ms": 10000, "jitter_ms": 500}, None,
+                 {"form": "frame", "run": "0001", "seq": 0}, None]))
+    out.append(("F-458: observer §7.6 reads a frame alone as one reply of a GET; no rule has an owner answer a GET on "
+                "a frame resource's key, and a history cache answers under @adv",
+                missing(obs, "That is one reply of a GET, or one row of a recording read alone.")
+                + missing(core, "declares its own queryable and token under `<key>/@adv/…`"), []))
+    # Part B's bits, offline (the owner's refusal of a mutation on a frame
+    # key is frames_scenarios §1 step 4's, live).
+    hc = load_contract(spec / "profiles" / "health" / "health.v1.toml")
+    ho = Owner("lab", "svc", [hc])
+    st = "zk2/lab/svc/health.v1/state/status"
+    ho.close_writer(st)
+    closed = st in ho.unvouched
+    ho.reopen_writer(st)
+    out.append(("health.v1 0.8 §2.3, alarms.v1 0.11 §2.7: a writer closed clears the member's bit, reopened sets it "
+                "(zk2py's owner of revision 1.1, offline)",
+                missing(he, "The heartbeat sets the status's bit while the owner vouches for its level. The owner "
+                            "never puts the status again unchanged.")
+                + missing(al_, "It clears the alarm's bit and lets the alarm go stale, or resolves it (§2.5).")
+                + missing(co, "by a change or by its heartbeat, which vouches for")
+                + [hc.canonical["uses"], closed, st in ho.unvouched], [["freshness.v2"], True, False]))
+    # alarms.v1 0.11 §2.15 step 7, through freshness.Subscriber.follow on a fake session.
+
+    class Fake:
+        def declare_subscriber(self, *a: Any, **k: Any) -> Any:
+            return None
+
+    ac = load_contract(spec / "profiles" / "alarms" / "alarms.v1.toml")
+    sub = fr.Subscriber(Fake(), "zk2/lab/svc/alarms.v1/**")
+    sub.follow("lab/svc", ac.canonical, ac.fingerprint)
+    alo = heartbeat.layout_of(ac.canonical, ac.fingerprint)
+    res = alo.collections[0].resource
+
+    class Smp:
+        def __init__(self, payload: bytes) -> None:
+            self.payload = type("P", (), {"to_bytes": lambda _s, b=payload: b})()
+
+    def hb(seq: int, live: int, digest: int) -> None:
+        body = heartbeat.write(alo, {"time": None, "sections": {res: {"digest": f"{digest:08x}", "live": live,
+                                                                         "vouched": []}}})
+        sub._beat(("lab/svc", "alarms.v1"), Smp(zk2c.heartbeat(zk2c.InBand(16, 1, seq), body, alo.tag)))
+
+    t0 = time.monotonic_ns()
+    hb(0, 0, heartbeat.digest([]))
+    in1 = sub.in_step("lab/svc", "alarms.v1", res, t0)
+    hb(1, 1, 0x12345678)
+    in2 = sub.in_step("lab/svc", "alarms.v1", res, t0)
+    hb(3, 0, heartbeat.digest([]))
+    gap = sub.views[("lab/svc", "alarms.v1")].gap
+    out.append(("alarms.v1 0.11 §2.15: a window's latest heartbeat in step with the view, out of step after one "
+                "the view missed, none heard false; freshness.v2 §2.5's gap read as a lost delivery",
+                missing(al_, "a window whose latest heartbeat was not in step with the view, or that heard none, "
+                             "`window_unconfirmed`: **unobservable**")
+                + [in1, in2, sub.in_step("lab/svc", "alarms.v1", res, time.monotonic_ns() + 1), gap,
+                   sub.observation("zk2/lab/svc/alarms.v1/state/alarms/0000000000000001").complete],
+                [True, False, False, True, False]))
+    # core 0.86's Consume: the heartbeat a binding needs.
+    use = acl.Use("health.v1", ["lab/svc"], ["state/status"])
+    out.append(("core §11.1 (0.86): Consume holds the subscription to each named provider's heartbeat covering a bound "
+                "freshness.v2 interface; zk2py's generator grants it, and none for a binding of no collection",
+                missing(core, "the subscription to each named provider's `…/freshness.v2/stream/heartbeat/<iface>`")
+                + [acl.heartbeat_selectors(use, {"health.v1": [hc]}),
+                   acl.heartbeat_selectors(acl.Use("health.v1", ["lab/svc"], ["stream/faults"]), {"health.v1": [hc]})],
+                [["zk2/lab/svc/freshness.v2/stream/heartbeat/health.v1"], []]))
+    # F-456: a published revision's review.
+    out.append(("F-456: core §9.8 asks a human to accept a review before publication, and §9.7's history records no "
+                "acceptance; zk2py's reading: a revision whose bundle is published is accepted",
+                missing(core, "**Review:** a human MUST accept it before publication.")
+                + [sorted(p_.name[:8] for p_ in (spec / "profiles" / ".history" / "health.v1").glob("*.bundle.json"))],
+                [["60a43745", "e9dbcdcb"]]))
+    # F-459: alarms scenarios §1 and §5 under freshness.v2.
+    sc = flat("profiles/alarms/scenarios.md")
+    out.append(("F-459: alarms.v1 scenarios §1 and §5, unchanged at 0.11, expect S's deliveries under the owner's "
+                "stamp id, which a freshness.v2 alarm's put does not carry (core §4.3's table, §2.14 step 5)",
+                missing(sc, "S receives one put on `…/state/alarms/a659f813308ad1da`, stamped by the owner (core S1)",
+                        "A firing, unchanged, `timestamp` *t₀* kept, under the new instance's stamp id.")
+                + missing(core, "on its replies alone, never on a put")
+                + missing(al_, "Under `freshness.v2` an alarm's put carries none (core §4.3's table)"), []))
+    return out
 
 
 def _round96_k1_readings(root: Path) -> list[tuple[str, Any, Any]]:

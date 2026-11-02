@@ -300,6 +300,11 @@ def row_of(key: str, delete: bool, size: int, encoding: str, payload: bytes | No
         framed = reader.read_put(read, epoch)
         if "undecodable" in framed:
             undecodable = f"undecodable as a frame of packed:{reader.layout.record.name}: {framed['undecodable']}"
+        else:
+            # observer §7.6 "Measured time" and §8.3: whose clock each time is on
+            framed["clock"] = ("record 0's time is the owner's wall clock, from the deployment epoch, or unknown; a "
+                               "measured offset is on its monotonic clock from record 0; a scheduled time is an "
+                               "instant and a bound, never a measurement (observer §7.6, §8.3)")
     elif read is not None and not delete and payload is not None and read.form == "frame":
         # observer §7.6: "A frame whose declaration the tool does not hold is
         # shown by its envelope: its run, its seq and its size. Its body is
