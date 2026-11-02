@@ -1702,7 +1702,10 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
     out = OwnerReading(address, presence, descriptor, meta_zid, None if seed is None else seed.seed, window,
                        verdict)
     if meta_zid is not None:
-        out.foreign = sorted(k for k, r in replies.items() if _zid(r.stamp_id) != _zid(meta_zid))
+        # §2.14 step 5 (0.11): "Only a stamp its owner set is attributed": a
+        # reply with no Zenoh timestamp is unattributable, never foreign
+        out.foreign = sorted(k for k, r in replies.items()
+                             if r.stamp_id is not None and _zid(r.stamp_id) != _zid(meta_zid))
     known = set(keys_known) | set(replies)
     if subscriber is not None:
         with subscriber.lock:

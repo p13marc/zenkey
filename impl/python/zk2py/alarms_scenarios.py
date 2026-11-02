@@ -731,8 +731,13 @@ def section5(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         for name, k in (("R", kr), ("P", kp)):
             if seen and not (k in rep_at and rep_at[k].deleted):
                 problems.append(f"no reply_del for {name}'s key")
-            elif seen and not _zid_eq(rep_at[k].stamp_id, g.meta_zid):
-                problems.append(f"{name}'s reply_del not stamped by the new instance: {rep_at[k].stamp_id}")
+            elif seen and not (rep_at[k].inband is not None and rep_at[k].inband.run_hex() == new_run
+                               and (rep_at[k].stamp_id is None or _zid_eq(rep_at[k].stamp_id, g.meta_zid))):
+                # 0.11 (F-459): "stamped by it" read in band, the delete's
+                # attachment under the new instance's run; a Zenoh timestamp,
+                # where one comes (zk2py's, F-460), the owner's
+                problems.append(f"{name}'s reply_del not stamped by the new instance: in-band {rep_at[k].inband} "
+                                f"(run {new_run}), Zenoh {rep_at[k].stamp_id}")
         report.check(sec, "3. before the new instance token appears (a SHOULD): a GET made the moment S sees it "
                           "answers A firing (t0 kept) and B under the new instance's stamps, and a reply_del "
                           "for each of R's and P's keys",
