@@ -8910,6 +8910,269 @@ async fn telemetry_across_a_face_with_no_state_opens_after_its_margin() {
     );
 }
 
+// ─── telemetry.v2 (#983 T2): a tool reads a frame's series ────────────────
+//
+// O is `lab/meterframe` on `meterframe.v1`, `telemetry.v2`'s scenarios'
+// contract, its frame resources written through the runtime's frame
+// writers, as the owner example's `--telemetry-v2` writes them, and a raw
+// frame put under the writer's run at its key's next seq, as its
+// `telemetry frame raw` puts one. T is `zenctl telemetry`.
+
+fn meterframe_contract_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../spec/profiles/telemetry/conformance/contracts/meterframe.v1.toml")
+}
+
+/// A *raw* frame of `w`'s key: one full record of `value`, its time now,
+/// under the writer's run at the key's next seq, from `session`: nothing
+/// of the writer's checks.
+async fn raw_frame(
+    svc: &Service,
+    w: &zenkey::frame::FrameWriter,
+    session: &zenoh::Session,
+    value: &Value,
+) {
+    use zenkey::model::frame::{Frame, Record, Time};
+    let l = w.layout();
+    let frame = Frame {
+        time: Time::from_unix_ms(
+            i128::from(zenkey::telemetry::now_ms()),
+            w.deployment_epoch(),
+        ),
+        records: vec![Record {
+            full: true,
+            at: None,
+            slots: l
+                .slots_of_json(value, Some(w.deployment_epoch()))
+                .expect("a record"),
+        }],
+    };
+    let key = zenoh::key_expr::OwnedKeyExpr::from(w.key_expr().clone().into_owned());
+    let stamp = svc.minter().mint_stream_n(&key, 1, false).stamp;
+    session
+        .put(
+            w.key_expr().clone(),
+            frame.envelope(l, stamp).expect("a frame"),
+        )
+        .encoding(zenoh::bytes::Encoding::ZENOH_BYTES)
+        .await
+        .expect("a put");
+}
+
+/// A frame series' member row: its key and its field.
+fn series_row<'a>(doc: &'a Value, template: &str, field: &str) -> Value {
+    let key = format!("zk2/lab/meterframe/meterframe.v1/stream/{template}");
+    rows_of(doc, "member")
+        .into_iter()
+        .find(|r| r["key"] == key.as_str() && r["field"] == field)
+        .cloned()
+        .unwrap_or_else(|| panic!("{key} {field} has a member row: {doc}"))
+}
+
+/// A frame series' pairs, as `(earlier, later, continuity, no_rate,
+/// time_basis, jitter_ms)`.
+fn series_pairs(row: &Value) -> Vec<(u64, u64, String, String, String, u64)> {
+    let s = |v: &Value| v.as_str().unwrap_or("").to_owned();
+    row["pairs"]
+        .as_array()
+        .expect("pairs")
+        .iter()
+        .map(|p| {
+            (
+                p["earlier"].as_u64().expect("a counter"),
+                p["later"].as_u64().expect("a counter"),
+                s(&p["continuity"]),
+                s(&p["no_rate"]),
+                s(&p["time_basis"]),
+                p["jitter_ms"].as_u64().unwrap_or(0),
+            )
+        })
+        .collect()
+}
+
+/// #983 T2 (telemetry.v2 §2.16–§2.21): T reads a live owner's frames, each
+/// series field a member of its own. Once T listens, O writes:
+/// - `frames/link`'s `dropped`, a 32-bit counter mirroring
+///   `sdu/dropped_total`, at 10 and 20 a frame a second, then 15 raw: 10 →
+///   20 same_epoch with a measured rate, 20 → 15 outside its serial window,
+///   `wrap_or_decrease` with no rate, so of `dropped` T could not tell;
+///   the queue's `out_of_range` no sample, never 0;
+/// - `frames/bytes`' `rx`, a 24-bit counter, six records a second apart in
+///   two frames of three, each after record 0 scheduled: every rate 300
+///   By/s, timed by the schedule with its bound, never measured;
+/// - `frames/totals`' `frames_total`, a 64-bit counter, at 100, then 80
+///   raw within the run: `decreased`, the finding, in band and across no
+///   presence. Exit 1.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn telemetry_reads_a_frames_series() {
+    let bus = Bus::bare(None).await;
+    let l = load_path(&meterframe_contract_path());
+    let c = l
+        .contract
+        .unwrap_or_else(|| panic!("meterframe.v1 does not load:\n{}", l.report));
+    let id = c.iface.clone();
+    let names: Vec<String> = c
+        .resources
+        .iter()
+        .map(zenkey::implementation::resource_name)
+        .collect();
+    let mut b = ServiceBuilder::new(
+        &bus.owners,
+        ServiceConfig::new("lab/meterframe".parse().unwrap()),
+    );
+    b.implement(Implementation::new(c)).expect("implement");
+    for n in names {
+        let _ = b.expose(&id, &n);
+    }
+    let mut w = std::collections::BTreeMap::new();
+    for r in ["frames/link", "frames/totals", "frames/bytes"] {
+        let fw = b
+            .declare_frame_writer(&id, &format!("stream/{r}"))
+            .await
+            .expect("a frame writer");
+        assert!(fw.is_metered().await, "{r}: its series are declared");
+        w.insert(r, fw);
+    }
+    let svc = b.start().await.expect("start");
+    wait_for(&bus, &["lab/meterframe"]).await;
+    let contracts = meterframe_contract_path();
+    let (listening, t) = bus.spawn_on_line(
+        &[
+            "telemetry",
+            "zk2/lab/meterframe/**",
+            "--contracts",
+            contracts.to_str().expect("a UTF-8 path"),
+            "--for",
+            "5",
+            "--format",
+            "json",
+        ],
+        "telemetry: listening",
+    );
+    listening.await.expect("T says it listens");
+    let t0 = Instant::now();
+    let at = |ms: u64| t0 + Duration::from_millis(ms);
+    let link = |dropped: u64, queue: Value| json!({"dropped": dropped, "queue_depth": queue});
+    w["frames/link"]
+        .record_json_at(&link(10, json!(4)), at(0))
+        .await
+        .expect("10");
+    w["frames/totals"]
+        .record_json_at(&json!({"frames_total": 100, "temperature": "21.5"}), at(0))
+        .await
+        .expect("100");
+    for (i, rx) in [100u64, 400, 700, 1000, 1300, 1600].into_iter().enumerate() {
+        w["frames/bytes"]
+            .record_json_at(&json!({"rx": rx}), at(1000 * i as u64))
+            .await
+            .expect("rx");
+    }
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    w["frames/link"]
+        .record_json_at(&link(20, json!("out_of_range")), Instant::now())
+        .await
+        .expect("20");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    raw_frame(&svc, &w["frames/link"], &bus.owners, &link(15, json!(6))).await;
+    raw_frame(
+        &svc,
+        &w["frames/totals"],
+        &bus.owners,
+        &json!({"frames_total": 80, "temperature": "21.5"}),
+    )
+    .await;
+    let run = t.await.expect("the telemetry run");
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["totals"]["decreased"], 1, "{run}");
+    assert_eq!(doc["totals"]["does_not"], 0, "{run}");
+    let decl = rows_of(&doc, "resource")
+        .into_iter()
+        .find(|r| r["resource"] == "stream/frames/link")
+        .unwrap_or_else(|| panic!("frames/link's resource row: {run}"))
+        .clone();
+    assert_eq!(decl["declaration"]["carrier"], "frame", "{run}");
+    assert_eq!(
+        decl["declaration"]["series"][0]["field"], "dropped",
+        "{run}"
+    );
+    assert_eq!(decl["declaration"]["series"][0]["width"], 32, "{run}");
+
+    let dropped = series_row(&doc, "frames/link", "dropped");
+    assert_eq!(dropped["mirrors"], "sdu/dropped_total", "{run}");
+    assert_eq!(dropped["unit"], "1", "{run}");
+    let p = series_pairs(&dropped);
+    assert_eq!(
+        p,
+        [
+            (
+                10,
+                20,
+                "same_epoch".into(),
+                String::new(),
+                "measured".into(),
+                0
+            ),
+            (
+                20,
+                15,
+                "unobservable".into(),
+                "wrap_or_decrease".into(),
+                "measured".into(),
+                0
+            ),
+        ],
+        "{run}"
+    );
+    assert_eq!(dropped["continuity"]["answer"], "unobservable", "{run}");
+    assert_eq!(dropped["continuity"]["wrap_or_decrease"], 1, "{run}");
+    assert!(
+        dropped["continuity"]["reason"]
+            .as_str()
+            .is_some_and(|r| r.contains("wrap_or_decrease")),
+        "{run}"
+    );
+    let queue = series_row(&doc, "frames/link", "queue_depth");
+    assert_eq!(queue["samples"]["received"], 2, "{run}");
+    assert_eq!(queue["samples"]["no_sample"]["beyond_range"], 1, "{run}");
+    assert_eq!(queue["continuity"]["answer"], "not_asked", "{run}");
+
+    let rx = series_row(&doc, "frames/bytes", "rx");
+    let p = series_pairs(&rx);
+    assert_eq!(p.len(), 5, "{run}");
+    for (a, b, continuity, _, basis, jitter) in &p {
+        assert_eq!((b - a, continuity.as_str()), (300, "same_epoch"), "{run}");
+        assert_eq!(basis, "scheduled", "{run}");
+        assert!(*jitter == 100 || *jitter == 200, "{run}");
+    }
+    for pair in rx["pairs"].as_array().unwrap() {
+        let r = pair["rate"].as_f64().expect("a rate");
+        assert!((r - 300.0).abs() < 1.0, "{pair}");
+        assert_eq!(pair["rate_unit"], "By/s", "{pair}");
+    }
+    assert_eq!(rx["rate"]["time_basis"], "scheduled", "{run}");
+    let (low, per_s) = (
+        rx["rate"]["bound"]["low"]
+            .as_f64()
+            .expect("a scheduled rate's bound"),
+        rx["rate"]["per_s"].as_f64().expect("a rate"),
+    );
+    assert!(low < per_s, "{run}");
+    assert_eq!(rx["continuity"]["answer"], "not_established", "{run}");
+
+    let total = series_row(&doc, "frames/totals", "frames_total");
+    assert_eq!(
+        series_pairs(&total)[0].2,
+        "decreased",
+        "a 64-bit counter's decrease within one run: {run}"
+    );
+    assert_eq!(total["continuity"]["answer"], "established", "{run}");
+    assert_eq!(total["pairs"][0]["epoch"], "established", "{run}");
+    assert_eq!(total["pairs"][0]["via"], "in_band", "{run}");
+    drop(w);
+    drop(svc);
+}
+
 /// #825, and a tool's reading of a mock owner's metrics: `gen` brings up an
 /// owner of `zs.snmp.v1`, whose state resources keep history, on a session
 /// with timestamping off, as an owner's runs (core §8.2). Zenoh's advanced
