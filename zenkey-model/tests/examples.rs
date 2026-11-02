@@ -311,7 +311,8 @@ fn every_example_arbitrated_role_is_valid() {
 /// deployment catalog zenoh-modem provisions to rf0's host and to the
 /// ground. It reads, is written as its JCS bytes, states its own epoch, and
 /// holds the current revision of each contract the modem side runs:
-/// `modem.v3`, `config.v1` and `health.v1`. Every entry is a published
+/// `modem.v3`, `config.v1`, `health.v1`, and the SX1262's config contract
+/// `sx1262_config.v1` (#985 G4). Every entry is a published
 /// revision, so a successor that keeps an older one stays checked. After an
 /// intended contract change, append its revision with `zk2 catalog add`.
 #[test]
@@ -328,6 +329,7 @@ fn the_zenoh_modem_catalog_holds_its_contracts() {
     let profiles = Path::new(env!("CARGO_MANIFEST_DIR")).join("../spec/profiles");
     for file in [
         examples().join("zenoh-modem/modem.v3.toml"),
+        examples().join("zenoh-modem/config/sx1262_config.v1.toml"),
         profiles.join("config/config.v1.toml"),
         profiles.join("health/health.v1.toml"),
     ] {
