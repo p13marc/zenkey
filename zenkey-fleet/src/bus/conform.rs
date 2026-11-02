@@ -272,9 +272,10 @@ pub struct FanoutSeen {
     pub selector: String,
     /// Value replies: the operation ran for a call it forbids.
     pub values: usize,
-    /// The envelope codes of the refusals, decoded (§5.2).
+    /// The codes of the owners' errors, from either wire (§5.2).
     pub codes: Vec<String>,
-    /// Replies that claim an envelope encoding and do not decode.
+    /// Replies that claim one of the bare wire's envelope encodings and do
+    /// not decode.
     pub malformed: Vec<String>,
     /// The transport's error replies, a timeout among them.
     pub transport: Vec<String>,
@@ -1055,7 +1056,8 @@ async fn call(
 
 /// A call over the template's wildcard (O2): target `All`, consolidation
 /// `None`, every reply kept apart — a value (the operation ran), an
-/// envelope (decoded, §5.2), the transport's own error.
+/// owner's error from either wire (§5.2, the runtime's
+/// [`zenkey::client::classify`]), the transport's own error.
 async fn fanout_probe(
     session: &Session,
     addr: &Addr,
@@ -1093,17 +1095,13 @@ async fn fanout_probe(
     while let Ok(reply) = replies.recv_async().await {
         match reply.result() {
             Ok(_) => seen.values += 1,
-            Err(e) => {
-                let encoding = e.encoding().to_string();
-                let bytes = e.payload().to_bytes();
-                match zenkey_model::envelope::decode(&encoding, &bytes) {
-                    Ok(env) => seen.codes.push(env.code),
-                    Err(zenkey_model::envelope::EnvelopeError::Encoding(_)) => seen
-                        .transport
-                        .push(format!("{encoding}: {}", String::from_utf8_lossy(&bytes))),
-                    Err(err) => seen.malformed.push(format!("{encoding}: {err}")),
+            Err(e) => match zenkey::client::classify(e) {
+                zenkey::client::ErrorReply::Refused(r) => seen.codes.push(r.envelope.code),
+                zenkey::client::ErrorReply::Transport(t) => seen.transport.push(t.to_string()),
+                zenkey::client::ErrorReply::Malformed(m) => {
+                    seen.malformed.push(format!("{}: {}", m.encoding, m.error));
                 }
-            }
+            },
         }
     }
     Ok(seen)

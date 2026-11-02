@@ -770,6 +770,7 @@ fn origin_value() -> zenkey_fleet::report::OperationAnswer {
                 epoch_assumed: None,
             },
         },
+        mark: None,
     }
 }
 

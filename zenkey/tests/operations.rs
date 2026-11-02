@@ -1559,3 +1559,191 @@ async fn a_fan_out_is_timed_reply_by_reply_and_a_tool_can_file_its_own() {
     assert_eq!(mine.repliers.len(), 2);
     assert!(mine.refusals.is_empty() && mine.malformed.is_empty());
 }
+
+/// #980's C4b: a caller reads both wires by each reply's `Encoding` alone
+/// (core §5.1, "The bare wire"; §5.2, "Reading an error" and "Transport
+/// errors"), against `common::forms_owner`, an owner answering in §7.5's
+/// forms as C4c's will. A value form's record decodes, typed or not, with
+/// its as-of mark beside it; an error form is an owner's error, its detail
+/// the `error` type's own JSON and its mark beside it; the bare wire's
+/// envelope is still an owner's error, with no mark; a value under
+/// `zenoh/bytes` that is no form is an answer, undecodable and never
+/// sniffed; a router's `Timeout`, an error form the parse refuses and an
+/// error form's bytes under another `Encoding` are the transport's,
+/// silence an idempotent call is retried after (O4); and a many-reply call
+/// keeps each form's mark.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_caller_reads_the_forms_and_the_bare_wire_alike() {
+    use common::forms_owner::{self, BUSY, BUSY_WITH_CAUSE, mark};
+    use zenkey::client::ReplyForm;
+    use zenkey::model::wire::{Form, Refusal, SampleKind, Tag};
+
+    let (_r, ep) = router(None).await;
+    let (owner, tool) = (client(&ep).await, client(&ep).await);
+    let served = forms_owner::serve(&owner, "f1/tc").await;
+    let c = Client::new(&tool, tc_contract(), &["f1/tc"])
+        .unwrap()
+        .with_timeout(Duration::from_millis(500))
+        .with_retries(1);
+    let f1 = addr("f1/tc");
+    let set = |m: &'static str| {
+        let c = c.clone();
+        let f1 = f1.clone();
+        async move {
+            c.call_value(&f1, SET, &member(m), &SetRequest { up: true })
+                .await
+                .unwrap()
+        }
+    };
+
+    // The value form: its record decodes, its as-of mark beside it.
+    let out = common::eventually_some("the test owner answers", || async {
+        match set("eth0").await {
+            o @ Outcome::Value(_) => Some(o),
+            _ => None,
+        }
+    })
+    .await;
+    let Outcome::Value(a) = &out else {
+        unreachable!()
+    };
+    assert_eq!(
+        a.form(),
+        ReplyForm::Value {
+            tag: Tag::NONE,
+            stamp: mark()
+        }
+    );
+    assert_eq!((a.mark(), a.tag()), (Some(mark()), Some(Tag::NONE)));
+    assert_eq!(a.record().unwrap(), br#"{"up":true}"#);
+    assert_eq!(a.value::<SetResponse>().unwrap(), SetResponse { up: true });
+    let typed = zenkey::typed::call::<Json<SetRequest>, Json<SetResponse>>(
+        &c,
+        &f1,
+        SET,
+        &member("eth0"),
+        SetRequest { up: true },
+    )
+    .await
+    .unwrap();
+    assert_eq!(typed.answer(), Some(&SetResponse { up: true }));
+
+    // The error form: an owner's error, its detail the type's own JSON.
+    let out = set("eth9").await;
+    let r = out.refusal().expect("an owner's error");
+    assert_eq!(
+        (r.code.as_str(), r.message.as_str(), r.cause.as_deref()),
+        ("app", "the kernel refused", None)
+    );
+    assert_eq!(r.mark(), Some(mark()));
+    assert!(r.form.is_some_and(|m| m.message && m.tag == Tag::NONE));
+    assert_eq!(
+        r.detail,
+        Some(Detail::Bytes(br#"{"kind":"kernel"}"#.to_vec()))
+    );
+    assert_eq!(
+        r.detail_as::<Json<Value>>(None),
+        Some(Ok(json!({"kind": "kernel"})))
+    );
+
+    // The bare wire's envelope: an owner's error still, with no mark.
+    let out = set("eth1").await;
+    let r = out.refusal().expect("the bare wire's busy");
+    assert_eq!((r.code.as_str(), r.message.as_str()), ("busy", ""));
+    assert_eq!((r.form, r.mark()), (None, None));
+
+    // A value under `zenoh/bytes` that is no form: an answer, never sniffed.
+    let out = set("eth2").await;
+    let Outcome::Value(a) = &out else {
+        panic!("an answer all the same: {out:?}")
+    };
+    let refusal = Refusal::WrongSample {
+        form: Form::Error,
+        sample: SampleKind::Reply,
+    };
+    assert_eq!(a.form(), ReplyForm::Refused(refusal));
+    assert_eq!((a.mark(), a.record()), (None, Err(refusal)));
+    assert!(
+        a.value::<SetResponse>().is_err(),
+        "never read as a bare record"
+    );
+    let typed = zenkey::typed::call::<Json<SetRequest>, Json<SetResponse>>(
+        &c,
+        &f1,
+        SET,
+        &member("eth2"),
+        SetRequest { up: true },
+    )
+    .await;
+    assert!(
+        matches!(&typed, Err(zenkey::Error::Payload(e)) if e.contains("sample_kind")),
+        "{typed:?}"
+    );
+
+    // An error form's bytes under `zenoh/string`: the transport's. `set`
+    // is not idempotent, so it is called once.
+    let out = set("eth3").await;
+    let s = out.silence().expect("the transport's, never busy");
+    assert_eq!(s.attempts, 1);
+    let t = s.transport.as_ref().expect("its error");
+    assert_eq!(
+        (t.encoding.as_str(), t.payload.as_slice(), t.refusal),
+        ("zenoh/string", &BUSY[..], None)
+    );
+    assert_eq!(t.to_string(), "zenoh/string: 0x600001000007a0");
+
+    // A router's `Timeout` and an error form the parse refuses: the
+    // transport's, so `diagnostics`, idempotent, is called again (O4).
+    let diagnostics = |request: Value| {
+        let c = c.clone();
+        let f1 = f1.clone();
+        async move {
+            c.call_value(&f1, DIAGNOSTICS, &Bindings::new(), &request)
+                .await
+                .unwrap()
+        }
+    };
+    let out = diagnostics(json!({})).await;
+    let s = out.silence().expect("silence");
+    assert_eq!(s.attempts, 2, "called again after the transport's error");
+    let t = s.transport.as_ref().expect("its error");
+    assert_eq!(
+        (t.encoding.as_str(), t.payload.as_slice()),
+        ("zenoh/bytes", &b"Timeout"[..])
+    );
+    assert_eq!(t.refusal.map(|r| r.token()), Some("sample_kind"));
+    assert_eq!(
+        t.to_string(),
+        "zenoh/bytes: Timeout (no error form: sample_kind)"
+    );
+    let out = diagnostics(json!({"verbose": true})).await;
+    let t = out.silence().expect("silence").transport.clone().unwrap();
+    assert_eq!(
+        (t.payload.as_slice(), t.refusal.map(|r| r.token())),
+        (&BUSY_WITH_CAUSE[..], Some("cause"))
+    );
+    assert_eq!(count(&served.diagnostics), 4);
+
+    // Many replies in the forms: each value's record and mark, and the
+    // summary's.
+    let replies = c
+        .call_many(&f1, LISTING, &Bindings::new(), br#"{}"#.to_vec())
+        .await
+        .unwrap();
+    assert_eq!(replies.repliers.len(), 1, "{replies:?}");
+    let p = &replies.repliers[0];
+    let names: Vec<Value> = p.values.iter().map(|a| a.value().unwrap()).collect();
+    assert_eq!(names, [json!({"name": "a"}), json!({"name": "b"})]);
+    let summary = p.summary().expect("one summary");
+    assert_eq!(
+        summary.value::<Value>().unwrap(),
+        json!({"partial": false, "scanned": 2})
+    );
+    assert!(
+        p.values
+            .iter()
+            .chain(&p.summaries)
+            .all(|a| a.mark() == Some(mark()))
+    );
+    assert!(replies.partial().is_empty());
+}

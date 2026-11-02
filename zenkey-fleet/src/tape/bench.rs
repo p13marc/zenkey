@@ -63,7 +63,7 @@ type Timed = (Duration, Reply);
 struct CallOutcome {
     /// Value replies: `(address, key, latency)`.
     values: Vec<(String, String, Duration)>,
-    /// Envelopes: `(code, latency)`.
+    /// Owners' errors, from either wire: `(code, latency)`.
     refusals: Vec<(String, Duration)>,
     malformed: u64,
     transport: u64,
@@ -72,7 +72,9 @@ struct CallOutcome {
 
 /// Sorts one call's replies into their populations: a value reply by the
 /// key it went on, when that key is concrete and a member of the operation
-/// called (O3, R6); an error reply by its `Encoding` (§5.2).
+/// called (O3, R6), in either wire; an error reply by its `Encoding`
+/// (§5.2): an owner's error from its form or the bare wire's envelope, a
+/// malformed envelope, or the transport's.
 fn classify(revision: &Revision, plan: &CallPlan, replies: Vec<Timed>) -> CallOutcome {
     let mut out = CallOutcome::default();
     for (at, reply) in replies {
@@ -85,7 +87,7 @@ fn classify(revision: &Revision, plan: &CallPlan, replies: Vec<Timed>) -> CallOu
                 }
             }
             Err(e) => match zenkey::client::classify(&e) {
-                zenkey::client::ErrorReply::Envelope(env) => out.refusals.push((env.code, at)),
+                zenkey::client::ErrorReply::Refused(r) => out.refusals.push((r.envelope.code, at)),
                 zenkey::client::ErrorReply::Malformed(_) => out.malformed += 1,
                 zenkey::client::ErrorReply::Transport(_) => out.transport += 1,
             },

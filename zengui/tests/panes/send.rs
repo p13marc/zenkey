@@ -381,6 +381,7 @@ fn the_call_mode_keeps_value_envelope_and_silence_apart() {
                     epoch_assumed: None,
                 },
             },
+            mark: None,
         }))),
         ..base.clone()
     };
@@ -407,6 +408,11 @@ fn the_call_mode_keeps_value_envelope_and_silence_apart() {
                 message: "the reset line is not wired".into(),
                 cause: Some("capability".into()),
                 detail: None,
+                // An error form's as-of mark (core §5.1, #980's C4b).
+                mark: Some(zenkey_fleet::report::InbandStamp {
+                    run: "0001".into(),
+                    seq: 7,
+                }),
             },
         }))),
         ..base.clone()
@@ -415,6 +421,7 @@ fn the_call_mode_keeps_value_envelope_and_silence_apart() {
         let mut ui = simulator::<Message, _, _>(pane(&refused, false, sp()));
         assert!(ui.find("refused: unavailable").is_ok());
         assert!(ui.find("cause: capability").is_ok());
+        assert!(ui.find("as of run 0001, seq 7").is_ok(), "the form's mark");
         assert!(ui.find("No answer").is_err(), "an envelope is an answer");
     }
 

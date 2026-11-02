@@ -53,7 +53,7 @@ impl Api for Loopback {
     ) -> zenkey::Result<Outcome<types::Status>> {
         Ok(match self.0.arm(request, CallInfo::default()).await {
             Ok(s) => Outcome::Value(s),
-            Err(e) => Outcome::Refused(e.into_envelope()),
+            Err(e) => Outcome::Refused(e.into()),
         })
     }
 

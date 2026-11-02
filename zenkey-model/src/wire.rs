@@ -805,10 +805,28 @@ pub fn read_reply_err(payload: &[u8]) -> Result<ErrorForm<'_>, Refusal> {
 }
 
 /// The Encoding a sample that carries an envelope or a call's form has
-/// (§7.5), as zenoh writes it: its default, with no schema. A raw media type zenoh does not
-/// predefine travels as its custom encoding, which zenoh writes as the
-/// media type itself (§7.2), so it is never this.
+/// (§7.5), as zenoh writes it: its default, with no schema. A raw media
+/// type zenoh does not predefine travels as its custom encoding, which
+/// zenoh writes as the media type itself (§7.2), so it is never this.
 pub const ENCODING: &str = "zenoh/bytes";
+
+/// A call's reply payload read by its `Encoding` (observer §7.3, "A call's
+/// forms first"): under `zenoh/bytes` ([`ENCODING`], exactly) as the value
+/// form ([`read_reply`]), [`Reading::Enveloped`] or [`Reading::Refused`];
+/// under any other as the bare wire's record (core §5.1, "The bare wire"),
+/// [`Reading::Plain`], which the reply's type reads on that `Encoding`. A
+/// value refused is undecodable, never read as a bare record, and an
+/// answer all the same: it came on the call's key (§5.1, "Retries").
+#[must_use]
+pub fn read_value<'a>(encoding: &str, payload: &'a [u8]) -> Reading<'a> {
+    if encoding != ENCODING {
+        return Reading::Plain;
+    }
+    match read_reply(payload) {
+        Ok(e) => Reading::Enveloped(e),
+        Err(r) => Reading::Refused(r),
+    }
+}
 
 /// Whether `key` is a zk2 data key whose kind is a stream, state or an
 /// event (§1.1, by the grammar alone, with no contract): the keys whose
@@ -859,7 +877,9 @@ pub fn carries(key: &str, encoding: &str) -> bool {
     encoding == ENCODING && enveloped_key(key)
 }
 
-/// What a put's payload reads as.
+/// What a put's payload reads as ([`read_put`]), or a call's reply
+/// ([`read_value`]): a reply reads as [`Reading::Plain`] on the bare wire,
+/// [`Reading::Enveloped`] in the value form, or [`Reading::Refused`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reading<'a> {
     /// The sample carries no envelope ([`carries`]): its payload is read as
@@ -1166,5 +1186,38 @@ mod tests {
         assert_eq!(read_delete(key, Some(&[0x00, 0, 7, 0, 0, 9])), None);
         assert_eq!(read_delete("demo/tick", Some(&att)), None);
         assert_eq!(read_delete("zk2/h/s/i.v1/@op/reset", Some(&att)), None);
+    }
+
+    /// A call's reply by its `Encoding` (observer §7.3, "A call's forms
+    /// first"; core §5.1, "The bare wire"): under `zenoh/bytes` the value
+    /// form, refused by its bytes alone, and under any other the bare
+    /// wire's record, however its bytes would parse.
+    #[test]
+    fn a_reply_is_a_value_form_under_zenoh_bytes_alone() {
+        let stamp = Stamp {
+            run: Run::U16(1),
+            seq: Seq::new(7).unwrap(),
+        };
+        let bytes = Envelope::value(Tag::NONE, stamp, br#"{"up":true}"#).write();
+        let Reading::Enveloped(v) = read_value(ENCODING, &bytes) else {
+            panic!("a value")
+        };
+        assert_eq!(
+            (v.form, v.stamp, v.record),
+            (Form::Value, stamp, &br#"{"up":true}"#[..])
+        );
+        // `{` is 0x7b, form 3: an error, which a reply does not carry.
+        assert_eq!(
+            read_value(ENCODING, br#"{"up":true}"#),
+            Reading::Refused(Refusal::WrongSample {
+                form: Form::Error,
+                sample: SampleKind::Reply
+            })
+        );
+        // The same bytes on another Encoding, a schema suffix included, are
+        // a bare record.
+        for other in ["application/json", "zenoh/bytes;x", "zenoh/string"] {
+            assert_eq!(read_value(other, &bytes), Reading::Plain, "{other}");
+        }
     }
 }

@@ -1,9 +1,11 @@
 //! A zk2 operation call (spec §5.1): `zenctl call`, through the runtime's
 //! `Client` (one address) or `Fleet` (a fan-out).
 //!
-//! The answer keeps O5's cases apart in every medium: a value, an envelope,
-//! a malformed envelope and silence are four tags, never one field read
-//! four ways. Silence carries what presence said of the service, worded as
+//! The answer keeps O5's cases apart in every medium: a value, an owner's
+//! error, a malformed envelope and silence are four tags, never one field
+//! read four ways. A value or an error that came in its form carries the
+//! replying instance's as-of mark, `mark` (core §5.1, observer §7.3); one
+//! on the bare wire carries none (#980's C4b). Silence carries what presence said of the service, worded as
 //! what this reader could see (§8.1, 0.8). A many-reply or fan-out call
 //! keeps every reply attributed by its key (O3, O6); its envelopes are
 //! unattributed, because a `reply_err` carries no key (§5.1,
@@ -17,6 +19,7 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use super::payload::{PayloadRendering, Rendered};
+use super::state::InbandStamp;
 
 /// One call of one operation.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -62,9 +65,17 @@ pub enum CallMode {
 #[serde(tag = "answer", rename_all = "snake_case")]
 pub enum OperationAnswer {
     /// A value reply on the call's own key (O3), rendered through the
-    /// contract's `response` type.
-    Value { reply: PayloadRendering },
-    /// A `reply_err` carrying a valid envelope (O3, §5.2): an answer.
+    /// contract's `response` type: a value form's record, or a bare reply.
+    Value {
+        reply: PayloadRendering,
+        /// The value form's as-of mark (core §5.1): the run as the
+        /// replier's descriptor spells it, and the seq. Absent on the bare
+        /// wire, and for bytes the form's parse refused.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mark: Option<InbandStamp>,
+    },
+    /// A `reply_err` carrying an owner's error (O3, §5.2), in its form or
+    /// the bare wire's envelope: an answer.
     Refused { envelope: EnvelopeView },
     /// A `reply_err` claiming an envelope encoding that does not decode: a
     /// broken server, not a silent one (§5.2).
@@ -75,14 +86,15 @@ pub enum OperationAnswer {
     Replies { replies: RepliesView },
 }
 
-/// An error envelope (§5.2), decoded without the contract and its detail
-/// rendered through the operation's `error` type when there is one.
+/// An owner's error (§5.2), read without the contract from its error form
+/// or the bare wire's envelope, its detail rendered through the
+/// operation's `error` type when there is one.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct EnvelopeView {
     /// `invalid_request`, `not_found`, `unavailable`, `forbidden`,
     /// `fanout_forbidden`, `busy`, `internal` or `app`.
     pub code: String,
-    /// For a human, never parsed.
+    /// For a human, never parsed; empty when an error form carried none.
     pub message: String,
     /// With `unavailable` only: `build`, `config` or `capability`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -90,9 +102,14 @@ pub struct EnvelopeView {
     /// With `app` only, when the owner sent one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<Rendered>,
+    /// The error form's as-of mark (core §5.1). It attributes nothing: a
+    /// `reply_err` carries no key. Absent on the bare wire.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mark: Option<InbandStamp>,
 }
 
-/// A reply that claims an envelope encoding and is not an envelope.
+/// A reply that claims one of the bare wire's envelope encodings and is not
+/// an envelope.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct MalformedReply {
     /// The reply's `Encoding`.
@@ -146,7 +163,7 @@ pub struct RepliesView {
     /// One per concrete key a value or summary arrived on, in order of
     /// first arrival.
     pub repliers: Vec<ReplierView>,
-    /// Envelopes, unattributed: a `reply_err` carries no key (§5.1).
+    /// Owners' errors, unattributed: a `reply_err` carries no key (§5.1).
     pub refusals: Vec<EnvelopeView>,
     pub malformed: Vec<MalformedReply>,
     /// The transport's error replies, such as a timeout.
@@ -174,6 +191,12 @@ pub struct ReplierView {
     /// Summary replies, rendered through the `summary` type.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub summaries: Vec<PayloadRendering>,
+    /// The as-of mark of each reply, then of each summary, in their order
+    /// (core §5.1): `null` for one on the bare wire or refused by the
+    /// form's parse. Absent when none came in the value form. Two runs on
+    /// one key are two instances.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub marks: Vec<Option<InbandStamp>>,
     /// With a declared summary: whether the replier ended without exactly
     /// one — cut off, broken off, or several instances on one key (O6).
     /// Absent without a declared summary.
@@ -202,8 +225,8 @@ pub struct SelectionPresence {
 
 impl OperationReport {
     /// The exit code `call` keeps from v1's `service call`: 0 a value and
-    /// no error reply, 1 an envelope or a malformed one (the finding), 2
-    /// silence — never a verdict (O5).
+    /// no error reply, 1 an owner's error or a malformed envelope (the
+    /// finding), 2 silence — never a verdict (O5).
     pub fn exit_code(&self) -> i32 {
         match &self.answer {
             OperationAnswer::Value { .. } => 0,
@@ -269,7 +292,10 @@ mod tests {
     fn operation_report_json_shape_is_pinned() {
         let key = "zk2/host-a/tc/tc.netif.v1/@op/diagnostics";
         let v = serde_json::to_value(report(
-            OperationAnswer::Value { reply: reply(key) },
+            OperationAnswer::Value {
+                reply: reply(key),
+                mark: None,
+            },
             CallMode::Concrete,
         ))
         .unwrap();
@@ -299,6 +325,20 @@ mod tests {
                 },
             })
         );
+        // A value form's as-of mark rides beside its reply (core §5.1).
+        let mark = InbandStamp {
+            run: "0001".into(),
+            seq: 7,
+        };
+        let marked = serde_json::to_value(report(
+            OperationAnswer::Value {
+                reply: reply(key),
+                mark: Some(mark.clone()),
+            },
+            CallMode::Concrete,
+        ))
+        .unwrap();
+        assert_eq!(marked["mark"], json!({"run": "0001", "seq": 7}));
 
         let refused = serde_json::to_value(report(
             OperationAnswer::Refused {
@@ -307,6 +347,7 @@ mod tests {
                     message: "no such NIC here".into(),
                     cause: Some("capability".into()),
                     detail: None,
+                    mark: None,
                 },
             },
             CallMode::Concrete,
@@ -316,6 +357,24 @@ mod tests {
         assert_eq!(
             refused["envelope"],
             json!({"code": "unavailable", "message": "no such NIC here", "cause": "capability"})
+        );
+        // An error form's: its mark, and no message when it sent none.
+        let form = serde_json::to_value(report(
+            OperationAnswer::Refused {
+                envelope: EnvelopeView {
+                    code: "busy".into(),
+                    message: String::new(),
+                    cause: None,
+                    detail: None,
+                    mark: Some(mark),
+                },
+            },
+            CallMode::Concrete,
+        ))
+        .unwrap();
+        assert_eq!(
+            form["envelope"],
+            json!({"code": "busy", "message": "", "mark": {"run": "0001", "seq": 7}})
         );
 
         let silent = serde_json::to_value(report(
@@ -367,6 +426,7 @@ mod tests {
                         values: BTreeMap::new(),
                         replies: vec![reply(k1)],
                         summaries: vec![],
+                        marks: vec![],
                         possibly_partial: None,
                     }],
                     refusals: vec![EnvelopeView {
@@ -374,6 +434,7 @@ mod tests {
                         message: "later".into(),
                         cause: None,
                         detail: None,
+                        mark: None,
                     }],
                     malformed: vec![],
                     transport: vec![],
@@ -396,6 +457,10 @@ mod tests {
         assert_eq!(replies["repliers"][0]["address"], "h1/tc");
         assert!(replies["repliers"][0].get("possibly_partial").is_none());
         assert!(replies["repliers"][0].get("summaries").is_none());
+        assert!(
+            replies["repliers"][0].get("marks").is_none(),
+            "the bare wire"
+        );
         assert_eq!(
             replies["refusals"],
             json!([{"code": "busy", "message": "later"}])
@@ -441,6 +506,7 @@ mod tests {
         assert_eq!(report(empty, CallMode::Fanout).exit_code(), 2);
         let value = OperationAnswer::Value {
             reply: reply("zk2/host-a/tc/tc.netif.v1/@op/diagnostics"),
+            mark: None,
         };
         assert_eq!(report(value, CallMode::Concrete).exit_code(), 0);
     }

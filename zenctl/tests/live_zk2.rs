@@ -67,6 +67,11 @@ use zenoh::qos::Priority;
 #[path = "../../zenkey/tests/common/panic_watchdog.rs"]
 mod panic_watchdog;
 
+/// An owner answering in core §7.5's forms (#980's C4b), the runtime's and
+/// the fleet's suites' too.
+#[path = "../../zenkey/tests/common/forms_owner.rs"]
+mod forms_owner;
+
 /// The net a case waits under before calling a hang a hang.
 const SETTLE: Duration = Duration::from_secs(20);
 /// One `zenctl` run's limit: above any wait a case asks for.
@@ -1331,6 +1336,92 @@ async fn call_keeps_a_value_a_refusal_and_an_attributed_silence_apart() {
         run.json()["silence"]["presence"],
         "no_token_visible",
         "{run}"
+    );
+}
+
+/// #980's C4b, through `call`: an owner answering in §7.5's forms
+/// (`forms_owner`) is read by each reply's `Encoding` (core §5.1, §5.2;
+/// observer §7.3, "A call's forms first"). A value form's record is the
+/// value, with its as-of mark; an error form is the owner's error, exit 1,
+/// its detail decoded as the `error` type and its mark beside it, which
+/// the table says; the bare wire's envelope is still read, with no mark;
+/// and a router's `Timeout` is the transport's, so an idempotent call is
+/// retried and reports silence with its `Encoding` and bytes, exit 2.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn call_reads_an_owner_answering_in_the_forms_and_the_bare_wire() {
+    let mut bus = Bus::bare(None).await;
+    let served = forms_owner::serve(&bus.owners, "f1/tc").await;
+    bus.keep(served);
+    let path = scenario_path("tc.v1");
+    let contracts = path.to_str().expect("a UTF-8 path");
+    let call = |op: &'static str, member: Option<&'static str>, format: &'static str| {
+        let mut args = vec!["call", "f1/tc", "tc.v1", op];
+        if let Some(m) = member {
+            args.extend([r#"{"up":true}"#, "--param", m]);
+        }
+        args.extend([
+            "--contracts",
+            contracts,
+            "--timeout",
+            "1",
+            "--format",
+            format,
+        ]);
+        args
+    };
+    let set = |m| call("interfaces/{if}/set", Some(m), "json");
+
+    let run = bus.until(&set("if=eth0"), |r| r.code == 0).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["answer"], "value", "{run}");
+    assert_eq!(doc["reply"]["declared"], "json:SetResponse");
+    assert_eq!(doc["reply"]["value"], json!({"up": true}));
+    assert_eq!(doc["mark"], json!({"run": "0001", "seq": 7}));
+
+    let run = bus.zenctl(&set("if=eth9")).await;
+    exits(&run, 1);
+    assert_eq!(
+        run.json()["envelope"],
+        json!({
+            "code": "app",
+            "message": "the kernel refused",
+            "detail": {"as": "value", "declared": "json:TcError", "value": {"kind": "kernel"}},
+            "mark": {"run": "0001", "seq": 7},
+        }),
+        "{run}"
+    );
+    let run = bus
+        .zenctl(&call("interfaces/{if}/set", Some("if=eth9"), "table"))
+        .await;
+    exits(&run, 1);
+    assert!(
+        run.stdout.contains("refused  app — the kernel refused")
+            && run.stdout.contains("as of run 0001, seq 7"),
+        "{run}"
+    );
+
+    let run = bus.zenctl(&set("if=eth1")).await;
+    exits(&run, 1);
+    assert_eq!(
+        run.json()["envelope"],
+        json!({"code": "busy", "message": ""}),
+        "the bare wire's envelope, no mark: {run}"
+    );
+
+    let mut diagnostics = call("diagnostics", None, "json");
+    diagnostics.extend(["--retries", "1"]);
+    let run = bus.zenctl(&diagnostics).await;
+    exits(&run, 2);
+    let doc = run.json();
+    assert_eq!(doc["answer"], "silent", "{run}");
+    assert_eq!(
+        doc["silence"]["attempts"], 2,
+        "the transport's: retried (O4)"
+    );
+    assert_eq!(
+        doc["silence"]["transport"],
+        "zenoh/bytes: Timeout (no error form: sample_kind)"
     );
 }
 

@@ -6,6 +6,22 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `call` and `bench call` read both wires (#985 C4b, for #980)
+
+Core 0.92 §7.5 defines a call's value and error forms, which C4c's owners
+will answer in. Until then every reader reads both, by each reply's
+`Encoding` alone: under `zenoh/bytes` a form, under the envelope's three
+encodings the bare wire's envelope, a value under any other its record. No
+owner answers in a form yet, so nothing that read before reads differently.
+
+| Before | Now | Notes |
+|---|---|---|
+| a value reply under `zenoh/bytes`: its bytes read as the record | the value form: CH and the as-of mark stripped, the record rendered as the `response` or `summary` type; one the form's parse refuses undecodable, its refusal named (`zk2c envelope refused: sample_kind`), never sniffed, and an answer all the same (exit 0) | observer §7.3, "A call's forms first" |
+| — | a value form's `mark` (`{"run", "seq"}`) beside `reply`, and a replier's `marks`, one per reply then per summary; the table says `as of run 0001, seq 7` | core §5.1's as-of mark; absent on the bare wire |
+| a `reply_err` under `zenoh/bytes`: the transport's | the error form, an owner's error (exit 1): its code, cause and message, its detail decoded as the `error` type on the contract's `encoding`, and the envelope's `mark`; the table adds `as of run r, seq s` | an error form may carry no message: `message` is then `""`, and the table shows the code alone |
+| a router's `Timeout`: `zenoh/bytes: Timeout` | `zenoh/bytes: Timeout (no error form: sample_kind)`: still the transport's, still silence (exit 2), retried when idempotent | any `zenoh/bytes` reply error the form's parse refuses is the transport's, its refusal named; non-UTF-8 bytes are shown as `0x` and hex |
+| `bench call`: refusals by the envelope's code | by the code of either wire's error; a form the parse refuses counted as the transport's | |
+
 ## Unreleased (`main`, zk2) — the far side of a face: its timeout, its transport, declaring again (#988, L4)
 
 Core 0.91 §8.1 has a caller across a constrained face wait at least the

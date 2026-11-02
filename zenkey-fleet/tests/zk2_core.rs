@@ -13,6 +13,11 @@ use std::sync::{Arc, Mutex};
 mod util;
 use util::zk2::{T, addr, client, config, eventually, example, iface, router};
 
+/// An owner answering in core §7.5's forms (#980's C4b), the runtime's
+/// suites' and zenctl's too.
+#[path = "../../zenkey/tests/common/forms_owner.rs"]
+mod forms_owner;
+
 use zenkey::{Implementation, Service, ServiceBuilder};
 use zenkey_fleet::bus::contracts::BundleStore;
 use zenkey_fleet::bus::presence::{Scope, observe, service_listing};
@@ -969,4 +974,133 @@ async fn a_state_read_keeps_its_bytes_and_a_raw_get_reads_a_tombstone() {
         "{deleted:?}"
     );
     drop(writer);
+}
+
+/// #980's C4b: `call_operation` reads an owner answering in §7.5's forms
+/// and the bare wire alike, by each reply's `Encoding` (core §5.1, §5.2;
+/// observer §7.3, "A call's forms first"): a value form's record rendered
+/// as its type with its as-of mark, an error form's code and message with
+/// its detail rendered as the `error` type and its mark, the bare wire's
+/// envelope with none, a value under `zenoh/bytes` that is no form
+/// undecodable with its refusal named, a router's `Timeout` silence with
+/// its `Encoding` and bytes, and each many-reply form's mark.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_call_is_read_from_its_form_or_the_bare_wire() {
+    use zenkey_fleet::report::{InbandStamp, OperationAnswer, OperationReport};
+    use zenkey_fleet::{OperationCall, ResolvedTarget, call_operation, plan_call};
+
+    let (_router, ep) = router(None).await;
+    let owner = client(&ep).await;
+    let tool = client(&ep).await;
+    let _served = forms_owner::serve(&owner, "f1/tc").await;
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../zenkey/tests/contracts/tc.v1.toml");
+    let loaded = zenkey_model::contract::load_path(&path);
+    let rev = zenkey_fleet::model::catalog::Revision::from_contract(
+        loaded.contract.expect("tc.v1 loads"),
+        ContractSource::File,
+    );
+    let call = |op: &'static str, member: Option<&'static str>, request: &'static [u8]| {
+        let (rev, tool) = (&rev, &tool);
+        async move {
+            let values: Bindings = member
+                .map(|m| [("if".to_owned(), vec![m.to_owned()])].into())
+                .unwrap_or_default();
+            let target = ResolvedTarget::parse("f1/tc").unwrap();
+            let plan = plan_call(rev, target, op, values).unwrap();
+            call_operation(
+                tool,
+                OperationCall {
+                    revision: rev,
+                    plan: &plan,
+                    request: request.to_vec(),
+                    timeout: std::time::Duration::from_millis(500),
+                    retries: 1,
+                },
+            )
+            .await
+            .unwrap()
+        }
+    };
+    let set = |m| call("@op/interfaces/{if}/set", Some(m), br#"{"up":true}"#);
+    let mark = InbandStamp {
+        run: "0001".into(),
+        seq: 7,
+    };
+    let json = |r: &OperationReport| serde_json::to_value(r).unwrap();
+
+    // The value form: the record rendered as its type, the mark beside it.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
+    let value = loop {
+        let r = set("eth0").await;
+        if matches!(r.answer, OperationAnswer::Value { .. }) {
+            break r;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "never answered: {r:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    };
+    let OperationAnswer::Value { reply, mark: got } = &value.answer else {
+        unreachable!()
+    };
+    assert_eq!(got.as_ref(), Some(&mark));
+    assert!(
+        matches!(&reply.rendered, Rendered::Value { declared, value, .. }
+            if declared == "json:SetResponse" && value == &serde_json::json!({"up": true})),
+        "{reply:?}"
+    );
+    assert_eq!(
+        json(&value)["mark"],
+        serde_json::json!({"run": "0001", "seq": 7})
+    );
+
+    // The error form: its code and message, its detail as the `error` type.
+    let refused = json(&set("eth9").await);
+    assert_eq!(refused["answer"], "refused");
+    assert_eq!(
+        refused["envelope"],
+        serde_json::json!({
+            "code": "app",
+            "message": "the kernel refused",
+            "detail": {"as": "value", "declared": "json:TcError", "value": {"kind": "kernel"}},
+            "mark": {"run": "0001", "seq": 7},
+        })
+    );
+
+    // The bare wire's envelope: no mark.
+    let bare = json(&set("eth1").await);
+    assert_eq!(
+        bare["envelope"],
+        serde_json::json!({"code": "busy", "message": ""})
+    );
+
+    // A value under `zenoh/bytes` that is no form: undecodable, never sniffed.
+    let r = set("eth2").await;
+    let OperationAnswer::Value { reply, mark: None } = &r.answer else {
+        panic!("{r:?}")
+    };
+    assert!(
+        matches!(&reply.rendered, Rendered::Undecodable { reason, .. }
+            if reason == "zk2c envelope refused: sample_kind"),
+        "{reply:?}"
+    );
+
+    // A router's `Timeout`: silence, with its `Encoding` and its bytes.
+    let silent = json(&call("@op/diagnostics", None, b"{}").await);
+    assert_eq!(silent["answer"], "silent");
+    assert_eq!(silent["silence"]["attempts"], 2);
+    assert_eq!(
+        silent["silence"]["transport"],
+        "zenoh/bytes: Timeout (no error form: sample_kind)"
+    );
+
+    // Many replies: each value's and the summary's mark, in their order.
+    let listing = json(&call("@op/listing", None, b"{}").await);
+    let p = &listing["replies"]["repliers"][0];
+    assert_eq!(p["replies"][1]["value"], serde_json::json!({"name": "b"}));
+    assert_eq!(p["summaries"][0]["value"]["scanned"], 2);
+    assert_eq!(p["marks"], serde_json::json!([mark, mark, mark]));
+    assert_eq!(p["possibly_partial"], false);
 }
