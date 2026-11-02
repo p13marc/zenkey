@@ -22,6 +22,47 @@
 > - **A name beside a link resource** is denied as `…/<name>/**`, which
 >   includes the key itself (§2.7).
 
+> **Since `modem.v3` 3.2 (#983 T4, with #991), the readings cross in frames.** The revision lists
+> [`telemetry.v2`](../../../spec/profiles/telemetry/v2.md) and adds nine frame resources (core
+> §7.7), typed in [`schemas/modem-frames.json`](schemas/modem-frames.json) and exposed `link`. The
+> four streams of §1 are `host` again: their readings cross in `frames/link`. §1's table, §3's
+> block and its downsampling rules are 3.1's, kept as the record.
+>
+> | Frame resource | Carries | Largest frame, its payload (32-bit run) |
+> |---|---|---:|
+> | `frames/link` | the four link readings, 63 bits; `freshness.ttl_s = 150` | 22 B |
+> | `frames/sdu`, `sched`, `air`, `layer`, `if`, `radio`, `bearer` | each group of readings (`bearer` is `link/`'s), counters at 32 bits, a full record at least every 15 | 21 to 106 B |
+> | `frames/message` | all 73, counters at 24 bits: one paid SBD message | 213 B |
+>
+> What changes on a face, as `link.v1` 0.14 derives it (the Rust lane re-blesses `plan.json`'s
+> zenoh-modem cases):
+> - **RF.** Every exposed frame crosses whole and is never downsampled (§2.8). Which ones a device
+>   publishes, and how often, is its owner's configuration (`config:frames.<name>`, #991's
+>   per-medium table). `stream:modem.v3` becomes seven subtree denies, `air`, `if`, `layer`,
+>   `link`, `radio`, `sched` and `sdu`, with no name, and the face has no downsampling rule: no
+>   plain stream of the plane crosses. No frame is above the batch of 220 B (`frame_over_batch`).
+> - **Liveness across RF** (README gap 14): `frames/link`'s horizon makes it evidence (§2.12). Its
+>   interval is unstated, so its owner puts a frame at least every 75 s, and the plan draws no
+>   `interval_over_horizon`.
+> - **The counter's epoch** (README gap 1): a frame's epoch is its run, in band (`telemetry.v2`
+>   §2.19), which is `link.v1` §2.13's in-band epoch at no byte. Across the face, a decrease of
+>   `dropped` within one run is no longer read as a reset. §5's "not available" holds only for the
+>   JSON streams, and they no longer cross.
+> - **The fail-open hazard** (README gap 12) shrinks: `sdu/`, `sched/` and `air/` are denied whole.
+>   Only `frames/` mixes, and every resource under it crosses. A `host` resource a later minor
+>   added there would cross until the plan is derived again.
+> - **SBD** still exposes none, so nothing crosses, `frames/message` included. It crosses once that
+>   face exposes. A `link.v1` face lists no frames, so every exposed frame would then cross it. A
+>   [`link.v2`](../../../spec/profiles/link/v2.md) face lists the ones it lets across (its §2.7), as
+>   #988 plans for SBD's `frames/message` alone.
+>
+> **Why `link.v1`, not `link.v2`.** `link.v2` 0.3 binds a contract that lists it to type every
+> resource it exposes `link` as packed (its §2.17, `packed_required`). From 3.2, `modem.v3` would
+> meet that: what it exposes are its nine frames, all packed. Its 73 JSON streams are `host`, and
+> §2.17 binds no `host` resource. It stays on `link.v1` because nothing needs the move yet. A
+> `link.v2` face carries a contract that lists `link.v1` as `link.v1` says (§2.17), with that
+> face's transport and its `frames` list (#988), and `link.v2` is experimental.
+
 zenoh-modem carries stock Zenoh over radios where every byte is billed in airtime:
 - 220 B MTU at 2,400 bit/s on RF;
 - LoRa at a 1% duty cycle;
