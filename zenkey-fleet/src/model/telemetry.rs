@@ -990,6 +990,7 @@ fn sampled(l: &Last) -> tm::Sampled<'_> {
         timestamp_ms: l.reading.timestamp_ms,
         stamp_ns: l.stamp_ns,
         arrival_ns: l.arrival_ns,
+        record: None,
     }
 }
 

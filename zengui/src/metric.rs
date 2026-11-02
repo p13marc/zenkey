@@ -321,7 +321,7 @@ pub fn plotted(m: &Measure) -> Option<f64> {
     match m {
         // Plotted as the nearest double: a chart's resolution, not the
         // count, which the Inspector reads exactly.
-        Measure::Counter(n) => Some(*n as f64),
+        Measure::Counter { value, .. } => Some(*value as f64),
         Measure::Gauge(f) => Some(*f),
         Measure::Boolean(b) => Some(if *b { 1.0 } else { 0.0 }),
         Measure::Histogram(h) => (h.count > 0).then(|| h.sum / h.count as f64),
@@ -332,7 +332,7 @@ pub fn plotted(m: &Measure) -> Option<f64> {
 /// A measure in a few characters, for a finding's subject.
 pub fn measure_words(m: &Measure) -> String {
     match m {
-        Measure::Counter(n) => n.to_string(),
+        Measure::Counter { value, .. } => value.to_string(),
         Measure::Gauge(f) => f.to_string(),
         Measure::Boolean(b) => b.to_string(),
         Measure::Histogram(h) => format!("count {}", h.count),
@@ -635,7 +635,9 @@ impl MetricFold {
                         NoRate::Reset => out.no_rate.reset += 1,
                         NoRate::Decreased => out.no_rate.decreased += 1,
                         NoRate::Elapsed => out.no_rate.elapsed += 1,
-                        NoRate::Kind => {}
+                        // A narrow counter's, which only a frame carries
+                        // (telemetry.v2 §2.20): no frame is read here.
+                        NoRate::Kind | NoRate::WrapOrDecrease => {}
                     }
                 }
             }

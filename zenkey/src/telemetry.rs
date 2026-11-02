@@ -146,7 +146,7 @@ impl Reason {
 
 fn measure_words(m: &Measure) -> String {
     match m {
-        Measure::Counter(n) => n.to_string(),
+        Measure::Counter { value, .. } => value.to_string(),
         Measure::Histogram(h) => format!("count {} counts {:?}", h.count, h.counts),
         Measure::Gauge(x) => x.to_string(),
         Measure::Text(s) => format!("{s:?}"),
@@ -459,7 +459,7 @@ mod meter {
                 };
             }
             match self.measure {
-                Some(m @ Measure::Counter(_)) => self.last.counter = Some(m),
+                Some(m @ Measure::Counter { .. }) => self.last.counter = Some(m),
                 Some(m @ Measure::Histogram(_)) => self.last.histogram = Some(m),
                 _ => {}
             }
@@ -561,7 +561,7 @@ mod meter {
                 && last.epoch.as_deref() == Some(epoch.as_str())
             {
                 let before = match after {
-                    Measure::Counter(_) => last.counter.as_ref(),
+                    Measure::Counter { .. } => last.counter.as_ref(),
                     Measure::Histogram(_) => last.histogram.as_ref(),
                     _ => None,
                 };
@@ -572,6 +572,7 @@ mod meter {
                         timestamp_ms: None,
                         stamp_ns: None,
                         arrival_ns: 0,
+                        record: None,
                     };
                     if pair(&at(before), &at(after), None, None).continuity == Continuity::Decreased
                     {

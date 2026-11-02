@@ -2811,7 +2811,7 @@ fn telemetry_measure(kind: &str, v: &Value) -> telemetry::Measure {
     use telemetry::Measure as M;
     let f = |v: &Value| v.as_f64().expect("a number");
     match MetricKind::parse(kind).expect("kind") {
-        MetricKind::Counter => M::Counter(v.as_u64().expect("a counter")),
+        MetricKind::Counter => M::counter(v.as_u64().expect("a counter")),
         MetricKind::Gauge => M::Gauge(f(v)),
         MetricKind::Text => M::Text(v.as_str().expect("text").to_owned()),
         MetricKind::Boolean => M::Boolean(v.as_bool().expect("a boolean")),
@@ -2868,6 +2868,7 @@ fn telemetry_continuity() {
                 timestamp_ms: s["timestamp_ms"].as_i64(),
                 stamp_ns: stamp,
                 arrival_ns: int(&s["arrival_ns"]).expect("arrival_ns"),
+                record: None,
             }
         };
         let (a, b) = (
