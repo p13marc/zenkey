@@ -372,8 +372,8 @@ pub use judge::arbitration::judge as judge_arbitration;
 pub use model::arbitration::{RoleRead, RoleSubject, ViewBook, roles_in as arbitrated_roles_in};
 pub use model::config::{Assignment, Given, TypedValues};
 pub use model::telemetry::{
-    MemberBook, MetricResource, MetricSample, MetricType, PairPresence, PairSeen, PairTally,
-    SampleVia as MetricVia, TelemetryBook, TelemetryScope,
+    FrameMetric, FramePair, FrameSeen, MemberBook, MetricResource, MetricSample, MetricType,
+    PairPresence, PairSeen, PairTally, SampleVia as MetricVia, TelemetryBook, TelemetryScope,
 };
 pub use model::timing::{MemberWindow, TimedResource, TimedSample, TimingBook, TimingScope};
 // Types reachable *through* root-exported ones (#350).

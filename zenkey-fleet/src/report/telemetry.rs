@@ -57,7 +57,8 @@ pub struct TelemetryDeclaration {
     /// tokens.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reasons: Vec<String>,
-    /// The carrier: `point` or `bare`. Absent when invalid.
+    /// The carrier: `point` or `bare`, or `frame` for a frame resource's
+    /// series (`telemetry.v2` §2.16). Absent when invalid.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub carrier: Option<String>,
     /// The declared kind; absent for a Point that says its own, or when
@@ -74,8 +75,46 @@ pub struct TelemetryDeclaration {
     /// none does.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub epoch_in: Option<String>,
+    /// A frame resource's series, in field order (`telemetry.v2` §2.16);
+    /// absent for any other resource, and when invalid.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub series: Vec<TelemetrySeries>,
+    /// An invalid `telemetry.series`' problems, each with its entry, in
+    /// the fixtures' order (v2 §2.16); `reasons` holds their tokens.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub problems: Vec<TelemetrySeriesProblem>,
     /// The answer in words.
     pub says: String,
+}
+
+/// One series of a frame resource, as its `telemetry.series` declares it
+/// (`telemetry.v2` §2.16).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TelemetrySeries {
+    pub field: String,
+    pub kind: String,
+    /// Absent when no entry gives one: unknown, never dimensionless.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic: Option<String>,
+    /// The resource it borrows its kind, unit and semantic from: a label,
+    /// never the series' identity (v2 §2.17).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mirrors: Option<String>,
+    /// A counter field's width, 1 to 64 (v2 §2.20).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+}
+
+/// One reason an invalid `telemetry.series` gives (v2 §2.16).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TelemetrySeriesProblem {
+    /// The entry, a field's name; absent for the annotation whole.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry: Option<String>,
+    /// The fixtures' token.
+    pub reason: String,
 }
 
 /// One metric resource of one owner in scope.
@@ -125,6 +164,12 @@ pub struct TelemetrySamples {
     /// order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub latest_does_not: Vec<String>,
+    /// A frame series' records that were no sample (`telemetry.v2`
+    /// §2.18), by the reading's token: `held` (not included, its value in
+    /// its state), and no value, `absent`, `owner_error`, `beyond_range`,
+    /// `unnamed` or `unknown`, never 0. Absent for any other member.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub no_sample: BTreeMap<String, u64>,
 }
 
 /// Every pair of one member, counted by answer (§2.10) and by how its epoch
@@ -150,8 +195,15 @@ pub struct TelemetryContinuity {
     pub reset: u64,
     /// The finding: a decrease within an established epoch.
     pub decreased: u64,
-    /// Incomparable: the kinds, or a histogram's bounds or length, differ.
+    /// Incomparable: the kinds, or a histogram's bounds or length, differ;
+    /// or a narrow counter's change outside its serial window, which
+    /// `wrap_or_decrease` counts.
     pub unobservable: u64,
+    /// Of `unobservable`: a wrap or a decrease, which a narrow counter's
+    /// two values cannot tell apart (`telemetry.v2` §2.20). Absent when
+    /// none.
+    #[serde(default, skip_serializing_if = "super::asked::u64_is_zero")]
+    pub wrap_or_decrease: u64,
     /// Neither sample a counter or a histogram.
     pub not_asked: u64,
     /// Established in-band.
@@ -214,13 +266,26 @@ pub struct TelemetryPair {
     /// The counter's unit followed by `/s`; absent when unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rate_unit: Option<String>,
-    /// Why there is no rate: `kind`, `reset`, `decreased` or `elapsed`.
+    /// Why there is no rate: `kind`, `reset`, `decreased` or `elapsed`, or
+    /// for a narrow counter `wrap_or_decrease` (`telemetry.v2` §2.20).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no_rate: Option<String>,
-    /// The time base: `timestamp`, `stamp` or `arrival` (§2.11).
+    /// The time base: `timestamp`, `stamp` or `arrival` (§2.11); for a
+    /// frame's series `record`, its records' times, or `arrival`
+    /// (`telemetry.v2` §2.21).
     pub base: String,
     /// The elapsed time over that base, seconds.
     pub elapsed_s: f64,
+    /// A frame series' time basis (`telemetry.v2` §2.21): `measured`,
+    /// `scheduled` or `arrival`. Absent for any other member.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_basis: Option<String>,
+    /// A `scheduled` basis' bound: the elapsed time is exact to within
+    /// this many milliseconds either way, the sum of the scheduled
+    /// records' `jitter_ms`, and so is never a measured rate's. Absent for
+    /// any other basis.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jitter_ms: Option<u64>,
 }
 
 /// A counter's latest rate (§2.11).
@@ -230,16 +295,46 @@ pub struct TelemetryRate {
     /// The counter's unit followed by `/s`; absent when unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit: Option<String>,
+    /// A frame series' time basis, and a `scheduled` one's bound, as
+    /// [`TelemetryPair`]'s (`telemetry.v2` §2.21). Absent for any other
+    /// member.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_basis: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jitter_ms: Option<u64>,
+    /// A `scheduled` rate's bound, per second: over the elapsed time plus
+    /// its jitter, and over it less its jitter (absent when the jitter
+    /// reaches the elapsed time, so no upper bound). Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bound: Option<TelemetryRateBound>,
+}
+
+/// A `scheduled` rate's bound (`telemetry.v2` §2.21): the rate lies
+/// between `low` and `high` per second.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TelemetryRateBound {
+    pub low: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub high: Option<f64>,
 }
 
 /// One metric member, as the reader read it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TelemetryMember {
-    /// The concrete key, base-relative: the series (§2.12).
+    /// The concrete key, base-relative: the series (§2.12); for a frame,
+    /// with `field` (`telemetry.v2` §2.17).
     pub key: String,
     pub address: String,
     pub iface: String,
     pub resource: String,
+    /// A frame's series: its field. Absent for any other member.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field: Option<String>,
+    /// The resource a frame's series borrows its kind and unit from, a
+    /// label and never the series' identity: a sum over series would count
+    /// the quantity twice (`telemetry.v2` §2.17). Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mirrors: Option<String>,
     /// "What is this member's kind?" (§2.5); absent when unobservable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
@@ -362,21 +457,48 @@ pub struct TelemetryReport {
     pub unobservable: Option<String>,
 }
 
+impl TelemetryMember {
+    /// The series, as a person reads it: its key, and a frame series' field
+    /// after it (`telemetry.v2` §2.17).
+    pub fn series_name(&self) -> String {
+        match &self.field {
+            Some(f) => format!("{} field {f}", self.key),
+            None => self.key.clone(),
+        }
+    }
+}
+
 impl TelemetryReport {
     /// Why `m`'s unreadable samples were, in words: its resource's invalid
     /// declaration with its reasons, or bytes that do not decode.
     fn unread(&self, m: &TelemetryMember) -> String {
         if m.samples.unobservable_reason.as_deref() == Some("declaration_invalid") {
-            let reasons = self
+            let row = self
                 .resources
                 .iter()
-                .find(|r| r.address == m.address && r.iface == m.iface && r.resource == m.resource)
+                .find(|r| r.address == m.address && r.iface == m.iface && r.resource == m.resource);
+            let reasons = row
                 .map(|r| r.declaration.reasons.join(", "))
                 .unwrap_or_default();
+            if row.is_some_and(|r| !r.declaration.problems.is_empty()) {
+                format!(
+                    "; {} {} {}: its telemetry.series is invalid ({reasons}), so no field of it \
+                     is read (telemetry.v2 §2.16)",
+                    m.address, m.iface, m.resource
+                )
+            } else {
+                format!(
+                    "; {} {} {}: its declaration is invalid ({reasons}), so no question of its \
+                     members is answered (telemetry.v1 §2.2)",
+                    m.address, m.iface, m.resource
+                )
+            }
+        } else if m.field.is_some() {
             format!(
-                "; {} {} {}: its declaration is invalid ({reasons}), so no question of its \
-                 members is answered (telemetry.v1 §2.2)",
-                m.address, m.iface, m.resource
+                "; {}: {} frame(s) undecodable, of which this profile reads nothing \
+                 (telemetry.v2 §2.18)",
+                m.series_name(),
+                m.samples.unobservable
             )
         } else {
             format!(
@@ -469,7 +591,9 @@ impl TelemetryReport {
                 .members
                 .iter()
                 .find_map(|m| match &m.continuity.answer {
-                    Judgement::Unobservable { reason } => Some(format!("; {}: {reason}", m.key)),
+                    Judgement::Unobservable { reason } => {
+                        Some(format!("; {}: {reason}", m.series_name()))
+                    }
                     _ => None,
                 });
             return Judgement::Unobservable {
@@ -515,6 +639,8 @@ mod tests {
             address: "lab/meter".into(),
             iface: "meter.v1".into(),
             resource: "stream/drops".into(),
+            field: None,
+            mirrors: None,
             kind: Some("counter".into()),
             kind_from: Some("declared".into()),
             unit: None,
@@ -529,6 +655,7 @@ mod tests {
                 deletes: 0,
                 problems: BTreeMap::new(),
                 latest_does_not: vec![],
+                no_sample: BTreeMap::new(),
             },
             latest: None,
             continuity: TelemetryContinuity {
@@ -539,6 +666,7 @@ mod tests {
                 reset: 0,
                 decreased: 0,
                 unobservable: 0,
+                wrap_or_decrease: 0,
                 not_asked: 0,
                 in_band: 0,
                 by_presence: 0,
@@ -603,6 +731,8 @@ mod tests {
                 buckets: None,
                 semantic: None,
                 epoch_in: None,
+                series: vec![],
+                problems: vec![],
                 says: "s".into(),
             },
             members: 1,
@@ -612,6 +742,8 @@ mod tests {
             address: "lab/meter".into(),
             iface: "meter.v1".into(),
             resource: "stream/drops".into(),
+            field: None,
+            mirrors: None,
             kind: Some("counter".into()),
             kind_from: Some("declared".into()),
             unit: None,
@@ -626,6 +758,7 @@ mod tests {
                 deletes: 0,
                 problems: BTreeMap::new(),
                 latest_does_not: vec![],
+                no_sample: BTreeMap::new(),
             },
             latest: Some(json!(9)),
             continuity: TelemetryContinuity {
@@ -636,6 +769,7 @@ mod tests {
                 reset: 1,
                 decreased: 0,
                 unobservable: 0,
+                wrap_or_decrease: 0,
                 not_asked: 0,
                 in_band: 0,
                 by_presence: 2,
@@ -653,10 +787,15 @@ mod tests {
                 no_rate: None,
                 base: "arrival".into(),
                 elapsed_s: 1.0,
+                time_basis: None,
+                jitter_ms: None,
             }],
             rate: Some(TelemetryRate {
                 per_s: 4.0,
                 unit: None,
+                time_basis: None,
+                jitter_ms: None,
+                bound: None,
             }),
         }];
         let v = serde_json::to_value(&r).unwrap();
@@ -819,6 +958,8 @@ mod tests {
                 buckets: None,
                 semantic: None,
                 epoch_in: None,
+                series: vec![],
+                problems: vec![],
                 says: "s".into(),
             },
             members: 1,

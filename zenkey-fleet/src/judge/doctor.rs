@@ -812,10 +812,13 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
 /// the descriptors name, its declaration read from the contract
 /// (`zenkey_model::telemetry::declaration_of`). An invalid one is the
 /// warning a contract linter gives: no reader reads its members' kind,
-/// conformance or continuity. A revision not in hand is unjudged.
+/// conformance or continuity. A revision not in hand is unjudged. A frame
+/// resource of a `telemetry.v2` contract is read by its `telemetry.series`
+/// (v2 §2.16, #983 T2), an invalid one's each reason said
+/// (`frames::Reason::says`).
 fn telemetry_declaration(p: &Presence<'_>) -> CheckReport {
     const C: CheckId = CheckId::TelemetryDeclaration;
-    use crate::model::telemetry::{MetricType, invalid_words};
+    use crate::model::telemetry::{FrameMetric, MetricType, invalid_words, series_problem_words};
     use zenkey_model::telemetry::Declaration;
     let mut named: BTreeMap<(IfaceId, Fingerprint), BTreeSet<String>> = BTreeMap::new();
     for (a, _, d) in p.served() {
@@ -840,6 +843,25 @@ fn telemetry_declaration(p: &Presence<'_>) -> CheckReport {
         };
         let c = rev.contract();
         for r in &c.resources {
+            // A frame resource's `telemetry.series` (telemetry.v2 §2.16): an
+            // invalid one is the warning a linter gives, each entry's reason.
+            if let Some(f) = FrameMetric::of(c, r) {
+                metrics += 1;
+                if let Some(problems) = f.problems() {
+                    findings.push(finding(
+                        C,
+                        DoctorSeverity::Warning,
+                        format!("{iface} {fp} {}", zenkey::implementation::resource_name(r)),
+                        format!(
+                            "implemented by {}; its telemetry.series is invalid: {} — no reader \
+                             reads its fields as series (telemetry.v2 §2.16)",
+                            by.iter().cloned().collect::<Vec<_>>().join(", "),
+                            series_problem_words(problems)
+                        ),
+                    ));
+                }
+                continue;
+            }
             let Some(ty) = MetricType::of(c, r) else {
                 continue;
             };
@@ -6807,6 +6829,51 @@ mod tests {
             ))
             .contains("unavailable")
         );
+    }
+
+    /// `telemetry-declaration` over `telemetry.v2` (#983 T2): a frame
+    /// resource's `telemetry.series` is read as v2 §2.16 reads it, so an
+    /// entry naming no field is the warning, each reason in the model's
+    /// words; `meterframe.v1`'s three frame resources and its bare counter
+    /// are clean.
+    #[test]
+    fn an_invalid_frame_series_is_a_warning() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../spec/profiles/telemetry/conformance/contracts");
+        let at = |text: &str| {
+            let l = zenkey_model::contract::load_str(text, &dir, None);
+            l.contract.unwrap_or_else(|| panic!("{}", l.report))
+        };
+        let good = at(&std::fs::read_to_string(dir.join("meterframe.v1.toml")).unwrap());
+        let bad = at(
+            "[interface]\nname = \"oddframe\"\nmajor = 1\nuses = [\"telemetry.v2\"]\n\
+             [schemas]\npacked = [\"meterframe.json\"]\n\
+             [resources.\"frames/bytes\"]\nkind = \"stream\"\ntype = \"packed:meterframe#Bytes\"\n\
+             frame = { records = 1 }\n\
+             [resources.\"frames/bytes\".annotations.\"telemetry.series\"]\n\
+             nope = { kind = \"counter\" }\n",
+        );
+        let after = observed(
+            &[inst("lab/meter", A)],
+            vec![(
+                ("lab/meter", A),
+                descriptor("lab/meter", A, &[entry(&bad), entry(&good)], &[]),
+            )],
+        );
+        let r = check(
+            &obs(after, &[&bad, &good], &[]),
+            CheckId::TelemetryDeclaration,
+        );
+        let f = found(&r);
+        assert_eq!(f.severity, DoctorSeverity::Warning);
+        assert!(f.subject.ends_with("stream/frames/bytes"), "{f:?}");
+        assert!(
+            f.evidence.contains(
+                "nope: the entry names no field of the frame's record type (series_field)"
+            ),
+            "{f:?}"
+        );
+        assert_eq!(r.findings.len(), 1, "meterframe.v1's are valid: {r:?}");
     }
 
     /// `pace.v1`, the timing scenarios' contract, as the runtime's tests keep

@@ -243,7 +243,8 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   narrow one's code alone, unwrapped by its least increase) and refused
   below its field's last count of the run (`Reason::FieldDecreased`,
   `Error::Telemetry` naming `telemetry.v2` by `Reason::profile`), then
-  every counter reduced modulo 2^w (on any frame resource). A count is of
+  every counter reduced modulo 2^w (on any frame resource); a code past
+  its field's width is the framer's `range`, its one width guard. A count is of
   the run its frame is put under, a record in the open frame of the run
   it will take, so a restart flushes, then `new_epoch`; an increase past
   2^(w−1) is a warning. It builds no `Sampled` and calls no `pair`.
