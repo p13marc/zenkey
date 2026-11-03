@@ -81,8 +81,9 @@ PROFILES = {
     "freshness.v2": ("owner (heartbeats), consumer and tool (§2.5's rule, the re-read, the judgements)", ""),
     "health.v1": ("owner, tool (§2.11's reader and roll-ups)", ""),
     "config.v1": ("owner (the simulated device), caller, tool (§5's reader)", ""),
-    "config.v2": ("none yet", "text 0.1 (#985 G1) is present on main and not read by round 101: #985's later round "
-                              "reads it after its owner (G2) and tools (G3) land"),
+    "config.v2": ("owner (the simulated device), caller, tool (§5's reader), and the linter of §2.2 (round 102)",
+                  "§12's document reaches the owner directly, not through desired.v1's binding; no text, enum or "
+                  "fixed-point parameter (none at 0.1)"),
     "link.v1": ("tool (the generator and the checks)", ""),
     "link.v2": ("tool (the linter, the plan with 0.3's contract side and frames per face, the transport block and "
                 "its checks); a far side's caller, consumer and tool (0.4's §2.20, §2.21)",
