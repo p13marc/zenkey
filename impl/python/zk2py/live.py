@@ -201,19 +201,21 @@ def _prune() -> None:
     watch session closed is dropped, so that another is opened."""
     for k, (reader, w) in list(_WATCHES.items()):
         if _is_closed(reader):
-            del _WATCHES[k]
+            _WATCHES.pop(k, None)
             try:
                 w.close()
             except Exception:  # noqa: BLE001 - closing anyway
                 pass
         elif _is_closed(w):
-            del _WATCHES[k]
-    for k in [k for k, v in _OPENED.items() if _is_closed(v[0])]:
-        del _OPENED[k]
-    for k in [k for k, v in _MARKED.items() if _is_closed(v)]:
-        del _MARKED[k]
-    for k in [k for k, v in _CONF.items() if _is_closed(v[0])]:
-        del _CONF[k]
+            _WATCHES.pop(k, None)
+    # Two threads may prune at once (a runner's sections in parallel): an
+    # entry another one dropped is gone already.
+    for k in [k for k, v in list(_OPENED.items()) if _is_closed(v[0])]:
+        _OPENED.pop(k, None)
+    for k in [k for k, v in list(_MARKED.items()) if _is_closed(v)]:
+        _MARKED.pop(k, None)
+    for k in [k for k, v in list(_CONF.items()) if _is_closed(v[0])]:
+        _CONF.pop(k, None)
 
 
 def forget(session: Any) -> None:
@@ -2100,15 +2102,20 @@ def read_reply(sample: Any, read_bare: bool = True) -> CallReply:
     step decodes"; a refused one is ``refused_value``, never decoded or
     sniffed as a bare record (observer §7.3); under any other Encoding the
     bare wire, its payload the record (§5.1's MAY). ``read_bare`` False is a
-    reader that takes no MAY: it reads every reply "by §7.5's parse", which
-    no text bounds by the Encoding for a value (F-475)."""
+    reader that takes no MAY: core 0.95 §5.1 (F-475's answer, round 102),
+    "Under another Encoding a reply is no value form, so it is malformed
+    too", a ``refused_value`` whose refusal is ``encoding``, an answer all
+    the same; round 101's reader parsed it, as 0.94's "A caller reads a
+    reply by §7.5's parse" bounded no Encoding."""
     from . import calls
 
     key, enc, data = str(sample.key_expr), str(sample.encoding), sample.payload.to_bytes()
     att = None if sample.attachment is None else sample.attachment.to_bytes()
     summ = att == b"summary"
-    if calls.bare(enc) and read_bare:
-        return CallReply("value", key, enc, data, raw=data, bare=True, summary=summ)
+    if calls.bare(enc):
+        if read_bare:
+            return CallReply("value", key, enc, data, raw=data, bare=True, summary=summ)
+        return CallReply("refused_value", key, enc, b"", refusal="encoding", raw=data, summary=summ)
     try:
         e = zk2c.parse(data, "reply")
     except zk2c.Refused as r:
