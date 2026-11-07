@@ -1812,7 +1812,7 @@ async fn archive_keys(s: &Session, addr: &Addr, timeout: Duration) -> Result<Arc
 }
 
 /// An owner's state, read as S4 reads it — target `All`, consolidation
-/// `Latest` — over `state/**` and `@state/**` of one interface, each reply
+/// `None`, a snapshot's page as its entries — over `state/**` and `@state/**` of one interface, each reply
 /// sorted by what stamped it ([`StateStamps::add`]), the table read from
 /// `revision` when it is in hand.
 async fn state_stamps(
@@ -1841,15 +1841,21 @@ async fn state_stamps(
         let replies = s
             .get(&selector)
             .target(QueryTarget::All)
-            .consolidation(ConsolidationMode::Latest)
+            .consolidation(ConsolidationMode::None)
             .timeout(timeout)
             .await
             .map_err(|e| format!("GET {selector}: {e}"))?;
+        // A snapshot's page is its entries, which carry no Zenoh timestamp
+        // (core §4.2, §7.5; #977's E3).
+        let mut samples = Vec::new();
         while let Ok(reply) = replies.recv_async().await {
             let Ok(sample) = reply.result() else {
                 out.complete = false;
                 continue;
             };
+            samples.extend(crate::bus::query::reply_samples(sample));
+        }
+        for sample in &samples {
             // The envelope first (core §7.5): an in-band stamp is the
             // owner's own, a refused envelope undecodable.
             let read = crate::model::inband::read(sample.clone());

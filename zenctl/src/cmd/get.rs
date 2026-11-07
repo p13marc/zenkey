@@ -386,7 +386,10 @@ pub async fn state(cli: crate::cli::StateGetArgs) -> Result<()> {
         Some(archive) => zenkey_fleet::last_known_state_in(&session, read, archive, epoch).await?,
     };
     crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
-    if report.rows.is_empty() {
+    // Silence is no verdict (O5). A complete snapshot of no entry is the
+    // owner's word that it held no member (core §4.2; #977's E3): an answer.
+    let said = report.snapshots.iter().any(|s| s.complete);
+    if report.rows.is_empty() && !said {
         std::process::exit(crate::exit::NO_VERDICT);
     }
     Ok(())

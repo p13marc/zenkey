@@ -18,8 +18,8 @@ use zenkey::{Implementation, Service, ServiceBuilder};
 use zenkey_fleet::model::render::Member;
 use zenkey_fleet::model::stats::{RateAsk, rate_report};
 use zenkey_fleet::report::{
-    Conformance, ExpectVerdict, Holder, Judgement, KeyGroup, LaneId, Rendered, StamperWire,
-    TimelineSource, Unresolved,
+    Conformance, ExpectVerdict, Holder, Judgement, KeyGroup, LaneId, Rendered, TimelineSource,
+    Unresolved,
 };
 use zenkey_fleet::{
     BundleStore, Catalog, ContractSet, ExpectAim, ExpectSpec, FleetEvent, Lens, Monitor,
@@ -520,10 +520,13 @@ async fn a_snapshot_takes_the_owners_state_with_its_holders() {
     };
     let good = row("/default/eth0");
     assert_eq!(good.conformance, Conformance::Valid);
+    // tc.netif.v1 uses freshness.v2: its state is read by snapshot (core
+    // 0.99, #977's E3), whose entry carries no Zenoh timestamp to attribute.
     assert!(
-        matches!(good.stamper, Some(StamperWire::Owner { .. })),
-        "the interfaces state is on core §4.3's table by its ttl: {good:?}"
+        good.stamper.is_none(),
+        "a snapshot's entry, stamped in band alone: {good:?}"
     );
+    assert!(good.inband.is_some(), "{good:?}");
     assert_eq!(
         good.inband,
         Some(put0.stamp.into()),

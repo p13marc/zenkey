@@ -1863,10 +1863,17 @@ async fn get_state_reads_the_owner_then_an_archive_and_never_confuses_them() {
     assert_eq!(row["state"], "value");
     assert_eq!(row["payload"]["declared"], "json:NetworkInterface");
     assert_eq!(row["payload"]["value"], value);
+    // A `freshness.v2` collection is read by snapshot (core 0.99, #977's
+    // E3): its entry carries no Zenoh timestamp, and its confirmation is
+    // its last confirmation, on the owner's clock named by its address.
+    assert!(
+        row.get("timestamp").is_none(),
+        "a snapshot carries none: {run}"
+    );
     assert_eq!(
-        row["timestamp"]["clock"],
-        bus.owners.zid().to_string(),
-        "the owner's own stamp (S1)"
+        row["last_confirmation"]["clock"],
+        zenkey::inband::owner_clock(origin).to_string(),
+        "its confirmation (freshness.v2 §2.6)"
     );
     assert!(row.get("confirmed").is_none(), "a current read has none");
 
@@ -1882,9 +1889,10 @@ async fn get_state_reads_the_owner_then_an_archive_and_never_confuses_them() {
         ])
         .await;
     exits(&run, 0);
+    // The collection read (core §4.2; #977's E3).
     assert_eq!(
         run.json()["selectors"],
-        json!(["zk2/host-a/tc/tc.netif.v1/state/interfaces/*/*"]),
+        json!(["zk2/host-a/tc/tc.netif.v1/state/interfaces/**"]),
         "{run}"
     );
 
@@ -2589,11 +2597,19 @@ async fn gen_brings_up_a_visible_owner_that_watch_and_get_state_read() {
     exits(&run, 0);
     let row = &run.json()["rows"][0];
     assert_eq!(row["inband"]["run"], stated.as_str(), "{run}");
-    assert_eq!(
-        u128::from_str_radix(row["timestamp"]["clock"].as_str().expect("a clock"), 16).unwrap(),
-        u128::from_str_radix(&zid, 16).unwrap(),
-        "the mock's own Zenoh timestamp, on the table (S1)"
+    // Read by snapshot (core 0.99, #977's E3): its entry carries no Zenoh
+    // timestamp, the mock's session's or another; its confirmation is the
+    // owner's clock named by its address.
+    assert!(
+        row.get("timestamp").is_none(),
+        "a snapshot carries none: {run}"
     );
+    assert_eq!(
+        row["last_confirmation"]["clock"],
+        zenkey::inband::owner_clock(row["key"].as_str().expect("a key")).to_string(),
+        "its confirmation (freshness.v2 §2.6)"
+    );
+    let _ = &zid;
 
     let again = bus
         .zenctl(&[
@@ -3874,7 +3890,10 @@ async fn snapshot_takes_the_owners_state_and_diff_compares_by_zk2_key() {
             json!({"kind": "live", "address": "host-a/tc", "answered_by": "owner"}),
             "{r}"
         );
-        assert_eq!(r["stamper"]["kind"], "owner", "S1: {r}");
+        // Read by snapshot (#977's E3): no Zenoh timestamp to attribute,
+        // its in-band stamp the owner's.
+        assert!(r.get("stamper").is_none(), "S1: {r}");
+        assert!(r.get("inband").is_some(), "S1: {r}");
         assert_eq!(r["conformance"]["state"], "valid");
         assert_eq!(r["identity"]["resource"], "state/interfaces/{ns}/{iface}");
     }
@@ -5390,7 +5409,8 @@ async fn why_explains_a_silence_rung_by_rung_over_a_live_owner() {
     assert!(doc.get("stopped_at").is_none());
     let answer = rung(&doc, "answer")["verdict"]["reason"].to_string();
     assert!(answer.contains("the owner answers its state GET"), "{run}");
-    assert!(answer.contains("the owner's own clock"), "S1: {run}");
+    // Read by snapshot (#977's E3): stamped in band, no Zenoh timestamp.
+    assert!(answer.contains("stamped in band"), "S1: {run}");
     assert_eq!(
         doc["value"]["value"],
         eth0(true),
@@ -12513,14 +12533,21 @@ async fn get_state_reads_an_owner_answering_in_snapshots() {
     assert_eq!(rows[0]["state"], "value");
     assert_eq!(rows[1]["inband"]["run"], "deadbeef", "its own run");
     assert_eq!(rows[2]["state"], "deleted", "a tombstone: {run}");
+    // The collection read (#977's E3): one snapshot on the snapshot key, in
+    // the owner's three pages, read whole under `None`.
+    assert_eq!(
+        doc["selectors"],
+        json!([format!("{}/**", owner::plans(ADDRESS))]),
+        "{run}"
+    );
     let snapshots = doc["snapshots"].as_array().expect("the snapshots");
-    assert_eq!(snapshots.len(), 3, "{run}");
-    for s in snapshots {
-        assert_eq!(s["run"], "0005");
-        assert_eq!(s["asof"], 7);
-        assert_eq!(s["pages"], json!([0]));
-        assert_eq!(s["complete"], true, "{run}");
-    }
+    assert_eq!(snapshots.len(), 1, "{run}");
+    let s = &snapshots[0];
+    assert_eq!(s["key"], owner::plans(ADDRESS));
+    assert_eq!(s["run"], "0005");
+    assert_eq!(s["asof"], 7);
+    assert_eq!(s["pages"], json!([0, 1, 2]));
+    assert_eq!(s["complete"], true, "{run}");
 
     let table = bus
         .zenctl(&[
@@ -12540,8 +12567,8 @@ async fn get_state_reads_an_owner_answering_in_snapshots() {
     exits(&table, 0);
     assert!(
         table.stdout.contains(&format!(
-            "snapshot on {}: coll 0, run 0005 as of seq 7, page 0, complete",
-            owner::member(ADDRESS, "vehicle-01")
+            "snapshot on {}: coll 0, run 0005 as of seq 7, pages 0, 1, 2, complete",
+            owner::plans(ADDRESS)
         )),
         "{table}"
     );
@@ -12563,7 +12590,9 @@ async fn get_state_reads_an_owner_answering_in_snapshots() {
             "json",
         ])
         .await;
-    exits(&none, 2);
+    // The owner's word that it holds no member there (core §4.2): an
+    // answer, exit 0 (#977's E3).
+    exits(&none, 0);
     let doc = none.json();
     assert!(doc.get("rows").is_none(), "{none}");
     assert_eq!(

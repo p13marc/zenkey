@@ -3188,20 +3188,16 @@ fn freshness(
     }
     if let (Some(Ok(g)), Some(at)) = (get, obs.read_at) {
         for row in &g.rows {
+            // A snapshot's entry is aged from its confirmation, a per-key
+            // reply from its stamp (`freshness.v2` §2.6; #977's E3).
+            let stamp = row.last_confirmation.as_ref().or(row.timestamp.as_ref());
             let reply = match &row.value {
                 StateValue::Deleted => Reply::Delete,
                 StateValue::Value { .. } => Reply::Put {
-                    stamp_age: row
-                        .timestamp
-                        .as_ref()
-                        .and_then(stamp_time)
-                        .map(|t| StampAge::between(t, at)),
+                    stamp_age: stamp.and_then(stamp_time).map(|t| StampAge::between(t, at)),
                 },
             };
-            let clock = row
-                .timestamp
-                .as_ref()
-                .map_or(ClockTrust::Untrusted, |s| trust(&s.clock));
+            let clock = stamp.map_or(ClockTrust::Untrusted, |s| trust(&s.clock));
             members
                 .entry(row.key.clone())
                 .or_default()

@@ -30,7 +30,7 @@
 //!    not (§2.13). Across a constrained face neither crosses, and the
 //!    deployment's word stands for them (§2.11);
 //! 3. S4's GET of the scope's alarms (`bus::query::state_get`: target
-//!    `All`, consolidation `Latest`), every reply merged with the live
+//!    `All`, consolidation `None`), every reply merged with the live
 //!    deliveries by the owner's in-band stamp (core §4.2, §4.3: by seq
 //!    within a run, the later arrival across two), in the [`AlarmBook`];
 //! 4. when asked, every archive's last-known documents of the scope
@@ -323,9 +323,9 @@ impl AlarmRefresh {
 }
 
 /// S4's GET of `selector` (core §4.2): target `All`, consolidation
-/// `Latest`, through the crate's one state GET. A reply on a wildcard key
-/// is discarded (R6); an error reply, a timeout's included, makes it
-/// incomplete.
+/// `None`, through the crate's one state GET, a snapshot's page read as its
+/// entries. A reply on a wildcard key is discarded (R6); an error reply, a
+/// timeout's included, makes it incomplete.
 pub async fn get(session: &Session, selector: &str, timeout: Duration) -> Result<SeedRead, String> {
     let asked_at = Instant::now();
     let replies =
@@ -348,11 +348,17 @@ pub async fn get(session: &Session, selector: &str, timeout: Duration) -> Result
             out.discarded += 1;
             continue;
         }
-        let (reply, envelope) = sample_of(sample, AlarmVia::Get);
-        if let Some(e) = envelope {
-            out.envelopes.insert(reply.key.clone(), e);
+        // A snapshot's page is its entries (core §4.2; #977's E3).
+        for sample in crate::bus::query::reply_samples_aged(
+            sample,
+            zenkey_model::catalog::EPOCH_WITHOUT_CATALOG,
+        ) {
+            let (reply, envelope) = sample_of(&sample, AlarmVia::Get);
+            if let Some(e) = envelope {
+                out.envelopes.insert(reply.key.clone(), e);
+            }
+            out.replies.push(reply);
         }
-        out.replies.push(reply);
     }
     Ok(out)
 }

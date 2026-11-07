@@ -21,7 +21,7 @@
 //!    (#819 TE, F-154); across a face, after the first reading's GET, the
 //!    round trip there (#819 TG, F-159);
 //! 3. two readings, a grace apart (or the window apart): each one GET of the
-//!    owners' `health.v1/state/**`, target `All`, consolidation `Latest`
+//!    owners' `health.v1/state/**`, target `All`, consolidation `None`
 //!    (core S4), which answers a status and its checks together (§2.4, core
 //!    S2) — so a status is never paired with a check from another instant
 //!    (§2.2);
@@ -561,8 +561,9 @@ pub async fn observe(
     }
 }
 
-/// One reading's GET (core S4): target `All`, consolidation `Latest`, every
-/// reply grouped by the owner its key names. A reply on a key that is not a
+/// One reading's GET (core S4): target `All`, consolidation `None`, a
+/// snapshot's page read as its entries, every reply grouped by the owner
+/// its key names. A reply on a key that is not a
 /// `health.v1` state key, or on a wildcard key, is not a member and is left
 /// out (R6).
 pub async fn get(
@@ -573,7 +574,7 @@ pub async fn get(
     let replies = session
         .get(selector)
         .target(QueryTarget::All)
-        .consolidation(ConsolidationMode::Latest)
+        .consolidation(ConsolidationMode::None)
         .timeout(timeout)
         .await
         .map_err(|e| format!("GET {selector}: {e}"))?;
@@ -583,11 +584,20 @@ pub async fn get(
         complete: true,
         services: BTreeMap::new(),
     };
+    // A snapshot's page is its entries, a live entry's confirmation its
+    // stamp (core §4.2, `freshness.v2` §2.6; #977's E3).
+    let mut samples = Vec::new();
     while let Ok(reply) = replies.recv_async().await {
         let Ok(sample) = reply.result() else {
             out.complete = false;
             continue;
         };
+        samples.extend(crate::bus::query::reply_samples_aged(
+            sample,
+            zenkey_model::catalog::EPOCH_WITHOUT_CATALOG,
+        ));
+    }
+    for sample in &samples {
         let key = sample.key_expr().as_str();
         if key.contains('*') {
             continue;

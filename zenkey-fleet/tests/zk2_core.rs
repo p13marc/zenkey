@@ -935,31 +935,34 @@ async fn a_state_read_keeps_its_bytes_and_a_raw_get_reads_a_tombstone() {
         .expect("a last-known read");
     assert_eq!(bytes_of(&last).as_deref(), Some(&body[..]), "{last:?}");
 
-    // The tombstone: a raw GET within the window reads the owner's
-    // `reply_del` as a delete, its kind kept, never a value.
+    // The tombstone: a raw GET within the window, a member read, is answered
+    // by the member's snapshot (core 0.99, #977's E3), whose tombstone reads
+    // as a delete, its kind kept, never a value.
     writer.delete().await.expect("a delete");
     let answers = loop {
-        let answers = zenkey_fleet::fleet_get(&tool, origin, &GetOpts::new(T))
+        let answers: Vec<FleetAnswer> = zenkey_fleet::fleet_get(&tool, origin, &GetOpts::new(T))
             .await
-            .expect("a GET");
+            .expect("a GET")
+            .iter()
+            .flat_map(|a| match a.entries() {
+                Some(Ok(entries)) => entries,
+                _ => vec![a.clone()],
+            })
+            .collect();
         if answers.iter().any(FleetAnswer::is_delete) {
             break answers;
         }
         settle("the owner answers with its tombstone").await;
     };
-    assert_eq!(answers.len(), 1, "one owner, one reply: {answers:?}");
+    assert_eq!(answers.len(), 1, "one owner, one entry: {answers:?}");
     let tombstone = &answers[0];
     assert_eq!(tombstone.key, origin);
     assert_eq!(tombstone.kind, Some(SampleKind::Delete));
-    // tc.netif.v1 uses freshness.v2 since #978's F5: its delete carried no
-    // Zenoh timestamp, and its `reply_del` carries the one the owner minted
-    // at the delete, its last confirmation (core 0.89's S2, F-460); the
-    // in-band stamp is the delete's attachment.
-    assert_eq!(
-        tombstone.timestamp.map(|t| *t.get_id()),
-        Some(zenoh::time::TimestampId::from(owners.zid())),
-        "a freshness.v2 reply_del carries the owner's last confirmation (S2)"
-    );
+    // A snapshot carries no Zenoh timestamp, and a tombstone no
+    // confirmation (core §7.5); its in-band stamp is its delete's.
+    assert_eq!(tombstone.timestamp, None, "a snapshot's tombstone");
+    assert!(tombstone.inband().is_some(), "the delete's in-band stamp");
+    let _ = &owners;
     let Answer::Value(payload) = &tombstone.answer else {
         panic!("a delete is a sample, not an error reply: {tombstone:?}")
     };

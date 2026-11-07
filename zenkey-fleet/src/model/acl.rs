@@ -24,6 +24,10 @@
 //!    far consumer under `deny` hears no confirmation, and every member it
 //!    follows reads stale. The owner serves it beside the interface, a
 //!    surface of its own for the fan-in and the allow posture's complement.
+//!    Since core 0.99 (#977's E3), a state template a binding leaves
+//!    unbound is granted by its collection read, `<snapshot key>/**`: an
+//!    owner answers it with the collection's snapshot on the snapshot key,
+//!    which the template's selector does not include.
 //! 3. **Call.** Query on the specific `…/@op/<op>` keys, and the same
 //!    liveliness reads on each service called.
 //! 4. **Egress is checked by inclusion** against the query's or
@@ -892,6 +896,18 @@ fn compile_binding(
                 if spec.history && has_history(r) {
                     push_unique(&mut h.history, canon(format!("{pattern}/@adv/**")));
                 }
+                // §11.1 Consume (core 0.99, #977's E3): a state template
+                // the binding leaves unbound is read whole, by a collection
+                // read, and its snapshot rides its snapshot key: the grant
+                // covers `<snapshot key>/**`, which includes both, and the
+                // template's selector beneath them.
+                let pattern = match r.token {
+                    KindToken::State | KindToken::ExplicitState => {
+                        zenkey_model::collection::collection_read(&pattern, &r.template)
+                            .map_or(pattern, canon)
+                    }
+                    _ => pattern,
+                };
                 push_unique(&mut h.data, pattern);
             }
         }
@@ -1106,7 +1122,8 @@ fn heartbeat_pattern(addr: &str, iface: &IfaceId) -> String {
 }
 
 /// What a service serves, enumerated from its contracts: each resource's
-/// pattern, its `@adv` subtree where it declares history, and its `@zk`
+/// pattern (a templated state's `<snapshot key>/**`, its snapshot's key
+/// among them), its `@adv` subtree where it declares history, and its `@zk`
 /// subtree. A service that implements nothing (a pure consumer) serves its
 /// presence alone. `None` when a contract it implements was not given: its
 /// Own patterns then stand in, for the fan-in and the allow posture's
@@ -1119,6 +1136,16 @@ fn surfaces_of(addr: &str, implements: &[(IfaceId, Option<Vec<Resource>>)]) -> O
             if has_history(r) {
                 push_unique(&mut out, canon(format!("{pattern}/@adv/**")));
             }
+            // Core §11.1 (0.99, #977's E3): a templated state's snapshot
+            // rides its snapshot key, which its members' pattern does not
+            // include: its surface is `<snapshot key>/**`.
+            let pattern = match r.token {
+                KindToken::State | KindToken::ExplicitState => {
+                    zenkey_model::collection::collection_read(&pattern, &r.template)
+                        .map_or(pattern, canon)
+                }
+                _ => pattern,
+            };
             push_unique(&mut out, pattern);
         }
     }

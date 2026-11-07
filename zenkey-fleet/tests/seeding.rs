@@ -951,10 +951,11 @@ async fn a_seeded_watch_seeds_from_a_zk2_owner() {
         (&SampleKind::Put, &Some(put0.stamp)),
         "the current value, with its in-band stamp (S2)"
     );
+    // Read by snapshot (core 0.99, #977's E3): its entry carries no Zenoh
+    // timestamp; its confirmation rides in band.
     assert_eq!(
-        confirmed.map(|t| *t.get_id()),
-        Some(owner),
-        "its last confirmation, the owner's Zenoh timestamp (S2)"
+        confirmed, &None,
+        "a snapshot's entry carries no Zenoh timestamp"
     );
     let (kind, tombstone, inband) = seen.get(&key("eth1")).expect("eth1's reply_del");
     assert_eq!(
@@ -962,19 +963,21 @@ async fn a_seeded_watch_seeds_from_a_zk2_owner() {
         (&SampleKind::Delete, &Some(deleted.stamp)),
         "the reply_del, a deletion with the deletion's in-band stamp (S3)"
     );
-    assert_eq!(
-        tombstone.map(|t| *t.get_id()),
-        Some(owner),
-        "its last confirmation, minted at the delete: the owner's Zenoh timestamp (S2)"
-    );
-    assert_eq!(
-        coverage.state,
-        Asked::Asked(SeedLeg {
-            replies: 2,
-            complete: true,
-            snapshots: Vec::new(),
-        })
-    );
+    assert_eq!(tombstone, &None, "a snapshot's tombstone carries none");
+    let _ = owner;
+    // `state/**` reads each collection whole: one page each, `interfaces`'
+    // and `namespaces`', on their snapshot keys, complete.
+    let Asked::Asked(leg) = &coverage.state else {
+        panic!("the state leg ran: {coverage:?}")
+    };
+    assert_eq!((leg.replies, leg.complete), (2, true), "{leg:?}");
+    assert_eq!(leg.snapshots.len(), 2, "{leg:?}");
+    let interfaces = leg
+        .snapshots
+        .iter()
+        .find(|s| s.key == "zk2/host-a/tc/tc.netif.v1/state/interfaces")
+        .expect("interfaces' snapshot");
+    assert!(interfaces.complete && interfaces.pages == [0]);
     monitor.shutdown().await.expect("shutdown");
     service.close().await.expect("close");
 }
@@ -1824,8 +1827,8 @@ async fn the_state_leg_reads_a_snapshots_entries() {
     assert!(leg.snapshots.iter().all(|s| s.complete && s.pages == [0]));
     assert!(leg.snapshots.iter().all(|s| s.run == "0005" && s.asof == 7));
 
-    // A collection read: three pages on the snapshot key, the last alone
-    // kept under `Latest`.
+    // A collection read: three pages on the snapshot key, every one read
+    // under `None` (#977's E3), the snapshot complete.
     let collection = format!("{}/**", owner::plans(ADDRESS));
     let mut sub = seed_subscribe(&b, &collection, policy).await.expect("seed");
     let (views, coverage) = drain_views(&mut sub).await;
@@ -1833,20 +1836,19 @@ async fn the_state_leg_reads_a_snapshots_entries() {
     assert_eq!(leg.snapshots.len(), 1, "{leg:?}");
     let s = &leg.snapshots[0];
     assert_eq!(s.key, owner::plans(ADDRESS));
-    assert_eq!(s.pages.len(), 1, "one page per key under Latest: {s:?}");
-    assert!(
-        !s.complete && !leg.complete,
-        "a page lost, and said so: {leg:?}"
-    );
-    let entries = owner::snapshot()
+    assert_eq!(s.pages, [0, 1, 2], "every page under None: {s:?}");
+    assert!(s.complete && leg.complete, "{leg:?}");
+    let mut keys: Vec<String> = views.iter().map(|v| v.key.clone()).collect();
+    keys.sort();
+    let mut entries: Vec<String> = owner::snapshot()
         .paginate(owner::PAGE_BYTES)
-        .expect("pages")[usize::try_from(s.pages[0]).unwrap()]
-    .members(&owner::plans(ADDRESS));
-    assert_eq!(
-        views.iter().map(|v| v.key.clone()).collect::<Vec<_>>(),
-        entries.iter().map(|m| m.key.clone()).collect::<Vec<_>>(),
-        "the page held, as its entries"
-    );
+        .expect("pages")
+        .iter()
+        .flat_map(|p| p.members(&owner::plans(ADDRESS)))
+        .map(|m| m.key)
+        .collect();
+    entries.sort();
+    assert_eq!(keys, entries, "every page's entries");
 }
 
 /// #977's E2: a `.zsnap` folds a snapshot's entries into rows, each on its

@@ -3,8 +3,9 @@
 //!
 //! Two disciplines, one `session.get`: the fan-in's (target `All`,
 //! consolidation `None`, every reply attributed by its key) and spec §4.2's
-//! state GET (target `All`, consolidation `Latest`, S4), which a late
-//! joiner seeds from (0.26; #614, FL4).
+//! state GET (target `All`, consolidation `None` since core 0.99, S4),
+//! which a late joiner seeds from (0.26; #614, FL4), each snapshot's page
+//! read as its entries (`reply_samples`; #977's E3).
 
 use std::time::Duration;
 
@@ -383,18 +384,20 @@ pub(crate) async fn disciplined_get(
 }
 
 /// **The** state GET of this crate: spec §4.2's S4, target `All` and
-/// consolidation **`Latest`**, both set explicitly — the GET a late joiner
-/// seeds from after its subscription is declared (0.26), and the only GET
-/// here that consolidates.
+/// consolidation **`None`**, both set explicitly (core 0.99, #977's E3) —
+/// the GET a late joiner seeds from after its subscription is declared
+/// (0.26).
 ///
-/// `Latest` keeps, per key, the reply with the greatest timestamp, ranks an
-/// unstamped one lowest, and delivers at the GET's completion (§4.1). That
-/// is the whole reason it is not [`disciplined_get`]: a fan-out under
-/// the fan-in discipline wants every reply, a state read wants each key's newest.
-/// One selector over several owners is still "addressed to the owner's
-/// keys" (0.26): each key it matches has one owner (P3), so `Latest`
-/// consolidates each key over that owner's answers; a foreign key is
-/// outside S4 and answered by whatever holds it.
+/// An owner answers it per collection: a collection read with the
+/// collection's snapshot, in pages on its snapshot key, a member read with
+/// each member's, a per-key resource with a reply per key (core §4.2).
+/// `Latest` would keep one page of a snapshot and hold every reply until
+/// the final ("Why `None`"), so every reply is delivered as it arrives,
+/// and the caller merges them per key: each page read as its entries
+/// ([`reply_samples`]), each key's newer kept by the owner's in-band stamp
+/// (observer §4.1). One selector over several owners is still "addressed
+/// to the owner's keys" (0.26): each key it matches has one owner (P3); a
+/// foreign key is outside S4 and answered by whatever holds it.
 ///
 /// Attribution is unchanged: each reply is drained by its own key.
 pub(crate) async fn state_get(
@@ -402,7 +405,61 @@ pub(crate) async fn state_get(
     selector: &str,
     opts: &GetOpts,
 ) -> Result<zenoh::handlers::FifoChannelHandler<zenoh::query::Reply>> {
-    issue(session, selector, opts, ConsolidationMode::Latest).await
+    issue(session, selector, opts, ConsolidationMode::None).await
+}
+
+/// A state GET's reply as the per-key replies it stands for (core §4.2,
+/// "What a profile reads"; #977's E3): a snapshot's page its entries, each
+/// on its member's key, a live entry a put of the bytes its mutation put
+/// and a tombstone a delete whose attachment is its envelope; a page whose
+/// body is refused, and every other reply, as it came, so a reader of
+/// mutations shows a refused one undecodable.
+/// No entry carries a Zenoh timestamp: a snapshot carries none.
+pub(crate) fn reply_samples(sample: &zenoh::sample::Sample) -> Vec<zenoh::sample::Sample> {
+    reply_samples_in(sample, None)
+}
+
+/// [`reply_samples`] for a reader that ages what it reads (`freshness.v2`
+/// §2.6, text 0.6): a live entry with a confirmation whose time is known (1
+/// at the snapshot's time, 2 at its conf; core §7.5) carries it as its
+/// Zenoh timestamp, counted from the deployment epoch, the catalog's when
+/// the reader holds one ([`zenkey_model::catalog::EPOCH_WITHOUT_CATALOG`]
+/// otherwise), so the reader ages the entry from it as it aged a reply
+/// from its stamp. Its id names the owner's clock, which built the
+/// snapshot, by the owner's address ([`owner_clock`]): a snapshot carries
+/// no zid. Every other entry carries none.
+pub(crate) fn reply_samples_aged(
+    sample: &zenoh::sample::Sample,
+    epoch: i64,
+) -> Vec<zenoh::sample::Sample> {
+    reply_samples_in(sample, Some(epoch))
+}
+
+fn reply_samples_in(
+    sample: &zenoh::sample::Sample,
+    epoch: Option<i64>,
+) -> Vec<zenoh::sample::Sample> {
+    if sample.kind() == zenoh::sample::SampleKind::Delete {
+        return vec![sample.clone()];
+    }
+    let encoding = sample.encoding().to_string();
+    let bytes = sample.payload().to_bytes();
+    let key = sample.key_expr().as_str();
+    match (
+        crate::model::inband::page(key, Some(&encoding), &bytes),
+        epoch,
+    ) {
+        (Some(Ok(page)), Some(e)) => zenkey::inband::replies_confirmed(sample, &page, e),
+        (Some(Ok(page)), None) => zenkey::inband::replies(sample, &page),
+        _ => vec![sample.clone()],
+    }
+}
+
+/// The id a snapshot's confirmations are stamped under
+/// (`reply_samples_aged`): the owner's clock, named by its address
+/// (`zenkey::inband::owner_clock`).
+pub fn owner_clock(key: &str) -> zenoh::time::TimestampId {
+    zenkey::inband::owner_clock(key)
 }
 
 /// The one `session.get` behind [`disciplined_get`] and [`state_get`]:

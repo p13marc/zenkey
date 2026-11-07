@@ -38,9 +38,10 @@ pub fn entries(values: Vec<(SampleView, Replier)>) -> Vec<(SampleView, Replier)>
 }
 
 /// Fold every reply to one kept value per key, last-writer-wins, and count
-/// what lost. Each GET is consolidated `Latest` by zenoh already (S4); this
-/// folds across selectors that overlap, and a snapshot's entries
-/// ([`entries`]) beside per-key replies.
+/// what lost. Each GET is consolidated `None` (S4; #977's E3), so this folds
+/// one GET's replies per key, two instances' among them, across selectors
+/// that overlap, and a snapshot's entries ([`entries`]) beside per-key
+/// replies.
 ///
 /// A newer stamp wins; a stamped value beats an unstamped one; between two
 /// unstamped values, or two carrying the same stamp, the first seen is kept

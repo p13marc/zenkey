@@ -460,14 +460,21 @@ impl Render for StateReport {
 
     fn notes(&self) -> Vec<Note> {
         let mut notes = Vec::new();
-        if self.rows.is_empty() && !self.snapshots.is_empty() {
+        if self.rows.is_empty() && self.snapshots.iter().any(|s| s.complete) {
             notes.push(
                 Note::caveat(
-                    "the owner answered with a snapshot that lists no member here: no value \
-                     as of its asof, and exit 2, as silence is, until #977's E3 says what an \
-                     empty snapshot is",
+                    "the owner answered with a snapshot that lists no member here: its word \
+                     that there was no value as of its asof, an answer, never silence",
                 )
-                .cite("spec §7.5"),
+                .cite("spec §4.2"),
+            );
+        } else if self.rows.is_empty() && !self.snapshots.is_empty() {
+            notes.push(
+                Note::caveat(
+                    "the owner's snapshot arrived incomplete and lists no member here: a page \
+                     was lost, so this is no verdict",
+                )
+                .cite("spec §4.2"),
             );
         } else if self.rows.is_empty() {
             notes.push(

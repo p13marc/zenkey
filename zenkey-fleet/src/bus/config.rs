@@ -14,7 +14,7 @@
 //!    deployment's word stands for them (§2.19, R7);
 //! 3. one S4 GET (core §4.2) of the owner's `config.v1/state/**`, or of
 //!    `state/status` alone (`--status`), at the window's end: target `All`,
-//!    consolidation `Latest`, the owner alone answering. A reply on a
+//!    consolidation `None`, the owner alone answering. A reply on a
 //!    wildcard key is no member (R6);
 //! 4. for a change asked about by its token, a replay of the change events
 //!    (core §2.6): a wildcard GET a union storage answers, when the
@@ -190,7 +190,8 @@ fn config_key(key: &str, kind: KindToken) -> Option<(Addr, Vec<String>)> {
     }
 }
 
-/// One GET (core S4): target `All`, consolidation `Latest`, each reply filed
+/// One GET (core S4): target `All`, consolidation `None`, a snapshot's page
+/// read as its entries, each reply filed
 /// by the owner its key names. A reply on a key that is not a `config.v1`
 /// state key, or on a wildcard key, is no member and is left out (R6).
 pub async fn get(
@@ -201,7 +202,7 @@ pub async fn get(
     let replies = session
         .get(selector)
         .target(QueryTarget::All)
-        .consolidation(ConsolidationMode::Latest)
+        .consolidation(ConsolidationMode::None)
         .timeout(timeout)
         .await
         .map_err(|e| format!("GET {selector}: {e}"))?;
@@ -211,11 +212,19 @@ pub async fn get(
         complete: true,
         services: BTreeMap::new(),
     };
+    // A snapshot's page is its entries (core §4.2; #977's E3).
+    let mut samples = Vec::new();
     while let Ok(reply) = replies.recv_async().await {
         let Ok(sample) = reply.result() else {
             out.complete = false;
             continue;
         };
+        samples.extend(crate::bus::query::reply_samples_aged(
+            sample,
+            zenkey_model::catalog::EPOCH_WITHOUT_CATALOG,
+        ));
+    }
+    for sample in &samples {
         let key = sample.key_expr().as_str();
         if key.contains('*') {
             continue;
@@ -603,7 +612,7 @@ pub async fn find_v2(
 }
 
 /// One S4 GET per `config.v2` owner of its record (v2 §2.3): target
-/// `All`, consolidation `Latest`, each reply read by its owner's contract
+/// `All`, consolidation `None`, a snapshot's entry as its reply, each read by its owner's contract
 /// under CH's tag. A reply on another key, or a wildcard key, is no member
 /// (R6). The GETs run at once.
 pub async fn get_records(
@@ -621,7 +630,7 @@ pub async fn get_records(
         let replies = session
             .get(&key)
             .target(QueryTarget::All)
-            .consolidation(ConsolidationMode::Latest)
+            .consolidation(ConsolidationMode::None)
             .timeout(timeout)
             .await
             .map_err(|e| format!("GET {key}: {e}"))?;
@@ -634,11 +643,19 @@ pub async fn get_records(
         services: BTreeMap::new(),
     };
     for (addr, target, key, replies) in asks {
+        // A snapshot's entry stands for its reply (core §4.2; #977's E3).
+        let mut samples = Vec::new();
         while let Ok(reply) = replies.recv_async().await {
             let Ok(sample) = reply.result() else {
                 out.complete = false;
                 continue;
             };
+            samples.extend(crate::bus::query::reply_samples_aged(
+                sample,
+                zenkey_model::catalog::EPOCH_WITHOUT_CATALOG,
+            ));
+        }
+        for sample in &samples {
             if sample.key_expr().as_str() != key {
                 continue;
             }

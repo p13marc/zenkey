@@ -10,7 +10,7 @@
 //! bus is recorded with why, never dropped.
 //!
 //! **The answer** is read the way the key's kind is read (§1.3): a state
-//! key by the owner's S4 GET (target `All`, consolidation `Latest`); a
+//! key by the owner's S4 GET (target `All`, consolidation `None`); a
 //! stream key by a subscription over the window; an event key by a GET a
 //! union storage may answer (§2.6). An operation is not called: `why` acts
 //! on nothing (tooling guide §4), so that answer is not asked.
@@ -289,8 +289,10 @@ fn reply_of(sample: &zenoh::sample::Sample) -> KeyReply {
     }
 }
 
-/// S4's GET on the owner's key: target `All`, consolidation `Latest`, both
-/// set explicitly.
+/// S4's GET on the owner's key: target `All`, consolidation `None`, both
+/// set explicitly (core 0.99, #977's E3). The owner answers a member read
+/// with the member's snapshot on its key, read as the reply its entry
+/// stands for; a snapshot of no entry brings none.
 async fn state_answer(
     session: &Session,
     key: &str,
@@ -299,7 +301,7 @@ async fn state_answer(
     let replies = session
         .get(key)
         .target(QueryTarget::All)
-        .consolidation(ConsolidationMode::Latest)
+        .consolidation(ConsolidationMode::None)
         .timeout(timeout)
         .await
         .map_err(|e| format!("GET {key}: {e}"))?;
@@ -307,7 +309,12 @@ async fn state_answer(
     let mut complete = true;
     while let Ok(reply) = replies.recv_async().await {
         match reply.result() {
-            Ok(sample) if sample.key_expr().as_str() == key => out.push(reply_of(sample)),
+            Ok(sample) if sample.key_expr().as_str() == key => out.extend(
+                crate::bus::query::reply_samples(sample)
+                    .iter()
+                    .filter(|s| s.key_expr().as_str() == key)
+                    .map(reply_of),
+            ),
             // R6: a reply on a key this GET did not name is discarded.
             Ok(_) => {}
             Err(_) => complete = false,

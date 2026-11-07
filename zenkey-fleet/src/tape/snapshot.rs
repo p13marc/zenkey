@@ -185,8 +185,9 @@ pub struct Taken {
     pub incomplete: Vec<String>,
 }
 
-/// One S4 GET's replies (spec §4.2): target `All`, consolidation `Latest`,
-/// a reply on a non-concrete key discarded by rule (R6).
+/// One S4 GET's replies (spec §4.2): target `All`, consolidation `None`,
+/// every page of a snapshot among them, a reply on a non-concrete key
+/// discarded by rule (R6).
 struct StateReplies {
     values: Vec<(
         crate::bus::monitor::SampleView,
@@ -207,7 +208,7 @@ async fn state_get(
     let replies = session
         .get(selector)
         .target(QueryTarget::All)
-        .consolidation(ConsolidationMode::Latest)
+        .consolidation(ConsolidationMode::None)
         .timeout(timeout)
         .await
         .map_err(|e| Error::bus("snapshot", selector, e))?;
@@ -238,12 +239,12 @@ async fn state_get(
 /// Collect a snapshot of the owners' current state (tooling guide §5; spec §4.2
 /// S4).
 ///
-/// One state GET per selector — target `All`, consolidation `Latest`, R6's
+/// One state GET per selector — target `All`, consolidation `None`, R6's
 /// discard — all at once, on `session` (in no namespace: the selectors are
 /// wire keys and rows keep them whole). A snapshot's page is its entries,
 /// each the per-key reply it stands for ([`crate::model::snapshot::entries`],
-/// #977's E2; under `Latest` a snapshot of several pages brings its last
-/// page's alone). The replies fold per key across
+/// #977's E2), every page of it arriving under `None` (E3). The replies
+/// fold per key across
 /// selectors ([`crate::model::snapshot::fold_latest`]), and each kept value
 /// becomes a row through `lens` ([`crate::model::snapshot::row_of`]): its
 /// identity, its conformance to its declared type, whose clock stamped it,

@@ -10,18 +10,19 @@
 //!   the subscription reaches it is lost, and a lost delete leaves a
 //!   deleted key standing;
 //! - **the state leg is S4's GET** on the watched selector, target `All`
-//!   and consolidation `Latest` set explicitly
+//!   and consolidation `None` set explicitly
 //!   (`bus::query::state_get`, the crate's one state GET): addressed to the owners' keys,
 //!   since each key it matches has one owner (P3), and answered for a
 //!   foreign key by whatever holds it. A storage on an owner's state is a
 //!   deployment fault (S4), never this seed's source. A snapshot's page
-//!   (core §7.5's form 7; #977's E2) is its entries, each the per-key
-//!   reply it stands for, merged as replies are, and the leg says which
-//!   snapshots it heard and whether each is complete
-//!   ([`SeedLeg::snapshots`]); under `Latest` a snapshot of several pages
-//!   arrives as its last page, held incomplete. No omission is applied:
-//!   that is E3's, under `None`. A page heard live is no owner's answer:
-//!   delivered undecodable, it moves nothing;
+//!   (core §7.5's form 7) is its entries, each the per-key reply it stands
+//!   for, merged as replies are, and the leg says which snapshots it heard
+//!   and whether each is complete ([`SeedLeg::snapshots`]). This seed holds
+//!   no contract, so it cannot map a snapshot's index to a template, and
+//!   applies no omission rule (observer §4.1, "Without the contract";
+//!   #977's E3): a key a complete snapshot left out stays as it was held,
+//!   possibly stale. A page heard live is no owner's answer: delivered
+//!   undecodable, it moves nothing;
 //! - **the history leg** asks the `@adv` caches of the advanced publishers
 //!   present (`<selector>/@adv/**`, spec §2.5), for resources that declare
 //!   `history` — streams among them, which no state GET reaches. Under a

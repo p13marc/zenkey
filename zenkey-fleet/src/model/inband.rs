@@ -238,16 +238,19 @@ pub fn payload<'a>(key: &str, encoding: Option<&str>, bytes: &'a [u8]) -> Payloa
 
 /// A put's bytes on `key` under `encoding` read as a snapshot's page (core
 /// §7.5's form 7; #977's E2): `None` for any other sample, else the page
-/// or its body's first refusal.
+/// or its body's first refusal. An envelope `Page::read` refuses, which
+/// `payload` read as a snapshot's, is no page here either: its reader
+/// refuses it as a mutation ([`SNAPSHOT_AS_MUTATION`]), never panics on
+/// network input (review-bot on #1078).
 pub fn page(key: &str, encoding: Option<&str>, bytes: &[u8]) -> Option<Result<Page, BodyRefusal>> {
     match payload(key, encoding, bytes) {
         Payload::Snapshot { body, header, tag } => {
             let envelope = wire::Envelope::snapshot(tag, header.run, header.seq, body);
-            Some(Page::read(&envelope).map_err(|r| match r {
-                zenkey_model::collection::PageRefusal::Body(b) => b,
-                // A snapshot's envelope, as `payload` read it.
-                other => unreachable!("a snapshot's envelope: {other}"),
-            }))
+            match Page::read(&envelope) {
+                Ok(p) => Some(Ok(p)),
+                Err(zenkey_model::collection::PageRefusal::Body(b)) => Some(Err(b)),
+                Err(_) => None,
+            }
         }
         _ => None,
     }
