@@ -44,12 +44,15 @@ they land:
 ## Components
 
 zk2's four libraries, `zenkey-model`, `zenkey`, `zenkey-build` and
-`zenkey-fleet`, go to crates.io from `main` at 0.20.0
-([#929](https://git.marcpardo.eu/marcpardo/zenkey/issues/929)). Each
-crate's README says what 0.20 does not promise: the wire and the
-authoring format are still moving (epic
-[#975](https://git.marcpardo.eu/marcpardo/zenkey/issues/975)), and a 0.21
-may break them. crates.io's `zenkey` and `zenkey-build` 0.11.x and
+`zenkey-fleet`, go to crates.io from `main` at one version: 0.20.0 first
+([#929](https://git.marcpardo.eu/marcpardo/zenkey/issues/929)), then
+0.21.0. 0.21's wire breaks 0.20's: a state GET is answered by snapshot
+([#977](https://git.marcpardo.eu/marcpardo/zenkey/issues/977)), and a
+0.20 service and a 0.21 one do not understand each other's state GETs.
+Each crate's README says what changed since 0.20 and what 0.21 does not
+promise: the wire and the authoring format are still moving
+(epic [#975](https://git.marcpardo.eu/marcpardo/zenkey/issues/975)), and
+a 0.22 may break them. crates.io's `zenkey` and `zenkey-build` 0.11.x and
 `zenkey-fleet` 0.18.x are v1's ([below](#v1)).
 
 | Part | What it is |
@@ -80,8 +83,8 @@ subsystem invents its own layout, none of those can be written down.
 ## Adopting zk2
 
 An application adopts zk2 through a contract, `zenkey-build` and the
-runtime's `ServiceBuilder`: `zenkey = "0.20"` among its dependencies and
-`zenkey-build = "0.20"` among its build dependencies, or both from `main`.
+runtime's `ServiceBuilder`: `zenkey = "0.21"` among its dependencies and
+`zenkey-build = "0.21"` among its build dependencies, or both from `main`.
 
 1. **A contract** per interface major, in the authoring format
    ([`examples/zk2/README.md`](examples/zk2/README.md)), checked by the
@@ -138,8 +141,8 @@ says what is generated. A team on v1 starts from
 
 ## Status
 
-zk2 is built on `main`, and its libraries go to crates.io at 0.20.0
-([#929](https://git.marcpardo.eu/marcpardo/zenkey/issues/929)). Its design record is in
+zk2 is built on `main`, and its libraries go to crates.io from it, 0.21.0
+the latest ([#929](https://git.marcpardo.eu/marcpardo/zenkey/issues/929)). Its design record is in
 [`docs/zk2/`](docs/zk2/README.md) (epic
 [#585](https://git.marcpardo.eu/marcpardo/zenkey/issues/585)). No adopter
 runs it yet: ZenSight, tcgui and zenoh-modem are mapped onto it in

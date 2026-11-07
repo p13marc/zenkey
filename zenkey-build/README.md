@@ -24,10 +24,10 @@ contracts it:
 
 ```toml
 [dependencies]
-zenkey = "0.20"
+zenkey = "0.21"
 
 [build-dependencies]
-zenkey-build = "0.20"
+zenkey-build = "0.21"
 ```
 
 Take `zenkey` and `zenkey-build` at the same 0.x: the generated code names
@@ -57,20 +57,42 @@ example). `Config::contract_crate(true)` puts every runtime item behind a
 `zenoh` feature, for a crate of contracts whose default build has no
 zenoh dependency (`zenkey` with `default-features = false`).
 
-## What 0.20 does not promise
+## Changes since 0.20
 
-0.20 is the first zk2 release. Two things under it are still moving, and
-a 0.21 may break either:
+- **The wire breaks 0.20's,** in the runtime the generated code runs on:
+  a state GET is answered by snapshot and read under consolidation
+  `None` (core 0.100,
+  [#977](https://git.marcpardo.eu/marcpardo/zenkey/issues/977)), and a
+  call is read in its forms alone (core 0.99,
+  [#985](https://git.marcpardo.eu/marcpardo/zenkey/issues/985)'s C4d). A
+  0.20 service and a 0.21 one do not understand each other's state GETs,
+  so take `zenkey` and `zenkey-build` at 0.21 together.
+- **This crate's API and the code it generates did not change.** What
+  the generated code calls did: `OpError::envelope()` gives way to
+  `OpError::{message, cause, detail}`, `Outcome::Malformed` is gone, and a
+  generated `Consumer`'s complete snapshot of no entry is
+  `StateGet::Answered` with no key, never `Silent`. [`zenkey`'s
+  README](https://crates.io/crates/zenkey), "Changes since 0.20", has the
+  rest.
+- **The authoring format and the canonical form did not move:** a
+  contract that builds under 0.20 builds under 0.21, at the same
+  fingerprint.
+
+## What 0.21 does not promise
+
+zk2c, the bandwidth-first wire (epic
+[#975](https://git.marcpardo.eu/marcpardo/zenkey/issues/975)), is not
+finished. Two things under 0.21 are still moving, and a 0.22 may break
+either:
 
 - **The authoring format** and the canonical form a fingerprint is taken
-  over. A contract that builds under 0.20 may need editing under
-  0.21, its fingerprint may change, and so may the generated API.
-- **The wire.** zk2c, the bandwidth-first wire (epic
-  [#975](https://git.marcpardo.eu/marcpardo/zenkey/issues/975)), is being
-  specified: one snapshot per collection
-  ([#977](https://git.marcpardo.eu/marcpardo/zenkey/issues/977)).
+  over. A contract that builds under 0.21 may need editing under
+  0.22, its fingerprint may change, and so may the generated API.
+- **The wire.** An event's key is to end in its run and seq in place of
+  a ULID ([#980](https://git.marcpardo.eu/marcpardo/zenkey/issues/980)'s
+  C2), and the rest of #975 follows.
 
-A 0.20.x patch release changes neither.
+A 0.21.x patch release changes neither.
 
 **Zenoh's unstable API:** none. This crate depends on no zenoh crate but
 `zenoh-keyexpr`, through `zenkey-model`.
@@ -86,6 +108,6 @@ A 0.20.x patch release changes neither.
   The GitHub repository is a mirror.
 
 zenkey-build 0.11.x on crates.io is v1's registry codegen, maintained on
-the `v1` branch. 0.20 shares its name and nothing else.
+the `v1` branch. 0.20 and later share its name and nothing else.
 
 MIT.
