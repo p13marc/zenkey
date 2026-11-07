@@ -320,7 +320,15 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   a per-key resource or a template with a leading parameter, any revision's);
   `seed_snapshot` runs `seed/snapshot.json` (45 cases, a case's
   `revisions`/`descriptor` mapping coll by the descriptor's revision),
-  `link_v2_lints` reads a case's deployment and windows.
+  `link_v2_lints` reads a case's deployment and windows. E4 (the old read
+  path removed): `collection::per_key_in`/`per_key` (core §4.2's per-key
+  resources: a `freshness.v1` horizon, a desired resource, a metric, a
+  governed interface; `link::tombstone_only` reads it), `stray_reply_del`
+  (a `reply_del` on a member of a collection the revision answers by
+  snapshot, `false` where it cannot judge) and `STRAY_REPLY_DEL`, what a
+  reader refuses one as: `Refusal::Reserved(Form::Delete)`, token `form`,
+  as a mutation's reader refuses a page; the text names no reading for
+  one.
   `telemetry.v2` (#983 T1, text 0.1, draft since T4): `telemetry::PROFILE_V2`/`uses_v2`, `SERIES`,
   `VOCABULARY_V2` (W105 reads a later major's own vocabulary, `contract::vocabulary`);
   `Measure::Counter { value, width }` (`Measure::counter` for v1's 64 bits), `pair`'s serial window

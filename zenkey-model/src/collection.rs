@@ -1086,6 +1086,94 @@ pub fn is_member(resource: &Resource, key: &str) -> bool {
     })
 }
 
+/// Whether a resource of `token`, with resolved `annotations`, in a
+/// revision whose `uses` lists the profiles `uses` says, is a **per-key
+/// resource** (core §4.2, "A per-key resource"): a state §4.3's table
+/// lists, read by a profile for the time its replies carry.
+///
+/// - a state that declares `freshness.ttl_s` above 0, of a revision that
+///   does not use `freshness.v2`;
+/// - a `desired.v1` desired resource: its annotations hold
+///   `desired.target_param`;
+/// - a metric resource of `telemetry.v1` or `telemetry.v2` (a key of its
+///   vocabulary), of a revision that uses one;
+/// - every state of a revision that uses `redundancy.v1`.
+///
+/// Its owner answers each member a GET reaches with a reply of its own,
+/// and one it deleted within the window with a `reply_del` (S2, S3). Every
+/// other state is a collection its owner answers by snapshot.
+#[must_use]
+pub fn per_key_in(
+    token: KindToken,
+    annotations: &std::collections::BTreeMap<String, serde_json::Value>,
+    uses: impl Fn(&str) -> bool,
+) -> bool {
+    use crate::authoring::Kind;
+    if !matches!(token, KindToken::State | KindToken::ExplicitState) {
+        return false;
+    }
+    let horizon = crate::freshness::horizon(Kind::State, annotations)
+        .ttl()
+        .is_some()
+        && !uses(crate::freshness::PROFILE_V2);
+    let desired = annotations.contains_key(crate::desired::TARGET_PARAM);
+    let metric = (uses(crate::telemetry::PROFILE) || uses(crate::telemetry::PROFILE_V2))
+        && crate::telemetry::VOCABULARY
+            .iter()
+            .any(|k| annotations.contains_key(&format!("telemetry.{k}")));
+    let governed = uses(crate::redundancy::PROFILE);
+    horizon || desired || metric || governed
+}
+
+/// [`per_key_in`] of `resource`, a resource of `contract`.
+#[must_use]
+pub fn per_key(contract: &Contract, resource: &Resource) -> bool {
+    per_key_in(resource.token, &resource.annotations, |p| {
+        contract.uses.iter().any(|u| u.to_string() == p)
+    })
+}
+
+/// What a state GET's reader refuses a **stray `reply_del`** as
+/// ([`stray_reply_del`]; #977's E4): its form, `form`, as a reader of
+/// mutations refuses a snapshot's page. An owner answers a member of a
+/// collection by snapshot, one it deleted within the window as a
+/// tombstone, and sends a `reply_del` only for a per-key resource's member
+/// (core S2, S3). So a `reply_del` on a collection's member is no owner's
+/// answer: the reader counts it undecodable, and never merges it as a
+/// deletion. The text names no reading for one; this is the reference's.
+pub const STRAY_REPLY_DEL: wire::Refusal = wire::Refusal::Reserved(Form::Delete);
+
+/// Whether a `reply_del` heard on `key`, a state GET's reply, is a stray
+/// one, read with `contract`, the revision of the key's interface the
+/// reader holds: `key` is a member's key of a state of `contract`, and no
+/// state of `contract` it is a member of is a per-key resource
+/// ([`per_key`]). Its reader refuses it as [`STRAY_REPLY_DEL`]. `false`
+/// for a per-key resource's member, and for a key of another interface or
+/// of no state of `contract`, which `contract` cannot judge. A key with a
+/// namespace in front is read as [`is_member`] reads one.
+#[must_use]
+pub fn stray_reply_del(contract: &Contract, key: &str) -> bool {
+    let Some(ZkKey::Data {
+        iface,
+        kind,
+        resource,
+        ..
+    }) = data_key_of(key)
+    else {
+        return false;
+    };
+    if iface != contract.iface {
+        return false;
+    }
+    let refs: Vec<&str> = resource.iter().map(String::as_str).collect();
+    let mut of = contract
+        .resources
+        .iter()
+        .filter(|r| r.token == kind && r.template.matches(&refs).is_some())
+        .peekable();
+    of.peek().is_some() && of.all(|r| !per_key(contract, r))
+}
+
 /// The collection read of a GET on `selector`, a key expression over one
 /// resource's members (core §4.2, "A collection read"): its snapshot key
 /// followed by `/**`, where every parameter from its template's first on
@@ -1121,12 +1209,20 @@ pub fn collection_read(selector: &str, template: &Template) -> Option<String> {
 /// `zk2` chunk from which the grammar parses a data key, a namespace in
 /// front skipped (as [`is_member`] reads one).
 fn data_of(key: &str) -> Option<(KindToken, Vec<String>)> {
+    match data_key_of(key)? {
+        ZkKey::Data { kind, resource, .. } => Some((kind, resource)),
+        _ => None,
+    }
+}
+
+/// [`data_of`]'s data key whole.
+fn data_key_of(key: &str) -> Option<ZkKey> {
     let mut rest = Some(key);
     while let Some(k) = rest {
         if k.starts_with("zk2/")
-            && let Ok(ZkKey::Data { kind, resource, .. }) = parse(k)
+            && let Ok(d @ ZkKey::Data { .. }) = parse(k)
         {
-            return Some((kind, resource));
+            return Some(d);
         }
         rest = k.split_once('/').map(|(_, r)| r);
     }
@@ -1413,6 +1509,66 @@ type = { raw = "text/plain" }
             "another kind"
         );
         assert!(is_member(by("a"), "zk2/h/s/c.v1/state/a"));
+    }
+
+    /// #977's E4: a `reply_del` is an owner's answer only on a per-key
+    /// resource's member (core S2, S3): here `fresh`, whose horizon is
+    /// `freshness.v1`'s, a state §4.3's table lists. On a member of a
+    /// collection answered by snapshot it is stray; on a key the contract
+    /// holds no state at, or another interface's, the contract cannot
+    /// judge it.
+    #[test]
+    fn a_reply_del_answers_only_a_per_key_resources_member() {
+        let l = crate::contract::load_str(
+            r#"[interface]
+name = "c"
+major = 1
+minor = 0
+uses = ["freshness.v1"]
+
+[resources."b/{x}"]
+kind = "state"
+type = { raw = "text/plain" }
+params = { x = "string" }
+cardinality = 4
+
+[resources.fresh]
+kind = "state"
+type = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 60 }
+
+[resources.s]
+kind = "stream"
+type = { raw = "text/plain" }
+"#,
+            std::path::Path::new("."),
+            None,
+        );
+        let c = l.contract.unwrap_or_else(|| panic!("{}", l.report));
+        let by = |t: &str| {
+            c.resources
+                .iter()
+                .find(|r| r.template.as_str() == t)
+                .unwrap()
+        };
+        assert!(per_key(&c, by("fresh")), "a freshness.v1 horizon");
+        assert!(!per_key(&c, by("b/{x}")), "answered by snapshot");
+        assert!(!per_key(&c, by("s")), "a stream is no state");
+        assert!(stray_reply_del(&c, "zk2/h/s/c.v1/state/b/one"));
+        assert!(
+            stray_reply_del(&c, "prod/zk2/h/s/c.v1/state/b/one"),
+            "namespaced"
+        );
+        assert!(!stray_reply_del(&c, "zk2/h/s/c.v1/state/fresh"));
+        assert!(
+            !stray_reply_del(&c, "zk2/h/s/c.v1/state/b"),
+            "no member's key"
+        );
+        assert!(
+            !stray_reply_del(&c, "zk2/h/s/d.v1/state/b/one"),
+            "another interface"
+        );
+        assert_eq!(STRAY_REPLY_DEL.token(), "form");
     }
 
     #[test]
