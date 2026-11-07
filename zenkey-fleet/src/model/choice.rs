@@ -98,14 +98,19 @@ impl Step {
     }
 
     /// How a key's identity says it was chosen: by tag for steps 2 and 3,
-    /// nothing for step 1, the deployment's word.
+    /// `any` for one of several step 1 left with no record read, so a guess
+    /// is never read as the deployment's word, and nothing for step 1's one.
     pub fn said(self) -> Option<ChosenByTag> {
         match self {
             Step::Tag | Step::Latest => Some(ChosenByTag {
                 by: ByTag::Tag,
                 step: self.number(),
             }),
-            Step::Deployment | Step::Any => None,
+            Step::Any => Some(ChosenByTag {
+                by: ByTag::Any,
+                step: 1,
+            }),
+            Step::Deployment => None,
         }
     }
 }
@@ -239,17 +244,15 @@ pub fn choose(
         // Any of step 1's: the catalog's latest, else the first by
         // fingerprint.
         Heard::Nothing => {
-            let pick = left
-                .iter()
-                .max_by(|(a, _), (b, _)| {
-                    order(a)
-                        .cmp(&order(b))
-                        .then_with(|| b.fingerprint().cmp(a.fingerprint()))
-                })
-                .map(|(r, _)| Arc::clone(r))
-                .expect("several left");
+            let Some((pick, _)) = left.iter().max_by(|(a, _), (b, _)| {
+                order(a)
+                    .cmp(&order(b))
+                    .then_with(|| b.fingerprint().cmp(a.fingerprint()))
+            }) else {
+                return Choice::Ambiguous(Vec::new());
+            };
             return Choice::Chosen {
-                revision: pick,
+                revision: Arc::clone(pick),
                 step: Step::Any,
             };
         }
@@ -269,15 +272,18 @@ pub fn choose(
         }
     }
     // Step 3: the catalog's latest of several that read the sample alike.
-    let first = &left[0].1.alike;
-    let alike = left.iter().all(|(_, g)| first.with(&g.alike));
+    // Two at one index, as unrelated catalogs given together can place
+    // them, are ordered by nothing: ambiguous, never the last one seen.
+    let Some((_, first)) = left.first() else {
+        return Choice::Ambiguous(Vec::new());
+    };
+    let alike = left.iter().all(|(_, g)| first.alike.with(&g.alike));
     let ordered: Option<Vec<u16>> = left.iter().map(|(r, _)| order(r)).collect();
-    if let (true, Some(at)) = (alike, ordered) {
-        let (i, _) = at
-            .iter()
-            .enumerate()
-            .max_by_key(|(_, at)| **at)
-            .expect("several left");
+    if let (true, Some(at)) = (alike, ordered)
+        && let Some(&latest) = at.iter().max()
+        && at.iter().filter(|i| **i == latest).count() == 1
+        && let Some(i) = at.iter().position(|i| *i == latest)
+    {
         return Choice::Chosen {
             revision: Arc::clone(left[i].0),
             step: Step::Latest,

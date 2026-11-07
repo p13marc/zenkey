@@ -6,6 +6,13 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — review-bot's items on #1088 (#990)
+
+| Before | Now | Notes |
+|---|---|---|
+| step 3 of the revision of a key, two revisions at one catalog index (two unrelated catalogs given together): the last one seen | `ambiguous` | observer §7.5: nothing orders them |
+| a key read with no record (its identity alone, a delete), several revisions left by step 1: no `identity.chosen` | `identity.chosen` `{"by": "any", "step": 1}` | a guess among several, never read as the deployment's word |
+
 ## Unreleased (`main`, zk2) — the old read path removed (#977 E4)
 
 An owner answers a collection's member by snapshot, one it deleted within
