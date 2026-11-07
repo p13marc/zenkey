@@ -4,6 +4,35 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.10 — 2026-11-07: editorial: the scenarios read a GET's answer as snapshots, no rule changed (#977, #609)
+
+Core 0.100 (#977's E3) answers a state GET by snapshot, whose entries
+carry no Zenoh timestamp. zk2py round 105's F-503 found two of these
+scenarios' rows still expecting the owner's stamp on a GET's reply. This
+version re-keys them, and two rows beside them, written against core
+0.100.
+
+**Changed: the scenarios.**
+- **§1, Expected 1 (F-503):** T's GETs answer the status in a snapshot
+  under the run the owner's descriptor states, its entry with its
+  confirmation. It said "stamped by the owner's session".
+- **§4, Expected 4 (F-503):** G's answer lists the status under the run
+  the owner's descriptor states, its times from the owner's clock, ahead,
+  which no router reads. It said "under the owner's stamp".
+- **§2, Expected 1 and 3:** G's entry carries the status's confirmation,
+  and goes stale when that is more than 60.5 s old. They said "stamp".
+- **§3, Expected 4:** `checks/net` is a tombstone in G's answer. It said
+  a `reply_del`, which core 0.101 calls a stray one for a collection's
+  member.
+
+**The reference** asserts each entry's confirmation on the owner's
+clock already (`zenkey/tests/profile_health.rs`). That the snapshot is
+under the descriptor's run is its code half (#977).
+
+**Deliberately not changed.**
+- **No rule.** `v1.md` moves only its header: its version, and core
+  0.100 as what it is written against.
+
 ## 0.9 — 2026-11-02: a clock ahead holds no status, and the clock question reads the heartbeat's time (#978)
 
 Core 0.88 (#978's F6) narrows its clock guard to the state writes that

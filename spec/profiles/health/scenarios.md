@@ -69,8 +69,10 @@ reference tool runs them (`zenctl/tests/live_zk2.rs`, `zenctl health`).
 5. The owner closes. S listens 3 s more.
 
 **Expected.**
-1. Both of T's GETs answer the status: `UNSPECIFIED`, `"starting"`,
-   stamped by the owner's session. It was put before the tokens (§2.3).
+1. Both of T's GETs answer the status: `UNSPECIFIED`, `"starting"`, in a
+   snapshot under the run the owner's descriptor states (core §3.3), its
+   entry with its confirmation (`freshness.v2` §2.4). It was put before
+   the tokens (§2.3).
 2. `lab/quiet` holds an instance token and no `alive/health.v1/…` or
    `alive/freshness.v2/…` token. Its descriptor lists `health.v1` with
    `"token": false`, and T's GET at the instance token answers its status
@@ -96,12 +98,12 @@ reference tool runs them (`zenctl/tests/live_zk2.rs`, `zenctl health`).
 
 **Expected.**
 1. Both: **healthy**, `ok`, past the horizon. S has received no put of
-   the status since step 1's. G's reply is stamped with the status's last
+   the status since step 1's. G's entry for the status carries its
    confirmation (`freshness.v2` §2.4).
 2. S receives heartbeats, each with the status's bit clear, and no put.
 3. Presence: the owner's instance and interface tokens are present.
    S: **stale**, `beyond_horizon`. G: **stale**, `beyond_horizon`, the
-   reply's stamp more than 60.5 s old. Neither
+   entry's confirmation more than 60.5 s old. Neither
    reports the service unhealthy or `FAILED`, and neither reports `OK` as
    current (§2.4, `freshness.v1` §2.11).
 
@@ -122,7 +124,7 @@ reference tool runs them (`zenctl/tests/live_zk2.rs`, `zenctl health`).
 3. S receives `checks/disk` `OK` before the status `OK`. G judges
    **healthy**, `ok`.
 4. S receives a delete of `checks/net`, and no status put for it. G's
-   reply holds the status and `disk`, and a `reply_del` for `checks/net`
+   answer holds the status and `disk`, and `checks/net` as a tombstone
    (core S2, S3). No check is re-put at any point: S receives each check
    only when it changes (§2.3).
 
@@ -183,9 +185,10 @@ conventions say.
    judges **healthy**, `ok`, and the clock question no.
 4. **[moved clock]** S receives no fault: R1 dropped it (v1.md §2.5). The
    status put carries no Zenoh timestamp of the owner's (`freshness.v2`
-   §2.4), so R1 stamps it itself, and S receives it. G's reply holds the
-   status, under the owner's stamp, since a router never drops or
-   re-stamps a reply (core §4.1). That deployment's readers have only the
+   §2.4), so R1 stamps it itself, and S receives it. G's answer lists the
+   status in a snapshot under the run the owner's descriptor states. Its
+   times are from the owner's clock, ahead, which no router reads (core
+   §4.1, §4.3). That deployment's readers have only the
    heartbeat's time unknown to go on, which answers no clock question
    alone (v1.md §2.5).
 
