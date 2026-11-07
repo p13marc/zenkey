@@ -1,8 +1,9 @@
-// The error envelope of a failed zk2 operation call (spec core.md §5.2).
-//
-// A protobuf operation replies with `reply_err`, this message as the
-// payload, and the Zenoh encoding `application/protobuf` with the schema
-// suffix `zk2.core.v1.Error`.
+// History, read by no rule. An earlier version of the zk2 core had a
+// protobuf operation answer a failed call with `reply_err`, this message as
+// the payload, and the Zenoh encoding `application/protobuf` with the schema
+// suffix `zk2.core.v1.Error`. A failed call is now answered in core §7.5's
+// error form (spec core.md §5.2), and a reply error under this encoding is
+// the transport's.
 syntax = "proto3";
 
 package zk2.core.v1;

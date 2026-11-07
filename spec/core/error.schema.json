@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "The error envelope of a failed zk2 operation call (spec core.md §5.2), for operations whose types are JSON Schema types: encoded in the operation's `encoding`, JSON or CBOR.",
+  "$comment": "History, read by no rule. An earlier version of the zk2 core had an operation whose types are JSON Schema types answer a failed call with this envelope, encoded in the operation's `encoding`, JSON or CBOR. A failed call is now answered in core §7.5's error form (spec core.md §5.2), and a reply error under application/json or application/cbor is the transport's.",
   "$defs": {
     "Error": {
       "type": "object",

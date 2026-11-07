@@ -3,6 +3,121 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.99 — 2026-11-07: the bare wire removed (#980, #985)
+
+0.94, #985's C4c, moved every call onto §7.5's forms and kept a MAY. A
+reader could read a call whose `Encoding` is not `zenoh/bytes` as the
+bare wire: 0.92's call with no form, its error in an envelope of JSON,
+CBOR or protobuf. This version is C4d, which removes it, so a call is
+read in the forms alone. `observer.md` moves to text 0.27 beside it
+([`observer-CHANGELOG.md`](observer-CHANGELOG.md)). Four profiles follow,
+none changing a rule: `telemetry.v1` 0.9, `config.v1` 0.12, `config.v2`
+0.3 and `redundancy.v1` 0.10.
+
+**Removed: §5.1's MAY, "The bare wire."** An implementation may no
+longer read a call's sample under another `Encoding` as the bare wire.
+The paragraph that said what an earlier version sent goes with it, and
+so does "None writes the bare wire".
+
+**Changed: §5.1, "Reading a value."** A reply under another `Encoding`
+is no value form, so it is malformed, and an answer all the same. It
+said "unless the caller reads the bare wire". "Only the `Encoding` tells
+them apart" stays: a record sent with no form can parse as one, as
+`vectors.json`'s JSON array of 8 bytes does.
+
+**Stated: §5.1, "The request," a query under another `Encoding`.** An
+owner reads a query under `zenoh/bytes` by §7.5's parse. Under another
+`Encoding` a query carries no request form, and is refused
+`invalid_request`, as a request the parse refuses is.
+- **Why it needs saying.** The MAY let an owner read such a query as a
+  bare request. Nothing said what an owner that did not would do, and a
+  form's bytes under another `Encoding` parse.
+- **No keyword.** "Are refused with `invalid_request`" states it, as it
+  states the refusal of a request the parse refuses.
+
+**Removed: §5.2, "The envelope, on the bare wire," and "Decoding".**
+- **The envelope:** its kind by the operation's types, its three
+  `Encoding`s (`application/json`, `application/cbor`, and
+  `application/protobuf` with the suffix `zk2.core.v1.Error`), its
+  fields, how one is read, and the pointer to its two definitions.
+- **Removed, a MUST: "Decoding".** A reader of the bare wire refused an
+  envelope's encoding, its bytes, its code, its cause and its detail
+  (`encoding`, `decode`, `code`, `cause`, `detail`). Its decoding edges
+  for JSON, CBOR and protobuf go with it.
+- **Removed: "Reading an error"'s bare-wire bullet.** It read a
+  `reply_err` under one of the three as that envelope, and one its
+  decoding refused as the transport's (0.95's F-473).
+- **What a reader does with one now.** A `reply_err` under one of the
+  three is under another `Encoding`, so "Reading an error"'s second MUST
+  reads it as the transport's. That is silence, after which a caller may
+  retry an idempotent call. An older owner's `busy` reads so.
+
+**Kept as history: `core/error.proto` and `core/error.schema.json`,** as
+the memo's C4d row says. No rule reads them. Their header comments and
+`spec/README.md`'s row say so.
+
+**Changed: Appendix C and E.** `errors/` holds `forms.json` alone, its
+tokens §7.5's and `encoding`. The `scenarios/operations.md` row names
+§9's envelope read as the transport's and its request under another
+`Encoding`.
+
+**Decided here, where the memo left it open.**
+- **The owner's half.** The memo's C4d removes "the legacy envelope's
+  read path" and names no owner's rule. A query under another
+  `Encoding` is refused `invalid_request`, never read by its bytes alone.
+  Reading it by its bytes would run a form sent under another
+  `Encoding`, which "Reading a value" refuses on the caller's side.
+- **`errors/cases.json` goes.** It pinned the decoding this version
+  removes. Keeping it would keep a decoder that no rule asks for.
+- **No history in §5.** The text no longer says what an earlier version
+  sent. This entry and 0.94's do. The rules already say what a reader
+  does with an older owner's error.
+
+**Why now.** 0.94 kept the MAY so that a reader in a fleet being moved
+would not read an older owner's `busy` as the transport's. The
+reference's owners and callers have written the forms since 0.94, and
+C4d's code half removes its read path. A deployment that still runs an
+owner from before 0.94 sees that owner's refusals as silence.
+
+**The evidence.**
+- **`scenarios/operations.md` §9.** Step 7 answers `set` and `ping`
+  with the JSON envelope under `application/json`. Both are the
+  transport's: `set` is called once and `ping` twice, and neither is
+  shown as `busy`. Step 8, new, sends a request form's bytes under
+  `application/json`: `invalid_request`, and no handler runs.
+- **`errors/forms.json`:** its description and three notes. Its reads
+  already expected `encoding` under the envelope's three `Encoding`s, so
+  no case changes.
+- **`envelope/vectors.json`:** three notes call the envelope an earlier
+  core's. The parse reads bytes, so no case changes.
+- **`envelope/calls.json`** holds no bare-wire case, and is unchanged.
+- **`errors/cases.json`** is removed.
+- **Checked** by an independent reading of the text, in Python with the
+  standard library: every read of `forms.json`, the three envelopes of
+  `vectors.json` and step 8's bytes read as stated.
+
+**Deliberately not changed.**
+- **§7.5:** the forms, their parse and their refusals.
+- **§5.2's error form,** its codes, and "Transport errors". "A malformed
+  error is the transport's too" holds of every `reply_err`, as 0.95 said
+  it would.
+- **O1 to O7,** and §7.2's predefined-`Encoding` MUST, which excepts a
+  form's sample.
+- **`envelope/carries.json`,** whose `application/json` cases are a
+  state's samples, not a call's.
+- **No section number moves.**
+
+**The index.** [`RULES.md`](RULES.md) lists 249 rules, 1 fewer: §5.2's
+"Decoding" MUST, under the caller and the observer. "Reading an
+error"'s second MUST loses its *Except:*. `scripts/gen-rules-index.py`
+drops their two entries, in `ANTECEDENTS` and `EXCEPTED_BY`. The caller
+class counts 17 and the observer 72. The glossary's "Error" and "Forms
+of a call" lose the bare wire.
+
+**The version.** 0.99 follows 0.98. A 1.0 of the core is the
+maintainer's to name, never a renumber. `scripts/check-spec-status.sh`
+now reads a core version of any major, compared part by part.
+
 ## 0.98 — 2026-11-07: the rule index reads a subject's own role (#609)
 
 zk2py's round 102 read core 0.96 and observer 0.26 cold. Its F-492 is the
