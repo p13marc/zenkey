@@ -258,13 +258,36 @@ async fn capture(s: &zenoh::Session, selector: &str) -> (zenoh::pubsub::Subscrib
     (sub, raw)
 }
 
-/// A raw GET of `selector`, `All` + `Latest` as S4 asks: each reply as it
-/// arrived.
+/// A raw GET of `selector`, `All` + `None` as S4 asks (core 0.99): each
+/// reply as it arrived, a snapshot's page as the per-key replies its
+/// entries stand for ([`zenkey::inband::replies`]; #977's E3).
 async fn raw_get(s: &zenoh::Session, selector: &str) -> Vec<Sample> {
+    raw_pages(s, selector)
+        .await
+        .into_iter()
+        .flat_map(|smp| match zenkey::inband::read(smp.clone()) {
+            zenkey::inband::Read::Snapshot { page: Ok(p), .. } => zenkey::inband::replies(&smp, &p),
+            _ => vec![smp],
+        })
+        .collect()
+}
+
+/// A raw GET of `selector`, `All` + `None`: each reply as it arrived, a
+/// snapshot's pages whole.
+async fn raw_pages(s: &zenoh::Session, selector: &str) -> Vec<Sample> {
+    raw_get_under(s, selector, ConsolidationMode::None).await
+}
+
+/// A raw GET of `selector` under `consolidation`, each reply as it arrived.
+async fn raw_get_under(
+    s: &zenoh::Session,
+    selector: &str,
+    consolidation: ConsolidationMode,
+) -> Vec<Sample> {
     let rx = s
         .get(selector)
         .target(QueryTarget::All)
-        .consolidation(ConsolidationMode::Latest)
+        .consolidation(consolidation)
         .timeout(T)
         .await
         .unwrap();
@@ -764,11 +787,14 @@ async fn s5_alignment_after_reconnect() {
     }
 }
 
-/// §6: a delete during an outage longer than the window is answered after
-/// the heal only when the window covers the outage.
+/// §6 step 1 (core 0.99, #977's E3): a delete during an outage reaches the
+/// archive after the heal whatever the window. Within it, the owner's
+/// snapshot answers the plan's key with its tombstone, and the archive holds
+/// the deletion; beyond it, with a snapshot of no entry, positive evidence
+/// by the omission rule, and the archive drops the key.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s6_a_window_shorter_than_the_outage() {
-    for (window, dropped) in [(5u64, true), (1u64, false)] {
+    for (window, tombstone) in [(5u64, true), (1u64, false)] {
         let x = sites().await;
         let (_mgr, w) = fleet_mgr(&x.ground, Some(window), &["vehicle-01"]).await;
         let arch = vehicle_archive(&x.vehicle, &x.vehicle_watch, &[]).await;
@@ -788,28 +814,18 @@ async fn s6_a_window_shorter_than_the_outage() {
             archive::last_known(&x.vehicle, &common::addr("vehicle-01/archive"), ORIGIN, T)
                 .await
                 .unwrap()
-                .unwrap()
         };
-        if dropped {
-            eventually(
-                "W covers the outage: dropped on the owner's reply_del",
-                || async { lk().await.value.is_none() },
-            )
-            .await;
-        } else {
-            eventually("aligned, unconfirmed", || async {
-                arch.confirmed(ORIGIN) == Some(false)
+        if tombstone {
+            eventually("W covers the outage: the snapshot's tombstone", || async {
+                lk().await.is_some_and(|l| l.value.is_none())
             })
             .await;
-            // The retries run their course; no evidence ever comes.
-            tokio::time::sleep(Duration::from_secs(4)).await;
-            let l = lk().await;
-            assert_eq!(
-                l.value.as_deref(),
-                Some(&b"p"[..]),
-                "W = {window}s: no evidence, kept"
-            );
-            assert!(!l.confirmed);
+        } else {
+            eventually(
+                "beyond W: dropped on the owner's snapshot of no entry",
+                || async { lk().await.is_none() },
+            )
+            .await;
         }
     }
 }
@@ -1487,20 +1503,13 @@ async fn state_and_events_carry_their_attachments() {
         "{got:?}"
     );
 
-    // S2: the owner's GET answers the value with its attachment.
-    let rx = tool
-        .get("zk2/h1/notes/notes.v1/state/last")
-        .target(zenoh::query::QueryTarget::All)
-        .with(flume::unbounded::<zenoh::query::Reply>())
-        .await
-        .unwrap();
-    let reply = rx.recv_async().await.expect("an answer");
-    let sample = reply.result().expect("a value");
-    assert_eq!(common::record(sample), b"hello");
-    assert_eq!(
-        sample.attachment().map(|a| a.to_bytes().into_owned()),
-        Some(b"by-alice".to_vec())
-    );
+    // S2 (core 0.99, #977's E3): the owner answers its member read by
+    // snapshot, whose entry is the record alone: a snapshot carries no
+    // attachment (core §7.5), so the GET's reader gets the value without it.
+    let replies = raw_get(&tool, "zk2/h1/notes/notes.v1/state/last").await;
+    assert_eq!(replies.len(), 1, "{replies:?}");
+    assert_eq!(common::record(&replies[0]), b"hello");
+    assert_eq!(replies[0].attachment(), None, "a snapshot's entry has none");
 }
 
 /// Core §4.4 (0.16): an archive is never tokenless, because consumers and
@@ -1652,14 +1661,296 @@ async fn the_session_posture_is_read_from_its_config() {
     .await;
     assert!(stamps(&by_mode), "stated for its mode");
 
-    // A stamping session: the put and the reply carry one timestamp.
+    // A stamping session: the put carries the owner's timestamp. Its GET is
+    // answered by snapshot, which carries none (core 0.99, #977's E3): S2's
+    // stamp rules bind a per-key resource's replies alone.
     let (mgr, w) = fleet_mgr(&on, None, &["vehicle-01"]).await;
     let tool = client(&ep).await;
     let put = w["vehicle-01"].put("v1").await.unwrap();
     let t = put.time.expect("every write given the owner's timestamp");
     assert_eq!(t.get_id().to_string(), on.zid().to_string());
     let reply = raw_get(&tool, ORIGIN).await;
-    assert_eq!(reply[0].timestamp(), Some(&t), "S2");
+    assert_eq!(reply.len(), 1);
+    assert_eq!(reply[0].timestamp(), None, "S2: a snapshot's entry");
+    assert_eq!(common::inband(&reply[0]), Some(put.stamp));
     drop(w);
     mgr.close().await.unwrap();
+}
+
+// --- §14: a collection's snapshot, its pages (#977's E3) --------------------
+
+const PLANS: &str = "zk2/ground/fleet-mgr/mission_plan.v1/state/plans";
+
+/// The owner of §14: 32 plans of 110 bytes each under one run, its pages
+/// cut at the default 1,024 bytes.
+async fn fleet_of_32(
+    s: &zenoh::Session,
+    window_s: Option<u64>,
+) -> (Service, BTreeMap<String, StateWriter>) {
+    let mut names: Vec<String> = (0..31).map(|i| format!("v{i:02}")).collect();
+    names.push("vehicle-01".to_owned());
+    let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let (svc, w) = fleet_mgr(s, window_s, &refs).await;
+    for (v, writer) in &w {
+        let record = format!("{v:-<110}");
+        writer.put(record.into_bytes()).await.unwrap();
+    }
+    (svc, w)
+}
+
+/// Every page a GET's replies hold, read, with the key it rode.
+fn pages_of(replies: &[Sample]) -> Vec<(String, zenkey::model::collection::Page)> {
+    replies
+        .iter()
+        .filter_map(|s| match zenkey::inband::read(s.clone()) {
+            zenkey::inband::Read::Snapshot { page: Ok(p), .. } => {
+                Some((s.key_expr().as_str().to_owned(), *p))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// §14 steps 1, 2 and 4: a collection read is answered with one snapshot
+/// on the snapshot key, in pages of at most 1,024 bytes whose more bits
+/// chain them, one run, asof and time; a member read with each member's
+/// own snapshot, its one entry's id empty; a concrete key at no member with
+/// one page of no entry; and under `Latest`, the control, one page of the
+/// four arrives. The consumer's GET (`plans/**`, `None`) holds the snapshot
+/// complete and every plan.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s14_a_collection_read_pages_and_member_reads() {
+    let (_r1, ep) = router(None).await;
+    let (mgr, _w) = fleet_of_32(&client(&ep).await, None).await;
+    let tool = client(&ep).await;
+
+    // Step 1: the collection read.
+    let whole = raw_pages(&tool, &format!("{PLANS}/**")).await;
+    let pages = pages_of(&whole);
+    assert_eq!(pages.len(), 4, "{} replies", whole.len());
+    let mut indices: Vec<u32> = pages.iter().map(|(_, p)| p.index).collect();
+    indices.sort_unstable();
+    assert_eq!(indices, [0, 1, 2, 3]);
+    let run = mgr.minter().run();
+    for (key, p) in &pages {
+        assert_eq!(key, PLANS, "a snapshot rides its snapshot key");
+        assert!(p.size() <= 1024, "page {}: {} bytes", p.index, p.size());
+        assert_eq!(p.more, p.index != 3, "page {}: more", p.index);
+        assert_eq!(
+            (p.run, p.asof, p.time, p.coll),
+            (run, pages[0].1.asof, pages[0].1.time, 0)
+        );
+        for e in &p.live {
+            assert_eq!(
+                e.confirmation,
+                zenkey::model::collection::Confirmation::None
+            );
+        }
+    }
+    let ps: Vec<_> = pages.iter().map(|(_, p)| p.clone()).collect();
+    let snap = zenkey::model::collection::Snapshot::complete(&ps).expect("complete");
+    assert_eq!(snap.live.len(), 32);
+    assert!(snap.tombs.is_empty());
+
+    // The consumer's GET: the collection read, held complete.
+    let (_ex, c) = executor(&client(&ep).await, false).await;
+    let got = eventually_answer(&c, |a| a.current.len() == 32).await;
+    assert!(got.complete, "{:?}", got.snapshots);
+    assert_eq!(got.snapshots.len(), 1);
+    assert_eq!(got.snapshots[0].key, PLANS);
+    assert!(got.snapshots[0].complete());
+    assert_eq!(got.snapshots[0].pages.len(), 4);
+
+    // Step 2: member reads.
+    let one = raw_pages(&tool, &format!("{PLANS}/v07")).await;
+    let one = pages_of(&one);
+    assert_eq!(one.len(), 1);
+    assert_eq!(one[0].0, format!("{PLANS}/v07"));
+    assert_eq!(one[0].1.live.len(), 1);
+    assert_eq!(one[0].1.live[0].id, "", "a member's own snapshot");
+    let each = pages_of(&raw_pages(&tool, &format!("{PLANS}/*")).await);
+    assert_eq!(each.len(), 32, "a snapshot per member");
+    assert!(each.iter().all(|(k, p)| k != PLANS && p.live.len() == 1));
+    let none = pages_of(&raw_pages(&tool, &format!("{PLANS}/v99")).await);
+    assert_eq!(none.len(), 1, "a concrete key at no member");
+    assert!(none[0].1.live.is_empty() && none[0].1.tombs.is_empty());
+    assert!(!none[0].1.more);
+
+    // Step 4, the control: `Latest` keeps one reply per key, and the four
+    // pages share theirs.
+    let latest = raw_get_under(&tool, &format!("{PLANS}/**"), ConsolidationMode::Latest).await;
+    assert_eq!(pages_of(&latest).len(), 1, "one page of the four");
+}
+
+/// GETs the consumer's answer until `done` holds of it.
+async fn eventually_answer(c: &Consumer, done: impl Fn(&StateAnswer) -> bool) -> StateAnswer {
+    let mut last = None;
+    for _ in 0..50 {
+        let a = c
+            .get_answer("state/plans/{vehicle}", None, T)
+            .await
+            .unwrap();
+        if done(&a) {
+            return a;
+        }
+        last = Some(a);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("never: {last:?}");
+}
+
+/// §2 and §14 steps 5 and 6 at the consumer: a delete within the window is
+/// a tombstone in the snapshot, a deletion with its stamp; beyond it the
+/// collection's snapshot omits the member, and a member read of its key
+/// draws one page of no entry, the owner's word that it has no value
+/// (`StateGet::Answered` with no key, never `Silent`). Once every plan is
+/// deleted and the window passes, the collection's snapshot is one page of
+/// no entry, complete.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s14_a_delete_within_the_window_and_beyond_it() {
+    let (_r1, ep) = router(None).await;
+    let (_mgr, w) = fleet_mgr(&client(&ep).await, Some(1), &["a", "b"]).await;
+    let (_ex, c) = executor(&client(&ep).await, false).await;
+    w["a"].put("pa").await.unwrap();
+    w["b"].put("pb").await.unwrap();
+    let del = w["b"].delete().await.unwrap();
+    let b = format!("{PLANS}/b");
+    let within = eventually_answer(&c, |a| a.current.len() == 2).await;
+    assert!(
+        within
+            .current
+            .iter()
+            .any(|x| x.key() == b && matches!(x, Current::Deleted { .. }))
+    );
+    assert_eq!(
+        within.inband.get(&b),
+        Some(&del.stamp),
+        "the tombstone's stamp"
+    );
+    // Beyond the window: the tombstone is gone, and the snapshot omits b.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let beyond = c
+        .get_answer("state/plans/{vehicle}", None, T)
+        .await
+        .unwrap();
+    assert!(beyond.complete);
+    assert_eq!(beyond.current.len(), 1, "{beyond:?}");
+    assert_eq!(beyond.current[0].key(), format!("{PLANS}/a"));
+    let at_b = c
+        .get_answer("state/plans/{vehicle}", Some(&vehicle("b")), T)
+        .await
+        .unwrap();
+    assert!(at_b.current.is_empty());
+    assert_eq!(at_b.snapshots.len(), 1);
+    assert!(at_b.snapshots[0].complete());
+    assert!(
+        matches!(StateGet::from(at_b), StateGet::Answered(v) if v.is_empty()),
+        "a snapshot of no entry is the owner's word"
+    );
+    // §14 step 6: an empty collection.
+    w["a"].delete().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let empty = c
+        .get_answer("state/plans/{vehicle}", None, T)
+        .await
+        .unwrap();
+    assert!(empty.current.is_empty());
+    assert_eq!(empty.snapshots.len(), 1);
+    assert!(empty.snapshots[0].complete(), "one page of no entry");
+    assert!(matches!(StateGet::from(empty), StateGet::Answered(v) if v.is_empty()));
+}
+
+/// §10's boundary, at the owner: a snapshot's asof is the last seq the
+/// owner minted, each live entry its member's last put, and a put after the
+/// answer carries a seq above asof, which the omission rule keeps.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s10_a_snapshots_asof_is_the_last_seq_minted() {
+    let (_r1, ep) = router(None).await;
+    let (_mgr, w) = fleet_mgr(&client(&ep).await, None, &["a", "b", "d"]).await;
+    let tool = client(&ep).await;
+    w["a"].put("v1").await.unwrap();
+    w["b"].put("v1").await.unwrap();
+    let del = w["b"].delete().await.unwrap();
+    let d = w["d"].put("v1").await.unwrap();
+    let pages = pages_of(&raw_pages(&tool, &format!("{PLANS}/**")).await);
+    assert_eq!(pages.len(), 1);
+    let p = &pages[0].1;
+    assert_eq!(
+        p.asof, d.stamp.seq,
+        "nothing in flight: the last seq minted"
+    );
+    assert_eq!(p.tombs.len(), 1);
+    assert_eq!(p.tombs[0].seq, del.stamp.seq);
+    let next = w["a"].put("v2").await.unwrap();
+    assert!(next.stamp.seq > p.asof, "a later put is above asof");
+    let ps = vec![p.clone()];
+    let held = [zenkey::model::seed::HeldMember {
+        key: "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/c",
+        mark: Some(Mark::InBand(next.stamp)),
+        heard_after: true,
+    }];
+    let c = contract("mission_plan.v1");
+    assert!(
+        zenkey::model::collection::omit(&c, PLANS, &ps, held).is_empty(),
+        "a value above asof is newer than the snapshot"
+    );
+}
+
+/// §5 at an archive: absence from the owner's complete snapshot is positive
+/// evidence (§4.4). The archive records `a` and `b` under the owner's first
+/// instance; a second instance, under another run, puts `a` alone. Its
+/// alignment's collection read omits `b`, which the archive heard before it
+/// asked, so `b` is dropped, where before #977's E3 it stayed unconfirmed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s5_an_archive_drops_what_the_owners_complete_snapshot_omits() {
+    let (_r1, ep) = router(None).await;
+    let owner_s = client(&ep).await;
+    let s = client(&ep).await;
+    let reader = client(&ep).await;
+    let (mgr, w) = fleet_mgr(&owner_s, None, &["a", "b"]).await;
+    w["a"].put("pa").await.unwrap();
+    w["b"].put("pb").await.unwrap();
+    let archive = Archive::start(
+        &s,
+        ArchiveConfig {
+            service: config("ground/archive"),
+            records: vec![Recorded {
+                owner: common::addr("ground/fleet-mgr"),
+                selector: format!("{PLANS}/*"),
+                implementation: imp("mission_plan.v1"),
+            }],
+            peers: Vec::new(),
+            unconfirmed_horizon: None,
+            watch: None,
+        },
+    )
+    .await
+    .unwrap();
+    let a = common::addr("ground/archive");
+    let b = format!("{PLANS}/b");
+    eventually("the archive records b", || async {
+        archive.align(T).await.unwrap();
+        archive::last_known(&reader, &a, &b, T)
+            .await
+            .unwrap()
+            .is_some()
+    })
+    .await;
+    drop(w);
+    mgr.close().await.unwrap();
+    let (_mgr2, w2) = fleet_mgr(&owner_s, None, &["a"]).await;
+    w2["a"].put("pa2").await.unwrap();
+    eventually("b is dropped on the owner's word", || async {
+        archive.align(T).await.unwrap();
+        archive::last_known(&reader, &a, &b, T)
+            .await
+            .unwrap()
+            .is_none()
+    })
+    .await;
+    let lk = archive::last_known(&reader, &a, &format!("{PLANS}/a"), T)
+        .await
+        .unwrap()
+        .expect("a stands");
+    assert_eq!(lk.value.as_deref(), Some(&b"pa2"[..]));
 }

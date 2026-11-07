@@ -350,7 +350,10 @@ fn judge_g(a: &StateAnswer, alert_key: &str, presence: Presence, zid: &str) -> (
         presence,
         observations: &obs,
         latest: Some(latest_of(c)),
-        previous_instance: c.clock().is_some_and(|id| id != zid),
+        // A snapshot's confirmation names no instance (#977's E3).
+        previous_instance: c
+            .clock()
+            .is_some_and(|id| id != zid && id != zenkey::inband::owner_clock(c.key()).to_string()),
         held_whole: false,
         left_out: false,
     };
@@ -394,18 +397,6 @@ fn judge_s(
 
 fn pair(j: Judged) -> (Answer, Reason) {
     (j.answer, j.reason)
-}
-
-/// A Zenoh timestamp's instant, in milliseconds since the Unix epoch.
-fn unix_ms(t: Timestamp) -> u64 {
-    u64::try_from(
-        t.get_time()
-            .to_system_time()
-            .duration_since(UNIX_EPOCH)
-            .expect("after the epoch")
-            .as_millis(),
-    )
-    .expect("fits")
 }
 
 /// Milliseconds since the Unix epoch, on this host's clock.
@@ -492,10 +483,13 @@ async fn s1_raise() {
         put.inband.map(Mark::InBand),
         "under the put's in-band stamp (core S2)"
     );
+    // freshness.v2 0.6 §2.6 (#977's E3): the snapshot's entry carries its
+    // confirmation, which the consumer stamps on the owner's clock, named
+    // by its address: a snapshot carries no zid.
     assert_eq!(
-        c.clock().as_deref(),
-        Some(owner_zid.as_str()),
-        "the reply carries its last confirmation, the owner's (freshness.v2 §2.4)"
+        c.clock(),
+        Some(zenkey::inband::owner_clock(c.key()).to_string()),
+        "the entry carries its confirmation, the owner's clock (freshness.v2 §2.6)"
     );
     let (firing, stale) = judge_g(&answer, A_KEY, presence, &zid);
     assert_eq!(pair(firing), (Answer::Yes, Reason::Firing));
@@ -673,9 +667,9 @@ async fn s3_resolve_then_delete() {
     assert!(a.held().await.is_empty());
     assert!(a.resolve(A_KEY).await.unwrap().is_none(), "nothing held");
 
-    // 2. Within 1 s of the delete: a reply_del, with the delete's in-band
-    // stamp, and the timestamp the owner minted at the delete, its last
-    // confirmation (core S2, text 0.13, zk2py round 97's F-460).
+    // 2. Within 1 s of the delete: a tombstone in the owner's snapshot, with
+    // the delete's in-band stamp and no confirmation (core S2, §7.5: a
+    // tombstone's is 0; #977's E3).
     let answer = get(&g).await;
     let c = reply(&answer, A_KEY).expect("a reply for A");
     assert!(matches!(c, Current::Deleted { .. }), "{c:?}");
@@ -691,19 +685,8 @@ async fn s3_resolve_then_delete() {
         "the delete carries no Zenoh timestamp of the owner's (core §4.3's table): {:?}",
         recs[2].stamp
     );
-    let minted = c
-        .timestamp()
-        .expect("the reply_del carries the delete's last confirmation (core S2)");
-    assert_eq!(
-        minted.get_id().to_string(),
-        owner_zid,
-        "minted by the owner"
-    );
-    let minted_ms = unix_ms(minted);
-    assert!(
-        minted_ms + 1000 >= before && minted_ms <= now_ms() + 1000,
-        "minted at the delete, within 1 s of the step: {minted_ms} against {before}"
-    );
+    assert_eq!(c.timestamp(), None, "a tombstone carries no confirmation");
+    let _ = before;
     let (firing, _) = judge_g(&answer, A_KEY, presence, &zid);
     assert_eq!(pair(firing), (Answer::No, Reason::Deleted));
 
@@ -868,10 +851,12 @@ async fn s5_a_restart_mid_incident() {
             doc,
             "{k} unchanged, its timestamp kept"
         );
+        // freshness.v2 §2.6 (#977's E3): the snapshot's confirmation, on
+        // the owner's clock named by its address.
         assert_eq!(
-            c.clock().as_deref(),
-            Some(new_zid.as_str()),
-            "{k} under the new instance's stamp id"
+            c.clock(),
+            Some(zenkey::inband::owner_clock(c.key()).to_string()),
+            "{k}: its confirmation, the owner's clock"
         );
     }
     for k in [r_key.as_str(), p_key] {
@@ -882,9 +867,9 @@ async fn s5_a_restart_mid_incident() {
             "{k}'s delete stamped in band by the new instance's run"
         );
         assert_eq!(
-            c.clock().as_deref(),
-            Some(new_zid.as_str()),
-            "{k}'s reply_del carries the timestamp the new instance minted at its delete (core S2)"
+            c.clock(),
+            None,
+            "{k}'s tombstone carries no confirmation (core §7.5; #977's E3)"
         );
     }
 
@@ -932,7 +917,11 @@ async fn s5_a_restart_mid_incident() {
     assert_eq!(zid, new_zid);
     let answer = get(&g).await;
     let c = reply(&answer, A_KEY).expect("A answered");
-    assert_eq!(c.clock().as_deref(), Some(new_zid.as_str()));
+    assert_eq!(
+        c.clock(),
+        Some(zenkey::inband::owner_clock(c.key()).to_string()),
+        "its confirmation, on the owner's clock (freshness.v2 §2.6)"
+    );
     let (firing, _) = judge_g(&answer, A_KEY, presence, &zid);
     assert_eq!(
         pair(firing),
@@ -1363,9 +1352,16 @@ async fn a_restart_adopts_from_an_archive_on_its_own_side() {
     assert_eq!(zid, new_zid);
     let answer = get(&g).await;
     let c = reply(&answer, A_KEY).expect("A answered");
+    // A snapshot's confirmation names the owner by its address, whatever
+    // its zid (freshness.v2 §2.6, #977's E3); its stamp is the new run's.
     assert_eq!(
-        c.clock().as_deref(),
-        Some(new_zid.as_str()),
+        c.clock(),
+        Some(zenkey::inband::owner_clock(c.key()).to_string()),
+        "the owner's clock"
+    );
+    assert_eq!(
+        answer.inband.get(c.key()).map(|s| s.run),
+        Some(svc.minter().run()),
         "under the new stamps"
     );
     let (firing, _) = judge_g(&answer, A_KEY, presence, &zid);

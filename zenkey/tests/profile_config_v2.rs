@@ -461,9 +461,11 @@ async fn get_record(s: &zenoh::Session, address: &str) -> Option<(Stamp, Vec<u8>
         .unwrap();
     let mut out = None;
     while let Ok(r) = rx.recv_async().await {
-        if let Ok(sample) = r.into_result()
-            && sample.kind() == SampleKind::Put
-        {
+        // A snapshot's page is its entries (core §4.2; #977's E3).
+        for sample in r.into_result().into_iter().flat_map(common::replies) {
+            if sample.kind() != SampleKind::Put {
+                continue;
+            }
             let bytes = sample.payload().to_bytes();
             let e = Envelope::parse(&bytes).expect("a mutation");
             out = Some((

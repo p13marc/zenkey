@@ -702,9 +702,10 @@ impl Consumer {
             })
     }
 
-    /// The key expressions a subscription or GET on `resource` uses: one per
+    /// The key expressions a subscription on `resource` uses: one per
     /// bound provider, with R2's parameter bindings applied and every other
-    /// parameter a wildcard. An event's selector ends in `*`, the ULID.
+    /// parameter a wildcard. An event's selector ends in `*`, the ULID. A
+    /// state GET's are [`Consumer::get_selectors`].
     pub fn selectors(&self, resource: &str) -> Result<Vec<OwnedKeyExpr>> {
         let r = self.resource(resource)?;
         let iface = self.contract.iface.to_string();
@@ -1280,8 +1281,9 @@ impl Consumer {
     /// GETs current state from its owners (S4): every bound provider's keys
     /// for `resource`, one member when `values` binds its parameters (R2's
     /// bindings apply either way), with target `All` and consolidation
-    /// `Latest` set explicitly. Silence is [`StateGet::Silent`], never a
-    /// verdict (S6, O5).
+    /// `None` set explicitly, its replies merged per key. Silence is
+    /// [`StateGet::Silent`], never a verdict (S6, O5); a complete snapshot
+    /// of no entry is the owner's word, [`StateGet::Answered`] with none.
     pub async fn get(
         &self,
         resource: &str,
@@ -1293,72 +1295,111 @@ impl Consumer {
             .map(StateGet::from)
     }
 
+    /// The selectors of S4's GET on `resource` (core §4.2; #977's E3): one
+    /// per bound provider, `values` and R2's bindings applied. Where they
+    /// bind none of its template's parameters, the collection read, its
+    /// snapshot key followed by `/**`, so that the owner answers with its
+    /// collection's snapshot; otherwise [`Consumer::selectors`]' member
+    /// read, or the one member `values` names.
+    pub fn get_selectors(
+        &self,
+        resource: &str,
+        values: Option<&Bindings>,
+    ) -> Result<Vec<OwnedKeyExpr>> {
+        let r = self.resource(resource)?.clone();
+        let Some(v) = values else {
+            return self
+                .selectors(resource)?
+                .into_iter()
+                .map(
+                    |ke| match crate::answer::collection_read(ke.as_str(), &r.template) {
+                        Some(whole) => OwnedKeyExpr::try_from(whole).map_err(zenoh),
+                        None => Ok(ke),
+                    },
+                )
+                .collect();
+        };
+        let mut merged: Bindings = self
+            .params
+            .iter()
+            .map(|(k, v)| (k.clone(), vec![v.clone()]))
+            .collect();
+        merged.extend(v.clone());
+        let chunks = r
+            .template
+            .build(&merged)
+            .map_err(|e| Error::Contract(format!("{resource:?}: {e}")))?;
+        self.providers
+            .iter()
+            .map(|p| {
+                let (sys, svc) = p.chunks();
+                let ke = format!(
+                    "zk2/{sys}/{svc}/{}/{}/{}",
+                    self.contract.iface,
+                    r.token,
+                    chunks.join("/")
+                );
+                OwnedKeyExpr::try_from(ke).map_err(zenoh)
+            })
+            .collect()
+    }
+
     /// [`Consumer::get`], with whether every GET ran to its final reply
     /// ([`StateAnswer::complete`]): a reader that counts members needs to
     /// know (§2.7, 0.24). An error reply, the timeout's included, is kept
     /// out of the answer and makes it incomplete.
     ///
-    /// **A snapshot's page** (core §7.5's form 7; #977's E2): each entry of
-    /// the resource's collection is the per-key reply it stands for, a live
-    /// entry a value and a tombstone a deletion, each with its stamp, and
-    /// each page is held toward its snapshot ([`StateAnswer::snapshots`]).
-    /// A page of another collection is not this resource's. A snapshot
-    /// held incomplete makes the answer incomplete; the entries it
-    /// brought stand. No omission is applied: that is E3's, with `None`.
+    /// **Snapshots** (core §4.2, §7.5; #977's E3): the owner answers a
+    /// collection read with its collection's snapshot, in pages, and a
+    /// member read with each member's. Each entry is the per-key reply it
+    /// stands for, a live entry a value and a tombstone a deletion, each
+    /// with its stamp, merged per key with every other reply by §4.3's
+    /// consumer rule, and a live entry's confirmation is kept
+    /// ([`StateAnswer::confirmations`]). Each page of the resource's
+    /// collection is held toward its snapshot ([`StateAnswer::snapshots`]);
+    /// an entry or a per-key reply on a key that is no member of the
+    /// resource is not this resource's. A complete snapshot applies the
+    /// omission rule over what the answer holds then
+    /// ([`StateAnswer::omitted`]), once the owner's descriptor names this
+    /// consumer's revision (`answer::runs_revision`, F-497). A snapshot held
+    /// incomplete drops nothing and makes the answer incomplete; the
+    /// entries it brought stand.
     pub async fn get_answer(
         &self,
         resource: &str,
         values: Option<&Bindings>,
         timeout: Duration,
     ) -> Result<StateAnswer> {
+        use zenkey_model::collection::{self, Heard, Page};
         let r = self.resource(resource)?.clone();
         if !matches!(r.token, KindToken::State | KindToken::ExplicitState) {
             return Err(Error::Contract(format!("{resource:?} is not state")));
         }
-        let selectors = match values {
-            None => self.selectors(resource)?,
-            Some(v) => {
-                let mut merged: Bindings = self
-                    .params
-                    .iter()
-                    .map(|(k, v)| (k.clone(), vec![v.clone()]))
-                    .collect();
-                merged.extend(v.clone());
-                let chunks = r
-                    .template
-                    .build(&merged)
-                    .map_err(|e| Error::Contract(format!("{resource:?}: {e}")))?;
-                self.providers
-                    .iter()
-                    .map(|p| {
-                        let (sys, svc) = p.chunks();
-                        let ke = format!(
-                            "zk2/{sys}/{svc}/{}/{}/{}",
-                            self.contract.iface,
-                            r.token,
-                            chunks.join("/")
-                        );
-                        OwnedKeyExpr::try_from(ke).map_err(zenoh)
-                    })
-                    .collect::<Result<Vec<_>>>()?
-            }
-        };
+        let selectors = self.get_selectors(resource, values)?;
         let layout = self.packed_layout(&r)?;
-        let coll = zenkey_model::collection::coll_of(&self.contract, &r);
-        let mut out: Vec<Current> = Vec::new();
+        let mut out: Vec<Option<Current>> = Vec::new();
         let mut at: BTreeMap<String, usize> = BTreeMap::new();
         let mut inband = BTreeMap::new();
         let mut tags = BTreeMap::new();
         let mut undecodable = BTreeMap::new();
-        let mut snapshots: Vec<zenkey_model::collection::Heard> = Vec::new();
+        let mut confirmations = BTreeMap::new();
+        let mut snapshots: Vec<Heard> = Vec::new();
+        let mut pages: Vec<Vec<Page>> = Vec::new();
+        let mut omitted: Vec<Vec<String>> = Vec::new();
         let mut complete = true;
         let timeout = self.reply_wait(timeout);
+        // The resource's own collection, as this consumer's revision reads
+        // a page's index: what its snapshots are held toward.
+        let ours = |key: &str, page: &Page| {
+            collection::collection_at(&self.contract, key, page.coll)
+                .is_some_and(|c| c.token == r.token && c.template == r.template)
+        };
         for ke in selectors {
             let rx = self
                 .session
                 .get(ke)
                 .target(zenoh::query::QueryTarget::All)
-                .consolidation(zenoh::query::ConsolidationMode::Latest)
+                .consolidation(zenoh::query::ConsolidationMode::None)
                 .timeout(timeout)
                 .with(flume::unbounded::<zenoh::query::Reply>())
                 .await
@@ -1372,20 +1413,44 @@ impl Consumer {
                 if key.contains('*') {
                     continue;
                 }
-                // A snapshot's page (#977's E2): each entry of this
-                // resource's collection read as the per-key reply it
-                // stands for, and the page held toward its snapshot.
+                // A snapshot's page: each entry read as the per-key reply
+                // it stands for, and the page held toward its snapshot.
+                let mut completed = None;
+                let mut entries = BTreeMap::new();
                 let reads = match crate::inband::read(sample) {
                     crate::inband::Read::Snapshot { sample, page } => match page {
+                        // A page whose body is refused lost its entries: the
+                        // answer may miss a member (review-bot on #1078).
                         Err(why) => {
+                            complete = false;
                             undecodable
                                 .insert(key, crate::inband::Undecodable::Snapshot(Some(why)));
                             continue;
                         }
-                        Ok(page) if Some(page.coll) != coll => continue,
                         Ok(page) => {
-                            zenkey_model::collection::hear(&mut snapshots, &key, &page);
-                            crate::inband::replies(&sample, &page)
+                            if ours(&key, &page) {
+                                let (i, done) = collection::hear(&mut snapshots, &key, &page);
+                                if i == pages.len() {
+                                    pages.push(Vec::new());
+                                    omitted.push(Vec::new());
+                                }
+                                if !pages[i].iter().any(|p| p.index == page.index) {
+                                    pages[i].push((*page).clone());
+                                }
+                                completed = done.then_some(i);
+                            }
+                            for m in page.members(&key) {
+                                entries.insert(
+                                    m.key,
+                                    crate::state::Confirmed {
+                                        confirmation: m.confirmation,
+                                        time: page.time,
+                                    },
+                                );
+                            }
+                            // freshness.v2 §2.6: an entry's confirmation
+                            // is its stamp, a GET reader ages it from it.
+                            crate::inband::replies_confirmed(&sample, &page, self.epoch)
                                 .into_iter()
                                 .map(crate::inband::read)
                                 .collect()
@@ -1395,6 +1460,11 @@ impl Consumer {
                 };
                 for read in reads {
                     let key = read.sample().key_expr().as_str().to_owned();
+                    // A collection read reaches the snapshot key's other
+                    // collections too: only this resource's members count.
+                    if !collection::is_member(&r, &key) {
+                        continue;
+                    }
                     if let Err(why) = crate::inband::admit(&read, layout.as_deref()) {
                         undecodable.insert(key, why);
                         continue;
@@ -1403,8 +1473,8 @@ impl Consumer {
                     // heard twice, two instances) keeps what §4.3's
                     // consumer rule accepts.
                     let mark = read.mark();
-                    if let Some(&i) = at.get(&key) {
-                        let held = StateAnswer::mark_in(&inband, &out[i]);
+                    if let Some(held) = at.get(&key).and_then(|&i| out[i].as_ref()) {
+                        let held = StateAnswer::mark_in(&inband, held);
                         let newer = match (held, mark) {
                             (_, None) => held.is_none(),
                             (held, Some(m)) => zenkey_model::seed::consumer_accepts(held, m),
@@ -1423,38 +1493,91 @@ impl Consumer {
                     };
                     let sample = read.into_sample();
                     let current = match sample.kind() {
-                        zenoh::sample::SampleKind::Delete => Current::Deleted {
-                            key: key.clone(),
-                            timestamp: sample.timestamp().copied(),
-                        },
-                        zenoh::sample::SampleKind::Put => Current::Value {
-                            key: key.clone(),
-                            sample: Box::new(sample),
-                        },
+                        zenoh::sample::SampleKind::Delete => {
+                            confirmations.remove(&key);
+                            Current::Deleted {
+                                key: key.clone(),
+                                timestamp: sample.timestamp().copied(),
+                            }
+                        }
+                        zenoh::sample::SampleKind::Put => {
+                            match entries.get(&key) {
+                                Some(c) => confirmations.insert(key.clone(), *c),
+                                None => confirmations.remove(&key),
+                            };
+                            Current::Value {
+                                key: key.clone(),
+                                sample: Box::new(sample),
+                            }
+                        }
                     };
                     match at.get(&key) {
-                        Some(&i) => out[i] = current,
+                        Some(&i) => out[i] = Some(current),
                         None => {
                             at.insert(key, out.len());
-                            out.push(current);
+                            out.push(Some(current));
                         }
                     }
                 }
+                // The omission rule over a snapshot this page completed:
+                // every reply of this GET came after it was asked, so only a
+                // value of the snapshot's run at or below its asof drops.
+                let Some(i) = completed else { continue };
+                let held: Vec<(String, Option<zenkey_model::seed::Mark>)> = at
+                    .iter()
+                    .filter_map(|(k, &j)| {
+                        let c = out[j].as_ref()?;
+                        Some((k.clone(), StateAnswer::mark_in(&inband, c)))
+                    })
+                    .collect();
+                let drop: Vec<String> = collection::omit(
+                    &self.contract,
+                    &snapshots[i].key,
+                    &pages[i],
+                    held.iter().map(|(k, m)| zenkey_model::seed::HeldMember {
+                        key: k,
+                        mark: *m,
+                        heard_after: true,
+                    }),
+                )
+                .into_iter()
+                .map(str::to_owned)
+                .collect();
+                if drop.is_empty()
+                    || !crate::answer::runs_revision(
+                        &self.session,
+                        &snapshots[i].key,
+                        snapshots[i].run,
+                        &self.contract,
+                        timeout,
+                    )
+                    .await
+                {
+                    continue;
+                }
+                for k in &drop {
+                    if let Some(j) = at.remove(k) {
+                        out[j] = None;
+                    }
+                    inband.remove(k);
+                    tags.remove(k);
+                    confirmations.remove(k);
+                }
+                omitted[i].extend(drop);
             }
         }
-        // A snapshot held incomplete may lack members: under `Latest`, one
-        // of several pages arrives, its index showing the others lost.
-        let complete = complete
-            && snapshots
-                .iter()
-                .all(zenkey_model::collection::Heard::complete);
+        // A snapshot held incomplete may lack members: a page lost, or a
+        // GET that reached its timeout.
+        let complete = complete && snapshots.iter().all(Heard::complete);
         Ok(StateAnswer {
-            current: out,
+            current: out.into_iter().flatten().collect(),
             complete,
             inband,
             tags,
             undecodable,
             snapshots,
+            confirmations,
+            omitted,
         })
     }
 
@@ -1895,24 +2018,43 @@ impl Subscription {
                 asked,
                 now,
             );
+            // freshness.v2 §2.6 (text 0.6): an entry's confirmation, aged
+            // from when the owner built its snapshot.
+            for (k, _) in &live {
+                if let Some(at) = answer
+                    .confirmations
+                    .get(k)
+                    .and_then(|c| confirmed_at(c, now))
+                {
+                    view.confirm(k, at);
+                }
+            }
         }
     }
 }
 
-/// The selector of `addr`'s members of the collection `f` follows
-/// ([`zenkey_model::grammar::template_selector`]): base-relative, so the
-/// consumer's session adds its namespace on egress and its replies come
-/// back base-relative, as [`zenkey_model::heartbeat::base_relative`] reads
-/// them either way.
+/// When a snapshot's entry says the owner last vouched for its member, on
+/// this host's monotonic clock: `arrived`, the page's arrival, less how long
+/// before building the snapshot the owner vouched, both on its clock
+/// (`freshness.v2` §2.6). `None` for confirmation 0 or a time unknown.
+fn confirmed_at(c: &crate::state::Confirmed, arrived: Instant) -> Option<Instant> {
+    let before = c.before_snapshot()?;
+    Some(arrived.checked_sub(before).unwrap_or(arrived))
+}
+
+/// The selector of `addr`'s members of the collection `f` follows: its
+/// collection read, its snapshot key followed by `/**` (core §4.2,
+/// `freshness.v2` §2.5), where it has one; else its members' template
+/// selector ([`zenkey_model::grammar::template_selector`]). Base-relative,
+/// so the consumer's session adds its namespace on egress and its replies
+/// come back base-relative, as [`zenkey_model::heartbeat::base_relative`]
+/// reads them either way.
 fn collection_selector(f: &Followed, addr: &Addr) -> Option<OwnedKeyExpr> {
     let c = f.layout.collections.get(f.index)?;
-    OwnedKeyExpr::try_from(zenkey_model::grammar::template_selector(
-        addr,
-        &f.layout.iface,
-        c.token,
-        &c.template,
-    ))
-    .ok()
+    let members =
+        zenkey_model::grammar::template_selector(addr, &f.layout.iface, c.token, &c.template);
+    let whole = crate::answer::collection_read(&members, &c.template).unwrap_or(members);
+    OwnedKeyExpr::try_from(whole).ok()
 }
 
 /// A re-read of `addr`'s collection after two divergences in a row
@@ -1944,7 +2086,7 @@ async fn reread(
     let rx = match session
         .get(ke)
         .target(zenoh::query::QueryTarget::All)
-        .consolidation(zenoh::query::ConsolidationMode::Latest)
+        .consolidation(zenoh::query::ConsolidationMode::None)
         .timeout(timeout)
         .with(flume::unbounded::<zenoh::query::Reply>())
         .await
@@ -1956,17 +2098,24 @@ async fn reread(
             return;
         }
     };
-    let mut live = Vec::new();
+    // One value per key, the newer by §4.3's consumer rule: a key answered
+    // twice (two instances) keeps the one it accepts.
+    let mut held: BTreeMap<String, (Option<Mark>, bool, Option<crate::state::Confirmed>)> =
+        BTreeMap::new();
     let mut complete = true;
     let mut snapshots: Vec<zenkey_model::collection::Heard> = Vec::new();
+    let ours = |k: &str| {
+        zenkey_model::heartbeat::base_relative(k)
+            .is_some_and(|b| f.layout.collection_of(b) == Some(f.index))
+    };
     while let Ok(reply) = rx.recv_async().await {
         let Ok(sample) = reply.into_result() else {
             complete = false;
             continue;
         };
-        // A snapshot's page (#977's E2): its live entries, each the
-        // per-key reply it stands for; a page whose body is refused leaves
-        // the answer incomplete.
+        // A snapshot's page: its entries, each the per-key reply it stands
+        // for; a page whose body is refused leaves the answer incomplete.
+        let mut entries = BTreeMap::new();
         let reads = match crate::inband::read(sample) {
             crate::inband::Read::Snapshot { sample, page } => match page {
                 Err(_) => {
@@ -1976,6 +2125,15 @@ async fn reread(
                 Ok(page) => {
                     let key = sample.key_expr().as_str().to_owned();
                     zenkey_model::collection::hear(&mut snapshots, &key, &page);
+                    for m in page.members(&key) {
+                        entries.insert(
+                            m.key,
+                            crate::state::Confirmed {
+                                confirmation: m.confirmation,
+                                time: page.time,
+                            },
+                        );
+                    }
                     crate::inband::replies(&sample, &page)
                         .into_iter()
                         .map(crate::inband::read)
@@ -1985,12 +2143,35 @@ async fn reread(
             read => vec![read],
         };
         for read in reads {
-            if read.sample().kind() != zenoh::sample::SampleKind::Put {
+            let key = read.sample().key_expr().as_str().to_owned();
+            // The collection read reaches its snapshot key's other
+            // collections too.
+            if !ours(&key) {
                 continue;
             }
-            live.push((read.sample().key_expr().as_str().to_owned(), read.stamp()));
+            let mark = read.mark();
+            let newer = match (held.get(&key).and_then(|h| h.0), mark) {
+                (_, None) => !held.contains_key(&key),
+                (h, Some(m)) => zenkey_model::seed::consumer_accepts(h, m),
+            };
+            if newer {
+                let put = read.sample().kind() == zenoh::sample::SampleKind::Put;
+                held.insert(key.clone(), (mark, put, entries.get(&key).copied()));
+            }
         }
     }
+    let arrived = Instant::now();
+    let live: Vec<(String, Option<zenkey_model::wire::Stamp>)> = held
+        .iter()
+        .filter(|(_, (_, put, _))| *put)
+        .map(|(k, (m, _, _))| {
+            let stamp = match m {
+                Some(Mark::InBand(s)) => Some(*s),
+                _ => None,
+            };
+            (k.clone(), stamp)
+        })
+        .collect();
     let complete = complete
         && snapshots
             .iter()
@@ -2000,12 +2181,20 @@ async fn reread(
     if complete {
         let mut views = seen.views.lock().expect("not poisoned");
         if let Some(v) = views.get_mut(&addr) {
+            // A member the complete snapshot left out leaves the view (core
+            // §4.2's omission rule, freshness.v2 §2.5); what the
+            // subscription heard since `asked` stands where newer.
             v.reread(
                 f.index,
                 live.iter().map(|(k, s)| (k.as_str(), *s)),
                 asked,
                 Instant::now(),
             );
+            for (k, (_, _, c)) in &held {
+                if let Some(at) = c.as_ref().and_then(|c| confirmed_at(c, arrived)) {
+                    v.confirm(k, at);
+                }
+            }
         }
         drop(views);
         *seen.last_reread.lock().expect("not poisoned") = Some(Instant::now());

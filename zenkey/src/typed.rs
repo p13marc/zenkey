@@ -608,9 +608,16 @@ impl<T> StateAnswer<T> {
     }
 }
 
+/// Silence is no reply at all (O5); a complete snapshot of no entry is the
+/// owner's word, [`StateGet::Answered`] with no key (core §4.2, #977's E3),
+/// as [`crate::state::StateGet`]'s.
 impl<T> From<StateAnswer<T>> for StateGet<T> {
     fn from(a: StateAnswer<T>) -> Self {
-        if a.current.is_empty() {
+        let said = a
+            .snapshots
+            .iter()
+            .any(zenkey_model::collection::Heard::complete);
+        if a.current.is_empty() && !said {
             StateGet::Silent
         } else {
             StateGet::Answered(a.current)

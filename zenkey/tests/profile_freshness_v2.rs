@@ -660,15 +660,29 @@ async fn s3_a_get_readers_age_from_the_confirmation_stamp() {
     );
     assert!(heard.inband.is_some(), "the in-band stamp");
     until(t0, Duration::from_secs(3)).await;
+    // v2 0.6 §2.6 (#977's E3): the owner answers by snapshot, the entry
+    // vouched for at the snapshot's time (confirmation 1), which the
+    // consumer stamps it with, on the owner's clock named by its address.
+    let answer = c.get_answer(STATUS, None, T).await.unwrap();
+    let key = answer.current[0].key().to_owned();
+    assert_eq!(
+        answer.confirmations.get(&key).map(|c| c.confirmation),
+        Some(zenkey::model::collection::Confirmation::AtTime),
+        "vouched for now"
+    );
     let reply = get().await;
-    let ts = reply.timestamp().expect("the last confirmation");
-    assert_eq!(ts.get_id().to_string(), owner_zid, "the owner's clock");
+    let ts = reply.timestamp().expect("the confirmation");
+    assert_eq!(
+        *ts.get_id(),
+        zenkey::inband::owner_clock(&key),
+        "the owner's clock"
+    );
     let at = ts.get_time().to_system_time();
     assert!(at > put_wall, "later than the put");
     let age = SystemTime::now().duration_since(at).unwrap_or_default();
     assert!(
         age <= Duration::from_secs(1) + JITTER,
-        "the last heartbeat's: {age:?}"
+        "the snapshot's: {age:?}"
     );
     assert_eq!(
         c.freshness(STATUS, &[reply.freshness(word)])
@@ -677,27 +691,28 @@ async fn s3_a_get_readers_age_from_the_confirmation_stamp() {
         Verdict::Fresh,
         "3 s after its put"
     );
-    // The heartbeat that confirmed it has the reply's instant as its time,
-    // truncated to the millisecond; H may hear it just after the reply.
-    let reply_ms = at
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .expect("after the Unix epoch")
-        .as_millis() as i128;
+    // The heartbeats go on vouching for it.
     tokio::time::sleep(JITTER).await;
     assert!(
         beats.lock().unwrap().iter().any(|b| {
             b.hb.sections[2]
                 .as_ref()
                 .is_some_and(|s| s.members == Members::One { vouched: true })
-                && b.hb.time.unix_ms(0) == Some(reply_ms)
         }),
-        "a heartbeat vouching for status at the reply's instant, {reply_ms} ms"
+        "a heartbeat vouching for status"
     );
+    let _ = &owner_zid;
 
-    // 2. The bit cleared; 3.5 s later, stale.
+    // 2. The bit cleared; 3.5 s later, stale: confirmation 2, the last
+    // confirmation.
     o.status.set_vouched(false);
     let cleared = Instant::now();
     until(cleared, Duration::from_millis(3500)).await;
+    let answer = c.get_answer(STATUS, None, T).await.unwrap();
+    assert!(matches!(
+        answer.confirmations.values().next().map(|c| c.confirmation),
+        Some(zenkey::model::collection::Confirmation::At(_))
+    ));
     let reply = get().await;
     let j = c.freshness(STATUS, &[reply.freshness(word)]).unwrap();
     assert_eq!(
@@ -1146,22 +1161,24 @@ async fn a_heartbeats_time_counts_from_the_catalogs_epoch() {
         ft.s
     );
 
-    // Exactly the instant a reply carries as its last confirmation.
-    let c = reader(&rs, "lab/beacon");
-    let reply = match c.get(STATUS, None, T).await.unwrap() {
-        StateGet::Answered(mut v) => v.remove(0),
-        StateGet::Silent => panic!("the owner did not answer"),
-    };
-    let ts = reply.timestamp().expect("the last confirmation");
+    // A GET's snapshot counts its times from the same epoch (core 0.100
+    // §4.3, "Minting"; #977's E3): the status vouched for, its confirmation
+    // is the snapshot's time, which a reader under the deployment's epoch
+    // reads as the wall clock.
+    let c = reader(&rs, "lab/beacon").with_deployment_epoch(epoch);
+    let answer = c.get_answer(STATUS, None, T).await.unwrap();
+    let key = answer.current[0].key().to_owned();
+    assert_eq!(
+        answer.confirmations.get(&key).map(|c| c.confirmation),
+        Some(zenkey::model::collection::Confirmation::AtTime),
+        "vouched for now"
+    );
+    let ts = answer.current[0].timestamp().expect("its confirmation");
     let reply_ms = unix_ms(ts.get_time().to_system_time());
-    tokio::time::sleep(JITTER).await;
+    let wall = before - 1_000..=unix_ms(SystemTime::now()) + 1_000;
     assert!(
-        beats
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|b| b.hb.time.unix_ms(epoch) == Some(reply_ms)),
-        "a heartbeat at the reply's instant under the epoch, {reply_ms} ms"
+        wall.contains(&reply_ms),
+        "the snapshot's time under the epoch, {reply_ms} ms, the wall clock {wall:?}"
     );
     svc.close().await.unwrap();
 }

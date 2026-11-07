@@ -1,11 +1,10 @@
 //! A collection's snapshot as the runtime's readers read it (core §7.5's
-//! form 7; #977's E2): `common::snapshot_owner` answers S4's GET with pages
-//! written by `collection::Page::write`, as E3's owners will, and each
+//! form 7; #977's E2, E3): `common::snapshot_owner` answers S4's GET with
+//! pages written by `collection::Page::write`, as owners do, and each
 //! reader takes every entry as the per-key reply it stands for, a live
-//! entry a value and a tombstone a deletion, each with its stamp. The
-//! readers keep `Latest` until E3, so a snapshot of several pages reaches
-//! the consumer as its last page alone, which its index shows incomplete;
-//! an archive aligns under `None` and reads every page.
+//! entry a value and a tombstone a deletion, each with its stamp. Every
+//! reader GETs under `None` (E3), so a snapshot of several pages arrives
+//! whole; the consumer asks a collection read where it asks every member.
 
 mod common;
 
@@ -51,22 +50,28 @@ fn find<'a>(a: &'a StateAnswer, id: &str) -> &'a Current {
         .unwrap_or_else(|| panic!("{key} in {a:?}"))
 }
 
-/// A member read (`…/state/plans/*`, the consumer's selector): each member
-/// a snapshot of its own, on its own key, its entry's id empty. A live
-/// entry is a value with its record and stamp, its own run where it has
-/// one; a tombstone a deletion with its stamp; a page whose body is
-/// refused is undecodable, by its refusal's token. Each snapshot is one
-/// page, complete.
+/// A collection read (`…/state/plans/**`, the consumer's GET where it
+/// asks every member; #977's E3): the collection's snapshot on its
+/// snapshot key, three pages of one entry each, read whole under `None`. A
+/// live entry is a value with its record and stamp, its own run where it
+/// has one; a tombstone a deletion with its stamp. A member read of one
+/// key: its own snapshot, its entry's id empty; a page whose body is
+/// refused is undecodable, by its refusal's token.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn the_consumer_reads_a_member_reads_snapshots_as_values_and_deletions() {
+async fn the_consumer_reads_a_collection_read_as_values_and_deletions() {
     let (_r, ep) = router(None).await;
     let raw = client(&ep).await;
     let reader = client(&ep).await;
     let _owner = owner::start(&raw, ADDRESS).await;
     let consumer = tool(&reader);
+    assert_eq!(
+        consumer.get_selectors(PLANS, None).unwrap()[0].as_str(),
+        format!("{}/**", owner::plans(ADDRESS)),
+        "the collection read"
+    );
     let answer = eventually_some("the owner answers", || async {
         let a = consumer.get_answer(PLANS, None, T).await.unwrap();
-        (a.current.len() == 3 && a.undecodable.len() == 1).then_some(a)
+        (a.current.len() == 3).then_some(a)
     })
     .await;
     assert!(answer.complete, "{answer:?}");
@@ -84,20 +89,29 @@ async fn the_consumer_reads_a_member_reads_snapshots_as_values_and_deletions() {
         );
     }
     assert_eq!(owner::stamp("vehicle-02").run, OWN_RUN);
+    assert!(answer.complete, "{answer:?}");
+    assert_eq!(answer.snapshots.len(), 1, "{:?}", answer.snapshots);
+    let h = &answer.snapshots[0];
+    assert!(h.complete(), "{h:?}");
+    assert_eq!(h.key, owner::plans(ADDRESS));
+    assert_eq!((h.run, h.asof, h.coll), (RUN, owner::asof(), 0));
+    assert_eq!(h.pages.iter().copied().collect::<Vec<_>>(), [0, 1, 2]);
+    assert!(
+        answer.omitted.iter().all(Vec::is_empty),
+        "every member is listed"
+    );
+    // A page whose body is refused, on the one member read of its key.
+    let values: zenkey::model::template::Bindings =
+        [("vehicle".to_owned(), vec!["broken".to_owned()])].into();
+    let broken = consumer.get_answer(PLANS, Some(&values), T).await.unwrap();
     assert_eq!(
-        answer
+        broken
             .undecodable
             .get(&owner::member(ADDRESS, "broken"))
             .map(|u| u.token()),
         Some("short"),
         "a page whose body is refused"
     );
-    assert_eq!(answer.snapshots.len(), 3, "{:?}", answer.snapshots);
-    for h in &answer.snapshots {
-        assert!(h.complete(), "{h:?}");
-        assert_eq!((h.run, h.asof, h.coll), (RUN, owner::asof(), 0));
-        assert_eq!(h.pages.iter().copied().collect::<Vec<_>>(), [0]);
-    }
     // One member, every parameter bound: one snapshot on its key.
     let values: zenkey::model::template::Bindings =
         [("vehicle".to_owned(), vec!["vehicle-01".to_owned()])].into();
@@ -117,16 +131,15 @@ async fn the_consumer_reads_a_member_reads_snapshots_as_values_and_deletions() {
         .await
         .unwrap();
     assert_eq!(typed.current.len(), 3);
-    assert_eq!(typed.snapshots.len(), 3);
+    assert_eq!(typed.snapshots.len(), 1);
 }
 
-/// Under `Latest`, which the consumer keeps until E3 (core §4.2's "Why
-/// `None`", E3's text), a snapshot's pages share one key, and the GET
-/// delivers only the last to arrive: its index shows the others lost, so
-/// the snapshot is held incomplete, the answer is incomplete, and the
-/// entries it brought stand.
+/// A snapshot's pages share one key (core §4.2's "Why `None`"): under
+/// `None` both arrive, and the consumer holds the snapshot complete at its
+/// last page, its entry standing; under `Latest`, the control, a GET
+/// delivers one of the two.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_paged_snapshot_under_latest_is_held_incomplete() {
+async fn a_paged_snapshot_is_read_whole_under_none() {
     let (_r, ep) = router(None).await;
     let raw = client(&ep).await;
     let reader = client(&ep).await;
@@ -180,14 +193,22 @@ async fn a_paged_snapshot_under_latest_is_held_incomplete() {
     .await;
     assert_eq!(answer.snapshots.len(), 1, "{answer:?}");
     let h = &answer.snapshots[0];
-    assert_eq!(h.pages.len(), 1, "one page kept per key: {h:?}");
-    assert!(!h.complete(), "the index shows a page lost");
-    assert!(!answer.complete, "a snapshot held incomplete");
-    if h.pages.contains(&0) {
-        assert_eq!(answer.current.len(), 1, "page 0's entry stands");
-    } else {
-        assert!(answer.current.is_empty(), "page 1 holds no entry");
+    assert_eq!(h.pages.iter().copied().collect::<Vec<_>>(), [0, 1], "{h:?}");
+    assert!(h.complete(), "both pages, its last one's more bit 0");
+    assert!(answer.complete);
+    assert_eq!(answer.current.len(), 1, "page 0's entry");
+    // The control: `Latest` keeps one reply on the key.
+    let rx = reader
+        .get(format!("{}/**", owner::plans(ADDRESS)))
+        .consolidation(zenoh::query::ConsolidationMode::Latest)
+        .timeout(T)
+        .await
+        .unwrap();
+    let mut n = 0;
+    while let Ok(r) = rx.recv_async().await {
+        n += usize::from(r.result().is_ok());
     }
+    assert_eq!(n, 1, "one page of the two");
 }
 
 /// A snapshot's page heard on a subscription is no owner's answer (core
@@ -233,7 +254,7 @@ async fn a_page_heard_on_a_subscription_is_undecodable() {
     assert_eq!(read.page().map(|p| p.coll), Some(0));
 }
 
-/// An archive aligns from the owner's snapshot (#977's E2): a collection
+/// An archive aligns from the owner's snapshot (#977's E2, E3): a collection
 /// read (`…/state/plans/**`, consolidation `None`) brings the three pages,
 /// and each entry is recorded as the per-key reply it stands for — a live
 /// entry the bytes its mutation put, which `last_known` reads back as its
@@ -294,4 +315,81 @@ async fn an_archive_aligns_from_a_paged_snapshot() {
             .is_none(),
         "the page's own key is no member, and nothing is recorded there"
     );
+}
+
+/// Two instances answer per key (core §4.2, "Where two instances answer";
+/// review-bot on #1078): under `None` both replies on a key arrive, and the
+/// consumer keeps one value per key by §4.3's consumer rule, whichever
+/// arrives first. A stamped reply is kept over an unstamped one; within one
+/// run a `reply_del` with a higher seq replaces the put, and a put with a
+/// lower seq never replaces the delete.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_instances_per_key_replies_keep_one_value_per_key() {
+    use zenkey::model::wire::{DeleteStamp, Envelope, Seq, Stamp, Tag};
+    let (_r, ep) = router(None).await;
+    let first = client(&ep).await;
+    let second = client(&ep).await;
+    let reader = client(&ep).await;
+    let x = owner::member(ADDRESS, "x");
+    let y = owner::member(ADDRESS, "y");
+    let at = |seq: u32| Stamp {
+        run: RUN,
+        seq: Seq::new(seq).unwrap(),
+    };
+    let (x1, y1) = (x.clone(), y.clone());
+    let _q1 = first
+        .declare_queryable(format!("zk2/{ADDRESS}/mission_plan.v1/state/**"))
+        .callback(move |q| {
+            // `x`, a put at seq 4; `y`, a stamped put.
+            q.reply(
+                x1.clone(),
+                Envelope::mutation(Tag::NONE, at(4), b"x4").write(),
+            )
+            .encoding(Encoding::ZENOH_BYTES)
+            .wait()
+            .unwrap();
+            q.reply(
+                y1.clone(),
+                Envelope::mutation(Tag::NONE, at(2), b"y2").write(),
+            )
+            .encoding(Encoding::ZENOH_BYTES)
+            .wait()
+            .unwrap();
+        })
+        .await
+        .unwrap();
+    let (x2, y2) = (x.clone(), y.clone());
+    let _q2 = second
+        .declare_queryable(format!("zk2/{ADDRESS}/mission_plan.v1/state/**"))
+        .callback(move |q| {
+            // `x`, deleted at seq 6; `y`, a plain reply with neither stamp.
+            q.reply_del(x2.clone())
+                .attachment(DeleteStamp { stamp: at(6) }.write())
+                .wait()
+                .unwrap();
+            q.reply(y2.clone(), b"plain".to_vec())
+                .encoding(Encoding::TEXT_PLAIN)
+                .wait()
+                .unwrap();
+        })
+        .await
+        .unwrap();
+    let consumer = tool(&reader);
+    // Both queryables routed: the second's delete is heard.
+    eventually("both answer", || async {
+        let a = consumer.get_answer(PLANS, None, T).await.unwrap();
+        a.inband.get(&x) == Some(&at(6))
+    })
+    .await;
+    for _ in 0..5 {
+        let a = consumer.get_answer(PLANS, None, T).await.unwrap();
+        let held_x = a.current.iter().find(|c| c.key() == x).unwrap();
+        assert!(matches!(held_x, Current::Deleted { .. }), "{a:?}");
+        assert_eq!(a.inband.get(&x), Some(&at(6)));
+        assert_eq!(
+            text(a.current.iter().find(|c| c.key() == y).unwrap()).as_deref(),
+            Some("y2")
+        );
+        assert_eq!(a.inband.get(&y), Some(&at(2)), "the stamped reply is kept");
+    }
 }

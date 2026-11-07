@@ -16,12 +16,14 @@
 //!   arrived, envelope and all, and answers with them; a delete's in-band
 //!   stamp rides its `reply_del` as the attachment it arrived with.
 //! - **Alignment:** when an owner becomes reachable, it re-reads the owner's
-//!   recorded collection; while the owner is absent, it re-reads an archive
-//!   on the owner's side. It drops a key only on a `reply_del`, or a
-//!   snapshot's tombstone (#977's E2: an owner's page is read as its
-//!   entries, each the per-key reply it stands for); a key the source
-//!   neither reports nor tombstones is kept, `confirmed: false`, absence
-//!   from a complete snapshot included until E3 makes it evidence. It
+//!   recorded collection, by a collection read where it records one whole
+//!   and a member read otherwise, so that the owner answers by snapshot
+//!   (#977's E3); while the owner is absent, it re-reads an archive on the
+//!   owner's side, which answers per key. It drops a key only on positive
+//!   evidence: a `reply_del`, a snapshot's tombstone, or its absence from
+//!   the owner's complete snapshot (core §4.2's omission rule, whose guard
+//!   keeps a value heard after the read was asked); a key the source
+//!   neither reports nor tombstones is kept, `confirmed: false`. It
 //!   hears an owner become reachable on a watch session of its own
 //!   ([`ArchiveConfig::watch`]), since it reads presence on its own session,
 //!   which holds no liveliness subscriber (core §8.1, 0.37; #830); with
@@ -128,6 +130,10 @@ struct Rec {
     confirmed: bool,
     identity: Value,
     at: Instant,
+    /// When it last heard this mutation, by either path, a mutation heard
+    /// again included: whether it came after an alignment's GET was asked,
+    /// for the omission rule's guard (core §4.2; #977's E3).
+    heard: Instant,
 }
 
 /// A mutation's stamps as recorded: its Zenoh timestamp, its in-band stamp
@@ -298,6 +304,7 @@ impl Inner {
                 Versus::Older => return false,
                 Versus::Same => {
                     held.confirmed |= confirmed;
+                    held.heard = Instant::now();
                     return false;
                 }
                 Versus::Newer | Versus::Unordered => {}
@@ -311,6 +318,7 @@ impl Inner {
                 confirmed,
                 identity,
                 at: Instant::now(),
+                heard: Instant::now(),
             },
         );
         true
@@ -415,11 +423,16 @@ impl Inner {
             )
             .await?
             .is_empty();
+            let asked = Instant::now();
             let (from, replies) = if present {
-                (
-                    AlignedFrom::Owner(owner.clone()),
-                    self.read(&src.rec.selector, timeout).await?,
-                )
+                // §4.4: a collection it records whole by a collection read,
+                // a member by a member read, so the owner answers by
+                // snapshot (core §4.2; #977's E3).
+                let mut got = Vec::new();
+                for sel in owner_reads(src) {
+                    got.extend(self.read(&sel, timeout).await?);
+                }
+                (AlignedFrom::Owner(owner.clone()), got)
             } else {
                 let mut found = (AlignedFrom::Nothing, Vec::new());
                 for peer in &self.peers {
@@ -433,6 +446,10 @@ impl Inner {
                     }
                 }
                 found
+            };
+            let heard = match from {
+                AlignedFrom::Owner(_) => snapshots_of(&replies),
+                _ => Vec::new(),
             };
             let replies = entries_of(replies, &from, &src.selector);
             let mut seen = Vec::new();
@@ -471,6 +488,48 @@ impl Inner {
                 }
                 seen.push(origin);
             }
+            // The owner's complete snapshot is positive evidence (§4.4): a
+            // key it omits, of its collection on its key or under it, has
+            // no value, unless what is held is newer than the snapshot.
+            for (h, pages) in heard.iter().filter(|(h, _)| h.complete()) {
+                let contract = src.rec.implementation.contract();
+                let drop: Vec<String> = {
+                    let store = self.store.lock().expect("not poisoned");
+                    let held = store
+                        .iter()
+                        .filter(|(o, _)| {
+                            OwnedKeyExpr::try_from(o.as_str())
+                                .is_ok_and(|k| src.selector.intersects(&k))
+                        })
+                        .map(|(o, r)| zenkey_model::seed::HeldMember {
+                            key: o,
+                            mark: Some(r.stamp.mark()),
+                            heard_after: r.heard >= asked,
+                        });
+                    zenkey_model::collection::omit(contract, &h.key, pages, held)
+                        .into_iter()
+                        .map(str::to_owned)
+                        .collect()
+                };
+                if drop.is_empty()
+                    || !crate::answer::runs_revision(
+                        &self.session,
+                        &h.key,
+                        h.run,
+                        contract,
+                        timeout,
+                    )
+                    .await
+                {
+                    continue;
+                }
+                let mut store = self.store.lock().expect("not poisoned");
+                for k in drop {
+                    if store.remove(&k).is_some() {
+                        a.dropped += 1;
+                    }
+                }
+            }
             // Keys the source neither reported nor tombstoned: kept,
             // unconfirmed (no positive evidence).
             let mut store = self.store.lock().expect("not poisoned");
@@ -489,6 +548,66 @@ impl Inner {
         }
         Ok(a)
     }
+}
+
+/// The reads of an alignment from `src`'s owner (§4.4; #977's E3): the
+/// collection read of each collection its selector selects whole, its
+/// snapshot key followed by `/**`; the selector itself where it selects
+/// none whole, a member read, concrete or wildcard.
+fn owner_reads(src: &Source) -> Vec<String> {
+    let c = src.rec.implementation.contract();
+    let mut out: Vec<String> = c
+        .resources
+        .iter()
+        .filter(|r| {
+            matches!(
+                r.token,
+                zenkey_model::grammar::KindToken::State
+                    | zenkey_model::grammar::KindToken::ExplicitState
+            )
+        })
+        .filter_map(|r| crate::answer::collection_read(&src.rec.selector, &r.template))
+        .collect();
+    out.sort();
+    out.dedup();
+    if out.is_empty() {
+        out.push(src.rec.selector.clone());
+    }
+    out
+}
+
+/// The snapshots an alignment read heard from the owner, each with the
+/// pages it holds of it (core §7.5, "Complete"), in the order of its first
+/// page. A page whose body is refused is none.
+fn snapshots_of(
+    replies: &[Sample],
+) -> Vec<(
+    zenkey_model::collection::Heard,
+    Vec<zenkey_model::collection::Page>,
+)> {
+    let mut heard = Vec::new();
+    let mut pages: Vec<Vec<zenkey_model::collection::Page>> = Vec::new();
+    for s in replies {
+        if !crate::inband::is_snapshot(s) {
+            continue;
+        }
+        let crate::inband::Read::Snapshot {
+            page: Ok(page),
+            sample,
+        } = crate::inband::read(s.clone())
+        else {
+            continue;
+        };
+        let key = sample.key_expr().as_str().to_owned();
+        let (i, _) = zenkey_model::collection::hear(&mut heard, &key, &page);
+        if i == pages.len() {
+            pages.push(Vec::new());
+        }
+        if !pages[i].iter().any(|p| p.index == page.index) {
+            pages[i].push(*page);
+        }
+    }
+    heard.into_iter().zip(pages).collect()
 }
 
 /// An alignment read's replies as the per-key replies it records (#977's
@@ -780,21 +899,38 @@ pub async fn last_known(
     origin: &str,
     timeout: Duration,
 ) -> Result<Option<LastKnown>> {
+    // Consolidation `None` (core S4; #977's E3): an archive's records are
+    // per key, and two replies on the origin (one archive reached twice)
+    // keep the newer, the later where nothing orders them.
     let rx = session
         .get(archive_key(archive, origin))
         .target(QueryTarget::All)
-        .consolidation(ConsolidationMode::Latest)
+        .consolidation(ConsolidationMode::None)
         .timeout(timeout)
         .with(flume::unbounded::<Reply>())
         .await
         .map_err(zenoh)?;
+    let mut kept: Option<(LastKnown, Option<Mark>)> = None;
     while let Ok(r) = rx.recv_async().await {
         let Ok(s) = r.into_result() else { continue };
-        if let Some((lk, _)) = recorded(origin.to_owned(), s) {
-            return Ok(Some(lk));
+        let Some((lk, mark)) = recorded(origin.to_owned(), s) else {
+            continue;
+        };
+        if kept.as_ref().is_none_or(|(_, have)| newer(*have, mark)) {
+            kept = Some((lk, mark));
         }
     }
-    Ok(None)
+    Ok(kept.map(|(lk, _)| lk))
+}
+
+/// Whether a reply marked `mark` replaces one marked `have` for one
+/// origin: a newer stamp, or the later where nothing orders them.
+fn newer(have: Option<Mark>, mark: Option<Mark>) -> bool {
+    match (have, mark) {
+        (Some(h), Some(m)) => matches!(versus(h, m), Versus::Newer | Versus::Unordered),
+        (None, Some(_)) => true,
+        (_, None) => false,
+    }
 }
 
 /// Reads the last-known state of every origin `pattern` selects from the
@@ -830,14 +966,7 @@ pub async fn last_known_all(
         };
         // Two archive replies for one origin (one archive reached twice):
         // keep the newer stamp, the later one where nothing orders them.
-        let newer = out
-            .get(&origin)
-            .is_none_or(|(_, have)| match (*have, mark) {
-                (Some(h), Some(m)) => matches!(versus(h, m), Versus::Newer | Versus::Unordered),
-                (None, Some(_)) => true,
-                (_, None) => false,
-            });
-        if newer {
+        if out.get(&origin).is_none_or(|(_, have)| newer(*have, mark)) {
             out.insert(origin, (lk, mark));
         }
     }

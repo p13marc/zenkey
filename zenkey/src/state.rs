@@ -5,13 +5,13 @@
 //! | Rule | Here |
 //! |---|---|
 //! | S1 every put and delete carries its in-band stamp (§7.5's envelope), and on §4.3's table a Zenoh timestamp the owner set | [`StateWriter`], [`Minter`] |
-//! | S2 GET replies are the bytes put, a `reply_del`'s attachment the delete's envelope, each with the mutation's Zenoh timestamp where it had one; the owner's state queryables answer every live key plus `reply_del` within the window | the state server ([`Store`]) |
+//! | S2 a GET answered per collection (#977's E3): a collection read with its snapshot, a member read with each member's, a concrete key at no member with a snapshot of no entry, a per-key resource with a reply per key (the bytes put, a `reply_del`'s attachment the delete's envelope, the mutation's Zenoh timestamp where it had one); asof the [`Minter`]'s low-water mark, pages at `ServiceConfig::snapshot_page_bytes`, a live entry's confirmation from its bit | the state server (`Store::answer`) |
 //! | S3 the tombstone window, 60 s unless configured | [`DEFAULT_WINDOW`], `ServiceConfig::tombstone_window_s` |
-//! | S4 a consumer's GET: the owner's keys, target `All`, consolidation `Latest`; a snapshot's page read as its entries' per-key replies (#977's E2) | [`crate::consumer::Consumer::get`], [`StateAnswer::snapshots`] |
+//! | S4 a consumer's GET: the owner's keys, target `All`, consolidation `None`, a collection read where it asks every member; a snapshot's page read as its entries' per-key replies, merged per key, and the omission rule over a complete snapshot (#977's E3) | [`crate::consumer::Consumer::get`], [`StateAnswer::snapshots`], [`StateAnswer::omitted`] |
 //! | S6 current is the owner's answer; silence is no verdict | [`StateGet`] |
 //! | S7 a run never reused, a seq never wrapped within it; §4.3's table's timestamps, ahead: the guard holds a state write that carries a Zenoh timestamp | [`Minter`], [`crate::run`], the clock guard (`ServiceConfig::clock_reference`) |
 //! | a re-put is a mutation (0.21); `freshness.v1` §2.4, §2.10 | [`StateWriter`]'s refresher |
-//! | `freshness.v2` §2.4: a collection's members vouched for by a heartbeat, its replies carrying the last confirmation (§4.3's table, row 1) | [`Store`]'s books, [`crate::heartbeat`] |
+//! | `freshness.v2` §2.4: a collection's members vouched for by a heartbeat; a snapshot's live entry carries confirmation 1 while its bit is set, else 2 with its last confirmation | [`Store`]'s books, [`crate::heartbeat`] |
 //!
 //! Last-known state (S5) is an archive's: [`crate::archive`].
 //!
@@ -23,8 +23,8 @@
 //! collections as a heartbeat reads them: each collection's digest,
 //! toggled at each mutation, and each live member's bit; and each member's
 //! last confirmation, the later of its last mutation and the last
-//! heartbeat that vouched for it, which its GET replies carry as their
-//! Zenoh timestamp (S2). On a session without timestamping the clock
+//! heartbeat that vouched for it, which its snapshot's entry carries as
+//! its confirmation 2 while its bit is clear (S2, core §7.5; #977's E3). On a session without timestamping the clock
 //! guard holds none of its writes, since they carry no Zenoh timestamp
 //! (§4.3, "Ahead"; #978's F6). On a session that stamps every write, a
 //! `redundancy.v1` candidate's (§8.2), it holds them all, and a held write
@@ -130,6 +130,10 @@ pub const STREAM_KEYS: usize = 65_536;
 /// before it would reach this (core §4.3, "No wrap").
 const SEQ_END: u32 = wire::Seq::MAX.get() + 1;
 
+/// How often [`Minter::as_of`] looks again, a millisecond apart, while the
+/// run's first seq is in flight.
+const AS_OF_TRIES: usize = 20;
+
 /// The run an owner writes under now, and its counts (core §4.3).
 #[derive(Default)]
 struct Runs {
@@ -142,6 +146,11 @@ struct Runs {
     /// Every run this instance wrote under, so a random draw never repeats
     /// one (§4.3).
     used: Vec<wire::Run>,
+    /// The seqs of the run minted for a state mutation the [`Store`] has
+    /// not yet recorded (core §4.2, "Its asof"; #977's E3): a snapshot's
+    /// asof stays below the lowest of them. Events are never recorded, so
+    /// none is held here.
+    pending: std::collections::BTreeSet<u32>,
 }
 
 /// Mints an owner's stamps (core §4.3). One per service.
@@ -360,6 +369,7 @@ impl Minter {
         r.run = Some(run);
         r.seq = 0;
         r.streams.clear();
+        r.pending.clear();
         tracing::info!(run = %run, "a new run (core §4.3)");
     }
 
@@ -379,6 +389,7 @@ impl Minter {
         r.run = Some(run);
         r.seq = 0;
         r.streams.clear();
+        r.pending.clear();
     }
 
     /// The next state or event seq, a new run taken first when it would
@@ -415,6 +426,67 @@ impl Minter {
             stamp,
             time: self.timed(timed),
         })
+    }
+
+    /// [`Minter::mint_state`] for a mutation the [`Store`] records: its
+    /// seq is pending until [`Minter::settle`], so that no snapshot's asof
+    /// reaches it before the store holds it (core §4.2, "Its asof").
+    pub(crate) fn mint_recorded(&self, timed: bool) -> Result<Stamped> {
+        if (timed || self.session_hlc) && self.ahead.load(Ordering::Relaxed) {
+            return Err(Error::ClockAhead);
+        }
+        let mut r = self.runs.lock().expect("not poisoned");
+        let stamp = self.next_seq(&mut r);
+        r.pending.insert(stamp.seq.get());
+        Ok(Stamped {
+            stamp,
+            time: self.timed(timed),
+        })
+    }
+
+    /// `stamp`, minted by [`Minter::mint_recorded`] or
+    /// [`Minter::mint_seq`], is recorded, or will never be: a snapshot's
+    /// asof may pass it.
+    pub(crate) fn settle(&self, stamp: wire::Stamp) {
+        let mut r = self.runs.lock().expect("not poisoned");
+        if r.run == Some(stamp.run) {
+            r.pending.remove(&stamp.seq.get());
+        }
+    }
+
+    /// A snapshot's run and asof now (core §4.2, "Its asof"; #977's E3): a
+    /// seq of the run at or below which every state mutation minted is
+    /// recorded. It is just below the lowest seq minted for a state
+    /// mutation and not yet recorded; with none in flight, the last seq
+    /// minted. A run that minted none takes one, as an occurrence does.
+    /// The run's first seq in flight leaves no seq below it, so this waits
+    /// for it a little, then answers 0.
+    pub(crate) fn as_of(&self) -> wire::Stamp {
+        for _ in 0..AS_OF_TRIES {
+            {
+                let mut r = self.runs.lock().expect("not poisoned");
+                let run = self.ensure(&mut r);
+                let asof = match r.pending.first() {
+                    Some(0) => None,
+                    Some(&low) => Some(low - 1),
+                    None if r.seq == 0 => Some(self.next_seq(&mut r).seq.get()),
+                    None => Some(r.seq.min(SEQ_END) - 1),
+                };
+                if let Some(a) = asof {
+                    return wire::Stamp {
+                        run: r.run.unwrap_or(run),
+                        seq: wire::Seq::new(a).expect("below 2^24"),
+                    };
+                }
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let mut r = self.runs.lock().expect("not poisoned");
+        let run = self.ensure(&mut r);
+        wire::Stamp {
+            run,
+            seq: wire::Seq::new(0).expect("0"),
+        }
     }
 
     /// An event occurrence's stamps: the next seq of the run, shared with
@@ -495,9 +567,14 @@ impl Minter {
     /// its own stamps, its writes then putting them as minted
     /// ([`StateWriter::put_sealed`], [`crate::writer::EventWriter`]'s), each
     /// deciding its timestamp and its guard there (`config.v2`, #985 G2).
+    ///
+    /// The seq is pending, as [`Minter::mint_recorded`]'s, until its write
+    /// settles it ([`StateWriter::put_sealed`], or the event writer's).
     pub(crate) fn mint_seq(&self) -> wire::Stamp {
         let mut r = self.runs.lock().expect("not poisoned");
-        self.next_seq(&mut r)
+        let stamp = self.next_seq(&mut r);
+        r.pending.insert(stamp.seq.get());
+        stamp
     }
 
     /// Takes a new run within the instance now (core §4.3's MAY) and
@@ -706,6 +783,66 @@ pub(crate) type Vouched = Vec<(String, wire::Stamp)>;
 /// selector past them is counted apart, as reaching no key.
 const ASKED_SELECTORS: usize = 1024;
 
+/// The page size an owner cuts its snapshots under when its deployment
+/// sets none (core §4.2, "Pages"): §3.3's descriptor size, within
+/// zenoh-pico's 4 KB fragment (§12).
+pub const DEFAULT_PAGE_BYTES: usize = 1024;
+
+/// One collection an owner's state queryable answers (core §4.2,
+/// "Answering a state GET"; #977's E3): a `state` or `@state` resource of
+/// an interface it exposes, with its members, as `ensure_state_server`
+/// reads it from the contract.
+pub(crate) struct Answered {
+    /// `zk2/<system>/<service>/<iface>/<kind token>`: the queryable's root,
+    /// which its template's chunks follow.
+    pub(crate) root: String,
+    pub(crate) template: zenkey_model::template::Template,
+    /// Its members' keys as a pattern: each parameter `*`, a rest `**`.
+    pub(crate) pattern: OwnedKeyExpr,
+    /// Its snapshot key: the root, then the template's chunks before its
+    /// first parameter. `None` for a template whose first chunk is a
+    /// parameter, whose members are answered one by one.
+    pub(crate) snapshot_key: Option<String>,
+    /// Its index among the interface's resources of its kind token, in the
+    /// canonical order (core §7.5).
+    pub(crate) coll: u32,
+    /// CH's tag: its type's (core §7.6), as its writers seal.
+    pub(crate) tag: wire::Tag,
+    /// A per-key resource (core §4.2): a state §4.3's table lists, answered
+    /// with a reply per key, its Zenoh timestamp kept.
+    pub(crate) per_key: bool,
+    /// A collection with a horizon (`freshness.v2`): each live entry
+    /// carries its confirmation.
+    pub(crate) horizon: bool,
+    /// The deployment epoch its times count from, in seconds (§7.6).
+    pub(crate) epoch: i64,
+}
+
+impl Answered {
+    /// Whether `key` is one of its members' keys.
+    fn holds(&self, key: &str) -> bool {
+        key.strip_prefix(self.root.as_str())
+            .and_then(|r| r.strip_prefix('/'))
+            .is_some_and(|rest| {
+                let chunks: Vec<&str> = rest.split('/').collect();
+                self.template.matches(&chunks).is_some()
+            })
+    }
+}
+
+/// A time as a snapshot carries it (core §4.3, "Minting"): the instant of
+/// `t`, to the millisecond, from the deployment epoch `epoch`; unknown
+/// where it cannot be counted so.
+fn snapshot_time(t: &Timestamp, epoch: i64) -> zenkey_model::collection::Time {
+    let ms = t
+        .get_time()
+        .to_system_time()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |d| i128::try_from(d.as_millis()).unwrap_or(i128::MAX));
+    zenkey_model::collection::Time::from_unix_ms(ms, epoch)
+        .unwrap_or(zenkey_model::collection::Time::Unknown)
+}
+
 /// The owner's state, as its queryables answer it (S2, S3).
 pub struct Store {
     map: Mutex<HashMap<OwnedKeyExpr, Entry>>,
@@ -718,15 +855,31 @@ pub struct Store {
     /// collections as its heartbeats read them. Lock order: `map`, then
     /// this.
     books: Mutex<BTreeMap<String, Book>>,
+    /// Each collection its state queryables answer (core §4.2), by the
+    /// queryable's root.
+    collections: Mutex<BTreeMap<String, Vec<Arc<Answered>>>>,
+    /// The page size its snapshots are cut under (core §4.2, "Pages").
+    page_bytes: usize,
 }
 
 impl Store {
-    pub(crate) fn new(window: Duration) -> Self {
+    pub(crate) fn new(window: Duration, page_bytes: usize) -> Self {
         Self {
             map: Mutex::new(HashMap::new()),
             window,
             asked: Mutex::new(HashMap::new()),
             books: Mutex::new(BTreeMap::new()),
+            collections: Mutex::new(BTreeMap::new()),
+            page_bytes,
+        }
+    }
+
+    /// Answers `collections` from now on, each on its queryable's root
+    /// (core §4.2; #977's E3).
+    pub(crate) fn answer_collections(&self, collections: Vec<Answered>) {
+        let mut held = self.collections.lock().expect("not poisoned");
+        for c in collections {
+            held.entry(c.root.clone()).or_default().push(Arc::new(c));
         }
     }
 
@@ -958,13 +1111,29 @@ impl Store {
         }
     }
 
-    /// Answers a query: every matching live key with the bytes it put, its
-    /// envelope included, and a `reply_del` whose attachment is the
-    /// deletion's envelope for each matching key deleted within the window,
-    /// each with the mutation's Zenoh timestamp where it carried one, a
-    /// covered member's last confirmation in its place (S2, S3). Older
-    /// tombstones are forgotten.
-    pub(crate) fn answer(&self, q: &Query) {
+    /// Answers a query on the state queryable over `root`
+    /// (`zk2/<system>/<service>/<iface>/<kind token>`), per collection (core
+    /// §4.2, "Answering a state GET"; #977's E3). Tombstones older than the
+    /// window are forgotten first (S3).
+    ///
+    /// - **A per-key resource**: each member the selector reaches, live
+    ///   with the bytes it put, its envelope included, or deleted within the
+    ///   window with a `reply_del` whose attachment is the deletion's
+    ///   envelope, each with the mutation's Zenoh timestamp where it carried
+    ///   one (S2, S3).
+    /// - **A collection read**, a selector that includes the snapshot key
+    ///   followed by `/**`: the collection's snapshot on its snapshot key,
+    ///   cut into pages of the store's page size (§7.5).
+    /// - **A member read**: each member reached, a snapshot of it alone on
+    ///   its own key; a concrete key at no member, a snapshot of no entry
+    ///   there.
+    ///
+    /// A snapshot is under `minter`'s run and asof ([`Minter::as_of`]), at
+    /// a time minted as it is built. Each live entry of a collection with a
+    /// horizon carries its confirmation: 1 while its bit is set, else 2 with
+    /// its last confirmation (`freshness.v2` §2.4). A key of no collection
+    /// is answered per key, as before #977.
+    pub(crate) fn answer(&self, q: &Query, minter: &Minter, root: &str) {
         {
             let mut asked = self.asked.lock().expect("not poisoned");
             let selector: &zenoh::key_expr::keyexpr = q.key_expr();
@@ -974,10 +1143,36 @@ impl Store {
                 asked.insert(selector.to_owned(), 1);
             }
         }
+        let collections = self
+            .collections
+            .lock()
+            .expect("not poisoned")
+            .get(root)
+            .cloned()
+            .unwrap_or_default();
+        let qk: &zenoh::key_expr::keyexpr = q.key_expr();
+        let reached: Vec<&Answered> = collections
+            .iter()
+            .map(AsRef::as_ref)
+            .filter(|c| qk.intersects(&c.pattern))
+            .collect();
+        // The run and asof first, then the store read: every mutation at or
+        // below asof is in the map by then, or a later one of its member.
+        let mark = reached.iter().any(|c| !c.per_key).then(|| minter.as_of());
         let mut map = self.map.lock().expect("not poisoned");
         map.retain(|_, e| e.value.is_some() || e.at.elapsed() <= self.window);
+        let under_root = |k: &OwnedKeyExpr| {
+            k.as_str()
+                .strip_prefix(root)
+                .is_some_and(|r| r.starts_with('/'))
+        };
+        // Per key: a per-key resource's members, and a key of no collection.
         for (key, e) in map.iter() {
-            if !q.key_expr().intersects(key) {
+            if !under_root(key) || !qk.intersects(key) {
+                continue;
+            }
+            let of = collections.iter().find(|c| c.holds(key.as_str()));
+            if of.is_some_and(|c| !c.per_key) {
                 continue;
             }
             let _ = match &e.value {
@@ -993,6 +1188,145 @@ impl Store {
                     .timestamp(e.reply_time())
                     .wait(),
             };
+        }
+        let Some(mark) = mark else { return };
+        let books = self.books.lock().expect("not poisoned");
+        for c in reached.iter().filter(|c| !c.per_key) {
+            let members: Vec<(&OwnedKeyExpr, &Entry)> =
+                map.iter().filter(|(k, _)| c.holds(k.as_str())).collect();
+            let snapshot = |key: &str, members: &[(&OwnedKeyExpr, &Entry)]| {
+                self.snapshot(c, &books, minter, mark, key, members)
+            };
+            let collection_read = c.snapshot_key.as_deref().filter(|sk| {
+                zenoh::key_expr::KeyExpr::try_from(format!("{sk}/**"))
+                    .is_ok_and(|whole| qk.includes(&whole))
+            });
+            if let Some(sk) = collection_read {
+                self.reply_pages(q, sk, &snapshot(sk, &members));
+                continue;
+            }
+            let mut at_asked = false;
+            for m in members.iter().filter(|(k, _)| qk.intersects(k)) {
+                at_asked |= m.0.as_str() == qk.as_str();
+                self.reply_pages(q, m.0.as_str(), &snapshot(m.0.as_str(), &[*m]));
+            }
+            // A concrete member read at no member: the owner's word that it
+            // had no value as of asof.
+            if !at_asked && !qk.is_wild() && c.holds(qk.as_str()) {
+                self.reply_pages(q, qk.as_str(), &snapshot(qk.as_str(), &[]));
+            }
+        }
+    }
+
+    /// The snapshot of `c` on `key`, the snapshot key or a member's, of
+    /// `members` (core §4.2, "What a snapshot lists"; §7.5): each id the
+    /// member's key below `key`, each entry under its own run where it is
+    /// not `mark`'s.
+    fn snapshot(
+        &self,
+        c: &Answered,
+        books: &BTreeMap<String, Book>,
+        minter: &Minter,
+        mark: wire::Stamp,
+        key: &str,
+        members: &[(&OwnedKeyExpr, &Entry)],
+    ) -> zenkey_model::collection::Snapshot {
+        use zenkey_model::collection::{Confirmation, Entry as Live, Snapshot, Tombstone};
+        let id_of = |k: &str| {
+            k.strip_prefix(key)
+                .map(|r| r.strip_prefix('/').unwrap_or(r).to_owned())
+                .unwrap_or_default()
+        };
+        let own = |run: wire::Run| (run != mark.run).then_some(run);
+        let mut live = Vec::new();
+        let mut tombs = Vec::new();
+        for (k, e) in members {
+            let stamp = e.stamped.stamp;
+            match &e.value {
+                Some((bytes, _)) => {
+                    let Ok(env) = wire::Envelope::parse(bytes) else {
+                        continue;
+                    };
+                    let confirmation = if c.horizon {
+                        let vouched = Self::collection_in(books, k.as_str())
+                            .and_then(|(iface, i)| {
+                                books.get(iface)?.collections[i].live.get(k.as_str())
+                            })
+                            .is_some_and(|(_, on)| *on);
+                        if vouched {
+                            Confirmation::AtTime
+                        } else {
+                            Confirmation::At(
+                                e.confirmed
+                                    .as_ref()
+                                    .map_or(zenkey_model::collection::Time::Unknown, |t| {
+                                        snapshot_time(t, c.epoch)
+                                    }),
+                            )
+                        }
+                    } else {
+                        Confirmation::None
+                    };
+                    live.push(Live {
+                        id: id_of(k.as_str()),
+                        run: own(stamp.run),
+                        seq: stamp.seq,
+                        confirmation,
+                        record: env.record.to_vec(),
+                    });
+                }
+                None => tombs.push(Tombstone {
+                    id: id_of(k.as_str()),
+                    run: own(stamp.run),
+                    seq: stamp.seq,
+                }),
+            }
+        }
+        live.sort_by(|a, b| a.id.as_bytes().cmp(b.id.as_bytes()));
+        tombs.sort_by(|a, b| a.id.as_bytes().cmp(b.id.as_bytes()));
+        Snapshot {
+            tag: c.tag,
+            run: mark.run,
+            asof: mark.seq,
+            time: snapshot_time(&minter.time(), c.epoch),
+            coll: c.coll,
+            live,
+            tombs,
+        }
+    }
+
+    /// Replies `snapshot`'s pages on `key`, cut under the page size (core
+    /// §7.5, "Pages"), each a GET reply of Encoding `zenoh/bytes` with no
+    /// Zenoh timestamp. One the writer refuses is logged, never sent.
+    fn reply_pages(&self, q: &Query, key: &str, snapshot: &zenkey_model::collection::Snapshot) {
+        let pages = match snapshot.paginate(self.page_bytes) {
+            Ok(p) => p,
+            Err(r) => {
+                tracing::warn!(
+                    key,
+                    refusal = r.token(),
+                    "a snapshot its writer refuses is not sent (core §7.5)"
+                );
+                return;
+            }
+        };
+        for p in pages {
+            match p.write() {
+                Ok(bytes) => {
+                    let _ = q
+                        .reply(key.to_owned(), bytes)
+                        .encoding(Encoding::ZENOH_BYTES)
+                        .wait();
+                }
+                Err(r) => {
+                    tracing::warn!(
+                        key,
+                        refusal = r.token(),
+                        "a page its writer refuses is not sent (core §7.5)"
+                    );
+                    return;
+                }
+            }
         }
     }
 }
@@ -1101,7 +1435,7 @@ impl Refresher {
         let Some((record, attachment)) = h.value.clone() else {
             return;
         };
-        match self.minter.mint_state(self.writer.is_stamped()) {
+        match self.minter.mint_recorded(self.writer.is_stamped()) {
             Ok(stamped) => {
                 let bytes = stamped.seal_tagged(self.writer.tag(), &record);
                 self.store.put(
@@ -1113,6 +1447,7 @@ impl Refresher {
                     true,
                     None,
                 );
+                self.minter.settle(stamped.stamp);
                 h.at = tokio::time::Instant::now();
                 if let Err(e) = self
                     .writer
@@ -1257,7 +1592,7 @@ impl StateWriter {
     /// next put that goes through sets the bit as
     /// [`StateWriter::set_vouched`] left it, and so does that call itself.
     fn mint(&self) -> Result<Stamped> {
-        let minted = self.minter.mint_state(self.writer.is_stamped());
+        let minted = self.minter.mint_recorded(self.writer.is_stamped());
         if self.covered && matches!(minted, Err(Error::ClockAhead)) {
             self.store.vouch(self.key.as_str(), false);
         }
@@ -1390,8 +1725,12 @@ impl StateWriter {
         let stamped = self.mint()?;
         // §2.7 (#741): a new live member at the bound is refused, nothing
         // stored or published. After the mint, so a stopped clock never
-        // leaves a member counted live without a value.
-        self.writer.admit()?;
+        // leaves a member counted live without a value. Its seq is never
+        // recorded, so it holds no snapshot's asof back.
+        if let Err(e) = self.writer.admit() {
+            self.minter.settle(stamped.stamp);
+            return Err(e);
+        }
         let record = payload.to_bytes().into_owned();
         let bytes = stamped.seal_tagged(self.writer.tag(), &record);
         let kept = attachment.as_ref().map(|a| a.to_bytes().into_owned());
@@ -1408,6 +1747,7 @@ impl StateWriter {
             self.is_vouched(),
             self.confirmed_at(&stamped),
         );
+        self.minter.settle(stamped.stamp);
         let sent = self
             .writer
             .put_stamped(&admitted, bytes.into(), attachment, stamped)
@@ -1428,6 +1768,14 @@ impl StateWriter {
     /// record checked by its layout, the budget, the store, and a Zenoh
     /// timestamp only where the writer stamps, which the clock guard holds.
     pub(crate) async fn put_sealed(&self, stamp: wire::Stamp, payload: Vec<u8>) -> Result<Stamped> {
+        // Its seq was pending since the model minted it (Minter::mint_seq):
+        // recorded or refused, it is settled here.
+        let put = self.put_sealed_at(stamp, payload).await;
+        self.minter.settle(stamp);
+        put
+    }
+
+    async fn put_sealed_at(&self, stamp: wire::Stamp, payload: Vec<u8>) -> Result<Stamped> {
         let admitted = self.writer.serving().await?;
         let mut held = self.member.held.lock().await;
         let record = wire::Envelope::parse(&payload)
@@ -1513,6 +1861,7 @@ impl StateWriter {
             self.is_vouched(),
             self.confirmed_at(&stamped),
         );
+        self.minter.settle(stamped.stamp);
         held.at = tokio::time::Instant::now();
         let sent = self
             .writer
@@ -1550,6 +1899,7 @@ impl StateWriter {
         held.at = tokio::time::Instant::now();
         self.store
             .delete_aged(&self.key, stamped, age, self.confirmed_at(&stamped));
+        self.minter.settle(stamped.stamp);
         // §2.7: a deleted key is not live, so it frees a member.
         self.writer.release();
         let sent = self.writer.delete_stamped(&admitted, stamped).await;
@@ -1627,7 +1977,9 @@ impl Current {
 /// What a state GET to the owner found (S4, S6).
 #[derive(Debug, Clone)]
 pub enum StateGet {
-    /// The owner answered: current state, key by key.
+    /// The owner answered: current state, key by key. Empty where its
+    /// complete snapshot listed no member (core §4.2): its word that the
+    /// collection had none.
     Answered(Vec<Current>),
     /// No reply within the timeout. Not a verdict about the key (O5): the
     /// owner may be gone, or the reply may not have crossed. A consumer may
@@ -1668,6 +2020,53 @@ pub struct StateAnswer {
     /// complete. Its entries are in [`StateAnswer::current`], each on its
     /// member's key. Empty when no page answered.
     pub snapshots: Vec<zenkey_model::collection::Heard>,
+    /// Each key answered by a snapshot's live entry, with its
+    /// confirmation (`freshness.v2` §2.6, text 0.6): what a GET reader ages
+    /// it from. A key answered per key has none.
+    pub confirmations: BTreeMap<String, Confirmed>,
+    /// The keys each complete snapshot's omission rule dropped (core
+    /// §4.2; #977's E3), by the snapshot's place in
+    /// [`StateAnswer::snapshots`]: members it held, from this GET's other
+    /// replies, that the snapshot lists neither live nor as a tombstone.
+    pub omitted: Vec<Vec<String>>,
+}
+
+/// A snapshot's live entry's confirmation, as a GET reader reads it
+/// (`freshness.v2` §2.6; core §7.5): its code, and the snapshot's time,
+/// which confirmation 1 is at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Confirmed {
+    pub confirmation: zenkey_model::collection::Confirmation,
+    /// The snapshot's time: when the owner built it, on its clock.
+    pub time: zenkey_model::collection::Time,
+}
+
+impl Confirmed {
+    /// When the owner last vouched for the member: the snapshot's time for
+    /// confirmation 1, the entry's conf for 2. `None` for 0, and for a time
+    /// that is unknown: no stamp (`freshness.v2` §2.6).
+    #[must_use]
+    pub fn at(&self) -> Option<zenkey_model::collection::Time> {
+        use zenkey_model::collection::{Confirmation, Time};
+        let t = match self.confirmation {
+            Confirmation::None => return None,
+            Confirmation::AtTime => self.time,
+            Confirmation::At(t) => t,
+        };
+        (t != Time::Unknown).then_some(t)
+    }
+
+    /// How long before the snapshot was built the owner last vouched, both
+    /// times on its clock: zero for confirmation 1. `None` where
+    /// [`Confirmed::at`] is.
+    #[must_use]
+    pub fn before_snapshot(&self) -> Option<Duration> {
+        let at = self.at()?.unix_ms(0)?;
+        let built = self.time.unix_ms(0)?;
+        u64::try_from(built.saturating_sub(at))
+            .ok()
+            .map(Duration::from_millis)
+    }
 }
 
 impl StateAnswer {
@@ -1690,9 +2089,17 @@ impl StateAnswer {
     }
 }
 
+/// Silence is no reply at all (O5). A complete snapshot is the owner's word
+/// for its collection, empty or not (core §4.2, #977's E3): one of no entry
+/// answers that the collection, or the member read, had no value, so it is
+/// [`StateGet::Answered`] with no key.
 impl From<StateAnswer> for StateGet {
     fn from(a: StateAnswer) -> Self {
-        if a.current.is_empty() {
+        let said = a
+            .snapshots
+            .iter()
+            .any(zenkey_model::collection::Heard::complete);
+        if a.current.is_empty() && !said {
             StateGet::Silent
         } else {
             StateGet::Answered(a.current)

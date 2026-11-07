@@ -329,9 +329,11 @@ async fn get(s: &zenoh::Session, key: &str) -> Option<Json> {
         .unwrap();
     let mut out = None;
     while let Ok(r) = rx.recv_async().await {
-        if let Ok(sample) = r.into_result()
-            && sample.kind() == SampleKind::Put
-        {
+        // A snapshot's page is its entries (core §4.2; #977's E3).
+        for sample in r.into_result().into_iter().flat_map(common::replies) {
+            if sample.kind() != SampleKind::Put {
+                continue;
+            }
             out = Some(serde_json::from_slice(&common::record(&sample)).unwrap());
         }
     }

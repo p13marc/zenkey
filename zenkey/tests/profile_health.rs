@@ -206,16 +206,22 @@ async fn get_state(s: &zenoh::Session, address: &str) -> Vec<Current> {
     let rx = s
         .get(format!("zk2/{address}/health.v1/state/**"))
         .target(QueryTarget::All)
-        .consolidation(ConsolidationMode::Latest)
+        .consolidation(ConsolidationMode::None)
         .timeout(T)
         .with(flume::unbounded::<Reply>())
         .await
         .unwrap();
     let mut out = Vec::new();
+    let mut samples = Vec::new();
     while let Ok(r) = rx.recv_async().await {
         let Ok(sample) = r.into_result() else {
             continue;
         };
+        // A snapshot's page is its entries, each live one stamped with its
+        // confirmation (core §4.2, freshness.v2 §2.6; #977's E3).
+        samples.extend(common::replies_aged(sample));
+    }
+    for sample in samples {
         let key = sample.key_expr().as_str().to_owned();
         out.push(match sample.kind() {
             SampleKind::Delete => Current::Deleted {
@@ -458,11 +464,14 @@ async fn s1_bring_up() {
             (Read::Unspecified, health::STARTING),
             "at the {when} token"
         );
+        // freshness.v2 §2.6 (#977's E3): its confirmation, on the owner's
+        // clock, named by its address; the owner's zid is in no snapshot.
         assert_eq!(
-            current.clock().as_deref(),
-            Some(owner_zid.as_str()),
-            "stamped by the owner's session (S1)"
+            current.clock(),
+            Some(zenkey::inband::owner_clock(current.key()).to_string()),
+            "confirmed on the owner's clock"
         );
+        let _ = &owner_zid;
         assert!(got.checks.is_empty());
         first_since = status.since_ns;
     }
@@ -1082,9 +1091,9 @@ async fn s4_the_faults_stamp_measured() {
     let (current, status) = got.status.expect("the owner's GET answers it");
     assert_eq!(status.read(), Read::Level(Level::Ok));
     assert_eq!(
-        current.clock().as_deref(),
-        Some(os.zid().to_string().as_str()),
-        "a GET reply is never re-stamped (core §4.1)"
+        current.clock(),
+        Some(zenkey::inband::owner_clock(current.key()).to_string()),
+        "its confirmation, from the owner's clock: a GET reply is never re-stamped (core §4.1)"
     );
     svc.close().await.unwrap();
     drop(r2);
