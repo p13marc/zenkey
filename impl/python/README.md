@@ -76,7 +76,7 @@ case name. It exits with:
 | hostid | profiles/hostid §2.1, §2.11 | `hostid` | every file of `spec/profiles/hostid/conformance/`: `vectors.json` (the derivation) and `shapes.json` (the minted shape). An unknown file there fails (`profiles/README.md`). |
 | freshness | profiles/freshness §2.1–§2.8 | `freshness` | every file of `spec/profiles/freshness/conformance/`: `horizons.json` (a resource's horizon), `judgements.json` (one member's combined verdict, seconds read exactly to the nanosecond) and `clock-trust.json` (a measured clock's trust over one reading, 0.2). An unknown file there fails. |
 | health | profiles/health §2.2, §2.10, §2.11 | `health` | every file of `spec/profiles/health/conformance/`: `judgements.json` (§2.11's procedure over one reading), `rollups.json` (a tool's roll-up), `codes.json` (fault codes) and `clock.json` (§5's clock question, 0.3). An unknown file there fails. |
-| config | profiles/config §2.2–§2.19 | `config` | every file of `spec/profiles/config/conformance/`: `validation.json` (§2.5's, §2.10's and §2.13's orders of refusals), `window.json` (§2.8's window and deadline), `lifecycle.json` (the owner as a state machine: each step's reply, device acts, events and state), `desired.json` (§2.18) and `redaction.json` (§2.15). An unknown file there fails. |
+| config | profiles/config §2.2–§2.19, `v2.md` §2–§3 | `config`, `config_v2` | every file of `spec/profiles/config/conformance/`: `validation.json` (§2.5's, §2.10's and §2.13's orders of refusals), `window.json` (§2.8's window and deadline), `lifecycle.json` (the owner as a state machine: each step's reply, device acts, events and state), `desired.json` (§2.18) and `redaction.json` (§2.15); and config.v2's (round 102): `v2/`'s six files, `derive.json` (the declaration, the derived types and their layouts, the contract's lint), `records.json`, `validation.json`, `window.json`, `lifecycle.json` and `redaction.json`, and `contracts/rfcfg.v1`, lint-clean. An unknown file there fails. |
 | frame | §7.7, observer §7.6 | `frame` | every file of `frame/`: `layouts.json` (the frame form, its tag, the widths and the span), `bodies.json` (each write's bits, pad and bytes or its refusal, each read's value or its first refusal, every accepted one written back and sealed in form 5) and `apply.json` (round 97: one key's frames through `frame.Reader`, from each body's value and as a sealed put, envelope first). An unknown file there fails. |
 | link | profiles/link §2.1–§2.15 | `link` | every file of `spec/profiles/link/conformance/`, `contracts/` (0.13: each contract there valid, each artifact listed) among them: `exposure.json` (§2.2's exposure and whether a resource's pushes cross), `plan.json` (a face policy and a deployment to each face's plan, or its refusal) and `lints.json` (the policy's linter, the plan's warnings, the windows and a router's block). An unknown file there fails. |
 | alarms | profiles/alarms §2.2–§2.6, §2.12, §2.14, §2.15, §5 | `alarms` | every file of `spec/profiles/alarms/conformance/`: `keys.json` (the recipe through the sanitizing step, the strict recipe beside it, host-scoped names, references and their keys), `documents.json` (readable, the owner's errors and warnings; a case given as its `text` read as strict JSON first, 0.2), `transitions.json` (one key's samples read in stamp order) and `conclusions.json` (§5's four questions, and §2.15's verdict on an owner's alarms). An unknown file there fails. |
@@ -6140,6 +6140,240 @@ Round 101 found F-472 to F-479: one contradiction, one ambiguity, three
 gaps and three bugs in the reference. None is a blocker. F-471's answer holds.
 See "At core 0.94 and observer 0.24 (#985 C4c)" in `SPEC-FINDINGS.md`.
 
+## Core 0.95 and 0.96, `observer.md` 0.25 and 0.26, `config.v2` 0.1, `link.v2` 0.7 and `modem.v3` 3.3: round 101 answered, a configuration in its contract, and a first hop (round 102)
+
+Since round 101 main took:
+- **core 0.95 and observer 0.25:** F-472 to F-476 answered on the texts,
+  and F-477 to F-479 fixed in the reference;
+- **config.v2 0.1** (#985 G1), now **draft**, used by zenoh-modem's
+  `sx1262_config.v1` (#985 G4), with its owner (G2) and tools (G3) in the
+  reference;
+- **link.v2** draft (a status entry, text 0.6);
+- #1055 and #1064 in the reference: a config.v1 or config.v2 owner's
+  re-mint restarts its configuration;
+- **core 0.96, observer 0.26, link.v2 0.7 and config.v1 0.10** (#982 H1,
+  main 0676db19): an owner on a first hop holds its instance token alone,
+  a reader finds a provider by its instance token, and a device face
+  carves its devices' instance keys from `zk`. With H2 in the reference,
+  the owner example takes `--first-hop`.
+
+Round 102 also carries PR #1059 (#991, a680b029): **`modem.v3` 3.3**,
+three frame resources over one record of all 73 readings, catalog
+e3a529fe, and `link.v1` 0.17, `link.v2` 0.8 and `telemetry.v2` 0.3, each
+editorial.
+
+zk2py diffed `spec/` between b483902e and ee5fb697, between ee5fb697 and
+0676db19, and between 0676db19 and a680b029. **No rule changed beyond
+what the changelogs state.** One sentence of `scenarios-v2.md`'s intro,
+naming zenctl's tests, has no entry (F-491). #1059 changed no line with a
+keyword.
+
+### The classes zk2py claims
+
+Unchanged for the core: the **owner**, **consumer**, **caller** and
+**observer** classes, at the full level, and the static rules. Of the
+profiles, **config.v2** is claimed now: its owner (a simulated device),
+its caller, its tool (§5) and its linter (§2.2). zk2py's `link.v2`
+generator takes the device face.
+
+### Its walk of `RULES.md` at 0.96
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 82 | 69 | 3 | 10 |
+| consumer | 23 | 19 | 0 | 4 |
+| caller | 18 | 18 | 0 | 0 |
+| observer | 93 | 89 | 2 | 2 |
+| static, in every class | 64 | 62 | 0 | 2 |
+
+- **254 rows walked of 254, none without a verdict.**
+  - At 0.95, 246. The new row, §5.2's Decoding MUST under the observer
+    (F-472's index), walks the verdict round 101 held beyond the index.
+  - 0.96 adds eight. The owner's three are met, by zk2py's owner on a
+    first hop. The observer's three are met, by its reader and its tool.
+  - The other two are n/a: a deployment's SHOULD and a tool's MUST NOT
+    the index lists under the owner too (F-492).
+- The walk was re-keyed first, in the commit that brings `just
+  py-conformance` level: round 101's readings of F-472 to F-476 now read
+  their answers.
+
+### What round 102 changed in zk2py
+
+- **`config_v2`** (new), from `v2.md` and the fixtures alone:
+  - `read_groups`: `config.groups` read into groups and markers, or the
+    reasons in the text's order; `derive` and `layouts`: `Record`, each
+    `Set<T>`, `Control` and `Error`, their tags, layout hashes and bit
+    bounds; `lint`: the contract's findings, `resolved` adapting a loaded
+    contract;
+  - the record: an owner's state written as `Record`'s JSON reading and
+    its bytes, and read back with §2.3's refusals after core §7.6's
+    (`group`, `pending`, `last`, `desired`, `parameter`), two revisions
+    reading each other;
+  - `check_request`: persist without a layer, the parse, then the rows;
+    `check_desired`; `deadline_ms` and `round_up` (§2.8);
+  - `Core`: the owner as a state machine, its puts, replies in the value
+    and error forms under their marks, events and acts; tokens of 48
+    bits, a new run when the seq or the counter is spent; the first
+    answer replayed byte for byte; redaction;
+  - the session half: `LiveCore` on zk2py's `Owner` (its run, its one
+    count of seqs, each reply sent as it is made, before the event);
+    `ConfigV2Owner` (the record before the tokens, deadlines on a timer,
+    random counters, a re-mint that restarts the configuration); `Caller`,
+    which holds the current record by seq within a run; `Recorder`;
+    `tool_answers`, §5's six questions;
+  - `sx1262_round_trip`: `config.v2-binding.md` §15 through zk2py's own
+    owner and codec.
+- **The config family** reads `v2/` and `contracts/` whole: 593 of 593,
+  up from 332. **The examples family** lints every contract that uses
+  config.v2 (§2.2: "An implementation that lints a contract MUST report …
+  a finding as an error"): `sx1262_config.v1` is clean.
+- **`live.read_reply`**, for a caller that takes no MAY: a reply under
+  another `Encoding` is malformed (core 0.95 §5.1).
+- **`forms_live`** step 7: `ping` answered by an envelope with no
+  `message`, the transport's to every caller (core 0.95 §5.2).
+- **`readings`: 912, up from 896.** Round 101's F-472 to F-476 read as
+  answered; core 0.95's, observer 0.25's, config.v2's and link.v2's
+  entries; config.v2's fixture counts; the SX1262's sizes; F-480 to F-491
+  as zk2py reads them.
+
+**`just py-conformance`: 5993 of 5993**, on main ee5fb697. Of them,
+`config` 593 and `readings` 912.
+
+At core 0.96 (#982 H1, main 0676db19):
+- **`link` and `link_v2`**, the device face from the text alone: `attach
+  = "device"` and `devices` (`bad_value`, `device_listed`), its devices
+  read as listed services, the carve of `zk` into three denies,
+  `presence_required` and `epoch_on_device`, no downsampling of a
+  device's stream on its own face, and `zk_not_denied` over the carve.
+  `v2/plan.json`'s 22 to 26 and `v2/lints.json`'s 40 to 57 pass, the link
+  family 300 of 300.
+- **`owner.Owner(first_hop=True)`:** every interface tokenless, its
+  instance token alone, no contract queryable, and `archive.v1` and a
+  governed interface refused before anything is declared.
+- **`first_hop`** (new): the tool's report of a first-hop owner, its link
+  closed and never down. **`first_hop_live`** (new): `constrained.md` §10.
+- **`classes`:** 0.96's eight rows, two of them n/a (F-492).
+- **`readings`: 917**, core 0.96's, observer 0.26's, link.v2 0.7's and
+  config.v1 0.10's entries and rules, and F-492.
+
+**`just py-conformance`: 6021 of 6021** on main 0676db19.
+
+Carrying #1059 (`modem.v3` 3.3, #991):
+- **#983 T4's rows** read 3.3: 13 frame resources, 3.2's nine, the three
+  new, and `gendev.v1`'s `frames/sample`. Each is written by zk2py's
+  `Framer`, read back and written again byte for byte.
+- **F-470's rows** read 3.3 too: `frames/fast` and `frames/slow` are
+  (207, 216) as (full, largest) by `link.v1` 0.16 §2.8, and `frames/paid`
+  is 207 B. zenoh-modem's README states each of the twelve sizes zk2py
+  measures.
+- **`readings`: 927**, 3.3 read as an adopter's contract:
+  - the three entries;
+  - the contract's counts, and its review against 3.2;
+  - its frames, their series, and `Readings`' bits and sizes;
+  - the packed states;
+  - catalog e3a529fe;
+  - the five faces planned as `v2/plan.json`'s 14 to 18;
+  - F-493 and F-494.
+
+**`just py-conformance`: 6031 of 6031** on the rebased branch (a680b029
+and round 102). Of them, `config` 593, `link` 300 and `readings` 927.
+
+### Live
+
+`scenarios-v2.md`, section by section (`config_v2_scenarios`):
+
+| Section | zk2py's owner and caller | the owner example, zk2py's caller | zk2py's owner, `zenctl config` |
+|---|---|---|---|
+| §1 a hot set, a dry run | 5/5 | 5/5 | 5/5 |
+| §2 a reach set, confirmed | 4/4 | 4/4 | 4/4 |
+| §3 rolled back at its deadline | 3/3 | 3/3 | 3/3 |
+| §4 an undo that fails | 2/2 | 2/2 | 2/2 |
+| §5 a join, a second writer | 4/4 | 4/4 | 4/4 |
+| §6 an extend | 3/3 | 3/3 | 3/3 |
+| §7 tokens, a restart | 5/5 | 5/5 | 5/5 |
+| §8 persist, granted and not | 4/4 | 4/4 | 4/4 |
+| §9 outside the allowlist | 3/3 | 3/3 | 3/3 |
+| §10 an idempotent retry | 4/4 | 4/4 | 4/4 |
+| §11 sensitive values | 4/4 | 4/4 | 3/4 (F-485) |
+| §12 desired state refused | 3/3 | 2/3 (F-482) | 3/3 |
+| §13 across a constrained face | 4/4 | 4/4 | 4/4 |
+| §14 a tool's answers | 6/6 | 6/6 | 6/6 |
+| a re-mint (config.v1 §2.12) | 4/4 | 4/4 | not run |
+
+- **zenctl config** is C with `set --no-precheck` where the owner's own
+  answer is the observable, a sensitive value from a file, and T with
+  `get --clocks-synced` (`--for` over §14 step 3's deadline, to hear the
+  event). Its §13 runs `--across-face --iface rfcfg.v1`. Its precheck
+  refuses `set/modulation` before sending (§9 step 3).
+- **§10** drops step 1's reply at zk2py's owner; the owner example cannot,
+  so C sets its first reply aside. The 300 s are the owner's clock moved.
+- **§13's face** is a deny list under `allow`: an allow list under
+  `deny` lost every call across it, the GET alone answered.
+- **The re-mint:** both owners restart the configuration; the reference
+  also ends the pending change, `rolled-back`, under its old run
+  (F-481). S hears the new record and the new instance token in either
+  order within a few ms, from either owner, so the check is T's GET at
+  the token.
+
+zenoh-modem's SX1262 (`sx1262_round_trip`), through zk2py's own owner:
+
+| Step | Request | Put and reply |
+|---|---|---|
+| 0, start | — | 30 B (a 24 B record) |
+| 1, `set/duty` | 5 B | 36 B, seq 1; the event after |
+| 2, `set/radio` | 16 B | 50 B, seq 3 |
+| 3, `confirm` | 8 B | `busy`, 7 B |
+| 4, the apply | — | 46 B, seq 4 |
+| 5, `confirm` | 8 B | 36 B, seq 5; the event after |
+
+The binding's §15 gives 30, 36, 50, 46 and 36 B, and its four payloads
+are zk2py's byte for byte. A retry of step 2 is its first 50 B.
+
+`forms_live`: 105 of 105, `zenctl call` 38 of 38 (F-477 and F-478 fixed).
+
+`constrained.md` §10 (`first_hop_live`), on main 0676db19's black boxes:
+
+| Device | Steps 1 to 6 |
+|---|---|
+| the owner example's `--first-hop` | 11/11 |
+| zk2py's `Owner(first_hop=True)` | 11/11 |
+
+- **Each device is R1's client through a proxy** that keeps the bytes
+  toward the router. The instance key alone crosses at each transport.
+  The descriptor lists every interface `"token": false`, and the bundle
+  comes from a near holder.
+- **While the link is closed,** a tool that knows the face reports it
+  closed, never down. A new run's descriptor is heard.
+- **At its defaults** a device sends its interface tokens and contract
+  keys. A governed interface refuses the start.
+- **The block's halves of steps 4 and 5 are not run.** The owner example
+  takes no credentials, so no block can tell its session from the near
+  side's.
+- **Step 2 now waits for R1 to drop the token,** up to 10 s, where it
+  slept 2 s. On the rebased branch R1 dropped it after 2.6 s to 2.7 s, so
+  both devices had failed the step at 2 s. 22 of 22 twice since.
+
+**`live_interop`, whole on main 0676db19's black boxes, on the rebased
+branch: 490 of 490**, no XFAIL. That is up from the mend's 484 of 490 on
+ee5fb697, whose six were T's presence read in the health run,
+intermittent.
+
+**Not run:**
+- `link.v2`'s scenarios on routers, the device face's carve among them;
+- §10's block halves (above), and F-436's fix, as before;
+- the README's rf0 sizes, 66 B full and 39 B delta for its 18 readings.
+  Which 18 they are is zenoh-modem's code, which zk2py does not read.
+
+Round 102 found F-480 to F-494:
+- two contradictions and three ambiguities;
+- one gap and one bug in the reference;
+- six minor errors;
+- an index defect and a changelog gap.
+
+None is a blocker. F-472 to F-479 are resolved. See "At core 0.96,
+config.v2 0.1 and modem.v3 3.3 (#985, #982 H1, #991)" in
+`SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -6197,8 +6431,12 @@ See "At core 0.94 and observer 0.24 (#985 C4c)" in `SPEC-FINDINGS.md`.
   them and its callers write them; its readers read the bare wire too, as
   §5.1's MAY allows. zk2py's tools show a call's reply only through
   `live.show_reply`, which `forms_live` judges: no zk2py command-line tool
-  calls an operation, as `zenctl call` does. config.v2 (#985 G1) is not
-  read.
+  calls an operation, as `zenctl call` does.
+- **Of config.v2** (round 102): §12's desired document reaches each owner
+  directly (`ConfigV2Owner.desire`, the owner example's `config
+  desired`), not through `desired.v1`'s binding; no text, enum or
+  fixed-point parameter, which 0.1 has not; zk2py's tool for §5 is a
+  library (`config_v2.tool_answers`), with no command line.
 - **Of `telemetry.v2`** (round 98): a candidate of a `freshness.v2`
   contract with its clock ahead, live (F-461); zk2py's echo tool shows a
   frame's field states, never its series; histograms, which no field
@@ -6307,6 +6545,13 @@ impl/python/
                                 ConfigOwner (fed through desired.v1 too, its re-mint a restart or refused), SimDevice,
                                 the reader of §5
     config_scenarios.py config.v1 scenarios.md §1–§14 against zk2py's owner or the Rust owner example
+    config_v2.py      config.v2 the declaration and its reasons, the derived types and their layouts, the contract's
+                                lint, the record written and read, validation, times, the owner (Core, its live
+                                LiveCore and ConfigV2Owner), redaction, a caller and a recorder, §5's tool, and
+                                zenoh-modem's SX1262 round trip (round 102)
+    config_v2_scenarios.py config.v2 scenarios-v2.md §1–§14 in three pairings (zk2py's owner and caller, the owner
+                                example's --config-v2 with zk2py's caller, zk2py's owner with zenctl config), and a
+                                re-mint (config.v1 §2.12) with both owners (round 102)
     link.py           link.v1   the face policy, exposure, the plan and its carve-out, the checks, a generator
     link_scenarios.py link.v1   scenarios.md §1–§13 on zenoh-python routers, over examples/zk2/link/
     link_v2.py        link.v2   the policy, the plan, the transport block and its checks (round 96); the contract
@@ -6315,7 +6560,8 @@ impl/python/
                                 (core 0.91, observer 0.23, link.v2 0.4; round 99)
     far_side_live.py  §8.1 §8.5 constrained.md §8 and §9 in process, a proxy dropping a batch the far client sends
     adopter_frames.py §7.7     modem.v3 3.2's and gendev.v1's frames written, read back and read as series (round 99);
-                                link.v1 0.16's largest frame, its delta records, measured (round 100)
+                                link.v1 0.16's largest frame, its delta records, measured (round 100); modem.v3
+                                3.3's three over Readings beside 3.2's nine, deprecated (#991, round 102)
     alarms.py         alarms.v1 the key and the sanitizing step, references, strict JSON, the document, transitions,
                                 the conclusions, AlarmsOwner, the reader on a bus
     alarms_scenarios.py alarms.v1 scenarios.md §1–§10 against zk2py's owner or the Rust owner example
@@ -6388,6 +6634,10 @@ impl/python/
                                 template's selector (round 95)
     constrained_live.py §8.5   constrained.md §7 live, zk2py's owner, tool and consumer through a byte-counting
                                 proxy, and an owner given a catalog (round 95)
+    first_hop.py      §8.1 §8.4, observer §3.11 a tool's report of an owner on a first hop: found by its instance
+                                token and descriptor, its link closed and never down (core 0.96; round 102)
+    first_hop_live.py §8.1 §8.4 constrained.md §10 live, a first-hop device through a byte-counting proxy, the
+                                owner example's --first-hop or zk2py's Owner(first_hop=True) (round 102)
     decoding.py       observer §7.3 the decode order: a held JSON Schema type on its Encoding's wire, sniffing, and what a
                                 tool says of a payload whose declared type it does not hold (0.12)
     judgement.py      observer §1 the judgement shape: a profile's answer read as Established, NotAsked, Unobservable or not

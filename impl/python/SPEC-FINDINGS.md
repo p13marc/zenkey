@@ -25062,3 +25062,420 @@ which comes first, and zk2py files no finding.
 - **Resolved: F-471**, as above.
 - **Open:** F-436 (not re-run), F-437 to F-441, F-472 to F-479. F-365
   stays open as #965's.
+
+## At core 0.96, config.v2 0.1 and modem.v3 3.3 (#985, #982 H1, #991)
+
+Round 102 read, cold, the texts at main ee5fb697, each changelog entry
+first: core 0.95 and observer 0.25 (round 101's answers), config.v2 0.1
+and its draft entry, and link.v2's draft entry. Then config.v2 whole,
+core §5's changes, observer §7.3 at 0.25, and config.v1 §2.12. Its
+evidence: `conformance/v2/`'s six files and `contracts/rfcfg.v1`, read
+whole by zk2py's own `config_v2` (593 of 593 in the config family);
+`scenarios-v2.md` §1 to §14 live in three pairings, zk2py's owner and
+caller, the owner example's `--config-v2` and zk2py's caller, and zk2py's
+owner and `zenctl config` (black boxes of main ee5fb697); zenoh-modem's
+`sx1262_config.v1` through zk2py's codec and owner; and a re-mint, live
+against both owners.
+
+It then read main 0676db19 the same way: core 0.96, observer 0.26,
+`link.v2` 0.7 and `config.v1` 0.10 (#982 H1, a first hop), with
+`v2/plan.json`'s cases 22 to 26, `v2/lints.json`'s 40 to 57 and
+`constrained.md` §10, live against both owners (black boxes of main
+0676db19). Last, PR #1059 at a680b029 (#991), which round 102 carries:
+`modem.v3` 3.3, read as an adopter's contract, with `link.v1` 0.17,
+`link.v2` 0.8 and `telemetry.v2` 0.3, each editorial.
+
+**F-472 to F-476's answers hold.**
+- **F-472:** `RULES.md` lists §5.2's Decoding MUST under the caller and
+  the observer, the observer class counting 70.
+- **F-473:** §5.2, "The bare wire": "One its decoding refuses (below,
+  "Decoding") is a malformed error, the transport's". Live, `ping`
+  answered `{"code":"busy"}` under `application/json` is the transport's
+  to both zk2py callers and to `zenctl call`, each calling twice.
+- **F-474:** `operations.md` §9's setup gives `h1/tc` its `status`.
+- **F-475:** §5.1, "Reading a value": a reply under another `Encoding` is
+  no value form, malformed unless the caller reads the bare wire;
+  observer §7.3 says it of a tool. zk2py's caller that takes no MAY now
+  reads it so (`live.read_reply`, `refused_value`, `encoding`).
+- **F-476:** §5.1, "At or after" and "Seq 0 twice". zk2py's config.v2
+  caller orders a reply against a push by seq within one run, and reads
+  a mark of seq 0 as after the record's first put.
+
+**F-477 to F-479 are fixed in the reference.** `forms_live`'s
+`zenctl call` pairing passes whole, 38 of 38: packed requests are
+written (step 2, 5 of 5), and `set-cbor`'s value and detail are read as
+CBOR (step 1, 22 of 22). The `consume` example prints a raw value's
+record (`live_interop --only owner`).
+
+**No rule changed beyond the changelogs.** zk2py diffed `spec/` between
+b483902e and ee5fb697. Core changed in §5.1 and §5.2 as 0.95's entry
+says, with no keyword added; observer §7.3 gained one sentence; `RULES.md`
+gained the one row F-472 asked; `vectors.json` one note;
+`operations.md` §9 its `status` and step 7's `ping`; `config/v2.md` and
+`link/v2.md` their status, and v2.md its Appendix B. One sentence of
+`scenarios-v2.md`'s intro, naming zenctl's tests, has no entry (F-491).
+
+**config.v2 in zk2py.** The six fixtures pass whole, the lint's 33
+contracts among them, from the text and the fixtures' descriptions alone.
+Live, §1 to §14 pass in each pairing but for F-482 (§12, the owner
+example) and F-485 (§11, `zenctl config`). zenoh-modem's SX1262, through
+zk2py's own owner, puts 30 B at start, then 36, 50, 46 and 36 B, as the
+binding's §15 says, and writes its four quoted payloads byte for byte.
+
+**Core 0.96 (#982 H1) in zk2py.** zk2py diffed `spec/` between ee5fb697
+and 0676db19. The keywords added are the entries': core §8.1's SHOULD
+and MUST NOT, §8.4's SHOULD NOT and SHOULD, §8.5's MAY; observer §3.6's
+MUST and MUST NOT, §3.11's MUST NOT and MAY; `link.v2` §2.5's, §2.6's and
+§2.8's two MUSTs and three MUST NOTs; `config.v1` §2.1's SHOULD NOT,
+excepting a first hop. `RULES.md` lists 246 rules, as 0.96's entry
+counts them.
+- **The walk:** 254 rows of 254, eight new verdicts. Two of them are a
+  deployment's and a tool's rule the index lists under the owner
+  (F-492).
+- **The device face** (`link.v2` §2.1, §2.5, §2.6, §2.8, §2.15), from
+  the text alone: `plan.json`'s cases 22 to 26 and `lints.json`'s 40 to
+  57 pass, the link family 300 of 300.
+- **The owner on a first hop:** zk2py's owner holds its instance token
+  alone, every interface tokenless and no bundle held, and refuses
+  `archive.v1` and a governed interface before it declares anything.
+- **`constrained.md` §10, live:** zk2py's first-hop owner and the owner
+  example's `--first-hop`, each R1's client through a byte-counting
+  proxy: 22 of 22. The block's halves of steps 4 and 5 are not run,
+  because the owner example takes no credentials.
+
+**`modem.v3` 3.3 (#991) in zk2py.** zk2py diffed `spec/` between
+0676db19 and a680b029. No line with a keyword changed. Three text
+versions moved. `link.v1` changed its head example and Appendix B, and
+`link.v2` and `telemetry.v2` their Appendix B, as their entries say.
+`plan.json`'s case 0 and `v2/plan.json`'s 14 to 18 are re-derived. Read
+as an adopter's contract, through zk2py's own loader, codec, writer and
+plan:
+- **The contract:** clean, fingerprint 71f55126, published in
+  `examples/zk2/.history`. 105 resources, 99 of them optional, as its
+  header says.
+  - Against 3.2 it is a review: the nine frames' `link.exposure` moved
+    from `link` to `host` (`annotations_changed`, core §9.8).
+  - Its own bundle in the history root accepts the review (§9.7).
+  - Adding `deprecated` is compatible.
+- **The frames:** 3.2's nine are deprecated and `host`, `frames/message`
+  replaced by `frames/paid` and the rest by `frames/fast`. The three new
+  frames share one record type, `Readings`, with 73 series each. The
+  twelve frames declare 369 series, as Appendix B says.
+- **`Readings`:** 73 optional fields, 1,542 bits with every reading
+  present. The 22 gauges take 305 bits and the 51 counters 1,164.
+  - A full record is 199 B of body, 207 B of payload with a 32-bit run,
+    and 205 B with a 16-bit run.
+  - A delta record that includes every reading is 216 B.
+  - So `frames/fast` and `frames/slow` measure (207, 216) as (full,
+    largest) by `link.v1` 0.16 §2.8, and `frames/paid` 207 B. These are
+    the README's sizes.
+- **Written and read back:** each of the twelve, as #983's T4 reads them.
+- **The packed states:** their records' longest are the README's bits,
+  2 to 20 B, as the contract says. Their puts are not as the README says
+  (F-494).
+- **The catalog:** `catalog.json` is e3a529fe. Its index 8 is 3.3's
+  fingerprint, and it succeeds 8c808dff.
+- **The faces:** zenoh-modem's five face files, planned with it, are
+  `v2/plan.json`'s cases 14 to 18, each listing one frame as liveness
+  evidence. SF9 draws `frame_over_batch` (216 B over 117 B), and four of
+  the five draw `no_arq`.
+- **The counters' widths** are not all the appendix says (F-493).
+
+### F-480 · contradiction · config.v1 §2.12 beside `config.v2-binding.md` §8: the reference refuses a re-mint, or restarts
+
+> config.v1 §2.12: "**A re-mint is a restart.** … So an owner re-mints
+> while `config.v1` runs only with its device running its startup
+> values … The reference refuses the re-mint (`zenkey::config_v1`), the
+> simplest owner that keeps the rule." `config.v2-binding.md` §8: "A
+> re-mint is a restart too: `Service::new_epoch` … cancels a pending
+> change, returns the device to its startup values through
+> `Device::restore_startup`, and restarts the record at revision 0, its
+> instance number the new run (#1064)."
+
+- **The contradiction.** The normative text names the reference's
+  behaviour as a refusal. The binding, and the reference since #1055 and
+  #1064, restart the configuration.
+- **Measured:** the owner example's `--config-v2 --frames`, `frame
+  new-epoch`, with a reach change pending and applied. It undoes the
+  change, puts the record under the old run (revision 2, nothing
+  pending), publishes `rolled-back`, and re-mints. T's GET at the new
+  instance token answers the new record: revision 0, its instance number
+  the new run. A late `confirm` is `not_found`. `frame new-run` takes a
+  run within the instance: no put of its own, the instance number
+  unchanged, the next token's run the new one.
+- **What zk2py does:** a restart of the configuration
+  (`ConfigV2Owner.remint`): the device back at its startup values by one
+  undo, then the new instance, its record put before its tokens.
+- **Fix:** config.v1 §2.12: "The reference restarts the configuration
+  (`zenkey::config_v1`, `config_v2`)".
+- **Changes:** nothing an implementation does; the text's word for the
+  reference.
+
+### F-481 · ambiguity · config.v1 §2.12 beside §2.17: a change pending at a re-mint, and its event
+
+> config.v1 §2.12: "**The new instance says nothing of the old one's
+> pending change,** which it never knew: no event is published for it."
+> §2.17: "An owner MUST publish exactly one event for each change, … when
+> the change ends: … `rolled-back`: undone, by `cancel`, at its deadline,
+> or after its apply failed".
+
+- **The ambiguity.** A process restart cannot publish the change's end. A
+  re-mint "is a restart", and its old instance is still running when it
+  undoes the change. Read by §2.12, nothing is published. Read by §2.17,
+  the change ends, undone, and the old instance publishes `rolled-back`,
+  though no listed cause is a re-mint.
+- **Measured:** the owner example publishes `rolled-back` under the old
+  run, and puts the undone record under the old instance number first.
+  zk2py's owner publishes nothing and puts nothing under the old run.
+- **Fix:** §2.12 says which: "A re-mint with a change pending ends it
+  first, `rolled-back`" (the reference's), or "publishes nothing for it,
+  as a restart".
+- **Changes:** whether a reader holds an end event for a change a re-mint
+  undid.
+
+### F-482 · ambiguity · config.v2 `scenarios-v2.md` §12 beside §2.18: the converged report and the converging put
+
+> `scenarios-v2.md` §12 expected 1: "S receives the record,
+> `fraction_ppm` 20000, `desired` `converged`, `desired_revision` 1, then
+> one event, `applied`." v2.md §2.3: "It MUST put it on every change of
+> any field". §2.17: "An owner MUST publish a change's event after its
+> reply, or after its put when no call is answered." §2.18: "The report
+> is the record's desired fields".
+
+- **The ambiguity.** No text says whether the report changes in the put
+  that applies the document's last group, or later. The scenario reads
+  the first.
+- **Measured (rust-py §12, 2 of 3):** the owner example puts the applied
+  value with no report (seq 1), publishes `applied` (seq 2), then puts
+  the report `converged` (seq 3). S never receives the converged record
+  before the event. zk2py's owner puts one record with both (seq 1),
+  then the event (seq 2).
+- **Fix:** §2.18: "The report changes in the put that applies the
+  document's last group", or the scenario drops "then".
+- **Changes:** what a reader holding the first put after a document
+  concludes of convergence.
+
+### F-483 · contradiction · config.v2 §3 "The desired fields hold together" beside `records.json`: an escape outcome with a code
+
+> §3: "**The desired fields hold together** when … `desired_code` is
+> present for `refused` and `failed` alone". `records.json`, read #22:
+> "an outcome this revision does not name, the escape: read as such, its
+> code unjudged", expecting a state with outcome null and code `busy`.
+> §4: "a reader shows one it does not know as the escape, and acts on
+> none."
+
+- **The contradiction.** Read as written, a code beside the escape is
+  present for an outcome other than `refused` and `failed`, so the
+  fields do not hold together and the reader refuses `desired`. The
+  fixture reads a state. Its description says the rule another way:
+  "desired_code absent for refused or failed, or present for converged".
+- **What zk2py does:** the fixture: a code is refused beside `converged`,
+  and missing beside `refused` and `failed`; beside the escape it is not
+  judged.
+- **Fix:** §3: "`desired_code` is present for `refused` and `failed`,
+  absent for `converged`, and not judged beside an outcome the reader
+  does not name (§4)."
+- **Changes:** whether a reader refuses a later revision's record.
+
+### F-484 · ambiguity · config.v2 §2.2 "Reading it": which of `group_units` and `group_sensitive` need a valid type
+
+> §2.2: "3. `group_units`, `group_sensitive`: that member is not as
+> above. Each needs a valid type to name its parameters." "Each check is
+> made alone, and a check that needs a wrong value is skipped".
+> `derive.json`: "every check of one entry, each alone, in order"
+> (`units = 3` beside an invalid type: `group_units`), and "a bad type
+> skips the checks that read it" (`units = {"pin": ""}`: no
+> `group_units`).
+
+- **The ambiguity.** Read as "each check needs a valid type", `units = 3`
+  is skipped, and the first case fails. Read as "the parts that name
+  parameters need one", the empty unit, which names no parameter, is
+  reported, and the second fails. Only the fixture's description says
+  the split: "not a table; or, with a valid type, a key naming no int
+  field of it, or a value that is not a non-empty string".
+- **What zk2py does:** the description's split, for both members.
+- **Fix:** §2.2: "`group_units` and `group_sensitive`: a member that is not
+  a table or not an array; then, with a valid type, its keys, names and
+  values."
+- **Changes:** the reasons a linter reports, which §2.2 binds to the
+  fixtures' order.
+
+### F-485 · bug · the reference's `zenctl config` beside config.v2 §4 and observer §7.3: an `Error` code shown as config.v1's
+
+> v2.md §4: "| `Error` code | `device_refused` | the `app` detail
+> (§2.5) |". Observer §7.3: "**An error** is shown by its code, its cause
+> and its message. Its detail is decoded as the operation's `error` type
+> where the tool holds it". Core §7.5: a message's bit "reads back empty,
+> not absent" only when set.
+
+- **The bug.** `zenctl config set` of ee5fb697, on a `device_refused`
+  refusal from zk2py's owner (detail `Error{code: device_refused}`, one
+  byte, no message), reports `"refusal": {"code": "app", "error":
+  {"code": "device-refused"}, "message": ""}`. The code is config.v1's
+  `ConfigError` spelling, and the absent message is shown empty. With the
+  device's words it shows them.
+- **Measured:** `config_v2_scenarios --pairing py-zenctl`, §11 step 2.
+  zk2py's caller reads the same bytes as `device_refused`, no message.
+- **Fix:** the tool shows the code as `Error` names it, and an absent
+  message as absent.
+- **Changes:** what the reference's tool shows of every config.v2 device
+  refusal.
+
+### F-486 · minor · config.v2 §2.19 "The record crosses": the SX1262's smallest record
+
+> §2.19: "For zenoh-modem's SX1262 it is 36 to 50 bytes with its
+> envelope, one radio frame." The draft entry: "30 bytes idle with a
+> last change and 44 with a reach change pending, as §3 says, and 24 at
+> start." `config.v2-binding.md` §7: "at start: no change yet | 24 B |
+> 30 B".
+
+- **The error.** At start, before any change, the record with its
+  envelope is 30 bytes. zk2py's owner puts 30 B.
+- **Fix:** "30 to 50 bytes".
+
+### F-487 · minor · `conformance/contracts/rfcfg.v1.toml` and `derive.json`: four hot groups, where there are three
+
+> `rfcfg.v1.toml`: "Four hot groups, two reach groups and a contract
+> group". `derive.json` case 0: "the test contract's six groups: four
+> hot, two reach and a contract group".
+
+- **The error.** The six groups hold three hot ones (`duty`, `sim`,
+  `queue`), two reach and a contract group.
+- **Fix:** "three hot".
+
+### F-488 · gap · zenoh-modem's `sx1262_config.v1` beside its SF12 face: a spreading factor the contract cannot state
+
+> `sx1262_config.v1.toml`: "modulation (contract): spreading_factor 7 to
+> 9 (2 bits)". zenoh-modem's README: "LoRa (a policy per spreading
+> factor, SF7, SF9 and SF12)". `config.v2-binding.md` §11: "**At SF12**
+> the face affords a 1,800 s horizon". v2.md Appendix B: "An owner checks
+> its device's runtime schema against its contract at start, and refuses
+> to start on a difference."
+
+- **The gap.** A radio started at SF12 holds a spreading factor its
+  record has no code for, so its owner refuses to start, or states a
+  bound its device does not hold. The mapping plans SF12 operation and
+  its config contract excludes it. "The bounds are illustrative" says
+  zenoh-modem chooses them, not that SF12 is out.
+- **Fix:** `spreading_factor` 7 to 12, 3 bits (the record's bytes, and
+  §15's, change), or the binding says SF12 runs another revision.
+- **Changes:** whether zenoh-modem's SF12 node can run config.v2.
+
+### F-489 · minor · `config.v2-binding.md` §15: times of day without a date
+
+> §15: "| 1 | 12:00:00Z | `set/duty` …", "The bytes. The request of step
+> 2 is `4cd5c6291100774000000067a5836140`. Its reply is `495a17…`".
+
+- **The gap.** The steps name times of day, and the reply's `apply_at` and
+  deadline codes depend on the date. Read back under the catalog's epoch,
+  they date the steps 2026-11-02. zk2py's codec writes the bytes on that
+  date.
+- **Fix:** "12:00:00Z on 2026-11-02".
+
+### F-490 · minor · config.v2 `scenarios-v2.md` §6: a tolerance that §2.8's rounding exceeds
+
+> §6 expected 2: "its deadline 81 s after step 1's call: the extend's
+> receipt plus 60 s, rounded up." Expected 3: "S receives the
+> `rolled-back` event 81 s after step 1, ± 0.5 s." v2.md §2.8: "An owner
+> MUST round a deadline … up to the next whole second".
+
+- **The error.** With the extend 20.4 s after step 1, the deadline falls
+  80.4 s to 81.4 s after step 1, by step 1's phase within its second. A
+  step 1 made 0.5 s to 0.6 s into its second puts the event below 80.5 s.
+  zk2py's runs passed by phase.
+- **Fix:** "at the record's deadline, ± 0.5 s", or step 1 made on a
+  whole second, as §3 fixes its phase.
+
+### F-491 · changelog · config `CHANGELOG.md`'s draft entry beside `scenarios-v2.md`'s intro
+
+> The `config.v2 draft` entry: "The text stays 0.1 … and its fixtures and
+> scenarios are as they were." `scenarios-v2.md`: "They are `zenctl`'s
+> `config_v2_scenario_13_…` and `config_v2_scenario_14_…`."
+
+- **The gap.** The sentence came after the draft entry (#985 G3), and no
+  entry records it. It names tests, and changes no rule.
+- **Fix:** an entry, or a note in the draft entry.
+
+### F-492 · index · `RULES.md` (core 0.96, observer 0.26): a deployment's SHOULD and a tool's MUST NOT listed under the owner
+
+> `RULES.md`: "Each is listed under every role it binds (core §0) … The
+> role is read from the sentence's subject". Core §8.4: "A deployment
+> with such an owner SHOULD hold each of its bundles on the near side of
+> the hop". Observer §3.11: "A tool that knows an owner is on a first hop
+> MUST NOT report it down from its instance token's absence".
+
+- **The defect.** Each sentence's subject is a deployment or a tool, and
+  the owner is in its object. The index lists the first under "Owner"
+  and "Deployment", and the second under "Owner" and "Observer". So the
+  owner class counts 78 where it binds 76. An owner's "minimum path",
+  the index "filtered to two roles", shows it two rules it can neither
+  meet nor break.
+- **What zk2py does:** its walk gives both owner rows n/a. It names the
+  class whose verdict holds each: the deployment's rule is played by
+  `first_hop_live`'s near holder, and the tool's is in the observer
+  class.
+- **Fix:** the generator reads the subject alone, "A deployment" and "A
+  tool". The owner class then counts 76.
+- **Changes:** the owner class's count. No verdict.
+
+### F-493 · minor · `telemetry.v2` 0.3 Appendix B beside zenoh-modem's README: nine counters whose window is shorter than 900 s
+
+> Appendix B: "**Each counter's width** holds its worst rate within its
+> serial window (§2.20). The rate is taken between two frames of the
+> slowest cadence a face lists, 900 s." zenoh-modem's README: "Each
+> width holds its counters' worst rate between two frames of the slowest
+> cadence a face lists, 900 s, within the serial window 2^(w−1)". Its
+> table: "`if/in_octets` and `if/out_octets` | 40 | 1.25 GB/s: a 10
+> Gbit/s bearer | 7.3 min", and "the 7 kernel packet, error and discard
+> counters | 32 | 14.88 Mpps: 10 GbE at its smallest frame | 2.4 min".
+> After it: "The kernel's are a netdev's, which no shipped face carries".
+
+- **The error.** zk2py reads 3.3's widths from `Readings`: 37 counters
+  at 20 bits, 5 at 24, 7 at 32 and 2 at 40, as the table says. A window
+  is 2^(w−1) over the worst rate. At the README's rates the windows are
+  29.1 min, 51.1 min (2.3 h for airtime), 2.4 min and 7.3 min. So 9 of
+  the 51 counters wrap within 900 s at their worst rate. Between two of
+  SF12's frames their increase would pass 2^(w−1), and read
+  `wrap_or_decrease` (§2.20).
+  - The README says why that spares every shipped face: none carries a
+    netdev.
+  - Appendix B states the claim of every counter, and its lead-in in the
+    README does too.
+- **What zk2py does:** nothing changes. §2.20's SHOULD is the owner's,
+  and zk2py reads any width in its window.
+- **Fix:** "Each counter's width, but the kernel's nine, holds …", in
+  Appendix B and in the README's lead-in. Or Appendix B names the netdev
+  as the README does.
+- **Changes:** wording.
+
+### F-494 · minor · zenoh-modem's README, "Since revision 3.3, the 7 again, packed": the packed states' puts
+
+> README: "Each record ends with an extension marker, so a later minor
+> appends fields. Put with a 16-bit run, each is 8 to 21 B, against 111
+> to 585 B of JSON". Its table: "`packed/destination/{destination}` |
+> `DestinationRecord`, 158". `modem.v3.toml`: "at a record's size: 2 to
+> 20 B, against 111 to 585 B of JSON".
+
+- **The error.** zk2py's longest records are 2 to 20 B, as the contract
+  says. `DestinationRecord`'s 158 bits are 20 B, and `LinkRecord`'s 145
+  bits are 19 B. With core §7.5's 6-byte envelope of a 16-bit run, their
+  puts are 26 B and 25 B. So the longest puts are 8 to 26 B, and no
+  record's is 21 B.
+- **Fix:** "8 to 26 B".
+- **Changes:** nothing in zk2py.
+
+### Counts at core 0.96, config.v2 0.1 and modem.v3 3.3 (#985, #982 H1, #991)
+
+494 entries.
+- **New: F-480 to F-494:**
+  - two contradictions (F-480, F-483);
+  - three ambiguities (F-481, F-482, F-484);
+  - one gap (F-488);
+  - one bug in the reference (F-485);
+  - six minor errors (F-486, F-487, F-489, F-490, F-493, F-494);
+  - an index defect (F-492) and a changelog gap (F-491).
+
+  None is a blocker.
+- **Resolved: F-472 to F-479**, as above.
+- **Open:** F-436 (not re-run), F-437 to F-441, F-480 to F-494. F-365
+  stays open as #965's.
