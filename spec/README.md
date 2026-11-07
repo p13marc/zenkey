@@ -192,7 +192,9 @@ section number alone is the core's.
   re-puts.
 - **Snapshot**: one collection's state in a GET's reply, in pages
   ([§7.5](core.md#75-the-zk2c-envelope)). Each entry carries its member's
-  stamp and, under a horizon, its confirmation. No owner writes one yet.
+  stamp and, under a horizon, its confirmation. An owner answers a
+  collection read with one, and a member read with one per member
+  ([§4.2](core.md#42-rules-for-owners-and-consumers)).
 - **Holder**: any participant that holds a bundle and serves it on its key
   ([§8.4](core.md#84-contract-retrieval)).
 - **Address**: a service's `<system>/<service>`, as a binding names it

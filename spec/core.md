@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.99** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.100** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -874,6 +874,9 @@ and reports these codes. `[F: descriptors/]`
 - `Latest` consolidation keeps, per key, the reply with the greatest
   timestamp, ranks an unstamped reply lowest, and delivers at query
   completion. Among unstamped replies it keeps the last to arrive.
+- `None` consolidation delivers every reply as it arrives, two on one key
+  included. `Auto` on a concrete key is `Latest`.
+- A queryable cannot reply on a key that does not intersect the query's.
 - `reply_del` is stable. `Session::new_timestamp()` uses the HLC when it is
   enabled, else a wall clock with the zid.
 - Routers re-stamp a future-dated put (beyond the HLC's maximum delta, 500 ms
@@ -887,12 +890,112 @@ and reports these codes. `[F: descriptors/]`
 | # | Rule | Evidence |
 |---|---|---|
 | S1 | **Owner:** every state mutation, put **and** delete, MUST carry its in-band stamp (§4.3): a put in its payload's envelope, a delete in its attachment (§7.5). On a resource §4.3's table lists, the owner MUST also set a Zenoh timestamp on each mutation. | `[Sc: state.md §1]` |
-| S2 | **Owner:** a GET reply MUST carry the in-band stamp of the mutation it represents: a reply as the bytes the mutation put, a `reply_del` as the delete's attachment. The owner's reply MUST also carry the mutation's Zenoh timestamp, where the mutation carried one. The owner's reply of a member of a state that §4.3's table lists under `freshness.v2` MUST carry instead that member's last confirmation, as the table says. That holds whether or not a heartbeat vouched for the member since its last mutation. A key of such a state deleted within the window is a member too. Its `reply_del` carries the timestamp minted at the delete. The owner's state queryables cover its interfaces' `state/**` and `@state/**`. It MUST answer a selector over them with every matching live key, plus a `reply_del` for each matching key it deleted within the window. | `[Sc: state.md §1, §2]` `[Sc: profiles/freshness/scenarios-v2.md §3]` `[Sc: profiles/alarms/scenarios.md §3]` |
-| S3 | **Owner:** for a key it deleted within the tombstone window, the owner MUST answer a GET with `reply_del` and the deletion's stamps (S2). The window is 60 s, unless the deployment configures the owner with another. A deployment MUST configure it, for state that an archive records, to at least the longest outage it expects between the archive and the owner. Across a constrained face, that is the face's maximum outage (§8.5), and [`link.v1`](profiles/link/v1.md) §2.11 floors the window of every state behind the face at it. | `[Sc: state.md §2, §6]` |
-| S4 | **Consumer:** a state GET MUST be addressed to the owner's keys, with target `All` and consolidation `Latest` set explicitly. **Deployment:** MUST NOT run a storage that answers on an owner's `state/**` or `@state/**` keys. | `[Sc: state.md §3]` |
+| S2 | **Owner:** the owner's state queryables cover its interfaces' `state/**` and `@state/**`. It MUST answer a GET over them per collection, as "Answering a state GET" below says: a collection read with the collection's snapshot, a member read with a snapshot of each member it reaches, and a member of a per-key resource with a reply of its own. An owner's per-key reply MUST carry the in-band stamp of the mutation it represents: a reply as the bytes the mutation put, a `reply_del` as the delete's attachment. It MUST also carry the mutation's Zenoh timestamp, where the mutation carried one. | `[Sc: state.md §1, §2, §14]` |
+| S3 | **Owner:** for a key it deleted within the tombstone window, the owner MUST answer a GET with the deletion's stamp (S2): a tombstone in a snapshot, or a per-key resource's `reply_del`. The window is 60 s, unless the deployment configures the owner with another. A deployment MUST configure it to at least the longest outage it expects between an archive and the owner, for each resource the archive records whose deletes only a tombstone proves (§4.4). Those are each per-key resource, each collection with no snapshot key, and each collection an archive aligns from a peer archive. Across a constrained face, the outage is the face's maximum (§8.5). [`link.v1`](profiles/link/v1.md) §2.11 floors the window of every state behind the face at it, and [`link.v2`](profiles/link/v2.md) §2.11 that of each resource whose deletes only a tombstone proves. | `[Sc: state.md §2, §6, §14]` |
+| S4 | **Consumer:** a state GET MUST be addressed to the owner's keys, with target `All` and consolidation `None` set explicitly. The consumer MUST merge the GET's replies per key, each snapshot's entries among them, as a late joiner's seed merges them (below). **Deployment:** MUST NOT run a storage that answers on an owner's `state/**` or `@state/**` keys. | `[Sc: state.md §3, §14]` |
 | S5 | **Consumer:** last-known state MUST be read from an archive (§4.4), explicitly. **Owner of an archive:** §4.4. | `[Sc: state.md §4–§6, §9]` |
 | S6 | **Consumer:** current state is the owner's answer. A consumer turns to an archive only when the owner gave no reply within the GET's timeout, or presence shows it absent. That silence is not a verdict about the key (O5). The archive's answer is last-known, never current, and a consumer MUST NOT present it as current. | `[Sc: state.md §4]` |
 | S7 | **Owner:** a run is never reused, and its seq for state and events never wraps within it (§4.3). | `[F: seed/inband.json]` `[Sc: state.md §7]` |
+
+**Answering a state GET** (S2). An owner answers a GET on its state
+queryables per **collection**: one `state` or `@state` resource of an
+interface it exposes, with its members (§7.5).
+- **A collection's snapshot key** is its resource's key up to the
+  template's first parameter. It is
+  `zk2/<system>/<service>/<iface>/<kind token>/<P>`, where P is the
+  template's chunks before that parameter. A template with no parameter
+  is its own snapshot key.
+  - modem.v3's `sdu/endpoint/{endpoint}` has
+    `…/modem.v3/state/sdu/endpoint`, and its `oper` has
+    `…/modem.v3/state/oper`.
+  - A template whose first chunk is a parameter has no snapshot key. Each
+    of its members is answered as a member read's are (below).
+  - Two collections can share a snapshot key, as `a` and `a/{x}` do.
+    Each answers its own snapshot, told apart by its collection's index
+    (§7.5).
+- **A collection read** is a GET whose selector includes the snapshot key
+  followed by `/**`. `…/state/sdu/endpoint/**`, `…/modem.v3/state/**` and
+  `zk2/h-3fa9c2d41b7e/rf0/**` each read `sdu/endpoint/{endpoint}` whole.
+  - An owner MUST answer a collection read with the collection's snapshot,
+    on its snapshot key, in pages (below). `[Sc: state.md §14]`
+  - A snapshot with no entry is the owner's word that the collection had
+    no member as of its asof. Silence is still O5's.
+- **A member read** is a GET that reaches a collection's member keys and
+  is not a collection read of it. Its selector names a member's key, puts
+  a wildcard in a parameter's place, or holds a `$*` chunk.
+  - An owner MUST answer each member a member read reaches with a
+    snapshot of that member alone, on the member's own key. It is one
+    page, whose one entry has the empty id. `[Sc: state.md §1, §2]`
+  - An owner MUST answer a member read of one concrete key that it holds
+    no member at, live or deleted within the window, with a snapshot of no
+    entry on that key. It is the owner's word that the member had no value
+    as of its asof. `[Sc: state.md §14]`
+  - zenoh refuses a reply on a key the query does not intersect (§4.1).
+    So a member read's answer cannot ride the snapshot key, and a reader
+    that wants a collection whole makes a collection read.
+- **A per-key resource** keeps S2's reply per key: the bytes its mutation
+  put, with their Zenoh timestamp. These are the states §4.3's table
+  lists, each read by a profile for the time its replies carry:
+  - a state that declares `freshness.ttl_s` above 0, of a contract that
+    does not use `freshness.v2`;
+  - a `desired.v1` desired resource;
+  - a state that is a metric resource of `telemetry.v1` or `telemetry.v2`;
+  - every state of an interface whose contract uses `redundancy.v1`.
+
+  An archive's records are per key too, each reply with its attachment
+  (§4.4). An owner MUST answer each member of a per-key resource that a GET
+  reaches with its reply, or with its `reply_del` within the window.
+  `[Sc: state.md §1]`
+- **What a snapshot lists** (§7.5). Its run is the one the owner writes
+  under. It lists each live member as a live entry, and each member
+  deleted within the window as a tombstone (S3). Each carries its
+  member's last mutation's stamp, and a live entry the record that
+  mutation put.
+  - **Its asof.** An owner MUST write as asof a seq of its run at or below
+    which it has recorded every state mutation it minted. The snapshot then
+    reflects each of them, as §7.5 says. `[Sc: state.md §14]`
+    - Events share the seq and are never recorded, so they hold asof
+      back at no seq.
+    - The reference writes the seq just below the lowest it minted for a
+      state mutation and has not yet recorded. With none in flight, it
+      writes the last seq it minted. A run that has minted none takes one
+      for its first snapshot, as an occurrence does.
+  - **The confirmation** (§7.5). An owner MUST give each live entry of a
+    collection with a horizon its confirmation. It is 1 while the owner
+    vouches for the member ([`freshness.v2`](profiles/freshness/v2.md)
+    §2.4), and otherwise 2, with the member's last confirmation (§4.3,
+    "Minting"). `[Sc: profiles/freshness/scenarios-v2.md §3]`
+    - A collection with a horizon is a resource that declares
+      `freshness.ttl_s` above 0, of a contract that uses `freshness.v2`.
+      An entry of any other collection has confirmation 0.
+    - So a value the owner no longer vouches for reads no fresher than its
+      last confirmation.
+  - **Its time** is the owner's clock as it builds the snapshot, minted
+    as a last confirmation is (§4.3).
+- **Pages.** An owner MUST cut each snapshot into pages by §7.5's paging
+  rule, under its page size, and send each page as a reply to the one GET.
+  It builds the pages at once, from one state of the collection.
+  `[Sc: state.md §14]`
+  - **The page size** is 1,024 bytes, unless the deployment configures the
+    owner with another. That is §3.3's descriptor size, within
+    zenoh-pico's 4 KB fragment (§12).
+  - A deployment sets it for an owner read across a constrained face,
+    from the face's batch (§8.5).
+- **What a profile reads.** Where a profile reads a state GET's reply
+  with a value, or a `reply_del`, a snapshot's live entry or tombstone
+  stands for it, on its member's key and with its stamp. An owner's
+  answer "holds every live key" when each snapshot of it is complete.
+
+**Why `None`** (S4). Under `Latest`, a reader would lose what a snapshot
+says (§4.1, Appendix B):
+- `Latest` keeps one reply per key. A snapshot's pages share one key, and
+  so do two collections with one snapshot key.
+- It holds every reply until the GET's final. Across a slow face the
+  final trails the replies by seconds. Under `None`, a snapshot is
+  complete at its last page.
+- A snapshot carries no Zenoh timestamp, so `Latest` orders nothing: the
+  merge is the reader's anyway.
+- `Auto` on a concrete key is `Latest`, so a reader sets `None`.
 
 **A re-put is a mutation.** A put that repeats a member's current
 value, as an owner refreshing it under
@@ -906,8 +1009,8 @@ reply represents the member's latest put, not its latest change.
 **A heartbeat is no mutation.** Under
 [`freshness.v2`](profiles/freshness/v2.md) an owner puts no member again
 to confirm it: its heartbeat (§7.5) vouches for it, and moves no seq of
-its state. A reply then represents the member's latest put, stamped with
-its last confirmation (§4.3's table).
+its state. A snapshot's entry then represents the member's latest put,
+with its confirmation (S2).
 `[Sc: profiles/freshness/scenarios-v2.md §1, §3]`
 
 **A late joiner's seed.** A consumer or a tool that wants an
@@ -962,11 +1065,42 @@ from S4's GET and follows a subscription.
         after a live sample.
 
       `[F: seed/merge.json]` `[Sc: state.md §11]`
+- **A snapshot's entries** merge as replies do, each as its page
+  arrives, on its member's key: the snapshot's key, then `/` and the id
+  (§7.5). A live entry is a put, and a tombstone a delete. Each has its
+  stamp: its own run or the header's, and its seq. `[F: seed/snapshot.json]`
+- **The omission rule.** A late joiner MUST apply the omission rule when
+  it holds a snapshot complete (§7.5) under run R as of asof A, on a key K
+  that is its collection's snapshot key or a member's key.
+  `[F: seed/snapshot.json]` `[Sc: state.md §14]` A member of the collection
+  at K or under it, that the snapshot lists neither live nor as a
+  tombstone, has no value. The late joiner drops what it holds for the
+  member, unless that is newer than the snapshot:
+  - a value under R with a seq above A;
+  - a value under another run that it heard after it asked the GET, by
+    either path. A mutation heard again then counts, though it is kept
+    once.
+
+  So a delete the owner made beyond the window still reaches the late
+  joiner.
+- **An incomplete snapshot** drops nothing. A late joiner applies no
+  omission rule over an incomplete snapshot, and SHOULD read the
+  collection again. The entries it merged stand.
+  `[F: seed/snapshot.json]` `[Sc: state.md §14]`
+- **A member read's snapshot** rides its member's own key, so it answers
+  for that member alone. A wildcard member read proves no absence: a key
+  the owner holds no member at is not answered. A reader that needs the
+  collection's absences makes a collection read.
+- **A snapshot heard on a subscription** is no owner's answer (§7.5). A
+  consumer or a tool MUST NOT merge a snapshot heard on a subscription,
+  nor count it toward a complete snapshot. `[F: seed/snapshot.json]`
+- **Without the contract** a reader cannot map a collection's index to
+  its template, so it applies no omission rule: [`observer.md`](observer.md) §4.1.
 - **R6 and a tool's seed**: [`observer.md`](observer.md) §4.1.
 - **A selector over several owners.** A GET on a selector that matches
   several owners' keys is addressed to the owner's keys, as S4 requires,
-  when each key it matches has one owner (P3, §6): `Latest` then
-  consolidates each key over that owner's answers. The keys it matches
+  when each key it matches has one owner (P3, §6). Each key's replies are
+  then one owner's, which the late joiner merges. The keys it matches
   that no zk2 owner has, foreign keys (§1.7), are outside S4, and a storage
   may answer them.
 - **What a seed cannot know**: [`observer.md`](observer.md) §4.1.
@@ -1073,26 +1207,25 @@ time a profile reads (the table below).
   another run's, and a tool keeps it, as the later arrival. The key steps
   back to the old run until the new one's next value. That is accepted at
   this version. `[Sc: state.md §7]`
-  - **Inside a seed.** An old run's value can arrive after the new run's
-    for as long as the GET is open, not only in transit. `Latest` delivers
-    every reply at the GET's end, after the samples heard during it
-    (§4.1). So a consumer and a tool both hold the reply's value over a
-    value of the new run heard live, until the key's next value.
-    `[Sc: state.md §7]`
-  - **Where two instances answer**, `Latest` keeps one reply per key. It
-    keeps the one with the greater Zenoh timestamp where a reply carries
-    one, else the last to arrive (§4.1). So a seed can hold either
-    instance's value. `[Sc: state.md §7]`
+  - **Inside a seed.** Under `None` a reply arrives as it comes (§4.1),
+    so an old run's reply is a value in transit, as above. A consumer and
+    a tool both hold it over a value of the new run heard live, until the
+    key's next value. `[Sc: state.md §7]`
+  - **Where two instances answer**, both answers arrive: a snapshot or a
+    reply of each one's run. A late joiner merges each, and applies each
+    complete snapshot's omission rule. The rule's guard keeps the other
+    run's values that arrived after the GET was asked (§4.2). So a seed
+    holds each key's later arrival across the two runs, and a member that
+    one instance lists. `[Sc: state.md §7, §14]`
 - **The Zenoh timestamps kept.** Only these resources carry a Zenoh
   timestamp the owner sets, beside the in-band stamp. Each is kept for the
   time a profile reads from it. A state among them carries one on each
-  mutation and reply (S1, S2), and a stream as its profile says. A state
-  of a contract that uses `freshness.v2` carries one on its replies alone.
+  mutation and reply (S1, S2), and is a per-key resource: its GET answers
+  are a reply per key (§4.2). A stream carries one as its profile says.
 
   | Resource | Read for | Carried as |
   |---|---|---|
   | A state whose contract declares `freshness.ttl_s` above 0, and does not use `freshness.v2` | a reply's age ([`freshness.v1`](profiles/freshness/v1.md) §2.4, §2.6) | S1, S2 |
-  | A state whose contract declares `freshness.ttl_s` above 0, and uses `freshness.v2` | a reply's age, from its last confirmation ([`freshness.v2`](profiles/freshness/v2.md) §2.4, §2.6) | on its replies alone, never on a put: the later of the timestamps the owner minted at its last mutation and at the last heartbeat that vouched for it (S2, "Minting" below) |
   | A `desired.v1` desired resource | the order of an author's versions ([`desired.v1`](profiles/desired/v1.md) §2.4, §2.6, §2.11) | S1, S2 |
   | A state that is a metric resource of `telemetry.v1`, or of `telemetry.v2` and no frame resource | a rate's time base ([`telemetry.v1`](profiles/telemetry/v1.md) §2.11, which [`telemetry.v2`](profiles/telemetry/v2.md) §0 restates) | S1, S2 |
   | A stream that declares a `timing.v1` lifespan | a sample's age ([`timing.v1`](profiles/timing/v1.md) §2.6) | that section says |
@@ -1110,14 +1243,18 @@ time a profile reads (the table below).
       value (Appendix B), whose unit is 2^−32 s: the reference adds one
       unit. A larger step keeps the rule, which needs only that each stamp
       exceed the last (Appendix B gives zenoh-python's smallest step).
-    - **A last confirmation** (the table's second row) is minted so too.
-      An owner mints one at each mutation of such a member, a delete
-      among them, though the mutation carries none. It mints one as it
-      writes each heartbeat (§7.5).
-      That heartbeat's time is the timestamp's instant, to the
-      millisecond, counted from the deployment epoch (§7.6). While the
-      clock guard holds ("Ahead", below), the time is unknown.
-      `[Sc: profiles/freshness/scenarios-v2.md §3]`
+    - **A collection's times** are minted so too, though no sample
+      carries them as a Zenoh timestamp. They are a snapshot's time and
+      a member's last confirmation, for a collection with a horizon
+      (§4.2). An owner mints a last confirmation at each mutation of such
+      a member, a delete among them, and as it writes each heartbeat that
+      vouches for it (§7.5). It mints a snapshot's time as it builds the
+      snapshot. `[Sc: profiles/freshness/scenarios-v2.md §3]`
+      - A snapshot carries each as a time: the timestamp's instant, to the
+        millisecond, counted from the deployment epoch (§7.6). A heartbeat
+        carries its own so.
+      - While the clock guard holds ("Ahead", below), a heartbeat's time is
+        unknown.
   - **Order and id.** Two such timestamps with one id order by time. A
     timestamp under another id is another session's.
   - **Catch-up**, which profiles cite, is the last such timestamp an owner
@@ -1150,8 +1287,8 @@ time a profile reads (the table below).
     session without timestamping, a state of a contract that uses
     `freshness.v2` is one: its heartbeat goes on vouching for it, with its
     time unknown ([`freshness.v2`](profiles/freshness/v2.md) §2.10). Its
-    replies carry a last confirmation from the clock ahead, which a router
-    never re-stamps (§4.1). `[Sc: state.md §7]`
+    snapshots carry their times and confirmations from the clock ahead,
+    which no router reads (§4.1). `[Sc: state.md §7]`
     `[Sc: profiles/freshness/scenarios-v2.md §2]`
   - **A candidate's.** A `redundancy.v1` candidate's session stamps every
     write (§8.2), so the guard holds every write of its `freshness.v2`
@@ -1179,6 +1316,10 @@ written. This section is what the core requires of it.
   mutation's stamps (S1) and type identity (§7.1), and keeps tombstones
   for at least the window (S3). A put's bytes are kept as the owner wrote
   them, its envelope included, and a reply gives them back verbatim.
+  - **From a snapshot's entry** it keeps the put the entry stands for:
+    CH of form 0 with the snapshot's tag and the run's width, the entry's
+    run and seq, then its record (§7.5). Those are the bytes the owner
+    put.
 - **Its key** is the archived key without its leading `zk2` chunk, slugged
   as a rest parameter, under the archive's own `@state` token:
   `zk2/<system>/<archive>/archive.v1/@state/{origin...}`. For example,
@@ -1219,19 +1360,27 @@ written. This section is what the core requires of it.
     as an archive meets it. `[Sc: state.md §9]`
 - **Alignment.** When an owner becomes reachable again, the archive MUST
   re-read the owner's recorded collection before serving it as confirmed.
+  It reads a collection it records whole by a collection read, and each
+  member it records alone by a member read of its key, so that the owner
+  answers by snapshot (§4.2). `[Sc: state.md §5]`
   While the owner stays absent, it re-reads that collection from an archive
   on the owner's side, through the collection's archive form (above).
+  A peer archive answers per key (above).
   - **Reachable** is judged by presence: the owner's instance token
     (§8.1). With the owner gone, a peer archive's token appearing is the
     sign that the link healed, so an archive aligns then too. It reads the
     peer archives it is configured with in turn, and aligns from the first
     whose reply set holds a reply that counts.
-  - **It drops a key only on positive evidence:** a `reply_del` for it from
-    the source.
+  - **It drops a key only on positive evidence:** a tombstone or a
+    `reply_del` for it from the source, or its absence from a complete
+    snapshot by the owner on its key or its collection's (§4.2's omission
+    rule).
   - **A key the source neither reports nor tombstones** is kept, and served
-    with `confirmed: false`. An empty or partial reply set is not a verdict
-    (O5): an access-control refusal, or a route that has not crossed yet,
-    returns empty too.
+    with `confirmed: false`, unless a complete snapshot of the owner's
+    omits it. An empty or partial reply set is not a verdict (O5): an
+    access-control refusal, or a route that has not crossed yet, returns
+    empty too. Nor is an incomplete snapshot. A complete one, empty or
+    not, is the owner's word.
   - **Retrying.** An archive SHOULD repeat an alignment that left keys
     unconfirmed, a bounded number of times. An owner's instance token can
     reach the archive before the route to the owner's state queryable has,
@@ -1239,7 +1388,8 @@ written. This section is what the core requires of it.
     still silent after the last attempt leaves its keys unconfirmed, which
     is what they are. The reference makes 5 attempts, the n-th retry
     200 ms × n after the previous attempt ends. `[Sc: state.md §5]`
-  - **What a reply confirms.** A value read from the owner is confirmed.
+  - **What a reply confirms.** A value read from the owner is confirmed,
+    a snapshot's entry included.
     A value read from a peer archive keeps the peer's confirmation: it is
     confirmed when the peer's attachment says `"confirmed": true`, and
     unconfirmed otherwise, an absent or unreadable attachment included. A
@@ -1249,9 +1399,11 @@ written. This section is what the core requires of it.
   - **Older never wins.** A reply older than what the archive holds changes
     nothing, as a put older than a held delete does not (above). One with
     the same stamp can confirm the key, never unconfirm it.
-  - **A raised window (S3) carries this rule.** With the window at least the
-    longest expected outage, every delete the archive missed is still
-    answered with `reply_del` after the heal.
+  - **A delete the archive missed** reaches it after the heal. From the
+    owner's complete snapshot it is an absence, whatever the window.
+    Elsewhere only a tombstone proves it, so S3's raised window carries
+    this rule: for a per-key resource, a collection with no snapshot key,
+    and a collection read from a peer archive.
   - **An unconfirmed key expires.** An outage longer than that can leave a
     key that alignment never confirms. The archive MAY drop such a key after
     a deployment-set horizon, and MUST keep serving it as unconfirmed until
@@ -1808,8 +1960,8 @@ seq name, and §5.2 what an error holds.
 
 A **snapshot** is one collection's state in a GET's reply: its members'
 values and tombstones, in pages. This section defines its bytes, and how
-an owner cuts one into pages (below). No rule at this version has an
-owner write one, or a reader read one (§4.2).
+an owner cuts one into pages (below). An owner answers a state GET with
+snapshots, and a reader merges them, as §4.2 says.
 
 **The layouts.** A put carries an envelope as its payload, and a delete as
 its attachment. A GET's reply carries a snapshot as its payload. A call's
@@ -1992,6 +2144,7 @@ same bytes. `[F: envelope/vectors.json]`
 
 **Only a GET's reply carries a snapshot.** No owner puts one on its key.
 The parser cannot tell how a put came, so it reads a snapshot either way.
+A reader merges none heard on a subscription (§4.2).
 
 **The heartbeat.** A **heartbeat** is a put an owner sends for one
 interface it serves, its **covered interface**. It vouches for the members of that interface's
@@ -2211,7 +2364,8 @@ Every page an implementation accepts MUST write back to the same bytes.
 `[F: snapshot/bodies.json]`
 
 **Pages.** An owner cuts a snapshot into pages under a **page size**, a
-number of bytes it is configured with. Each page has the snapshot's CH,
+number of bytes it is configured with, 1,024 unless its deployment sets
+another (§4.2). Each page has the snapshot's CH,
 run, asof, time and coll, and its own index.
 - **The entries** are the snapshot's live entries and tombstones
   together, in the byte order of their ids.
@@ -2228,8 +2382,9 @@ An implementation that cuts a snapshot into pages MUST cut it so.
 `[F: snapshot/bodies.json]`
 
 **Complete.** A reader holds a snapshot complete when it holds one page
-of each index from 0 to a page whose more bit is 0, all with one CH, run,
-asof, time and coll. It then holds every entry the snapshot has.
+of each index from 0 to a page whose more bit is 0, all on one key with
+one CH, run, asof, time and coll. It then holds every entry the snapshot
+has.
 
 ### 7.6 Packed records
 
@@ -3072,6 +3227,18 @@ facts.
   - **A tool's half** is [`observer.md`](observer.md) §7.5.
 
   `[Sc: constrained.md §7]`
+- **A state GET across the face** reads each collection whole by a
+  collection read (§4.2). The owner answers one reply per page, so the
+  collection's members share one key's text and one replier's id.
+  - **The page size** of an owner read across the face is the
+    deployment's to set (§4.2). Each page pays its key and its replier
+    again, so small pages cost more.
+  - **Without ARQ** zenoh resends no lost fragment of a reply, so a page of
+    several frames crosses only when each does. A page within the face's
+    batch is lost alone.
+  - **With `block`**, a page larger than the batch queues as fragments,
+    and a push that cannot queue within `wait_before_close` closes the
+    transport ([`link.v2`](profiles/link/v2.md) §2.16).
 - **A far router in a south region needs declarations sent toward it.**
   It learns of queryables only from the declarations the near router
   sends it. So a deployment MUST grant the far side's principal
@@ -4289,10 +4456,17 @@ The format is the generator's own. The reference reads an enrollment file
 | Grant | Rule |
 |---|---|
 | **Own** | A service principal puts, deletes, declares queryables, replies and declares tokens under `zk2/<system>/<service>/**`, on ingress. It also holds each verbatim subtree, spelled out because `**` never crosses one: `…/*/@stream/**`, `…/*/@state/**`, `…/*/@op/**`, `…/@zk/**`. A service using advanced publication (§2.5) also holds `…/*/stream/**/@adv/**` and `…/*/state/**/@adv/**`. On egress, it receives queries and subscriber declarations on the same keys (spike S14). |
-| **Consume** | Subscribe or GET on the prefixes a principal's bindings name, plus their `@adv` subtrees where the consumer uses history, plus **presence**: liveliness reads (GETs and subscriptions, §8.1) and the descriptor's GET and subscription (§3.3) on the `…/@zk/**` subtree of each provider they name. Plus each **heartbeat** a binding needs: where a bound interface's contract uses `freshness.v2` and the binding consumes one of its collections (§7.5), the subscription to each named provider's `…/freshness.v2/stream/heartbeat/<iface>`. A consumer denied it hears no confirmation, and every member it follows goes stale (`freshness.v2` §2.5). |
+| **Consume** | Subscribe or GET on the prefixes a principal's bindings name, plus their `@adv` subtrees where the consumer uses history, plus **presence**: liveliness reads (GETs and subscriptions, §8.1) and the descriptor's GET and subscription (§3.3) on the `…/@zk/**` subtree of each provider they name. Plus each **heartbeat** a binding needs: where a bound interface's contract uses `freshness.v2` and the binding consumes one of its collections (§7.5), the subscription to each named provider's `…/freshness.v2/stream/heartbeat/<iface>`. A consumer denied it hears no confirmation, and every member it follows goes stale (`freshness.v2` §2.5). A binding that leaves a parameter of a state template unbound reads its collection whole: its GET covers the collection's snapshot key, `<snapshot key>/**` (§4.2). |
 | **Call** | Query on specific `…/@op/<op>` keys, plus presence on the `…/@zk/**` subtree of each service whose operations it calls. |
 | **Tool** | A role a principal plays, with no address of its own: Consume and Call on what it reads and calls, and presence on the services it inspects. **Inspection** is presence alone, on the `…/@zk/**` subtree of each service named, exact or wildcard, and none of its data. A tool drawing the graph (R3), a doctor, or a service listing reads descriptors through presence. A tool that checks S4, runs a doctor or draws the mesh (§4.2) also holds the **admin read**: `query` on `@/*/router`, `@/*/router/status/plugins/storage_manager/storages/**` and `@/*/*`, and their `reply`, never namespaced. Under `deny`, no other grant reaches the admin space. |
 
+- **A snapshot rides its snapshot key** (§4.2). A grant per template's
+  selector, such as `…/state/sdu/endpoint/*`, includes neither a
+  collection read's query nor the snapshot's key, `…/state/sdu/endpoint`.
+  So the owner's snapshot is refused by its own key, silently.
+  `…/state/sdu/endpoint/**` includes both. It grants every key under the
+  snapshot key too, so two collections that share one are granted
+  together.
 - **Contract bundles are open:** any principal MAY hold or fetch
   `zk2/@zk/contract/**`, because the hash is the check.
 - **No principal declares queryables under `@/**`**: the routers
@@ -4552,6 +4726,7 @@ additions:
 |---|---|
 | Namespace (§1.6) | The deployment prefix written literally in keys |
 | Descriptor (§3.3) | An owner's descriptor MUST fit one fragment (Appendix B gives its size under zenoh-pico's default) `[Sc: constrained.md §5]` |
+| Snapshots (§4.2) | An owner's page size MUST fit one fragment of each constrained reader that GETs its state. The default, 1,024 bytes, does under zenoh-pico's. `[Sc: constrained.md §5]` |
 | Bundles (§8.4) | Served by a gateway holder where the device cannot receive or hold them. A zenoh-pico 1.10.1 owner sent 100 KB replies, so its limit is on receiving (Appendix B). On a first hop, held on the near side, never by the owner (§8.4). |
 | Faces (§8.5) | The far side attached as a client or as a south region, with batches within the lease, `@zk` denied, and `@stream` denied unless downsampled ([`link.v1`](profiles/link/v1.md)). Presence never crosses, but a first-hop owner's instance token and descriptor where its face lets them (§8.1, §8.5). |
 
@@ -4672,6 +4847,16 @@ Appendix B. These are the ones the rules above cite:
   later one on a tie, so the last to arrive among unstamped replies. It
   delivers them at the final reply (`api/session.rs`). Checked against
   zenoh's own `Timestamp` by `zenkey-fleet`'s `bus::seed` tests.
+- `Latest` keeps one reply per key, `>=` keeping the later of two
+  unstamped ones (`api/session.rs:3540–3574`), and holds them until the
+  final reply (3601–3605) or the GET's timeout (2754–2758). `None`
+  delivers each reply as it arrives. `Auto` on a concrete key is `Latest`
+  (2717–2718). A snapshot's pages share one key, so `Latest` would keep
+  one of them (§4.2).
+- A queryable's reply on a key that does not intersect the query's key
+  expression is refused (`api/queryable.rs:585`), unless the query
+  accepts any key (`_anyke`). So a member read's snapshot rides the
+  member's key (§4.2).
 - An advanced publisher with a cache and no sample numbering orders its
   history by its session's timestamps, and is refused at its declaration
   on a session with no HLC (zenoh-ext's `advanced_publisher.rs`, `cache`
@@ -5179,14 +5364,14 @@ section each was written against, whose pointer leads on.
 | `conformance/compat/` | §9.7 retention, §9.8, R4 |
 | `conformance/descriptors/` | §3.3 |
 | `conformance/budget/` | §2.7, `lossless.json` and the reader's stall included |
-| `conformance/seed/` | §4.2 a late joiner's merge: `merge.json` the Zenoh timestamps' order, unstamped samples, and a tool's across two ids; `inband.json` §4.3's in-band stamps, plain and serial order, and a tool's and a consumer's across two runs |
+| `conformance/seed/` | §4.2 a late joiner's merge: `merge.json` the Zenoh timestamps' order, unstamped samples, and a tool's across two ids; `inband.json` §4.3's in-band stamps, plain and serial order, and a tool's and a consumer's across two runs; `snapshot.json` a seed over snapshots, their pages, asof and the omission rule |
 | `conformance/errors/` | §5.2: `forms.json` §7.5's error form, and every reply error it refuses read as the transport's, a router's `Timeout`, a querier's and one under another `Encoding` among them |
 | `conformance/envelope/` | §7.5, a call's forms and a snapshot's envelope included; `calls.json` §5.1's and §5.2's forms by an operation's types |
 | `conformance/snapshot/` | §7.5, a snapshot's pages: their bytes, their reading and the paging rule |
 | `conformance/frame/` | §7.7 |
 | `conformance/catalog/` | §8.6 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
-| `scenarios/state.md` | §4; §1 in-band stamps through a router that stamps nothing and one that stamps, and §8.2's session posture; §7 runs, a record's and a random draw's, the run before the seq wraps, and a consumer's and a tool's late joiner across two runs, after their seed and inside it; §9 an archive within a run and across two; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node; §13 a stream key's seq wrapping, and kept across a takeover |
+| `scenarios/state.md` | §4; §1 in-band stamps through a router that stamps nothing and one that stamps, and §8.2's session posture; §7 runs, a record's and a random draw's, the run before the seq wraps, and a consumer's and a tool's late joiner across two runs, after their seed and inside it; §9 an archive within a run and across two; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node; §13 a stream key's seq wrapping, and kept across a takeover; §14 a collection's snapshot in pages, a member read, a page lost, `Latest`'s control, a delete beyond the window and two instances answering |
 | `scenarios/operations.md` | §5, §6; §9 a call's forms for each kind of type, the as-of mark, an owner's error beside a router's `Timeout`, a querier's and a malformed one, an earlier version's envelope read as the transport's, and a request under another `Encoding` refused |
 | `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip; §7–§9 what a complete presence read is: a session cut off, before a read or while it runs, a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict; §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout; a watch session in no namespace on the wire keys, a round trip through a watch session cut off, and a move unconfirming what a reader holds; a reopen telling every token, the round trip after it waiting for them, and one round trip and one read at a time; step 10's counts, the reader's own sessions'; what a black box is judged on there, at what period its output is sampled, and one that prints nothing while its link is cut; Appendix B |
 | `scenarios/bindings.md` | §3.2; §6 a binding's order kept by the descriptor |
@@ -5346,6 +5531,12 @@ brief:
     An arrival carries an in-band stamp, a Zenoh timestamp, both or
     neither. They give which arrivals a tool's merge keeps, and for a
     state key, which a consumer accepts.
+  - **`snapshot.json`**: a reader's collections, each its index, template
+    and snapshot key; what it holds when it asks a GET; and what arrives
+    after, by the GET or the subscription: a sample, or a snapshot's page
+    as `snapshot/bodies.json` reads one, with its hex. They give what it
+    holds after the last arrival, and each snapshot's pages, whether it
+    is complete, and what its omission rule dropped.
 - **`envelope/`**: one byte → CH's form, run width and tag
   (`vectors.json`'s `headers`). An envelope's or a form's bytes in hex,
   and the sample that carries them → the parse, or the refusal's token,
