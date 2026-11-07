@@ -167,6 +167,18 @@ impl Decimal {
         self.m.is_positive()
     }
 
+    /// Half of this decimal, exactly: a `fixed` field reads back within
+    /// half its `resolution` of the value written (core §7.6), which a
+    /// tool shows as its bound (the tooling guide's O8).
+    #[must_use]
+    pub fn half(&self) -> Self {
+        Self {
+            m: &self.m * BigInt::from(5),
+            e: self.e + 1,
+        }
+        .normalized()
+    }
+
     /// An integer, as a decimal.
     pub(crate) fn of_i128(v: i128) -> Self {
         Self {
@@ -1715,6 +1727,18 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn half_a_resolution_is_exact() {
+        for (r, half) in [
+            ("100", "50"),
+            ("0.25", "0.125"),
+            ("1", "0.5"),
+            ("0.001", "0.0005"),
+        ] {
+            assert_eq!(Decimal::parse(r).unwrap().half().to_string(), half);
+        }
+    }
 
     fn codes(doc: &Value) -> Vec<&'static str> {
         let mut c: Vec<_> = PackedDoc::read(doc)

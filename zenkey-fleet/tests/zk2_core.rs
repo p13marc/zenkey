@@ -754,6 +754,8 @@ async fn each_kind_decodes_or_renders_honestly() {
             declared: "json:BandwidthUpdate".into(),
             value: serde_json::json!({"rx_bps": 1, "tx_bps": 2}),
             epoch_assumed: None,
+            dated: None,
+            bounds: None,
         }
     );
     let res = r.resource.expect("resolved");
@@ -785,6 +787,8 @@ async fn each_kind_decodes_or_renders_honestly() {
             declared: "json:FrameMeta".into(),
             value: serde_json::json!({"keyframe": true, "pts_ns": 40}),
             epoch_assumed: None,
+            dated: None,
+            bounds: None,
         }
     );
 

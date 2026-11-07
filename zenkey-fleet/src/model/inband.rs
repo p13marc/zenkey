@@ -341,6 +341,7 @@ pub fn heartbeat_value(
     stamp: wire::Stamp,
     tag: wire::Tag,
     body: &[u8],
+    dating: crate::model::deployment::Dating,
 ) -> Result<serde_json::Value, String> {
     use zenkey_model::heartbeat::{Heartbeat, Members, Time};
     if tag != layout.tag {
@@ -360,25 +361,43 @@ pub fn heartbeat_value(
             Members::One { vouched } => {
                 serde_json::json!({"digest": s.digest.to_string(), "vouched": vouched})
             }
-            m => serde_json::json!({
-                "digest": s.digest.to_string(),
-                "live": m.live(),
-                "vouched": m.vouched(),
-            }),
+            m => {
+                let mut v = serde_json::json!({
+                    "digest": s.digest.to_string(),
+                    "live": m.live(),
+                    "vouched": m.vouched(),
+                });
+                // `heartbeat/bodies.json`'s spelling: a templated section's
+                // members as a bitmap or a list of ranks.
+                if let Some(form) = m.form() {
+                    v["form"] = form.into();
+                }
+                v
+            }
         };
         sections.insert(c.resource(), v);
     }
-    let time = match hb.time {
-        Time::Unknown => serde_json::Value::Null,
-        Time::At { secs, ms } => serde_json::json!({"s": secs, "ms": ms}),
+    let (time, dated) = match hb.time {
+        Time::Unknown => (serde_json::Value::Null, None),
+        Time::At { secs, ms } => (
+            serde_json::json!({"s": secs, "ms": ms}),
+            // The date after the number (the tooling guide's O8), from the
+            // epoch in force for its owner, named.
+            Some(dating.dated_from(i128::from(secs) * 1000 + i128::from(ms))),
+        ),
     };
-    Ok(serde_json::json!({
+    let mut v = serde_json::json!({
         "covers": layout.iface.to_string(),
+        "covered": layout.fingerprint.to_string(),
         "run": stamp.run.hex(),
         "seq": stamp.seq.get(),
         "time": time,
         "sections": sections,
-    }))
+    });
+    if let Some(d) = dated {
+        v["dated"] = serde_json::to_value(d).unwrap_or_default();
+    }
+    Ok(v)
 }
 
 /// Why a heartbeat where a record of a resource's type was read is
@@ -437,9 +456,10 @@ pub fn heartbeat_check(
     stamp: wire::Stamp,
     tag: wire::Tag,
     body: &[u8],
+    dating: crate::model::deployment::Dating,
 ) -> (PayloadRendering, Conformance) {
     let declared = heartbeat_declared(key);
-    match heartbeat_value(layout, stamp, tag, body) {
+    match heartbeat_value(layout, stamp, tag, body, dating) {
         Ok(value) => (
             PayloadRendering {
                 key: key.to_owned(),
@@ -449,6 +469,8 @@ pub fn heartbeat_check(
                     declared,
                     value,
                     epoch_assumed: None,
+                    dated: None,
+                    bounds: None,
                 },
             },
             Conformance::Valid,

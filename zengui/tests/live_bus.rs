@@ -1064,6 +1064,9 @@ async fn a_recorded_window_replays_through_the_offline_lens() {
             captured_at: zenkey_fleet::rfc3339_now(),
             preamble: None,
             pre_roll: None,
+            catalog: None,
+            revisions: None,
+            bundles: None,
         };
         let file = std::fs::File::create(&path).expect("a scratch file");
         let sink = zenkey_fleet::ZrecSink::spawn(std::io::BufWriter::new(file), &header)

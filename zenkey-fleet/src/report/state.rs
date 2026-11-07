@@ -262,6 +262,8 @@ mod tests {
                 declared: "json:Namespaces".into(),
                 value: json!([]),
                 epoch_assumed: None,
+                dated: None,
+                bounds: None,
             },
         }
     }

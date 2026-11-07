@@ -6,6 +6,22 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a value dated and bounded, and `.zrec` version 4 (#990 V3, V4)
+
+The tooling guide's O8 and §5's version 4; no rule in core or observer
+changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| a frame record's `at`, a heartbeat's `time`: the wire's `{s, ms}` from the deployment epoch alone | beside it, `"dated": {"utc": "2026-11-07T14:49:16.523Z", "epoch": "stated", "catalog": "e3a529fe"}`; `epoch` is `stated`, `deployment`, `assumed` (no `utc`), `unknown_catalog` or `ambiguous` (no `utc`); the table `t=26837356.523 (2026-11-07T14:49:16.523Z, catalog e3a529fe)` | `echo`, `watch`, `get`; an assumed or refused epoch is never dated |
+| a packed record's `time` field: core §7.6's milliseconds alone | the row's `dated` (by field name) beside `value`; a frame field's and a packed record's bounded values a `bound` / `bounds`: `{"half_resolution": "0.125"}` for `fixed`, `{"width": 24}` for a counter; the table `radio_snr -9.75 ±0.125`, `sdu_tx_bytes_total 24 (mod 2^24)` | `echo --format ndjson` rows gain `dated` and `bounds`; a rendering's `value` is unchanged |
+| a frame field's `fixed` value in the table: quoted, `"1500"` | `1500` | the JSON stays a decimal string |
+| a heartbeat's reading: `covers`, `run`, `seq`, `time`, `sections` | also `covered` (the revision read with), `dated`, and a templated section's `form` (`bitmap` or `list`) | `heartbeat/bodies.json`'s spelling |
+| `record`: `.zrec` version 3 | version 4: the header's `catalog` (the one `--catalog`; two refused, exit 2), `revisions` (one presence read as the capture begins, each descriptor's `named` catalog; across a face the contracts in hand, no `named`) and `bundles` (base64; `--no-bundles` leaves them out) | `record --on`'s header carries no revisions yet |
+| — | `echo --from FILE`: a capture printed through the offline lens, no session: a version-4 header in presence's place, its bundles verified (a refused one named, its keys at rung 5), its catalog the epoch, `--catalog` the header's or a successor (else exit 2, `unknown_catalog` or `epoch_moved`), `--contracts` beside, `--across-face` for a key the header lists no revision for | a version-3 file reads, its keys `no_provider` without `--across-face` |
+| a version-3 reader of a version-4 file | refuses it, `unsupported version 4` | a version-4 reader reads 1 to 4; a v4 header with a member version 4 does not define is refused (`header`) |
+| `watch` under `--catalog` | each date names the catalog | |
+
 ## Unreleased (`main`, zk2) — review-bot's items on #1088 (#990)
 
 | Before | Now | Notes |

@@ -29,10 +29,124 @@ use zenkey_model::grammar::IfaceId;
 
 pub use zenkey_model::catalog::{Catalog as DeploymentCatalog, CatalogId};
 
-/// The catalogs a tool was given, in the order given.
+/// The catalogs a tool was given, in the order given, and the catalogs it
+/// holds only as a `.zrec` header recorded them (the tooling guide's §5,
+/// version 4): an id, an epoch and a lineage, no entries.
 #[derive(Debug, Clone, Default)]
 pub struct Catalogs {
     held: Vec<DeploymentCatalog>,
+    recorded: Vec<RecordedCatalog>,
+}
+
+/// A catalog as a `.zrec` header records it (the tooling guide's §5): its
+/// id, its epoch and its lineage, enough to read an owner's epoch through
+/// it (core §8.6), and no entry to list a revision by.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordedCatalog {
+    pub id: CatalogId,
+    pub epoch: i64,
+    pub lineage: Vec<zenkey_model::catalog::Ancestor>,
+}
+
+impl RecordedCatalog {
+    /// Whether it is `id`, or succeeds it.
+    pub fn reads(&self, id: CatalogId) -> bool {
+        self.id == id || self.lineage.iter().any(|a| a.id == id)
+    }
+}
+
+/// The epoch in force and the catalog it is read from: what a date says
+/// beside a time (the tooling guide's O8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Dating {
+    pub epoch: Epoch,
+    /// The catalog the owner names, or with no descriptor the one held;
+    /// `None` for an owner naming none, and where nothing states it.
+    pub catalog: Option<CatalogId>,
+}
+
+impl From<Epoch> for Dating {
+    fn from(epoch: Epoch) -> Dating {
+        let catalog = match epoch {
+            Epoch::Unknown(id) => Some(id),
+            _ => None,
+        };
+        Dating { epoch, catalog }
+    }
+}
+
+impl Dating {
+    /// The date of a wire number counted from the deployment epoch, `ms`
+    /// milliseconds after it (a frame record's `at`, a heartbeat's time):
+    /// dated under a stated or a deployment epoch, named alone under an
+    /// assumed or a refused one (O8).
+    pub fn dated_from(self, ms: i128) -> crate::report::Dated {
+        let utc = self
+            .epoch
+            .given()
+            .and_then(|e| rfc3339_ms(i128::from(e) * 1000 + ms, true));
+        self.dated(utc)
+    }
+
+    /// The date of a value already read under this epoch as milliseconds
+    /// since the Unix epoch (a packed `time` field, core §7.6's reading),
+    /// at seconds where the field carries no milliseconds.
+    pub fn dated_unix(self, unix_ms: i128, with_ms: bool) -> crate::report::Dated {
+        let utc = self
+            .epoch
+            .given()
+            .and_then(|_| rfc3339_ms(unix_ms, with_ms));
+        self.dated(utc)
+    }
+
+    fn dated(self, utc: Option<String>) -> crate::report::Dated {
+        use crate::report::DatedEpoch as E;
+        let (epoch, catalog) = match self.epoch {
+            Epoch::Stated(_) => (E::Stated, self.catalog),
+            Epoch::Deployment(_) => (E::Deployment, self.catalog),
+            Epoch::Assumed => (E::Assumed, None),
+            Epoch::Unknown(id) => (E::UnknownCatalog, Some(id)),
+            Epoch::Ambiguous => (E::Ambiguous, None),
+        };
+        let utc = match epoch {
+            E::Stated | E::Deployment => utc,
+            _ => None,
+        };
+        crate::report::Dated {
+            utc,
+            epoch,
+            catalog: catalog.map(CatalogId::hex),
+        }
+    }
+}
+
+/// RFC 3339 UTC of `unix_ms` milliseconds since the Unix epoch, at
+/// milliseconds or at seconds: `2026-11-07T14:49:16.523Z`. `None` past
+/// year 9999 or before year 0.
+pub fn rfc3339_ms(unix_ms: i128, with_ms: bool) -> Option<String> {
+    let secs = unix_ms.div_euclid(1000);
+    let ms = unix_ms.rem_euclid(1000);
+    let days = secs.div_euclid(86_400);
+    let tod = secs.rem_euclid(86_400);
+    // Howard Hinnant's civil_from_days.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i128::from(m <= 2);
+    if !(0..=9999).contains(&y) {
+        return None;
+    }
+    let (h, mi, s) = (tod / 3600, tod % 3600 / 60, tod % 60);
+    Some(if with_ms {
+        format!("{y:04}-{m:02}-{d:02}T{h:02}:{mi:02}:{s:02}.{ms:03}Z")
+    } else {
+        format!("{y:04}-{m:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z")
+    })
 }
 
 /// What a reader holds of the catalog an owner writes under: what its
@@ -118,7 +232,25 @@ pub struct Placed {
 
 impl Catalogs {
     pub fn new(held: Vec<DeploymentCatalog>) -> Catalogs {
-        Catalogs { held }
+        Catalogs {
+            held,
+            recorded: Vec::new(),
+        }
+    }
+
+    /// Catalogs held only as a `.zrec` header recorded them (§5, version
+    /// 4): an owner's epoch reads through them, and they list no revision.
+    pub fn recorded(recorded: Vec<RecordedCatalog>) -> Catalogs {
+        Catalogs {
+            held: Vec::new(),
+            recorded,
+        }
+    }
+
+    /// Whether a catalog with its entries is held: what lists a revision,
+    /// across a face (observer §7.5's step 1).
+    pub fn lists_entries(&self) -> bool {
+        !self.held.is_empty()
     }
 
     /// Reads one catalog file as §8.6 reads it: a refusal's words end with
@@ -138,7 +270,7 @@ impl Catalogs {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.held.is_empty()
+        self.held.is_empty() && self.recorded.is_empty()
     }
 
     /// The catalog an owner is given: one at most, since an owner writes
@@ -160,19 +292,58 @@ impl Catalogs {
     /// The epoch a reader counts the `time` fields of an owner that
     /// `stated` its catalog from (§8.6).
     pub fn epoch(&self, stated: Stated) -> Epoch {
+        self.dating(stated).epoch
+    }
+
+    /// [`Catalogs::epoch`], with the catalog it is read from (the tooling
+    /// guide's O8): the one the owner names, or with no descriptor the one
+    /// held.
+    pub fn dating(&self, stated: Stated) -> Dating {
         match stated {
-            Stated::Names(None) => Epoch::Stated(EPOCH_WITHOUT_CATALOG),
-            Stated::Names(Some(id)) => zenkey_model::catalog::through(&self.held, id)
-                .map_or(Epoch::Unknown(id), |t| Epoch::Stated(t.epoch())),
-            Stated::Disagree => Epoch::Ambiguous,
+            Stated::Names(None) => Dating {
+                epoch: Epoch::Stated(EPOCH_WITHOUT_CATALOG),
+                catalog: None,
+            },
+            Stated::Names(Some(id)) => {
+                let epoch = match zenkey_model::catalog::through(&self.held, id) {
+                    Ok(t) => Epoch::Stated(t.epoch()),
+                    Err(_) => self
+                        .recorded
+                        .iter()
+                        .find(|r| r.reads(id))
+                        .map_or(Epoch::Unknown(id), |r| Epoch::Stated(r.epoch)),
+                };
+                Dating {
+                    epoch,
+                    catalog: Some(id),
+                }
+            }
+            Stated::Disagree => Dating {
+                epoch: Epoch::Ambiguous,
+                catalog: None,
+            },
             Stated::Unread => {
-                let epochs: BTreeSet<i64> =
-                    self.held.iter().map(DeploymentCatalog::epoch).collect();
+                let all: Vec<(i64, CatalogId)> = self
+                    .held
+                    .iter()
+                    .map(|c| (c.epoch(), c.id()))
+                    .chain(self.recorded.iter().map(|r| (r.epoch, r.id)))
+                    .collect();
+                let epochs: BTreeSet<i64> = all.iter().map(|(e, _)| *e).collect();
                 let mut it = epochs.iter();
                 match (it.next(), it.next()) {
-                    (None, _) => Epoch::Assumed,
-                    (Some(e), None) => Epoch::Deployment(*e),
-                    (Some(_), Some(_)) => Epoch::Ambiguous,
+                    (None, _) => Dating {
+                        epoch: Epoch::Assumed,
+                        catalog: None,
+                    },
+                    (Some(e), None) => Dating {
+                        epoch: Epoch::Deployment(*e),
+                        catalog: all.first().map(|(_, id)| *id),
+                    },
+                    (Some(_), Some(_)) => Dating {
+                        epoch: Epoch::Ambiguous,
+                        catalog: None,
+                    },
                 }
             }
         }
@@ -255,6 +426,49 @@ mod tests {
         let p =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2/zenoh-modem/catalog.json");
         Catalogs::load(&p).unwrap()
+    }
+
+    /// O8: a date at the wire's precision, from the epoch in force, named;
+    /// an assumed or a refused epoch dates nothing.
+    #[test]
+    fn a_time_is_dated_under_the_epoch_in_force_and_named() {
+        use crate::report::DatedEpoch;
+        let c = modem();
+        let id = c.id();
+        let held = Catalogs::new(vec![c.clone()]);
+        let stated = held.dating(Stated::Names(Some(id)));
+        let d = stated.dated_from(26_837_356_523);
+        assert_eq!(d.utc.as_deref(), Some("2026-11-07T14:49:16.523Z"));
+        assert_eq!((d.epoch, d.catalog), (DatedEpoch::Stated, Some(id.hex())));
+        let deployment = held.dating(Stated::Unread).dated_from(0);
+        assert_eq!(deployment.epoch, DatedEpoch::Deployment);
+        assert_eq!(deployment.utc.as_deref(), Some("2026-01-01T00:00:00.000Z"));
+        let zero = held.dating(Stated::Names(None)).dated_unix(1000, false);
+        assert_eq!(
+            (zero.utc.as_deref(), zero.catalog),
+            (Some("1970-01-01T00:00:01Z"), None)
+        );
+        let assumed = Catalogs::default().dating(Stated::Unread).dated_from(5);
+        assert_eq!((assumed.epoch, assumed.utc), (DatedEpoch::Assumed, None));
+        let unknown = Catalogs::default()
+            .dating(Stated::Names(Some(id)))
+            .dated_from(5);
+        assert_eq!(
+            (unknown.epoch, unknown.utc, unknown.catalog),
+            (DatedEpoch::UnknownCatalog, None, Some(id.hex()))
+        );
+        // A header's catalog: read through by id and lineage, no entries.
+        let rec = Catalogs::recorded(vec![RecordedCatalog {
+            id,
+            epoch: c.epoch(),
+            lineage: c.lineage().to_vec(),
+        }]);
+        assert_eq!(rec.epoch(Stated::Names(Some(id))), Epoch::Stated(c.epoch()));
+        assert_eq!(
+            rec.epoch(Stated::Names(Some(c.lineage()[0].id))),
+            Epoch::Stated(c.epoch())
+        );
+        assert!(!rec.lists_entries());
     }
 
     #[test]

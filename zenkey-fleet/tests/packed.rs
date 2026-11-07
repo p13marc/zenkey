@@ -39,6 +39,7 @@ fn value_of(r: &Rendered) -> &serde_json::Value {
             declared,
             value,
             epoch_assumed,
+            ..
         } => {
             assert_eq!(declared, "packed:Sensor");
             assert_eq!(*epoch_assumed, None, "Sensor holds no time field");
@@ -250,6 +251,7 @@ fn a_time_field_is_shown_under_the_epoch_assumed() {
             declared,
             value,
             epoch_assumed,
+            ..
         } => {
             assert_eq!(declared, "packed:Clock");
             assert_eq!(value["at"], 1_700_000_000_000_i64);
@@ -258,6 +260,8 @@ fn a_time_field_is_shown_under_the_epoch_assumed() {
                 declared,
                 value,
                 epoch_assumed,
+                dated: None,
+                bounds: None,
             })
             .unwrap();
             assert_eq!(json["epoch_assumed"], 0, "{json}");

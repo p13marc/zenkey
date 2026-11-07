@@ -582,6 +582,11 @@ impl FaceScope {
         self.scope.selectors()
     }
 
+    /// The addresses across the face, each once.
+    pub fn addrs(&self) -> &[Addr] {
+        self.scope.addresses()
+    }
+
     /// The addresses across the face, as `--across-face` named them.
     pub fn addresses(&self) -> String {
         self.scope

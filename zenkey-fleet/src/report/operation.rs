@@ -280,6 +280,8 @@ mod tests {
                 declared: "json:DiagnosticsResponse".into(),
                 value: json!({"ok": true}),
                 epoch_assumed: None,
+                dated: None,
+                bounds: None,
             },
         }
     }

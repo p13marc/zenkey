@@ -219,7 +219,7 @@ pub fn choose(
     if left.is_empty() {
         return none(NoneStep::NoResource);
     }
-    let catalogs = catalogs.filter(|c| !c.is_empty());
+    let catalogs = catalogs.filter(|c| c.lists_entries());
     if let Some(c) = catalogs {
         left.retain(|(r, _)| c.lists(r.iface(), r.fingerprint()));
         if left.is_empty() {

@@ -4,6 +4,14 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — a value dated and bounded, a replay under `--catalog` (#990 V3, V4)
+
+| Before | Now | Notes |
+|---|---|---|
+| the Inspector's FRAME section: each record's `t=` alone, each field `known 7` | the record's date after the number, `(2026-…Z, catalog …)`, where the epoch dates it, and each bounded field `known 7 (mod 2^32)`, `known 1500 ±50` | the tooling guide's O8; an assumed epoch dates nothing |
+| a replay: its epoch assumed, its lens holding no catalog | the window's `--catalog`, else a version-4 file's header catalog, the recorder's word | `ReplayLens::catalogs` |
+| `.zrec` written by "save the retained window": version 3 | version 4, no revision named | the header's members are §5's |
+
 ## Unreleased (`main`, zk2) — a packed record never sniffed, the revision of a key in a replay (#990 V2)
 
 Observer 0.29 §7.3 and §7.5, through the fleet's lens.

@@ -29,7 +29,7 @@ use std::collections::{BTreeMap, VecDeque};
 use zenkey_model::frame::{Applied, Frame, Layout, Reader};
 use zenkey_model::wire;
 
-use crate::model::deployment::Epoch;
+use crate::model::deployment::Dating;
 use crate::report::{Conformance, PayloadRendering, Rendered, ResolvedResource, Unresolved};
 
 pub use zenkey::inband::{FRAME_AS_RECORD, MUTATION_ON_FRAME};
@@ -125,6 +125,67 @@ fn with_refused(mut value: serde_json::Value, applied: &Applied) -> serde_json::
     value
 }
 
+/// A frame's reading with what it promises (the tooling guide's O8),
+/// beside the numbers it keeps in `frame/apply.json`'s spelling: each
+/// record's `at` dated (`dated`, the epoch in force named), and each field
+/// with a value bounded by its declaration (`bound`: a `fixed` field's
+/// half resolution, a counter's width).
+fn promised(mut value: serde_json::Value, layout: &Layout, dating: Dating) -> serde_json::Value {
+    let bounds: BTreeMap<&str, crate::report::Bound> = layout
+        .fields()
+        .iter()
+        .filter_map(|f| bound_of(f).map(|b| (f.name.as_str(), b)))
+        .collect();
+    let Some(records) = value
+        .get_mut("records")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return value;
+    };
+    for r in records {
+        let at = r
+            .get("at")
+            .and_then(|a| Some(a["s"].as_i64()? * 1000 + a["ms"].as_i64()?));
+        if let Some(at) = at
+            && let Some(m) = r.as_object_mut()
+        {
+            m.insert(
+                "dated".into(),
+                serde_json::to_value(dating.dated_from(i128::from(at))).unwrap_or_default(),
+            );
+        }
+        let Some(fields) = r
+            .get_mut("fields")
+            .and_then(serde_json::Value::as_object_mut)
+        else {
+            continue;
+        };
+        for (name, f) in fields.iter_mut() {
+            if let (Some(b), Some(m)) = (bounds.get(name.as_str()), f.as_object_mut())
+                && m.contains_key("value")
+            {
+                m.insert("bound".into(), serde_json::to_value(b).unwrap_or_default());
+            }
+        }
+    }
+    value
+}
+
+/// What a field's declaration bounds its value by (core §7.6; O8): a
+/// `fixed` field's half resolution, a `counter`'s width; `None` for a
+/// kind that reads back exactly.
+#[must_use]
+pub fn bound_of(f: &zenkey_model::packed::Field) -> Option<crate::report::Bound> {
+    use zenkey_model::packed::FieldKind;
+    match &f.kind {
+        FieldKind::Fixed { resolution, .. } => Some(crate::report::Bound::HalfResolution(
+            resolution.half().to_string(),
+        )),
+        FieldKind::Counter => Some(crate::report::Bound::Width(f.width)),
+        _ => None,
+    }
+}
+
 /// A frame its reader read, rendered: its reading as the value, valid,
 /// its record type's `time` fields under `epoch`, the epoch in force for
 /// its owner (core §8.6), as a packed record's are
@@ -139,8 +200,10 @@ pub fn applied_rendering(
     layout: &Layout,
     applied: &Applied,
     size: usize,
-    epoch: Epoch,
+    epoch: impl Into<Dating>,
 ) -> (PayloadRendering, Conformance) {
+    let dating: Dating = epoch.into();
+    let epoch = dating.epoch;
     let timed = holds_time(layout);
     if timed && let Some(reason) = epoch.refusal() {
         return undecodable(key, resource, declared, size, reason);
@@ -151,6 +214,7 @@ pub fn applied_rendering(
     match applied
         .reading(layout, Some(under))
         .map(|v| with_refused(v, applied))
+        .map(|v| promised(v, layout, dating))
     {
         Ok(value) => (
             PayloadRendering {
@@ -161,6 +225,8 @@ pub fn applied_rendering(
                     declared,
                     value,
                     epoch_assumed: assumed,
+                    dated: None,
+                    bounds: None,
                 },
             },
             Conformance::Valid,
@@ -186,7 +252,7 @@ pub fn frame_check(
     tag: wire::Tag,
     body: &[u8],
     reader: &mut Reader,
-    epoch: Epoch,
+    epoch: impl Into<Dating>,
 ) -> (PayloadRendering, Conformance) {
     match Frame::parse(tag, body, layout) {
         Ok(frame) => {
@@ -278,6 +344,23 @@ pub fn is_frame_declared(declared: &str) -> bool {
     declared.starts_with("zk2c frame of ")
 }
 
+/// A field's value as a person reads it: a `fixed` field's decimal
+/// string without its quotes.
+fn value_text(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        v => v.to_string(),
+    }
+}
+
+/// A field's bound after its value (O8): ` ±0.125`, ` (mod 2^24)`.
+fn bound_text(f: &serde_json::Value) -> String {
+    f.get("bound")
+        .and_then(|b| serde_json::from_value::<crate::report::Bound>(b.clone()).ok())
+        .map(|b| format!(" {}", b.words()))
+        .unwrap_or_default()
+}
+
 /// A frame's reading as a person reads it (observer §7.6), one line a
 /// record after a head: `None` for a value that is no frame reading.
 ///
@@ -335,6 +418,13 @@ pub fn reading_lines(value: &serde_json::Value) -> Option<Vec<String>> {
                 a["ms"].as_u64().unwrap_or(0)
             )
         });
+        // The date after the number (O8), where the epoch dates it.
+        let at = at.map(
+            |at| match r.get("dated").and_then(crate::report::Dated::read) {
+                Some(d) if d.utc.is_some() => format!("{at} ({})", d.words()),
+                _ => at,
+            },
+        );
         let when = match (r.get("time")?.as_str()?, at, r.get("after_ms")) {
             ("unknown", _, _) => "t unknown (the owner's clock)".to_owned(),
             ("scheduled", at, after) => format!(
@@ -350,11 +440,12 @@ pub fn reading_lines(value: &serde_json::Value) -> Option<Vec<String>> {
             .as_object()?
             .iter()
             .map(|(name, f)| match f["state"].as_str() {
-                Some("known") => format!("{name} {}", f["value"]),
+                Some("known") => format!("{name} {}{}", value_text(&f["value"]), bound_text(f)),
                 Some("within") => format!(
-                    "{name} {} ±{} (within)",
-                    f["value"],
-                    f["delta"].as_str().unwrap_or("?")
+                    "{name} {} ±{} (within){}",
+                    value_text(&f["value"]),
+                    f["delta"].as_str().unwrap_or("?"),
+                    bound_text(f)
                 ),
                 Some("absent") => format!("{name} absent"),
                 _ => format!(
@@ -379,6 +470,7 @@ pub fn reading_lines(value: &serde_json::Value) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::deployment::Epoch;
     use serde_json::json;
     use zenkey_model::authoring::FrameSpec;
     use zenkey_model::frame::FrameParams;

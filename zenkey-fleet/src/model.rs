@@ -37,7 +37,8 @@
 //! contracts in hand and, given a face policy, the face's plan
 //! ([`face_scope`], observer §7.5, #990 V1); with no descriptor in hand,
 //! the revision of a key is the deployment's word, then CH's tag
-//! ([`choice`], #990 V2a).
+//! ([`choice`], #990 V2a). A `.zrec` version-4 header stands in presence's
+//! place for a capture read offline ([`recorded`], #990 V4).
 //!
 //! The rest is generation-neutral: a stream of samples becomes rates and
 //! latencies ([`stats`]) or a tree ([`tree`]), two payloads become a diff
@@ -94,6 +95,7 @@ pub mod lens;
 pub mod namespace;
 pub mod presence_live;
 pub mod presence_watch;
+pub mod recorded;
 pub mod redundancy;
 pub mod render;
 pub mod retain;

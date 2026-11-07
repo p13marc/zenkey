@@ -63,6 +63,10 @@ pub struct ReplayLens {
     /// interface by the one revision held offline. A lens is built over a
     /// store all the same.
     store: BundleStore,
+    /// The deployment catalogs the replay reads its times under (core §8.6,
+    /// #990 V4): the window's `--catalog`, else a version-4 header's own,
+    /// the recorder's word; none, and its epoch is assumed.
+    pub catalogs: Arc<zenkey_fleet::Catalogs>,
     /// The declared keyspace from this lens alone — every revision held
     /// under a symbolic `{system}/{service}`, nothing placed by presence.
     pub skeleton: Arc<Skeleton>,
@@ -93,8 +97,15 @@ impl ReplayLens {
             namespace: namespace.to_owned(),
             contracts,
             store,
+            catalogs: Arc::default(),
             skeleton,
         }
+    }
+
+    /// The same lens reading its times under `catalogs` (`--catalog`).
+    pub fn with_catalogs(mut self, catalogs: Arc<zenkey_fleet::Catalogs>) -> ReplayLens {
+        self.catalogs = catalogs;
+        self
     }
 
     /// The lens: catalog `None`, the offline contracts.
@@ -102,6 +113,7 @@ impl ReplayLens {
         zenkey_fleet::Lens::new(&self.namespace, None, &self.store)
             .offline(&self.contracts)
             .held(self.contracts.len())
+            .catalogs(&self.catalogs)
     }
 
     /// The same lens, owned, for a task: no catalog, no feed to nudge.
@@ -113,7 +125,7 @@ impl ReplayLens {
             contracts: Some(Arc::clone(&self.contracts)),
             generation: 0,
             feed: None,
-            catalogs: Default::default(),
+            catalogs: Arc::clone(&self.catalogs),
         }
     }
 }
@@ -188,8 +200,9 @@ pub enum ReplaySource {
     File {
         /// Where the file came from — the banner names it.
         path: String,
-        /// The capture's own account of itself (selectors, base, when).
-        header: ZrecHeader,
+        /// The capture's own account of itself (selectors, base, when),
+        /// boxed: a version-4 header is most of the enum's size.
+        header: Box<ZrecHeader>,
     },
     /// The monitor's retained window, snapshotted on entry (#217).
     Retained {
@@ -374,7 +387,7 @@ impl ReplayState {
             watched: Arc::from(header.selectors.clone()),
             source: ReplaySource::File {
                 path: path.to_string(),
-                header,
+                header: Box::new(header),
             },
             rows,
             capture_dropped,
@@ -561,12 +574,28 @@ impl ReplayState {
     /// Resolve this replay offline (#614, FL10b): through the contracts the
     /// window holds, in the capture's namespace — a file's header `base`, or
     /// `live_namespace` for the retained window — and no presence read.
-    pub fn resolve_offline(&mut self, live_namespace: &str, contracts: Option<Arc<ContractSet>>) {
-        let namespace = match &self.source {
-            ReplaySource::File { header, .. } => header.base.clone(),
-            ReplaySource::Retained { .. } => live_namespace.to_owned(),
+    pub fn resolve_offline(
+        &mut self,
+        live_namespace: &str,
+        contracts: Option<Arc<ContractSet>>,
+        catalogs: Option<Arc<zenkey_fleet::Catalogs>>,
+    ) {
+        let (namespace, header) = match &self.source {
+            ReplaySource::File { header, .. } => (header.base.clone(), Some(header)),
+            ReplaySource::Retained { .. } => (live_namespace.to_owned(), None),
         };
-        self.lens = ReplayLens::offline(&namespace, contracts);
+        // The window's catalogs (`--catalog`), else a version-4 header's,
+        // the recorder's word (the tooling guide's §5).
+        let catalogs = match (catalogs.filter(|c| !c.is_empty()), header) {
+            (Some(c), _) => c,
+            (None, Some(h)) => Arc::new(
+                zenkey_fleet::tape::record::reader_catalogs(h, None)
+                    .map(|(c, _)| c)
+                    .unwrap_or_default(),
+            ),
+            (None, None) => Arc::default(),
+        };
+        self.lens = ReplayLens::offline(&namespace, contracts).with_catalogs(catalogs);
         // What was resolved under the lens it replaces is resolved again
         // under this one (#614, FL7): the rows fed so far, in order.
         self.identity = IdentityCache::default();
@@ -743,7 +772,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2/walkthrough");
         let (set, _) = ContractSet::load_path(&dir);
         let held = set.len();
-        state.resolve_offline("live-namespace", Some(Arc::new(set)));
+        state.resolve_offline("live-namespace", Some(Arc::new(set)), None);
         assert_eq!(state.lens.namespace, "spray", "the capture's namespace");
         assert!(state.lens.lens().catalog().is_none());
         let coverage = &state.lens.skeleton.coverage;
@@ -789,7 +818,7 @@ mod tests {
         let dir =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2/walkthrough");
         let (set, _) = ContractSet::load_path(&dir);
-        state.resolve_offline("", Some(Arc::new(set)));
+        state.resolve_offline("", Some(Arc::new(set)), None);
         assert_eq!(
             rung(&state, position),
             Some(Rung::Resolved),

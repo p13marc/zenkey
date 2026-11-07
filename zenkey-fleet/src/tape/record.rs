@@ -68,14 +68,21 @@ use crate::tape::ingest::{IngestRow, parse_row};
 /// version-3 file with neither, which is why [`ZREC_READS`] names all
 /// three; a version-2 reader refuses version 3, by the rule it already had,
 /// rather than replaying its rows under the wrong QoS.
-pub const ZREC_VERSION: u32 = 3;
+///
+/// Version 4 (the tooling guide's §5; #990 V4) adds what reading a capture
+/// offline needs, its rows version 3's: the header's `catalog`, the
+/// `revisions` that served the scope when it began, and their `bundles`
+/// ([`read_header`] checks them, [`crate::model::recorded`] reads rows
+/// through them). A version-3 reader refuses version 4, by the rule it
+/// already had.
+pub const ZREC_VERSION: u32 = 4;
 
 /// The versions [`ZrecReader`] speaks: the current one and every earlier
 /// one whose lines it still reads verbatim. A version outside this list is
 /// refused, never guessed at (tooling guide §5's unknown-version rule) — and
 /// the list is what lets a version-3 reader read versions 1 and 2 while an
 /// older reader refuses version 3, both by the rule they already had.
-pub const ZREC_READS: [u32; 3] = [1, 2, 3];
+pub const ZREC_READS: [u32; 4] = [1, 2, 3, 4];
 
 /// zk2's verbatim chunks (spec §1.3, and zenoh-ext's `@adv` sidecar of
 /// §2.5): `*` and `**` never match one, so a selector reaches keys under
@@ -97,10 +104,280 @@ pub fn excluded_by(selectors: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// Why a reader refuses a `.zrec` before any row (the tooling guide's §5):
+/// a version it does not read, a header that breaks the version's table,
+/// or a `--catalog` that is neither the header's nor a successor of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HeaderRefusal {
+    /// A version outside those the reader reads.
+    Version(u32),
+    /// A header that is not the version's: a member it does not define, a
+    /// value that breaks its table, a revision or a bundle twice, a bundle
+    /// no revision names.
+    Header(String),
+    /// A `--catalog` that is neither the header's nor succeeds it.
+    UnknownCatalog { given: String, recorded: String },
+    /// A `--catalog` whose lineage holds the header's at another epoch:
+    /// succession never moves the epoch (core §8.6).
+    EpochMoved { given: String, recorded: String },
+}
+
+impl HeaderRefusal {
+    /// The refusal's token, as `tests/fixtures/zrec/modem-v4.cases.json`
+    /// spells it.
+    pub fn token(&self) -> &'static str {
+        match self {
+            HeaderRefusal::Version(_) => "version",
+            HeaderRefusal::Header(_) => "header",
+            HeaderRefusal::UnknownCatalog { .. } => "unknown_catalog",
+            HeaderRefusal::EpochMoved { .. } => "epoch_moved",
+        }
+    }
+}
+
+impl std::fmt::Display for HeaderRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HeaderRefusal::Version(v) => write!(
+                f,
+                "unsupported version {v} (this reader speaks {ZREC_VERSION} and reads {})",
+                ZREC_READS
+                    .iter()
+                    .filter(|r| **r != ZREC_VERSION)
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            HeaderRefusal::Header(why) => write!(f, "its header is refused (header): {why}"),
+            HeaderRefusal::UnknownCatalog { given, recorded } => write!(
+                f,
+                "--catalog {given} is neither the header's catalog {recorded} nor a successor \
+                 of it (unknown_catalog, core §8.6)"
+            ),
+            HeaderRefusal::EpochMoved { given, recorded } => write!(
+                f,
+                "--catalog {given} names {recorded} in its lineage at another epoch \
+                 (epoch_moved): succession never moves the epoch (core §8.6)"
+            ),
+        }
+    }
+}
+
+/// The members each version defines, by the version it came in (§5).
+const MEMBERS: [(&str, u32); 10] = [
+    ("zrec", 1),
+    ("selectors", 1),
+    ("base", 1),
+    ("captured_at", 1),
+    ("preamble", 2),
+    ("pre_roll", 2),
+    ("excluded", 3),
+    ("catalog", 4),
+    ("revisions", 4),
+    ("bundles", 4),
+];
+
+/// A header line read as a reader that reads versions `reads` (the
+/// tooling guide's §5, step 1): its version first, then, for version 4,
+/// every member one the version defines, each value its table's, no
+/// revision or bundle twice, and every bundle one a revision names. An
+/// earlier version's member is taken as it always was.
+pub fn read_header(line: &str, reads: &[u32]) -> std::result::Result<ZrecHeader, HeaderRefusal> {
+    let refuse = |why: String| HeaderRefusal::Header(why);
+    let v: serde_json::Value =
+        serde_json::from_str(line).map_err(|e| refuse(format!("not JSON: {e}")))?;
+    let version = v
+        .get("zrec")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or_else(|| refuse("no `zrec` version".into()))?;
+    if !reads.contains(&version) {
+        return Err(HeaderRefusal::Version(version));
+    }
+    let members = v
+        .as_object()
+        .ok_or_else(|| refuse("not one object".into()))?;
+    for k in members.keys() {
+        match MEMBERS.iter().find(|(m, _)| m == k) {
+            Some((_, since)) if *since > version => {
+                return Err(refuse(format!(
+                    "`{k}` is version {since}'s, not {version}'s"
+                )));
+            }
+            None if version >= 4 => {
+                return Err(refuse(format!("`{k}` is no member of version {version}")));
+            }
+            _ => {}
+        }
+    }
+    let header: ZrecHeader = serde_json::from_value(v).map_err(|e| refuse(format!("{e}")))?;
+    if version >= 4 {
+        check_v4(&header).map_err(refuse)?;
+    }
+    Ok(header)
+}
+
+/// Version 4's members, each as its table says (§5).
+fn check_v4(h: &ZrecHeader) -> std::result::Result<(), String> {
+    use zenkey_model::canonical::Fingerprint;
+    use zenkey_model::catalog::CatalogId;
+    let id = |s: &str, what: &str| {
+        CatalogId::from_hex(s).ok_or_else(|| format!("{what} {s:?} is no catalog id"))
+    };
+    if let Some(c) = &h.catalog {
+        id(&c.id, "catalog.id")?;
+        for a in &c.lineage {
+            id(&a.id, "a lineage's id")?;
+        }
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for r in h.revisions.iter().flatten() {
+        r.address
+            .parse::<zenkey_model::grammar::Addr>()
+            .map_err(|e| format!("revision address {:?}: {e}", r.address))?;
+        r.iface
+            .parse::<zenkey_model::grammar::IfaceId>()
+            .map_err(|e| format!("revision iface {:?}: {e}", r.iface))?;
+        Fingerprint::parse(&r.fingerprint)
+            .map_err(|e| format!("revision fingerprint {:?}: {e}", r.fingerprint))?;
+        if let Some(Some(n)) = &r.named {
+            id(n, "a revision's named")?;
+        }
+        if !seen.insert((&r.address, &r.iface, &r.fingerprint)) {
+            return Err(format!(
+                "revision {} {} {} listed twice",
+                r.address, r.iface, r.fingerprint
+            ));
+        }
+    }
+    let named: std::collections::BTreeSet<&str> = h
+        .revisions
+        .iter()
+        .flatten()
+        .map(|r| r.fingerprint.as_str())
+        .collect();
+    let mut bundles = std::collections::BTreeSet::new();
+    for b in h.bundles.iter().flatten() {
+        if !named.contains(b.fingerprint.as_str()) {
+            return Err(format!(
+                "bundle {} is no revision's: no revision names it",
+                b.fingerprint
+            ));
+        }
+        if !bundles.insert(b.fingerprint.as_str()) {
+            return Err(format!("bundle {} listed twice", b.fingerprint));
+        }
+        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b.bytes)
+            .map_err(|e| format!("bundle {}: not base64: {e}", b.fingerprint))?;
+    }
+    Ok(())
+}
+
+/// The catalogs a reader reads a version-4 file through (§5, step 2): the
+/// `--catalog` given, which must be the header's or succeed it at its
+/// epoch, else the header's own, the recorder's word, held by id, epoch
+/// and lineage alone; with neither, none. `true` beside them where the
+/// header's was taken, which the reader says.
+pub fn reader_catalogs(
+    header: &ZrecHeader,
+    given: Option<&crate::DeploymentCatalog>,
+) -> std::result::Result<(crate::Catalogs, bool), HeaderRefusal> {
+    use crate::model::deployment::{Catalogs, RecordedCatalog};
+    use zenkey_model::catalog::{Ancestor, CatalogId};
+    let recorded = header.catalog.as_ref().and_then(|c| {
+        Some(RecordedCatalog {
+            id: CatalogId::from_hex(&c.id)?,
+            epoch: c.epoch,
+            lineage: c
+                .lineage
+                .iter()
+                .filter_map(|a| {
+                    Some(Ancestor {
+                        id: CatalogId::from_hex(&a.id)?,
+                        entries: a.entries,
+                    })
+                })
+                .collect(),
+        })
+    });
+    match (given, recorded) {
+        (Some(g), Some(r)) => {
+            let names = |gid: CatalogId| HeaderRefusal::UnknownCatalog {
+                given: gid.hex(),
+                recorded: r.id.hex(),
+            };
+            if g.id() == r.id {
+                return Ok((Catalogs::new(vec![g.clone()]), false));
+            }
+            if !g.lineage().iter().any(|a| a.id == r.id) {
+                return Err(names(g.id()));
+            }
+            if g.epoch() != r.epoch {
+                return Err(HeaderRefusal::EpochMoved {
+                    given: g.id().hex(),
+                    recorded: r.id.hex(),
+                });
+            }
+            Ok((Catalogs::new(vec![g.clone()]), false))
+        }
+        (Some(g), None) => Ok((Catalogs::new(vec![g.clone()]), false)),
+        (None, Some(r)) => Ok((Catalogs::recorded(vec![r]), true)),
+        (None, None) => Ok((Catalogs::default(), false)),
+    }
+}
+
 impl ZrecHeader {
-    /// A version-3 header for a capture of `selectors` under the namespace
-    /// `base`, taken now: what it excludes stated (O5), no preamble and no
-    /// pre-roll yet.
+    /// Version 4's members (the tooling guide's §5): the one catalog
+    /// `record` was given, the revisions that served the scope when the
+    /// capture began (sorted, each once), and each one's bundle bytes, or
+    /// none with `--no-bundles`.
+    pub fn served_by(
+        mut self,
+        catalog: Option<&crate::DeploymentCatalog>,
+        mut revisions: Vec<crate::report::ZrecRevision>,
+        bundles: Option<Vec<(zenkey_model::canonical::Fingerprint, Vec<u8>)>>,
+    ) -> ZrecHeader {
+        use crate::report::{ZrecAncestor, ZrecBundle, ZrecCatalog};
+        self.catalog = catalog.map(|c| ZrecCatalog {
+            id: c.id().hex(),
+            epoch: c.epoch(),
+            lineage: c
+                .lineage()
+                .iter()
+                .map(|a| ZrecAncestor {
+                    entries: a.entries,
+                    id: a.id.hex(),
+                })
+                .collect(),
+        });
+        revisions.sort_by(|a, b| {
+            (&a.address, &a.iface, &a.fingerprint).cmp(&(&b.address, &b.iface, &b.fingerprint))
+        });
+        revisions.dedup_by(|a, b| {
+            (&a.address, &a.iface, &a.fingerprint) == (&b.address, &b.iface, &b.fingerprint)
+        });
+        self.bundles = bundles.map(|mut v| {
+            v.sort_by(|a, b| a.0.cmp(&b.0));
+            v.dedup_by(|a, b| a.0 == b.0);
+            v.into_iter()
+                .filter(|(fp, _)| revisions.iter().any(|r| r.fingerprint == fp.to_string()))
+                .map(|(fp, bytes)| ZrecBundle {
+                    fingerprint: fp.to_string(),
+                    bytes: base64::Engine::encode(
+                        &base64::engine::general_purpose::STANDARD,
+                        bytes,
+                    ),
+                })
+                .collect()
+        });
+        self.revisions = Some(revisions);
+        self
+    }
+
+    /// A header for a capture of `selectors` under the namespace `base`,
+    /// taken now: what it excludes stated (O5), no preamble and no
+    /// pre-roll yet, and no catalog, revision or bundle until the capture
+    /// says what served it ([`ZrecHeader::served_by`]).
     pub fn capture(selectors: Vec<String>, base: &str) -> ZrecHeader {
         ZrecHeader {
             zrec: ZREC_VERSION,
@@ -110,6 +387,9 @@ impl ZrecHeader {
             captured_at: rfc3339_now(),
             preamble: None,
             pre_roll: None,
+            catalog: None,
+            revisions: None,
+            bundles: None,
         }
     }
 }
@@ -659,23 +939,10 @@ impl<R: BufRead> ZrecReader<R> {
                 path: std::path::PathBuf::new(),
                 source: e,
             })?;
-        let header: ZrecHeader = serde_json::from_str(&first)
-            .map_err(|e| Error::malformed_with(".zrec line 1", "is not a header", e))?;
-        if !ZREC_READS.contains(&header.zrec) {
-            return Err(Error::malformed(
-                ".zrec",
-                format!(
-                    "unsupported version {} (this reader speaks {ZREC_VERSION} and reads {})",
-                    header.zrec,
-                    ZREC_READS
-                        .iter()
-                        .filter(|v| **v != ZREC_VERSION)
-                        .map(u32::to_string)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-            ));
-        }
+        let header = read_header(&first, &ZREC_READS).map_err(|e| match e {
+            HeaderRefusal::Header(_) => Error::malformed(".zrec line 1", e.to_string()),
+            _ => Error::malformed(".zrec", e.to_string()),
+        })?;
         Ok(ZrecReader {
             header,
             lines,
@@ -1235,6 +1502,9 @@ mod tests {
             excluded: Some(excluded_by(&["v1/**".into()])),
             preamble: None,
             pre_roll: None,
+            catalog: None,
+            revisions: None,
+            bundles: None,
         }
     }
 
@@ -1259,13 +1529,27 @@ mod tests {
         // The version after this one is refused, never guessed at (the
         // tooling guide's §5: an unknown version is refused) — and the refusal says what this
         // reader does speak.
-        let future = r#"{"zrec":4,"selectors":[],"base":"","captured_at":"x"}"#;
+        let future = r#"{"zrec":5,"selectors":[],"base":"","captured_at":"x"}"#;
         let err = ZrecReader::new(future.as_bytes())
             .err()
             .unwrap()
             .to_string();
-        assert!(err.contains("version 4"), "{err}");
-        assert!(err.contains("speaks 3 and reads 1, 2"), "{err}");
+        assert!(err.contains("version 5"), "{err}");
+        assert!(err.contains("speaks 4 and reads 1, 2, 3"), "{err}");
+        // A version-3 reader refuses version 4 by the rule it already had.
+        let v4 = r#"{"zrec":4,"selectors":[],"base":"","captured_at":"x"}"#;
+        assert_eq!(read_header(v4, &[1, 2, 3]).unwrap_err().token(), "version");
+        // A version-4 header names only the members version 4 defines.
+        let stray = r#"{"zrec":4,"selectors":[],"base":"","captured_at":"x","extra":1}"#;
+        assert_eq!(
+            read_header(stray, &ZREC_READS).unwrap_err().token(),
+            "header"
+        );
+        let early = r#"{"zrec":3,"selectors":[],"base":"","captured_at":"x","revisions":[]}"#;
+        assert_eq!(
+            read_header(early, &ZREC_READS).unwrap_err().token(),
+            "header"
+        );
 
         let not_zrec = r#"{"key":"v1/x","value":1}"#;
         let err = ZrecReader::new(not_zrec.as_bytes())
@@ -1286,7 +1570,7 @@ mod tests {
             vec!["prod/zk2/**".into(), "prod/zk2/*/*/*/@stream/**".into()],
             "prod",
         );
-        assert_eq!(zk2.zrec, 3);
+        assert_eq!(zk2.zrec, 4);
         assert_eq!(zk2.base, "prod");
         assert_eq!(
             zk2.excluded.as_deref(),
@@ -1301,7 +1585,7 @@ mod tests {
         let _ = ZrecWriter::new(&mut sink, &zk2).unwrap().finish().unwrap();
         let line: serde_json::Value =
             serde_json::from_slice(sink.split(|b| *b == b'\n').next().unwrap()).unwrap();
-        assert_eq!(line["zrec"], 3);
+        assert_eq!(line["zrec"], 4);
         assert_eq!(
             line["excluded"],
             serde_json::json!(["@state", "@op", "@zk", "@adv"])

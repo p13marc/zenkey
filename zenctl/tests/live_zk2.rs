@@ -2867,7 +2867,7 @@ async fn record_then_replay_into_a_namespace_round_trips() {
         .await;
     exits(&run, 0);
     let doc = run.json();
-    assert_eq!(doc["header"]["zrec"], 3);
+    assert_eq!(doc["header"]["zrec"], 4);
     assert_eq!(doc["header"]["base"], "");
     assert_eq!(
         doc["header"]["selectors"],
@@ -2916,7 +2916,7 @@ async fn record_then_replay_into_a_namespace_round_trips() {
     let doc = run.json();
     assert_eq!(doc["published"], 5, "{run}");
     assert_eq!(doc["refused"], 0);
-    assert_eq!(doc["header"]["zrec"], 3);
+    assert_eq!(doc["header"]["zrec"], 4);
     assert_eq!(
         sample.key_expr().as_str(),
         "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0"

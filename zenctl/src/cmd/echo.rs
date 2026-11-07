@@ -50,9 +50,31 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
         rate,
         no_decode,
         count,
+        from,
         contracts: _,
         ns: _,
     } = cli;
+    if let Some(file) = from {
+        let shape = match &fmt {
+            _ if raw => Shape::Raw,
+            Some(f) => Shape::Fmt(f.as_str()),
+            None => Shape::Table { hex: hex_payload },
+        };
+        let catalog = catalogs
+            .one()
+            .map_err(|e| crate::exit::unaskable!("echo --from --catalog: {e}"))?
+            .cloned();
+        return from_file(
+            &file,
+            &dep,
+            contracts,
+            catalog,
+            !across.across_face.is_empty(),
+            raw || no_decode,
+            count,
+            shape,
+        );
+    }
     let namespace = dep.namespace().to_owned();
     let face = zk2::FaceScope::of(&across, &contracts, &namespace, zk2::Reads::Samples)?;
     let dep = match &face {
@@ -192,6 +214,154 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// `echo --from FILE` (the tooling guide's §5, version 4): a capture
+/// printed through the offline lens, no session opened. A version-4 header
+/// stands in presence's place ([`zenkey_fleet::model::recorded`]), its
+/// catalog, or `catalog` when that is its or a successor of it, dating its
+/// times; `contracts` holds what it does not carry, and with `across` a key
+/// it lists no revision for reads through them as across a face.
+#[allow(clippy::too_many_arguments)]
+fn from_file(
+    file: &std::path::Path,
+    dep: &Deployment,
+    contracts: zenkey_fleet::ContractSet,
+    catalog: Option<zenkey_fleet::DeploymentCatalog>,
+    across: bool,
+    structural_only: bool,
+    count: usize,
+    shape: Shape<'_>,
+) -> Result<()> {
+    use zenkey_fleet::tape::record::{ZrecItem, ZrecReader};
+    let opened = std::fs::File::open(file)
+        .map_err(|e| crate::exit::unaskable!("--from {}: {e}", file.display()))?;
+    let mut reader = ZrecReader::new(std::io::BufReader::new(opened))
+        .map_err(|e| crate::exit::unaskable!("--from {}: {e}", file.display()))?;
+    let header = reader.header().clone();
+    let (catalogs, recorded_word) =
+        zenkey_fleet::tape::record::reader_catalogs(&header, catalog.as_ref())
+            .map_err(|e| crate::exit::unaskable!("--from {}: {e}", file.display()))?;
+    if recorded_word && let Some(c) = &header.catalog {
+        eprintln!(
+            "reading {} under its header's catalog {} (epoch {}), the recorder's word: give \
+             --catalog to read it through one of your own",
+            file.display(),
+            c.id,
+            c.epoch
+        );
+    }
+    let recorded = zenkey_fleet::model::recorded::Recorded::of(&header, contracts.clone());
+    for (fp, b) in recorded.bundles() {
+        if let zenkey_fleet::model::recorded::Bundled::Refused(tag) = b {
+            eprintln!("bundle {fp} refused ({tag}, core §9.6): its keys stop at rung 5");
+        }
+    }
+    if header.zrec >= 4 && header.bundles.is_none() && contracts.is_empty() {
+        eprintln!(
+            "{} carries no bundle (record --no-bundles): give --contracts to decode it (O4)",
+            file.display()
+        );
+    }
+    let namespace = header.base.clone();
+    let mut lens = zenkey_fleet::Lens::new(&namespace, None, &recorded)
+        .recorded(&recorded)
+        .catalogs(&catalogs);
+    if across {
+        lens = lens.offline(&contracts);
+    }
+    let ndjson = crate::render::Mode::of(dep.format()).machine();
+    let mut frames = zenkey_fleet::model::frame::Readers::new();
+    let mut seen = 0usize;
+    while let Some(item) = reader.next() {
+        let (row, t_us, timestamp) = match item {
+            Ok(ZrecItem::Sample {
+                row,
+                t_us,
+                timestamp,
+                ..
+            }) => (row, t_us, timestamp),
+            Ok(ZrecItem::Preamble { row, timestamp }) => (row, Some(0), timestamp),
+            Ok(ZrecItem::Dropped(n)) => {
+                if ndjson {
+                    println!(
+                        "{}",
+                        crate::render::Row::tagged("dropped", serde_json::json!({ "dropped": n }))
+                            .into_line()
+                    );
+                } else {
+                    eprintln!("-- the capture dropped {n} sample(s) here --");
+                }
+                continue;
+            }
+            Ok(ZrecItem::Trigger(_)) => continue,
+            Err(e) => {
+                eprintln!("--from {}: {e}", file.display());
+                continue;
+            }
+        };
+        seen += 1;
+        let sample = view_of(&row);
+        let line = line_of(&sample, &lens, structural_only, &mut frames);
+        if ndjson {
+            let mut out = zenkey_fleet::SampleRow::of_key(&row.key);
+            out.t = t_us;
+            out.timestamp = timestamp;
+            out.delete = row.delete;
+            out.encoding.clone_from(&row.encoding);
+            line.fill(&mut out, row.attachment.as_deref());
+            println!("{}", out.to_line());
+        } else {
+            let printed = human(&line, &sample, shape_ref(&shape), seen, &namespace, "");
+            for l in printed.out {
+                println!("{l}");
+            }
+            for l in printed.err {
+                eprintln!("{l}");
+            }
+        }
+        if count > 0 && seen >= count {
+            break;
+        }
+    }
+    Ok(())
+}
+
+/// A shape borrowed again, for each row.
+fn shape_ref<'a>(s: &'a Shape<'a>) -> Shape<'a> {
+    match s {
+        Shape::Raw => Shape::Raw,
+        Shape::Fmt(f) => Shape::Fmt(f),
+        Shape::Table { hex } => Shape::Table { hex: *hex },
+    }
+}
+
+/// A recorded row as the sample it was: its key, bytes, encoding,
+/// attachment and the QoS axes it rode, received now.
+fn view_of(row: &zenkey_fleet::tape::ingest::IngestRow) -> zenkey_fleet::SampleView {
+    let qos = row.qos_axes.unwrap_or(zenkey_fleet::WireQos::DEFAULT);
+    zenkey_fleet::SampleView {
+        key: row.key.clone(),
+        payload: zenoh::bytes::ZBytes::from(row.payload.clone()),
+        encoding: row.encoding.clone().unwrap_or_default(),
+        kind: if row.delete {
+            zenoh::sample::SampleKind::Delete
+        } else {
+            zenoh::sample::SampleKind::Put
+        },
+        timestamp: None,
+        stamped_by: None,
+        attachment: row
+            .attachment
+            .as_ref()
+            .map(|a| zenoh::bytes::ZBytes::from(a.clone())),
+        priority: qos.priority,
+        congestion_control: qos.congestion,
+        reliability: qos.reliability,
+        express: qos.express,
+        source: None,
+        received: std::time::Instant::now(),
+    }
 }
 
 /// One sample through the lens.

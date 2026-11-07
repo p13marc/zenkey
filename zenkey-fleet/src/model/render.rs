@@ -30,7 +30,7 @@ use zenkey_model::template::resolve;
 use zenkey_model::wire;
 
 use crate::model::catalog::{Catalog, ContractState, Contracts, Revision};
-use crate::model::deployment::Epoch;
+use crate::model::deployment::{Dating, Epoch};
 use crate::model::inband::{self, Payload};
 use crate::model::structural::{structural, structural_value};
 use crate::report::{PayloadRendering, Rendered, ResolvedResource, Unresolved};
@@ -113,7 +113,7 @@ pub fn render(
             payload.encoding(encoding),
             read,
             bytes.len(),
-            Epoch::Assumed,
+            Epoch::Assumed.into(),
         ),
         None => fallback(Unresolved::ContractNotHeld {
             fingerprint: fp.to_string(),
@@ -154,8 +154,9 @@ pub fn render_with_in(
     member: Member,
     encoding: Option<&str>,
     bytes: &[u8],
-    epoch: Epoch,
+    epoch: impl Into<Dating>,
 ) -> PayloadRendering {
+    let epoch: Dating = epoch.into();
     let read = read(key, member, encoding, bytes);
     render_read(
         revision,
@@ -179,8 +180,9 @@ pub fn render_record(
     record: &[u8],
     stamp: zenkey_model::wire::Stamp,
     tag: zenkey_model::wire::Tag,
-    epoch: Epoch,
+    epoch: impl Into<Dating>,
 ) -> PayloadRendering {
+    let epoch: Dating = epoch.into();
     let payload = Payload::Record { record, stamp, tag };
     render_read(
         revision,
@@ -204,8 +206,9 @@ pub fn render_frame(
     body: &[u8],
     stamp: zenkey_model::wire::Stamp,
     tag: zenkey_model::wire::Tag,
-    epoch: Epoch,
+    epoch: impl Into<Dating>,
 ) -> PayloadRendering {
+    let epoch: Dating = epoch.into();
     let payload = Payload::Frame { body, stamp, tag };
     render_read(
         revision,
@@ -357,7 +360,7 @@ fn render_read(
     encoding: Option<&str>,
     read: Read<'_>,
     size: usize,
-    epoch: Epoch,
+    epoch: Dating,
 ) -> PayloadRendering {
     let fingerprint = revision.fingerprint().to_string();
     let fallback = |why| fallback_rendering(key, why, &read, size);
@@ -506,7 +509,7 @@ fn render_read(
         .filter(|e| *e != "zenoh/bytes")
         .or_else(|| own_encoding(r, member, ty));
     let (decoded, epoch_assumed) = decode_under(revision.bundle(), ty, encoding, bytes, tag, epoch);
-    let rendered = rendered(ty, decoded, epoch_assumed);
+    let rendered = rendered(revision.bundle(), ty, decoded, epoch_assumed, epoch);
     PayloadRendering {
         key: key.to_owned(),
         size: bytes.len(),
@@ -529,7 +532,7 @@ pub(crate) fn frame_rendering(
     ty: &serde_json::Value,
     payload: Payload<'_>,
     size: usize,
-    epoch: Epoch,
+    epoch: Dating,
 ) -> Option<PayloadRendering> {
     frame_check(
         contract,
@@ -556,7 +559,7 @@ pub(crate) fn frame_check(
     payload: Payload<'_>,
     size: usize,
     reader: &mut zenkey_model::frame::Reader,
-    epoch: Epoch,
+    epoch: Dating,
 ) -> Option<(PayloadRendering, crate::report::Conformance)> {
     use crate::model::frame;
     let layout = zenkey_model::frame::Layout::of_resource(contract, r);
@@ -686,6 +689,7 @@ pub fn render_resource(
         size: record.len(),
         resource: Some(resolved),
         rendered: rendered(
+            revision.bundle(),
             ty,
             decode::decode_in(
                 revision.bundle(),
@@ -695,6 +699,7 @@ pub fn render_resource(
                 decode::Context { tag, epoch: None },
             ),
             None,
+            Epoch::Assumed.into(),
         ),
     }
 }
@@ -742,7 +747,7 @@ pub(crate) fn decode_under(
     encoding: Option<&str>,
     bytes: &[u8],
     tag: Option<zenkey_model::wire::Tag>,
-    epoch: Epoch,
+    epoch: Dating,
 ) -> (Decoded, Option<i64>) {
     if let Some(reason) = tag_refused(ty, tag) {
         return (
@@ -755,7 +760,7 @@ pub(crate) fn decode_under(
         );
     }
     let bare = decode::Context { tag, epoch: None };
-    if let Some(reason) = epoch.refusal()
+    if let Some(reason) = epoch.epoch.refusal()
         && decode::epoch_assumed(bundle, ty, bare).is_some()
     {
         let declared = decode::declared(ty);
@@ -771,7 +776,7 @@ pub(crate) fn decode_under(
     }
     let cx = decode::Context {
         tag,
-        epoch: epoch.given(),
+        epoch: epoch.epoch.given(),
     };
     (
         decode::decode_in(bundle, ty, encoding, bytes, cx),
@@ -799,16 +804,72 @@ pub(crate) fn tag_refused(
     ))
 }
 
+/// What a packed record's reading promises (the tooling guide's O8): each
+/// `time` field present dated under the epoch in force, by field name, and
+/// each bounded field present its bound (a `fixed` field's half
+/// resolution, a counter's width). `(None, None)` for any other type, and
+/// for a record that holds neither.
+pub(crate) fn packed_promises(
+    bundle: &zenkey_model::bundle::Bundle,
+    ty: &serde_json::Value,
+    value: &serde_json::Value,
+    dating: Dating,
+) -> (Option<serde_json::Value>, Option<serde_json::Value>) {
+    use zenkey_model::packed::FieldKind;
+    if ty["kind"] != "packed" {
+        return (None, None);
+    }
+    let Some(layout) = ty["schema"]
+        .as_str()
+        .and_then(|id| bundle.schemas.get(id))
+        .zip(ty["name"].as_str())
+        .and_then(|(s, name)| zenkey_model::packed::layout_in(&s["data"], name).ok())
+    else {
+        return (None, None);
+    };
+    let mut dated = serde_json::Map::new();
+    let mut bounds = serde_json::Map::new();
+    for f in layout.fields() {
+        let Some(v) = value.get(&f.name).filter(|v| !v.is_null()) else {
+            continue;
+        };
+        if let (FieldKind::Time { ms }, Some(at)) = (&f.kind, v.as_i64()) {
+            dated.insert(
+                f.name.clone(),
+                serde_json::to_value(dating.dated_unix(i128::from(at), *ms)).unwrap_or_default(),
+            );
+        }
+        if let Some(b) = crate::model::frame::bound_of(f) {
+            bounds.insert(f.name.clone(), serde_json::to_value(b).unwrap_or_default());
+        }
+    }
+    let some = |m: serde_json::Map<String, serde_json::Value>| {
+        (!m.is_empty()).then_some(serde_json::Value::Object(m))
+    };
+    (some(dated), some(bounds))
+}
+
 /// The model's decode, as the report spells it, with the epoch a packed
 /// record's `time` fields were read under when none was stated
 /// ([`decode::epoch_assumed`]).
-fn rendered(ty: &serde_json::Value, d: Decoded, epoch_assumed: Option<i64>) -> Rendered {
+fn rendered(
+    bundle: &zenkey_model::bundle::Bundle,
+    ty: &serde_json::Value,
+    d: Decoded,
+    epoch_assumed: Option<i64>,
+    dating: Dating,
+) -> Rendered {
     match d {
-        Decoded::Value(value) => Rendered::Value {
-            declared: decode::declared(ty),
-            value,
-            epoch_assumed,
-        },
+        Decoded::Value(value) => {
+            let (dated, bounds) = packed_promises(bundle, ty, &value, dating);
+            Rendered::Value {
+                declared: decode::declared(ty),
+                value,
+                epoch_assumed,
+                dated,
+                bounds,
+            }
+        }
         Decoded::Opaque { media_type, .. } => Rendered::Opaque { media_type },
         Decoded::Undecodable {
             declared, reason, ..
@@ -829,8 +890,9 @@ pub fn render_detail(
     r: &zenkey_model::contract::Resource,
     detail: &zenkey_model::envelope::Detail,
     form: Option<zenkey_model::wire::Tag>,
-    epoch: Epoch,
+    epoch: impl Into<Dating>,
 ) -> Rendered {
+    let epoch: Dating = epoch.into();
     use zenkey_model::envelope::Detail;
     let ty = decode::type_of(
         revision.bundle(),
@@ -842,12 +904,14 @@ pub fn render_detail(
         (Some(ty), Detail::Bytes(bytes)) => {
             let wire = own_encoding(r, Member::Error, ty);
             let (decoded, assumed) = decode_under(revision.bundle(), ty, wire, bytes, form, epoch);
-            rendered(ty, decoded, assumed)
+            rendered(revision.bundle(), ty, decoded, assumed, epoch)
         }
         (Some(ty), Detail::Value(value)) => Rendered::Value {
             declared: decode::declared(ty),
             value: value.clone(),
             epoch_assumed: None,
+            dated: None,
+            bounds: None,
         },
         (None, detail) => {
             let why = Unresolved::NoMember {
@@ -984,6 +1048,8 @@ mod tests {
                     declared: "json:Status".into(),
                     value: json!({"up": true}),
                     epoch_assumed: None,
+                    dated: None,
+                    bounds: None,
                 },
                 "{encoding:?}"
             );
@@ -1034,6 +1100,8 @@ mod tests {
             declared: "json:Status".into(),
             value: json!({"up": true}),
             epoch_assumed: None,
+            dated: None,
+            bounds: None,
         };
         let form = [&[0x40][..], br#"{"up":true}"#].concat();
         let r = render_with(&rev, key, Member::Request, Some("zenoh/bytes"), &form);
@@ -1123,6 +1191,8 @@ mod tests {
             declared: declared.into(),
             value: v,
             epoch_assumed: None,
+            dated: None,
+            bounds: None,
         };
         let applied = cbor(json!({"applied": true}));
         let reply = Envelope {
@@ -1295,6 +1365,8 @@ mod tests {
                 declared: "json:Status".into(),
                 value: json!({"up": false}),
                 epoch_assumed: None,
+                dated: None,
+                bounds: None,
             }
         );
 

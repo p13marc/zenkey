@@ -427,6 +427,9 @@ Options:
           
           [default: 0]
 
+      --from <FILE>
+          Print a `.zrec` capture through the offline lens, opening no session (the tooling guide's §5): a version-4 file resolves its keys through its header's revisions and bundles, and dates its times under its catalog, or under --catalog when that is the header's or a successor of it (else refused, exit 2). --contracts holds what the header does not carry; with --across-face a key no revision of the header serves reads through them, as across a face
+
       --contracts <PATH>
           Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
           
@@ -787,7 +790,7 @@ Options:
 $ zenctl record --help
 Capture wire selectors' traffic to a .zrec file.
 
-A capture (`.zrec` version 3, the tooling guide's §5), taken through the Monitor on a session in no namespace, so rows keep their full wire keys and their payloads lossless (base64 `bytes`), with the QoS axes they rode with and the stamp they carried, informatively. The header carries the namespace you stated (`--namespace`, alias `--base`) and the exact selectors, and names the verbatim chunks none of them reach (`@stream`, `@state`, `@op`, `@zk`, `@adv`: O5) — a `zk2/**` capture excludes them, it does not find them empty, and `--explicit` opts into `@stream` and `@state` by name. A bus that outruns the disk surfaces as drop records in the file, where the gaps happened (O6). Replay with `zenctl replay --namespace`; the file is ndjson, so `jq` reads it too.
+A capture (`.zrec` version 4, the tooling guide's §5), taken through the Monitor on a session in no namespace, so rows keep their full wire keys and their payloads lossless (base64 `bytes`), with the QoS axes they rode with and the stamp they carried, informatively. The header carries the namespace you stated (`--namespace`, alias `--base`) and the exact selectors, and names the verbatim chunks none of them reach (`@stream`, `@state`, `@op`, `@zk`, `@adv`: O5) — a `zk2/**` capture excludes them, it does not find them empty, and `--explicit` opts into `@stream` and `@state` by name. A bus that outruns the disk surfaces as drop records in the file, where the gaps happened (O6). Replay with `zenctl replay --namespace`; the file is ndjson, so `jq` reads it too.
 
 Usage: zenctl record [OPTIONS] --out <FILE> [SELECTOR]...
 
@@ -850,6 +853,9 @@ Options:
 
       --clocks-synced
           With --on: this host's clock and the owners' agree within the HLC delta (500 ms), for a `doctor health-*` rule, as `watchdog --clocks-synced`. Without it, those rules read unobservable
+
+      --no-bundles
+          Leave the revisions' bundles out of the header (`.zrec` version 4): a reader of the file then needs --contracts to decode it
 
       --contracts <PATH>
           Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.

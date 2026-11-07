@@ -256,7 +256,7 @@ pub(crate) fn update(
             {
                 sub.pin_current(work.replay.identity_cache(&dep.identity), &|a| {
                     if work.replay.replay.is_some() {
-                        zenkey_fleet::DeploymentEpoch::Assumed
+                        zenkey_fleet::DeploymentEpoch::Assumed.into()
                     } else {
                         dep.epoch_of(a)
                     }

@@ -258,6 +258,10 @@ impl Line {
         row.typed = Some(matches!(rendering.rendered, Rendered::Value { .. }));
         row.payload_bytes = Some(self.bytes.len());
         row.value = self.value();
+        if let Rendered::Value { dated, bounds, .. } = &rendering.rendered {
+            row.dated.clone_from(dated);
+            row.bounds.clone_from(bounds);
+        }
         row.verdict = Some(conformance.token());
         match conformance {
             Conformance::Invalid { violations } => row.violations = Some(violations.clone()),

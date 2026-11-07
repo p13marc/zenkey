@@ -1699,11 +1699,24 @@ fn frame_section<'a>(f: &'a crate::frame::FrameRead, sp: Spacing) -> Element<'a,
         col = col.push(kit::caption(when.to_owned()).font(face::MONO));
         if let Some(fields) = r["fields"].as_object() {
             for (name, v) in fields {
+                // The bound its declaration gives it (the tooling guide's
+                // O8): a fixed field's half resolution, a counter's width.
+                let bound = v
+                    .get("bound")
+                    .and_then(|b| {
+                        serde_json::from_value::<zenkey_fleet::report::Bound>(b.clone()).ok()
+                    })
+                    .map(|b| format!(" {}", b.words()))
+                    .unwrap_or_default();
+                let shown = |x: &serde_json::Value| match x {
+                    serde_json::Value::String(s) => s.clone(),
+                    x => x.to_string(),
+                };
                 let state = match v["state"].as_str() {
-                    Some("known") => format!("known {}", v["value"]),
+                    Some("known") => format!("known {}{bound}", shown(&v["value"])),
                     Some("within") => format!(
-                        "within {} ±{}",
-                        v["value"],
+                        "within {} ±{}{bound}",
+                        shown(&v["value"]),
                         v["delta"].as_str().unwrap_or("?")
                     ),
                     Some("absent") => "absent".to_owned(),

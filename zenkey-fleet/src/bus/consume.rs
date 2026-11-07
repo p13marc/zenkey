@@ -36,7 +36,7 @@ use zenoh::Session;
 use zenoh::sample::{Sample, SampleKind};
 
 use crate::model::catalog::Revision;
-use crate::model::deployment::Epoch;
+use crate::model::deployment::{Dating, Epoch};
 use crate::model::lens::{Resolved, declared_qos, observed_qos, qos_mismatch, sample_conformance};
 use crate::model::render::{Member, render_frame, render_record, render_with, render_with_in};
 use crate::model::target::Target;
@@ -453,7 +453,7 @@ fn payload(
     sample: &Sample,
     member: Member,
     envelope: Option<(zenkey_model::wire::Stamp, zenkey_model::wire::Tag)>,
-    epoch: Epoch,
+    epoch: impl Into<Dating>,
 ) -> crate::report::PayloadRendering {
     if let (Member::Type, Some((stamp, tag))) = (member, envelope) {
         return render_record(
@@ -486,7 +486,7 @@ fn frame_payload(
     values: &Bindings,
     frame: &zenkey::consumer::FrameRead,
     size: usize,
-    epoch: Epoch,
+    epoch: Dating,
 ) -> crate::report::PayloadRendering {
     let ty = zenkey_model::decode::type_of(
         revision.bundle(),
@@ -557,8 +557,10 @@ pub async fn watch_in(
     target: &Target,
     r: &Resource,
     values: &Bindings,
-    epoch: Epoch,
+    epoch: impl Into<Dating>,
 ) -> Result<Watch> {
+    // The epoch in force and its catalog, which a date names (O8).
+    let epoch: Dating = epoch.into();
     let name = zenkey::implementation::resource_name(r);
     let address = target.address.as_str();
     let params = r2_params(values)?;
@@ -725,7 +727,7 @@ fn refused_sample(
     rev: &Revision,
     declared: Option<&crate::report::QosAxes>,
     refused: zenkey::consumer::Refused,
-    epoch: Epoch,
+    epoch: Dating,
 ) -> WatchSample {
     use zenkey::inband::Read;
     let sample = refused.read.sample();
