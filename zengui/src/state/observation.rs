@@ -57,11 +57,11 @@ impl SeedTotals {
     /// replies, and is counted when it ran short of its final reply; a leg
     /// switched off adds nothing (it was not asked).
     pub fn add(&mut self, coverage: &zenkey_fleet::SeedCoverage) {
-        if let Some(leg) = coverage.history.get() {
+        if let Some(leg) = coverage.history.as_option() {
             self.history += leg.replies;
             self.incomplete += usize::from(!leg.complete);
         }
-        if let Some(leg) = coverage.state.get() {
+        if let Some(leg) = coverage.state.as_option() {
             self.state += leg.replies;
             self.incomplete += usize::from(!leg.complete);
         }

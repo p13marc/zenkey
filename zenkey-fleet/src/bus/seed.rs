@@ -14,7 +14,14 @@
 //!   (`bus::query::state_get`, the crate's one state GET): addressed to the owners' keys,
 //!   since each key it matches has one owner (P3), and answered for a
 //!   foreign key by whatever holds it. A storage on an owner's state is a
-//!   deployment fault (S4), never this seed's source;
+//!   deployment fault (S4), never this seed's source. A snapshot's page
+//!   (core §7.5's form 7; #977's E2) is its entries, each the per-key
+//!   reply it stands for, merged as replies are, and the leg says which
+//!   snapshots it heard and whether each is complete
+//!   ([`SeedLeg::snapshots`]); under `Latest` a snapshot of several pages
+//!   arrives as its last page, held incomplete. No omission is applied:
+//!   that is E3's, under `None`. A page heard live is no owner's answer:
+//!   delivered undecodable, it moves nothing;
 //! - **the history leg** asks the `@adv` caches of the advanced publishers
 //!   present (`<selector>/@adv/**`, spec §2.5), for resources that declare
 //!   `history` — streams among them, which no state GET reaches. Under a
@@ -434,12 +441,15 @@ async fn run_leg(
         return SeedLeg {
             replies: 0,
             complete: false,
+            snapshots: Vec::new(),
         };
     };
     let mut out = SeedLeg {
         replies: 0,
         complete: true,
+        snapshots: Vec::new(),
     };
+    let mut heard: Vec<zenkey_model::collection::Heard> = Vec::new();
     while let Ok(reply) = replies.recv_async().await {
         let Ok(sample) = reply.result() else {
             out.complete = false;
@@ -447,11 +457,42 @@ async fn run_leg(
         };
         out.replies += 1;
         let view = view_of(sample);
-        if merge.admit(&view) {
-            deliver(view);
+        for view in state_views(leg, view, &mut heard) {
+            if merge.admit(&view) {
+                deliver(view);
+            }
         }
     }
+    out.complete &= heard.iter().all(zenkey_model::collection::Heard::complete);
+    out.snapshots = heard
+        .iter()
+        .map(crate::report::CollectionSnapshot::from)
+        .collect();
     out
+}
+
+/// A reply of `leg` as the samples the merge reads (#977's E2): on the
+/// state leg, a snapshot's page is its entries, each the per-key reply it
+/// stands for on its member's key, and the page is held toward its
+/// snapshot in `heard`; every other reply, a page whose body is refused
+/// among them (delivered undecodable, as a mutation's reader reads one), as
+/// it came.
+fn state_views(
+    leg: Leg,
+    view: SampleView,
+    heard: &mut Vec<zenkey_model::collection::Heard>,
+) -> Vec<SampleView> {
+    if !matches!(leg, Leg::State) || view.kind == zenoh::sample::SampleKind::Delete {
+        return vec![view];
+    }
+    let bytes = view.payload.to_bytes();
+    match crate::model::inband::page(&view.key, Some(&view.encoding), &bytes) {
+        Some(Ok(page)) => {
+            zenkey_model::collection::hear(heard, &view.key, &page);
+            crate::model::inband::views_of(&view, &page)
+        }
+        _ => vec![view],
+    }
 }
 
 /// The legs `policy` asks for, concurrently, through one merge; the
@@ -694,10 +735,12 @@ mod tests {
                 history: Asked::Asked(SeedLeg {
                     replies: 0,
                     complete: true,
+                    snapshots: Vec::new(),
                 }),
                 state: Asked::Asked(SeedLeg {
                     replies: 0,
                     complete: true,
+                    snapshots: Vec::new(),
                 }),
                 superseded: 0,
             })

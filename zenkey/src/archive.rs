@@ -17,8 +17,11 @@
 //!   stamp rides its `reply_del` as the attachment it arrived with.
 //! - **Alignment:** when an owner becomes reachable, it re-reads the owner's
 //!   recorded collection; while the owner is absent, it re-reads an archive
-//!   on the owner's side. It drops a key only on a `reply_del`; a key the
-//!   source neither reports nor tombstones is kept, `confirmed: false`. It
+//!   on the owner's side. It drops a key only on a `reply_del`, or a
+//!   snapshot's tombstone (#977's E2: an owner's page is read as its
+//!   entries, each the per-key reply it stands for); a key the source
+//!   neither reports nor tombstones is kept, `confirmed: false`, absence
+//!   from a complete snapshot included until E3 makes it evidence. It
 //!   hears an owner become reachable on a watch session of its own
 //!   ([`ArchiveConfig::watch`]), since it reads presence on its own session,
 //!   which holds no liveliness subscriber (core §8.1, 0.37; #830); with
@@ -318,6 +321,12 @@ impl Inner {
             tracing::warn!(key = %s.key_expr(), reason = %why.reason(), "an undecodable mutation is not recorded");
             return;
         }
+        // Only a GET's reply carries a snapshot (core §7.5): one heard here
+        // is no owner's answer, and no mutation.
+        if crate::inband::is_snapshot(s) {
+            tracing::warn!(key = %s.key_expr(), "a snapshot's page heard on a subscription is not recorded");
+            return;
+        }
         let Some(stamp) = Stamped::of(s) else {
             tracing::warn!(key = %s.key_expr(), "an unstamped state mutation is not recorded (S1)");
             return;
@@ -425,6 +434,7 @@ impl Inner {
                 }
                 found
             };
+            let replies = entries_of(replies, &from, &src.selector);
             let mut seen = Vec::new();
             for s in &replies {
                 let key = s.key_expr().as_str();
@@ -479,6 +489,43 @@ impl Inner {
         }
         Ok(a)
     }
+}
+
+/// An alignment read's replies as the per-key replies it records (#977's
+/// E2): from the owner, a snapshot's page is its entries, each the per-key
+/// reply it stands for (the bytes its mutation put, or a delete with its
+/// envelope as attachment), those on keys `selector` selects; a page whose
+/// body is refused is left out, undecodable. A peer archive answers per key
+/// (§4.4), so a page from one is left out. Every other reply as it came.
+fn entries_of(replies: Vec<Sample>, from: &AlignedFrom, selector: &OwnedKeyExpr) -> Vec<Sample> {
+    let mut out = Vec::with_capacity(replies.len());
+    for s in replies {
+        if !crate::inband::is_snapshot(&s) {
+            out.push(s);
+            continue;
+        }
+        let read = crate::inband::read(s);
+        match (from, &read) {
+            (
+                AlignedFrom::Owner(_),
+                crate::inband::Read::Snapshot {
+                    sample,
+                    page: Ok(page),
+                },
+            ) => {
+                out.extend(
+                    crate::inband::replies(sample, page)
+                        .into_iter()
+                        .filter(|m| selector.intersects(m.key_expr())),
+                );
+            }
+            _ => {
+                let why = read.undecodable().map(|u| u.reason()).unwrap_or_default();
+                tracing::warn!(key = %read.sample().key_expr(), reason = %why, "a snapshot's page is not aligned from");
+            }
+        }
+    }
+    out
 }
 
 impl Inner {

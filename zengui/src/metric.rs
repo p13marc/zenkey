@@ -1024,6 +1024,13 @@ impl FrameFold {
                 Payload::Frame { body, stamp, tag } => (body.to_vec(), Some(Ok(stamp)), Some(tag)),
                 Payload::Record { record, stamp, .. } => (record.to_vec(), Some(Ok(stamp)), None),
                 Payload::Refused(r) => (bytes.to_vec(), Some(Err(r)), None),
+                // A snapshot's page is no metric's sample: refused as a
+                // reader of mutations reads it (#977's E2).
+                Payload::Snapshot { .. } => (
+                    bytes.to_vec(),
+                    Some(Err(zenkey_fleet::model::inband::SNAPSHOT_AS_MUTATION)),
+                    None,
+                ),
                 Payload::Plain(b) | Payload::Heartbeat { body: b, .. } => (b.to_vec(), None, None),
             };
         let seen = book.frame(

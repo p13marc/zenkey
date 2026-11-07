@@ -102,7 +102,61 @@ impl FleetAnswer {
             | Payload::Heartbeat { stamp, .. }
             | Payload::Frame { stamp, .. } => Some(Ok(stamp)),
             Payload::Refused(r) => Some(Err(r)),
+            Payload::Snapshot { .. } => Some(Err(inband::SNAPSHOT_AS_MUTATION)),
         }
+    }
+
+    /// A snapshot's page (core §7.5's form 7; #977's E2), its body read, or
+    /// the body's first refusal; `None` for any other answer. Read as its
+    /// entries ([`FleetAnswer::entries`]); as a mutation it is refused
+    /// ([`FleetAnswer::envelope`]).
+    pub fn page(
+        &self,
+    ) -> Option<
+        std::result::Result<zenkey_model::collection::Page, zenkey_model::collection::BodyRefusal>,
+    > {
+        let Answer::Value(bytes) = &self.answer else {
+            return None;
+        };
+        if self.is_delete() {
+            return None;
+        }
+        crate::model::inband::page(&self.key, self.encoding.as_deref(), &bytes.to_bytes())
+    }
+
+    /// A snapshot's page as the per-key answers its entries stand for
+    /// (#977's E2): each on its member's key, a live entry a put of the
+    /// bytes its mutation put, a tombstone a delete whose attachment is its
+    /// envelope, none with a Zenoh timestamp, since a snapshot carries
+    /// none. `None` for any other answer.
+    pub fn entries(
+        &self,
+    ) -> Option<std::result::Result<Vec<FleetAnswer>, zenkey_model::collection::BodyRefusal>> {
+        let page = match self.page()? {
+            Ok(p) => p,
+            Err(r) => return Some(Err(r)),
+        };
+        Some(Ok(page
+            .members(&self.key)
+            .into_iter()
+            .map(|m| {
+                let delete = m.is_tombstone();
+                FleetAnswer {
+                    encoding: Some(zenkey_model::wire::ENCODING.to_owned()),
+                    attachment: m.attachment().map(zenoh::bytes::ZBytes::from),
+                    timestamp: None,
+                    kind: Some(if delete {
+                        zenoh::sample::SampleKind::Delete
+                    } else {
+                        zenoh::sample::SampleKind::Put
+                    }),
+                    answer: Answer::Value(zenoh::bytes::ZBytes::from(
+                        m.payload().unwrap_or_default(),
+                    )),
+                    key: m.key,
+                }
+            })
+            .collect()))
     }
 
     /// Its in-band stamp, when it carried an envelope.

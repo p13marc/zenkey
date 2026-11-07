@@ -6,6 +6,18 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — state read in snapshots (#977 E2)
+
+Core 0.97 §7.5 defines form 7, a collection's snapshot, a GET reply's
+payload in pages. No owner writes one yet (E3); the readers read one beside
+per-key replies, consolidation `Latest` kept, so a snapshot of several pages
+arrives as its last page alone, held incomplete.
+
+| Before | Now | Notes |
+|---|---|---|
+| `get state`: a snapshot's page undecodable, `form` | each entry of the resource's collection a row on its member's key: a live entry its value with its in-band stamp (its own run where it has one), a tombstone `deleted`; JSON `snapshots` beside `rows`, each `{key, coll, run, asof, pages, complete}`, absent when no page answered; the table a line per snapshot, `INCOMPLETE` when a page was lost | a snapshot of no entry is no row, its note saying so; exit 2 until E3 says what one is |
+| `get <SELECTOR>`, `echo`, `snapshot`: a page undecodable, `form` | a page's row resolved by its collection's index, its value the page's header and entries, each live entry decoded on its member's key; `snapshot` folds each entry into a row of its own; `--raw`/`--no-decode` name the page's index, coll, run, asof and counts | a page whose body is refused is undecodable, its refusal named |
+
 ## Unreleased (`main`, zk2) — a `config.v2` refusal in its own words (#609, F-485)
 
 zk2py's round 102 found `config` showing a `config.v2` refusal as

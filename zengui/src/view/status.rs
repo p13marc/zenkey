@@ -773,10 +773,12 @@ mod tests {
             history: Asked::Asked(SeedLeg {
                 replies: 2,
                 complete: true,
+                snapshots: Vec::new(),
             }),
             state: Asked::Asked(SeedLeg {
                 replies: 5,
                 complete: true,
+                snapshots: Vec::new(),
             }),
             superseded: 1,
         });
@@ -785,6 +787,7 @@ mod tests {
             state: Asked::Asked(SeedLeg {
                 replies: 0,
                 complete: true,
+                snapshots: Vec::new(),
             }),
             superseded: 0,
         });
@@ -797,10 +800,12 @@ mod tests {
             history: Asked::Asked(SeedLeg {
                 replies: 0,
                 complete: false,
+                snapshots: Vec::new(),
             }),
             state: Asked::Asked(SeedLeg {
                 replies: 3,
                 complete: true,
+                snapshots: Vec::new(),
             }),
             superseded: 0,
         });

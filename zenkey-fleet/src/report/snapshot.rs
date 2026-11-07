@@ -54,6 +54,8 @@ pub struct ZsnapHeader {
     pub asked: u64,
     /// Value and deletion replies received across every GET, before they
     /// were folded per key — so `answered - superseded` is the row count.
+    /// A snapshot's page counts as its entries, each the per-key reply it
+    /// stands for (#977's E2).
     pub answered: u64,
     /// Replies that arrived and were not kept past the observer's bound
     /// (O6). Absent at zero.
@@ -146,9 +148,9 @@ impl SnapshotRow {
             crate::model::inband::Payload::Record { record, .. }
             | crate::model::inband::Payload::Heartbeat { body: record, .. }
             | crate::model::inband::Payload::Frame { body: record, .. } => Some(record.to_vec()),
-            crate::model::inband::Payload::Plain(_) | crate::model::inband::Payload::Refused(_) => {
-                Some(bytes)
-            }
+            crate::model::inband::Payload::Plain(_)
+            | crate::model::inband::Payload::Refused(_)
+            | crate::model::inband::Payload::Snapshot { .. } => Some(bytes),
         }
     }
 }

@@ -4305,6 +4305,7 @@ mod tests {
     fn get(value: &[u8], clock: Option<&str>) -> Result<StateReport, String> {
         let rev = revision();
         Ok(StateReport {
+            snapshots: Vec::new(),
             reading: StateReading::Current,
             address: "lab/m".into(),
             iface: "m.v1".into(),

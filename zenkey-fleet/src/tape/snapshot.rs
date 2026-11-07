@@ -240,7 +240,10 @@ async fn state_get(
 ///
 /// One state GET per selector — target `All`, consolidation `Latest`, R6's
 /// discard — all at once, on `session` (in no namespace: the selectors are
-/// wire keys and rows keep them whole). The replies fold per key across
+/// wire keys and rows keep them whole). A snapshot's page is its entries,
+/// each the per-key reply it stands for ([`crate::model::snapshot::entries`],
+/// #977's E2; under `Latest` a snapshot of several pages brings its last
+/// page's alone). The replies fold per key across
 /// selectors ([`crate::model::snapshot::fold_latest`]), and each kept value
 /// becomes a row through `lens` ([`crate::model::snapshot::row_of`]): its
 /// identity, its conformance to its declared type, whose clock stamped it,
@@ -254,7 +257,7 @@ pub async fn take_snapshot(
     lens: &crate::model::lens::Lens<'_>,
     spec: &SnapshotSpec,
 ) -> Result<Taken> {
-    use crate::model::snapshot::{fold_latest, row_of};
+    use crate::model::snapshot::{entries, fold_latest, row_of};
 
     let started = std::time::Instant::now();
     let collected_at = crate::tape::record::rfc3339_now();
@@ -284,6 +287,8 @@ pub async fn take_snapshot(
             }
         }
     }
+    // A snapshot's page is its entries' rows (#977's E2).
+    let values = entries(values);
     let answered = values.len() as u64;
     let (kept, superseded) = fold_latest(values);
     let rows: Vec<SnapshotRow> = kept

@@ -50,8 +50,50 @@ pub struct StateReport {
     /// How long the GET waited for replies, seconds.
     pub timeout_s: f64,
     /// Every key answered, sorted. Empty is silence: no reply within the
-    /// timeout, which is not a verdict about the key (S6, O5).
+    /// timeout, which is not a verdict about the key (S6, O5) — unless
+    /// [`StateReport::snapshots`] holds a complete snapshot, the owner's
+    /// word that it held no member there.
     pub rows: Vec<StateRow>,
+    /// Each collection's snapshot the owner's pages made (core §7.5;
+    /// #977's E2), in the order of its first page, its entries among the
+    /// rows: current reads only, and absent when no page answered, so a
+    /// read of per-key replies keeps its shape.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub snapshots: Vec<CollectionSnapshot>,
+}
+
+/// One collection's snapshot a state read heard (core §7.5's form 7;
+/// #977's E2), `get state`'s and a seed's state leg's: the key its pages
+/// came on, its collection's index, the owner's run and the snapshot's
+/// asof, the pages held, and whether it is complete. Under `Latest`, which
+/// the readers keep until E3, a snapshot of several pages arrives as its
+/// last page alone, and is held incomplete. Not a `.zsnap`
+/// ([`Snapshot`](crate::report::Snapshot)), a tool's capture of state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CollectionSnapshot {
+    pub key: String,
+    pub coll: u32,
+    /// The owner's run, as a descriptor spells one (core §3.3).
+    pub run: String,
+    /// A seq of that run: the snapshot reflects every state mutation of
+    /// the run at or below it.
+    pub asof: u32,
+    /// The page indices held.
+    pub pages: Vec<u32>,
+    pub complete: bool,
+}
+
+impl From<&zenkey_model::collection::Heard> for CollectionSnapshot {
+    fn from(h: &zenkey_model::collection::Heard) -> Self {
+        CollectionSnapshot {
+            key: h.key.clone(),
+            coll: h.coll,
+            run: h.run.hex(),
+            asof: h.asof.get(),
+            pages: h.pages.iter().copied().collect(),
+            complete: h.complete(),
+        }
+    }
 }
 
 /// Which state question a read asked (S6).
@@ -232,6 +274,7 @@ mod tests {
     fn state_report_json_shape_is_pinned() {
         let key = "zk2/host-a/tc/tc.netif.v1/state/namespaces";
         let r = StateReport {
+            snapshots: Vec::new(),
             reading: StateReading::LastKnown,
             address: "host-a/tc".into(),
             iface: "tc.netif.v1".into(),

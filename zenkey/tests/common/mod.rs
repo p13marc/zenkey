@@ -18,6 +18,7 @@ use zenkey::{Implementation, ServiceConfig};
 
 pub mod forms_owner;
 pub mod panic_watchdog;
+pub mod snapshot_owner;
 
 /// The scenarios' reply timeout (`spec/scenarios/README.md`: 1 s unless
 /// stated).

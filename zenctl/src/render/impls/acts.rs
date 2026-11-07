@@ -405,6 +405,32 @@ impl Render for StateReport {
                 );
             }
         }
+        // Each collection's snapshot the owner answered with (core §7.5;
+        // #977's E2): its entries are the rows below, each on its key.
+        for s in &self.snapshots {
+            let pages = s
+                .pages
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            let line = format!(
+                "snapshot on {}: coll {}, run {} as of seq {}, page{} {pages}",
+                s.key,
+                s.coll,
+                s.run,
+                s.asof,
+                if s.pages.len() == 1 { "" } else { "s" },
+            );
+            if s.complete {
+                t.line(format!("{line}, complete"));
+            } else {
+                t.line_styled(
+                    format!("{line}, INCOMPLETE: a page was lost, so members may be missing"),
+                    style::WARNING,
+                );
+            }
+        }
         if self.rows.is_empty() {
             return;
         }
@@ -449,7 +475,16 @@ impl Render for StateReport {
 
     fn notes(&self) -> Vec<Note> {
         let mut notes = Vec::new();
-        if self.rows.is_empty() {
+        if self.rows.is_empty() && !self.snapshots.is_empty() {
+            notes.push(
+                Note::caveat(
+                    "the owner answered with a snapshot that lists no member here: no value \
+                     as of its asof, and exit 2, as silence is, until #977's E3 says what an \
+                     empty snapshot is",
+                )
+                .cite("spec §7.5"),
+            );
+        } else if self.rows.is_empty() {
             notes.push(
                 Note::silence(match self.reading {
                     StateReading::Current => {

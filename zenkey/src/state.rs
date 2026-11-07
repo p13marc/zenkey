@@ -7,7 +7,7 @@
 //! | S1 every put and delete carries its in-band stamp (§7.5's envelope), and on §4.3's table a Zenoh timestamp the owner set | [`StateWriter`], [`Minter`] |
 //! | S2 GET replies are the bytes put, a `reply_del`'s attachment the delete's envelope, each with the mutation's Zenoh timestamp where it had one; the owner's state queryables answer every live key plus `reply_del` within the window | the state server ([`Store`]) |
 //! | S3 the tombstone window, 60 s unless configured | [`DEFAULT_WINDOW`], `ServiceConfig::tombstone_window_s` |
-//! | S4 a consumer's GET: the owner's keys, target `All`, consolidation `Latest` | [`crate::consumer::Consumer::get`] |
+//! | S4 a consumer's GET: the owner's keys, target `All`, consolidation `Latest`; a snapshot's page read as its entries' per-key replies (#977's E2) | [`crate::consumer::Consumer::get`], [`StateAnswer::snapshots`] |
 //! | S6 current is the owner's answer; silence is no verdict | [`StateGet`] |
 //! | S7 a run never reused, a seq never wrapped within it; §4.3's table's timestamps, ahead: the guard holds a state write that carries a Zenoh timestamp | [`Minter`], [`crate::run`], the clock guard (`ServiceConfig::clock_reference`) |
 //! | a re-put is a mutation (0.21); `freshness.v1` §2.4, §2.10 | [`StateWriter`]'s refresher |
@@ -1646,7 +1646,10 @@ pub struct StateAnswer {
     pub current: Vec<Current>,
     /// Whether every GET ran to its final reply with no error reply: a GET
     /// that reached its timeout ends with one (Appendix B), and so may miss
-    /// a member. A refused GET is complete and empty (§8.1, 0.8).
+    /// a member. A refused GET is complete and empty (§8.1, 0.8). And
+    /// whether every snapshot it heard is complete
+    /// ([`StateAnswer::snapshots`]): one held incomplete may miss a member
+    /// too.
     pub complete: bool,
     /// The in-band stamp of each key answered under a zk2c envelope, a
     /// value's or a deletion's: what orders it ([`StateAnswer::mark`]).
@@ -1656,8 +1659,15 @@ pub struct StateAnswer {
     pub tags: BTreeMap<String, zenkey_model::wire::Tag>,
     /// Each key answered with an envelope refused, or a packed record its
     /// layout refused (core §7.5, §7.6): undecodable, with the refusal,
-    /// and left out of [`StateAnswer::current`].
+    /// and left out of [`StateAnswer::current`]. A snapshot's page whose
+    /// body is refused is undecodable on the page's key.
     pub undecodable: BTreeMap<String, crate::inband::Undecodable>,
+    /// Each snapshot of the resource's collection the GET's pages made
+    /// (core §7.5; #977's E2), in the order of its first page: the key it
+    /// was heard on, its run, its asof, the pages held and whether it is
+    /// complete. Its entries are in [`StateAnswer::current`], each on its
+    /// member's key. Empty when no page answered.
+    pub snapshots: Vec<zenkey_model::collection::Heard>,
 }
 
 impl StateAnswer {
@@ -1665,8 +1675,16 @@ impl StateAnswer {
     /// else its Zenoh timestamp ([`ValueOrder::accept_mark`]).
     #[must_use]
     pub fn mark(&self, current: &Current) -> Option<Mark> {
+        Self::mark_in(&self.inband, current)
+    }
+
+    /// [`StateAnswer::mark`], over the in-band stamps `inband`.
+    pub(crate) fn mark_in(
+        inband: &BTreeMap<String, zenkey_model::wire::Stamp>,
+        current: &Current,
+    ) -> Option<Mark> {
         Mark::of(
-            self.inband.get(current.key()).copied(),
+            inband.get(current.key()).copied(),
             current.timestamp().as_ref().map(crate::inband::stamp_of),
         )
     }

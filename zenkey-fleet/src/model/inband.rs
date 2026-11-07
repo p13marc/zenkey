@@ -17,6 +17,11 @@
 //!     → its body, record 0's run and seq and its frame form's tag
 //!       (Payload::Frame), read with its frame resource's declaration
 //!       ([`crate::model::frame`]), never as one record of the key's type
+//! a put whose envelope is a snapshot's page (core §7.5's form 7, 0.97)
+//!     → its body, its run and asof and its collection's tag
+//!       (Payload::Snapshot): a GET's reader takes its entries as the
+//!       per-key replies they stand for ([`page`], [`member_views`]);
+//!       a reader of mutations refuses it ([`SNAPSHOT_AS_MUTATION`])
 //! every other sample
 //!     → read with no envelope (Payload::Plain)
 //! ```
@@ -36,6 +41,15 @@
 //! read, here. A raw zenoh sample in a bus reader is read by [`read`], the
 //! runtime's `zenkey::inband::read`, which makes the same decisions.
 //!
+//! **A snapshot's page** (#977's E2): only a GET's reply carries one, and
+//! the seed's state leg, the `.zsnap` collection and the lens read it
+//! (`Payload::Snapshot`; the lens resolves its key by its collection's
+//! index). What reads a sample as a mutation — [`Envelope`], [`record`],
+//! [`read_parts`], so a [`crate::FleetAnswer`] and a [`crate::SampleView`]
+//! too — refuses a page as its form, `form`, as before E2 read it, so a
+//! reader E3 has not taught yet degrades to undecodable, never to a
+//! misread.
+//!
 //! A sample's Zenoh timestamp stays its time on a resource core §4.3's
 //! table lists, where a profile reads one (freshness's age, timing's
 //! lifespan, desired's author order; [`on_the_table`]), and its wire size
@@ -44,6 +58,7 @@
 
 use std::borrow::Cow;
 
+use zenkey_model::collection::{BodyRefusal, Page};
 use zenkey_model::seed::Mark;
 use zenkey_model::wire::{self, Reading, Refusal};
 
@@ -64,8 +79,15 @@ pub fn envelope_of(read: &Read) -> Envelope {
         | Read::Heartbeat { stamp, .. }
         | Read::Framed { stamp, .. } => Some(Ok(*stamp)),
         Read::Refused { refusal, .. } => Some(Err(*refusal)),
+        Read::Snapshot { .. } => Some(Err(SNAPSHOT_AS_MUTATION)),
     }
 }
+
+/// What a reader of mutations reads a snapshot's page as (core §7.5's form
+/// 7): refused as its form, `form`, as before #977's E2 read it. Only a
+/// GET's reader reads a page, as the per-key replies its entries stand for
+/// ([`member_views`], [`crate::FleetAnswer::entries`]).
+pub const SNAPSHOT_AS_MUTATION: Refusal = Refusal::Reserved(wire::Form::Snapshot);
 
 /// What orders a sample whose envelope says `envelope`: its in-band stamp,
 /// else its Zenoh timestamp; `None` for a refused envelope, never ordered.
@@ -108,6 +130,16 @@ pub enum Payload<'a> {
         stamp: wire::Stamp,
         tag: wire::Tag,
     },
+    /// A snapshot's page (core §7.5's form 7): its body, its run and its
+    /// asof in the seq's place, and CH's tag, its collection's type's.
+    /// Read as its entries ([`page`]), never as a record of the key's
+    /// type; its run and asof order no value, so it has no
+    /// [`Payload::stamp`].
+    Snapshot {
+        body: &'a [u8],
+        header: wire::Stamp,
+        tag: wire::Tag,
+    },
 }
 
 impl<'a> Payload<'a> {
@@ -115,7 +147,10 @@ impl<'a> Payload<'a> {
     pub fn bytes(&self) -> Option<&'a [u8]> {
         match *self {
             Payload::Plain(b) | Payload::Record { record: b, .. } => Some(b),
-            Payload::Refused(_) | Payload::Heartbeat { .. } | Payload::Frame { .. } => None,
+            Payload::Refused(_)
+            | Payload::Heartbeat { .. }
+            | Payload::Frame { .. }
+            | Payload::Snapshot { .. } => None,
         }
     }
 
@@ -125,7 +160,7 @@ impl<'a> Payload<'a> {
             Payload::Record { stamp, .. }
             | Payload::Heartbeat { stamp, .. }
             | Payload::Frame { stamp, .. } => Some(*stamp),
-            Payload::Plain(_) | Payload::Refused(_) => None,
+            Payload::Plain(_) | Payload::Refused(_) | Payload::Snapshot { .. } => None,
         }
     }
 
@@ -134,7 +169,8 @@ impl<'a> Payload<'a> {
         match self {
             Payload::Record { tag, .. }
             | Payload::Heartbeat { tag, .. }
-            | Payload::Frame { tag, .. } => Some(*tag),
+            | Payload::Frame { tag, .. }
+            | Payload::Snapshot { tag, .. } => Some(*tag),
             Payload::Plain(_) | Payload::Refused(_) => None,
         }
     }
@@ -146,7 +182,8 @@ impl<'a> Payload<'a> {
             Payload::Plain(_)
             | Payload::Record { .. }
             | Payload::Heartbeat { .. }
-            | Payload::Frame { .. } => None,
+            | Payload::Frame { .. }
+            | Payload::Snapshot { .. } => None,
         }
     }
 
@@ -159,7 +196,8 @@ impl<'a> Payload<'a> {
             Payload::Record { .. }
             | Payload::Refused(_)
             | Payload::Heartbeat { .. }
-            | Payload::Frame { .. } => None,
+            | Payload::Frame { .. }
+            | Payload::Snapshot { .. } => None,
         }
     }
 }
@@ -189,12 +227,101 @@ pub fn payload<'a>(key: &str, encoding: Option<&str>, bytes: &'a [u8]) -> Payloa
             stamp: e.stamp,
             tag: e.tag,
         },
-        // A snapshot's page (core 0.97 §7.5, form 7) is read as before
-        // core 0.97 defined it, undecodable as a reserved form, until
-        // #977's E2 brings the snapshot reader: never decoded as a record
-        // of the key's type.
-        Reading::Snapshot(_) => Payload::Refused(Refusal::Reserved(wire::Form::Snapshot)),
+        Reading::Snapshot(e) => Payload::Snapshot {
+            body: e.record,
+            header: e.stamp,
+            tag: e.tag,
+        },
         Reading::Refused(r) => Payload::Refused(r),
+    }
+}
+
+/// A put's bytes on `key` under `encoding` read as a snapshot's page (core
+/// §7.5's form 7; #977's E2): `None` for any other sample, else the page
+/// or its body's first refusal.
+pub fn page(key: &str, encoding: Option<&str>, bytes: &[u8]) -> Option<Result<Page, BodyRefusal>> {
+    match payload(key, encoding, bytes) {
+        Payload::Snapshot { body, header, tag } => {
+            let envelope = wire::Envelope::snapshot(tag, header.run, header.seq, body);
+            Some(Page::read(&envelope).map_err(|r| match r {
+                zenkey_model::collection::PageRefusal::Body(b) => b,
+                // A snapshot's envelope, as `payload` read it.
+                other => unreachable!("a snapshot's envelope: {other}"),
+            }))
+        }
+        _ => None,
+    }
+}
+
+/// A view heard on `view.key` read as a snapshot's page ([`page`]), its
+/// entries as the per-key replies they stand for (#977's E2): each on its
+/// member's key, a live entry a put of the bytes its mutation put
+/// (`CH · run · seq · record`, under `zenoh/bytes`), a tombstone a delete
+/// whose attachment is its envelope. Each keeps the page's QoS, source and
+/// arrival, and carries no Zenoh timestamp: a snapshot carries none.
+/// `None` for a view that is no page.
+pub fn member_views(
+    view: &crate::bus::monitor::SampleView,
+) -> Option<Result<Vec<crate::bus::monitor::SampleView>, BodyRefusal>> {
+    if view.kind == zenoh::sample::SampleKind::Delete {
+        return None;
+    }
+    let bytes = view.payload.to_bytes();
+    let p = match page(&view.key, Some(&view.encoding), &bytes)? {
+        Ok(p) => p,
+        Err(r) => return Some(Err(r)),
+    };
+    Some(Ok(views_of(view, &p)))
+}
+
+/// [`member_views`], for the page `p` `view` was read as.
+pub fn views_of(
+    view: &crate::bus::monitor::SampleView,
+    p: &Page,
+) -> Vec<crate::bus::monitor::SampleView> {
+    p.members(&view.key)
+        .into_iter()
+        .map(|m| {
+            let (kind, payload, attachment) = match (m.payload(), m.attachment()) {
+                (Some(put), _) => (zenoh::sample::SampleKind::Put, put, None),
+                (None, att) => (
+                    zenoh::sample::SampleKind::Delete,
+                    Vec::new(),
+                    att.map(zenoh::bytes::ZBytes::from),
+                ),
+            };
+            crate::bus::monitor::SampleView {
+                key: m.key,
+                payload: zenoh::bytes::ZBytes::from(payload),
+                encoding: wire::ENCODING.to_owned(),
+                kind,
+                timestamp: None,
+                stamped_by: None,
+                attachment,
+                ..view.clone()
+            }
+        })
+        .collect()
+}
+
+/// A page's words where its body is not read as entries: its form, its
+/// collection's index, its entries' counts and its size, or its body's
+/// refusal.
+pub fn snapshot_text(header: wire::Stamp, tag: wire::Tag, body: &[u8]) -> String {
+    let envelope = wire::Envelope::snapshot(tag, header.run, header.seq, body);
+    match Page::read(&envelope) {
+        Ok(p) => format!(
+            "<zk2c snapshot's page {}{}, coll {}, run {} as of seq {}: {} live, {} tombstones, {} bytes>",
+            p.index,
+            if p.more { " (more follow)" } else { "" },
+            p.coll,
+            p.run.hex(),
+            p.asof.get(),
+            p.live.len(),
+            p.tombs.len(),
+            body.len()
+        ),
+        Err(r) => format!("<undecodable: a zk2c snapshot's body refused: {r}>"),
     }
 }
 
@@ -464,6 +591,7 @@ pub fn record<'a>(
     let from = match payload(key, encoding, &bytes) {
         Payload::Plain(_) => return Ok(bytes),
         Payload::Refused(r) => return Err(r),
+        Payload::Snapshot { .. } => return Err(SNAPSHOT_AS_MUTATION),
         Payload::Record { stamp, .. }
         | Payload::Heartbeat { stamp, .. }
         | Payload::Frame { stamp, .. } => stamp.envelope_bytes(),
@@ -490,6 +618,7 @@ pub fn read_parts<'a>(
     match payload(key, encoding, &bytes) {
         Payload::Plain(_) => (bytes, None),
         Payload::Refused(r) => (bytes, Some(Err(r))),
+        Payload::Snapshot { .. } => (bytes, Some(Err(SNAPSHOT_AS_MUTATION))),
         Payload::Record { stamp, .. }
         | Payload::Heartbeat { stamp, .. }
         | Payload::Frame { stamp, .. } => (after(bytes, stamp.envelope_bytes()), Some(Ok(stamp))),
@@ -570,6 +699,7 @@ pub fn structural_text(key: &str, encoding: Option<&str>, bytes: &[u8]) -> Strin
             format!("<{}, {} bytes>", heartbeat_declared(key), body.len())
         }
         Payload::Frame { body, stamp, .. } => crate::model::frame::unread_text(stamp, body.len()),
+        Payload::Snapshot { body, header, tag } => snapshot_text(header, tag, body),
         Payload::Plain(b) | Payload::Record { record: b, .. } => structural::structural(b),
     }
 }
