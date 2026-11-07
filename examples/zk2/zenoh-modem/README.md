@@ -51,8 +51,9 @@ Its seam crates are on crates.io for out-of-tree backends.
   routers, the ground side, and what is still to decide.
 - [`catalog.json`](catalog.json) is the deployment catalog ([core §8.6](../../../spec/core.md#86-the-deployment-catalog)),
   provisioned to rf0's host and to the ground. It indexes `modem.v3`, `config.v1` and
-  `health.v1` at their current revisions (`modem.v3` 3.3 at index 8, catalog `e3a529fe`), and
-  `sx1262_config.v1` (index 7, #985 G4), and dates times from 2026-01-01. A new revision goes in
+  `health.v1` at their current revisions (`modem.v3` 3.3 at index 8), `sx1262_config.v1`
+  (index 7, #985 G4), and `freshness.v2`'s standard contract, which each of their owners serves
+  (index 9, catalog `0ff6bf6d`, #1080). It dates times from 2026-01-01. A new revision goes in
   with `zk2 catalog add`, which writes the catalog's successor.
 
 **The verdict.** Every v1 entry maps or is deleted for a stated reason, and the constrained-face

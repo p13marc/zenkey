@@ -28,7 +28,7 @@ profile  = "link.v2"
 system   = "h-3fa9c2d41b7e"
 services = ["rf0"]
 binding  = "zm-1.10.2-r1"           # the zenoh fork zenoh-modem's routers run
-catalog  = "e3a529fe"               # catalog.json, which the ground holds
+catalog  = "0ff6bf6d"               # catalog.json, which the ground holds
 
 [transport]
 lease_ms             = 240000

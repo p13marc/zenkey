@@ -21,7 +21,7 @@ declare, and stay on `config.v1` until a packed format carries text (§4).
 | **The contract** | [`config/sx1262_config.v1.toml`](config/sx1262_config.v1.toml), `sha256:dc7c01069bffc9dc5a966c93cfe2444eca0391e71f051bc9bf6d2b2b54d4317b` |
 | **Its types** | [`config/schemas/sx1262_config.json`](config/schemas/sx1262_config.json): the three group types, then the five derived ones |
 | **Profile** | `config.v2` text 0.1, with `freshness.v2` and `link.v2` |
-| **Catalog** | [`catalog.json`](catalog.json) `e3a529fe`, index 7, where `8c808dff` appended it |
+| **Catalog** | [`catalog.json`](catalog.json) `0ff6bf6d`, index 7, where `8c808dff` appended it |
 
 ## 1. Which service, which interface
 
