@@ -519,6 +519,14 @@ pub(crate) struct DoctorArgs {
     /// (exit 2).
     #[arg(long = "catalog", value_name = "PATH")]
     pub(crate) catalog: Vec<PathBuf>,
+    /// A `link.v2` face policy whose device faces (`attach = "device"`)
+    /// list owners on a first hop (link.v2 §2.5): `first-hop-token` asks
+    /// whether each holds an interface token or a contract queryable, which
+    /// an owner on a first hop holds none of (core §8.1, §8.4). Without
+    /// one, `first-hop-token` is not asked. A policy the linter refuses, or
+    /// one with no device face, is refused (exit 2).
+    #[arg(long = "face-policy", value_name = "FILE")]
+    pub(crate) face_policy: Option<PathBuf>,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
 }
@@ -2252,7 +2260,21 @@ pub(crate) struct ServiceListArgs {
     #[arg(long, value_name = "SYSTEM")]
     pub(crate) system: Option<String>,
     #[command(flatten)]
+    pub(crate) first_hop: FirstHopArgs,
+    #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
+}
+
+/// The owners on a first hop a reader is told of (observer §3.11; #982 H3).
+#[derive(clap::Args, Clone, Default)]
+pub(crate) struct FirstHopArgs {
+    /// A `link.v2` face policy whose device faces (`attach = "device"`)
+    /// list owners on a first hop (link.v2 §2.5): each device's instance
+    /// token follows its link, so its absence reads `link_closed`, never
+    /// down (observer §3.11). A policy the linter refuses, or one with no
+    /// device face, is refused (exit 2).
+    #[arg(long = "face-policy", value_name = "FILE")]
+    pub(crate) face_policy: Option<PathBuf>,
 }
 
 /// `service show`'s flags.
@@ -2262,6 +2284,8 @@ pub(crate) struct ServiceShowArgs {
     #[arg(value_name = "SYSTEM/SERVICE", value_parser = addr_arg,
           add = ArgValueCandidates::new(completion::services))]
     pub(crate) address: zenkey_model::grammar::Addr,
+    #[command(flatten)]
+    pub(crate) first_hop: FirstHopArgs,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
 }

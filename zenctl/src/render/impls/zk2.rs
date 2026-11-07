@@ -17,10 +17,12 @@
 
 use std::collections::BTreeSet;
 
+use zenkey_fleet::AddressStatus;
 use zenkey_fleet::report::{
     Asked, BindingGraph, CompatClass, CompatReport, ContractAnswer, ContractView, DescriptorAnswer,
-    IfaceListing, IfaceSighting, IfaceView, InstanceRef, InstanceSighting, NamespaceListing,
-    ResourceBody, ResourceView, SchemaView, ServiceListing, ServiceView, TypeView,
+    FirstHopSighting, IfaceListing, IfaceSighting, IfaceView, InstanceRef, InstanceSighting,
+    NamespaceListing, ResourceBody, ResourceView, SchemaView, ServiceListing, ServiceView,
+    TypeView,
 };
 use zenkey_model::descriptor::Descriptor;
 
@@ -48,6 +50,40 @@ fn incomplete(cut_off_during: bool) -> Note {
         )
     })
     .cite("spec §8.1")
+}
+
+/// A first-hop device's link, as a person reads it (observer §3.11; #982
+/// H3): its instance token shows its link, never its liveness.
+fn first_hop_line(f: &FirstHopSighting) -> String {
+    let link = match f.status {
+        AddressStatus::Up => "link up: an instance token held".to_owned(),
+        AddressStatus::LinkClosed => "link closed: no instance token in a complete read — \
+             never down; its liveness is what else crosses, its heartbeat among it"
+            .to_owned(),
+        AddressStatus::Unobservable => {
+            "link unobservable: the read is possibly incomplete".to_owned()
+        }
+        AddressStatus::Down => "down".to_owned(),
+    };
+    format!("a device on face {} (first hop): {link}", f.face)
+}
+
+/// The note for first-hop devices whose link is closed (observer §3.11).
+fn link_closed_note(closed: &[&FirstHopSighting]) -> Option<Note> {
+    (!closed.is_empty()).then(|| {
+        Note::caveat(format!(
+            "{} first-hop device(s) with the link closed, never down: {}. A device's \
+             instance token follows its link, and its liveness is what crosses (observer \
+             §7.1)",
+            closed.len(),
+            closed
+                .iter()
+                .map(|f| f.address.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))
+        .cite("observer §3.11")
+    })
 }
 
 /// The note for keys under `@zk` that are not zk2 tokens.
@@ -197,7 +233,7 @@ impl Render for ServiceListing {
     const FAMILY: &'static str = "service-list";
 
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
-        envelope_without(self, &["services"])
+        envelope_without(self, &["services", "first_hop"])
     }
 
     fn rows(&self, out: &mut dyn FnMut(Row)) {
@@ -213,12 +249,19 @@ impl Render for ServiceListing {
                 out(Row::tagged("member", v));
             }
         }
+        for f in &self.first_hop {
+            out(Row::of("first_hop", f));
+        }
     }
 
     fn table(&self, t: &mut Table) {
         let mut grid = Grid::unheaded(4).max(0, 48);
+        let device = |address: &str| self.first_hop.iter().find(|f| f.address == address);
         for s in &self.services {
             grid.group(&s.address);
+            if let Some(f) = device(&s.address) {
+                grid.detail([format!("  {}", first_hop_line(f))]);
+            }
             for i in &s.instances {
                 instance_rows(&mut grid, i);
             }
@@ -230,6 +273,14 @@ impl Render for ServiceListing {
                 );
             }
         }
+        // A device presence shows no token of: its row all the same, its
+        // link closed or unobservable, never absent from the listing.
+        for f in &self.first_hop {
+            if !self.services.iter().any(|s| s.address == f.address) {
+                grid.group(&f.address);
+                grid.detail([format!("  {}", first_hop_line(f))]);
+            }
+        }
         t.grid(grid);
     }
 
@@ -238,6 +289,12 @@ impl Render for ServiceListing {
         if !self.complete {
             notes.push(incomplete(self.cut_off_during));
         }
+        let closed: Vec<&FirstHopSighting> = self
+            .first_hop
+            .iter()
+            .filter(|f| f.status == AddressStatus::LinkClosed)
+            .collect();
+        notes.extend(link_closed_note(&closed));
         if self.services.is_empty() {
             notes.push(Note::silence(
                 "no zk2 service holds a token here. An empty read is not a verdict: \
@@ -269,7 +326,7 @@ impl Render for ServiceView {
     const FAMILY: &'static str = "service-show";
 
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
-        envelope_without(self, &["instances", "members"])
+        envelope_without(self, &["instances", "members", "first_hop"])
     }
 
     fn rows(&self, out: &mut dyn FnMut(Row)) {
@@ -279,9 +336,15 @@ impl Render for ServiceView {
         for m in &self.members {
             out(Row::of("member", m));
         }
+        if let Some(f) = &self.first_hop {
+            out(Row::of("first_hop", f));
+        }
     }
 
     fn table(&self, t: &mut Table) {
+        if let Some(f) = &self.first_hop {
+            t.line(format!("{}  {}", self.address, first_hop_line(f)));
+        }
         for i in &self.instances {
             t.blank();
             let mut head = format!("{}  instance {}", self.address, i.instance);
@@ -336,7 +399,13 @@ impl Render for ServiceView {
         if !self.complete {
             notes.push(incomplete(self.cut_off_during));
         }
-        if self.instances.is_empty() {
+        let closed = self
+            .first_hop
+            .as_ref()
+            .filter(|f| f.status == AddressStatus::LinkClosed);
+        if let Some(f) = closed {
+            notes.extend(link_closed_note(&[f]));
+        } else if self.instances.is_empty() {
             notes.push(Note::silence(format!(
                 "presence shows no instance of {}: it may be down, in another namespace, \
                  or not yet up — silence is not a verdict, and this exits 2",

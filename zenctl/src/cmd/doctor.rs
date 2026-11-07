@@ -53,6 +53,7 @@ pub async fn run(cli: DoctorArgs) -> Result<()> {
         every,
         count,
         catalog,
+        face_policy,
         ns,
     } = cli;
     let dep = ASKING.ask(Deployment::resolve(&ns));
@@ -60,6 +61,7 @@ pub async fn run(cli: DoctorArgs) -> Result<()> {
         contracts: Vec::new(),
         catalog,
     }));
+    let first_hop = ASKING.ask(super::zk2::first_hop(face_policy.as_deref()));
     let grace = ASKING.ask(super::positive_secs("--grace", grace));
     let desired_behind = ASKING.ask(super::positive_secs("--desired-behind", desired_behind));
     let asked: BTreeSet<CheckId> = if checks.is_empty() {
@@ -77,6 +79,7 @@ pub async fn run(cli: DoctorArgs) -> Result<()> {
         clocks_synced,
         desired_behind,
         catalogs,
+        first_hop,
     };
     if deep_without_its_check(&spec) {
         eprintln!(
