@@ -64,16 +64,12 @@ impl Time {
     /// epoch, and from t32 all ones on, which no known time takes.
     #[must_use]
     pub fn from_unix_ms(t: i128, epoch: i64) -> Option<Time> {
-        let since = t - i128::from(epoch) * 1000;
-        if since < 0 {
-            return None;
-        }
+        // Unsigned, so `None` before the epoch.
+        let since = u128::try_from(t - i128::from(epoch) * 1000).ok()?;
         let s = u32::try_from(since / 1000)
             .ok()
             .filter(|&s| s != u32::MAX)?;
-        // From 0 to 999: `since` is not negative here.
-        debug_assert!((0..1000).contains(&(since % 1000)));
-        let ms = (since % 1000) as u16;
+        let ms = u16::try_from(since % 1000).ok()?;
         Some(Time::Known { s, ms })
     }
 
