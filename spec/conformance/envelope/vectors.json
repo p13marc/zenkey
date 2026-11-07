@@ -1735,7 +1735,7 @@
       }
     },
     {
-      "note": "the bare wire's JSON envelope read as a form: `{` is an error's CH, and its bytes break it",
+      "note": "an earlier core's JSON error envelope read as a form: `{` is an error's CH, and its bytes break it",
       "sample": "reply_err",
       "hex": "7b22636f6465223a2262757379222c226d657373616765223a22227d",
       "expect": {
@@ -1743,7 +1743,7 @@
       }
     },
     {
-      "note": "the bare wire's protobuf envelope read as a form: 0x0a, field 1's key, is a mutation's CH",
+      "note": "an earlier core's protobuf error envelope read as a form: 0x0a, field 1's key, is a mutation's CH",
       "sample": "reply_err",
       "hex": "0a04627573791200",
       "expect": {
@@ -1751,7 +1751,7 @@
       }
     },
     {
-      "note": "the bare wire's CBOR envelope read as a form: 0xa2, a map of two, is a frame's CH",
+      "note": "an earlier core's CBOR error envelope read as a form: 0xa2, a map of two, is a frame's CH",
       "sample": "reply_err",
       "hex": "a264636f64656462757379676d65737361676560",
       "expect": {

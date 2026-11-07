@@ -257,11 +257,14 @@ receives it.
    - the fourth's, `600001000007a0` under `zenoh/bytes`.
 6. **A timeout behind a router.** `ping`'s server, behind a router,
    freezes, and the caller calls it.
-7. **The bare wire.** A session of the test's own answers `set` with the
-   JSON envelope `{"code":"busy","message":""}`, under
-   `application/json`. Then it answers `ping` with `{"code":"busy"}`
-   under `application/json`, an envelope with no `message`, and the
-   caller has two attempts configured.
+7. **An envelope.** A session of the test's own answers `set` with the
+   JSON error envelope that an earlier version of the core had an owner
+   write, `{"code":"busy","message":""}`, under `application/json`. Then
+   it answers `ping` the same way, and the caller has two attempts
+   configured.
+8. **A request under another `Encoding`.** `h1/tc` serves `set` again. A
+   session of the test's own sends it the bytes of step 1's request form,
+   `0x40` then the record, under `application/json`.
 
 **Expected.**
 1. Every query arrives under `zenoh/bytes`, as `0x40` then the request's
@@ -297,8 +300,11 @@ receives it.
 6. Silence. The caller's own `Timeout` comes under `zenoh/string`, or the
    router's under `zenoh/bytes`. Neither is an owner's error, so the
    caller calls twice.
-7. A caller that reads the bare wire reports `busy`. One that does not
-   reports the transport's, and calls `set` once: it is not idempotent.
-   - The `ping` envelope is malformed, so it is the transport's to both
-     callers (core §5.2, `decode`). Each calls `ping` twice, then reports
-     silence.
+7. Each reply error is the transport's: another `Encoding` (core §5.2).
+   - The caller reports silence. It calls `set` once, since `set` is not
+     idempotent, and `ping` twice.
+   - A tool shows each as the transport's, with its `Encoding` and its
+     bytes, never as `busy`.
+8. `invalid_request`, and no handler runs. Under another `Encoding` a
+   query carries no request form, whatever its bytes (core §5.1, "The
+   request").
