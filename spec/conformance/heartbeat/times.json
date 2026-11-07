@@ -1,0 +1,322 @@
+{
+  "description": "core §7.5, a heartbeat's time under a deployment epoch (core §7.6, §8.6), and the time freshness.v2 §2.4's owner writes. Written by an independent reading of the text (Python, standard library), checked by a second, never blessed. Every case is layouts.json's `bare.v1`, a revision with no collection, so a body is its time alone: 32 bits of seconds from the deployment epoch, 10 of milliseconds, then 6 of pad (`bodies.json`). `epoch` is the deployment epoch in seconds, the catalog's the owner is given; where none is given, E = 0, as an owner with no catalog counts from the Unix epoch. `at` is an instant in milliseconds since the Unix epoch, `utc` the same instant in RFC 3339, or `null` for an owner whose clock is unknown. `writes`: an epoch and an instant → the time as `bodies.json` spells it (`{\"s\", \"ms\"}`, or `null` for the unknown time, all 42 bits set), the body's `bits` before the pad, the `pad` and the `hex` bytes. An instant before the epoch, or 2^32 seconds or more after it, has no code, and the owner writes the unknown time. `reads`: an epoch and a body's bytes → the instant, `at` and `utc`, or `null` for the unknown time, or `{\"refused\": \"code\"}` for a millisecond code from 1000 up but the unknown time's (`bodies.json` holds the other refusals). Seconds all ones with a millisecond code up to 999 are a known time. Every write whose time is known reads back to its `at`.",
+  "writes": [
+    {
+      "note": "the epoch itself: zero seconds and zero milliseconds",
+      "layout": "bare.v1",
+      "epoch": 1767225600,
+      "at": 1767225600000,
+      "utc": "2026-01-01T00:00:00.000Z",
+      "expect": {
+        "time": {
+          "s": 0,
+          "ms": 0
+        },
+        "bits": "000000000000000000000000000000000000000000",
+        "pad": 6,
+        "hex": "000000000000"
+      }
+    },
+    {
+      "note": "one second and a half after the epoch",
+      "layout": "bare.v1",
+      "epoch": 1767225600,
+      "at": 1767225601500,
+      "utc": "2026-01-01T00:00:01.500Z",
+      "expect": {
+        "time": {
+          "s": 1,
+          "ms": 500
+        },
+        "bits": "000000000000000000000000000000010111110100",
+        "pad": 6,
+        "hex": "000000017d00"
+      }
+    },
+    {
+      "note": "the epoch's first second, its last millisecond",
+      "layout": "bare.v1",
+      "epoch": 1767225600,
+      "at": 1767225600999,
+      "utc": "2026-01-01T00:00:00.999Z",
+      "expect": {
+        "time": {
+          "s": 0,
+          "ms": 999
+        },
+        "bits": "000000000000000000000000000000001111100111",
+        "pad": 6,
+        "hex": "00000000f9c0"
+      }
+    },
+    {
+      "note": "#1080's heartbeat: 1794062759 s and 123 ms after the Unix epoch, 26837159 s after zenoh-modem's",
+      "layout": "bare.v1",
+      "epoch": 1767225600,
+      "at": 1794062759123,
+      "utc": "2026-11-07T14:45:59.123Z",
+      "expect": {
+        "time": {
+          "s": 26837159,
+          "ms": 123
+        },
+        "bits": "000000011001100110000000101001110001111011",
+        "pad": 6,
+        "hex": "019980a71ec0"
+      }
+    },
+    {
+      "note": "110 s later, the instant #1080 read in the same owner's frame, t = 26837269: a heartbeat then writes the same seconds",
+      "layout": "bare.v1",
+      "epoch": 1767225600,
+      "at": 1794062869000,
+      "utc": "2026-11-07T14:47:49.000Z",
+      "expect": {
+        "time": {
+          "s": 26837269,
+          "ms": 0
+        },
+        "bits": "000000011001100110000001000101010000000000",
+        "pad": 6,
+        "hex": "019981150000"
+      }
+    },
+    {
+      "note": "the last instant the time holds: seconds all ones and 999 ms, a known time in 2162, never the unknown time",
+      "layout": "bare.v1",
+      "epoch": 1767225600,
+      "at": 6062192895999,
+      "utc": "2162-02-07T06:28:15.999Z",
+      "expect": {
+        "time": {
+          "s": 4294967295,
+          "ms": 999
+        },
+        "bits": "111111111111111111111111111111111111100111",
+        "pad": 6,
+        "hex": "fffffffff9c0"
+      }
+    },
+    {
+      "note": "one millisecond before the epoch: no code (core §7.6), so the owner writes the unknown time (freshness.v2 §2.4)",
+      "layout": "bare.v1",
+      "epoch": 1767225600,
+      "at": 1767225599999,
+      "utc": "2025-12-31T23:59:59.999Z",
+      "expect": {
+        "time": null,
+        "bits": "111111111111111111111111111111111111111111",
+        "pad": 6,
+        "hex": "ffffffffffc0"
+      }
+    },
+    {
+      "note": "the Unix epoch, as a clock with no RTC reads at boot: before the deployment epoch, so the unknown time",
+      "layout": "bare.v1",
+      "epoch": 1767225600,
+      "at": 0,
+      "utc": "1970-01-01T00:00:00.000Z",
+      "expect": {
+        "time": null,
+        "bits": "111111111111111111111111111111111111111111",
+        "pad": 6,
+        "hex": "ffffffffffc0"
+      }
+    },
+    {
+      "note": "2^32 seconds after the epoch: no code, so the unknown time",
+      "layout": "bare.v1",
+      "epoch": 1767225600,
+      "at": 6062192896000,
+      "utc": "2162-02-07T06:28:16.000Z",
+      "expect": {
+        "time": null,
+        "bits": "111111111111111111111111111111111111111111",
+        "pad": 6,
+        "hex": "ffffffffffc0"
+      }
+    },
+    {
+      "note": "the clock guard holds: the time unknown, whatever the epoch (freshness.v2 §2.10)",
+      "layout": "bare.v1",
+      "epoch": 1767225600,
+      "at": null,
+      "expect": {
+        "time": null,
+        "bits": "111111111111111111111111111111111111111111",
+        "pad": 6,
+        "hex": "ffffffffffc0"
+      }
+    },
+    {
+      "note": "#1080's instant with no catalog: no epoch given, so E = 0 and the 32 bits are Unix seconds",
+      "layout": "bare.v1",
+      "at": 1794062759123,
+      "utc": "2026-11-07T14:45:59.123Z",
+      "expect": {
+        "time": {
+          "s": 1794062759,
+          "ms": 123
+        },
+        "bits": "011010101110111100111001101001110001111011",
+        "pad": 6,
+        "hex": "6aef39a71ec0"
+      }
+    },
+    {
+      "note": "no catalog, 2^32 seconds after the Unix epoch (2106): no code, so the unknown time",
+      "layout": "bare.v1",
+      "at": 4294967296000,
+      "utc": "2106-02-07T06:28:16.000Z",
+      "expect": {
+        "time": null,
+        "bits": "111111111111111111111111111111111111111111",
+        "pad": 6,
+        "hex": "ffffffffffc0"
+      }
+    },
+    {
+      "note": "the epoch 0 given: the Unix epoch itself, zero",
+      "layout": "bare.v1",
+      "epoch": 0,
+      "at": 0,
+      "utc": "1970-01-01T00:00:00.000Z",
+      "expect": {
+        "time": {
+          "s": 0,
+          "ms": 0
+        },
+        "bits": "000000000000000000000000000000000000000000",
+        "pad": 6,
+        "hex": "000000000000"
+      }
+    }
+  ],
+  "reads": [
+    {
+      "note": "written: the epoch itself: zero seconds and zero milliseconds",
+      "layout": "bare.v1",
+      "epoch": 1767225600,
+      "hex": "000000000000",
+      "expect": {
+        "at": 1767225600000,
+        "utc": "2026-01-01T00:00:00.000Z"
+      }
+    },
+    {
+      "note": "written: one second and a half after the epoch",
+      "layout": "bare.v1",
+      "epoch": 1767225600,
+      "hex": "000000017d00",
+      "expect": {
+        "at": 1767225601500,
+        "utc": "2026-01-01T00:00:01.500Z"
+      }
+    },
+    {
+      "note": "written: the epoch's first second, its last millisecond",
+      "layout": "bare.v1",
+      "epoch": 1767225600,
+      "hex": "00000000f9c0",
+      "expect": {
+        "at": 1767225600999,
+        "utc": "2026-01-01T00:00:00.999Z"
+      }
+    },
+    {
+      "note": "written: #1080's heartbeat: 1794062759 s and 123 ms after the Unix epoch, 26837159 s after zenoh-modem's",
+      "layout": "bare.v1",
+      "epoch": 1767225600,
+      "hex": "019980a71ec0",
+      "expect": {
+        "at": 1794062759123,
+        "utc": "2026-11-07T14:45:59.123Z"
+      }
+    },
+    {
+      "note": "written: 110 s later, the instant #1080 read in the same owner's frame, t = 26837269: a heartbeat then writes the same seconds",
+      "layout": "bare.v1",
+      "epoch": 1767225600,
+      "hex": "019981150000",
+      "expect": {
+        "at": 1794062869000,
+        "utc": "2026-11-07T14:47:49.000Z"
+      }
+    },
+    {
+      "note": "written: the last instant the time holds: seconds all ones and 999 ms, a known time in 2162, never the unknown time",
+      "layout": "bare.v1",
+      "epoch": 1767225600,
+      "hex": "fffffffff9c0",
+      "expect": {
+        "at": 6062192895999,
+        "utc": "2162-02-07T06:28:15.999Z"
+      }
+    },
+    {
+      "note": "written: #1080's instant with no catalog: no epoch given, so E = 0 and the 32 bits are Unix seconds",
+      "layout": "bare.v1",
+      "hex": "6aef39a71ec0",
+      "expect": {
+        "at": 1794062759123,
+        "utc": "2026-11-07T14:45:59.123Z"
+      }
+    },
+    {
+      "note": "written: the epoch 0 given: the Unix epoch itself, zero",
+      "layout": "bare.v1",
+      "epoch": 0,
+      "hex": "000000000000",
+      "expect": {
+        "at": 0,
+        "utc": "1970-01-01T00:00:00.000Z"
+      }
+    },
+    {
+      "note": "the unknown time: all 42 bits set, no instant whatever the epoch",
+      "layout": "bare.v1",
+      "epoch": 1767225600,
+      "hex": "ffffffffffc0",
+      "expect": {
+        "at": null
+      }
+    },
+    {
+      "note": "seconds all ones and 1000 ms: unused",
+      "layout": "bare.v1",
+      "epoch": 1767225600,
+      "hex": "fffffffffa00",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "seconds all ones and 1022 ms: not the unknown time, unused",
+      "layout": "bare.v1",
+      "epoch": 1767225600,
+      "hex": "ffffffffff80",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "#1080's bytes, Unix seconds, read under zenoh-modem's epoch: a valid time, 2082, which no reader can tell from a right one",
+      "layout": "bare.v1",
+      "epoch": 1767225600,
+      "hex": "6aef39a71ec0",
+      "expect": {
+        "at": 3561288359123,
+        "utc": "2082-11-07T14:45:59.123Z"
+      }
+    },
+    {
+      "note": "zero with no catalog: the Unix epoch",
+      "layout": "bare.v1",
+      "hex": "000000000000",
+      "expect": {
+        "at": 0,
+        "utc": "1970-01-01T00:00:00.000Z"
+      }
+    }
+  ]
+}
