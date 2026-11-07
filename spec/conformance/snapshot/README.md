@@ -24,8 +24,8 @@ entry carries a confirmation. Under 1,024-byte pages, 24 endpoints take
 4 pages. Under 220-byte pages, one RF SDU each, every endpoint takes a
 page of its own.
 
-**What they cannot reach.** Which key answers which GET, what an owner
-promises with asof and a confirmation, and what a reader concludes from a
-complete snapshot are §4.2's. No rule adopts them at this version, and
-their evidence comes with the owners. These fixtures read one page at a
-time, so assembling pages into a complete snapshot is not among them.
+**What they cannot reach.** Which key answers which GET, and what an owner
+promises with asof and a confirmation, are §4.2's, and their evidence is
+`scenarios/state.md` §14's. These fixtures read one page at a time.
+Assembling pages into a complete snapshot, and what a reader concludes
+from one, are [`seed/snapshot.json`](../seed/snapshot.json)'s.
