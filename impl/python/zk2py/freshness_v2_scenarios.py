@@ -324,6 +324,17 @@ def zget_reading(ep: str, key: str) -> tuple[fr.GetReading, dict[str, Any] | Non
     if not rows:
         return fr.GetReading(None), doc
     row = rows[0]
+    snaps = [] if doc is None else doc.get("snapshots") or []
+    if snaps:
+        # core 0.100: zenctl reads the owner's snapshot, and shows an entry's
+        # confirmation as its time (text 0.7 §5), "last_confirmation"
+        whole = any(x.get("complete") for x in snaps)
+        if row.get("state") == "deleted":
+            return fr.GetReading("delete", snapshot=True, complete=whole), row
+        st = row.get("last_confirmation")
+        return fr.GetReading("put", None, None, None, snapshot=True, complete=whole,
+                             confirmed_ns=None if not st else _rfc3339_ns(st["time"]),
+                             owner_id=None if not st else st.get("clock")), row
     if row.get("state") == "deleted":
         return fr.GetReading("delete"), row
     st = row.get("last_confirmation") or row.get("timestamp")
@@ -706,7 +717,7 @@ def section2(report: Report, pairing: str) -> None:
         else:
             gr, _ = zget_reading(bus.endpoint, ahead_key)
         g_now = time.time_ns()
-        vg = fr.judge_get(fr.Horizon("within", 2), gr.observation(trust, g_now))
+        vg = fr.judge_observation("state", {"freshness.ttl_s": 2}, gr.observation(trust, g_now))
         stop.set()
         report.check(pairing, sec, "step 4: the owner's guard holds (it detects the drift); its puts of status, "
                                    "before and once the guard holds, both go on: neither carries a Zenoh timestamp "
@@ -746,11 +757,16 @@ def section2(report: Report, pairing: str) -> None:
             v4 = _judge_rows(zs2, ahead_key, 2, at4, since2)
             report.check(pairing, sec, "step 4: status of lab/ahead judged fresh 4 s on, from zenctl's rows",
                          v4.verdict == fr.FRESH, f"{v4.pair()}")
-        ahead_ns = None if gr.stamp_ns is None else gr.stamp_ns - g_now
-        report.check(pairing, sec, "step 4: G's reply carries the owner's stamp from the clock ahead, ahead of G's "
-                                   "clock beyond the delta; G judges status unobservable (v1 §2.6's band)",
-                     ahead_ns is not None and ahead_ns > fr.DEFAULT_DELTA_NS and vg.verdict == fr.UNOBSERVABLE,
-                     f"stamp {gr.stamp}, {None if ahead_ns is None else ahead_ns / NS} s ahead of G, {vg.pair()}")
+        # core 0.100, text 0.7: "G's answer is a snapshot of status alone, its
+        # entry vouched for at the snapshot's time. That time is from the
+        # clock ahead, ahead of G's clock beyond the delta."
+        ahead_ns = None if gr.confirmed_ns is None else gr.confirmed_ns - g_now
+        report.check(pairing, sec, "step 4: G's answer is a snapshot of status alone, its entry vouched for at the "
+                                   "snapshot's time, from the clock ahead, ahead of G's clock beyond the delta; G "
+                                   "judges status unobservable (v1 §2.6's band)",
+                     gr.snapshot and ahead_ns is not None and ahead_ns > fr.DEFAULT_DELTA_NS
+                     and vg.verdict == fr.UNOBSERVABLE,
+                     f"snapshot {gr.snapshot}, {None if ahead_ns is None else ahead_ns / NS} s ahead of G, {vg.pair()}")
         # Step 5.
         o.close()
         t5 = time.monotonic_ns()
@@ -903,7 +919,10 @@ def step6(report: Report, pairing: str, bus: Bus, impl: str, reader: str, beat: 
 # -- §3 ---------------------------------------------------------------------------------------
 
 def section3(report: Report, pairing: str) -> None:
-    from .live import _zid_value
+    """§3 at core 0.100 and text 0.7: G's answer a snapshot, its entry's
+    confirmation 1 or 2 aged by §2.6 (no epoch: the owner is given no
+    catalog, so 0, Unix seconds)."""
+    from . import live
 
     sec = "§3 a GET reader's age"
     owner_impl, reader = pairing.split("-")
@@ -912,21 +931,16 @@ def section3(report: Report, pairing: str) -> None:
     trust = fr.ClockTrust(fr.DEFAULT_DELTA_NS, word=True)
     h = fr.Horizon("within", 2)
     try:
+        hb = subscriber(bus.s_session, ["state/status", "state/peer/{peer}"])
+        bus.closers.append(hb)
         if reader == "py":
-            s = subscriber(bus.s_session, ["state/status"])
-            bus.closers.append(s)
+            s = hb
         else:
             zs = ZWatch(bus.endpoint, "lab/beacon", IFACE, "state/status", 14)
             time.sleep(1.0)
         o = make_owner(impl, bus.endpoint)
         bus.closers.append(o)
-        if impl == "rust":
-            from . import live
-
-            d = live.get_descriptor(bus.g_session, o.instance_key)
-            o._zid = json.loads(d[0].payload).get("meta", {}).get("zid") if d and d[0].ok else None
         time.sleep(0.3)
-        t_put_utc = time.time_ns()
         o.put("status", b"up")
         time.sleep(0.5)
         time.sleep(2.5)
@@ -936,43 +950,77 @@ def section3(report: Report, pairing: str) -> None:
                 return fr.get_reading(bus.g_session, STATUS), None
             return zget_reading(bus.endpoint, STATUS)
 
+        raw = live.get_state(bus.g_session, STATUS, timeout=1.0)
         r1, row1 = g()
         now = time.time_ns()
         obs = r1.observation(trust, now)
-        v1 = fr.judge_get(h, obs)
-        age = None if r1.stamp_ns is None else (now - r1.stamp_ns) / NS
-        report.check(pairing, sec, "step 1: G's reply carries a Zenoh timestamp of the owner's zid, later than the "
-                                   "put and within 1 s plus jitter of G's clock; G judges status fresh 3 s after "
-                                   "its put",
-                     r1.stamp_id is not None and _zid_value(r1.stamp_id) == _zid_value(o.zid())
-                     and r1.stamp_ns is not None and r1.stamp_ns > t_put_utc and age is not None
-                     and age <= 1.0 + JITTER_S and v1.verdict == fr.FRESH,
-                     f"stamp {r1.stamp} (owner zid {o.zid()}), aged {age} s, {v1.pair()}")
+        v1 = fr.judge_observation("state", {"freshness.ttl_s": 2}, obs)
+        age = None if r1.confirmed_ns is None else (now - r1.confirmed_ns) / NS
+        heard = [x for x in raw.snapshots if x.key == STATUS]
+        entry = heard[0].pages[0]["live"] if len(heard) == 1 and heard[0].done else []
+        report.check(pairing, sec, "step 1: G's answer is a snapshot of status alone, with no Zenoh timestamp; its "
+                                   "entry has confirmation 1, vouched for at the snapshot's time, within jitter of G's "
+                                   "clock; G judges status fresh 3 s after its put",
+                     [(k, w, t) for k, w, t in raw.arrivals] == [(STATUS, "page", None)]
+                     and [(e["id"], e["confirmation"]) for e in entry] == [("", "time")] and r1.snapshot
+                     and age is not None and abs(age) <= 1.0 + JITTER_S and v1.verdict == fr.FRESH,
+                     f"{raw.arrivals}; {entry}; aged {age} s, {v1.pair()}" + (f"; zenctl {row1}" if row1 else ""))
         # The put reaches S stamped by R1's clock, if at all.
         if reader == "py":
             ids = {x[4].split("/", 1)[1] if x[4] else None for x in s.samples if x[1] == STATUS}
         else:
             rows = [r for _, r in zs.samples(STATUS)]
             ids = {(r.get("timestamp") or {}).get("clock") for r in rows}
-        if True:
-            report.check(pairing, sec, "the put reaches S stamped by R1's clock, if at all: the owner set no Zenoh "
-                                       "timestamp (core §4.3's table)",
-                         all(i is None or _zid_value(i) == _zid_value(bus.r1_zid) for i in ids),
-                         f"clocks {ids}, R1 {bus.r1_zid}")
+        from .live import _zid_value
+
+        report.check(pairing, sec, "the put reaches S stamped by R1's clock, if at all: the owner set no Zenoh "
+                                   "timestamp (core §4.3's table)",
+                     all(i is None or _zid_value(i) == _zid_value(bus.r1_zid) for i in ids),
+                     f"clocks {ids}, R1 {bus.r1_zid}")
         # Step 2.
         o.vouch("status", False)
-        t2 = time.monotonic_ns()
-        last_before = r1.stamp_ns
+        cleared = time.monotonic_ns()
         time.sleep(3.5)
-        r2, _ = g()
+        beats = [x for x in hb.heartbeats if x.arrival_ns < cleared and x.value is not None
+                 and x.value["sections"].get("state/status", {}).get("vouched") is True]
+        last_t = beats[-1].value["time"] if beats else None
+        raw2 = live.get_state(bus.g_session, STATUS, timeout=1.0)
+        r2, row2 = g()
         now = time.time_ns()
-        v2 = fr.judge_get(h, r2.observation(trust, now))
-        report.check(pairing, sec, "step 2: the reply's stamp is the last confirmation before the bit cleared; G "
-                                   "judges status stale, its age above ttl + δ",
-                     r2.stamp_ns is not None and last_before is not None and r2.stamp_ns >= last_before
-                     and (now - r2.stamp_ns) / NS > 2.5 and v2.verdict == fr.STALE,
-                     f"stamp {r2.stamp}, aged {None if r2.stamp_ns is None else (now - r2.stamp_ns) / NS} s, "
-                     f"{v2.pair()}")
+        v2 = fr.judge_observation("state", {"freshness.ttl_s": 2}, r2.observation(trust, now))
+        h2 = [x for x in raw2.snapshots if x.key == STATUS]
+        e2 = h2[0].pages[0]["live"] if len(h2) == 1 and h2[0].done else []
+        report.check(pairing, sec, "step 2: the entry has confirmation 2, its conf the last confirmation before the bit "
+                                   "cleared, to the millisecond the time H read in the last heartbeat that vouched for "
+                                   "status; G judges status stale, its age above ttl + δ",
+                     [(e["id"], e["confirmation"], e.get("conf")) for e in e2] == [("", "conf", last_t)]
+                     and last_t is not None and r2.confirmed_ns is not None
+                     and (now - r2.confirmed_ns) / NS > 2.5 and v2.verdict == fr.STALE,
+                     f"{e2}; H's last vouching heartbeat {last_t}; aged "
+                     f"{None if r2.confirmed_ns is None else (now - r2.confirmed_ns) / NS} s, {v2.pair()}"
+                     + (f"; zenctl {row2}" if row2 else ""))
+        # Step 3: §1's steps 1 and 2, peer/a vouched for, peer/b not.
+        o.put("peer/a", b"1")
+        o.put("peer/b", b"1")
+        time.sleep(1.5)
+        o.vouch("peer/b", False)
+        time.sleep(1.5)
+        peer = f"{BASE}/state/peer"
+        beats = [x for x in hb.heartbeats if x.value is not None]
+        st3 = live.get_state(bus.g_session, f"{peer}/**", timeout=1.0)
+        h3 = [x for x in st3.snapshots if x.key == peer]
+        got = {} if len(h3) != 1 or not h3[0].done else {
+            e["id"]: (e["confirmation"], e.get("conf")) for p_ in h3[0].pages.values() for e in p_["live"]}
+        last_b = None
+        for x in beats:
+            sec_ = x.value["sections"].get("state/peer/{peer}")
+            if isinstance(sec_, dict) and sec_.get("live") == 2 and 1 in (sec_.get("vouched") or []):
+                last_b = x.value["time"]
+        report.check(pairing, sec, "step 3: G's collection read draws one snapshot of peer/{peer}: a with "
+                                   "confirmation 1, and b with confirmation 2 and its last confirmation",
+                     len(h3) == 1 and got.get("a") == ("time", None) and got.get("b", ("",))[0] == "conf"
+                     and got["b"][1] is not None and (last_b is None or got["b"][1] == last_b),
+                     f"{[(x.key, x.header['coll']) for x in st3.snapshots]}; {got}; H's last for b {last_b}")
         if reader != "py":
             zs.wait()
     finally:

@@ -1415,7 +1415,7 @@ def section9(report: Report, mode: Any, contract: Any, tool: Path | None = None)
         R = bus.R
         R.subscribe(TOTAL)
         time.sleep(0.2)
-        replies = R.session.get(TOTAL, target=zenoh.QueryTarget.ALL, consolidation=zenoh.ConsolidationMode.LATEST,
+        replies = R.session.get(TOTAL, target=zenoh.QueryTarget.ALL, consolidation=zenoh.ConsolidationMode.NONE,
                                 timeout=2.0)
         time.sleep(0.3)
         o.put("total", 12)
@@ -1650,7 +1650,7 @@ def tool_opening(report: Report, contract: Any, tool: Path, tries: int = 20) -> 
         from . import zk2c
 
         held = [json.loads(zk2c.record_of(r.ok) or b"null") for r in bus.r_session.get(
-            TOTAL, target=zenoh.QueryTarget.ALL, consolidation=zenoh.ConsolidationMode.LATEST, timeout=2.0)
+            TOTAL, target=zenoh.QueryTarget.ALL, consolidation=zenoh.ConsolidationMode.NONE, timeout=2.0)
             if r.ok is not None]
         report.check(sec, "before the first case: the owner holds total's value, which its S4 GET answers (core S2)",
                      held == [1], f"the GET's replies {held}")

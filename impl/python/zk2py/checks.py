@@ -76,11 +76,19 @@ class HeldQueries:
                 return
         query.drop()
 
-    def release(self) -> None:
+    def release(self, replies: list[tuple[str, bytes]] | None = None) -> None:
+        """End each held query, first answering it with ``replies``, each a
+        key and a payload under ``zenoh/bytes``: an owner's answer the test
+        held (state.md §7 step 5, core 0.100), sent as it was made."""
         with self.lock:
             self.done, queries, self.queries = True, self.queries, []
         self.timer.cancel()
         for q in queries:
+            for key, payload in replies or []:
+                try:
+                    q.reply(key, payload, encoding="zenoh/bytes")
+                except Exception:  # noqa: BLE001 - a query its GET has given up on
+                    pass
             q.drop()
 
 

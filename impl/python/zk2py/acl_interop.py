@@ -599,7 +599,6 @@ def _allow_full(report, repo, block, workdir) -> None:
 
 
 def _allow_rules_only(report, repo, block, workdir) -> None:
-
     run = "acl: the deny posture's allow rules, with default_permission allow (security.md §2)"
     w = World(repo, block, workdir)
     try:

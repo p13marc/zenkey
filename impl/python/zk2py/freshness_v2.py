@@ -162,7 +162,7 @@ class View:
         return True
 
     def read(self, resource: str, asked: int, at: int, live: Iterable[tuple[str, zk2c.InBand | None]],
-             deleted: Iterable[tuple[str, zk2c.InBand | None]] = ()) -> None:
+             deleted: Iterable[tuple[str, zk2c.InBand | None]] = (), replace: bool = True) -> None:
         """A complete read's answer of ``resource``, asked at ``asked`` and
         arrived at ``at``: "The answer MUST then replace its view of the
         collection", "merged with what the subscriber heard of the
@@ -170,7 +170,11 @@ class View:
         Across two runs the answer's value stands." "A member the answer left
         out leaves the view". A ``reply_del`` is a deletion with its stamp.
         Every member of the collection loses its heartbeat confirmation, and
-        the collection is no longer due a read."""
+        the collection is no longer due a read.
+
+        ``replace`` False (text 0.7): the answer's snapshot is incomplete, so
+        "An incomplete one removes nothing": the members it lists merge, and
+        none leaves the view."""
         c = self.layout.collection(resource)
         answer: dict[str, tuple[zk2c.InBand | None, bool]] = {}
         for k, st in live:
@@ -183,6 +187,9 @@ class View:
         merged: dict[str, Member] = {}
         for k in set(mine) | set(answer):
             heard = self.members.get(k)
+            if not replace and heard is not None and k not in answer:
+                merged[k] = heard
+                continue
             heard = heard if heard is not None and heard.at >= asked else None
             got = answer.get(k)
             if heard is None:
@@ -340,6 +347,11 @@ class Subscriber:
         self.session = session
         self.address = address
         self.layout = heartbeat.layout_of(canonical, fingerprint)
+        #: core §7.5: each collection's index "among the interface's
+        #: resources of the reply key's kind token, in the canonical form's
+        #: order", by ``<token>/<template>``
+        self.coll_index = {f"{t}/{r['template']}": i for t in ("state", "@state")
+                           for i, r in enumerate(x for x in canonical["resources"] if x["token"] == t)}
         self.follows = list(follows) if follows is not None else [c.resource for c in self.layout.collections]
         self.view = View(self.layout, self.follows, address)
         self.reread_enabled = reread
@@ -357,11 +369,20 @@ class Subscriber:
         #: confirmed it, on its monotonic clock
         self.last_conf: dict[str, int] = {}
         self._reading: set[str] = set()
+        #: a read whose snapshot came incomplete, (collection, arrival): it
+        #: removed nothing (§2.5, 0.7)
+        self.incomplete_reads: list[tuple[str, int]] = []
         self.closed = False
         self.declared_ns = time.monotonic_ns()
         prefix = f"zk2/{address}/{self.layout.interface}"
         self.selectors = {c.resource: f"{prefix}/{c.token}/{_selector(c.template)}"
                           for c in self.layout.collections if c.resource in self.follows}
+        #: §2.5 "The re-read" (text 0.7): "The GET is a collection read: the
+        #: collection's snapshot key followed by ``/**`` (core §4.2)"; a
+        #: template whose first chunk is a parameter has no snapshot key, and
+        #: is read by its member selector
+        self.read_selectors = {c.resource: _collection_read(prefix, c.token, c.template) or self.selectors[c.resource]
+                               for c in self.layout.collections if c.resource in self.follows}
         self.hb_key = heartbeat.heartbeat_key(*address.split("/"), self.layout.interface)
         self.subs = [session.declare_subscriber(sel, zenoh.handlers.Callback(self._state))
                      for sel in self.selectors.values()]
@@ -439,15 +460,24 @@ class Subscriber:
         try:
             if self.closed:
                 return
-            st = live.get_state(self.session, self.selectors[resource], timeout=self.get_timeout)
+            st = live.get_state(self.session, self.read_selectors[resource], timeout=self.get_timeout)
             arrived = time.monotonic_ns()
-            if not st.replies and not st.complete:
+            if st.silent:
                 return
             ok = [(r.key, r.inband) for r in st.replies if not r.deleted and r.refusal is None]
             gone = [(r.key, r.inband) for r in st.replies if r.deleted]
+            # §2.5 (0.7): "A member a complete snapshot left out leaves the
+            # view, by core §4.2's omission rule. An incomplete one removes
+            # nothing: the subscriber reads again."
+            key = _collection_key(f"zk2/{self.address}/{self.layout.interface}", c.token, c.template)
+            whole = key is not None and any(
+                h.done and h.key == key and h.header["coll"] == self.coll_index.get(c.resource) for h in st.snapshots)
             with self.lock:
-                self.view.read(c.resource, asked, arrived, ok, gone)
+                self.view.read(c.resource, asked, arrived, ok, gone, replace=whole)
                 (self.seeds if seed else self.reads).append((c.resource, asked, arrived, len(ok)))
+            if not whole and key is not None and any(h.key == key and not h.done for h in st.snapshots):
+                with self.lock:
+                    self.incomplete_reads.append((c.resource, arrived))
         except Exception:  # noqa: BLE001 - a read that fails replaces nothing
             return
         finally:
@@ -492,6 +522,23 @@ class Subscriber:
                 s.undeclare()
             except Exception:  # noqa: BLE001 - closing anyway
                 pass
+
+
+def _collection_key(prefix: str, token: str, template: str) -> str | None:
+    """Core §4.2: a collection's snapshot key, "its resource's key up to the
+    template's first parameter", or None where its first chunk is one."""
+    lit: list[str] = []
+    for chunk in template.split("/"):
+        if chunk.startswith("{"):
+            break
+        lit.append(chunk)
+    return f"{prefix}/{token}/{'/'.join(lit)}" if lit else None
+
+
+def _collection_read(prefix: str, token: str, template: str) -> str | None:
+    """Core §4.2: a collection read, "the snapshot key followed by ``/**``"."""
+    key = _collection_key(prefix, token, template)
+    return None if key is None else f"{key}/**"
 
 
 def _selector(template: str) -> str:

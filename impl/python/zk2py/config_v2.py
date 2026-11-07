@@ -947,13 +947,17 @@ def check_persist(req: dict[str, Any], f: Facts) -> Refusal | None:
         last_token=f.last_token, last_sensitive=f.last_sensitive, persist=f.persist)))  # type: ignore[arg-type]
 
 
-def check_request(layout: Layout, op: str, group: str | None, payload: bytes, f: Facts
-                  ) -> tuple[dict[str, Any] | None, Refusal | None]:
+def check_request(layout: Layout, op: str, group: str | None, payload: bytes, f: Facts,
+                  encoding: str | None = None) -> tuple[dict[str, Any] | None, Refusal | None]:
     """One request before any act (``validation.json``): persist without a
-    layer first, then the parse, then the rows. Returns (the request's JSON
+    layer first, then a query under another ``Encoding`` (text 0.4, F-501's
+    answer: "invalid_request, its bytes never read", core §5.1 "The
+    request"), then the parse, then the rows. Returns (the request's JSON
     reading or None, the refusal or None)."""
     if op == "persist" and not f.persist:
         return None, Refusal("unavailable", cause="config")
+    if encoding is not None and encoding != v1.FORM_ENCODING:
+        return None, Refusal("invalid_request")
     try:
         req = parse_request(layout, op, group, payload)
     except (zk2c.Refused, packed.Refused):

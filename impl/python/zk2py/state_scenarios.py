@@ -395,11 +395,13 @@ def section3(report: Report, run: Run) -> None:
 
         cap = Capture(bus.consumer)
         got = live.get_state(cap, bus.plan, timeout=2.0)  # type: ignore[arg-type]
-        report.check(sec, "expected 2: the consumer's query carries target All and consolidation Latest, set "
-                          "explicitly, and the owner alone answers it: its one reply carries the owner's stamp, and "
+        # core 0.100: consolidation None; the owner's answer is a member
+        # read's snapshot, its one entry the plan with the owner's stamp.
+        report.check(sec, "expected 2: the consumer's query carries target All and consolidation None, set "
+                          "explicitly, and the owner alone answers it: its one entry carries the owner's stamp, and "
                           "every reply's replier id is the owner's session",
                      cap.asked == [{"selector": bus.plan, "target": zenoh.QueryTarget.ALL,
-                                    "consolidation": zenoh.ConsolidationMode.LATEST}]
+                                    "consolidation": zenoh.ConsolidationMode.NONE}]
                      and bus.stamped(got.replies)
                      and [str(x).lower().lstrip("0") for x in cap.repliers] == [bus.owner_zid.lower().lstrip("0")]
                      and not got.errors,

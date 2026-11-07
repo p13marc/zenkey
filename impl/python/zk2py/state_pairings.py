@@ -326,7 +326,7 @@ def section1(report: Report, pairing: str) -> None:
     (on)."""
     import zenoh
 
-    from . import live
+    from . import live, snapshot
 
     impl = "rust" if pairing == "rust-py" else "zk2py"
     for ts_on, rname in ((False, "R1"), (True, "R2")):
@@ -385,12 +385,22 @@ def section1(report: Report, pairing: str) -> None:
                              and [x["inband"]["seq"] for x in wa + wc] == sorted({x["inband"]["seq"] for x in wa + wc})
                              and len(wa + wc) == 5,
                              f"run {run}; {[(x['kind'], x.get('inband')) for x in wa + wc]}")
-                want = owner.o._held[f"{owner.base}/state/plans/c"].wire  # noqa: SLF001 - the owner's own bytes
                 v2 = [r_ for r_ in tap.of("/state/plans/a") if not r_["delete"]]
-                report.check(sec, "expected 2 (zenctl get --raw): the GET after v2 returns v2's bytes, its envelope "
-                                  "included",
-                             bool(v2) and v2[-1]["payload"].hex() in (raw_get or "").replace(" ", ""),
-                             f"want {v2[-1]['payload'].hex() if v2 else None} in {raw_get!r}"[:400])
+                # core 0.100: zenctl's raw GET shows the owner's answer, a
+                # snapshot's one page on the plan's own key.
+                try:
+                    rows_ = [x for x in json.loads(raw_get or "{}").get("rows", []) if x.get("row") == "answer"]
+                    pages = [(x["key"], snapshot.read_page(bytes.fromhex(x["hex"].replace(" ", "")))) for x in rows_]
+                except Exception as e_:  # noqa: BLE001 - a reading that fails is the check's detail
+                    pages = [("refused", {"error": str(e_)})]
+                pg = pages[0][1] if len(pages) == 1 else {}
+                report.check(sec, "expected 2 (zenctl get --raw): the GET after v2 is a member read, its answer one "
+                                  "page on the plan's own key whose one entry has the empty id, v2's seq and v2's "
+                                  "record",
+                             bool(v2) and len(pages) == 1 and pages[0][0] == f"{owner.base}/state/plans/a"
+                             and [(x["id"], x["seq"], x["record"]) for x in pg.get("live", [])]
+                             == [("", v2[-1]["read"].stamp.seq, v2[-1]["read"].record.hex())] and not pg.get("tombs"),
+                             f"{pages}; v2 {[str(x['read'].stamp) for x in v2]}"[:600])
                 er = echo.rows()
                 plan_ts = [t for k, t in er if "/state/plans/" in k]
                 stat_ts = [t for k, t in er if k.endswith("/state/status")]
@@ -420,25 +430,33 @@ def section1(report: Report, pairing: str) -> None:
                          and all(x["encoding"] == "zenoh/bytes" for x in a + cc)
                          and [r_.stamp.seq for r_ in reads] == sorted({r_.stamp.seq for r_ in reads}),
                          f"run {run}; {[(x['delete'], str(x['read'].stamp), x['read'].refusal) for x in a + cc]}")
-            rep = [x for x in st.replies if x.key.endswith("/plans/a")]
+            rep = [x for x in st.arrivals if x[0].endswith("/plans/a")]
             v2 = [x for x in a if not x["delete"]][-1:] if a else []
-            report.check(sec, "expected 2: the GET after v2 returns v2's bytes, its envelope included",
-                         len(rep) == 1 and bool(v2) and rep[0].raw == v2[0]["payload"]
-                         and rep[0].encoding == "zenoh/bytes",
-                         f"{[(x.raw.hex(), x.encoding) for x in rep]} against {[x['payload'].hex() for x in v2]}")
+            # core 0.100: a member read, answered by "a snapshot of the plan
+            # alone, on the plan's own key: one page, whose one entry has the
+            # empty id, v2's seq and v2's record".
+            heard = [h for h in st.snapshots if h.key == f"{owner.base}/state/plans/a"]
+            pg = heard[0].pages.get(0) if len(heard) == 1 else None
+            report.check(sec, "expected 2: the GET after v2 is a member read: a snapshot of the plan alone on its own "
+                              "key, one page, whose one entry has the empty id, v2's seq and v2's record",
+                         len(rep) == 1 and rep[0][1] == "page" and pg is not None and sorted(heard[0].pages) == [0]
+                         and heard[0].done and not pg["tombs"] and len(pg["live"]) == 1 and pg["live"][0]["id"] == ""
+                         and bool(v2) and pg["live"][0]["seq"] == v2[0]["read"].stamp.seq
+                         and bytes.fromhex(pg["live"][0]["record"]) == v2[0]["read"].record,
+                         f"{rep}; {pg}; v2 {[str(x['read'].stamp) for x in v2]}")
             if ts_on:
                 ok3 = (all(_same_zid(_zid_of(x["ts"]), rzid) for x in a + cc if not x["delete"])
                        and all(x["ts"] is None for x in a + cc if x["delete"])
-                       and all(x.stamp is None for x in rep)
+                       and all(x[2] is None for x in rep)
                        and len(ctl) == 1 and _same_zid(_zid_of(ctl[0]["ts"]), rzid))
             else:
-                ok3 = (all(x["ts"] is None for x in a + cc) and all(x.stamp is None for x in rep)
+                ok3 = (all(x["ts"] is None for x in a + cc) and all(x[2] is None for x in rep)
                        and len(ctl) == 1 and ctl[0]["ts"] is None)
             report.check(sec, "expected 3: " + ("each put with R2's zid, its delete and its reply with none; the "
                                                 "control's put with R2's zid" if ts_on else
                                                 "no put, delete or reply of the plans carries a Zenoh timestamp; "
                                                 "nor does the control's put"),
-                         ok3, f"router {rzid}; puts {[x['ts'] for x in a + cc]}; reply {[x.stamp for x in rep]}; "
+                         ok3, f"router {rzid}; puts {[x['ts'] for x in a + cc]}; reply {[x[2] for x in rep]}; "
                               f"control {[x['ts'] for x in ctl]}")
             report.check(sec, "expected 4: v4's seq is v3's plus 1",
                          len(cc) == 2 and cc[1]["read"].stamp.seq == cc[0]["read"].stamp.seq + 1,
@@ -503,19 +521,42 @@ def section2(report: Report, pairing: str) -> None:
             code, lines = consume_state(ep, owner.address, "state/plans/{vehicle}")
             report.note(sec, f"consume over plans/{{vehicle}} prints one reply: {lines}")
         else:
+            # core 0.100: plans/b and plans/* are member reads, plans/** a
+            # collection read.
+            d = dele[0]["read"].stamp if dele else None
+            pa = puta[-1]["read"] if puta else None
+
+            def pages_on(st_: Any, key: str) -> list[dict[str, Any]]:
+                hs = [h for h in st_.snapshots if h.key == key]
+                return [] if len(hs) != 1 or not hs[0].done else [hs[0].pages[i] for i in sorted(hs[0].pages)]
+
             one = live.get_state(tool, f"{owner.base}/state/plans/b", timeout=5.0)
-            report.check(sec, "for plans/b: a reply_del whose attachment is the delete's envelope",
-                         len(one.replies) == 1 and one.replies[0].deleted and bool(dele)
-                         and one.replies[0].attachment == dele[0]["attachment"]
-                         and one.replies[0].inband is not None,
-                         f"{[(x.deleted, x.attachment and x.attachment.hex()) for x in one.replies]}; the delete's "
-                         f"{dele[0]['attachment'].hex() if dele else None}")
-            coll = live.get_state(tool, f"{owner.base}/state/plans/*", timeout=5.0)
-            got = {x.key.rsplit("/", 1)[1]: x for x in coll.replies}
-            report.check(sec, "for plans/*: plans/a with the bytes the owner put, and a reply_del for plans/b",
-                         set(got) == {"a", "b"} and not got["a"].deleted and bool(puta)
-                         and got["a"].raw == puta[-1]["payload"] and got["b"].deleted,
-                         f"{[(k, x.deleted, x.raw.hex()) for k, x in got.items()]}")
+            pb = pages_on(one, f"{owner.base}/state/plans/b")
+            report.check(sec, "for plans/b, a member read: a snapshot on …/plans/b whose one entry is a tombstone, the "
+                              "empty id with the delete's run and seq",
+                         len(pb) == 1 and not pb[0]["live"] and len(pb[0]["tombs"]) == 1 and d is not None
+                         and pb[0]["tombs"][0]["id"] == ""
+                         and (pb[0]["tombs"][0]["run"] or pb[0]["run"]) == d.run and pb[0]["tombs"][0]["seq"] == d.seq,
+                         f"{pb}; the delete's {d}")
+            star = live.get_state(tool, f"{owner.base}/state/plans/*", timeout=5.0)
+            pa_ = pages_on(star, f"{owner.base}/state/plans/a")
+            pb_ = pages_on(star, f"{owner.base}/state/plans/b")
+            report.check(sec, "for plans/*, a member read: a snapshot of each member on its own key, a's its put's "
+                              "record and stamp, b's its tombstone",
+                         len(star.snapshots) == 2 and len(pa_) == 1 and len(pb_) == 1 and pa is not None
+                         and [(x["id"], x["seq"], x["record"]) for x in pa_[0]["live"]]
+                         == [("", pa.stamp.seq, pa.record.hex())]
+                         and [(x["id"], x["seq"]) for x in pb_[0]["tombs"]] == [("", d.seq if d else None)],
+                         f"{[(h.key, sorted(h.pages)) for h in star.snapshots]}")
+            coll = live.get_state(tool, f"{owner.base}/state/plans/**", timeout=5.0)
+            pc = pages_on(coll, f"{owner.base}/state/plans")
+            report.check(sec, "for plans/**, a collection read: one snapshot on …/state/plans, one page, a live with "
+                              "the record the owner put and b a tombstone, each with its stamp",
+                         len(coll.snapshots) == 1 and len(pc) == 1 and pa is not None and d is not None
+                         and [(x["id"], x["seq"], x["record"]) for x in pc[0]["live"]] == [("a", pa.stamp.seq,
+                                                                                            pa.record.hex())]
+                         and [(x["id"], x["seq"]) for x in pc[0]["tombs"]] == [("b", d.seq)],
+                         f"{[(h.key, sorted(h.pages)) for h in coll.snapshots]}; {pc}")
         tap.close()
     except Exception as e:  # noqa: BLE001
         report.check(sec, "the section ran", False, f"{type(e).__name__}: {e}")
@@ -690,6 +731,7 @@ def section7_late(report: Report, pairing: str, impl: str) -> None:
     import zenoh
 
     from . import live
+    from . import seed_snapshot as ss
     from .checks import HeldQueries
 
     base = "zk2/ground/fleet-mgr/zk2py_ground.v1/state/plans"
@@ -706,7 +748,19 @@ def section7_late(report: Report, pairing: str, impl: str) -> None:
             owners.append(o1)
             o1.put("r", b"rev10")
             time.sleep(0.3)
+            answer: list[tuple[str, bytes]] = []
             if inside:
+                # core 0.100: "The test holds the owner's answer, a snapshot
+                # whose entry is rev 10". Under None no other queryable holds
+                # it back (core §4.1), so the test takes the owner's answer
+                # to the joiners' selector first, and plays it from a
+                # session of its own once released, as §10's owner is played.
+                for rep in helper.get(f"{base}/*", target=zenoh.QueryTarget.ALL,
+                                      consolidation=zenoh.ConsolidationMode.NONE, timeout=5.0):
+                    if rep.ok is not None:
+                        answer.append((str(rep.ok.key_expr), rep.ok.payload.to_bytes()))
+                o1.close()
+                owners.remove(o1)
                 held = HeldQueries()
                 q = helper.declare_queryable(f"{base}/*", zenoh.handlers.Callback(held.take), complete=False)
                 time.sleep(0.3)
@@ -720,33 +774,38 @@ def section7_late(report: Report, pairing: str, impl: str) -> None:
                     (j.view().get(f"{base}/r") is not None) for j in joiners)
                 report.check(sec, "both seeded rev 10", ok, str([_show(j.view().get(f"{base}/r")) for j in joiners]))
             else:
-                report.check(sec, "both GETs open on the second queryable",
-                             _wait(lambda: len(held.queries) >= 2, 3.0) and not any(j.seed.ended for j in joiners),
-                             f"held {len(held.queries)}")
-                time.sleep(0.4)  # the owner's replies on their way
-            o1.close()
-            owners.remove(o1)
+                pages = [ss.read_page_of(k, b) for k, b in answer]
+                report.check(sec, "the owner's answer is a snapshot on r's own key whose one entry, the empty id, is "
+                                  "rev 10, and both GETs open on the test's queryable",
+                             len(pages) == 1 and answer[0][0] == f"{base}/r" and [e["id"] for e in pages[0]["live"]]
+                             == [""] and _wait(lambda: len(held.queries) >= 2, 3.0)
+                             and not any(j.seed.ended for j in joiners),
+                             f"answer {[(k, p['live']) for (k, _), p in zip(answer, pages)]}; held {len(held.queries)}")
+            if not inside:
+                o1.close()
+                owners.remove(o1)
             o2 = make_owner(impl, ep)
             owners.append(o2)
             o2.put("r", b"rev11")
             time.sleep(0.5)
             if inside:
                 first = [[(a.via, str(a.inband)) for a in j.applied] for j in joiners]
-                report.check(sec, "rev 11 arrives live inside both seeds, before any reply (Latest delivers at the "
-                                  "GET's end, core §4.1)",
+                report.check(sec, "rev 11 arrives live inside both seeds, before the held answer (under None the "
+                                  "answer arrives when it is released, core §4.1)",
                              all(len(f) == 1 and f[0][0] == "live" for f in first), str(first))
-                held.release()
+                held.release(answer)
                 ended = all(j.wait(12.0) for j in joiners)
                 c = lc.view().get(f"{base}/r")
                 t = lt.view().get(f"{base}/r")
                 lcs = [(a.via, a.outcome) for a in lc.applied]
                 lts = [(a.via, a.outcome) for a in lt.applied]
-                report.check(sec, "the consumer accepts rev 11, then the reply, which carries the old run: it holds "
-                                  "rev 10",
+                report.check(sec, "the consumer accepts rev 11, then the answer's entry, which carries the old run: "
+                                  "it holds rev 10",
                              ended and lcs == [("live", "kept"), ("reply", "kept")] and c is not None
                              and (c.payload == b"rev10" or impl == "rust") and c.via == "reply",
                              f"{_show(c)}; {lcs}")
-                report.check(sec, "the tool keeps the later arrival too: it holds rev 10, the reply that arrived last",
+                report.check(sec, "the tool keeps the later arrival too: it holds rev 10, the entry that arrived "
+                                  "last",
                              lts == [("live", "kept"), ("reply", "kept")] and t is not None and t.via == "reply",
                              f"{_show(t)}; {lts}")
             o2.put("r", b"rev12")
@@ -878,8 +937,10 @@ def section7_ahead(report: Report, pairing: str, impl: str) -> None:
 
 def section10(report: Report, pairing: str) -> None:
     """§10 A late joiner's seed, by seq: the owner holds its answer to the
-    GET (zk2py's owner, ``Owner.state_hold``)."""
-    from . import live
+    GET (zk2py's owner, ``Owner.state_hold``). Core 0.100: the GET is a
+    collection read, its answer a snapshot as of seq 3."""
+    from . import live, snapshot
+    from . import seed_snapshot as ss
     from .state_scenarios import Hold
 
     sec = f"{pairing} §10"
@@ -903,7 +964,11 @@ def section10(report: Report, pairing: str) -> None:
         hold = Hold()
         o.o.state_hold = hold
         time.sleep(0.3)
-        lj = sd.LateJoiner(tool, f"{base}/*", consumer=False, timeout=5.0)
+        # core 0.100: the late joiner subscribes to plans/*, then GETs
+        # plans/**, a collection read; it maps the snapshot's index by the
+        # owner's descriptor's revision (§4.2).
+        lj = sd.LateJoiner(tool, f"{base}/*", consumer=False, timeout=5.0, get_selector=f"{base}/**",
+                           collections=ss.ByDescriptor(o.contracts))
         lj.start()
         if not report.check(sec, "the owner takes the late joiner's GET and holds it", hold.taken.wait(5.0)):
             return
@@ -923,25 +988,37 @@ def section10(report: Report, pairing: str) -> None:
         def e(k: str) -> Any:
             return v.get(f"{base}/{k}")
 
-        report.check(sec, "every seq below one run's: the answer holds a (seq 1), b's reply_del (seq 2) and d (seq 3)",
-                     sorted((k.rsplit("/", 1)[1], str(h.inband)) for k, h in answer)
-                     == sorted([("a", str(t1)), ("b", str(t2)), ("d", str(t3))])
+        snaps = [(k, [snapshot.read_page(b) for b in pages]) for what, k, pages in answer if what == "snapshot"]
+        listed = [] if len(snaps) != 1 else sorted(
+            [(x["id"], "live", x["seq"]) for p_ in snaps[0][1] for x in p_["live"]]
+            + [(x["id"], "tomb", x["seq"]) for p_ in snaps[0][1] for x in p_["tombs"]])
+        report.check(sec, "step 3: the answer is one snapshot on …/state/plans as of seq 3: a (seq 1), the tombstone b "
+                          "(seq 2) and d (seq 3)",
+                     len(snaps) == 1 and snaps[0][0] == base and listed == [("a", "live", t1.seq), ("b", "tomb", t2.seq),
+                                                                              ("d", "live", t3.seq)]
+                     and snaps[0][1][0]["asof"] == t3.seq
                      and [t.seq - t1.seq + 1 for t in (t1, t2, t3, t4, t5)] == [1, 2, 3, 4, 5],
-                     str([(k.rsplit("/", 1)[1], str(h.inband)) for k, h in answer]))
+                     f"{[(k, len(p_)) for k, p_ in snaps]}; {listed}; asof "
+                     f"{snaps[0][1][0]['asof'] if snaps else None}")
         a_reply = [x for x in lj.applied if x.key.endswith("/a") and x.via == "reply"]
-        report.check(sec, "expected 1: a as v2 with seq 4's stamp; the reply (seq 1) older, dropped",
+        report.check(sec, "expected 1: a as v2 with seq 4's stamp; the entry (seq 1) older, dropped by the merge",
                      e("a") is not None and e("a").payload == b"v2" and e("a").inband == t4
                      and [x.outcome for x in a_reply] == ["dropped"], f"{_show(e('a'))}; {[x.outcome for x in a_reply]}")
-        report.check(sec, "expected 2: c as v1 with seq 5's, through the subscription",
-                     e("c") is not None and e("c").inband == t5 and e("c").via == "live", _show(e("c")))
-        report.check(sec, "expected 3: b as a deletion with seq 2's, the reply_del merged as a deletion",
+        report.check(sec, "expected 2: c as v1 with seq 5's, through the subscription; the omission rule keeps it, "
+                          "its seq above asof",
+                     e("c") is not None and e("c").inband == t5 and e("c").via == "live" and not lj.omitted,
+                     f"{_show(e('c'))}; omitted {lj.omitted}")
+        report.check(sec, "expected 3: b as a deletion with seq 2's, the tombstone merged as a deletion",
                      e("b") is not None and e("b").deleted and e("b").inband == t2, _show(e("b")))
         d_all = [x for x in lj.applied if x.key.endswith("/d")]
-        report.check(sec, "expected 4: d as v1 with seq 3's, once: the live put and the reply one stamp",
+        report.check(sec, "expected 4: d as v1 with seq 3's, once: the live put and the entry one stamp",
                      e("d") is not None and e("d").inband == t3 and sorted(x.outcome for x in d_all) == ["kept", "same"],
                      f"{_show(e('d'))}; {[(x.via, x.outcome) for x in d_all]}")
-        report.check(sec, "expected 5: the seed ran to its final reply, with no error reply: complete",
-                     ended and lj.seed.complete and not lj.seed.errors, str(lj.seed.errors))
+        heard = lj.trackers[-1].heard if lj.trackers else []
+        report.check(sec, "expected 5: the snapshot complete at its one page, and the seed ran to its final reply "
+                          "with no error reply",
+                     ended and lj.seed.complete and not lj.seed.errors and len(heard) == 1 and heard[0].done
+                     and sorted(heard[0].pages) == [0], f"{lj.seed.errors}; {[(h.key, sorted(h.pages), h.done) for h in heard]}")
         lj.close()
         o.o.state_hold = None
         oc = PyOwner(ep, service="fleet-mgr-control")
@@ -953,7 +1030,8 @@ def section10(report: Report, pairing: str) -> None:
         holdc = Hold()
         oc.o.state_hold = holdc
         time.sleep(0.3)
-        ljc = sd.LateJoiner(tool, f"{basec}/*", consumer=False, timeout=5.0, order="get-first")
+        ljc = sd.LateJoiner(tool, f"{basec}/*", consumer=False, timeout=5.0, order="get-first",
+                            get_selector=f"{basec}/**")
         ljc.start()
         holdc.taken.wait(5.0)
         answer_c = oc.o.state_answer(holdc.queries[0])

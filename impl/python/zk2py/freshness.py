@@ -193,7 +193,37 @@ class Archive:
     """An archive's answer: last-known, never current (§2.8)."""
 
 
-Observation = Subscription | Get | Archive
+@dataclass(frozen=True)
+class Snapshot:
+    """``freshness.v2`` §2.6 (text 0.7, core 0.100): what a GET reader's
+    snapshot says of one member. ``complete`` is whether the reader holds the
+    member's collection's snapshot complete (core §7.5); ``entry`` is None
+    when the snapshot lists the member neither live nor as a tombstone,
+    ``tombstone``, or ``live``; ``age_ns`` is the reader's clock minus the
+    confirmation's time ("the snapshot's time for confirmation 1, and the
+    entry's conf for 2"), None for confirmation 0 or an unknown time; the
+    clock is the owner's, "which built the snapshot"."""
+
+    complete: bool
+    entry: str | None
+    age_ns: int | None = None
+    trusted: bool = False
+    delta_ns: int = DEFAULT_DELTA_NS
+
+    def as_get(self) -> Get | None:
+        """v2 §2.6: "v1 §2.6, word for word, read over a snapshot's entries
+        … The order is v1 §2.6's, an entry for a reply: no entry, then a
+        tombstone, then no confirmation's time, then a clock not trusted,
+        then the band." None for a member no entry lists: deleted or
+        silent, by :func:`judge_snapshot`."""
+        if self.entry is None:
+            return None
+        if self.entry == "tombstone":
+            return Get(Reply("delete"), self.trusted, self.delta_ns)
+        return Get(Reply("put", self.age_ns), self.trusted, self.delta_ns)
+
+
+Observation = Subscription | Get | Archive | Snapshot
 
 
 def judge_subscription(h: Horizon, obs: Subscription) -> Verdict:
@@ -248,6 +278,19 @@ def judge_get(h: Horizon, obs: Get) -> Verdict:
     return Verdict(UNOBSERVABLE, "near_horizon", f"aged {age / NS:.3f} s, within the delta of the horizon")
 
 
+def judge_snapshot(h: Horizon, obs: Snapshot) -> Verdict:
+    """``freshness.v2`` §2.6: "A member a complete snapshot omits has no
+    value, by core §4.2's omission rule: deleted, as a tombstone. One an
+    incomplete snapshot omits is a member the read did not reach:
+    unobservable." An entry is judged as v1 §2.6 judges a reply."""
+    g = obs.as_get()
+    if g is None:
+        if obs.complete:
+            return Verdict(NOT_ASKED, "deleted", "a complete snapshot omits the member (core §4.2)")
+        return Verdict(UNOBSERVABLE, "silent", "an incomplete snapshot omits the member: the read did not reach it")
+    return judge_get(h, g)
+
+
 def judge_observation(kind: str, annotations: dict[str, Any] | Horizon, obs: Observation) -> Verdict:
     """§2.7 "The order of the checks", for one observation: no horizon; an
     event or an operation; an archive's value; a value that is no horizon;
@@ -263,6 +306,8 @@ def judge_observation(kind: str, annotations: dict[str, Any] | Horizon, obs: Obs
         return Verdict(UNOBSERVABLE, "not_a_horizon", f"freshness.ttl_s = {h.value!r} is not a horizon (§2.1)")
     if isinstance(obs, Subscription):
         return judge_subscription(h, obs)
+    if isinstance(obs, Snapshot):
+        return judge_snapshot(h, obs)
     return judge_get(h, obs)
 
 
@@ -678,8 +723,26 @@ class GetReading:
     encoding: str = ""
     #: core §4.3 (0.73): the reply's in-band stamp, or None
     inband: Any = None
+    #: ``freshness.v2`` 0.7 §2.6 (core 0.100): where the member came as a
+    #: snapshot's entry, its confirmation's instant in Unix ns ("the
+    #: snapshot's time for confirmation 1, and the entry's conf for 2"),
+    #: None for none or an unknown time; ``snapshot`` whether it so came,
+    #: ``complete`` whether its snapshot is complete (a member it omits: no
+    #: entry), and the owner's session id, whose clock built the snapshot
+    snapshot: bool = False
+    complete: bool = False
+    confirmed_ns: int | None = None
+    owner_id: str | None = None
 
-    def observation(self, trust: ClockTrust, now_utc_ns: int | None = None) -> Get:
+    def observation(self, trust: ClockTrust, now_utc_ns: int | None = None) -> Observation:
+        if self.snapshot:
+            # v2 §2.6: "a GET reader MUST age an entry from its confirmation
+            # as v1 §2.6 ages a reply from its stamp". "The clock is the
+            # owner's, which built the snapshot."
+            entry = None if self.reply is None else "tombstone" if self.reply == "delete" else "live"
+            now = time.time_ns() if now_utc_ns is None else now_utc_ns
+            age = None if self.confirmed_ns is None else now - self.confirmed_ns
+            return Snapshot(self.complete, entry, age, trust.trusted(self.owner_id), trust.delta_ns)
         if self.reply is None:
             return Get(None, trust.word, trust.delta_ns)
         if self.reply == "delete":
@@ -689,16 +752,50 @@ class GetReading:
         return Get(Reply("put", age), trust.trusted(self.stamp_id), trust.delta_ns)
 
 
-def get_reading(session: Any, key: str, timeout: float = 1.0) -> GetReading:
+def reading_of(r: Any, epoch_s: int = 0, complete: bool = True, owner_id: str | None = None) -> GetReading:
+    """One reply of S4's GET (:class:`zk2py.live.StateReply`) as §2.6 reads
+    it: a per-key resource's reply by its Zenoh timestamp, a snapshot's
+    entry (core 0.100) by its confirmation, ``freshness.v2`` 0.7 §2.6,
+    counted from the deployment epoch ``epoch_s``."""
+    if r is None:
+        return GetReading(None)
+    if getattr(r, "snapshot_key", None) is not None:
+        t = r.snapshot_time if r.confirmation == "time" else r.conf if r.confirmation == "conf" else None
+        at = None if t is None else ((epoch_s + t["s"]) * 1000 + t["ms"]) * 1_000_000
+        return GetReading("delete" if r.deleted else "put", None, None, None, r.payload, r.encoding, r.inband,
+                          True, complete, at, owner_id)
+    if r.deleted:
+        return GetReading("delete", r.stamp_ns, r.stamp_id, r.stamp, inband=r.inband)
+    if r.refusal is not None:
+        return GetReading("put", r.stamp_ns, r.stamp_id, r.stamp, b"", r.encoding, r.inband)
+    return GetReading("put", r.stamp_ns, r.stamp_id, r.stamp, r.payload, r.encoding, r.inband)
+
+
+def get_reading(session: Any, key: str, timeout: float = 1.0, epoch_s: int = 0,
+                owner_id: str | None = None) -> GetReading:
     """A GET of one state member as core S4 says (target All, consolidation
-    Latest), the member's reply kept for §2.6."""
+    None, core 0.100), the member's reply kept for §2.6. Where it comes as a
+    snapshot's entry (a member read: "a snapshot of that member alone, on
+    the member's own key"), ``freshness.v2`` 0.7 §2.6 ages it from its
+    confirmation, each time counted from the deployment epoch ``epoch_s``
+    (the catalog's, else 0); a snapshot of no entry on the key is the
+    owner's word, its member deleted (§2.6: "A member a complete snapshot
+    omits has no value")."""
     from . import live
 
     st = live.get_state(session, key, timeout=timeout)
     mine = [r for r in st.replies if r.key == key]
+    whole = bool(st.complete_for(key))
     if not mine:
+        if st.snapshots:
+            return GetReading(None, snapshot=True, complete=whole, owner_id=owner_id)
         return GetReading(None)
     r = mine[-1]
+    if r.snapshot_key is not None:
+        t = r.snapshot_time if r.confirmation == "time" else r.conf if r.confirmation == "conf" else None
+        at = None if t is None else ((epoch_s + t["s"]) * 1000 + t["ms"]) * 1_000_000
+        return GetReading("delete" if r.deleted else "put", None, None, None, r.payload, r.encoding, r.inband,
+                          True, whole, at, owner_id)
     if r.deleted:
         return GetReading("delete", r.stamp_ns, r.stamp_id, r.stamp, inband=r.inband)
     if r.refusal is not None:

@@ -587,7 +587,10 @@ def judge(r: Reading, question: str = Q_FIRING, horizon: fr.Horizon = HORIZON) -
     # (§2.15) left it out (step 5)" (0.5, F-136).
     left_out = r.left_out and r.held_whole
     lost = any(isinstance(o, fr.Subscription) and not o.complete for o in obs)
-    reseeded = any(isinstance(o, fr.Get) and o.reply is not None for o in obs)
+    # core 0.100: a snapshot's entry, live or a tombstone, answers the key as
+    # a reply or a reply_del does ("What a profile reads")
+    reseeded = any((isinstance(o, fr.Get) and o.reply is not None)
+                   or (isinstance(o, fr.Snapshot) and o.entry is not None) for o in obs)
     if lost and not reseeded and not left_out:
         return Answer(UNOBSERVABLE, "incomplete", "a delivery was lost, and no GET answered the key since")
     # 5. The latest sample. "A sample the reader holds, a delete included,
@@ -1735,7 +1738,11 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
             if r is None:
                 g = fr.GetReading(None)
             else:
-                g = fr.GetReading("delete" if r.deleted else "put", r.stamp_ns, r.stamp_id, r.stamp, r.payload)
+                # core 0.100: an alarm's state (a freshness.v2 collection) is
+                # answered by snapshot, its entry aged by its confirmation
+                # (freshness.v2 0.7 §2.6), counted from epoch 0: this reader
+                # holds no catalog
+                g = fr.reading_of(r, 0, True, meta_zid)
                 if (r.stamp is not None or r.inband is not None) and r.refusal is None:
                     cands.append((sd.Mark(r.inband, sd.Stamp.of(r.stamp)), "delete" if r.deleted else "put",
                                   r.payload, r.stamp_id))

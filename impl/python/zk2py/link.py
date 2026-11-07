@@ -505,6 +505,41 @@ def heartbeat_of(entry: Any, resources: list["Resource"]) -> bool:
         r.token in ("state", "@state") and r.horizon().horizon == "within" for r in resources)
 
 
+def _per_key(r: dict[str, Any], uses: list[str]) -> bool:
+    """link.v2 0.9 §2.11's per-key resources (core §4.2): "a state that
+    declares ``freshness.ttl_s`` above 0, of a contract that does not use
+    ``freshness.v2``; one whose resolved annotations hold
+    ``desired.target_param``; a metric resource of ``telemetry.v1`` or
+    ``telemetry.v2``, of a contract that uses one; or any state of a
+    contract that uses ``redundancy.v1``"."""
+    ann = r.get("annotations") or {}
+    if freshness.horizon("state", ann).horizon == "within" and HEARTBEAT_IFACE not in uses:
+        return True
+    if "desired.target_param" in ann:
+        return True
+    if "telemetry.kind" in ann and {"telemetry.v1", "telemetry.v2"} & set(uses):
+        return True
+    return "redundancy.v1" in uses
+
+
+def tombstone_only(entry: Any) -> bool:
+    """link.v2 0.9 §2.11 "Which they are": whether an interface, its
+    revisions read together ("The plan reads each from the revisions given,
+    every revision of an interface together: the resource's kind, its
+    template and resolved annotations, and its revision's ``uses``"), has a
+    ``state`` or ``@state`` resource whose deletes only a tombstone proves:
+    a per-key resource, or "a template whose first chunk is a parameter,
+    which has no snapshot key". Each revision is read with its own ``uses``,
+    and one that makes a resource such is enough."""
+    for rev, uses in zip(revisions_of(entry), uses_of(entry)):
+        for r in rev:
+            if r["token"] not in ("state", "@state"):
+                continue
+            if r["template"].split("/")[0].startswith("{") or _per_key(r, uses):
+                return True
+    return False
+
+
 def merge_revisions(iface: str, revisions: list[list[dict[str, Any]]]) -> list[Resource]:
     """§2.3 "Revisions read together" (0.3): "Its resources are those any
     revision declares, paired by kind token and template. A revision that
@@ -859,7 +894,13 @@ def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
     windows, liveness = [], []
     for addr, ifs in owners:
         mine = [r for i in ifs for r in res[i]]
-        if any(r.token in ("state", "@state") for r in mine):
+        if v2 is None:
+            floored = any(r.token in ("state", "@state") for r in mine)
+        else:
+            # link.v2 0.9 §2.11: the floor narrowed to "each listed service
+            # that owns" a resource whose deletes only a tombstone proves.
+            floored = any(tombstone_only(interfaces[i]) for i in ifs)
+        if floored:
             windows.append({"service": addr, "min_s": face.max_outage_s})
         evidence = {r.name for r in mine if r.token in ("stream", "@stream", "state", "@state")
                     and crossing_res(r) and r.horizon().horizon == "within"}

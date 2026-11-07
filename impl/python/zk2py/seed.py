@@ -247,6 +247,15 @@ class Entry:
     stamp: Stamp | None
     via: str            # "live" or "reply"
     inband: zk2c.InBand | None = None
+    #: core §4.2 (0.100), the omission rule's guard: whether the late joiner
+    #: heard this value after it asked the GET, "by either path. A mutation
+    #: heard again then counts, though it is kept once"
+    after_get: bool = False
+    #: where it came as a snapshot's entry: the snapshot's key, and the
+    #: entry's confirmation and its time (§7.5)
+    snapshot_key: str | None = None
+    confirmation: str | None = None
+    conf: Any = None
 
     @property
     def mark(self) -> Mark:
@@ -473,13 +482,18 @@ class LateJoiner:
     (round 91)."""
 
     def __init__(self, session: Any, selector: str, *, timeout: float = GET_TIMEOUT_S, consumer: bool = True,
-                 order: str = "subscribe-first", max_keys: int | None = -1, across: Any = None):
+                 order: str = "subscribe-first", max_keys: int | None = -1, across: Any = None,
+                 collections: Any = None, get_selector: str | None = None):
         # core §8.1 (0.91): across a constrained face (``across``, a
         # zk2py.far_side.FarSide), a seed's GET waits at least the face's
         # reply timeout.
         if across is not None:
             timeout = across.get_timeout_s(timeout)
         self.session, self.selector, self.timeout = session, selector, timeout
+        #: the GET's selector where it is not the subscription's: state.md §10
+        #: (core 0.100) subscribes to ``plans/*`` and GETs ``plans/**``, a
+        #: collection read
+        self.get_selector = get_selector or selector
         self.consumer = consumer
         self.order = order
         self.lock = threading.Lock()
@@ -498,6 +512,27 @@ class LateJoiner:
         self._done = threading.Event()
         #: every arrival, in the order the callbacks were handed them
         self._inbox: queue.SimpleQueue[tuple[str, Any]] = queue.SimpleQueue()
+        #: core §4.2 (0.100): what maps a snapshot's index to its collection,
+        #: ``collections(reply_key, header) -> [seed_snapshot.Collection]``
+        #: (:class:`zk2py.seed_snapshot.ByDescriptor`, or a list), or None:
+        #: "Without the contract … it applies no omission rule"
+        self.collections = collections
+        #: whether the GET has been asked: arrivals after it are "heard after
+        #: it asked the GET" (the omission rule's guard)
+        self._asked = False
+        #: the snapshots each GET brought (:class:`zk2py.seed_snapshot.Tracker`),
+        #: the last GET's last
+        self.trackers: list[Any] = []
+        #: each key the omission rule dropped, (snapshot key, member key)
+        self.omitted: list[tuple[str, str]] = []
+        #: snapshots heard on the subscription: "MUST NOT merge … nor count
+        #: it toward a complete snapshot"
+        self.live_snapshots = 0
+        #: each snapshot as it completed, (key, coll, whether the GET had
+        #: ended): "Under ``None``, a snapshot is complete at its last page"
+        self.completed: list[tuple[str, int, bool]] = []
+        #: S4's consolidation, ``None``; a scenario's control sets another
+        self.consolidation: Any = None
 
     @property
     def state(self) -> "OrderedDict[str, Entry]":
@@ -545,6 +580,16 @@ class LateJoiner:
             self.seed.ended = True
             self.seed.complete = not self.seed.errors
             return True
+        if what == "asked":
+            from . import seed_snapshot
+
+            # "heard after it asked the GET": this GET's asking; what was held
+            # before it was heard before it
+            for e in self.merge.held.values():
+                e.after_get = False
+            self._asked = True
+            self.trackers.append(seed_snapshot.Tracker())
+            return False
         if what == "sample":
             self._sample_locked(arg, "live")
         elif what == "reply":
@@ -564,8 +609,66 @@ class LateJoiner:
         import zenoh
 
         att = s.attachment
-        self._merge_locked(str(s.key_expr), via, s.kind == zenoh.SampleKind.DELETE, s.payload.to_bytes(),
-                           str(s.encoding), s.timestamp, None if att is None else att.to_bytes())
+        key, deleted, payload, enc = str(s.key_expr), s.kind == zenoh.SampleKind.DELETE, s.payload.to_bytes(), \
+            str(s.encoding)
+        if not deleted and zk2c.carries(key, enc) and payload[:1] and payload[0] >> 5 == 7:
+            self._snapshot_locked(key, via, payload, enc)
+            return
+        self._merge_locked(key, via, deleted, payload, enc, s.timestamp, None if att is None else att.to_bytes())
+
+    def _snapshot_locked(self, key: str, via: str, payload: bytes, encoding: str) -> None:
+        """A snapshot's page (core §4.2, §7.5, 0.100): heard live, neither
+        merged nor counted; heard by the GET, its entries merged "as replies
+        do, each as its page arrives, on its member's key", and the omission
+        rule applied once the snapshot is complete, "a member … that the
+        snapshot lists neither live nor as a tombstone, has no value", unless
+        newer than it. "An incomplete snapshot drops nothing"."""
+        from . import seed_snapshot as ss
+        from . import snapshot as snap_mod
+
+        if via == "live":
+            self.live_snapshots += 1
+            return
+        if self.consumer and "*" in key:
+            return  # R6
+        try:
+            page = ss.read_page_of(key, payload)
+        except (snap_mod.Refused, zk2c.Refused) as e:
+            self.undecodable.append((key, via, getattr(e, "token", "snapshot")))
+            self.applied.append(Applied(key, via, False, None, "undecodable", self.merge.rule, None,
+                                        getattr(e, "token", "snapshot")))
+            return
+        if not self.trackers:
+            self.trackers.append(ss.Tracker())
+        heard, whole = self.trackers[-1].add(key, page)
+        if whole is not None:
+            self.completed.append((key, heard.header["coll"], self.seed.ended))
+        for m in ss.members_of(key, page):
+            entry = Entry(m.deleted, m.record, zk2c.ENCODING, None, via, m.inband, snapshot_key=key,
+                          confirmation=m.confirmation, conf=m.conf if m.confirmation == "conf" else m.time)
+            self._apply_entry(m.key, via, entry)
+        if whole is None or self.collections is None:
+            return
+        cols = self.collections(key, heard.header) if callable(self.collections) else list(self.collections)
+        held = {k: (e.inband, e.after_get) for k, e in self.merge.held.items()}
+        for k in ss.omitted(heard, whole, cols, held):
+            gone = self.merge.held.pop(k, None)
+            heard.omitted.append(k)
+            self.omitted.append((key, k))
+            self.applied.append(Applied(k, via, True, None, "omitted", self.merge.rule,
+                                        None if gone is None else gone.inband))
+
+    def _apply_entry(self, key: str, via: str, entry: Entry) -> str:
+        """One value at the merge, its guard kept: a value kept is heard
+        after the GET was asked when it arrived after it; "A mutation heard
+        again then counts, though it is kept once"."""
+        outcome = self.merge.apply(key, entry)
+        if outcome == "kept":
+            entry.after_get = self._asked
+        elif outcome == "same" and self._asked and key in self.merge.held:
+            self.merge.held[key].after_get = True
+        self.applied.append(Applied(key, via, entry.deleted, entry.stamp, outcome, self.merge.rule, entry.inband))
+        return outcome
 
     def _merge_locked(self, key: str, via: str, deleted: bool, payload: bytes, encoding: str, ts: Any,
                       attachment: bytes | None = None) -> None:
@@ -584,8 +687,7 @@ class LateJoiner:
         # A consumer by §4.3's consumer rule from its first value on, its
         # seed's replies included; a tool by §4.2's merge for as long as it
         # follows (observer §4.1). Neither turns at the GET's end.
-        outcome = self.merge.apply(key, Entry(deleted, record, encoding, stamp, via, read.stamp))
-        self.applied.append(Applied(key, via, deleted, stamp, outcome, self.merge.rule, read.stamp))
+        self._apply_entry(key, via, Entry(deleted, record, encoding, stamp, via, read.stamp))
 
     # -- the two paths, and the GET's end ------------------------------------
 
@@ -611,14 +713,37 @@ class LateJoiner:
 
         self.sub = self.session.declare_subscriber(self.selector, zenoh.handlers.Callback(self._sample))
 
-    def get(self) -> None:
-        """S4's GET: target ``All``, consolidation ``Latest``, set
-        explicitly."""
+    def get(self, selector: str | None = None) -> None:
+        """S4's GET (core 0.100): target ``All``, consolidation ``None``, set
+        explicitly. The GET is marked asked first, so every arrival after it
+        is "heard after it asked the GET". The descriptors that map a
+        snapshot's index are read before it (:class:`ByDescriptor`)."""
         import zenoh
 
-        self.session.get(self.selector, zenoh.handlers.Callback(self._reply, self._ended),
-                         target=zenoh.QueryTarget.ALL, consolidation=zenoh.ConsolidationMode.LATEST,
-                         timeout=self.timeout)
+        sel = selector or self.get_selector
+        prepare = getattr(self.collections, "prepare", None)
+        if prepare is not None:
+            prepare(self.session, sel)
+        self._done.clear()
+        self.seed = Seed()
+        with self.lock:
+            self._asked = False
+        self._arrive(("asked", None))
+        self.session.get(sel, zenoh.handlers.Callback(self._reply, self._ended),
+                         target=zenoh.QueryTarget.ALL,
+                         consolidation=self.consolidation or zenoh.ConsolidationMode.NONE, timeout=self.timeout)
+
+    def read_again(self, timeout: float | None = None, selector: str | None = None) -> bool:
+        """Core §4.2: over an incomplete snapshot a late joiner "SHOULD read
+        the collection again". The same merge, a new GET: what it holds
+        stays, and the new GET's guard counts from its asking."""
+        self.get(selector)
+        return self.wait(timeout)
+
+    def incomplete(self) -> list[Any]:
+        """The last GET's snapshots it holds incomplete (§7.5)."""
+        with self.lock:
+            return [h for h in (self.trackers[-1].heard if self.trackers else []) if not h.done]
 
     def start(self) -> None:
         if self.order == "subscribe-first":

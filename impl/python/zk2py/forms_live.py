@@ -691,7 +691,13 @@ def step_8(ck: Checks, pairing: str, ep: str, cli: Any, ops: dict[str, Any]) -> 
     rust = pairing == "py-rust"
     owner: Any = RustOwner(ep) if rust else PyOwner(ep)
     try:
-        time.sleep(1.0)
+        # the owner's tokens, its interface's among them, heard by the
+        # caller's session before it calls (the mend after round 104: no
+        # fixed sleep)
+        deadline = time.monotonic() + 10.0
+        while not live.list_presence(cli, "zk2/h1/tc/@zk/alive/**", timeout=1.0).alive \
+                and time.monotonic() < deadline:
+            time.sleep(0.1)
         form = b"\x40" + ops["tc/set"].encode("request", JSON_OK)
         probes = [("tc/set", form, "application/json", "step 1's request form under application/json"),
                   ("tc/set-raw", b"\x40" + RAW_OK, "application/octet-stream",

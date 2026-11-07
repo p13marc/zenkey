@@ -829,13 +829,30 @@ def check_transport(policy_text: str, router: dict[str, Any], peer: dict[str, An
     return {"emit": emit(policy), "findings": link.sort_findings(out)}
 
 
-def lint(policy_text: str, block: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+def lint(policy_text: str, block: dict[str, Any] | None = None, *, implements: dict[str, list[str]] | None = None,
+         interfaces: dict[str, Any] | None = None, windows: dict[str, int] | None = None,
+         catalog_doc: Any = None) -> list[dict[str, Any]]:
     """``lints.json``'s reading: every finding of the policy; with
     ``block`` (0.7), ``link.v1``'s block check, ``zk_not_denied`` on a device
-    face read as §2.15 says."""
+    face read as §2.15 says. With a deployment (0.9: "A case may give a
+    deployment and its windows as link.v1's lints.json does … the plan is
+    derived, and ``window_under_outage`` reads §2.11's floor"), the plan's
+    findings, or its refusal, and with ``windows`` the floor's."""
     policy, out = parse_policy(policy_text)
-    if block is None or policy is None:
+    if policy is None:
         return out
-    face = next((f for f in policy.faces if f.face.name == block.get("face")), None)
-    device = face is not None and face.face.attach == "device"
-    return link.sort_findings(list(out) + link.check_block(block, policy.as_v1(), device=device))
+    out = list(out)
+    if implements is not None:
+        p = plan(policy_text, implements, interfaces or {}, catalog_doc)
+        if "refused" in p:
+            out += p["refused"]
+        else:
+            for f in p["faces"]:
+                out += [x for x in f["findings"] if x not in out]
+            if windows is not None:
+                out += link.check_windows(p, windows)
+    if block is not None:
+        face = next((f for f in policy.faces if f.face.name == block.get("face")), None)
+        device = face is not None and face.face.attach == "device"
+        out += link.check_block(block, policy.as_v1(), device=device)
+    return link.sort_findings(out)

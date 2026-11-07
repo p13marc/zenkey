@@ -70,7 +70,7 @@ case name. It exits with:
 | errors | §5.2, §7.5 | `zk2c` | `forms.json`: the error form's 256 bytes, its writes and its reads by Encoding, an earlier core's three envelopes `encoding`. `cases.json`, the bare wire's envelope, went with core 0.99 (round 104). An unknown file there fails. |
 | envelope | §7.5, §5.1, §5.2 (0.72 to 0.94) | `zk2c`, `calls` | `vectors.json` (each header and case, accepted ones written back), `carries.json`, and `calls.json` (round 101): an operation's forms by its types' tags, its writes and its reads, a packed record under CH's tag |
 | budget | core §2.7, observer §5 (0.24, 0.25, 0.27) | `budget` | every file of `budget/`: `bounds.json` (the bound across instances), `population.json` (a GET's or a window's population against it), `rate.json` (an event's rate per member) and `lossless.json` (whether a window is shown to have lost no delivery, 0.25; its `reader_stall` and `stall_bounds`, 0.27). An unknown file there fails. |
-| seed | §4.2 (0.27) | `seed`, `seed_snapshot` | `seed/merge.json`: `order` (two stamps, or a stamp and none, compared) and `cases` (a key's arrivals, each kept or not); `inband.json`; and `snapshot.json` (#977 E2, round 104), a seed over snapshots read from its description alone, since no text states it (F-498). An unknown file there fails. |
+| seed | §4.2 (0.27, 0.100) | `seed`, `seed_snapshot` | `seed/merge.json`: `order` (two stamps, or a stamp and none, compared) and `cases` (a key's arrivals, each kept or not); `inband.json`; and `snapshot.json` (#977 E2, round 104; core 0.100's §4.2 since round 105), a seed over snapshots: 45 cases, F-497's three mapping the index by the revision the owner's descriptor names. An unknown file there fails. |
 | compat | §9.7, §9.8 | `compat` | **all 100 cases** (spec 0.8), evaluated through `compat/README.md`'s one-resource wrapper: §9.8's six tables, the JSON Schema and protobuf rules, `same_revision`, and the FULL_TRANSITIVE cases (with each pairwise `against`). The packed cases (0.75) are wrapped as `packed` artifacts. |
 | packed | §7.6, §7.5 (0.75, 0.76) | `packed`, `zk2c` | `packed/vectors.json`: each layout's form, sha256, tag, items and bit bounds; each write's bits, pad and bytes, or the writer's refusal; each read's JSON reading, or the first refusal in §7.6's order. Every accepted write is sealed in the envelope, opened and read back; every read is made through the envelope too. Live against the reference: `python -m zk2py.packed_live` (the mend after round 94). |
 | hostid | profiles/hostid §2.1, §2.11 | `hostid` | every file of `spec/profiles/hostid/conformance/`: `vectors.json` (the derivation) and `shapes.json` (the minted shape). An unknown file there fails (`profiles/README.md`). |
@@ -6683,6 +6683,195 @@ Round 104 found F-498 to F-502:
 None is a blocker. F-495 to F-497 stay open. See "At core 0.99 (#985 C4d)"
 in `SPEC-FINDINGS.md`.
 
+## Core 0.100 and `observer.md` 0.28: state GETs answered by snapshot (round 105)
+
+Since round 104 main took:
+- **core 0.100** (#977 E3, the flip): an owner answers a state GET per
+  collection, by snapshot, in pages under 1,024 bytes; a member read
+  draws a snapshot of each member, and a concrete key with no member one
+  of no entry; the per-key resources keep their reply per key. S4's GET
+  is under `None`, merged per key; §4.2's seed applies the omission rule
+  with its guards, maps the index by the owner's descriptor (F-497) and
+  drops a snapshot heard live. S3's raised window binds only what a
+  tombstone alone proves. F-498 and F-502 answered.
+- **observer 0.28:** a tool's GET is S4's.
+- **freshness.v2 0.6** (#1080): a heartbeat's time from the catalog's
+  epoch, all ones outside it, and `heartbeat/times.json`; **0.7:** a GET
+  reader ages a snapshot's entry by its confirmation.
+- **link.v2 0.9:** §2.11 floors only what a tombstone alone proves.
+- **#1084:** config.v1 0.13 and config.v2 0.4 (F-499, F-501, the
+  validation fixtures' `encoding`), telemetry.v1 0.10 (F-500).
+
+zk2py diffed `spec/` and `examples/zk2/` between 3c1d33cf and 324c6d4f.
+**No rule changed beyond what the changelogs state.** zenoh-modem's
+catalog appending `freshness.v2` (#1080) is the example's (F-505).
+
+### Its walk of `RULES.md` at 0.100
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 88 | 76 | 3 | 9 |
+| consumer | 28 | 24 | 0 | 4 |
+| caller | 18 | 18 | 0 | 0 |
+| observer | 98 | 93 | 3 | 2 |
+| static, in every class | 68 | 66 | 0 | 2 |
+
+- **271 rows walked of 271, none without a verdict.** 29 verdicts are
+  beyond the index.
+- **The re-key came first,** with every new owner and reader rule not
+  met, in the commit that brings `just py-conformance` level. The next
+  commit implements them and meets them.
+- **Not met, new:** observer §4.1's tool GET for the alarms, health and
+  config readers, which merge a recording with a GET's entries through
+  `seed.merged` and apply no omission rule over what they recorded.
+
+### What round 105 changed in zk2py
+
+- **The owner** (`owner.Owner.state_answer`, `Owner.collections`,
+  `owner.per_key`): a collection read's snapshot on its snapshot key, a
+  member read's per member, a snapshot of no entry where a concrete key
+  wins a collection's template and holds no member; pages by
+  `snapshot.cut` under `owner.PAGE_SIZE`; asof the last seq minted under
+  the writes' lock; confirmation 1 or 2 with its conf, from the deployment
+  epoch. A per-key resource's reply per key, as before.
+- **The readers:** `live.get_state` under `None`, each page's entries a
+  reply (`StateReply.snapshot_key`, its confirmation), the snapshots in
+  `StateReading.snapshots`; `seed.LateJoiner` under `None`, the omission
+  rule over `seed_snapshot.omitted` with its two guards, the guard reset
+  at each GET's asking, a page heard live counted and never merged,
+  `read_again`, and `seed_snapshot.ByDescriptor`, the descriptor whose
+  run is the snapshot's (F-507).
+- **freshness.v2:** the subscriber re-reads by a collection read and
+  replaces its view only from a complete snapshot; `freshness.Snapshot`
+  and `reading_of` age an entry by its confirmation (0.7 §2.6).
+- **The walk:** `heartbeat/times.json`; freshness's 27 snapshot
+  observations; link.v2 0.9's floor (`link.tombstone_only`) and its lints
+  with a deployment; config's `encoding`; round 104's open findings read
+  as answered; F-503 to F-508's texts pinned.
+- **The mend** (review-bot on #1083, and #1084's answers):
+  - `seed_snapshot` re-keyed to core §4.2;
+  - config.v1's re-mint refuses an act in flight before step 1, waits for
+    step 1's undo, then refuses an unknown startup value or a device that
+    will not return, the change staying ended (`config_remint_live`, 3 of
+    3); the rollback after a failed `new_epoch` is shown whole, since
+    `Core.restart` replaces every member it changes (readings);
+  - F-471's weak row is gone, and F-473's is a behaviour check;
+  - `forms_live` waits for the owner's tokens; `acl_interop`'s blank line.
+
+**`just py-conformance`: 6465 of 6465** on main 324c6d4f. Of them,
+`seed` 113, `heartbeat` 163, `link` 315 and `readings` 960.
+
+### Live
+
+On main 324c6d4f's black boxes.
+
+| Runner | py-py | rust-py | py-rust or py-zenctl |
+|---|---|---|---|
+| `snapshot_live` (state.md §14) | 17/17 | 16/16 | 7/7 |
+| `state_pairings` §1, §2, §7, §10, §13 | 46/46 (§1, §2, §7, §10) | 40/40 | all |
+| `state_scenarios` §3, §11 | 8/8 | 8/8 (the owner example) | |
+| `freshness_v2_scenarios` | 27/27 (§2 to §6) | all | all |
+| `heartbeat_epoch_live` | 4/4 (zk2py's owner) | 4/4 (`--catalog`) | |
+| `config_remint_live` (config.v1 §2.12) | 3/3 | | |
+
+Also run on the new readers, zk2py's owner unless named: `alarms_scenarios`
+(every section, and 80 of 80 against the owner example), `health_scenarios`
+31/31, `config_scenarios` 52/52, `config_v2_scenarios` 172/172,
+`desired_scenarios` 117 and §9 with zenctl 29/29, `telemetry_scenarios`
+57/57, `redundancy_scenarios` 88/88, `budget_scenarios` 27/27,
+`hostid_scenarios` 35/35, `freshness_scenarios` 23/23,
+`observer_scenarios` 50/50, `forms_live` 128/128, and `live_interop`
+(487 checks, its health and seed runs re-keyed to snapshots and run
+again, 33 of 33). The re-keyed checks are each F-503's or a GET's order
+under `None`. alarms' §6 found an owner bug: a member read gave each entry
+the snapshot key to look its bit up by, so a cleared bit read as vouched
+for; fixed.
+
+- **§14 in each pairing:** a collection read in 4 pages of 8 (zk2py's
+  owner) and 3 pages of 200 entries (the owner example, its records
+  `ok`), cut alike by both owners; a member read, `plans/*`'s 32
+  snapshots, `plans/v99`'s page of no entry, `oper` and `p9/route`; a
+  page lost and read again; `Latest`'s control; a delete beyond the
+  window; an empty collection; two instances in either order.
+- **The Rust readers on zk2py's owner:** `zenctl get --raw` (4 pages),
+  `zenctl get state` (a complete snapshot of 4 pages, a tombstone, a
+  member beyond the window, and a page lost: incomplete, pages 0, 1 and
+  3) and `consume`.
+- **The epoch:** under a catalog of epoch 1767225600 each heartbeat's
+  seconds, and the snapshot's time, are the clock less the epoch; a GET
+  reader judges `status` fresh under the catalog's epoch and stale under
+  0.
+
+**Not run:** an alignment by snapshot (core §4.4): no archive black box;
+`state.md` §14 steps 3 and 5's held answer against the owner example,
+which cannot hold one, so a session of the test's own plays its answer.
+
+Round 105 found F-503 to F-508: two gaps (alarms.v1's attribution by a
+stamp a snapshot does not carry; which descriptor maps a snapshot when two
+instances answer) and four minor errors. None is a blocker. F-495 to F-502
+are answered. See "At core 0.100 (#977 E3)" in `SPEC-FINDINGS.md`.
+
+## Observer 0.29 and `link.v2` 0.10: a tool across a face (round 106)
+
+Round 106 continues round 105 on one branch, rebased on main 2186bd9f
+(#990 V1, V2):
+- **observer 0.29:** §7.5 is "Reading across a face". With a face policy and
+  its face, a tool's scopes are what the face's plan lets cross, each
+  heartbeat's exact key among them; a selector given is narrowed to them,
+  and one that meets none is refused. "The revision of a key" picks a
+  revision in three steps: the deployment's word, CH's tag, the catalog's
+  latest. §7.3's "CH's tag": a record under a tag not its type's is refused
+  `tag`, and one under a tag other than 0 whose type is not held is never
+  sniffed.
+- **link.v2 0.10:** §2.21 points to the tool's scope.
+- **The evidence:** `scope/faces.json` (17) and `envelope/tags.json` (31).
+
+No rule changed beyond what the changelogs state.
+
+### What round 106 changed in zk2py
+
+- **`across`** (new): `scopes`, a tool's scopes with or without a face
+  policy, the plan `link_v2.plan`'s, what crosses read from its denies on
+  `put`, each device of a device face taken as an owner too (F-511);
+  `declared`, a selector given narrowed or refused; `revision_of_key`,
+  §7.5's three steps and §7.3's tag; `catalog_by_id`, a catalog read and its
+  id checked, a predecessor through its successor's lineage (F-509).
+- **`echo_tool`:** `--across-face` with `--face-policy` and `--face` takes
+  the plan's scopes, and takes a SELECTOR, narrowed or refused; several
+  revisions of an interface are held, each sample read with the one chosen;
+  a record under a wrong tag is undecodable, `tag`, and one under a tag
+  other than 0 whose type is not held is shown as a packed record.
+- **The walk:** the `scope` family, `tags.json` in `envelope`, the
+  re-worded sentences and RULES.md's 267 rules re-keyed, F-509 to F-511
+  pinned. The class walk: 276 rows, observer 98 met, 3 not met, 2 n/a.
+
+**`just py-conformance`: 6523 of 6523** on main 2186bd9f. Of them,
+`envelope` 402, `scope` 17 and `readings` 965.
+
+### Live
+
+On the black boxes of 324c6d4f: their owner serves what zk2py's tool reads.
+- **`across_live`**, 4 of 4: zk2py's echo across zenoh-modem's RF face
+  against the owner example serving `modem.v3` 3.3 at rf0. With no policy it
+  hears the owner's heartbeat; through the face its one scope is
+  `frames/fast`, and it declares and hears nothing else; a selector over
+  `air/**` is refused, exit 2; one over `frames/*` is narrowed.
+- `constrained_live` 14/14 and `far_side_live` 16/16 with the new echo.
+
+**On e2bdd8ce's black boxes** (V1, V2 and E4), `across_live`'s reverse half,
+2 of 2: `zenctl echo --across-face` holding modem.v3's four revisions and
+the catalog, against zk2py's owner putting `packed/oper` and `oper` beside
+its heartbeat. With no policy it hears all three, `oper`'s revision chosen
+by tag at step 3 and the heartbeat's at step 2. Through the RF face it
+declares `frames/fast` alone and hears none of them. After E4,
+`snapshot_live` is 40 of 40 and `state_pairings` passes in all three
+pairings (50, 40 and 28).
+
+Round 106 found F-509 to F-511: a minor error (`tags.json`'s `e3a529fe` is a
+successor's file), an ambiguity (a refused selector, or a refused read), and
+a gap (a device face's devices in the tool's plan). None is a blocker. See
+"At observer 0.29 (#990 V1, V2)" in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -6853,8 +7042,8 @@ impl/python/
                                 (round 96)
     snapshot.py       §7.5      the snapshot, form 7: a page read, written and written back, cut by the paging
                                 rule twice (by writing, by arithmetic), held complete (core 0.97, round 103)
-    seed_snapshot.py  §4.2      seed/snapshot.json's seed over snapshots, from its description alone: a page's
-                                entries merged, completeness, the omission rule (#977 E2, round 104; F-498)
+    seed_snapshot.py  §4.2      a seed over snapshots, core 0.100's §4.2: the fixture's Seed, and the live
+                                reader's pages, entries, Tracker, omitted and ByDescriptor (round 105)
     frame.py          §7.7      frames: the declaration, the frame form and its tag, the body written and read
                                 over packed's fields (round 96, core 0.83)
     freshness_v2.py   freshness.v2 §2.5's rule (the view), a subscriber that re-reads, the owner's body (round 96)
@@ -6944,7 +7133,18 @@ impl/python/
     state_scenarios.py §4.2, observer §4 scenarios/state.md §3 and §12 on a router process (zk2py's owner or, with
                                 --owner rust, the owner example), §11's open cases, and state_pairings' sections
     state_pairings.py §4, §7.5 scenarios/state.md §1, §2, §7, §10 and §13 at core 0.73, in three pairings: zk2py's
-                                owner and readers, the Rust owner with zk2py's, zk2py's owner with zenctl and consume
+                                owner and readers, the Rust owner with zk2py's, zk2py's owner with zenctl and consume;
+                                re-keyed to snapshots at core 0.100 (round 105)
+    snapshot_live.py  §4.2, §7.5 scenarios/state.md §14 at core 0.100, in three pairings, over
+                                interop/state/zk2py_fleet.v1.toml (round 105)
+    heartbeat_epoch_live.py freshness.v2 0.6 §2.4, core §4.3: a heartbeat's and a snapshot's time under a
+                                catalog's epoch, the owner example with --catalog and zk2py's (round 105)
+    config_remint_live.py config.v1 0.13 §2.12: the re-mint's refusals in order, and its wait for step 1's
+                                undo, live (round 105)
+    across.py         observer §7.3 §7.5 reading across a face: the scopes by the face's plan, a selector
+                                given, the revision of a key in three steps, CH's tag (round 106)
+    across_live.py    observer §7.5, live: zk2py's echo across zenoh-modem's RF face against the owner example
+                                (round 106)
     echo_tool.py      observer §8.1 §8.2 a generic watcher: the samples a selector delivers, and its scope, what it watches
                                 and the verbatim kinds it excludes, in its report and on stderr; NDJSON rows with the
                                 scope on stderr alone; each payload sniffed, its row saying which case and where it

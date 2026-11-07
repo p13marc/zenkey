@@ -2781,13 +2781,15 @@ def run_python_health(report: Report, exe: Path, consume: Path) -> None:
             # Zenoh timestamp of the owner's (freshness.v2 §2.4), so R1 stamps
             # it itself, and S receives it" (the round 102 mend; 0.2 had S
             # receive none).
+            # core 0.100 (round 105): G's answer is the owner's snapshot, its
+            # entry in band with no Zenoh timestamp (F-503)
             report.check(run, "step 4 (health.v1 0.9): S receives no fault, R1 dropped it, and the status put, which "
-                              "carries no Zenoh timestamp of the owner's; G's reply holds the status under the owner's "
-                              "stamp (a router never drops or re-stamps a reply, core §4.1)",
+                              "carries no Zenoh timestamp of the owner's; G's answer holds the status, a snapshot's "
+                              "entry in band, no Zenoh timestamp (core 0.100; F-503)",
                          ready_d is not None and not s2.of("zk2/lab/ahead/health.v1/stream/faults")
                          and len([x for x in s2.of("zk2/lab/ahead/health.v1/state/status") if x.kind == "put"]) >= 1
-                         and len(gets) == 1
-                         and live._zid_value(gets[0][0]) == owner_d and gets[0][1]["level"] == h.OK,
+                         and len(gets) == 1 and gets[0][0] is None and st.replies[0].snapshot_key is not None
+                         and st.replies[0].inband is not None and gets[0][1]["level"] == h.OK,
                          f"faults {len(s2.of('zk2/lab/ahead/health.v1/stream/faults'))}, status puts "
                          f"{len(s2.of('zk2/lab/ahead/health.v1/state/status'))}; GET {gets}, owner {owner_d}")
             s2.close()
@@ -2818,13 +2820,16 @@ def run_python_health(report: Report, exe: Path, consume: Path) -> None:
                 # compared the put's stamp)
                 zid = str(py.owner.session.zid()) if py.owner.session is not None else "?"
                 parts = lines[1].split(" ", 3) if len(lines) >= 2 else []
+                # core 0.100 (round 105): the status is a snapshot's entry, with
+                # no Zenoh timestamp; consume prints a stamp of its own making,
+                # which is no longer compared (F-503)
                 ok = (len(lines) >= 2 and lines[0] == "present lab/py" and len(parts) == 4
-                      and parts[1] == py.status_key
-                      and live._zid_value(parts[2].split("/")[-1]) == live._zid_value(zid)
-                      and parts[3].startswith(prefix))
-                report.check(run, "it finds zk2py's owner present and reads its status, the protobuf bytes of "
-                                  "FAILED \"check disk: full\" (raised by the check, §2.2) under zk2py's stamp; it "
-                                  "then stops, as health.v1 has no operation for it to call",
+                      and parts[1] == py.status_key and parts[3].startswith(prefix))
+                report.info(run, f"consume's stamp for the snapshot's entry: {parts[2] if len(parts) == 4 else None}, "
+                                 f"zk2py's session {zid}")
+                report.check(run, "it finds zk2py's owner present and reads its status from its snapshot, the protobuf "
+                                  "bytes of FAILED \"check disk: full\" (raised by the check, §2.2); it then stops, as "
+                                  "health.v1 has no operation for it to call",
                              ok and p.returncode != 0 and "NoResource" in p.stderr,
                              f"exit {p.returncode}; {lines[:2]}; stderr {p.stderr.strip()[-120:]!r}")
                 p2 = subprocess.run([str(consume), ep, "lab/py", str(REPO / HEALTH_TOML), "state/checks/disk",
@@ -3410,10 +3415,14 @@ def run_python_seed(report: Report, exe: Path) -> None:
                      f"{put_c!r}; c {c}; arrivals {arrivals.get('c')}")
         a = v.get(f"{base}/a")
         a_reply = [x for x in lj.applied if x.key == f"{base}/a" and x.via == "reply"]
-        report.check(run, "a stale reply loses to a newer live put: a's reply, at a lower seq of the same run and "
-                          "delivered at the GET's end, is dropped, and a holds the live put's stamp",
+        # core 0.100: under None the owner's answer arrives as it comes,
+        # before the later put, which replaces its entry; under Latest it
+        # came at the GET's end and was dropped. Either way a holds the put.
+        report.check(run, "a stale entry loses to a newer live put: a's entry, at a lower seq of the same run, "
+                          "arrives first under None (core §4.1) and the live put replaces it; a holds the live put's "
+                          "stamp",
                      bool(put_a) and a is not None and a.via == "live" and a.inband is not None
-                     and [x.outcome for x in a_reply] == ["dropped"]
+                     and [x.outcome for x in a_reply] in (["kept"], ["dropped"])
                      and all(x.inband is not None and x.inband.same_run(a.inband) and x.inband.seq < a.inband.seq
                              for x in a_reply),
                      f"{put_a!r}; a {a}; arrivals {arrivals.get('a')}")

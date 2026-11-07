@@ -406,6 +406,22 @@ def check_control(op: str, request: dict[str, Any], f: Facts) -> Refusal | None:
     return None
 
 
+#: core §5.1 "The request" (0.99): a call's request form travels under
+#: this Encoding alone.
+FORM_ENCODING = "zenoh/bytes"
+
+
+def encoding_refusal(encoding: str | None) -> Refusal | None:
+    """§2.5 (text 0.13, F-501's answer): "a query under another ``Encoding``"
+    is ``invalid_request``, its bytes never read (core §5.1, "The
+    request"), with no field: validation.json's ``encoding``, "zenoh/bytes
+    (the request form's) where it gives none". It comes "after persist's
+    unavailable … and before the request's type and row 1"."""
+    if encoding is None or encoding == FORM_ENCODING:
+        return None
+    return Refusal("invalid_request", None, f"a query under {encoding}: no request form (core §5.1)")
+
+
 def persist_unavailable(f: Facts, writable: bool = True) -> Refusal | None:
     """§2.13 row 1: "no persisted layer: unavailable, cause config", which
     the core answers before any handler runs, the request's type included;
@@ -1827,16 +1843,29 @@ class ConfigOwner:
            a new run"), then the tokens make before the old ones break (core
            §8.1, :meth:`zk2py.owner.Owner.new_epoch`'s ``before``).
 
-        **A refusal, the instance running on**: with ``remint="refuse"``,
-        nothing moved, as the reference does; with an act in flight; with a
-        parameter set at runtime whose startup value is unknown; with the
-        pending change's undo left in flight by the device; and with a
-        device that will not return to its startup values. A pending change
-        ended before a refusal stays ended, as config.v2's owner keeps it and
-        review-bot says the reference does (#1055); §2.12 does not say
-        (F-499). A declaration that fails in step 4 puts the old instance
-        back, its view and status put again under its run. Returns the new
-        instance id."""
+        **The refusals, in §2.12's order** (text 0.13, F-499's answer; the
+        mend after round 104):
+        - before step 1: ``remint="refuse"``, nothing moved, as the reference
+          does; and "A re-mint asked while an act is in flight is refused
+          before step 1";
+        - then steps 1 and 2, and "Each step ends before the next starts.
+          The re-mint waits for step 1's undo, one act (§2.11), as a
+          ``cancel``'s reply does (§2.10)": a device that holds the undo
+          (§2.7) is waited for (:meth:`complete` ends it), within
+          :attr:`remint_undo_wait_s`, zk2py's bound, past which the re-mint
+          is refused with the undo still in flight;
+        - after step 1, "A re-mint refused after step 1 leaves steps 1 and 2
+          done. The change stays ended, and its event stands": a parameter
+          set at runtime whose startup value is unknown, then a device that
+          refuses to return, "read as a device that refuses an apply (§2.9).
+          One that returns whole or not at all has moved nothing, so the
+          revision stays". zk2py's device returns whole or not at all.
+
+        The ending's view and status go out under the old run, before its
+        event; a refusal after it leaves them as the last put
+        (``_last_put``). A declaration that fails in step 4 puts the old
+        instance back, its view and status put again under its run. Returns
+        the new instance id."""
         import secrets
 
         from .owner import OwnerRefused
@@ -1845,16 +1874,16 @@ class ConfigOwner:
             raise OwnerRefused("config.v1 §2.12: a re-mint is a restart, and this owner refuses one while it runs")
         with self.cv:
             if self.core.in_flight is not None:
-                raise OwnerRefused("config.v1 §2.12: an act in flight (§2.7): no re-mint")
+                raise OwnerRefused("config.v1 §2.12: an act in flight (§2.7): no re-mint, refused before step 1")
+            self._after(self.core.end_for_remint(time.time_ns()), put_first=True)
+            if not self.cv.wait_for(lambda: self.core.in_flight is None, timeout=self.remint_undo_wait_s):
+                raise OwnerRefused(f"config.v1 §2.12: step 1's undo still in flight after {self.remint_undo_wait_s} "
+                                   "s (zk2py's bound): no re-mint; the change ends when it completes")
             unknown = sorted(f"{g}.{p}" for (g, p), prm in self.core.running.items()
                              if prm.source == "runtime" and self.core.startup_value(g, p)[0] is UNKNOWN)
             if unknown:
                 raise OwnerRefused(f"config.v1 §2.12: {', '.join(unknown)} set at runtime, its startup value "
-                                   "unknown: no re-mint")
-            self._after(self.core.end_for_remint(time.time_ns()), put_first=True)
-            if self.core.in_flight is not None:
-                raise OwnerRefused("config.v1 §2.12: the pending change's undo is in flight (§2.7): no re-mint; "
-                                   "the change ends when it completes, as cancel ends it")
+                                   "unknown: no re-mint; a pending change ended stays ended")
             try:
                 self.device.boot(self.core.startup_values())
             except Exception as e:  # noqa: BLE001 - a device that will not return refuses the re-mint
@@ -1889,6 +1918,17 @@ class ConfigOwner:
             # the new run silently: counted, made again, and ended by close.
             threading.Thread(target=self._fed_seed_retry, daemon=True).start()
         return new
+
+    #: config.v1 §2.12 (0.13): how long a re-mint waits for step 1's undo, a
+    #: device's act in flight, before it refuses (zk2py's bound)
+    remint_undo_wait_s = 30.0
+
+    def complete(self, result: Any) -> None:
+        """A device act the core left in flight (§2.7) ends with ``result``:
+        its step published, the view and the status put, and a re-mint that
+        waits for it woken (§2.12, 0.13)."""
+        with self.cv:
+            self._after(self.core.complete(result, time.time_ns()))
 
     def _run_timer(self) -> None:
         with self.cv:

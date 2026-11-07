@@ -172,23 +172,40 @@ def scope_line(scope: dict[str, Any]) -> str:
 
 
 class Held:
-    """The contracts a tool holds (``--contracts``), one revision per
-    interface: what each zk2 data key's resource declares."""
+    """The contracts a tool holds (``--contracts``): what each zk2 data key's
+    resource declares. Several revisions of one interface may be held
+    (observer 0.29 §7.5, round 106): no descriptor names the owner's, so each
+    sample is read with "the revision chosen in this order", by the
+    deployment's word, then CH's tag, then the catalog's latest
+    (:meth:`choose`, :func:`zk2py.across.revision_of_key`). ``by_iface``
+    keeps the one revision of an interface held once."""
 
-    def __init__(self, contracts: list[Any]) -> None:
-        from . import templates
+    def __init__(self, contracts: list[Any], catalog: Any = None) -> None:
+        from . import across, templates
 
-        self.by_iface: dict[str, Any] = {}
+        self.catalog = catalog
+        self.revisions: dict[str, Any] = {c.fingerprint: across.Revision.of_contract(c) for c in contracts}
+        self.contracts = list(contracts)
+        groups: dict[str, list[Any]] = {}
         for c in contracts:
-            if c.interface in self.by_iface:
-                raise ValueError(f"{c.interface}: two revisions held, and this tool reads no descriptor to choose "
-                                 "between them")
-            self.by_iface[c.interface] = c
+            groups.setdefault(c.interface, []).append(c)
+        self.by_iface: dict[str, Any] = {i: cs[0] for i, cs in groups.items() if len(cs) == 1}
+        self.several = {i for i, cs in groups.items() if len(cs) > 1}
         #: one frame reader per frame key heard (observer §7.6)
         self.readers: dict[str, Any] = {}
         self._templates = {
             name: [(templates.parse_template(r["template"]), r) for r in c.canonical["resources"]]
             for name, c in self.by_iface.items()}
+
+    def choose(self, key: str, ch: int, size: int) -> Any:
+        """Observer §7.5's "The revision of a key" for a put on ``key`` whose
+        CH is ``ch``: a :class:`zk2py.across.Choice`."""
+        from . import across
+
+        return across.revision_of_key(key, ch, size, self.revisions, self.catalog)
+
+    def contract(self, fingerprint: str) -> Any:
+        return self.revisions[fingerprint].contract
 
     def resource(self, parsed: dict[str, Any]) -> tuple[Any, dict[str, Any]] | None:
         """The (contract, resource) a parsed data key is a sample of, or
@@ -230,6 +247,12 @@ def heartbeat_of(key: str, read: Any, size: int, held: "Held | None") -> dict[st
     covers = key.split("/")[-1]
     out: dict[str, Any] = {"form": "heartbeat", "covers": covers, "bytes": size, "vouches": None}
     c = None if held is None else held.by_iface.get(covers)
+    if held is not None and covers in held.several:
+        # observer 0.29 §7.5: "A heartbeat's revisions are those of that
+        # interface whose contracts use freshness.v2"; chosen by CH's tag
+        ch = held.choose(key, (6 << 5) | (16 if read.stamp is not None and read.stamp.width == 32 else 0) | read.tag,
+                         size)
+        c = None if ch.revision is None else held.contract(ch.revision)
     if c is None:
         out["says"] = (f"a heartbeat covering {covers}: its covered revision is not held, so it is shown by its "
                        "envelope, its form, the interface it covers and its size (observer §7.3)")
@@ -313,17 +336,48 @@ def row_of(key: str, delete: bool, size: int, encoding: str, payload: bytes | No
         read = zk2c.read_delete(key, encoding, attachment) if delete else zk2c.read_put(key, encoding, payload)
     stamp = None if read is None or read.stamp is None else {
         "run": read.stamp.run_hex(), "seq": read.stamp.seq, "shown": str(read.stamp)}
-    found = held.resource(parsed) if held is not None and parsed and parsed.get("form") == "data" else None
+    data_key = bool(parsed and parsed.get("form") == "data")
+    choice = None
+    found = None
+    if held is not None and data_key and read is not None and not delete and payload is not None \
+            and read.tag is not None and read.form in ("mutation", "frame", "heartbeat"):
+        # observer 0.29 §7.5: the revision chosen in three steps, CH's tag
+        # checked as §7.3 says
+        choice = held.choose(key, payload[0], len(read.record or b""))
+        if choice.revision is not None and read.form != "heartbeat":
+            from . import across
+
+            c = held.contract(choice.revision)
+            r = across.resource_for(held.revisions[choice.revision], key)
+            found = None if r is None else (c, r)
+    elif held is not None and data_key:
+        found = held.resource(parsed)
     declared = decoding.unheld(key) if found is None else _held_type(*found)
+    if choice is not None:
+        declared["revision"] = choice.expect()
+        if choice.revision is None:
+            declared["says"] = (f"{declared.get('says', '')}; the revision of this key: "
+                                + (f"none left at {choice.none}" if choice.none else
+                                   f"ambiguous among {choice.ambiguous}")
+                                + " (observer §7.5), so its type is not held").lstrip("; ")
+        elif choice.by == "tag":
+            declared["says"] = (declared.get("says", "") + f"; read with {choice.revision}, chosen by CH's tag at "
+                                f"step {choice.step}: the tool's reading of CH, never the deployment's word "
+                                "(observer §7.5)")
     sniffed = decoded = None
     undecodable = None if read is None or not read.refused else read.undecodable()
     rec = None
     beat = framed = None
     reader = None
-    if found is not None and found[1].get("frame") is not None:
+    tag_refused = choice is not None and choice.refused == "tag"
+    if found is not None and found[1].get("frame") is not None and not tag_refused:
         reader = held.frame_reader(key, *found)
-    elif found is not None and found[1]["type"]["kind"] == "packed":
+    elif found is not None and found[1]["type"]["kind"] == "packed" and not tag_refused:
         rec = found[0].schemas.packed_record(found[1]["type"])
+    elif found is not None and not tag_refused and read is not None and read.tag:
+        # observer 0.29 §7.3: "A tool MUST NOT decode a record as its declared
+        # type under a tag that is not that type's", 0 for any other kind
+        tag_refused = True
     snap = None
     if read is not None and not delete and payload is not None and read.form == "heartbeat":
         # observer §7.3 (0.20): never read as a record, never sniffed
@@ -359,6 +413,17 @@ def row_of(key: str, delete: bool, size: int, encoding: str, payload: bytes | No
             undecodable = got.says(rec.name)
         else:
             decoded = got.value
+    elif tag_refused and not delete and payload is not None and read is not None:
+        undecodable = (f"undecodable as {declared.get('name')}: tag (CH carries tag {read.tag}, not its type's; "
+                       "observer §7.3)")
+    elif not delete and payload is not None and read is not None and not read.refused and read.tag \
+            and read.form == "mutation":
+        # observer 0.29 §7.3: "A tool that holds no type for a record whose
+        # tag is not 0 MUST NOT sniff it. It shows it as a packed record, by
+        # its tag and the record's size in bytes."
+        row_packed = {"tag": read.tag, "bytes": len(read.record or b"")}
+        declared = {**declared, "packed_record": row_packed,
+                    "shown": f"<packed record, tag {read.tag}, {len(read.record or b'')} bytes>"}
     elif not delete and payload is not None and not (read is not None and read.refused):
         sniffed = decoding.sniff(read.record if read is not None and read.record is not None else payload, encoding)
     row = {"key": key, "zk2": parsed is not None,
@@ -516,22 +581,24 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--count", type=int, default=0)
     ap.add_argument("--format", choices=("json", "ndjson"), default="json")
     ap.add_argument("--contracts", action="append", default=[],
-                    help="a contract file the tool holds, one revision per interface (repeatable)")
+                    help="a contract file the tool holds, repeatable; several revisions of one interface are "
+                         "chosen among per sample (observer §7.5)")
     ap.add_argument("--epoch", type=int, default=None,
                     help="the deployment epoch, Unix seconds, for packed time fields (default 0, core §7.6)")
     ap.add_argument("--catalog", default=None,
                     help="the deployment's catalog, whose epoch packed time fields count from (core §8.6)")
     ap.add_argument("--across-face", dest="across_face", action="append", default=[],
-                    help="an address across a constrained face, subscribed by the scopes of the contracts held "
-                         "(observer §7.5; repeatable, needs --contracts, not with a SELECTOR)")
+                    help="an address across a constrained face, subscribed by the scopes of the contracts held, "
+                         "the face's plan's with --face-policy and --face, a SELECTOR narrowed to them (observer "
+                         "§7.5; repeatable, needs --contracts)")
     ap.add_argument("--face-policy", dest="face_policy", default=None,
                     help="the routers' link.v2 face policy, with --face: the session runs the face's [transport], "
                          "and where its medium repairs no lost frame each scope is declared again after two of "
                          "its horizons of silence (observer §7.5, 0.23; core §8.5)")
     ap.add_argument("--face", default=None, help="the face of --face-policy the tool is across")
     args = ap.parse_args(argv)
-    if args.across_face and (args.selector is not None or not args.contracts):
-        print("echo: --across-face needs --contracts and no SELECTOR: its scopes are the contracts' (observer §7.5)",
+    if args.across_face and not args.contracts:
+        print("echo: --across-face needs --contracts: its scopes are the contracts' (observer §7.5)",
               file=sys.stderr)
         return 2
     across = None
@@ -549,6 +616,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"echo: --face-policy: {e}", file=sys.stderr)
             return 2
     catalog_epoch: int | None = None
+    held_catalog: Any = None
+    catalog_doc: Any = None
     if args.catalog is not None:
         from pathlib import Path
 
@@ -566,6 +635,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"echo: --catalog: refused, {e.token}: {e} (core §8.6)", file=sys.stderr)
             return 2
         catalog_epoch = catalog.resolve([held_catalog], held_catalog.id).epoch
+        catalog_doc = json.loads(Path(args.catalog).read_text(encoding="utf-8"))
     selector = args.selector if args.selector is not None else "zk2/**"
     held = None
     if args.contracts:
@@ -578,7 +648,7 @@ def main(argv: list[str] | None = None) -> int:
             bad = [f"{c.path}: {c.codes}" for c in loaded if not c.valid]
             if bad:
                 raise ValueError("not a valid contract: " + "; ".join(bad))
-            held = Held(loaded)
+            held = Held(loaded, held_catalog)
         except Exception as e:  # noqa: BLE001 - a contract it cannot hold is refused input
             print(f"echo: --contracts: {e}", file=sys.stderr)
             return 2
@@ -588,12 +658,34 @@ def main(argv: list[str] | None = None) -> int:
     watched: str | list[str] = selector
     horizons: dict[str, float | None] = {}
     if args.across_face:
-        from . import face, far_side
+        from pathlib import Path
+
+        from . import across as across_mod
+        from . import far_side
 
         assert held is not None
-        watched = face.scopes(held.by_iface.values(), args.across_face)
+        # observer 0.29 §7.5: with a face policy and its face, the scopes are
+        # what the face's plan lets cross; each heartbeat's exact key; a
+        # selector given narrowed to them, and one that meets none refused
+        pol = None if args.face_policy is None else Path(args.face_policy).read_text(encoding="utf-8")
+        sc = across_mod.scopes(held.contracts, args.across_face, "samples", pol, args.face, catalog_doc)
+        if sc.plan_refused is not None:
+            print(f"echo: the face's plan is refused ({', '.join(sc.plan_refused)}): no scope (observer §7.5)",
+                  file=sys.stderr)
+            return 2
+        d = across_mod.declared(sc.scopes, None if args.selector is None else [args.selector])
+        if d.refused:
+            print(f"echo: {', '.join(d.refused)}: meets none of the scopes across the face: refused, never dropped "
+                  "(observer §7.5)", file=sys.stderr)
+            return 2
+        watched = d.selectors
         scope = face_scope(watched, args.across_face)
-        horizons = far_side.scope_horizons(list(held.by_iface.values()), args.across_face)
+        horizons = far_side.scope_horizons(held.contracts, args.across_face)
+        for a in args.across_face:
+            for c in held.contracts:
+                hb = across_mod.heartbeat_key(a, c.interface)
+                if hb in watched:
+                    horizons[hb] = far_side.heartbeat_horizon_s(c)
     else:
         try:
             scope = scope_of(selector)

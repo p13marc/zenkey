@@ -250,13 +250,21 @@ def section1(report: Report) -> None:
         def status_of(st) -> list[tuple[dict | None, int | None]]:
             return [(_status(x.payload), _zid(x.stamp_id)) for x in st.replies if x.key.endswith("/state/status")]
 
-        got = [status_of(st) for k in ("lab/svc instance", "lab/svc alive") for st, _ in answers.get(k, [])]
+        # core 0.100 (round 105): status, a freshness.v2 state, is answered by
+        # snapshot, its entry with no Zenoh timestamp; "stamped by the owner's
+        # session" is read by its in-band run, the one the owner's descriptor
+        # states (F-503: the scenario reads a stamp's session)
+        run = o.owner.run_hex()
+        got = [[(_status(x.payload), x.inband.run_hex() if x.inband is not None else None, x.stamp_id)
+                for x in st.replies if x.key.endswith("/state/status")]
+               for k in ("lab/svc instance", "lab/svc alive") for st, _ in answers.get(k, [])]
         report.check(sec, "step 1: both of T's GETs, at the instance token and at the alive/health.v1 token, "
-                          "answer the status UNSPECIFIED \"starting\", stamped by the owner's session: put before "
-                          "the tokens (§2.3)",
+                          "answer the status UNSPECIFIED \"starting\", a snapshot's entry under the owner's run "
+                          "(its in-band stamp; no Zenoh timestamp, F-503): put before the tokens (§2.3)",
                      len(got) == 2 and all(len(x) == 1 and x[0][0] is not None and x[0][0]["level"] == h.UNSPECIFIED
-                                           and x[0][0]["reason"] == "starting" and x[0][1] == zid for x in got),
-                     str(got))
+                                           and x[0][0]["reason"] == "starting" and x[0][1] == run
+                                           and x[0][2] is None for x in got),
+                     f"{got}; run {run}")
         # Step 2.
         bus.owner("lab/quiet", level=h.OK, reason="serving", tokenless={"health.v1", "freshness.v2"})
         time.sleep(1.0)
@@ -337,12 +345,12 @@ def section2(report: Report) -> None:
         puts = _puts(s.of(o.status_key))
         rd = info_g.get("status_reading")
         report.check(sec, "step 1: past the horizon S and G both judge healthy, ok; S has received no put of the "
-                          "status since step 1's; G's reply is stamped with its last confirmation (freshness.v2 §2.4)",
+                          "status since step 1's; G's entry carries its confirmation (core 0.100, freshness.v2 0.7 §2.4)",
                      a_s.expect() == a_g.expect() == {"verdict": "healthy", "reason": "ok", "level": "ok"}
-                     and len(puts) == 1 and rd is not None and rd.stamp_ns is not None
-                     and (time.time_ns() - rd.stamp_ns) / fr.NS < 31,
+                     and len(puts) == 1 and rd is not None and rd.confirmed_ns is not None
+                     and (time.time_ns() - rd.confirmed_ns) / fr.NS < 31,
                      f"S {_answer(a_s)}, G {_answer(a_g)}, {len(puts)} puts, reply aged "
-                     f"{None if rd is None or not rd.stamp_ns else round((time.time_ns() - rd.stamp_ns) / fr.NS, 2)} s")
+                     f"{None if rd is None or not rd.confirmed_ns else round((time.time_ns() - rd.confirmed_ns) / fr.NS, 2)} s")
         # step 2: the owner stops vouching (zk2py: its writer closed, its bit clear)
         o.owner.close_writer(o.status_key)
         t2 = time.monotonic_ns()
@@ -357,10 +365,10 @@ def section2(report: Report) -> None:
         a_s, a_g = h.judge(r_s), h.judge(r_g)
         pres = info_s["presence"]
         reading = info_g.get("status_reading")
-        age = (time.time_ns() - reading.stamp_ns) / fr.NS if reading is not None and reading.stamp_ns else None
+        age = (time.time_ns() - reading.confirmed_ns) / fr.NS if reading is not None and reading.confirmed_ns else None
         report.check(sec, "step 3: the owner's instance and interface tokens are present; 65 s after the last "
                           "heartbeat that vouched for the status S judges stale, beyond_horizon, and G stale, "
-                          "beyond_horizon, its reply's stamp more than 60.5 s old; neither unhealthy, FAILED or OK "
+                          "beyond_horizon, its entry's confirmation more than 60.5 s old; neither unhealthy, FAILED or OK "
                           "as current",
                      len(pres.instances) == 1 and len(pres.alive) >= 1
                      and a_s.expect() == a_g.expect() == {"verdict": "stale", "reason": "beyond_horizon", "level": None}
@@ -748,7 +756,10 @@ def section4m(report: Report) -> None:
                       "the heartbeat's time unknown to go on, which answers no clock question alone (0.9)",
                  b["ahead"] and not b["faults"] and len(b["puts"]) == 2
                  and all(_zid(x.stamp_id) == _zid(b["r1"]) for x in b["puts"]) and len(gets) == 1
-                 and _zid(gets[0][0]) == _zid(b["owner"]) and gets[0][1] is not None and gets[0][1]["level"] == h.OK
+                 # core 0.100 (round 105): the status is a snapshot's entry, under
+                 # the owner's run in band, with no Zenoh timestamp (F-503)
+                 and gets[0][0] is None and b["get"][0].snapshot_key is not None and b["get"][0].inband is not None
+                 and gets[0][1] is not None and gets[0][1]["level"] == h.OK
                  and b["clock"] == ("unobservable", "time_unknown"),
                  f"ahead {b['ahead']}, {len(b['faults'])} faults, {len(b['puts'])} status puts; GET {gets}; owner "
                  f"{b['owner']}; clock question {b['clock']} over {b['heard'][-4:]}")
@@ -818,23 +829,21 @@ class StandInArchive:
                                            zenoh.handlers.Callback(self._answer), complete=False),
         ]
         time.sleep(0.2)
-        # Alignment (core §4.4): the owner's collection, read as S4 says; a
-        # value read from the owner is confirmed.
-        got: list[Any] = []
-        done = threading.Event()
-        self.session.get(origin, zenoh.handlers.Callback(got.append, done.set), target=zenoh.QueryTarget.ALL,
-                         consolidation=zenoh.ConsolidationMode.LATEST, timeout=1.0)
-        done.wait(3.0)
-        for rep in got:
-            if rep.ok is None:
+        # Alignment (core §4.4, 0.100): the owner's collection, read as S4
+        # says, consolidation None, by snapshot; a value read from the owner
+        # is confirmed, "a snapshot's entry included", and "From a snapshot's
+        # entry it keeps the put the entry stands for: CH of form 0 with the
+        # snapshot's tag and the run's width, the entry's run and seq, then
+        # its record" (live.StateReply.raw).
+        st = live.get_state(self.session, origin, timeout=1.0)
+        for r_ in st.replies:
+            if r_.refusal is not None:
                 continue
-            smp = rep.ok
             with self.lock:
                 # core §4.4 (0.73): "A put's bytes are kept as the owner wrote
                 # them, its envelope included, and a reply gives them back
                 # verbatim."
-                self.held[str(smp.key_expr)] = (None if smp.kind == zenoh.SampleKind.DELETE
-                                                else smp.payload.to_bytes(), str(smp.encoding), smp.timestamp, True)
+                self.held[r_.key] = (None if r_.deleted else r_.raw, r_.encoding, None, True)
 
     def form(self, key: str) -> str:
         from .slug import slug
