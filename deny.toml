@@ -29,6 +29,10 @@ ignore = [
     "RUSTSEC-2026-0370", # zvariant unmaintained
     "RUSTSEC-2026-0371", # zbus_names unmaintained
     "RUSTSEC-2026-0372", # zvariant_derive unmaintained
+    # iced_futures 0.14 -> wasmtimer 0.4 -> pin-utils 0.1. Its repository was
+    # archived on 2026-10-01; it is unmaintained, not vulnerable, and only
+    # zengui pulls it in. Re-check on every iced bump (2026-11-07).
+    "RUSTSEC-2026-0441", # pin-utils unmaintained
 ]
 
 [licenses]
