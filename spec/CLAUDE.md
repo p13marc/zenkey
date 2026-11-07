@@ -442,9 +442,7 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   `zenoh/bytes`, any other malformed unless the reader takes the bare
   wire's MAY (F-475, observer §7.3 too); a mark of seq n is at or after
   the write of n, and seq 0 orders before seq 1, nothing against seq 0
-  (F-476). C4d, the bare wire's removal, is not in: `telemetry.v1` §2.6
-  reads a CBOR map as §5.2's decoding reads one, and `config.v1` §2.5
-  cites the envelope.
+  (F-476). C4d, the bare wire's removal, followed at core 0.99 (below).
   Core 0.96 and observer 0.26 (#982's H1) let an owner on a first hop
   (its session its router's client across a constrained face) hold its
   instance token alone: §8.1 SHOULD every interface tokenless, MUST NOT
@@ -464,7 +462,20 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   the device's sessions by zid under the carve); 246 rules. Core 0.98
   (zk2py round 102's F-492) changed no text: the index reads the role a
   subject opens with and each role joined to it, never one its qualifier
-  names, so the owner class counts 76.
+  names, so the owner class counts 76. Core 0.99 and observer text 0.27
+  (#985 C4d) remove the bare wire: §5.1's MAY, §5.2's envelope with its
+  "Decoding" MUST and edges, and observer §7.3's branch go. A reply under
+  another `Encoding` is malformed, a `reply_err` under one the
+  transport's (`operations.md` §9 step 7: an earlier core's JSON
+  envelope, `set` called once, `ping` twice), and a query under one
+  carries no request form, refused `invalid_request` (§5.1 "The
+  request", step 8, a form's bytes under `application/json`).
+  `errors/cases.json` is removed; `core/error.proto` and
+  `core/error.schema.json` stay as history, read by no rule.
+  `telemetry.v1` 0.9 states its CBOR map reading itself; `config.v1`
+  0.12, `config.v2` 0.3 and `redundancy.v1` 0.10 say "error" for
+  "envelope", no rule changed. 249 rules (caller 17, observer 72), and
+  `check-spec-status.sh` reads a version of any major, part by part.
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`

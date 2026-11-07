@@ -140,9 +140,7 @@ a 0.21 may break either:
 - **The wire.** zk2c, the bandwidth-first wire (epic
   [#975](https://git.marcpardo.eu/marcpardo/zenkey/issues/975)), is being
   specified: one snapshot per collection
-  ([#977](https://git.marcpardo.eu/marcpardo/zenkey/issues/977)), and
-  config.v2's calls without the bare wire (C4d,
-  [#985](https://git.marcpardo.eu/marcpardo/zenkey/issues/985)). What
+  ([#977](https://git.marcpardo.eu/marcpardo/zenkey/issues/977)). What
   the readers decode, and how they order it, moves with it.
 - **The authoring format** and the canonical form a fingerprint is taken
   over, which the lens and the contract retrieval read.

@@ -340,17 +340,24 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `redeclare_failed`), `tests/redeclare.rs` is `constrained.md` §9 step 2
   through a lossy relay, and #1047's `unwatch` returning while a re-declare
   waits behind a stalled relay (no QoS, blocking puts).
-  A call's both wires (#985 C4b): `model::render`'s `read` reads a
-  `response` or `summary` under `zenoh/bytes` as the value form
-  (`Payload::Record`, or `Refused`, never sniffed), `render_detail` takes
-  the error form's tag (`None` for the bare wire) and decodes a form's
-  detail as the `error` type on the contract's encoding, and
-  `report::operation` carries the as-of mark (`OperationAnswer::Value`'s
-  and `EnvelopeView`'s `mark`, `ReplierView::marks`, each omitted on the
-  bare wire); `bus::conform`'s fan-out probe and `tape::bench` classify by
-  the runtime's `classify`, and `bus::config`'s refusal reads a
-  `ConfigError` from either wire (`Refusal::detail_as`); `zk2_core.rs`'s
-  `a_call_is_read_from_its_form_or_the_bare_wire` runs them. The flip
+  A call's forms alone (#985 C4b; C4d, core 0.99, removed the bare
+  wire): `model::render`'s `read` reads a `response` or `summary` under
+  `zenoh/bytes` as the value form (`Payload::Record`, or `Refused`, never
+  sniffed), and a request, response or summary under any other `Encoding`
+  as no form (`Read::no_form`, undecodable, "no call form under …", its
+  type declared), `render_resource`'s request alike; `render_detail`
+  decodes a detail's bytes as the `error` type on the contract's encoding
+  under the form's tag (`None` only for a refusal made before any wire),
+  and `report::operation` carries the as-of mark (`OperationAnswer::Value`'s
+  and `EnvelopeView`'s `mark`, `ReplierView::marks`, each omitted for a
+  malformed reply); `bus::conform`'s fan-out probe and `tape::bench`
+  write the request form (`Forms::request`, under `zenoh/bytes`) and
+  classify by the runtime's `classify`, and `bus::config`'s refusal reads
+  a `ConfigError` (`Refusal::detail_as`); `OperationAnswer::Malformed`,
+  `RepliesView::malformed`, `ConfigActAnswer::Malformed`,
+  `MalformedReply` and `BenchReport::malformed` are gone, a reply error
+  that is no error form being the transport's; `zk2_core.rs`'s
+  `a_call_is_read_from_its_form_alone` runs them. The flip
   (#985 C4c): every call goes through the runtime's `Client`/`Fleet`,
   which write the request form, and `bus::conform`'s fan-out probe writes
   it too (`Forms::request`, under `zenoh/bytes`); `render_resource`, the

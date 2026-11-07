@@ -46,7 +46,7 @@ says what it will be.
 | **Configuration,** `config.v1` | Landed | `ServiceBuilder::config_v1`, `zenkey::config_v1::{Startup, Device}`, the compact status, `zenctl config`, zengui's Config tool |
 | A configuration owner's re-mint | Landed | `Service::new_epoch` on a `config.v1` or `config.v2` service restarts its configuration in the new instance (`config.v1` §2.12): a pending change cancelled, the device returned to its startup values through `Device::restore_startup`, revision 0. Refused while an act is in flight, for a runtime value that starts unknown, and when fed through `desired.v1` (#1055, PR #1063; #1064 for `config.v2`) |
 | **Calls:** the value and error forms | Landed | Core 0.94 §5.1 and §5.2. A caller writes its request as `CH · record` under `zenoh/bytes`. An owner answers in the value form, or refuses in the error form, each with its as-of mark. `Call::reply`, `summary` and `refuse` write the forms, and `Client` and the generated `Client` write the request (#985's C4a to C4c; C4c is PR #1057) |
-| The bare wire's removal | Missing, in progress | An owner on `main` still reads a bare request, under its type's `Encoding` (core §5.1's MAY), and a caller a bare reply. C4d removes both (#985's C4d) |
+| **The bare wire's removal** | Landed | Core 0.99 §5.1 and §5.2: a call is read in the forms alone. An owner refuses a request under another `Encoding` with `invalid_request`, a caller reads a value under one as malformed, and an error under one, an earlier core's envelope included, as the transport's (#985's C4d) |
 | **`config.v2`,** its text and its model | Landed | `config.v2` 0.1, draft since G4: the groups declared in the adopter's contract (`config.groups`), one packed record in place of the view and the status, and the derived `Record`, `Set<T>`, `Control` and `Error`. `zenkey_model::config::v2`; `zk2 config derive` prints the derived types, and `zk2 contract lint` runs its lint (#985's G1, PR #1058) |
 | `config.v2`'s owner | Landed | `ServiceBuilder::config_v2(Startup, Device)` and `zenkey::config_v2`, over the service's own config contract. zenkey-build lints a contract that uses `config.v2` and generates its derived types. The owner example's `--config-v2` runs the spec's `rfcfg.v1` (#985's G2, PR #1061) |
 | `config.v2`'s tools | Missing | `zenctl config` and zengui's Config tool read `config.v1` only (#985's G3) |
@@ -161,7 +161,7 @@ move together.
     `rpc::lanes` and `rpc::action_run` become the generated handlers of `@op/sdu/lanes` and
     `@op/action/{name}`. Their answers go out in the value and error forms (core 0.94 §5.1).
     zenoh-modem's own callers move to the generated `Client`, which writes the request form. An
-    owner still reads a bare JSON request, until C4d removes the bare wire (§6).
+    owner refuses a bare JSON request, `invalid_request` (core 0.99 §5.1).
   - `presence_loop`, which cycles a netdev's token when its ifindex moves, becomes
     `Service::new_epoch`, which restarts a `config.v1` or `config.v2` configuration (#1055, #1064).
   - `twin_alive` has no runtime twin. The README's "Tokens" maps it to a liveliness query on the
@@ -509,7 +509,6 @@ A migration started today would hit each of these.
 |---|---|---|
 | **No published crates,** and no zk2 tag | A git dependency on a revision, or a path | #929 |
 | **The readers' `wait_before_close` default** is zenoh 1.10.1's 5 s | Pass `--wait-before-close`, or `--face-policy` where a verb takes it | #1011 |
-| **The bare wire is still read.** An owner on `main` takes a bare request, and C4d removes it | Write every call through `zenkey::Client` or the generated `Client`, which write the request form; give zenoh-modem's ops tooling no bare request to depend on | #985 (C4d) |
 | **`config.v2` has no tools.** Four backends need text | Stay on `config.v1`. Across RF, a GET of the status by grant; the view is never pushed | #985 (G3, G4), #979 |
 | **No snapshots.** A seed or a re-read across RF is a reply per key, about 120 B each before its value. A 64-endpoint re-read is 14,788 B in 129 SDUs | Keep states `host`, as 3.2 and 3.3 do | #977 |
 | **No first-hop configuration** | Nothing for zenoh-modem's own owners, whose sessions are TCP on the node. A ground service across the radio pays its tokens at each reconnect | #982 |

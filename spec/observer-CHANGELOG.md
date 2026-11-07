@@ -35,8 +35,8 @@ written against core 0.99.
   so, with its `Encoding` and its bytes, never as an owner's error.
 - **"The envelope first"** and the decode order, which read a stream's,
   a state's and an event's samples.
-- **The reference's tools** read the bare wire until C4d's code half,
-  which follows this text.
+- **The reference's tools** read the forms alone with this text, C4d's
+  code half beside it.
 - **The header** is written against core 0.99.
 
 ## 0.26 — 2026-11-02: a provider found by its instance token, and a first hop (#982 H1)
