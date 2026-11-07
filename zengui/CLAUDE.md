@@ -48,6 +48,10 @@ Claude Code loads this file when working in `zengui/`; the root `CLAUDE.md` is t
   §3.11) shows "link closed" in the unobservable tone, never down, and
   the status cell counts it apart; zengui takes no face policy yet, so
   only a projection given one (`LivePresence::with_first_hop`) says it.
+  Each live tick hands the lens feed the runs its puts state in band
+  (`update::bus::hear_runs` over `LensFeed::runs_in`/`on_runs`, #1074), so
+  a descriptor kept across a token's return is read again once a put
+  states another run.
   **The lens**: the feed's catalog and generation, the contract store
   (offline contracts plus retrieval, §8.4), and the identity cache under
   its own `identity_epoch`, bumped at every door the lens's inputs move

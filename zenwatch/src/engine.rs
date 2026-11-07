@@ -582,14 +582,13 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
     // A rule on a tokenless interface's tokens is refused by name (#982
     // H3; core §8.1, observer §3.6): its providers hold none, so it would
     // never fire. Asked of the instances present at start, by one presence
-    // read with descriptors of the scope the rules cover.
+    // read with descriptors of the scope the rules cover; a read that
+    // failed is said at warn (#1074).
     let named = presence_rules.named_interfaces();
     if !named.is_empty() {
         let scope = zenkey_fleet::covering_scope(named.iter().map(|(_, t, _)| *t));
-        if let Ok(observed) =
-            zenkey_fleet::observe_presence(&e.bus.session, &scope, e.timeout).await
-            && let Some(why) = presence_rules.refuse_tokenless(&observed)
-        {
+        let read = zenkey_fleet::observe_presence(&e.bus.session, &scope, e.timeout).await;
+        if let Some(why) = tokenless_refusal(&presence_rules, read) {
             return Err(unaskable!("{why}"));
         }
     }
@@ -1264,11 +1263,92 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
     Ok(())
 }
 
+/// What `run`'s start reads of the one presence read its tokenless refusal
+/// asks (#982 H3; core §8.1, observer §3.6): a rule's refusal, when an
+/// instance present marks the interface it names `"token": false`. A read
+/// that failed refuses nothing, and is said at warn, naming the rules it
+/// leaves unchecked (#1074): they run, and one on a tokenless interface
+/// never fires.
+fn tokenless_refusal(
+    rules: &PresenceRules,
+    read: zenkey_fleet::Result<zenkey_fleet::ObservedPresence>,
+) -> Option<String> {
+    match read {
+        Ok(observed) => rules.refuse_tokenless(&observed),
+        Err(err) => {
+            let unchecked: Vec<&str> = rules
+                .named_interfaces()
+                .into_iter()
+                .map(|(name, _, _)| name)
+                .collect();
+            tracing::warn!(rules = ?unchecked,
+                "presence: the read for the tokenless refusal failed, so these rules are not \
+                 checked against a tokenless interface, on which one would never fire: {}",
+                zenkey_fleet::one_line(&err));
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::RuleConfig;
     use zenkey_fleet::{AddressStatus, PresenceChange, PresenceSource};
+
+    /// #1074: the tokenless refusal's presence read failing refuses
+    /// nothing and is said at warn, naming the rules it leaves unchecked
+    /// and why; a read that shows no tokenless interface refuses nothing,
+    /// and says nothing.
+    #[test]
+    fn a_failed_read_for_the_tokenless_refusal_is_said_at_warn() {
+        #[derive(Clone)]
+        struct Capture(Arc<std::sync::Mutex<Vec<u8>>>);
+        impl std::io::Write for Capture {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let rules = [rule(
+            "ping-gone",
+            "liveliness-gone site/zk2/*/tc/@zk/alive/ping.v1/**",
+            &[],
+        )];
+        let presence = PresenceRules::new(&rules, "site");
+        let capture = Capture(Arc::default());
+        let logs = capture.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::WARN)
+            .with_ansi(false)
+            .with_writer(move || logs.clone())
+            .finish();
+        let logged = || String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
+        tracing::subscriber::with_default(subscriber, || {
+            let empty = zenkey_fleet::ObservedPresence::from_keys("zk2/*/tc/@zk/**", &[], true);
+            assert_eq!(tokenless_refusal(&presence, Ok(empty)), None);
+            assert_eq!(logged(), "", "a read that refuses nothing says nothing");
+            let failed = zenkey_fleet::Error::Bus {
+                op: "liveliness get",
+                target: "zk2/*/tc/@zk/**".into(),
+                source: "session closed".into(),
+            };
+            assert_eq!(tokenless_refusal(&presence, Err(failed)), None);
+        });
+        let line = logged();
+        for needle in [
+            "WARN",
+            "ping-gone",
+            "tokenless refusal failed",
+            "liveliness get zk2/*/tc/@zk/**",
+            "session closed",
+        ] {
+            assert!(line.contains(needle), "{needle:?} not in {line:?}");
+        }
+    }
 
     /// The watch sessions a run opens (#830): one in the namespace for the
     /// rules that follow the deployment's presence live, one in none for a

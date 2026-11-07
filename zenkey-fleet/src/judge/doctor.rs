@@ -808,14 +808,18 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
         if !spec.asks(CheckId::FirstHopToken) || spec.first_hop.is_empty() {
             return BTreeMap::new();
         }
-        let mut out = BTreeMap::new();
-        for (addr, instance, d) in served(observed) {
-            if spec.first_hop.contains(addr) {
-                let read = held_bundles(s, d, t).await;
-                out.insert((addr.clone(), instance.clone()), read);
-            }
-        }
-        out
+        let devices = served(observed)
+            .filter(|(addr, _, _)| spec.first_hop.contains(addr))
+            .map(|(addr, instance, d)| async move {
+                (
+                    (addr.clone(), instance.clone()),
+                    held_bundles(s, d, t).await,
+                )
+            });
+        futures_util::future::join_all(devices)
+            .await
+            .into_iter()
+            .collect::<BTreeMap<_, _>>()
     };
     let ((contracts, stamps), archives, second, second_config, alarms, first_hop) = tokio::join!(
         contracts_then_stamps,
@@ -1685,8 +1689,9 @@ async fn domain_tokens(raw: &Session, timeout: Duration) -> Result<DomainTokens,
 /// Which bundles a first-hop device's own session holds (#982 H3): each
 /// contract key `d` names (core §8.4), target `All`, consolidation `None`,
 /// a reply its device's when its replier id is `d`'s `meta.zid` by value.
-/// A descriptor that states no `meta.zid` attributes no reply: why, as the
-/// error.
+/// The GETs run at once, so a device whose keys go unanswered costs one
+/// timeout, not one per key (#1074). A descriptor that states no
+/// `meta.zid` attributes no reply: why, as the error.
 async fn held_bundles(
     s: &Session,
     d: &Descriptor,
@@ -1702,40 +1707,59 @@ async fn held_bundles(
              (core §3.3)"
                 .to_owned()
         })?;
+    let asks = d.interfaces.iter().filter_map(|e| {
+        let iface = IfaceId::from_str(&e.iface).ok()?;
+        let fp = Fingerprint::parse(&e.contract).ok()?;
+        let key = zenkey_model::grammar::contract_key(&iface, fp.hex()).ok()?;
+        Some(held_bundle(
+            s,
+            key.to_string(),
+            format!("{iface} {fp}"),
+            &zid,
+            timeout,
+        ))
+    });
     let mut out = HeldBundles::default();
-    for e in &d.interfaces {
-        let (Ok(iface), Ok(fp)) = (IfaceId::from_str(&e.iface), Fingerprint::parse(&e.contract))
-        else {
-            continue;
-        };
-        let Ok(key) = zenkey_model::grammar::contract_key(&iface, fp.hex()) else {
-            continue;
-        };
+    for (named, answered) in futures_util::future::join_all(asks).await {
         out.asked += 1;
-        let selector = key.to_string();
-        let replies = match s
-            .get(&selector)
-            .target(QueryTarget::All)
-            .consolidation(ConsolidationMode::None)
-            .timeout(timeout)
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                out.failed.push(format!("GET {selector}: {e}"));
-                continue;
+        match answered {
+            Ok(true) => {
+                out.held.insert(named);
             }
-        };
-        while let Ok(reply) = replies.recv_async().await {
-            if reply
-                .replier_id()
-                .is_some_and(|id| zid_value(&id.zid().to_string()) == zid)
-            {
-                out.held.insert(format!("{iface} {fp}"));
-            }
+            Ok(false) => {}
+            Err(why) => out.failed.push(why),
         }
     }
     Ok(out)
+}
+
+/// One contract key's GET for [`held_bundles`]: `named` with whether a
+/// reply came from the session whose zid is `zid`, or why the GET could not
+/// be put on the bus.
+async fn held_bundle(
+    s: &Session,
+    selector: String,
+    named: String,
+    zid: &str,
+    timeout: Duration,
+) -> (String, Result<bool, String>) {
+    let replies = match s
+        .get(&selector)
+        .target(QueryTarget::All)
+        .consolidation(ConsolidationMode::None)
+        .timeout(timeout)
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => return (named, Err(format!("GET {selector}: {e}"))),
+    };
+    let mut held = false;
+    while let Ok(reply) = replies.recv_async().await {
+        held |= reply
+            .replier_id()
+            .is_some_and(|id| zid_value(&id.zid().to_string()) == zid);
+    }
+    (named, Ok(held))
 }
 
 /// One archive's keys: a GET over its whole `@state` (§4.4), target `All`

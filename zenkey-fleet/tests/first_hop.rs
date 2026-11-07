@@ -14,7 +14,8 @@
 //!   device's instance tokens reads its link closed, where an owner the
 //!   policy does not list reads down.
 //! - **A descriptor kept** across the token's return (observer §3.11's
-//!   MAY): the lens reads it again with no GET.
+//!   MAY): the lens reads it again with no GET, and reads the descriptor
+//!   again when a put states another run than the one kept (#1074).
 //! - **`first-hop-token`**: a device left at its defaults holds interface
 //!   tokens and contract queryables, a warning; one started for its first
 //!   hop holds neither.
@@ -36,21 +37,31 @@ use zenkey_fleet::report::{CheckId, DoctorSeverity, Judgement};
 use zenkey_fleet::{
     AddressStatus, BundleStore, Catalog, DoctorBus, DoctorSpec, FirstHop, LensFeed, LivePresence,
     Monitor, MonitorSpec, PresenceChange, PresenceFeed, PresenceScope, PresenceTransition,
-    run_doctor,
+    SampleView, run_doctor,
 };
 use zenkey_model::contract::{Contract, load_path};
+use zenkey_model::grammar::Addr;
+use zenkey_model::template::Bindings;
+use zenkey_model::wire::Run;
 
 /// The device's address: the RF medium's radio, attached as a device.
 const DEVICE: &str = "lab/radio-a";
+
+/// One of the runtime's scenario contracts, by file name.
+fn scenario(name: &str) -> Contract {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../zenkey/tests/contracts")
+        .join(format!("{name}.toml"));
+    let l = load_path(&path);
+    l.contract
+        .unwrap_or_else(|| panic!("{name} does not load:\n{}", l.report))
+}
 
 /// `ping.v1`, from the runtime's scenario contracts: one replicated
 /// operation, so an owner at its defaults holds an instance token, one
 /// interface token and one contract queryable.
 fn ping() -> Contract {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../zenkey/tests/contracts/ping.v1.toml");
-    let l = load_path(&path);
-    l.contract
-        .unwrap_or_else(|| panic!("ping.v1 does not load:\n{}", l.report))
+    scenario("ping.v1")
 }
 
 /// The RF medium's policy (`examples/zk2/link/media/rf.face.toml`) with
@@ -77,16 +88,28 @@ fn device_policy() -> zenkey_model::link::FacePolicy {
 /// An owner of `ping.v1` at `address`, through the runtime's own builder,
 /// on its first hop or at its defaults.
 async fn owner(session: &zenoh::Session, address: &str, first_hop: bool) -> Service {
-    let c = ping();
+    owner_of(session, address, first_hop, &[ping()]).await
+}
+
+/// An owner of `contracts` at `address`, every resource exposed, on its
+/// first hop or at its defaults.
+async fn owner_of(
+    session: &zenoh::Session,
+    address: &str,
+    first_hop: bool,
+    contracts: &[Contract],
+) -> Service {
     let mut cfg = config(address);
     if first_hop {
         cfg = cfg.first_hop();
     }
     let mut b = ServiceBuilder::new(session, cfg);
-    b.implement(Implementation::new(c.clone()))
-        .expect("implement");
-    for r in &c.resources {
-        let _ = b.expose(&c.iface, &zenkey::implementation::resource_name(r));
+    for c in contracts {
+        b.implement(Implementation::new(c.clone()))
+            .expect("implement");
+        for r in &c.resources {
+            let _ = b.expose(&c.iface, &zenkey::implementation::resource_name(r));
+        }
     }
     b.start().await.expect("start")
 }
@@ -370,6 +393,168 @@ async fn s10_a_device_on_a_device_face_is_link_closed_never_down() {
     })
     .await;
     assert_eq!(feed.presence().status(&device), AddressStatus::Up);
+    svc.close().await.expect("close");
+}
+
+// ─── a descriptor kept by (instance, run) ───────────────────────────────────
+
+/// The run the lens's catalog reads in the device's descriptor.
+fn run_listed(lens: &LensFeed) -> Option<String> {
+    lens.catalog()?
+        .descriptors()
+        .find(|d| d.service == DEVICE)?
+        .run
+        .clone()
+}
+
+/// The runs the lens reads in the device's next put on `level`
+/// ([`LensFeed::runs_in`]): put until the listener hears one, since a
+/// put before the router declares the listener to the device's new
+/// transport is dropped at its source.
+async fn runs_heard(
+    lens: &LensFeed,
+    level: &zenkey::writer::Writer,
+    heard: &zenoh::pubsub::Subscriber<zenoh::handlers::FifoChannelHandler<zenoh::sample::Sample>>,
+) -> Vec<(Addr, Run)> {
+    while let Ok(Some(_)) = heard.try_recv() {}
+    let deadline = tokio::time::Instant::now() + util::SETTLE;
+    loop {
+        level.put("1").await.expect("a put");
+        if let Ok(Ok(s)) =
+            tokio::time::timeout(Duration::from_millis(200), heard.recv_async()).await
+        {
+            return lens.runs_in("", &[Arc::new(SampleView::of(&s))]);
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the device's put never crossed"
+        );
+    }
+}
+
+/// #1074: the descriptor kept is by (instance, run). A run moves within an
+/// instance with no token moving (core §4.3's MAY, `Service::new_run`), and
+/// the descriptor put stating it does not cross while the link is closed:
+/// the lens reuses what it kept at the token's return, on trust, and reads
+/// the descriptor again at the first put stating the new run, once. A put
+/// under the run kept costs no GET, and before any token went nothing is
+/// read of a put at all.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s10_a_run_moved_while_the_link_was_closed_is_read_again() {
+    let (_router, ep) = router(None).await;
+    let link = Link::to(&ep).await;
+    let device_session = retrying_client(&link.endpoint).await;
+    let tool = client(&ep).await;
+    let watching = client(&ep).await;
+    let listening = client(&ep).await;
+    let device = addr(DEVICE);
+
+    let watch = watch_of(&watching, "");
+    let spec = MonitorSpec {
+        stats_tick: Duration::from_secs(3600),
+        ..MonitorSpec::default()
+    }
+    .with_presence(&PresenceScope::all());
+    let monitor = Monitor::start_watch(&watch, spec).await.expect("a monitor");
+    let live = LivePresence::new(PresenceScope::all())
+        .with_first_hop(FirstHop::of_policy(&device_policy()), SystemTime::now());
+    let (mut feed, seeded) = PresenceFeed::open(&tool, &monitor, live, T)
+        .await
+        .expect("a feed");
+    let store = BundleStore::new(T);
+    let (lens, error) = LensFeed::open(&tool, &store, T).await;
+    assert!(error.is_none(), "{error:?}");
+    lens.on_presence(&seeded).await;
+    let heard = listening
+        .declare_subscriber(format!("zk2/{DEVICE}/**"))
+        .await
+        .expect("a subscriber");
+
+    // The device starts for its first hop, and the lens describes it.
+    let hop = scenario("hop.v1");
+    let svc = owner_of(&device_session, DEVICE, true, std::slice::from_ref(&hop)).await;
+    let level = svc
+        .writer(&hop.iface, "stream/level", &Bindings::new())
+        .await
+        .expect("a writer");
+    let mut seen = Vec::new();
+    until(&mut feed, &lens, &mut seen, "the device up", |f| {
+        f.presence().status(&device) == AddressStatus::Up
+    })
+    .await;
+    eventually("the lens reads the device's run", || {
+        let lens = lens.clone();
+        async move { run_listed(&lens).is_some() }
+    })
+    .await;
+    let first = run_listed(&lens).expect("the descriptor states its run");
+    assert!(
+        runs_heard(&lens, &level, &heard).await.is_empty(),
+        "a descriptor a GET read stands: no put is read against it"
+    );
+    let described = lens.descriptors_read();
+
+    // The link closes and opens again under the same run: the kept
+    // descriptor is reused, and a put under its run reads nothing again.
+    link.cut();
+    until(&mut feed, &lens, &mut seen, "the link closed", |f| {
+        f.presence().status(&device) == AddressStatus::LinkClosed
+    })
+    .await;
+    link.heal();
+    until(&mut feed, &lens, &mut seen, "the device up again", |f| {
+        f.presence().status(&device) == AddressStatus::Up
+    })
+    .await;
+    assert_eq!(lens.descriptors_kept().await, 1);
+    let runs = runs_heard(&lens, &level, &heard).await;
+    assert_eq!(
+        runs,
+        [(device.clone(), Run::from_hex(&first).expect("a run"))]
+    );
+    assert!(
+        !lens.on_runs(&runs).await,
+        "its own run reads nothing again"
+    );
+    assert_eq!(lens.descriptors_read(), described);
+
+    // Again, and the run moves while the link is closed: its descriptor
+    // put does not cross, the token's return reuses what was kept, and
+    // the first put under the new run reads the descriptor again.
+    link.cut();
+    until(&mut feed, &lens, &mut seen, "the link closed again", |f| {
+        f.presence().status(&device) == AddressStatus::LinkClosed
+    })
+    .await;
+    let moved = svc.new_run();
+    assert_ne!(moved.hex(), first);
+    link.heal();
+    until(
+        &mut feed,
+        &lens,
+        &mut seen,
+        "the device up a third time",
+        |f| f.presence().status(&device) == AddressStatus::Up,
+    )
+    .await;
+    assert_eq!(lens.descriptors_kept().await, 2);
+    assert_eq!(
+        run_listed(&lens),
+        Some(first.clone()),
+        "reused on trust: nothing crossed to say the run moved"
+    );
+    let runs = runs_heard(&lens, &level, &heard).await;
+    assert_eq!(runs, [(device.clone(), moved)]);
+    assert!(
+        lens.on_runs(&runs).await,
+        "the new run's descriptor is read"
+    );
+    assert_eq!(lens.descriptors_read(), described + 1, "one GET");
+    assert_eq!(run_listed(&lens), Some(moved.hex()));
+    assert!(
+        runs_heard(&lens, &level, &heard).await.is_empty(),
+        "read once: no put is read against it again"
+    );
     svc.close().await.expect("close");
 }
 
