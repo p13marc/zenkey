@@ -899,10 +899,42 @@ fn freshness_horizons() {
     }
 }
 
+/// An observation's `clock`, as `judgements.json` writes it.
+fn clock_trust(o: &Value) -> ClockTrust {
+    match o.get("clock") {
+        Some(c) if c["trusted"] == json!(true) => ClockTrust::Trusted {
+            delta: secs(&c["delta_s"]),
+        },
+        _ => ClockTrust::Untrusted,
+    }
+}
+
 /// One observation, as `judgements.json` writes it.
 fn observation(o: &Value) -> Observation {
     match o["via"].as_str().expect("via") {
         "archive" => Observation::Archived,
+        // freshness.v2 0.6 §2.6: a snapshot's entry, judged as a reply.
+        "snapshot" => {
+            let entry = match &o["entry"] {
+                Value::Null => freshness::Entry::Omitted,
+                e => match e["kind"].as_str().expect("entry.kind") {
+                    "tombstone" => freshness::Entry::Tombstone,
+                    "live" => freshness::Entry::Live {
+                        stamp_age: match e["confirmation"].as_str().expect("confirmation") {
+                            "none" => None,
+                            "time" | "conf" => e["age_s"].as_f64().map(StampAge::from_secs_f64),
+                            other => panic!("confirmation {other:?}"),
+                        },
+                    },
+                    other => panic!("entry.kind {other:?}"),
+                },
+            };
+            Observation::of_entry(
+                o["complete"].as_bool().expect("complete"),
+                entry,
+                clock_trust(o),
+            )
+        }
         "subscription" => Observation::Subscribed {
             last: match &o["last"] {
                 Value::Null => None,
@@ -919,12 +951,7 @@ fn observation(o: &Value) -> Observation {
             complete: o["complete"].as_bool().expect("complete"),
         },
         "get" => {
-            let clock = match o.get("clock") {
-                Some(c) if c["trusted"] == json!(true) => ClockTrust::Trusted {
-                    delta: secs(&c["delta_s"]),
-                },
-                _ => ClockTrust::Untrusted,
-            };
+            let clock = clock_trust(o);
             let reply = match &o["reply"] {
                 Value::Null => None,
                 r => Some(match r["kind"].as_str().expect("reply.kind") {
@@ -943,7 +970,8 @@ fn observation(o: &Value) -> Observation {
 
 /// `freshness/conformance/judgements.json`: a horizon and the observations
 /// of one member → the combined verdict and its reason class
-/// (freshness.v1 §2.3, §2.5–§2.8).
+/// (freshness.v1 §2.3, §2.5–§2.8), a snapshot's entry as `freshness.v2`
+/// §2.6 reads it (text 0.6).
 #[test]
 fn freshness_judgements() {
     let path = profiles().join("freshness/conformance/judgements.json");
@@ -1864,6 +1892,8 @@ fn link_revision(d: &mut link::Deployment, iface: &str, rev: &Value) {
             let link_v2 = uses(link::PROFILE_V2);
             for r in &mut resources {
                 r.link_v2 = link_v2;
+                // v2 §2.11 (0.9): read with the revision's `uses`.
+                r.tombstone_only = link::tombstone_only(r.token, &r.template, &r.annotations, uses);
             }
             d.add_revision(iface.to_owned(), resources);
         }
@@ -2120,8 +2150,9 @@ fn link_lints() {
 // --- link.v2 (#988, L1) ---------------------------------------------------------
 
 /// `link/conformance/v2/lints.json`: a face policy, and a router's block
-/// where the case gives one → every finding (link.v2 §2.1, §2.4, §2.10,
-/// §2.15, §2.16), a policy with no `profile` read as link.v1's. A block is
+/// or a deployment and its windows where the case gives them → every
+/// finding (link.v2 §2.1, §2.4, §2.10, §2.11, §2.15, §2.16), a policy with
+/// no `profile` read as link.v1's. A block is
 /// read as `link/conformance/lints.json` reads it, `zk_not_denied` on a
 /// device face as link.v2 §2.15 says (0.7).
 #[test]
@@ -2130,11 +2161,18 @@ fn link_v2_lints() {
     let mut doc = read_json(&path);
     for case in doc["cases"].as_array_mut().expect("cases") {
         let what = format!("{}", case["note"]);
+        // A deployment and its windows, where the case gives them (v2
+        // §2.11, 0.9), as `link/conformance/lints.json` gives them.
+        let deployment = link_deployment(case);
+        let windows: Option<BTreeMap<String, u64>> = case
+            .get("windows")
+            .map(|w| serde_json::from_value(w.clone()).expect("windows"));
         let block = case.get("block").map(link_block);
         let found = link::lint(&link::LintInput {
             text: case["policy"].as_str().expect("policy"),
+            deployment: deployment.as_ref(),
+            windows: windows.as_ref(),
             block: block.as_ref().map(|(f, b)| (f.as_str(), b)),
-            ..link::LintInput::default()
         });
         expect(case, findings_json(&found), &what);
     }

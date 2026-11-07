@@ -2770,17 +2770,18 @@ fn snapshot_bodies() {
     }
 }
 
-/// `spec/conformance/seed/snapshot.json` (core §4.2, as E3 states it;
-/// #977's E2 runs it ahead of the flip): a reader's collections, what it
-/// holds when it asks a GET, and every arrival after it — the GET's pages
-/// and per-key replies, and live samples — → what it holds, and each
+/// `spec/conformance/seed/snapshot.json` (core §4.2): a reader's
+/// collections, what it holds when it asks a GET, and every arrival after
+/// it — the GET's pages and per-key replies, and live samples — → what it
+/// holds, and each
 /// snapshot the GET brought, its pages, completeness and the keys its
 /// omission rule dropped. The merge is a tool's
 /// (`zenkey_model::seed::admits_mark`), a page's entries are its members'
 /// per-key replies (`collection::Page::members`), the pages are held by
 /// `collection::hear`, and the omission is `seed::apply_snapshot`, applied
-/// once, when a snapshot turns complete. Written by an independent reading
-/// of the text, checked by a second, never blessed.
+/// once, when a snapshot turns complete. A case that gives `revisions` maps
+/// coll by the one its `descriptor` names (core §4.2, F-497). Written by an
+/// independent reading of the text, checked by a second, never blessed.
 #[test]
 fn seed_snapshot() {
     use zenkey_model::collection::{Heard, Page, Snapshot, hear, snapshot_prefix};
@@ -2830,8 +2831,16 @@ fn seed_snapshot() {
         let note = &case["note"];
         // Each collection the reader's contract gives it: its index, its
         // snapshot key, the key its template's chunks start under, and the
-        // template.
-        let collections: Vec<(u32, String, String, Template)> = case["collections"]
+        // template. Where the case gives revisions, the reader maps coll by
+        // the one the owner's descriptor names alone (F-497).
+        let given = match case.get("revisions") {
+            Some(revs) => {
+                let named = case["descriptor"].as_str().expect("descriptor");
+                &revs[named]
+            }
+            None => &case["collections"],
+        };
+        let collections: Vec<(u32, String, String, Template)> = given
             .as_array()
             .expect("collections")
             .iter()
