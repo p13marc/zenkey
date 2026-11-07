@@ -4579,44 +4579,50 @@ annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "1" }
                  ["freshness.v2/stream/heartbeat/probe.v1", "probe.v1/state/status", "probe.v1/stream/frames/link"]]))
 
     # #983's last "Done when" item (main 2ed6d968, the coordinator's addition
-    # to round 99): modem.v3 3.2's frames and gendev.v1's frames/sample,
-    # written by zk2py's Framer and read back through its reader and R.
+    # to round 99): modem.v3's frames and gendev.v1's frames/sample, written
+    # by zk2py's Framer and read back through its reader and R. Since
+    # modem.v3 3.3 (#991, carried by round 102): 3.2's nine, deprecated, and
+    # 3.3's three over one record of all 73 readings.
     from . import adopter_frames
 
     rows = adopter_frames.run()
     sizes = {f"{x['interface']}/{x['resource']}": x for x in rows}
-    out.append(("#983 T4: modem.v3 3.2's nine frame resources and gendev.v1 1.1's frames/sample, each declared, "
-                "written by zk2py's Framer under a 32-bit run, read back envelope first, written again byte for byte, "
-                "and every series field of every record a sample of the value written, paired by seq; link.v1 "
-                "0.16 §2.8's largest frame measured at frame_facts' size, frames/link 22 B and frames/message 213 B "
-                "(keyframe_every 1) and frames/sample 100 B",
+    out.append(("#983 T4 at modem.v3 3.3 (#991): its twelve frame resources, 3.2's nine deprecated and frames/fast, "
+                "frames/slow and frames/paid, and gendev.v1 1.1's frames/sample, each declared, written by zk2py's "
+                "Framer under a 32-bit run, read back envelope first, written again byte for byte, and every series "
+                "field of every record a sample of the value written, paired by seq; link.v1 0.16 §2.8's largest "
+                "frame measured at frame_facts' size, frames/link 22 B, frames/message 213 B and frames/paid 207 B "
+                "(keyframe_every 1), frames/fast and frames/slow 216 B and frames/sample 100 B",
                 [len(rows), all(x["declared"] == "declared" and x["read_back"] and x["samples"]
                                 and x["follows"] == ["first", "continues"] for x in rows),
                  all(x["largest_frame_bytes"] == x["largest_bytes"] for x in rows),
                  [sizes.get(k, {}).get("largest_frame_bytes")
-                  for k in ("modem.v3/frames/link", "modem.v3/frames/message", "gendev.v1/frames/sample")]],
-                [10, True, True, [22, 213, 100]]))
+                  for k in ("modem.v3/frames/link", "modem.v3/frames/message", "modem.v3/frames/paid",
+                            "modem.v3/frames/fast", "modem.v3/frames/slow", "gendev.v1/frames/sample")]],
+                [13, True, True, [22, 213, 207, 216, 216, 100]]))
     # F-470 answered (link.v1 0.16 §2.8): "the largest frame holds records −
     # ⌊records / keyframe_every⌋ such delta records, and full records for
     # the rest". zk2py's writer never puts a frame above it, and puts it
     # where every field changes; examples/zk2/zenoh-modem/README.md states
-    # the group frames' new sizes.
+    # each frame's size, 3.3's three and 3.2's nine.
     readme = (spec.parent / "examples" / "zk2" / "zenoh-modem" / "README.md").read_text(encoding="utf-8")
     stated = {m.group(1): int(m.group(2)) for m in re.finditer(r"^\| `(frames/\w+)` \|.*\| (\d+) B \|$", readme, re.M)}
     out.append(("F-470 at link.v1 0.16: the largest frame holds records − ⌊records / keyframe_every⌋ delta records "
                 "that include every field; zk2py's writer puts no frame above it and reaches it where every field "
-                "changes (frames/layer 109 B, frames/sample 100 B); zenoh-modem's README states each modem.v3 size "
-                "zk2py measures",
+                "changes (frames/layer 109 B, frames/fast and frames/slow 216 B over a 207 B full record, "
+                "frames/sample 100 B); zenoh-modem's README states each modem.v3 size zk2py measures, 3.3's three "
+                "and 3.2's nine",
                 missing(flat("profiles/link/v1.md"), "so the largest frame holds `records` −")
                 + [all(x["delta_frame_bytes"] <= x["largest_bytes"] for x in rows),
                    {k: (x["full_frame_bytes"], x["largest_bytes"]) for k, x in sizes.items()
                     if x["full_frame_bytes"] != x["largest_bytes"]},
                    {k.split("/", 1)[1]: x["largest_bytes"] for k, x in sizes.items() if k.startswith("modem.v3/")}
-                   == stated],
+                   == stated, len(stated)],
                 [True, {"modem.v3/frames/air": (49, 50), "modem.v3/frames/bearer": (32, 33),
-                        "modem.v3/frames/if": (58, 60), "modem.v3/frames/layer": (106, 109),
-                        "modem.v3/frames/radio": (21, 22), "modem.v3/frames/sched": (32, 33),
-                        "modem.v3/frames/sdu": (51, 52), "gendev.v1/frames/sample": (97, 100)}, True]))
+                        "modem.v3/frames/fast": (207, 216), "modem.v3/frames/if": (58, 60),
+                        "modem.v3/frames/layer": (106, 109), "modem.v3/frames/radio": (21, 22),
+                        "modem.v3/frames/sched": (32, 33), "modem.v3/frames/sdu": (51, 52),
+                        "modem.v3/frames/slow": (207, 216), "gendev.v1/frames/sample": (97, 100)}, True, 12]))
 
     # Review-bot on round 98 (PR #1041): the meter accepts after the put.
     mf = spec / "profiles" / "telemetry" / "conformance" / "contracts" / "meterframe.v1.toml"
@@ -4996,7 +5002,233 @@ def _round102_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 + missing(idx, "| [`config.v2`](config/v2.md) | 0.1 | draft | zenoh-modem | 0.94 |")
                 + [bool(re.search(r"\| \[`link\.v2`\]\(link/v2\.md\) \| 0\.\d+ \| draft \| zenoh-modem \|", idx))],
                 [True]))
-    return out + _config_v2_readings(root) + _core096_readings(root)
+    return out + _config_v2_readings(root) + _core096_readings(root) + _modem33_readings(root)
+
+
+def _modem33_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """``modem.v3`` 3.3 (#991, PR #1059 at a680b029, carried by round 102),
+    read as an adopter's contract: link.v1 0.17, link.v2 0.8 and
+    telemetry.v2 0.3, each editorial, with its entry; the contract and its
+    one record of all 73 readings as its README and its header state them,
+    through zk2py's own loader, codec and envelope; the seven packed states;
+    catalog ``e3a529fe``; each of zenoh-modem's faces planned by zk2py as its
+    ``v2/plan.json`` case; F-493 and F-494. The frames themselves are
+    :func:`_round99_readings`' #983 T4 and F-470 rows."""
+    import math
+    import re
+    import tomllib
+
+    from . import adopter_frames as af, catalog, frame, link_v2, packed, zk2c
+    from .contract import load_contract
+
+    spec = root.parent
+    fm = spec.parent / "examples" / "zk2" / "zenoh-modem"
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    def text_version(rel: str) -> tuple[int, int]:
+        m = re.search(r"\| \*\*Text version\*\* \| (\d+)\.(\d+)", (spec / rel).read_text(encoding="utf-8"))
+        return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+    readme = " ".join((fm / "README.md").read_text(encoding="utf-8").split())
+    toml_text = (fm / "modem.v3.toml").read_text(encoding="utf-8")
+    #: the contract's comments, as one line of words
+    comments = " ".join(" ".join(ln.strip().lstrip("#").strip() for ln in toml_text.splitlines()
+                                 if ln.strip().startswith("#")).split())
+    t2_text = flat("profiles/telemetry/v2.md")
+    out: list[tuple[str, Any, Any]] = [
+        ("link.v1 0.17 or later, link.v2 0.8 or later and telemetry.v2 0.3 or later, each with its entry: "
+         "editorial, Appendix B reading modem.v3 3.3, no rule changed (#991)",
+         [text_version("profiles/link/v1.md") >= (0, 17), text_version("profiles/link/v2.md") >= (0, 8),
+          text_version("profiles/telemetry/v2.md") >= (0, 3)]
+         + entry("profiles/link/CHANGELOG.md", "0.17", "no rule changed")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 0.8", "no rule changed")
+         + entry("profiles/telemetry/CHANGELOG.md", "telemetry.v2 0.3", "no rule changed"),
+         [True, True, True]),
+    ]
+    # The contract, as its header counts it.
+    c = load_contract(fm / "modem.v3.toml", check_file_name=True)
+    head = tomllib.loads(toml_text)["interface"]
+    res = c.canonical["resources"] if c.canonical else []
+    by = {r["template"]: r for r in res}
+    kinds = {k: sum(1 for r in res if r["kind"] == k) for k in ("stream", "state", "event", "operation")}
+    out.append(("modem.v3 3.3 loads clean, fingerprint 71f55126, published in examples/zk2/.history: 105 resources "
+                "(85 streams, 14 states, 4 events, 2 operations), 99 of them optional, as its header says",
+                missing(comments, "Counts: 105 resources (85 streams, 14 states, 4 events, 2 "
+                        "operations); 99 of them optional.")
+                + [c.codes, (head["major"], head["minor"]), (c.fingerprint or "")[7:15],
+                   (spec.parent / "examples" / "zk2" / ".history" / "modem.v3"
+                    / f"{(c.fingerprint or '')[7:]}.bundle.json").is_file(),
+                   len(res), kinds, sum(1 for r in res if r.get("optional"))],
+                [[], (3, 3), "71f55126", True, 105, {"stream": 85, "state": 14, "event": 4, "operation": 2}, 99]))
+    frames = sorted(t for t, r in by.items() if r.get("frame") is not None)
+    nine = ["frames/air", "frames/bearer", "frames/if", "frames/layer", "frames/link", "frames/message",
+            "frames/radio", "frames/sched", "frames/sdu"]
+    three = ["frames/fast", "frames/slow", "frames/paid"]
+    # Against 3.2 (catalog index 6, a584f236): a review, which 3.3's own
+    # bundle in the history root accepts (core §9.7), as the examples family
+    # checks it against every published revision.
+    from . import bundle, compat
+
+    b32 = spec.parent / "examples" / "zk2" / ".history" / "modem.v3" \
+        / "a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404.bundle.json"
+    cand = compat.Revision(c.canonical, {a.id: a.data for a in c.schemas.artifacts()})
+    vs32, _ = compat.full_transitive([bundle.revision(bundle.verify(b32.read_bytes()))], cand,
+                                     compat.contract_compare)
+    out.append(("modem.v3 3.3 against 3.2 (a584f236): a review, the nine frames' link.exposure moved from link to "
+                "host (annotations_changed, core §9.8), and nothing else; deprecated added is compatible",
+                [vs32.cls, sorted(r.split(":")[0] for r in vs32.reasons),
+                 all("review annotations_changed" in r and "'link.exposure': 'link'" in r
+                     and "'link.exposure': 'host'" in r for r in vs32.reasons)],
+                [compat.REVIEW, nine, True]))
+    lays = {t: frame.layout_of(c, by[t]) for t in frames}
+    out.append(("modem.v3 3.3's frames: 3.2's nine deprecated since 3.3, replaced by frames/fast, frames/message by "
+                "frames/paid, and host; the "
+                "three over one record type, Readings, link, their horizons 300, 1,800 and 3,600 s and a full record "
+                "at least every 15, 4 and 1, each declaring 73 series; the twelve declare 369 series (telemetry.v2 "
+                "0.3 Appendix B)",
+                missing(t2_text, "Its twelve frame resources declare 369 series")
+                + [[t for t in frames if t not in three] == nine,
+                   {t: ((by[t].get("deprecated") or {}).get("since"),
+                        (by[t].get("deprecated") or {}).get("replaced_by"),
+                        by[t]["annotations"].get("link.exposure")) for t in nine}
+                   == {t: (3, "frames/paid" if t == "frames/message" else "frames/fast", "host") for t in nine},
+                   [(by[t]["type"]["name"], by[t]["annotations"].get("link.exposure"),
+                     by[t]["annotations"].get("freshness.ttl_s"), by[t].get("deprecated"),
+                     lays[t].decl.keyframe_every, len(by[t]["annotations"].get("telemetry.series") or {}))
+                    for t in three],
+                   sum(len(by[t]["annotations"].get("telemetry.series") or {}) for t in frames)],
+                [True, True, [("Readings", "link", 300, None, 15, 73), ("Readings", "link", 1800, None, 4, 73),
+                              ("Readings", "link", 3600, None, 1, 73)], 369]))
+    # Readings, as the README's "The ranges" and its frame sizes state it.
+    lo = lays["frames/fast"]
+    fields = lo.fields
+    gauges = [f for f in fields if f.type != "counter"]
+    counters = [f for f in fields if f.type == "counter"]
+    widths: dict[int, list[str]] = {}
+    for f in counters:
+        assert f.counter_width is not None
+        widths.setdefault(f.counter_width, []).append(f.name)
+    vals = {f.name: af._value(f, 0) for f in fields}
+    full = lo.write({"time": af.TIME, "records": [{"full": True, "values": vals, "absent": []}]})
+    delta = lo.write({"time": af.TIME, "records": [{"full": False, "values": vals, "absent": []}]})
+    out.append(("modem.v3 3.3's Readings: 73 optional fields, no marker, 1,542 bits with every reading present; the 22 "
+                "gauges 305 bits and the 51 counters 1,164, 5 at 24 bits, 37 at 20, the 7 kernel packet, error and "
+                "discard counters at 32 and the 2 octet counters at 40; a full record 199 B of body, 207 B of "
+                "payload with a 32-bit run and 205 B with a 16-bit run; a delta record of every reading 216 B "
+                "(zk2py's writer)",
+                missing(readme, "A full record with every reading present is 1,542 bits, 199 B of body: 207 B of "
+                        "payload after an envelope with a 32-bit run, 205 B with a 16-bit run.",
+                        "The 22 gauges take 305 bits.", "The counters take 1,164 bits.")
+                + [len(fields), all(f.optional for f in fields), packed.MARKER in lo.record.items,
+                   lo.record.bit_bounds()[1], (len(gauges), sum(f.width for f in gauges)),
+                   (len(counters), sum(f.width for f in counters)),
+                   {w: len(n) for w, n in sorted(widths.items())}, sorted(widths.get(32, [])),
+                   sorted(widths.get(40, [])), len(full), len(zk2c.write("frame", 32, 1, 0, lo.tag, full)),
+                   len(zk2c.write("frame", 16, 1, 0, lo.tag, full)),
+                   len(zk2c.write("frame", 32, 1, 0, lo.tag, delta))],
+                [73, True, False, 1542, (22, 305), (51, 1164), {20: 37, 24: 5, 32: 7, 40: 2},
+                 ["if_in_discards", "if_in_errors", "if_in_multicast_pkts", "if_in_pkts", "if_out_discards",
+                  "if_out_errors", "if_out_pkts"], ["if_in_octets", "if_out_octets"], 199, 207, 205, 216]))
+    # F-493: each width's serial window at the README's worst rate, beside
+    # telemetry.v2 0.3 Appendix B's "Each counter's width holds its worst
+    # rate … between two frames of the slowest cadence a face lists, 900 s".
+    worst = {24: 2734, 20: 300, 40: 1.25e9, 32: 14.88e6}  # the README's table, per second
+    windows = {"bytes": 2 ** 23 / worst[24], "airtime_ms": 2 ** 23 / 1000, "sdu_plane": 2 ** 19 / worst[20],
+               "octets": 2 ** 39 / worst[40], "kernel_packets": 2 ** 31 / worst[32]}
+    short = sorted(k for k, s in windows.items() if s < 900)
+    out.append(("F-493 (open): telemetry.v2 0.3 Appendix B says each counter's width holds its worst rate between two "
+                "frames 900 s apart; at the README's worst rates zk2py's windows for 3.3's widths are 51 min, 2.3 h "
+                "and 29 min, but 7.3 min for the 2 octet counters and 2.4 min for the 7 kernel packet counters: 9 of "
+                "51 below 900 s, which the README excepts (\"no shipped face carries\" a netdev) and Appendix B "
+                "does not",
+                missing(t2_text, "**Each counter's width** holds its worst rate within its serial window (§2.20). "
+                        "The rate is taken between two frames of the slowest cadence a face lists, 900 s.")
+                + missing(readme, "2,734 B/s", "1,000 ms/s", "300/s", "1.25 GB/s", "14.88 Mpps",
+                          "The kernel's are a netdev's, which no shipped face carries")
+                + [{k: math.floor(s / 6) / 10 for k, s in windows.items()}, short,
+                   sum(len(widths.get(w, [])) for w in (32, 40))],
+                [{"airtime_ms": 139.8, "bytes": 51.1, "kernel_packets": 2.4, "octets": 7.3, "sdu_plane": 29.1},
+                 ["kernel_packets", "octets"], 9]))
+    # The seven packed states, each record's longest as the README's table
+    # gives it, and F-494: their longest puts.
+    states = sorted(t for t in by if t.startswith("packed/"))
+    recs = {t: c.schemas.packed_record(by[t]["type"]) for t in states}
+    longest = {recs[t].name: recs[t].bit_bounds()[1] for t in states}
+    rec_bytes = sorted({(b + 7) // 8 for b in longest.values()})
+    puts16 = [6 + b for b in rec_bytes]
+    out.append(("modem.v3 3.3's packed states: the seven JSON states again under packed/, each optional, host, "
+                "ttl 60, its record ending with an extension marker, its longest record OperRecord 83 bits, "
+                "IdentityRecord 52, SecurityRecord 10, RadioRecord 9, LinkRecord 145, EndpointRecord 17, "
+                "DestinationRecord 158 (the README's table), 2 to 20 B (the contract's comment)",
+                missing(comments, "at a record's size: 2 to 20 B")
+                + [len(states), all(by[t]["kind"] == "state" and by[t].get("optional")
+                                    and by[t]["annotations"].get("freshness.ttl_s") == 60
+                                    and by[t]["annotations"].get("link.exposure") in (None, "host")
+                                    and recs[t].items[-1] == packed.MARKER for t in states),
+                   longest, (rec_bytes[0], rec_bytes[-1])],
+                [7, True, {"DestinationRecord": 158, "EndpointRecord": 17, "IdentityRecord": 52, "LinkRecord": 145,
+                           "OperRecord": 83, "RadioRecord": 9, "SecurityRecord": 10}, (2, 20)]))
+    out.append(("F-494 (open): the README says a packed state \"Put with a 16-bit run, each is 8 to 21 B\"; with core "
+                "§7.5's 6-byte envelope zk2py's longest puts are 8 to 26 B, DestinationRecord's 158 bits 20 B and "
+                "26 B put, LinkRecord's 145 bits 19 B and 25 B",
+                missing(readme, "Put with a 16-bit run, each is 8 to 21 B")
+                + [(puts16[0], puts16[-1]), len(zk2c.write("mutation", 16, 1, 0, 0, b"\x00" * 20))],
+                [(8, 26), 26]))
+    # Catalog e3a529fe, index 8.
+    cat_doc = _load_json(fm / "catalog.json")
+    prev = dict(cat_doc, entries=cat_doc["entries"][:-1], lineage=cat_doc["lineage"][:-1])
+    try:
+        catalog.succession(catalog.read(json.dumps(prev)), catalog.read((fm / "catalog.json").read_bytes()))
+        succeeds = True
+    except Exception as e:  # noqa: BLE001 - the refusal is the reading
+        succeeds = f"{type(e).__name__}: {e}"
+    out.append(("zenoh-modem's catalog.json is e3a529fe, its index 8 modem.v3 3.3's fingerprint; its lineage's last, "
+                "8c808dff, is the catalog of its first eight entries, which it succeeds (core §8.6)",
+                [catalog.catalog_id(cat_doc), cat_doc["entries"][-1], cat_doc["lineage"][-1],
+                 catalog.catalog_id(prev), succeeds],
+                ["e3a529fe", {"contract": c.fingerprint, "iface": "modem.v3", "index": 8},
+                 {"entries": 8, "id": "8c808dff"}, "8c808dff", True]))
+    # Each face file, planned by zk2py with catalog.json, is its plan.json case.
+    cases = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "plan.json")["cases"]
+    faces = {"zenohd-rf0": 14, "zenohd-lora0-sf7": 15, "zenohd-lora0-sf9": 16, "zenohd-lora0-sf12": 17,
+             "zenohd-sat0": 18}
+    planned: dict[str, Any] = {}
+    for name, i in faces.items():
+        case = cases[i]
+        text = (fm / "faces" / f"{name}.face.toml").read_text(encoding="utf-8")
+        got = link_v2.plan(text, case["implements"], _link_interfaces(case), cat_doc)
+        face = (got.get("faces") or [{}])[0]
+        planned[name] = [got == case["expect"], got.get("catalog"),
+                         [(f_["resource"].rsplit("/", 2)[-2] + "/" + f_["resource"].rsplit("/", 1)[-1], f_["every_s"],
+                           f_.get("keyframe_s")) for f_ in face.get("frames", [])],
+                         [e for x in face.get("liveness", []) for e in x["evidence"]
+                          if e.startswith("modem.v3/stream/frames/")],
+                         sorted(x["code"] for x in face.get("findings", []) if x["code"] != "frame_unlisted"),
+                         [x["code"] for x in link_v2.lint(text)]]
+    out.append(("zenoh-modem's five faces (link.v2 0.8 Appendix B), each planned by zk2py with catalog.json as its "
+                "v2/plan.json case 14 to 18: one frame each at its cadence, liveness evidence, the two others "
+                "frame_unlisted; SF7 keep_alive_not_suppressed, SF9 frame_over_batch (216 B over 117 B); no_arq but "
+                "on SBD",
+                planned,
+                {"zenohd-rf0": [True, "e3a529fe", [("frames/fast", 60, None)], ["modem.v3/stream/frames/fast"], [],
+                                ["no_arq"]],
+                 "zenohd-lora0-sf7": [True, "e3a529fe", [("frames/fast", 60, None)], ["modem.v3/stream/frames/fast"],
+                                      ["keep_alive_not_suppressed"], ["no_arq"]],
+                 "zenohd-lora0-sf9": [True, "e3a529fe", [("frames/fast", 120, 900)], ["modem.v3/stream/frames/fast"],
+                                      ["frame_over_batch"], ["no_arq"]],
+                 "zenohd-lora0-sf12": [True, "e3a529fe", [("frames/slow", 900, 3600)],
+                                       ["modem.v3/stream/frames/slow"], [], ["no_arq"]],
+                 "zenohd-sat0": [True, "e3a529fe", [("frames/paid", 1800, None)], ["modem.v3/stream/frames/paid"], [],
+                                 []]}))
+    return out
 
 
 def _core096_readings(root: Path) -> list[tuple[str, Any, Any]]:
