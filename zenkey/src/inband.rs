@@ -18,6 +18,10 @@
 //!     → its body becomes the payload, its run and seq record 0's
 //!       (Read::Framed): read with its frame resource's declaration
 //!       ([`admit_frame`]), never as one record of the key's type
+//! a put whose envelope is a snapshot's page (core §7.5's form 7, 0.97)
+//!     → its body read (Read::Snapshot): a GET's reader takes its entries
+//!       as the per-key replies they stand for ([`replies`]); anywhere
+//!       else it is no record (#977's E2)
 //! every other sample
 //!     → read with no envelope (Read::Plain)
 //! ```
@@ -51,7 +55,19 @@
 //! [`admit_frame`] on a frame resource, its body parsed with its layout,
 //! and refused anywhere else ([`Undecodable::Framed`]); a mutation on a
 //! frame resource has no reading ([`Undecodable::Mutation`]).
+//!
+//! **A snapshot's page** (#977's E2): only a GET's reply carries one (core
+//! §7.5), and the parser cannot tell how a put came. So [`read`] reads its
+//! body either way, and a reader of a GET's replies — the consumer's state
+//! GET and re-read, an archive's alignment — reads each entry as the
+//! per-key reply it stands for ([`replies`]: a put of the entry's record
+//! under its stamp on its member's key, or a tombstone's delete). Every
+//! other reader admits no record from it ([`Undecodable::Snapshot`]): a
+//! page heard on a subscription is no owner's answer. The GET readers keep
+//! `Latest` until E3, so a snapshot of several pages arrives there as its
+//! last page alone, which its index shows incomplete.
 
+use zenkey_model::collection::{BodyRefusal, Page};
 use zenkey_model::frame::{self, Frame};
 use zenkey_model::packed::{Layout, ReadRefusal};
 use zenkey_model::seed::{self, Mark};
@@ -93,6 +109,14 @@ pub enum Read {
         stamp: wire::Stamp,
         tag: Tag,
     },
+    /// A snapshot's page (core §7.5's form 7): the put as it arrived, and
+    /// its body read, or the body's first refusal. A GET's reader reads
+    /// its entries ([`replies`]); it is never a record of the key's type,
+    /// and has no stamp of its own to order a value by.
+    Snapshot {
+        sample: Sample,
+        page: Result<Box<Page>, BodyRefusal>,
+    },
 }
 
 impl Read {
@@ -103,7 +127,7 @@ impl Read {
             Read::Enveloped { stamp, .. }
             | Read::Heartbeat { stamp, .. }
             | Read::Framed { stamp, .. } => Some(*stamp),
-            Read::Plain(_) | Read::Refused { .. } => None,
+            Read::Plain(_) | Read::Refused { .. } | Read::Snapshot { .. } => None,
         }
     }
 
@@ -114,6 +138,7 @@ impl Read {
             Read::Enveloped { tag, .. }
             | Read::Heartbeat { tag, .. }
             | Read::Framed { tag, .. } => Some(*tag),
+            Read::Snapshot { page, .. } => page.as_ref().ok().map(|p| p.tag),
             Read::Plain(_) | Read::Refused { .. } => None,
         }
     }
@@ -126,7 +151,18 @@ impl Read {
             Read::Plain(_)
             | Read::Enveloped { .. }
             | Read::Heartbeat { .. }
-            | Read::Framed { .. } => None,
+            | Read::Framed { .. }
+            | Read::Snapshot { .. } => None,
+        }
+    }
+
+    /// A snapshot's page, its body read; `None` for any other sample and
+    /// for a page whose body is refused.
+    #[must_use]
+    pub fn page(&self) -> Option<&Page> {
+        match self {
+            Read::Snapshot { page: Ok(p), .. } => Some(p),
+            _ => None,
         }
     }
 
@@ -152,6 +188,9 @@ impl Read {
             Read::Refused { refusal, .. } => Some(Undecodable::Envelope(*refusal)),
             Read::Heartbeat { .. } => Some(Undecodable::Heartbeat),
             Read::Framed { .. } => Some(Undecodable::Framed),
+            Read::Snapshot { page, .. } => {
+                Some(Undecodable::Snapshot(page.as_ref().err().copied()))
+            }
             Read::Plain(_) | Read::Enveloped { .. } => None,
         }
     }
@@ -164,7 +203,8 @@ impl Read {
             | Read::Enveloped { sample, .. }
             | Read::Refused { sample, .. }
             | Read::Heartbeat { sample, .. }
-            | Read::Framed { sample, .. } => sample,
+            | Read::Framed { sample, .. }
+            | Read::Snapshot { sample, .. } => sample,
         }
     }
 
@@ -176,7 +216,8 @@ impl Read {
             | Read::Enveloped { sample, .. }
             | Read::Refused { sample, .. }
             | Read::Heartbeat { sample, .. }
-            | Read::Framed { sample, .. } => sample,
+            | Read::Framed { sample, .. }
+            | Read::Snapshot { sample, .. } => sample,
         }
     }
 
@@ -185,7 +226,7 @@ impl Read {
     #[must_use]
     pub fn mark(&self) -> Option<Mark> {
         match self {
-            Read::Refused { .. } => None,
+            Read::Refused { .. } | Read::Snapshot { .. } => None,
             Read::Plain(s) => Mark::of(None, s.timestamp().map(stamp_of)),
             Read::Enveloped { sample, stamp, .. }
             | Read::Heartbeat { sample, stamp, .. }
@@ -204,6 +245,17 @@ pub fn read(sample: Sample) -> Read {
         Some(Err(refusal)) => return Read::Refused { sample, refusal },
         Some(Ok(read)) => read,
     };
+    if form == wire::Form::Snapshot {
+        let page = {
+            let bytes = sample.payload().to_bytes();
+            Page::parse(&bytes).map(Box::new).map_err(|r| match r {
+                zenkey_model::collection::PageRefusal::Body(b) => b,
+                // `envelope` parsed this envelope as a snapshot's.
+                other => unreachable!("a snapshot's envelope: {other}"),
+            })
+        };
+        return Read::Snapshot { sample, page };
+    }
     if sample.kind() == SampleKind::Delete {
         return Read::Enveloped {
             sample,
@@ -247,6 +299,11 @@ pub enum Undecodable {
     /// A mutation, or a sample with no envelope, on a frame resource: no
     /// reading (core §7.7).
     Mutation,
+    /// A snapshot's page (core §7.5's form 7) where a record was read: on
+    /// a subscription, where it is no owner's answer, or anywhere a GET's
+    /// reader does not read its entries; with its body's refusal when the
+    /// body is refused, which a GET's reader reports too.
+    Snapshot(Option<BodyRefusal>),
 }
 
 impl Undecodable {
@@ -261,6 +318,8 @@ impl Undecodable {
             Undecodable::Heartbeat => "heartbeat",
             Undecodable::Framed => "frame",
             Undecodable::Mutation => "mutation",
+            Undecodable::Snapshot(None) => "snapshot",
+            Undecodable::Snapshot(Some(r)) => r.token(),
         }
     }
 
@@ -276,6 +335,8 @@ impl Undecodable {
             Undecodable::Frame(r) => format!("a frame refused by its layout, {r}"),
             Undecodable::Framed => FRAME_AS_RECORD.to_owned(),
             Undecodable::Mutation => MUTATION_ON_FRAME.to_owned(),
+            Undecodable::Snapshot(None) => SNAPSHOT_AS_RECORD.to_owned(),
+            Undecodable::Snapshot(Some(r)) => format!("a zk2c snapshot's body refused: {r}"),
         }
     }
 }
@@ -317,6 +378,12 @@ pub fn admit(read: &Read, layout: Option<&Layout>) -> Result<(), Undecodable> {
 pub const FRAME_AS_RECORD: &str =
     "a zk2c frame on a resource that declares no `frame` table: it has no reading";
 
+/// Why a snapshot's page where a record was read is undecodable (core
+/// §7.5): only a GET's reply carries one, and its entries are read by the
+/// GET's reader ([`replies`]), never as one record.
+pub const SNAPSHOT_AS_RECORD: &str =
+    "a zk2c snapshot's page where a record was read: only a GET's reader reads its entries";
+
 /// Why a mutation on a frame resource is undecodable (core §7.7, "No
 /// reading"): its samples travel as frames.
 pub const MUTATION_ON_FRAME: &str =
@@ -339,6 +406,7 @@ pub fn admit_frame(read: &Read, layout: &frame::Layout) -> Result<Option<Frame>,
         }
         Read::Refused { refusal, .. } => Err(Undecodable::Envelope(*refusal)),
         Read::Heartbeat { .. } => Err(Undecodable::Heartbeat),
+        Read::Snapshot { page, .. } => Err(Undecodable::Snapshot(page.as_ref().err().copied())),
         r if r.sample().kind() == SampleKind::Delete => Ok(None),
         Read::Enveloped { .. } | Read::Plain(_) => Err(Undecodable::Mutation),
     }
@@ -360,14 +428,10 @@ fn envelope(sample: &Sample) -> Option<Result<(wire::Stamp, wire::Form), Refusal
             }
             let bytes = sample.payload().to_bytes();
             Some(match wire::read_put(key, wire::ENCODING, &bytes) {
-                Reading::Enveloped(e) | Reading::Heartbeat(e) | Reading::Framed(e) => {
-                    Ok((e.stamp, e.form))
-                }
-                // A snapshot's page (core 0.97 §7.5, form 7) is read as
-                // before core 0.97 defined it, undecodable as a reserved
-                // form, until #977's E2 brings the snapshot reader: never
-                // as a record.
-                Reading::Snapshot(_) => Err(Refusal::Reserved(wire::Form::Snapshot)),
+                Reading::Enveloped(e)
+                | Reading::Heartbeat(e)
+                | Reading::Framed(e)
+                | Reading::Snapshot(e) => Ok((e.stamp, e.form)),
                 Reading::Refused(refusal) => Err(refusal),
                 Reading::Plain => return None,
             })
@@ -386,10 +450,48 @@ pub fn stamp_of(ts: &Timestamp) -> seed::Stamp {
 }
 
 /// A sample's in-band stamp, read without stripping it: its envelope's
-/// when it carried one ([`Read::stamp`]).
+/// when it carried one ([`Read::stamp`]). A snapshot's page has none: its
+/// run and asof order no value.
 #[must_use]
 pub fn stamp(sample: &Sample) -> Option<wire::Stamp> {
-    envelope(sample)?.ok().map(|(s, _)| s)
+    envelope(sample)?
+        .ok()
+        .filter(|(_, f)| *f != wire::Form::Snapshot)
+        .map(|(s, _)| s)
+}
+
+/// Whether a sample is a snapshot's page (core §7.5's form 7), read
+/// without stripping it: no mutation, whatever it carries.
+#[must_use]
+pub fn is_snapshot(sample: &Sample) -> bool {
+    matches!(envelope(sample), Some(Ok((_, wire::Form::Snapshot))))
+}
+
+/// The per-key replies a snapshot's page stands for (#977's E2; core 0.97
+/// §4.2's "what a profile reads", E3's text): one per entry, on its
+/// member's key below the page's key, as the owner would have answered it
+/// per key — a live entry a put of `CH · run · seq · record` under
+/// `zenoh/bytes`, CH a mutation's with the page's tag, and a tombstone a
+/// delete whose attachment is its envelope. [`read`] reads each as the
+/// reply it stands for. They carry no Zenoh timestamp, since a snapshot
+/// carries none, and the page's QoS.
+#[must_use]
+pub fn replies(sample: &Sample, page: &Page) -> Vec<Sample> {
+    use zenoh::bytes::Encoding;
+    use zenoh::key_expr::KeyExpr;
+    page.members(sample.key_expr().as_str())
+        .into_iter()
+        .filter_map(|m| {
+            // Plain chunks below a key make a key: never refused here.
+            let key = KeyExpr::try_from(m.key.clone()).ok()?;
+            Some(match (m.payload(), m.attachment()) {
+                (Some(payload), _) => SampleBuilder::put(key, payload)
+                    .encoding(Encoding::ZENOH_BYTES)
+                    .into(),
+                (None, attachment) => SampleBuilder::delete(key).attachment(attachment).into(),
+            })
+        })
+        .collect()
 }
 
 /// Why a sample's envelope was refused, read without stripping it

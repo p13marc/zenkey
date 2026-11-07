@@ -508,7 +508,7 @@ async fn a_late_joiners_seed_counts_its_state_leg() {
             .expect("the seed resolves in time")
             .expect("the pump runs");
         let seeded = match &message {
-            Message::Bus(BusMsg::Tick(tick)) => tick.seeded.first().map(|(_, c)| *c),
+            Message::Bus(BusMsg::Tick(tick)) => tick.seeded.first().map(|(_, c)| c.clone()),
             _ => None,
         };
         let _ = app.update(message);
@@ -517,19 +517,19 @@ async fn a_late_joiners_seed_counts_its_state_leg() {
         }
     };
     println!("seeded {subtree}: {coverage:?}");
-    let state = coverage.state.get().expect("the state leg is asked");
+    let state = coverage.state.as_option().expect("the state leg is asked");
     assert!(
         state.replies > 0,
         "{}'s owner answers S4's GET for its state",
         spray::SQUATTED.0
     );
-    let history = coverage.history.get().map_or(0, |l| l.replies);
+    let history = coverage.history.as_option().map_or(0, |l| l.replies);
 
     let mut said = format!(
         "seeded 1 watch: {history} history · {} state · {} superseded",
         state.replies, coverage.superseded
     );
-    let incomplete = [coverage.history.get(), coverage.state.get()]
+    let incomplete = [coverage.history.as_option(), coverage.state.as_option()]
         .into_iter()
         .flatten()
         .filter(|l| !l.complete)

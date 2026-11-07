@@ -226,6 +226,52 @@ impl<'a> Lens<'a> {
 
     /// Rungs 1–6 for one wire key.
     pub fn resolve(&self, wire: &str) -> Resolution {
+        self.resolve_with(wire, |candidates, kind, chunks| {
+            let refs: Vec<&str> = template_chunks(kind, chunks)
+                .iter()
+                .map(String::as_str)
+                .collect();
+            resolve(candidates.iter().map(|(_, r)| &r.template), &refs)
+        })
+    }
+
+    /// Rungs 1–6 for the key a snapshot's page was heard on (core §7.5's
+    /// form 7; #977's E2), whose resource is the one its collection's
+    /// index `coll` names among the revision's resources of the key's kind
+    /// token (`zenkey_model::collection::collection_of`): a collection
+    /// read's snapshot key names no member, and a member read's page rides
+    /// its member's key, whose values the template gives. A coll the
+    /// revision has no collection at is `NoResource`.
+    pub fn resolve_snapshot(&self, wire: &str, coll: u32) -> Resolution {
+        self.resolve_with(wire, |candidates, kind, chunks| {
+            let i = usize::try_from(coll).ok()?;
+            let (_, r) = candidates.get(i)?;
+            if !matches!(
+                kind,
+                zenkey_model::grammar::KindToken::State
+                    | zenkey_model::grammar::KindToken::ExplicitState
+            ) {
+                return None;
+            }
+            let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
+            let values = r.template.matches(&refs).unwrap_or_default();
+            Some((i, values))
+        })
+    }
+
+    /// Rungs 1–6, the resource picked by `pick` among the revision's
+    /// resources of the key's kind token, in the canonical order, from the
+    /// key's resource chunks: its place among them, and the template's
+    /// values.
+    fn resolve_with(
+        &self,
+        wire: &str,
+        pick: impl FnOnce(
+            &[(usize, &Resource)],
+            zenkey_model::grammar::KindToken,
+            &[String],
+        ) -> Option<(usize, Bindings)>,
+    ) -> Resolution {
         let stop = |group: KeyGroup, why: Unresolved| Resolution {
             identity: KeyIdentity {
                 group,
@@ -289,11 +335,7 @@ impl<'a> Lens<'a> {
             .enumerate()
             .filter(|(_, r)| r.token == kind)
             .collect();
-        let refs: Vec<&str> = template_chunks(kind, &chunks)
-            .iter()
-            .map(String::as_str)
-            .collect();
-        let Some((i, values)) = resolve(candidates.iter().map(|(_, r)| &r.template), &refs) else {
+        let Some((i, values)) = pick(&candidates, kind, &chunks) else {
             return stop(
                 group(None),
                 Unresolved::NoResource {
@@ -489,6 +531,12 @@ impl<'a> Lens<'a> {
                     identity: resolution.identity,
                 };
             }
+            // A snapshot's page (core §7.5's form 7; #977's E2): resolved
+            // by its collection's index, each entry checked as the per-key
+            // reply it stands for.
+            inband::Payload::Snapshot { body, header, tag } => {
+                return self.snapshot(wire, key, body, header, tag);
+            }
             // A heartbeat (core §7.5's form 6): read with the revision of
             // the interface it covers, never as a record.
             inband::Payload::Heartbeat { body, stamp, tag } => {
@@ -643,6 +691,144 @@ impl<'a> Lens<'a> {
                     Conformance::NotChecked { reason },
                 )
             }
+        }
+    }
+
+    /// A snapshot's page heard on `wire` (#977's E2): its key resolved by
+    /// its collection's index ([`Lens::resolve_snapshot`]), and rendered as
+    /// a document of its header and its entries, each live entry's record
+    /// checked on its member's key as the per-key reply it stands for, each
+    /// tombstone a deletion. Its conformance is its entries': valid when
+    /// every one is, else the first entry's failure, named by its key. A
+    /// body refused is undecodable, its refusal named.
+    fn snapshot(
+        &self,
+        wire: &str,
+        key: &str,
+        body: &[u8],
+        header: zenkey_model::wire::Stamp,
+        tag: zenkey_model::wire::Tag,
+    ) -> Checked {
+        use zenkey_model::collection::{Confirmation, Page, Time};
+        const DECLARED: &str = "zk2c snapshot";
+        let envelope = zenkey_model::wire::Envelope::snapshot(tag, header.run, header.seq, body);
+        let page = match Page::read(&envelope) {
+            Ok(p) => p,
+            Err(r) => {
+                let resolution = self.resolve(wire);
+                let reason = format!("a zk2c snapshot's body refused: {r}");
+                return Checked {
+                    rendering: PayloadRendering {
+                        key: key.to_owned(),
+                        size: body.len(),
+                        resource: None,
+                        rendered: Rendered::Undecodable {
+                            declared: DECLARED.to_owned(),
+                            reason: reason.clone(),
+                        },
+                    },
+                    conformance: Conformance::Undecodable {
+                        declared: DECLARED.to_owned(),
+                        reason,
+                    },
+                    identity: resolution.identity,
+                };
+            }
+        };
+        let resolution = self.resolve_snapshot(wire, page.coll);
+        let time = |t: Time| match t {
+            Time::Unknown => serde_json::Value::Null,
+            Time::Known { s, ms } => serde_json::json!({"s": s, "ms": ms}),
+        };
+        let mut live = Vec::new();
+        let mut tombs = Vec::new();
+        let mut conformance = Conformance::Valid;
+        for m in page.members(wire) {
+            let member = self.relative(&m.key).unwrap_or(&m.key).to_owned();
+            let mut entry = serde_json::json!({
+                "key": member,
+                "run": m.stamp.run.hex(),
+                "seq": m.stamp.seq.get(),
+            });
+            let Some(payload) = m.payload() else {
+                tombs.push(entry);
+                continue;
+            };
+            match m.confirmation {
+                Confirmation::None => {}
+                Confirmation::AtTime => {
+                    entry["confirmed"] = serde_json::json!("at the page's time")
+                }
+                Confirmation::At(t) => entry["confirmed"] = time(t),
+            }
+            let c = self.check(
+                &m.key,
+                Member::Type,
+                Some(zenkey_model::wire::ENCODING),
+                &payload,
+            );
+            entry["value"] = match &c.rendering.rendered {
+                Rendered::Value { value, .. } => value.clone(),
+                Rendered::Structural { value: Some(v), .. } => v.clone(),
+                Rendered::Structural { text, .. } => serde_json::Value::String(text.clone()),
+                Rendered::Opaque { media_type } => {
+                    serde_json::json!({"opaque": media_type, "bytes": c.rendering.size})
+                }
+                Rendered::Undecodable { reason, .. } => serde_json::json!({"undecodable": reason}),
+            };
+            conformance = match (conformance, c.conformance) {
+                (Conformance::Valid, Conformance::Valid) => Conformance::Valid,
+                (Conformance::Valid, Conformance::Invalid { violations }) => Conformance::Invalid {
+                    violations: violations
+                        .iter()
+                        .map(|v| format!("{member}: {v}"))
+                        .collect(),
+                },
+                (Conformance::Valid, Conformance::Undecodable { declared, reason }) => {
+                    Conformance::Undecodable {
+                        declared,
+                        reason: format!("{member}: {reason}"),
+                    }
+                }
+                (Conformance::Valid, other) => other,
+                (held, _) => held,
+            };
+            live.push(entry);
+        }
+        let resource = resolution.resolved.as_ref().map(|r| ResolvedResource {
+            iface: r.iface.to_string(),
+            fingerprint: r.revision.fingerprint().to_string(),
+            resource: r.resource_name(),
+            member: Member::Type.as_str().to_owned(),
+            values: r.values.clone(),
+        });
+        let declared = match &resource {
+            Some(r) => format!("{DECLARED} ({} {})", r.iface, r.resource),
+            None => DECLARED.to_owned(),
+        };
+        let value = serde_json::json!({
+            "page": page.index,
+            "more": page.more,
+            "coll": page.coll,
+            "run": page.run.hex(),
+            "asof": page.asof.get(),
+            "time": time(page.time),
+            "live": live,
+            "tombs": tombs,
+        });
+        Checked {
+            rendering: PayloadRendering {
+                key: key.to_owned(),
+                size: body.len(),
+                resource,
+                rendered: Rendered::Value {
+                    declared,
+                    value,
+                    epoch_assumed: None,
+                },
+            },
+            conformance,
+            identity: resolution.identity,
         }
     }
 

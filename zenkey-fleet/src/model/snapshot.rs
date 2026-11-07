@@ -20,9 +20,27 @@ use crate::report::{
 /// The replier's zenoh id, when the reply named one.
 pub type Replier = Option<zenoh::config::ZenohId>;
 
+/// Every reply as the per-key values a snapshot folds (#977's E2): a
+/// snapshot's page (core §7.5's form 7) is its entries, each the per-key
+/// reply it stands for on its member's key — a live entry the bytes its
+/// mutation put, a tombstone a deletion with its envelope — with the page's
+/// replier; every other reply as it came, a page whose body is refused
+/// among them, which its row shows undecodable.
+pub fn entries(values: Vec<(SampleView, Replier)>) -> Vec<(SampleView, Replier)> {
+    let mut out = Vec::with_capacity(values.len());
+    for (view, replier) in values {
+        match crate::model::inband::member_views(&view) {
+            Some(Ok(members)) => out.extend(members.into_iter().map(|m| (m, replier))),
+            _ => out.push((view, replier)),
+        }
+    }
+    out
+}
+
 /// Fold every reply to one kept value per key, last-writer-wins, and count
 /// what lost. Each GET is consolidated `Latest` by zenoh already (S4); this
-/// folds across selectors that overlap.
+/// folds across selectors that overlap, and a snapshot's entries
+/// ([`entries`]) beside per-key replies.
 ///
 /// A newer stamp wins; a stamped value beats an unstamped one; between two
 /// unstamped values, or two carrying the same stamp, the first seen is kept

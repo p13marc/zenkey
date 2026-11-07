@@ -4,6 +4,13 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — state read in snapshots (#977 E2)
+
+| Before | Now | Notes |
+|---|---|---|
+| a state key's owner read: a snapshot's page undecodable | the entry on its key read as its value, a chip "snapshot as of seq N" (", incomplete" when a page was lost); a snapshot of no entry is "its snapshot lists no member", never silence | core §7.5's form 7; `Latest` kept until E3 |
+| a seeded watch's state leg | reads a page's entries as per-key samples; its coverage carries each snapshot heard | |
+
 ## Unreleased (`main`, zk2) — a descriptor kept is by instance and run (#1074)
 
 | Before | Now | Notes |

@@ -279,6 +279,16 @@ fn fallback_rendering(
         Payload::Frame { body, stamp, .. } => {
             crate::model::frame::unread_rendering(key, why, stamp, body.len())
         }
+        Payload::Snapshot { body, header, tag } => PayloadRendering {
+            key: key.to_owned(),
+            size: body.len(),
+            resource: None,
+            rendered: Rendered::Structural {
+                why,
+                value: None,
+                text: inband::snapshot_text(header, tag, body),
+            },
+        },
         Payload::Plain(b) | Payload::Record { record: b, .. } => structural_rendering(key, why, b),
     }
 }
@@ -390,6 +400,20 @@ fn render_read(
                 crate::model::frame::FRAME_AS_RECORD.to_owned(),
             )
             .0;
+        }
+        // A snapshot's page where one record is rendered (core §7.5's
+        // form 7): its entries are its GET reader's, never one record of
+        // the type ([`crate::Lens::check`] reads them).
+        Payload::Snapshot { .. } => {
+            return PayloadRendering {
+                key: key.to_owned(),
+                size,
+                resource: Some(resource),
+                rendered: Rendered::Undecodable {
+                    declared: decode::declared(ty),
+                    reason: zenkey::inband::SNAPSHOT_AS_RECORD.to_owned(),
+                },
+            };
         }
         // A heartbeat on a key whose resource has a type (core §7.5's form
         // 6): a body, never a record of the type.

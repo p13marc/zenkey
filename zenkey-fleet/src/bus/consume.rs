@@ -187,6 +187,11 @@ pub async fn get_state_answer_in(
     let complete = got.complete;
     let inband = got.inband;
     let tags = got.tags;
+    let snapshots = got
+        .snapshots
+        .iter()
+        .map(crate::report::CollectionSnapshot::from)
+        .collect();
     let inband_of = |key: &str| inband.get(key).copied().map(InbandStamp::from);
     // freshness.v2 (#978's F3): a collection's reply carries its member's
     // last confirmation as its Zenoh timestamp.
@@ -236,6 +241,7 @@ pub async fn get_state_answer_in(
         .collect();
     rows.sort_by(|a, b| a.key.cmp(&b.key));
     let report = StateReport {
+        snapshots,
         reading: StateReading::Current,
         address,
         iface: revision.iface().to_string(),
@@ -311,6 +317,7 @@ pub async fn last_known_in(
         .into_iter()
         .collect();
     Ok(StateReport {
+        snapshots: Vec::new(),
         reading: StateReading::LastKnown,
         address: owner.to_string(),
         iface: revision.iface().to_string(),
@@ -368,6 +375,7 @@ async fn last_known_pattern(
     }
     rows.sort_by(|a, b| a.key.cmp(&b.key));
     Ok(StateReport {
+        snapshots: Vec::new(),
         reading: StateReading::LastKnown,
         address,
         iface: revision.iface().to_string(),
@@ -732,6 +740,17 @@ fn refused_sample(
             rendered: crate::report::Rendered::Undecodable {
                 declared: crate::model::inband::heartbeat_declared(&key),
                 reason: crate::model::inband::HEARTBEAT_AS_RECORD.to_owned(),
+            },
+        },
+        // A snapshot's page heard on a subscription (#977's E2): no
+        // owner's answer, its entries a GET's reader's alone.
+        Read::Snapshot { sample, .. } => crate::report::PayloadRendering {
+            key: key.clone(),
+            size: sample.payload().len(),
+            resource: None,
+            rendered: crate::report::Rendered::Undecodable {
+                declared: "zk2c snapshot".to_owned(),
+                reason: zenkey::inband::SNAPSHOT_AS_RECORD.to_owned(),
             },
         },
     };

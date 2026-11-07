@@ -1297,6 +1297,14 @@ impl Consumer {
     /// ([`StateAnswer::complete`]): a reader that counts members needs to
     /// know (§2.7, 0.24). An error reply, the timeout's included, is kept
     /// out of the answer and makes it incomplete.
+    ///
+    /// **A snapshot's page** (core §7.5's form 7; #977's E2): each entry of
+    /// the resource's collection is the per-key reply it stands for, a live
+    /// entry a value and a tombstone a deletion, each with its stamp, and
+    /// each page is held toward its snapshot ([`StateAnswer::snapshots`]).
+    /// A page of another collection is not this resource's. A snapshot
+    /// held incomplete makes the answer incomplete; the entries it
+    /// brought stand. No omission is applied: that is E3's, with `None`.
     pub async fn get_answer(
         &self,
         resource: &str,
@@ -1336,10 +1344,13 @@ impl Consumer {
             }
         };
         let layout = self.packed_layout(&r)?;
-        let mut out = Vec::new();
+        let coll = zenkey_model::collection::coll_of(&self.contract, &r);
+        let mut out: Vec<Current> = Vec::new();
+        let mut at: BTreeMap<String, usize> = BTreeMap::new();
         let mut inband = BTreeMap::new();
         let mut tags = BTreeMap::new();
         let mut undecodable = BTreeMap::new();
+        let mut snapshots: Vec<zenkey_model::collection::Heard> = Vec::new();
         let mut complete = true;
         let timeout = self.reply_wait(timeout);
         for ke in selectors {
@@ -1361,36 +1372,89 @@ impl Consumer {
                 if key.contains('*') {
                     continue;
                 }
-                let read = crate::inband::read(sample);
-                if let Err(why) = crate::inband::admit(&read, layout.as_deref()) {
-                    undecodable.insert(key, why);
-                    continue;
-                }
-                if let Some(stamp) = read.stamp() {
-                    inband.insert(key.clone(), stamp);
-                }
-                if let Some(tag) = read.tag() {
-                    tags.insert(key.clone(), tag);
-                }
-                let sample = read.into_sample();
-                out.push(match sample.kind() {
-                    zenoh::sample::SampleKind::Delete => Current::Deleted {
-                        key,
-                        timestamp: sample.timestamp().copied(),
+                // A snapshot's page (#977's E2): each entry of this
+                // resource's collection read as the per-key reply it
+                // stands for, and the page held toward its snapshot.
+                let reads = match crate::inband::read(sample) {
+                    crate::inband::Read::Snapshot { sample, page } => match page {
+                        Err(why) => {
+                            undecodable
+                                .insert(key, crate::inband::Undecodable::Snapshot(Some(why)));
+                            continue;
+                        }
+                        Ok(page) if Some(page.coll) != coll => continue,
+                        Ok(page) => {
+                            zenkey_model::collection::hear(&mut snapshots, &key, &page);
+                            crate::inband::replies(&sample, &page)
+                                .into_iter()
+                                .map(crate::inband::read)
+                                .collect()
+                        }
                     },
-                    zenoh::sample::SampleKind::Put => Current::Value {
-                        key,
-                        sample: Box::new(sample),
-                    },
-                });
+                    read => vec![read],
+                };
+                for read in reads {
+                    let key = read.sample().key_expr().as_str().to_owned();
+                    if let Err(why) = crate::inband::admit(&read, layout.as_deref()) {
+                        undecodable.insert(key, why);
+                        continue;
+                    }
+                    // One value per key: a key answered twice (a page
+                    // heard twice, two instances) keeps what §4.3's
+                    // consumer rule accepts.
+                    let mark = read.mark();
+                    if let Some(&i) = at.get(&key) {
+                        let held = StateAnswer::mark_in(&inband, &out[i]);
+                        let newer = match (held, mark) {
+                            (_, None) => held.is_none(),
+                            (held, Some(m)) => zenkey_model::seed::consumer_accepts(held, m),
+                        };
+                        if !newer {
+                            continue;
+                        }
+                    }
+                    match read.stamp() {
+                        Some(stamp) => inband.insert(key.clone(), stamp),
+                        None => inband.remove(&key),
+                    };
+                    match read.tag() {
+                        Some(tag) => tags.insert(key.clone(), tag),
+                        None => tags.remove(&key),
+                    };
+                    let sample = read.into_sample();
+                    let current = match sample.kind() {
+                        zenoh::sample::SampleKind::Delete => Current::Deleted {
+                            key: key.clone(),
+                            timestamp: sample.timestamp().copied(),
+                        },
+                        zenoh::sample::SampleKind::Put => Current::Value {
+                            key: key.clone(),
+                            sample: Box::new(sample),
+                        },
+                    };
+                    match at.get(&key) {
+                        Some(&i) => out[i] = current,
+                        None => {
+                            at.insert(key, out.len());
+                            out.push(current);
+                        }
+                    }
+                }
             }
         }
+        // A snapshot held incomplete may lack members: under `Latest`, one
+        // of several pages arrives, its index showing the others lost.
+        let complete = complete
+            && snapshots
+                .iter()
+                .all(zenkey_model::collection::Heard::complete);
         Ok(StateAnswer {
             current: out,
             complete,
             inband,
             tags,
             undecodable,
+            snapshots,
         })
     }
 
@@ -1894,20 +1958,45 @@ async fn reread(
     };
     let mut live = Vec::new();
     let mut complete = true;
+    let mut snapshots: Vec<zenkey_model::collection::Heard> = Vec::new();
     while let Ok(reply) = rx.recv_async().await {
         let Ok(sample) = reply.into_result() else {
             complete = false;
             continue;
         };
-        if sample.kind() != zenoh::sample::SampleKind::Put {
-            continue;
+        // A snapshot's page (#977's E2): its live entries, each the
+        // per-key reply it stands for; a page whose body is refused leaves
+        // the answer incomplete.
+        let reads = match crate::inband::read(sample) {
+            crate::inband::Read::Snapshot { sample, page } => match page {
+                Err(_) => {
+                    complete = false;
+                    continue;
+                }
+                Ok(page) => {
+                    let key = sample.key_expr().as_str().to_owned();
+                    zenkey_model::collection::hear(&mut snapshots, &key, &page);
+                    crate::inband::replies(&sample, &page)
+                        .into_iter()
+                        .map(crate::inband::read)
+                        .collect()
+                }
+            },
+            read => vec![read],
+        };
+        for read in reads {
+            if read.sample().kind() != zenoh::sample::SampleKind::Put {
+                continue;
+            }
+            live.push((read.sample().key_expr().as_str().to_owned(), read.stamp()));
         }
-        let key = sample.key_expr().as_str().to_owned();
-        let read = crate::inband::read(sample);
-        live.push((key, read.stamp()));
     }
-    let complete =
-        complete && asked.elapsed() < ends_at && !crate::presence::cut_off(&session).await;
+    let complete = complete
+        && snapshots
+            .iter()
+            .all(zenkey_model::collection::Heard::complete)
+        && asked.elapsed() < ends_at
+        && !crate::presence::cut_off(&session).await;
     if complete {
         let mut views = seen.views.lock().expect("not poisoned");
         if let Some(v) = views.get_mut(&addr) {

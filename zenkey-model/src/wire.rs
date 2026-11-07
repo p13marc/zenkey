@@ -38,21 +38,19 @@
 //! error. So the tag of every form but a delete is reported, never checked
 //! against a type; `packed` (#979) is the first type kind to define one. A
 //! put carries a mutation, a heartbeat, a frame or a snapshot
-//! ([`Envelope::form`]); a
-//! heartbeat's body is read with its covered revision
-//! ([`crate::heartbeat`]), its tag that revision's, and a frame's with its
-//! declaration ([`crate::frame`]), its tag that declaration's. A
+//! ([`Envelope::form`]); a heartbeat's body is read with its covered
+//! revision ([`crate::heartbeat`]), its tag that revision's, and a frame's
+//! with its declaration ([`crate::frame`]), its tag that declaration's. A
 //! snapshot's body (core 0.97, #977's E1) is taken unread, its asof in the
 //! seq's place, and read by [`crate::collection`], its tag its
 //! collection's type's. [`read_put`] refuses a frame on a key whose kind
 //! token is not `stream`, and a snapshot on one that is neither `state`
 //! nor `@state` (`key_kind`), which [`Envelope::parse_on`] reads. Only a
 //! GET's reply carries a snapshot, but the parser cannot tell how a put
-//! came, so it reads one either way. An error's detail is
-//! taken unread. The first refusal that applies is reported, in §7.5's
-//! order, with the token `spec/conformance/envelope/` pins
-//! ([`Refusal::token`]). Every envelope and form accepted writes back to
-//! its bytes.
+//! came, so it reads one either way. An error's detail is taken unread.
+//! The first refusal that applies is reported, in §7.5's order, with the
+//! token `spec/conformance/envelope/` pins ([`Refusal::token`]). Every
+//! envelope and form accepted writes back to its bytes.
 //!
 //! Not [`crate::envelope`]'s [`Envelope`](crate::envelope::Envelope), the
 //! error envelope of a failed call (§5.2), which its error form carries in
@@ -171,8 +169,8 @@ impl std::fmt::Display for Form {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SampleKind {
     /// A put's payload, or the payload of a GET's reply that represents a
-    /// put (S2) or carries a snapshot: a mutation, a heartbeat, a frame or a
-    /// snapshot.
+    /// put (S2) or carries a snapshot: a mutation, a heartbeat, a frame or
+    /// a snapshot.
     Put,
     /// A delete's attachment, or a `reply_del`'s (S2): a delete.
     Delete,
@@ -209,8 +207,9 @@ impl SampleKind {
     }
 
     /// Whether the sample carries the form: a put a mutation, a heartbeat,
-    /// a frame or a snapshot, a delete's attachment a delete, a query and a reply a
-    /// value, and a `reply_err` an error. No sample carries a reserved one.
+    /// a frame or a snapshot, a delete's attachment a delete, a query and a
+    /// reply a value, and a `reply_err` an error. No sample carries a
+    /// reserved one.
     #[must_use]
     pub const fn carries(self, form: Form) -> bool {
         match self {
@@ -491,8 +490,8 @@ impl Refusal {
 }
 
 /// §7.5's checks on CH, in its order: CH itself, its form, the sample, a
-/// frame's or a snapshot's key kind (when `kind` is known), a delete's tag and a request's
-/// width bit. Returns CH and every byte after it.
+/// frame's or a snapshot's key kind (when `kind` is known), a delete's tag
+/// and a request's width bit. Returns CH and every byte after it.
 fn read_header(
     bytes: &[u8],
     sample: SampleKind,

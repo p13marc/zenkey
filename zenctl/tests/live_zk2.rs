@@ -72,6 +72,11 @@ mod panic_watchdog;
 #[path = "../../zenkey/tests/common/forms_owner.rs"]
 mod forms_owner;
 
+/// An owner answering state GETs in snapshots (#977's E2), the runtime's
+/// and the fleet's suites' too.
+#[path = "../../zenkey/tests/common/snapshot_owner.rs"]
+mod snapshot_owner;
+
 /// The net a case waits under before calling a hang a hang.
 const SETTLE: Duration = Duration::from_secs(20);
 /// One `zenctl` run's limit: above any wait a case asks for.
@@ -12423,4 +12428,125 @@ async fn arbitration_s10_a_tools_questions() {
     );
     exits(&run, 2);
     a.stop().await;
+}
+
+/// #977's E2, through `get state`: an owner answering S4's GET in
+/// snapshots (core §7.5's form 7). Each member's one-entry snapshot is its
+/// row, a live entry its value with its in-band stamp, its own run where
+/// it has one, a tombstone a deletion; the report says which snapshots the
+/// owner answered with, their run, asof and completeness. A member it holds
+/// none at is a snapshot of no entry: no row, the report naming the
+/// snapshot, and exit 2 until E3 says what one is.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn get_state_reads_an_owner_answering_in_snapshots() {
+    use snapshot_owner as owner;
+    const ADDRESS: &str = "ground/fleet-mgr";
+    let mut bus = Bus::bare(None).await;
+    let served = owner::start(&bus.owners, ADDRESS).await;
+    bus.keep(served);
+    let contracts = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../zenkey/tests/contracts/mission_plan.v1.toml");
+    let contracts = contracts.to_str().expect("a UTF-8 path");
+    let all = [
+        "get",
+        "state",
+        ADDRESS,
+        "mission_plan.v1",
+        "plans/{vehicle}",
+        "--contracts",
+        contracts,
+        "--timeout",
+        "1",
+        "--format",
+        "json",
+    ];
+    let run = bus
+        .until(&all, |r| {
+            r.code == 0
+                && r.json()["rows"]
+                    .as_array()
+                    .is_some_and(|rows| rows.len() == 3)
+        })
+        .await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["reading"], "current", "{run}");
+    let rows = doc["rows"].as_array().expect("rows");
+    for (row, id) in rows.iter().zip(["vehicle-01", "vehicle-02", "vehicle-03"]) {
+        assert_eq!(row["key"], owner::member(ADDRESS, id), "{run}");
+        let stamp = owner::stamp(id);
+        assert_eq!(
+            row["inband"],
+            json!({"run": stamp.run.hex(), "seq": stamp.seq.get()}),
+            "{id}: {run}"
+        );
+        assert!(
+            row.get("timestamp").is_none(),
+            "a snapshot carries none: {run}"
+        );
+    }
+    assert_eq!(rows[0]["state"], "value");
+    assert_eq!(rows[1]["inband"]["run"], "deadbeef", "its own run");
+    assert_eq!(rows[2]["state"], "deleted", "a tombstone: {run}");
+    let snapshots = doc["snapshots"].as_array().expect("the snapshots");
+    assert_eq!(snapshots.len(), 3, "{run}");
+    for s in snapshots {
+        assert_eq!(s["run"], "0005");
+        assert_eq!(s["asof"], 7);
+        assert_eq!(s["pages"], json!([0]));
+        assert_eq!(s["complete"], true, "{run}");
+    }
+
+    let table = bus
+        .zenctl(&[
+            "get",
+            "state",
+            ADDRESS,
+            "mission_plan.v1",
+            "plans/{vehicle}",
+            "--contracts",
+            contracts,
+            "--timeout",
+            "1",
+            "--format",
+            "table",
+        ])
+        .await;
+    exits(&table, 0);
+    assert!(
+        table.stdout.contains(&format!(
+            "snapshot on {}: coll 0, run 0005 as of seq 7, page 0, complete",
+            owner::member(ADDRESS, "vehicle-01")
+        )),
+        "{table}"
+    );
+
+    let none = bus
+        .zenctl(&[
+            "get",
+            "state",
+            ADDRESS,
+            "mission_plan.v1",
+            "plans/{vehicle}",
+            "--param",
+            "vehicle=vehicle-09",
+            "--contracts",
+            contracts,
+            "--timeout",
+            "1",
+            "--format",
+            "json",
+        ])
+        .await;
+    exits(&none, 2);
+    let doc = none.json();
+    assert!(doc.get("rows").is_none(), "{none}");
+    assert_eq!(
+        doc["snapshots"][0]["key"],
+        owner::member(ADDRESS, "vehicle-09")
+    );
+    assert!(
+        doc["notes"].to_string().contains("lists no member"),
+        "{none}"
+    );
 }

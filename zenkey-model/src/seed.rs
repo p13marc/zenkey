@@ -367,6 +367,61 @@ pub fn merge(arrivals: &[Option<Stamp>]) -> Vec<bool> {
         .collect()
 }
 
+/// What a late joiner holds of one key as a snapshot completes, for the
+/// omission rule ([`apply_snapshot`]): the key, the mark of the value or
+/// deletion it holds, and whether it heard that after it asked the GET, by
+/// either path (an arrival with that same mark heard again counts).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeldMember<'a> {
+    pub key: &'a str,
+    pub mark: Option<Mark>,
+    pub heard_after: bool,
+}
+
+/// The omission rule (core 0.97 §4.2 as E3 states it; #977's E2 defines
+/// it, and no reader applies it before E3): a late joiner holds `snapshot`
+/// complete, heard on `key`, its collection's snapshot key or a member's
+/// key. Each member of the collection at `key` or under it
+/// (`of_collection` says which keys are its members) that the snapshot
+/// lists neither live nor as a tombstone has no value, unless what the
+/// late joiner holds of it is newer than the snapshot:
+///
+/// - a value under the snapshot's run with a seq above its asof;
+/// - a value under another run, or with no in-band stamp, that it heard
+///   after it asked the GET.
+///
+/// Returns the keys of `held` it drops, in `held`'s order. An incomplete
+/// snapshot drops nothing, which is the caller's to know: it calls this
+/// once [`crate::collection::Heard::complete`] says so. So a delete the
+/// owner made beyond its window still reaches the late joiner.
+pub fn apply_snapshot<'a>(
+    snapshot: &crate::collection::Snapshot,
+    key: &str,
+    of_collection: impl Fn(&str) -> bool,
+    held: impl IntoIterator<Item = HeldMember<'a>>,
+) -> Vec<&'a str> {
+    let listed: std::collections::BTreeSet<String> = snapshot
+        .live
+        .iter()
+        .map(|e| e.id.as_str())
+        .chain(snapshot.tombs.iter().map(|t| t.id.as_str()))
+        .map(|id| crate::collection::member_key(key, id))
+        .collect();
+    let at_or_under = |k: &str| {
+        k == key
+            || k.strip_prefix(key)
+                .is_some_and(|rest| rest.starts_with('/'))
+    };
+    held.into_iter()
+        .filter(|h| at_or_under(h.key) && of_collection(h.key) && !listed.contains(h.key))
+        .filter(|h| match h.mark {
+            Some(Mark::InBand(s)) if s.run == snapshot.run => s.seq <= snapshot.asof,
+            _ => !h.heard_after,
+        })
+        .map(|h| h.key)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

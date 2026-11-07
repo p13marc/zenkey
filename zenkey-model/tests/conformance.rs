@@ -2717,3 +2717,212 @@ fn snapshot_bodies() {
         assert_eq!(case["expect"], got, "{note}");
     }
 }
+
+/// `spec/conformance/seed/snapshot.json` (core §4.2, as E3 states it;
+/// #977's E2 runs it ahead of the flip): a reader's collections, what it
+/// holds when it asks a GET, and every arrival after it — the GET's pages
+/// and per-key replies, and live samples — → what it holds, and each
+/// snapshot the GET brought, its pages, completeness and the keys its
+/// omission rule dropped. The merge is a tool's
+/// (`zenkey_model::seed::admits_mark`), a page's entries are its members'
+/// per-key replies (`collection::Page::members`), the pages are held by
+/// `collection::hear`, and the omission is `seed::apply_snapshot`, applied
+/// once, when a snapshot turns complete. Written by an independent reading
+/// of the text, checked by a second, never blessed.
+#[test]
+fn seed_snapshot() {
+    use zenkey_model::collection::{Heard, Page, Snapshot, hear, snapshot_prefix};
+    use zenkey_model::seed::{HeldMember, Mark, Versus, apply_snapshot, versus};
+    use zenkey_model::wire::{self, Run, Seq};
+
+    /// One key's held sample: a put's record or a delete, its stamp, and
+    /// whether it was heard after the GET was asked.
+    #[derive(Debug, Clone)]
+    struct HeldSample {
+        record: Option<Vec<u8>>,
+        stamp: wire::Stamp,
+        heard_after: bool,
+    }
+
+    let doc = read_json(&spec().join("conformance/seed/snapshot.json"));
+    let stamp = |v: &Value| -> wire::Stamp {
+        let run = v["run"].as_u64().expect("run");
+        let run = match v["width"].as_u64() {
+            Some(16) => Run::U16(u16::try_from(run).expect("a 16-bit run")),
+            Some(32) => Run::U32(u32::try_from(run).expect("a 32-bit run")),
+            w => panic!("width {w:?}"),
+        };
+        let seq = u32::try_from(v["seq"].as_u64().expect("seq")).expect("a seq");
+        wire::Stamp {
+            run,
+            seq: Seq::new(seq).expect("a seq"),
+        }
+    };
+    let stamp_json = |s: wire::Stamp| json!({"width": if s.run.is_wide() { 32 } else { 16 }, "run": s.run.value(), "seq": s.seq.get()});
+    let sample = |v: &Value| -> HeldSample {
+        let record = match v["sample"].as_str() {
+            Some("put") => Some(unhex(v["record"].as_str().expect("record"))),
+            Some("delete") => None,
+            other => panic!("sample {other:?}"),
+        };
+        HeldSample {
+            record,
+            stamp: stamp(&v["stamp"]),
+            heard_after: false,
+        }
+    };
+    let cases = doc["cases"].as_array().expect("cases");
+    assert!(cases.len() >= 40, "the fixture's cases");
+    let (mut omitted_some, mut incomplete_some, mut paged) = (false, false, false);
+    for case in cases {
+        let note = &case["note"];
+        // Each collection the reader's contract gives it: its index, its
+        // snapshot key, the key its template's chunks start under, and the
+        // template.
+        let collections: Vec<(u32, String, String, Template)> = case["collections"]
+            .as_array()
+            .expect("collections")
+            .iter()
+            .map(|c| {
+                let template = Template::parse(c["template"].as_str().expect("template"))
+                    .unwrap_or_else(|e| panic!("{note}: {e}"));
+                let key = c["snapshot_key"].as_str().expect("snapshot_key").to_owned();
+                let n = snapshot_prefix(&template).expect("a snapshot key").len();
+                let chunks: Vec<&str> = key.split('/').collect();
+                let root = chunks[..chunks.len() - n].join("/");
+                let coll = u32::try_from(c["coll"].as_u64().expect("coll")).expect("coll");
+                (coll, key, root, template)
+            })
+            .collect();
+        let mut view: BTreeMap<String, HeldSample> = case["view"]
+            .as_array()
+            .expect("view")
+            .iter()
+            .map(|v| (v["key"].as_str().expect("key").to_owned(), sample(v)))
+            .collect();
+        // Every arrival is heard after the GET was asked: kept when newer,
+        // or once when it is the mutation held.
+        let merge = |view: &mut BTreeMap<String, HeldSample>, key: &str, mut got: HeldSample| {
+            got.heard_after = true;
+            let held = view
+                .get(key)
+                .map(|h| versus(Mark::InBand(h.stamp), Mark::InBand(got.stamp)));
+            match held {
+                None | Some(Versus::Newer | Versus::Unordered) => {
+                    view.insert(key.to_owned(), got);
+                }
+                Some(Versus::Same) => view.get_mut(key).expect("held").heard_after = true,
+                Some(Versus::Older) => {}
+            }
+        };
+        let mut heard: Vec<Heard> = Vec::new();
+        let mut pages: Vec<Vec<Page>> = Vec::new();
+        let mut omitted: Vec<Vec<String>> = Vec::new();
+        for a in case["arrivals"].as_array().expect("arrivals") {
+            let key = a["key"].as_str().expect("key");
+            let via = a["via"].as_str().expect("via");
+            assert!(matches!(via, "get" | "subscription"), "{note}: via {via}");
+            if a.get("page").is_none() {
+                merge(&mut view, key, sample(a));
+                continue;
+            }
+            let bytes = unhex(a["hex"].as_str().expect("hex"));
+            let page = Page::parse(&bytes).unwrap_or_else(|r| panic!("{note}: {r}"));
+            assert_eq!(snapshot_page_json(&page), a["page"], "{note}: the page");
+            assert_eq!(page.write().as_deref(), Ok(&bytes[..]), "{note}");
+            // A snapshot heard on a subscription is no owner's answer.
+            if via == "subscription" {
+                continue;
+            }
+            for m in page.members(key) {
+                let got = HeldSample {
+                    record: m.record.clone(),
+                    stamp: m.stamp,
+                    heard_after: true,
+                };
+                merge(&mut view, &m.key, got);
+            }
+            let (at, completed) = hear(&mut heard, key, &page);
+            if at == pages.len() {
+                pages.push(Vec::new());
+                omitted.push(Vec::new());
+            }
+            // A page heard twice is held once.
+            if !pages[at].iter().any(|p| p.index == page.index) {
+                pages[at].push(page.clone());
+            }
+            if !completed {
+                continue;
+            }
+            let h = &heard[at];
+            let snapshot = Snapshot::complete(&pages[at])
+                .unwrap_or_else(|| panic!("{note}: complete, as `hear` says"));
+            let Some((_, _, root, template)) = collections.iter().find(|(coll, sk, _, _)| {
+                *coll == h.coll && (key == sk || key.starts_with(&format!("{sk}/")))
+            }) else {
+                // Without the contract, coll maps to no template.
+                continue;
+            };
+            let of_collection = |k: &str| {
+                k.strip_prefix(root.as_str())
+                    .and_then(|rest| rest.strip_prefix('/'))
+                    .is_some_and(|rest| {
+                        let chunks: Vec<&str> = rest.split('/').collect();
+                        template.matches(&chunks).is_some()
+                    })
+            };
+            let held: Vec<HeldMember<'_>> = view
+                .iter()
+                .map(|(k, s)| HeldMember {
+                    key: k,
+                    mark: Some(Mark::InBand(s.stamp)),
+                    heard_after: s.heard_after,
+                })
+                .collect();
+            let drop: Vec<String> = apply_snapshot(&snapshot, key, of_collection, held)
+                .into_iter()
+                .map(str::to_owned)
+                .collect();
+            for k in &drop {
+                view.remove(k);
+            }
+            omitted[at].extend(drop);
+        }
+        let got_view: Vec<Value> = view
+            .iter()
+            .map(|(k, s)| match &s.record {
+                Some(r) => json!({"key": k, "sample": "put", "stamp": stamp_json(s.stamp), "record": hex(r)}),
+                None => json!({"key": k, "sample": "delete", "stamp": stamp_json(s.stamp)}),
+            })
+            .collect();
+        let got_snapshots: Vec<Value> = heard
+            .iter()
+            .zip(&omitted)
+            .map(|(h, o)| {
+                let mut o = o.clone();
+                o.sort();
+                json!({
+                    "key": h.key,
+                    "coll": h.coll,
+                    "run": {"width": if h.run.is_wide() { 32 } else { 16 }, "run": h.run.value()},
+                    "asof": h.asof.get(),
+                    "pages": h.pages.iter().collect::<Vec<_>>(),
+                    "complete": h.complete(),
+                    "omitted": o,
+                })
+            })
+            .collect();
+        omitted_some |= omitted.iter().any(|o| !o.is_empty());
+        incomplete_some |= heard.iter().any(|h| !h.complete());
+        paged |= heard.iter().any(|h| h.pages.len() > 1);
+        assert_eq!(
+            json!({"view": got_view, "snapshots": got_snapshots}),
+            case["expect"],
+            "{note}"
+        );
+    }
+    assert!(
+        omitted_some && incomplete_some && paged,
+        "the cases cover omissions, losses and pages"
+    );
+}

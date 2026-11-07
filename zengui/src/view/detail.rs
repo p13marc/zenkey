@@ -105,6 +105,12 @@ fn attachment_pane<'a>(bytes: &[u8], sp: Spacing) -> Element<'a, Message> {
 pub(crate) fn read_summary(read: &ValueRead) -> String {
     match read {
         ValueRead::Owner(answer) => match answer.row().map(|r| &r.value) {
+            // A snapshot of no entry (core §7.5; #977's E2): the owner
+            // answered, and its snapshot lists no member here.
+            None if !answer.report.snapshots.is_empty() => format!(
+                "owner GET (S4): its snapshot lists no member, as of seq {}",
+                answer.report.snapshots[0].asof
+            ),
             None => format!(
                 "silent — owner GET (S4) unanswered in {}s (not a verdict)",
                 answer.report.timeout_s
@@ -1153,6 +1159,13 @@ fn owner_value<'a>(answer: &'a StateAnswer, data: &DetailData<'a>) -> Element<'a
     let sp = data.sp;
     let mut col = Column::new().spacing(sp.xs);
     let Some(row) = answer.row() else {
+        if let Some(s) = answer.report.snapshots.first() {
+            return kit::muted(format!(
+                "the owner answered with a snapshot that lists no member here, as of \
+                 seq {} of run {} (core §7.5): no value then",
+                s.asof, s.run
+            ));
+        }
         return kit::muted(format!(
             "silent — the owner did not answer S4's GET within {}s: not a verdict \
              about the key (S6). An archive may still hold its last-known value.",
@@ -1178,6 +1191,15 @@ fn owner_value<'a>(answer: &'a StateAnswer, data: &DetailData<'a>) -> Element<'a
         ));
     if row.last_confirmation.is_some() {
         chips = chips.push(kit::data_chip("confirmed by heartbeat (freshness.v2)"));
+    }
+    // The owner's snapshot the row came in (core §7.5; #977's E2): as of
+    // which seq, and whether a page was lost.
+    for s in &answer.report.snapshots {
+        chips = chips.push(kit::data_chip(if s.complete {
+            format!("snapshot as of seq {}", s.asof)
+        } else {
+            format!("snapshot as of seq {}, incomplete", s.asof)
+        }));
     }
     col = col.push(chips.wrap());
     if let Some(line) = stamp_line(row.timestamp.as_ref()) {
@@ -1968,6 +1990,47 @@ fn decoded_pane<'a>(
 mod tests {
     use super::*;
     use std::time::Instant;
+
+    /// #977's E2: an owner GET answered by a snapshot of no entry is the
+    /// owner's answer, not silence, and the strip says which seq it holds
+    /// as of; with no snapshot either, silence.
+    #[test]
+    fn a_snapshot_of_no_member_is_no_silence() {
+        use zenkey_fleet::report::{CollectionSnapshot, StateReading, StateReport};
+        let report = |snapshots| StateReport {
+            snapshots,
+            reading: StateReading::Current,
+            address: "ground/fleet-mgr".into(),
+            iface: "mission_plan.v1".into(),
+            fingerprint: String::new(),
+            resource: "state/plans/{vehicle}".into(),
+            values: Default::default(),
+            selectors: vec!["zk2/ground/fleet-mgr/mission_plan.v1/state/plans/v9".into()],
+            archive: None,
+            timeout_s: 1.0,
+            rows: Vec::new(),
+        };
+        let read = |snapshots| {
+            ValueRead::Owner(StateAnswer {
+                report: report(snapshots),
+                decoded: None,
+                provenance: None,
+            })
+        };
+        let one = CollectionSnapshot {
+            key: "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/v9".into(),
+            coll: 0,
+            run: "0005".into(),
+            asof: 7,
+            pages: vec![0],
+            complete: true,
+        };
+        assert_eq!(
+            read_summary(&read(vec![one])),
+            "owner GET (S4): its snapshot lists no member, as of seq 7"
+        );
+        assert!(read_summary(&read(Vec::new())).starts_with("silent — owner GET (S4)"));
+    }
 
     /// #345: both sides of a value row are bounded now, and each says what it
     /// left out. The rendered side had no bound at all — a whole decoded

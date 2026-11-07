@@ -589,6 +589,9 @@ pub struct StateAnswer<T> {
     /// layout refused (core §7.5, §7.6): undecodable, with the refusal, and
     /// left out of [`StateAnswer::current`].
     pub undecodable: std::collections::BTreeMap<String, crate::inband::Undecodable>,
+    /// Each snapshot the GET's pages made
+    /// ([`crate::state::StateAnswer::snapshots`]).
+    pub snapshots: Vec<zenkey_model::collection::Heard>,
 }
 
 impl<T> StateAnswer<T> {
@@ -663,6 +666,7 @@ pub async fn get_answer<C: Codec>(
         complete: a.complete,
         inband: a.inband,
         undecodable: a.undecodable,
+        snapshots: a.snapshots,
     })
 }
 

@@ -3856,6 +3856,7 @@ mod actfx {
             archive: (reading == StateReading::LastKnown).then(|| "ground/archive".into()),
             timeout_s: 5.0,
             rows,
+            snapshots: Vec::new(),
         }
     }
 

@@ -1852,6 +1852,7 @@ impl World {
             .into_iter()
             .collect();
         let report = StateReport {
+            snapshots: Vec::new(),
             reading: match archive {
                 Some(_) => StateReading::LastKnown,
                 None => StateReading::Current,

@@ -338,6 +338,7 @@ fn an_owner_read_shows_its_bytes_in_hex() {
     // world's contract, carrying `bytes`.
     let owner_read = |body: &[u8], bytes: Option<&[u8]>| {
         let report = StateReport {
+            snapshots: Vec::new(),
             reading: StateReading::Current,
             address: resolved.address.to_string(),
             iface: resolved.iface.to_string(),

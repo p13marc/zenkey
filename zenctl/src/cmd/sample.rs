@@ -97,6 +97,23 @@ impl Line {
                     };
                     (r, c)
                 }
+                // A snapshot's page (#977's E2): its header and counts,
+                // its body never sniffed.
+                inband::Payload::Snapshot { body, header, tag } => (
+                    PayloadRendering {
+                        key: key.to_owned(),
+                        size: body.len(),
+                        resource: None,
+                        rendered: Rendered::Structural {
+                            why: Unresolved::DecodeNotAsked,
+                            value: None,
+                            text: inband::snapshot_text(header, tag, body),
+                        },
+                    },
+                    Conformance::NotChecked {
+                        reason: Unresolved::DecodeNotAsked.words(),
+                    },
+                ),
                 // A frame's body is never sniffed (observer §7.6): its
                 // envelope and size.
                 inband::Payload::Frame { body, stamp, .. } => (

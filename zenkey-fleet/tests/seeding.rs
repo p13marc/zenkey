@@ -86,12 +86,12 @@ async fn history_seed_lands_before_the_boundary() {
     let (seen, coverage) = drain_seed(&mut sub).await;
     assert_eq!(seen, ["v1"], "the cached value seeds — before the boundary");
     assert_eq!(
-        coverage.history.get().map(|l| l.replies),
+        coverage.history.as_option().map(|l| l.replies),
         Some(1),
         "the cache answered once"
     );
     assert_eq!(
-        coverage.state.get().map(|l| l.replies),
+        coverage.state.as_option().map(|l| l.replies),
         Some(0),
         "no state queryable on this bus — ran and found nothing, an observation"
     );
@@ -160,7 +160,7 @@ async fn a_stale_reply_cannot_regress_a_key() {
         "the stamped cache value seeds once; the late unstamped echo never surfaces"
     );
     assert_eq!(
-        coverage.state.get().map(|l| l.replies),
+        coverage.state.as_option().map(|l| l.replies),
         Some(1),
         "the replier DID answer"
     );
@@ -347,8 +347,8 @@ async fn a_seeded_watch_shows_pre_existing_state() {
         ["cached-before-watch"],
         "pre-existing state arrives without waiting for a refresh"
     );
-    assert_eq!(coverage.history.get().map(|l| l.replies), Some(1));
-    assert_eq!(coverage.state.get().map(|l| l.replies), Some(0));
+    assert_eq!(coverage.history.as_option().map(|l| l.replies), Some(1));
+    assert_eq!(coverage.state.as_option().map(|l| l.replies), Some(0));
 
     // …and the seeded key is already in the tree at the boundary tick.
     assert_eq!(monitor.tree().keys, 1);
@@ -750,6 +750,7 @@ async fn s10_a_late_joiners_seed() {
         Asked::Asked(SeedLeg {
             replies: 3,
             complete: true,
+            snapshots: Vec::new(),
         })
     );
     assert_eq!(coverage.history, Asked::NotAsked);
@@ -834,6 +835,7 @@ async fn a_state_get_that_reaches_its_timeout_seeds_incompletely() {
         Asked::Asked(SeedLeg {
             replies: 0,
             complete: false,
+            snapshots: Vec::new(),
         }),
         "ran to its timeout: possibly incomplete, never \"no state\" (O5)"
     );
@@ -970,6 +972,7 @@ async fn a_seeded_watch_seeds_from_a_zk2_owner() {
         Asked::Asked(SeedLeg {
             replies: 2,
             complete: true,
+            snapshots: Vec::new(),
         })
     );
     monitor.shutdown().await.expect("shutdown");
@@ -1735,4 +1738,173 @@ async fn s13_a_stream_keys_seq_wraps_in_a_tools_merge() {
         "an older seq of the run was not kept"
     );
     assert_eq!(sub.superseded(), 1, "h-older");
+}
+
+/// An owner answering in snapshots (#977's E2), the runtime's and zenctl's
+/// suites' too.
+#[path = "../../zenkey/tests/common/snapshot_owner.rs"]
+mod snapshot_owner;
+
+/// Drain a seeded subscriber until the boundary, keeping each sample.
+async fn drain_views(
+    sub: &mut zenkey_fleet::SeededSubscriber,
+) -> (Vec<zenkey_fleet::SampleView>, zenkey_fleet::SeedCoverage) {
+    let mut views = Vec::new();
+    loop {
+        match tokio::time::timeout(util::SETTLE, sub.recv())
+            .await
+            .expect("seed boundary")
+            .expect("stream alive")
+        {
+            SeedItem::Sample(v) => views.push(v),
+            SeedItem::Dropped(n) => panic!("{n} dropped"),
+            SeedItem::SeedComplete(c) => return (views, c),
+        }
+    }
+}
+
+/// #977's E2: the state leg reads a snapshot's page as its entries, each
+/// the per-key reply it stands for on its member's key — a live entry a
+/// value with its stamp, its own run where it has one, a tombstone a
+/// deletion with its stamp — and says which snapshots it heard. A member
+/// read's snapshots are one page each, complete; a page whose body is
+/// refused is delivered undecodable and moves nothing. A collection read's
+/// three pages share one key, so under `Latest`, which the leg keeps until
+/// E3, only the last arrives: the leg holds the snapshot incomplete, and
+/// the seed possibly incomplete, the last page's entry delivered.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_state_leg_reads_a_snapshots_entries() {
+    use snapshot_owner as owner;
+    const ADDRESS: &str = "ground/fleet-mgr";
+    let (a, b) = timestamping_pair().await;
+    let _owner = owner::start(&a, ADDRESS).await;
+    let policy = SeedPolicy {
+        history: false,
+        timeout: Duration::from_millis(800),
+        ..SeedPolicy::default()
+    };
+    let members = format!("{}/*", owner::plans(ADDRESS));
+    let deadline = std::time::Instant::now() + util::SETTLE;
+    let (views, coverage) = loop {
+        let mut sub = seed_subscribe(&b, &members, policy).await.expect("seed");
+        let (views, coverage) = drain_views(&mut sub).await;
+        if views.len() == 4 || std::time::Instant::now() > deadline {
+            break (views, coverage);
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    assert_eq!(views.len(), 4, "{views:?}");
+    let by_key: BTreeMap<&str, &zenkey_fleet::SampleView> =
+        views.iter().map(|v| (v.key.as_str(), v)).collect();
+    for (id, record) in [
+        ("vehicle-01", Some("plan 1")),
+        ("vehicle-02", Some("plan 2")),
+        ("vehicle-03", None),
+    ] {
+        let v = by_key[owner::member(ADDRESS, id).as_str()];
+        assert_eq!(v.inband(), Some(owner::stamp(id)), "{id}");
+        match record {
+            Some(r) => {
+                assert_eq!(v.kind, SampleKind::Put, "{id}");
+                assert_eq!(text(v), r, "{id}");
+            }
+            None => assert_eq!(v.kind, SampleKind::Delete, "{id}: a tombstone"),
+        }
+        assert!(
+            v.timestamp.is_none(),
+            "{id}: a snapshot carries no Zenoh timestamp"
+        );
+    }
+    let broken = by_key[owner::member(ADDRESS, "broken").as_str()];
+    assert!(broken.refusal().is_some(), "a refused body is undecodable");
+    let leg = coverage.state.as_option().expect("the state leg ran");
+    assert_eq!(leg.replies, 4);
+    assert!(leg.complete, "{leg:?}");
+    assert_eq!(leg.snapshots.len(), 3, "{leg:?}");
+    assert!(leg.snapshots.iter().all(|s| s.complete && s.pages == [0]));
+    assert!(leg.snapshots.iter().all(|s| s.run == "0005" && s.asof == 7));
+
+    // A collection read: three pages on the snapshot key, the last alone
+    // kept under `Latest`.
+    let collection = format!("{}/**", owner::plans(ADDRESS));
+    let mut sub = seed_subscribe(&b, &collection, policy).await.expect("seed");
+    let (views, coverage) = drain_views(&mut sub).await;
+    let leg = coverage.state.as_option().expect("the state leg ran");
+    assert_eq!(leg.snapshots.len(), 1, "{leg:?}");
+    let s = &leg.snapshots[0];
+    assert_eq!(s.key, owner::plans(ADDRESS));
+    assert_eq!(s.pages.len(), 1, "one page per key under Latest: {s:?}");
+    assert!(
+        !s.complete && !leg.complete,
+        "a page lost, and said so: {leg:?}"
+    );
+    let entries = owner::snapshot()
+        .paginate(owner::PAGE_BYTES)
+        .expect("pages")[usize::try_from(s.pages[0]).unwrap()]
+    .members(&owner::plans(ADDRESS));
+    assert_eq!(
+        views.iter().map(|v| v.key.clone()).collect::<Vec<_>>(),
+        entries.iter().map(|m| m.key.clone()).collect::<Vec<_>>(),
+        "the page held, as its entries"
+    );
+}
+
+/// #977's E2: a `.zsnap` folds a snapshot's entries into rows, each on its
+/// member's key with its in-band stamp, a tombstone a deletion's row, and a
+/// page whose body is refused a row of its own on its key, undecodable;
+/// the header counts each entry a reply.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_zsnap_folds_a_snapshots_entries_into_rows() {
+    use snapshot_owner as owner;
+    const ADDRESS: &str = "ground/fleet-mgr";
+    let (a, b) = timestamping_pair().await;
+    let _owner = owner::start(&a, ADDRESS).await;
+    let contracts = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../zenkey/tests/contracts/mission_plan.v1.toml");
+    let (set, problems) = zenkey_fleet::ContractSet::load_path(&contracts);
+    assert!(problems.is_empty(), "{problems:?}");
+    let lens = zenkey_fleet::Lens::new("", None, &set).offline(&set);
+    let spec = zenkey_fleet::SnapshotSpec {
+        selectors: vec![format!("{}/*", owner::plans(ADDRESS))],
+        timeout: Duration::from_millis(800),
+        max_replies: 64,
+    };
+    let deadline = std::time::Instant::now() + util::SETTLE;
+    let taken = loop {
+        let t = zenkey_fleet::take_snapshot(&b, &lens, &spec)
+            .await
+            .expect("taken");
+        assert!(
+            t.incomplete.is_empty(),
+            "every GET was asked: {:?}",
+            t.incomplete
+        );
+        if t.snapshot.rows.len() == 4 || std::time::Instant::now() > deadline {
+            break t;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    let rows = &taken.snapshot.rows;
+    assert_eq!(rows.len(), 4, "{rows:?}");
+    assert_eq!(rows[0].key, owner::member(ADDRESS, "broken"));
+    assert!(
+        rows[0].conformance.is_violation(),
+        "{:?}",
+        rows[0].conformance
+    );
+    let rows = &rows[1..];
+    for (row, id) in rows.iter().zip(["vehicle-01", "vehicle-02", "vehicle-03"]) {
+        assert_eq!(row.key, owner::member(ADDRESS, id));
+        assert_eq!(
+            row.inband,
+            Some(zenkey_fleet::report::InbandStamp::from(owner::stamp(id))),
+            "{id}"
+        );
+        assert_eq!(row.delete, id == "vehicle-03", "{id}");
+    }
+    assert_eq!(rows[0].record().as_deref(), Some(&b"plan 1"[..]));
+    assert_eq!(
+        taken.snapshot.header.answered, 4,
+        "each entry a reply, and the refused page"
+    );
 }
