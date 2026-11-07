@@ -156,23 +156,28 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   by its key (O6); `ownership::split_brain` is §6's token check. At most
   once holds only while one instance serves: exclusivity is
   `redundancy.v1`'s (#613).
-  Both wires (#985 C4b, no writer change): `client::classify` reads a
-  `reply_err` by `envelope::read_error` into `ErrorReply::{Refused,
-  Malformed, Transport}`; `call::Refusal` (an `Envelope` by `Deref`, a
-  form's detail its `Detail::Bytes`, `form: Option<ErrorMark>` with tag,
-  as-of mark and whether a message came, `detail_as::<C>(wire)` reading
-  either wire's, `From<OpError>` for an `Api` double) is `Outcome::Refused`
-  and `Replies::refusals`; `call::Transport` (`encoding`, `payload`,
+  The forms alone (#985 C4b; C4d, core 0.99, removed the bare wire):
+  `client::classify` reads a `reply_err` by `envelope::read_error` into
+  `ErrorReply::{Refused, Transport}`, any other `Encoding` than
+  `zenoh/bytes` the transport's, an earlier core's envelope included;
+  `call::Refusal` (`code`, `message`, `cause` by name, a form's detail its
+  `Detail::Bytes`, `form: Option<ErrorMark>` with tag, as-of mark and
+  whether a message came, `None` only for `From<OpError>`, an `Api`
+  double's; `detail_as::<C>(wire)`, `relay`) is `Outcome::Refused` and
+  `Replies::refusals`; `OpError` holds the same fields (`code`, `message`,
+  `cause`, `detail`); `call::Transport` (`encoding`, `payload`,
   `refusal`; `Display` `zenoh/bytes: Timeout (no error form:
   sample_kind)`, hex for non-UTF-8) is `Silence::transport` and
   `Replies::transport`, silence that an idempotent call retries after; an
   `Answer` reads its value form (`Answer::new(addr, sample, op.encoding)`,
-  `form()` → `ReplyForm::{Bare, Value, Refused}`, `mark`, `tag`,
-  `record`, `record_encoding`, `value` on the contract's encoding), and
+  `form()` → `ReplyForm::{Value, Refused, NoForm}`, the last two
+  malformed and answers all the same, `mark`, `tag`, `record` →
+  `Result<_, FormRefusal>`, `value` on the contract's encoding), and
   `typed::call` decodes the record by CH's tag. `tests/common/forms_owner.rs`
-  is a raw owner answering in the forms, which `operations.rs`'s
-  `a_caller_reads_the_forms_and_the_bare_wire_alike`, the fleet's
-  `zk2_core.rs` and zenctl's `live_zk2.rs` include.
+  is a raw owner answering in the forms, beside an earlier core's
+  envelope and a value under `application/json`, which `operations.rs`'s
+  `a_caller_reads_the_forms_alone`, the fleet's `zk2_core.rs` and
+  zenctl's `live_zk2.rs` include.
   The flip (#985 C4c, core 0.94): an `OpSpec` holds the operation's
   `zenkey_model::forms::Forms`, the service's `Minter` and deployment
   epoch; `Call::reply`/`summary` write the value form (tag the
@@ -189,17 +194,17 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   `holds_key`, and answers a retry the model `replays` with them, its mark
   the first's. A request is read before the handler (`invalid_request`
   on §7.5's refusal or a packed record refused under CH's tag); one under
-  another `Encoding` is the bare wire's (§5.1's MAY, until C4d);
-  `Call::record`, `request_tag`, `record_encoding`, `deployment_epoch`.
+  another `Encoding` carries no request form, `invalid_request` before any
+  handler (core 0.99 §5.1, §9 step 8); `Call::record`, `request_tag` (a
+  `Tag`), `deployment_epoch`.
   `Client`/`Fleet` write `CH · record` under `zenoh/bytes`, and carry a
   deployment epoch (`with_deployment_epoch`, a role's client the
   service's), the typed calls and serving encoding and decoding packed
   records under it (`Sink::new_in`). `Raw::detail` and `Packed::detail`
   changed for the form (bytes; the JSON reading). `operations.rs`'s
-  `s9_a_calls_forms` is `operations.md` §9. Core 0.95 (round 101's
-  F-473): `classify` reads a bare-wire envelope its decoding refuses as
-  the transport's, so `ErrorReply::Malformed` and `Outcome::Malformed`
-  are produced no more, until C4d removes them; the `consume` example
+  `s9_a_calls_forms` is `operations.md` §9, steps 7 and 8 an earlier
+  core's envelope (silence: `set` once, `ping` twice) and a request under
+  `application/json` (`invalid_request`, no handler). The `consume` example
   prints a value's record alone (`call_line`, F-479) and runs in process
   as `consume::run`, which `owner_example.rs` drives.
   Everything session-free stays in `zenkey-model`, including `decode`, the
@@ -289,8 +294,9 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   (`StateWriter::put_sealed`), the reply as written (`Call::reply_form`/
   `refuse_form`), the events under their stamps (`EventWriter::put_sealed`).
   One queryable per settable group's `set/<g>`, none for a contract group;
-  `persist` without a layer is listed unavailable; a bare-wire request is
-  given CH again under its type's tag. `set_desired` converges through
+  `persist` without a layer is listed unavailable; a request reaches the
+  model as the query's payload, the runtime having refused any other form
+  before the handler. `set_desired` converges through
   `Owner::converge`/`report_desired`, and `desired_config` (desired.v1
   §2.16) feeds it as it feeds config.v1's (`desired::Configured`,
   `profile_desired.rs`'s `config_v2_as_a_target`). Its re-mint is

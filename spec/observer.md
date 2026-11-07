@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.26 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.27 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.96 ([`core.md`](core.md)) |
+| **Written against** | core 0.99 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
@@ -1127,8 +1127,8 @@ This is core §7.1's and §7.2's tool half; type identity and the sample's
     The tool MUST NOT decode or sniff a refused value's bytes as a bare
     record. `[F: envelope/vectors.json]`
   - **Another `Encoding`.** A reply under any other `Encoding` is no
-    value form, and is undecodable as a refused one is, unless the tool
-    reads the bare wire (below; core §5.1, "Reading a value").
+    value form, and is undecodable as a refused one is (core §5.1,
+    "Reading a value").
   - **An error** is shown by its code, its cause and its message. Its
     detail is decoded as the operation's `error` type where the tool
     holds it, a packed one under CH's tag, and shown as its bytes
@@ -1139,8 +1139,6 @@ This is core §7.1's and §7.2's tool half; type identity and the sample's
   - **The as-of mark.** A tool may show a reply's run and seq beside it.
     The run names an instance only through the descriptor that states it
     (core §5.1).
-  - **The bare wire.** A tool that reads it (core §5.1) reads a bare
-    value by the decode order below, and an envelope as core §5.2 says.
 - **Decode order** for a tool: a payload whose declared type the tool
   holds is decoded by that type, on the wire its sample's `Encoding`
   names (below). Any other payload is sniffed.

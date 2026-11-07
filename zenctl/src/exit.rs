@@ -15,7 +15,7 @@
 //!   question that *was* asked is an answer.
 //! * **1 — asked, and the answer is a finding.** The assertion did not hold;
 //!   the retired family still speaks; the payload does not conform; a reply
-//!   was an error envelope (core §5.2); rows were refused or malformed;
+//!   was an owner's error (core §5.2); rows were refused or malformed;
 //!   `--fail-on` tripped; an act failed. **`why` exits 1 when it finds a
 //!   cause** — a cause *is* the finding, and the healthy fleet is the clean
 //!   run.

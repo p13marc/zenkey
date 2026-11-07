@@ -92,9 +92,7 @@ a 0.21 may break either:
 - **The wire.** zk2c, the bandwidth-first wire (epic
   [#975](https://git.marcpardo.eu/marcpardo/zenkey/issues/975)), is being
   specified: one snapshot per collection in place of a reply per key
-  ([#977](https://git.marcpardo.eu/marcpardo/zenkey/issues/977)), and
-  config.v2's calls without the bare wire (C4d,
-  [#985](https://git.marcpardo.eu/marcpardo/zenkey/issues/985)). A 0.20
+  ([#977](https://git.marcpardo.eu/marcpardo/zenkey/issues/977)). A 0.20
   service and a 0.21 one may not understand each other.
 - **The authoring format** and the canonical form a fingerprint is taken
   over. A contract that builds under 0.20 may need editing under

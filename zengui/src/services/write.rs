@@ -134,9 +134,9 @@ pub struct Call {
 
 /// One call through the runtime's client (one address) or fleet (an
 /// allowed fan-out), landing on the Send tool. The report keeps a value, an
-/// owner's error and silence apart (O5), each reply read from its form or
-/// the bare wire by its `Encoding`, a form's as-of mark beside it (core
-/// §5.1, §5.2; #980's C4b); an `Err` is the bus failing, never silence.
+/// owner's error and silence apart (O5), each reply read from its form by
+/// its `Encoding`, a form's as-of mark beside it (core §5.1, §5.2; #985's
+/// C4b to C4d); an `Err` is the bus failing, never silence.
 pub fn call(c: Call) -> Task<Message> {
     Task::perform(
         async move {

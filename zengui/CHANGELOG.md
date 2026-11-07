@@ -4,6 +4,17 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — a call in its forms alone, the bare wire removed (#985 C4d)
+
+Core 0.99 removes the bare wire: a call with no form, its error in a
+JSON, CBOR or protobuf envelope.
+
+| Before | Now | Notes |
+|---|---|---|
+| Send: an owner's envelope under `application/json` (or CBOR, or protobuf): a refused card, with no mark | "No answer", the transport's error named with its `Encoding` and bytes, never `busy` | core §5.2: an owner from before core 0.94 answers so |
+| Send: a value under an `Encoding` other than `zenoh/bytes` decoded as its type | undecodable, "no call form under …", no mark | core §5.1: an answer all the same |
+| Send and the Config tool: a "malformed envelope" card | gone: no reply has read so since core 0.95 | |
+
 ## Unreleased (`main`, zk2) — state read in snapshots (#977 E2)
 
 | Before | Now | Notes |

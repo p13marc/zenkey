@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.98** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.99** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -1354,10 +1354,13 @@ SHOULD NOT repeat a template parameter (W102). `[F: contracts/w102-repeat]`
   chunk is not a canonical slug (§1.4, §2.2), is refused with
   `invalid_request`: the key is malformed. `not_found` is for a well-formed
   member the owner does not have. `[Sc: operations.md §3]`
-- **The request.** A request that §7.5's parse refuses, or whose record
-  does not decode as the operation's `request` type, is refused with
-  `invalid_request`. The record is read on the contract's `encoding`
-  (§7.2), and a packed one under its CH's tag (§7.6).
+- **The request.** An owner reads a query under `zenoh/bytes` by §7.5's
+  parse. Under another `Encoding` a query carries no request form: only
+  the `Encoding` tells a record sent with no form from one (below,
+  "Reading a value"). Such a query, a request the parse refuses, and one
+  whose record does not decode as the operation's `request` type are
+  refused with `invalid_request`. The record is read on the contract's
+  `encoding` (§7.2), and a packed one under its CH's tag (§7.6).
   - That decode is the check the core requires. An owner MAY decode into a
     type generated from the schema, or checked against it, and need not
     evaluate the JSON Schema itself; the reference does not.
@@ -1366,7 +1369,7 @@ SHOULD NOT repeat a template parameter (W102). `[F: contracts/w102-repeat]`
   - A caller MUST NOT depend on a refusal of what the schema refuses: a
     writer sends only what its schema declares (§9.8).
 
-  `[Sc: operations.md §3]`
+  `[Sc: operations.md §3, §9]`
 - **The active instance (O3).** An instance is active on an interface when
   it exposes at least one of the interface's resources (§8.2). It then
   holds the interface's token, unless the interface is in its tokenless
@@ -1465,9 +1468,9 @@ form's record is encoded as its type says, on the contract's `encoding`
   type on a summary reply. A reply the parse or the type refuses is
   malformed, and an answer all the same (above). `[F: envelope/calls.json]`
   - **Under another `Encoding`** a reply is no value form, so it is
-    malformed too, unless the caller reads the bare wire (below).
-  - **Only the `Encoding` tells them apart:** a bare record can parse as
-    a form, as `vectors.json`'s JSON array of 8 bytes does.
+    malformed too.
+  - **Only the `Encoding` tells them apart:** a record sent with no form
+    can parse as one, as `vectors.json`'s JSON array of 8 bytes does.
     `[F: envelope/vectors.json]`
 - **Its errors** travel in the error form (§5.2).
 - **The as-of mark.** A value's and an error's run and seq are the
@@ -1495,13 +1498,6 @@ form's record is encoded as its type says, on the contract's `encoding`
 - **An error's run** attributes nothing. A `reply_err` still carries no
   key, so a fan-out's errors stay unattributed (above). A tool that holds
   descriptors may map the run to the instance that states it (§3.3).
-- **The bare wire.** An earlier version of this text had a call carry no
-  form. Its request and its value travelled bare, under their type's
-  `Encoding` (§7.2), and its error in §5.2's envelope.
-  - An implementation MAY read a call's sample whose `Encoding` is not
-    `zenoh/bytes` as the bare wire. It tells the two wires apart by the
-    `Encoding` alone ("Reading a value", above).
-  - None writes the bare wire: the rules above say what each writes.
 
 ### 5.2 Errors
 
@@ -1584,11 +1580,6 @@ another `Encoding`. `[F: errors/forms.json]` `[Sc: operations.md §9]`
 - **No contract is needed.** The parse reads the code, the cause and the
   message without one, as a key is read (§1.1). Only a detail needs the
   `error` type.
-- **The bare wire.** A reader of the bare wire (§5.1) reads a `reply_err`
-  under one of the envelope's three encodings as that envelope (below),
-  not as the transport's. One its decoding refuses (below, "Decoding") is
-  a malformed error, the transport's, as an error form the parse refuses
-  is. `[Sc: operations.md §9]`
 
 **Transport errors.** Zenoh answers some calls with a reply error of its
 own (Appendix B).
@@ -1604,62 +1595,6 @@ own (Appendix B).
 - **What it rests on.** zenoh 1.10.1 sends that one payload of its own
   under `zenoh/bytes` (Appendix B). A later Zenoh's own error that parsed
   as an error form would read as an owner's.
-
-**The envelope, on the bare wire.** An earlier version of this text had
-an owner answer a failed call with an **envelope**: the fields above,
-encoded as JSON, CBOR or protobuf. A reader of the bare wire (§5.1) reads
-one so.
-- **Its kind** follows the operation's `error` type when it declares
-  one, else its `response` type:
-  - **a JSON Schema type:** the envelope is JSON or CBOR, on the
-    operation's `encoding`;
-  - **a protobuf type:** the envelope is the message `zk2.core.v1.Error`;
-  - **a raw type:** the envelope is JSON. A raw `error` type's detail is
-    its bytes as base64 text (RFC 4648 §4, padded), the JSON form of bytes
-    (§7.2). `[F: errors/cases.json]`
-- **Its `Encoding`** is `application/json` or `application/cbor`, or
-  `application/protobuf` with the schema suffix `zk2.core.v1.Error`.
-- **Its fields.** `message` is required. A JSON or CBOR detail is the
-  `error` type's value inline, and a protobuf one its encoded message.
-- **Reading one.** A tool decodes the envelope without the contract, so a
-  raw detail reads as a string, and a caller holding the contract decodes
-  it as base64. A protobuf detail is absent only when its field is not
-  written: an empty one is present. `[F: errors/cases.json]`
-
-The two definitions are [`core/error.proto`](core/error.proto) and
-[`core/error.schema.json`](core/error.schema.json).
-
-**Decoding.** A caller or a tool that reads the bare wire decodes an
-envelope by its reply's `Encoding`, without the contract. It MUST refuse:
-- an unknown encoding (`encoding`);
-- malformed bytes, a duplicate or unknown member, or a missing `code` or
-  `message` (`decode`);
-- an unknown code, the empty string included, since a protobuf envelope
-  without one decodes as `""` (`code`);
-- `unavailable` without a valid cause, or a cause on any other code
-  (`cause`);
-- a detail on any code but `app` (`detail`).
-
-A protobuf decoder ignores unknown fields, as protobuf does.
-`[F: errors/cases.json]`
-
-The decoding edges, each pinned by a case `[F: errors/cases.json]`:
-- **The encoding** is compared as an exact string. A parameter
-  (`application/json;charset=utf-8`), a bare `application/protobuf`, or
-  another schema suffix is an unknown encoding (`encoding`).
-- **JSON and CBOR:** a member of the wrong type (`"code": 3`) is `decode`,
-  like a missing one. A `cause` or `detail` that is `null` is absent.
-- **CBOR:** the bytes hold one data item and nothing after it (`decode`
-  otherwise). Indefinite lengths are accepted. A tag decodes as its content,
-  and `undefined` as `null`. A map key that is not text, or a float that is
-  not finite, is `decode`. An integer decodes from −2^63 to 2^64−1, a signed
-  or an unsigned 64-bit value, so an encoder's `uint64` reads back; CBOR's
-  other integers, −2^64 to −2^63−1, are `decode`. A byte string inside a
-  `detail` reads as base64 text (RFC 4648 §4, padded), the JSON form of bytes
-  (§7.2), so a CBOR detail decodes like the same detail sent as JSON.
-- **Protobuf:** a known field with the wrong wire type is `decode`. A missing
-  `message` decodes as `""` and is accepted, since protobuf cannot tell the
-  two apart. A `cause` present but empty is not a valid cause (`cause`).
 
 ---
 
@@ -5245,14 +5180,14 @@ section each was written against, whose pointer leads on.
 | `conformance/descriptors/` | §3.3 |
 | `conformance/budget/` | §2.7, `lossless.json` and the reader's stall included |
 | `conformance/seed/` | §4.2 a late joiner's merge: `merge.json` the Zenoh timestamps' order, unstamped samples, and a tool's across two ids; `inband.json` §4.3's in-band stamps, plain and serial order, and a tool's and a consumer's across two runs |
-| `conformance/errors/` | §5.2: `forms.json` §7.5's error form, a router's `Timeout` and a querier's read as the transport's; `cases.json` the bare wire's envelope |
+| `conformance/errors/` | §5.2: `forms.json` §7.5's error form, and every reply error it refuses read as the transport's, a router's `Timeout`, a querier's and one under another `Encoding` among them |
 | `conformance/envelope/` | §7.5, a call's forms and a snapshot's envelope included; `calls.json` §5.1's and §5.2's forms by an operation's types |
 | `conformance/snapshot/` | §7.5, a snapshot's pages: their bytes, their reading and the paging rule |
 | `conformance/frame/` | §7.7 |
 | `conformance/catalog/` | §8.6 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
 | `scenarios/state.md` | §4; §1 in-band stamps through a router that stamps nothing and one that stamps, and §8.2's session posture; §7 runs, a record's and a random draw's, the run before the seq wraps, and a consumer's and a tool's late joiner across two runs, after their seed and inside it; §9 an archive within a run and across two; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node; §13 a stream key's seq wrapping, and kept across a takeover |
-| `scenarios/operations.md` | §5, §6; §9 a call's forms for each kind of type, the as-of mark, and an owner's error beside a router's `Timeout`, a querier's and a malformed one |
+| `scenarios/operations.md` | §5, §6; §9 a call's forms for each kind of type, the as-of mark, an owner's error beside a router's `Timeout`, a querier's and a malformed one, an earlier version's envelope read as the transport's, and a request under another `Encoding` refused |
 | `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip; §7–§9 what a complete presence read is: a session cut off, before a read or while it runs, a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict; §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout; a watch session in no namespace on the wire keys, a round trip through a watch session cut off, and a move unconfirming what a reader holds; a reopen telling every token, the round trip after it waiting for them, and one round trip and one read at a time; step 10's counts, the reader's own sessions'; what a black box is judged on there, at what period its output is sampled, and one that prints nothing while its link is cut; Appendix B |
 | `scenarios/bindings.md` | §3.2; §6 a binding's order kept by the descriptor |
 | `scenarios/retrieval.md` | §8.4 |
@@ -5378,7 +5313,8 @@ brief:
   codes' meanings are §9.2's table (contracts and sets) and §3.3's
   (descriptors).
 - **`bundles/`, `history/`, `errors/`:** expected tags, or the decoded
-  value. The tags' meanings are §9.6's, §9.7's and §5.2's.
+  value. The tags' meanings are §9.6's and §9.7's, and `errors/`'s are
+  §7.5's (below).
   - **`errors/forms.json`** holds §7.5's error form. An error's byte → its
     code, its cause and its two bits, or the refusal (`bytes`). An error
     and its stamp → the payload's bytes, or the writer's refusal
@@ -5386,7 +5322,6 @@ brief:
     carries, or the refusal (`reads`). Its tokens are §7.5's, and
     `encoding` for a payload under another `Encoding`. A reply error the
     read refuses is the transport's (§5.2).
-  - **`errors/cases.json`** holds the bare wire's envelope (§5.2).
 - **`budget/`**: a bound from the contract's `cardinality` and
   each instance's stated one (`bounds.json`); a population's verdict and
   reason class from a kind, a bound and one reading (`population.json`);

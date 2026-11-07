@@ -294,11 +294,14 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   `arbitration_s10_a_tools_questions`, against the actuator and the
   commanders brought up through the runtime as the owner example's
   `--arbitrate` and `--commander` do.
-  `call` and `bench call` read both wires (#985 C4b): a value form's
-  record with its `mark` (`as of run r, seq s` in the table), an error
-  form as an owner's error with its mark, the bare wire's envelope with
-  none, a router's `Timeout` the transport's with its refusal named
-  (`live_zk2.rs`'s `call_reads_an_owner_answering_in_the_forms_and_the_bare_wire`).
+  `call` and `bench call` read the forms alone (#985 C4b; C4d, core
+  0.99): a value form's record with its `mark` (`as of run r, seq s` in
+  the table), an error form as an owner's error with its mark, a value
+  under another `Encoding` undecodable, no form, and an earlier core's
+  envelope and a router's `Timeout` the transport's, silence with its
+  `Encoding` and bytes (`live_zk2.rs`'s
+  `call_reads_an_owner_answering_in_the_forms_alone`); no `malformed`
+  answer or count remains.
   `--skip` sends nothing: no call for `operation`, no fan-out probe for
   `fanout-refused`, no standby probe for `redundancy-standby` (#841, RD).
   PF's `health [SYSTEM/SERVICE]` (#721) reads health.v1 as its §2.11 reader

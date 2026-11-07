@@ -1,8 +1,9 @@
-//! A `tc.v1` owner answering in core §7.5's value and error forms, as C4c's
-//! owners will (#980's C4b), beside the bare wire's envelope and the
-//! transport's own errors: what a caller reading both wires reads. The
-//! runtime's `operations.rs`, the fleet's `zk2_core.rs` and zenctl's
-//! `live_zk2.rs` include this file and read it alike.
+//! A `tc.v1` owner answering in core §7.5's value and error forms (#980's
+//! C4b), beside the transport's own errors, an earlier core's envelope and
+//! a value under another `Encoding`: what a caller reading the forms alone
+//! reads (core 0.99, #985's C4d). The runtime's `operations.rs`, the
+//! fleet's `zk2_core.rs` and zenctl's `live_zk2.rs` include this file and
+//! read it alike.
 //!
 //! It is one raw `complete` queryable over `zk2/<address>/tc.v1/@op/**`
 //! (`zenkey/tests/contracts/tc.v1.toml`), so no runtime writer is involved,
@@ -12,9 +13,10 @@
 //! |---|---|
 //! | `interfaces/eth0/set` | a value form, `{"up":true}` under [`mark`] |
 //! | `interfaces/eth9/set` | an error form: `app`, "the kernel refused", the detail `{"kind":"kernel"}` |
-//! | `interfaces/eth1/set` | the bare wire's envelope, `{"code":"busy","message":""}` under `application/json` |
+//! | `interfaces/eth1/set` | an earlier core's JSON envelope, [`ENVELOPE`] under `application/json`: the transport's |
 //! | `interfaces/eth2/set` | `{"up":true}` under `zenoh/bytes`: no value form (`sample_kind`) |
 //! | `interfaces/eth3/set` | a `busy` error form's bytes under `zenoh/string`: the transport's |
+//! | `interfaces/eth4/set` | `{"up":true}` under `application/json`: no form (`encoding`), malformed |
 //! | `diagnostics` | a router's `Timeout` under `zenoh/bytes` (`sample_kind`); for `{"verbose":true}`, a `busy` error form with a cause (`cause`): each the transport's |
 //! | `listing` | two value forms, `{"name":"a"}` and `{"name":"b"}`, then a summary form |
 
@@ -44,6 +46,10 @@ pub const BUSY: [u8; 7] = [0x60, 0x00, 0x01, 0x00, 0x00, 0x07, 0xa0];
 /// The same with a cause, which §7.5's parse refuses (`cause`).
 pub const BUSY_WITH_CAUSE: [u8; 7] = [0x60, 0x00, 0x01, 0x00, 0x00, 0x07, 0xa8];
 
+/// The JSON error envelope an earlier core had an owner write, `busy`
+/// (core 0.92's bare wire), which a reader reads as the transport's.
+pub const ENVELOPE: &[u8] = br#"{"code":"busy","message":""}"#;
+
 /// The owner, while it is held.
 pub struct FormsOwner {
     _queryable: Queryable<()>,
@@ -68,13 +74,17 @@ fn answer(q: &Query, tail: &str, diagnostics: &AtomicU64) -> zenoh::Result<()> {
             q.reply_err(e.write().expect("an app error writes")).wait()
         }
         "interfaces/eth1/set" => q
-            .reply_err(br#"{"code":"busy","message":""}"#.to_vec())
+            .reply_err(ENVELOPE.to_vec())
             .encoding(Encoding::APPLICATION_JSON)
             .wait(),
         "interfaces/eth2/set" => q.reply(ke, br#"{"up":true}"#.to_vec()).wait(),
         "interfaces/eth3/set" => q
             .reply_err(BUSY.to_vec())
             .encoding(Encoding::ZENOH_STRING)
+            .wait(),
+        "interfaces/eth4/set" => q
+            .reply(ke, br#"{"up":true}"#.to_vec())
+            .encoding(Encoding::APPLICATION_JSON)
             .wait(),
         "diagnostics" => {
             diagnostics.fetch_add(1, Ordering::SeqCst);

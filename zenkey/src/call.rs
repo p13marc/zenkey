@@ -13,14 +13,15 @@
 //!   handler sends through a [`Sink`]: values, then the summary (O6). A
 //!   handler over a whole template names the member a fan-out answers for
 //!   ([`CallInfo::member`], §5.1 "Over a template").
-//! - **A caller** gets an [`Outcome`] (O5: a value, a refusal, a malformed
-//!   refusal, or silence, each distinct) or, for a many-reply or fan-out
+//! - **A caller** gets an [`Outcome`] (O5: a value, a refusal, or silence,
+//!   each distinct) or, for a many-reply or fan-out
 //!   call, [`Replies`], attributed by replier (O3, O6).
-//! - **Both wires** (#980's C4b): a caller reads an owner's error from the
-//!   error form under `zenoh/bytes` and from the bare wire's envelope alike,
-//!   a [`Refusal`] carrying the form's as-of mark when it came in one
-//!   (core §5.1, §5.2), and keeps the transport's own error replies apart,
-//!   as silence ([`Transport`]).
+//! - **The forms** (#985's C4b to C4d): a caller reads an owner's error
+//!   from the error form under `zenoh/bytes` alone, a [`Refusal`] carrying
+//!   the form's as-of mark (core §5.1, §5.2), and keeps the transport's own
+//!   error replies apart, as silence ([`Transport`]): a reply error under
+//!   any other `Encoding` is one, an earlier core's envelope included,
+//!   since core 0.99 removed the bare wire.
 
 use std::fmt;
 use std::future::Future;
@@ -31,12 +32,12 @@ use serde::{Deserialize, Serialize};
 use zenkey_model::authoring::Encoding as WireEncoding;
 use zenkey_model::contract::Operation;
 use zenkey_model::descriptor::Cause;
-use zenkey_model::envelope::{Detail, Envelope, EnvelopeError, ErrorForm};
+use zenkey_model::envelope::{Detail, ErrorForm};
 use zenkey_model::grammar::Addr;
 use zenkey_model::template::Bindings;
 use zenkey_model::wire::{self, Stamp, Tag};
 
-use crate::codec::{Codec, CodecKind};
+use crate::codec::Codec;
 use crate::error::{Error, Result};
 
 /// The optional call metadata (O7): who claims to call, and the caller's
@@ -90,7 +91,12 @@ impl CallMetadata {
 /// message, cause and detail. The runtime writes it in §7.5's error form,
 /// its detail in the operation's `error` type's own bytes.
 #[derive(Debug, Clone, PartialEq)]
-pub struct OpError(Envelope);
+pub struct OpError {
+    code: String,
+    message: String,
+    cause: Option<String>,
+    detail: Option<Detail>,
+}
 
 /// The name §5.2 gives a cause.
 #[must_use]
@@ -104,12 +110,22 @@ pub fn cause_name(c: Cause) -> &'static str {
 
 impl OpError {
     fn new(code: &str, message: impl Into<String>, cause: Option<Cause>) -> Self {
-        Self(Envelope {
+        Self {
             code: code.to_owned(),
             message: message.into(),
             cause: cause.map(|c| cause_name(c).to_owned()),
             detail: None,
-        })
+        }
+    }
+
+    /// `app`, its detail as given.
+    fn app_with(message: impl Into<String>, detail: Detail) -> Self {
+        Self {
+            code: "app".to_owned(),
+            message: message.into(),
+            cause: None,
+            detail: Some(detail),
+        }
     }
 
     /// The request does not decode, or breaks the operation's rules.
@@ -161,12 +177,7 @@ impl OpError {
     /// that operation's `app`).
     pub fn app<T: Serialize>(message: impl Into<String>, detail: &T) -> Self {
         match serde_json::to_value(detail) {
-            Ok(v) => Self(Envelope {
-                code: "app".to_owned(),
-                message: message.into(),
-                cause: None,
-                detail: Some(Detail::Value(v)),
-            }),
+            Ok(v) => Self::app_with(message, Detail::Value(v)),
             Err(e) => Self::internal(format!("the app detail does not serialize: {e}")),
         }
     }
@@ -176,12 +187,7 @@ impl OpError {
     /// Schema value's JSON or CBOR, each sent as it is, the error form's
     /// detail (§5.2).
     pub fn app_bytes(message: impl Into<String>, detail: Vec<u8>) -> Self {
-        Self(Envelope {
-            code: "app".to_owned(),
-            message: message.into(),
-            cause: None,
-            detail: Some(Detail::Bytes(detail)),
-        })
+        Self::app_with(message, Detail::Bytes(detail))
     }
 
     /// `app`, with a value of the declared `error` type through its codec
@@ -192,35 +198,40 @@ impl OpError {
     /// writes `OpError::app_as::<Protobuf<NavError>>(…)`.
     pub fn app_as<C: Codec>(message: impl Into<String>, detail: &C::Value) -> Self {
         match C::detail(detail) {
-            Ok(d) => Self(Envelope {
-                code: "app".to_owned(),
-                message: message.into(),
-                cause: None,
-                detail: Some(d),
-            }),
+            Ok(d) => Self::app_with(message, d),
             Err(e) => Self::internal(format!("the app detail does not encode: {e}")),
         }
     }
 
+    /// §5.2's code, by name.
     #[must_use]
     pub fn code(&self) -> &str {
-        &self.0.code
+        &self.code
     }
 
+    /// For a human, never parsed; empty for none, which the error form
+    /// then carries none of.
     #[must_use]
-    pub fn envelope(&self) -> &Envelope {
-        &self.0
+    pub fn message(&self) -> &str {
+        &self.message
     }
 
+    /// `unavailable`'s cause, by name: `build`, `config` or `capability`.
     #[must_use]
-    pub fn into_envelope(self) -> Envelope {
-        self.0
+    pub fn cause(&self) -> Option<&str> {
+        self.cause.as_deref()
+    }
+
+    /// `app`'s detail, as the handler gave it.
+    #[must_use]
+    pub fn detail(&self) -> Option<&Detail> {
+        self.detail.as_ref()
     }
 }
 
 impl fmt::Display for OpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.0.code, self.0.message)
+        write!(f, "{}: {}", self.code, self.message)
     }
 }
 
@@ -230,13 +241,6 @@ impl std::error::Error for OpError {}
 impl From<Error> for OpError {
     fn from(e: Error) -> Self {
         Self::internal(e.to_string())
-    }
-}
-
-/// An envelope received from elsewhere (a proxy relaying a refusal).
-impl From<Envelope> for OpError {
-    fn from(e: Envelope) -> Self {
-        Self(e)
     }
 }
 
@@ -522,33 +526,26 @@ impl<T: Send + 'static, S: Send + 'static> Sink<T, S> {
     }
 }
 
-/// An error reply under one of the bare wire's envelope encodings that
-/// does not decode as one (§5.2's decoding refusals). No reply is read so
-/// since core 0.95: a malformed error is the transport's on either wire
-/// ([`Transport`]; zk2py round 101's F-473), and C4d removes this with the
-/// bare wire.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Malformed {
-    pub encoding: String,
-    pub error: EnvelopeError,
-}
-
-/// An owner's error (core §5.2), as a caller reads it from either wire
-/// (`client::classify`): the error form under `zenoh/bytes`, or
-/// the bare wire's envelope under its three encodings (§5.1, "The bare
-/// wire"). It reads as its [`Envelope`] (`Deref`): `code`, `message`,
-/// `cause` and `detail`.
+/// An owner's error (core §5.2), as a caller reads it from its error form
+/// under `zenoh/bytes` (`client::classify`): its code, message, cause and
+/// detail, and the form's mark.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Refusal {
-    /// Its fields. From an error form, a message the owner sent none of
-    /// reads as empty ([`ErrorMark::message`] tells them apart), and a
-    /// detail is the `error` type's own bytes, [`Detail::Bytes`], never a
-    /// decoded value: JSON or CBOR on the operation's `encoding`, a
-    /// protobuf message, a raw type's bytes, or a packed record under
-    /// [`ErrorMark::tag`]. [`Refusal::detail_as`] reads either wire's.
-    pub envelope: Envelope,
-    /// The error form's CH tag and as-of mark; `None` for the bare wire's
-    /// envelope, which carries neither.
+    /// §5.2's code, by the name its table gives it.
+    pub code: String,
+    /// For a human, never parsed. A message the owner sent none of reads
+    /// as empty ([`ErrorMark::message`] tells them apart).
+    pub message: String,
+    /// `unavailable`'s cause, by name: `build`, `config` or `capability`.
+    pub cause: Option<String>,
+    /// `app`'s alone: from an error form, the `error` type's own bytes,
+    /// [`Detail::Bytes`], never a decoded value: JSON or CBOR on the
+    /// operation's `encoding`, a protobuf message, a raw type's bytes, or a
+    /// packed record under [`ErrorMark::tag`]. [`Refusal::detail_as`]
+    /// reads it.
+    pub detail: Option<Detail>,
+    /// The error form's CH tag and as-of mark; `None` only for a refusal
+    /// made before any wire ([`From<OpError>`](Refusal#impl-From<OpError>-for-Refusal)).
     pub form: Option<ErrorMark>,
 }
 
@@ -566,31 +563,20 @@ pub struct ErrorMark {
 }
 
 impl Refusal {
-    /// An error form, read: its code and cause by name, as the bare wire's
-    /// envelope spells them.
+    /// An error form, read: its code and cause by the names §5.2's table
+    /// gives them.
     #[must_use]
     pub fn of_form(f: &ErrorForm<'_>) -> Self {
         Self {
-            envelope: Envelope {
-                code: f.code.as_str().to_owned(),
-                message: f.message.unwrap_or_default().to_owned(),
-                cause: f.cause.map(|c| c.as_str().to_owned()),
-                detail: f.detail.map(|d| Detail::Bytes(d.to_vec())),
-            },
+            code: f.code.as_str().to_owned(),
+            message: f.message.unwrap_or_default().to_owned(),
+            cause: f.cause.map(|c| c.as_str().to_owned()),
+            detail: f.detail.map(|d| Detail::Bytes(d.to_vec())),
             form: Some(ErrorMark {
                 tag: f.tag,
                 stamp: f.stamp,
                 message: f.message.is_some(),
             }),
-        }
-    }
-
-    /// The bare wire's envelope, decoded.
-    #[must_use]
-    pub fn of_envelope(envelope: Envelope) -> Self {
-        Self {
-            envelope,
-            form: None,
         }
     }
 
@@ -604,75 +590,68 @@ impl Refusal {
     /// answering for another owner): its code, message and cause, and its
     /// detail as the error form writes one again (core §5.2). An error
     /// form's JSON Schema detail, its type's JSON or CBOR on `op`'s
-    /// `encoding`, is decoded back to a value; the bare wire's raw detail,
-    /// base64 text, back to its bytes; any other detail kept as it came.
-    /// The relaying owner writes it under its own as-of mark.
+    /// `encoding`, is decoded back to a value; any other detail is kept as
+    /// it came. The relaying owner writes it under its own as-of mark.
     #[must_use]
     pub fn relay(&self, op: &Operation) -> OpError {
         use zenkey_model::schema::TypeId;
-        let mut env = self.envelope.clone();
-        env.detail = match (env.detail.take(), &op.error) {
+        let detail = match (self.detail.clone(), &op.error) {
             (Some(Detail::Bytes(b)), Some(TypeId::JsonSchema { .. })) => Some(
                 crate::codec::decode_json::<serde_json::Value>(&b, op.encoding)
                     .map_or(Detail::Bytes(b), Detail::Value),
             ),
-            (Some(d @ Detail::Value(_)), Some(TypeId::Raw { .. })) => {
-                Some(d.raw_bytes().map_or(d, Detail::Bytes))
-            }
             (d, _) => d,
         };
-        OpError::from(env)
+        OpError {
+            code: self.code.clone(),
+            message: self.message.clone(),
+            cause: self.cause.clone(),
+            detail,
+        }
     }
 
     /// An `app` error's detail read as the operation's `error` type `C`, on
-    /// the operation's `encoding` `wire` (§5.2, "Reading one"), from either
-    /// wire: an error form's bytes as the type encodes them (a packed one
-    /// under CH's tag); the bare wire's JSON or CBOR value as carried, its
-    /// protobuf message, or a raw type's base64 text. `None` without a
-    /// detail; `Err` with why the type refuses it, which leaves the error
-    /// the owner's.
+    /// the operation's `encoding` `wire` (§5.2): an error form's bytes as
+    /// the type encodes them, a packed one under CH's tag. A refusal made
+    /// before any wire reads its detail as the handler gave it: bytes as
+    /// the type encodes them, a value as JSON. `None` without a detail;
+    /// `Err` with why the type refuses it, which leaves the error the
+    /// owner's.
     #[must_use]
     pub fn detail_as<C: Codec>(
         &self,
         wire: Option<WireEncoding>,
     ) -> Option<std::result::Result<C::Value, String>> {
-        let detail = self.envelope.detail.as_ref()?;
+        let detail = self.detail.as_ref()?;
         Some(match (self.form, detail) {
             (Some(m), Detail::Bytes(b)) => C::decode_record(b, wire, Some(m.tag)),
-            (_, Detail::Bytes(b)) => C::decode(b, wire),
-            (_, d @ Detail::Value(v)) => match C::KIND {
-                CodecKind::Raw => d
-                    .raw_bytes()
-                    .ok_or_else(|| "a raw detail that is not base64 text".to_owned())
-                    .and_then(|b| C::decode(&b, wire)),
-                _ => serde_json::to_vec(v)
-                    .map_err(|e| format!("JSON: {e}"))
-                    .and_then(|b| C::decode(&b, Some(WireEncoding::Json))),
-            },
+            (None, Detail::Bytes(b)) => C::decode(b, wire),
+            (_, Detail::Value(v)) => serde_json::to_vec(v)
+                .map_err(|e| format!("JSON: {e}"))
+                .and_then(|b| C::decode(&b, Some(WireEncoding::Json))),
         })
     }
 }
 
 /// A refusal as its owner refused it, before any wire: what a test's `Api`
-/// double answers with.
+/// double answers with. It carries no mark.
 impl From<OpError> for Refusal {
     fn from(e: OpError) -> Self {
-        Self::of_envelope(e.into_envelope())
-    }
-}
-
-impl std::ops::Deref for Refusal {
-    type Target = Envelope;
-    fn deref(&self) -> &Envelope {
-        &self.envelope
+        Self {
+            code: e.code,
+            message: e.message,
+            cause: e.cause,
+            detail: e.detail,
+            form: None,
+        }
     }
 }
 
 /// A reply error that is the transport's, never an owner's (core §5.2,
 /// "Transport errors"): a querier's own `Timeout` under `zenoh/string`, a
 /// router's under `zenoh/bytes`, any `zenoh/bytes` reply error the error
-/// form's parse refuses, one under an `Encoding` that carries no error,
-/// or the bare wire's envelope its decoding refuses (core 0.95, F-473).
+/// form's parse refuses, or one under an `Encoding` that carries no error
+/// form, an earlier core's envelope under `application/json` among them.
 /// A caller reads it as silence, and may retry after it (§5.1, "Retries").
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Transport {
@@ -681,8 +660,7 @@ pub struct Transport {
     /// Its bytes, as they arrived.
     pub payload: Vec<u8>,
     /// Under `zenoh/bytes`, why it is no error form (`sample_kind` for a
-    /// router's `Timeout`); `None` under any other `Encoding`, the bare
-    /// wire's included.
+    /// router's `Timeout`); `None` under any other `Encoding`.
     pub refusal: Option<wire::Refusal>,
 }
 
@@ -767,14 +745,12 @@ pub struct Silence {
 #[derive(Debug, Clone)]
 pub enum Outcome<T> {
     /// A value reply on the operation's concrete key, in the value form or
-    /// on the bare wire (one the form's parse refuses included: it came on
-    /// the call's key, §5.1).
+    /// malformed: refused by the form's parse, or under another `Encoding`,
+    /// an answer all the same since it came on the call's key (§5.1).
     Value(T),
-    /// A `reply_err` carrying an owner's error, in its form or the bare
-    /// wire's envelope (O3, §5.2).
+    /// A `reply_err` carrying an owner's error in its error form (O3,
+    /// §5.2).
     Refused(Refusal),
-    /// Unproduced since core 0.95 ([`Malformed`]): C4d removes it.
-    Malformed(Malformed),
     /// No answer.
     NoAnswer(Silence),
 }
@@ -813,7 +789,6 @@ impl<T> Outcome<T> {
         Ok(match self {
             Self::Value(v) => Outcome::Value(f(v)?),
             Self::Refused(e) => Outcome::Refused(e),
-            Self::Malformed(m) => Outcome::Malformed(m),
             Self::NoAnswer(s) => Outcome::NoAnswer(s),
         })
     }
@@ -852,10 +827,9 @@ pub struct Replies<V, S> {
     pub summary_declared: bool,
     /// One per concrete key, in the order of first arrival.
     pub repliers: Vec<Replier<V, S>>,
-    /// Owners' errors, from either wire. A `reply_err` carries no key, so a
-    /// refusal is never attributed to a replier.
+    /// Owners' errors, in their error form. A `reply_err` carries no key,
+    /// so a refusal is never attributed to a replier.
     pub refusals: Vec<Refusal>,
-    pub malformed: Vec<Malformed>,
     /// The transport's error replies, such as a timeout.
     pub transport: Vec<Transport>,
     /// Value replies discarded: on a key that is not concrete (R6), or not
@@ -869,7 +843,6 @@ impl<V, S> Default for Replies<V, S> {
             summary_declared: false,
             repliers: Vec::new(),
             refusals: Vec::new(),
-            malformed: Vec::new(),
             transport: Vec::new(),
             discarded: 0,
         }
@@ -885,10 +858,10 @@ impl<V, S> Replies<V, S> {
         }
     }
 
-    /// No value, no owner's error, nothing malformed: silence (O5).
+    /// No value and no owner's error: silence (O5).
     #[must_use]
     pub fn is_silent(&self) -> bool {
-        self.repliers.is_empty() && self.refusals.is_empty() && self.malformed.is_empty()
+        self.repliers.is_empty() && self.refusals.is_empty()
     }
 
     /// Every value, across repliers.
@@ -938,7 +911,6 @@ impl<V, S> Replies<V, S> {
             summary_declared: self.summary_declared,
             repliers,
             refusals: self.refusals,
-            malformed: self.malformed,
             transport: self.transport,
             discarded: self.discarded,
         })
@@ -989,7 +961,7 @@ mod tests {
     #[test]
     fn app_without_a_detail() {
         let e = OpError::app_without_detail("plan rejected");
-        assert_eq!((e.code(), e.envelope().detail.as_ref()), ("app", None));
+        assert_eq!((e.code(), e.detail()), ("app", None));
     }
 
     /// Spec §5.1 "Over a template" (0.7, O-1, C-2): a template-wide

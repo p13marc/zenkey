@@ -3,9 +3,11 @@
 //!
 //! Three rules, each with a place in the rendering:
 //!
-//! * **O5's cases stay apart.** A value, an owner's error, a malformed
-//!   envelope and silence are four different first words, and silence is
-//!   never drawn as an empty value. Its attribution through presence is
+//! * **O5's cases stay apart.** A value, an owner's error and silence are
+//!   three different first words, and silence is never drawn as an empty
+//!   value: a reply error that is no error form, an earlier core's
+//!   envelope among them, is the transport's (core §5.2, since 0.99). Its
+//!   attribution through presence is
 //!   worded as what this reader could see: a refused presence read is
 //!   empty too (spec §8.1, 0.8). A value or an error that came in its form
 //!   says its as-of mark, `as of run r, seq s` (core §5.1, observer §7.3).
@@ -181,12 +183,6 @@ fn replies_table(t: &mut Table, r: &RepliesView) {
     for e in &r.refusals {
         envelope_lines(t, e, "refused (unattributed): ");
     }
-    for m in &r.malformed {
-        t.line_styled(
-            format!("malformed envelope ({}): {}", m.encoding, m.error),
-            style::ERROR,
-        );
-    }
     if !r.presence.unheard.is_empty() {
         t.line(format!(
             "no value from {}: each holds the interface's token, and refused or was \
@@ -238,15 +234,6 @@ impl Render for OperationReport {
                 }
             }
             OperationAnswer::Refused { envelope } => envelope_lines(t, envelope, "refused  "),
-            OperationAnswer::Malformed { malformed } => {
-                t.line_styled(
-                    format!(
-                        "malformed envelope ({}): {}",
-                        malformed.encoding, malformed.error
-                    ),
-                    style::ERROR,
-                );
-            }
             OperationAnswer::Silent { silence } => {
                 t.line_styled(
                     format!(
@@ -288,9 +275,7 @@ impl Render for OperationReport {
                 .cite("spec §5.1 O5"),
             ),
             OperationAnswer::Replies { replies } => {
-                let silent = replies.repliers.is_empty()
-                    && replies.refusals.is_empty()
-                    && replies.malformed.is_empty();
+                let silent = replies.repliers.is_empty() && replies.refusals.is_empty();
                 if silent {
                     notes.push(
                         Note::silence("no reply from any service selected: exit 2")

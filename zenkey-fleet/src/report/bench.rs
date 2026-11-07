@@ -4,12 +4,12 @@
 //!
 //! The report keeps its populations apart, because a benchmark that folds
 //! them lies (the tooling guide's O6): a value reply's latency belongs to
-//! the replier whose key carried it; an envelope is a refusal, a population
-//! of its own and unattributed (a `reply_err` carries no key); a call that
-//! drew no value and no envelope is silence, counted and never averaged in
-//! (O5); a call that panicked inside this tool is news about the tool. v1's
-//! `bench rpc` (`OriginLatency`, by `@rpc` origin) went with the `@rpc`
-//! plane.
+//! the replier whose key carried it; an owner's error is a refusal, a
+//! population of its own and unattributed (a `reply_err` carries no key); a
+//! call that drew no value and no owner's error is silence, counted and
+//! never averaged in (O5); a call that panicked inside this tool is news
+//! about the tool. v1's `bench rpc` (`OriginLatency`, by `@rpc` origin)
+//! went with the `@rpc` plane.
 
 use std::collections::BTreeMap;
 
@@ -51,14 +51,13 @@ pub struct BenchReport {
     /// Value replies, one population per key that carried them (O3), in
     /// order of first arrival.
     pub repliers: Vec<ReplierLatency>,
-    /// Envelopes: their own population, unattributed (§5.1).
+    /// Owners' errors: their own population, unattributed (§5.1).
     pub refusals: RefusalTally,
-    /// Replies claiming an envelope encoding that do not decode (§5.2).
-    pub malformed: u64,
-    /// The transport's own error replies, such as a query's timeout.
+    /// The transport's own error replies, such as a query's timeout, or
+    /// a reply error under another `Encoding` (§5.2).
     pub transport: u64,
-    /// Calls that drew no value and no envelope: silence, counted apart and
-    /// never averaged in (O5).
+    /// Calls that drew no value and no owner's error: silence, counted
+    /// apart and never averaged in (O5).
     pub silent: u64,
     /// Value replies on a key that is not concrete (R6), or not a member of
     /// the operation called.
@@ -139,13 +138,13 @@ pub struct HolderTally {
 }
 
 impl BenchReport {
-    /// 0 every measured reply a value, 1 an envelope or a malformed one
-    /// among them (the latencies above are timings of failures), 2 no value
+    /// 0 every measured reply a value, 1 an owner's error among them (the
+    /// latencies above are timings of failures), 2 no value
     /// at all: a benchmark that reached nobody measured nothing (O5).
     pub fn exit_code(&self) -> i32 {
         if self.repliers.is_empty() {
             2
-        } else if self.refusals.count > 0 || self.malformed > 0 {
+        } else if self.refusals.count > 0 {
             1
         } else {
             0
@@ -195,7 +194,6 @@ mod tests {
                 codes: [("busy".to_owned(), 3)].into(),
                 latency: Some(latency(0.5)),
             },
-            malformed: 1,
             transport: 2,
             silent: 4,
             discarded: 5,
@@ -244,7 +242,6 @@ mod tests {
                     "latency": {"min_ms": 0.5, "p50_ms": 0.5, "p95_ms": 0.5, "p99_ms": 0.5,
                                 "max_ms": 0.5},
                 },
-                "malformed": 1,
                 "transport": 2,
                 "silent": 4,
                 "discarded": 5,
@@ -265,7 +262,6 @@ mod tests {
         let mut r = report();
         assert_eq!(r.exit_code(), 1);
         r.refusals.count = 0;
-        r.malformed = 0;
         assert_eq!(
             r.exit_code(),
             0,

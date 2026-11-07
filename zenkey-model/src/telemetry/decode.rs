@@ -8,7 +8,7 @@
 //! | a float's text is the nearest double (round to nearest, ties to even) | `str::parse::<f64>`, correctly rounded; an infinite one is not strict JSON |
 //! | a CBOR integer: major types 0 and 1, or a bignum, tag 2 or 3 around a byte string, of any length, definite or not (F-144) | [`cbor`]: `Datum::Int`, or `Datum::BigInt` beyond i128 |
 //! | every other CBOR tag, and a tag 2 or 3 around anything but a byte string, is read as its content | [`cbor`] |
-//! | a CBOR map is read as core §5.2 reads the envelope's: text keys, no duplicate; `undefined` is `null` | [`cbor`]: anything else is `None` |
+//! | a CBOR map is read as its pairs: each key a text string, none twice; `undefined` is `null` | [`cbor`]: anything else is `None` |
 //! | a CBOR float keeps NaN and the infinities | `Datum::Float`, which reads `not_finite` |
 //!
 //! | a data item nests at most 256 arrays and maps deep (0.3): an array or a map at the top is at depth 1, one inside another one deeper; a tag or a scalar adds none | both readers count the same: an array or a map at depth [`MAX_DEPTH`] + 1 is `None`, the sample `undecodable`. A chain of tags is read without recursion |

@@ -961,7 +961,7 @@ pub enum Code {
 }
 
 impl Code {
-    /// The envelope's code.
+    /// The error's code.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -1006,7 +1006,7 @@ impl Field {
     }
 }
 
-/// A refusal, before or after an act: the envelope's code, its `app`
+/// A refusal, before or after an act: the error's code, its `app`
 /// detail, what it is about, and a message for a person that never carries
 /// a sensitive value (§2.15).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1045,7 +1045,7 @@ impl Refusal {
         Self::new(Code::Busy, None, message)
     }
 
-    /// The envelope's cause: `config` for `unavailable`, else none.
+    /// The error's cause: `config` for `unavailable`, else none.
     #[must_use]
     pub fn cause(&self) -> Option<&'static str> {
         (self.code == Code::Unavailable).then_some("config")

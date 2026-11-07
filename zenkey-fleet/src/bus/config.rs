@@ -25,7 +25,7 @@
 //! idempotent, so none is retried, O4), with the call metadata the caller
 //! claims (O7). The reply is read as its union (§3): `{applied}` or
 //! `{pending}` for a `set`, `{view}` or `{status}` for a control operation;
-//! a refusal as the core's envelope, its `app` detail a `ConfigError`;
+//! a refusal as the core's error form, its `app` detail a `ConfigError`;
 //! silence attributed through presence, or unattributed across a face (R7).
 //!
 //! Nothing is judged here: [`crate::judge::config`] answers §5's questions
@@ -82,7 +82,7 @@ use crate::model::config::{
 use crate::model::deployment::{Catalogs, Stated};
 use crate::report::{
     ConfigActAnswer, ConfigActReport, ConfigAppError, ConfigChecked, ConfigRefusal, ConfigReport,
-    MalformedReply, SilenceView,
+    SilenceView,
 };
 
 /// A document as read: its value, or why the bytes are not one.
@@ -1088,10 +1088,10 @@ fn runtime(target: &str, e: zenkey::Error) -> crate::Error {
     }
 }
 
-/// An owner's error (§5.2), from its error form or the bare wire's
-/// envelope, as the report spells it, its `app` detail decoded as
-/// `ConfigError` on either wire ([`zenkey::call::Refusal::detail_as`]),
-/// every sensitive value sent taken out of its words.
+/// An owner's error (§5.2), from its error form, as the report spells it,
+/// its `app` detail decoded as `ConfigError`
+/// ([`zenkey::call::Refusal::detail_as`]), every sensitive value sent taken
+/// out of its words.
 fn refusal(env: &zenkey::call::Refusal, secrets: &[String]) -> ConfigRefusal {
     let (error, detail_undecodable) = match env.detail_as::<zenkey::codec::Json<ConfigError>>(None)
     {
@@ -1168,8 +1168,8 @@ fn refusal_v2(env: &zenkey::call::Refusal, target: &V2Target, secrets: &[String]
 }
 
 /// A refusal's message as the owner sent it, scrubbed: absent when its
-/// error form carried none (core §7.5), never read back as `""`. The bare
-/// wire's envelope always carries one.
+/// error form carried none (core §7.5), never read back as `""`. A refusal
+/// made before any wire carries one.
 fn message(env: &zenkey::call::Refusal, secrets: &[String]) -> Option<String> {
     env.form
         .is_none_or(|f| f.message)
@@ -1274,12 +1274,6 @@ async fn call_v2(
         zenkey::call::Outcome::Refused(env) => ConfigActAnswer::Refused {
             refusal: refusal_v2(&env, target, &c.secrets),
         },
-        zenkey::call::Outcome::Malformed(m) => ConfigActAnswer::Malformed {
-            malformed: MalformedReply {
-                encoding: m.encoding.clone(),
-                error: m.error.to_string(),
-            },
-        },
         zenkey::call::Outcome::NoAnswer(s) => ConfigActAnswer::Silent {
             silence: SilenceView {
                 attempts: s.attempts,
@@ -1352,12 +1346,6 @@ pub async fn call(session: &Session, c: ConfigCall<'_>) -> crate::Result<ConfigA
         }
         zenkey::call::Outcome::Refused(env) => ConfigActAnswer::Refused {
             refusal: refusal(&env, &c.secrets),
-        },
-        zenkey::call::Outcome::Malformed(m) => ConfigActAnswer::Malformed {
-            malformed: MalformedReply {
-                encoding: m.encoding.clone(),
-                error: m.error.to_string(),
-            },
         },
         zenkey::call::Outcome::NoAnswer(s) => ConfigActAnswer::Silent {
             silence: SilenceView {
@@ -1486,15 +1474,12 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
-        let env = zenkey_model::envelope::Envelope {
-            code: "app".into(),
-            message: "pin 1234 refused".into(),
-            cause: None,
-            detail: Some(zenkey_model::envelope::Detail::Value(
-                serde_json::json!({"code": "device-refused", "detail": "bad 1234"}),
-            )),
-        };
-        let r = refusal(&zenkey::call::Refusal::of_envelope(env), &["1234".into()]);
+        // A refusal made before any wire, as a test's `Api` double makes one.
+        let made = zenkey::OpError::app(
+            "pin 1234 refused",
+            &serde_json::json!({"code": "device-refused", "detail": "bad 1234"}),
+        );
+        let r = refusal(&zenkey::call::Refusal::from(made), &["1234".into()]);
         assert_eq!(r.message.as_deref(), Some("pin <redacted> refused"));
         assert_eq!(r.error.unwrap().detail(), Some("bad <redacted>"));
         // An error form's detail is the ConfigError's own JSON (core §5.2).

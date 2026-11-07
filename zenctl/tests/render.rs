@@ -964,7 +964,6 @@ host-c/tc holds the interface's token and sent no value in 98 call(s): refused o
     let n = notes(&fx::bench_report());
     for each in [
         "2 refusal(s)",
-        "1 malformed envelope(s)",
         "3 transport error(s)",
         "1 silent call(s)",
         "4 discarded value(s)",
@@ -3828,7 +3827,6 @@ mod actfx {
                         detail: None,
                         mark: None,
                     }],
-                    malformed: vec![],
                     transport: vec![],
                     discarded: 1,
                     presence: SelectionPresence {
@@ -3981,8 +3979,8 @@ presence   no token of the service is visible to this reader: it may be gone, or
 
 /// An owner answering in the value and error forms (core §5.1, §5.2,
 /// #980's C4b): each answer says its as-of mark, an error form with no
-/// message says none, and the documents carry `mark` where the bare wire's
-/// carry nothing.
+/// message says none, and the documents carry `mark` where a reply in no
+/// form, or a refusal made before any wire, carries nothing.
 #[test]
 fn a_call_in_the_forms_says_its_as_of_mark() {
     assert_data_eq!(
@@ -4015,7 +4013,10 @@ refused  busy
         doc(&actfx::refused_in_form())["envelope"],
         serde_json::json!({"code": "busy", "message": "", "mark": {"run": "0001", "seq": 7}})
     );
-    assert!(doc(&actfx::value()).get("mark").is_none(), "the bare wire");
+    assert!(
+        doc(&actfx::value()).get("mark").is_none(),
+        "no form, no mark"
+    );
     assert!(doc(&actfx::refused())["envelope"].get("mark").is_none());
 }
 

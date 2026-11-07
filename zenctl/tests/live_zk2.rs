@@ -1344,16 +1344,17 @@ async fn call_keeps_a_value_a_refusal_and_an_attributed_silence_apart() {
     );
 }
 
-/// #980's C4b, through `call`: an owner answering in §7.5's forms
-/// (`forms_owner`) is read by each reply's `Encoding` (core §5.1, §5.2;
-/// observer §7.3, "A call's forms first"). A value form's record is the
-/// value, with its as-of mark; an error form is the owner's error, exit 1,
-/// its detail decoded as the `error` type and its mark beside it, which
-/// the table says; the bare wire's envelope is still read, with no mark;
-/// and a router's `Timeout` is the transport's, so an idempotent call is
-/// retried and reports silence with its `Encoding` and bytes, exit 2.
+/// #985's C4b to C4d, through `call`: an owner answering in §7.5's forms
+/// (`forms_owner`) is read by each reply's `Encoding` alone (core §5.1,
+/// §5.2; observer §7.3, "A call's forms first"). A value form's record is
+/// the value, with its as-of mark; an error form is the owner's error,
+/// exit 1, its detail decoded as the `error` type and its mark beside it,
+/// which the table says; a value under another `Encoding` is undecodable,
+/// no form; an earlier core's envelope is the transport's, silence with
+/// its `Encoding` and bytes, never `busy`, exit 2; and a router's
+/// `Timeout` is the transport's too, so an idempotent call is retried.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn call_reads_an_owner_answering_in_the_forms_and_the_bare_wire() {
+async fn call_reads_an_owner_answering_in_the_forms_alone() {
     let mut bus = Bus::bare(None).await;
     let served = forms_owner::serve(&bus.owners, "f1/tc").await;
     bus.keep(served);
@@ -1407,12 +1408,36 @@ async fn call_reads_an_owner_answering_in_the_forms_and_the_bare_wire() {
     );
 
     let run = bus.zenctl(&set("if=eth1")).await;
-    exits(&run, 1);
+    exits(&run, 2);
+    let doc = run.json();
+    assert_eq!(doc["answer"], "silent", "an envelope, never busy: {run}");
+    assert_eq!(doc["silence"]["attempts"], 1, "set is not idempotent");
     assert_eq!(
-        run.json()["envelope"],
-        json!({"code": "busy", "message": ""}),
-        "the bare wire's envelope, no mark: {run}"
+        doc["silence"]["transport"],
+        r#"application/json: {"code":"busy","message":""}"#
     );
+    let run = bus
+        .zenctl(&call("interfaces/{if}/set", Some("if=eth1"), "table"))
+        .await;
+    exits(&run, 2);
+    assert!(
+        run.stdout.contains(
+            r#"no answer  after 1 attempt(s) — application/json: {"code":"busy","message":""}"#
+        ),
+        "{run}"
+    );
+
+    let run = bus.zenctl(&set("if=eth4")).await;
+    let doc = run.json();
+    assert_eq!(doc["answer"], "value", "an answer all the same: {run}");
+    assert_eq!(doc["reply"]["as"], "undecodable", "{run}");
+    assert!(
+        doc["reply"]["reason"]
+            .as_str()
+            .is_some_and(|r| r.starts_with("no call form under application/json")),
+        "{run}"
+    );
+    assert!(doc.get("mark").is_none(), "no form, no mark: {run}");
 
     let mut diagnostics = call("diagnostics", None, "json");
     diagnostics.extend(["--retries", "1"]);

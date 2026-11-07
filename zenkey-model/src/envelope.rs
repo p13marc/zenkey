@@ -1,15 +1,9 @@
-//! The error envelope of a failed operation call (spec `core.md` §5.2,
-//! r3 §3.7 O3), and its error form in bytes (core 0.92 §7.5, #980's C4a).
-//!
-//! A failed call replies with `reply_err` and an envelope. Its encoding
-//! follows the operation's types: JSON or CBOR for a JSON Schema operation,
-//! the message `zk2.core.v1.Error` (`spec/core/error.proto`) for a protobuf
-//! one. The reply's Zenoh encoding says which, so a tool decodes it without
-//! the contract. [`decode`] is that decoder, with the refusal tags
-//! `spec/conformance/errors/cases.json` pins.
+//! The error of a failed operation call (spec `core.md` §5.2, r3 §3.7
+//! O3) in its error form (core §7.5, #980's C4a).
 //!
 //! **The error form** ([`ErrorForm`], §5.2 "The error form") carries the
-//! same fields in bytes under `zenoh/bytes`, after a value's CH and stamp:
+//! error's fields in bytes under `zenoh/bytes`, after a value's CH and
+//! stamp:
 //!
 //! ```text
 //! error, a reply error's payload   CH · run · seq · byte · message? · detail?
@@ -23,15 +17,19 @@
 //! extension bit 0. [`ErrorByte::read`] reads the byte alone,
 //! [`crate::wire::read_reply_err`] a payload, [`ErrorForm::read`] a payload
 //! by its `Encoding` first, and [`ErrorForm::write`] writes one, its
-//! message [`cut`] to 255 bytes. No rule at core 0.92 has an owner answer
-//! in it (C4c is the flip). `spec/conformance/errors/forms.json` pins it.
+//! message [`cut`] to 255 bytes. Every owner answers in it since core 0.94
+//! (#985's C4c). `spec/conformance/errors/forms.json` pins it.
 //!
-//! **Reading both wires** (#980's C4b): [`read_error`] reads a reply error
-//! by its `Encoding` first, as an error form, the bare wire's envelope, or
-//! the transport's ([`ErrorReading`]), and [`crate::wire::read_value`] a
-//! reply as a value form or a bare record.
+//! **Reading a reply error** (core §5.2, "Reading an error"): [`read_error`]
+//! reads one by its `Encoding` first, as an owner's error form or the
+//! transport's ([`ErrorReading`]), and [`crate::wire::read_value`] a reply
+//! as a value form. Core 0.99 (#985's C4d) removed the bare wire, a call
+//! with no form whose error travelled in a JSON, CBOR or protobuf
+//! envelope: a reply error under any `Encoding` but `zenoh/bytes`, one of
+//! those three included, is the transport's, and nothing here decodes an
+//! envelope.
 
-use serde_json::{Map, Value};
+use serde_json::Value;
 use thiserror::Error;
 
 use crate::wire::{self, Form, Header, Refusal, Stamp, Tag};
@@ -50,11 +48,6 @@ pub const CODES: [&str; 8] = [
 
 /// The causes `unavailable` carries (r3.3 D4).
 pub const CAUSES: [&str; 3] = ["build", "config", "capability"];
-
-/// The Zenoh encodings an envelope travels with.
-pub const JSON: &str = "application/json";
-pub const CBOR: &str = "application/cbor";
-pub const PROTOBUF: &str = "application/protobuf;zk2.core.v1.Error";
 
 /// A core error code (§5.2), numbered in its table's order: the number is
 /// the error form's bits 7–5 (§7.5), and three bits hold eight, so no
@@ -345,9 +338,8 @@ impl<'a> ErrorForm<'a> {
     }
 
     /// A reply error read as an error form, by its `Encoding` first (§5.2,
-    /// §7.5): only `zenoh/bytes`, exactly ([`wire::ENCODING`]), carries one.
-    /// A reply error under §5.2's three envelope encodings is [`decode`]'s,
-    /// and under any other the transport's.
+    /// §7.5): only `zenoh/bytes`, exactly ([`wire::ENCODING`]), carries one,
+    /// and a reply error under any other is the transport's.
     ///
     /// # Errors
     ///
@@ -388,13 +380,16 @@ impl<'a> ErrorForm<'a> {
     }
 }
 
-/// Why a reply error is not read as an error form ([`ErrorForm::read`]).
+/// Why a call's sample is not read as one of its forms: a reply error as
+/// an error form ([`ErrorForm::read`]), or a reply as a value form
+/// ([`crate::wire::read_value`]).
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum FormRefusal {
-    /// An `Encoding` other than `zenoh/bytes`, which carries no form.
-    #[error("a reply error under {0:?}, which carries no error form")]
+    /// An `Encoding` other than `zenoh/bytes`, which carries no form (core
+    /// §5.1, "Reading a value"; §5.2, "Reading an error").
+    #[error("under {0:?}, which carries no form")]
     Encoding(String),
-    /// §7.5's first refusal for a `reply_err`.
+    /// §7.5's first refusal for the sample.
     #[error(transparent)]
     Form(Refusal),
 }
@@ -409,316 +404,59 @@ impl FormRefusal {
             FormRefusal::Form(r) => r.token(),
         }
     }
+
+    /// Why the sample has no reading, as a rendering names it: the parse's
+    /// refusal as [`Refusal::reason`] spells it, or the `Encoding` that
+    /// carries no form.
+    #[must_use]
+    pub fn reason(&self) -> String {
+        match self {
+            FormRefusal::Encoding(e) => {
+                format!("no call form under {e}: only zenoh/bytes carries one (core §5.1)")
+            }
+            FormRefusal::Form(r) => r.reason(),
+        }
+    }
 }
 
-/// What a call's reply error reads as, by its `Encoding` first (core
-/// §5.2, "Reading an error"), with the bare wire read beside it (§5.1,
-/// "The bare wire"): [`read_error`].
+/// What a call's reply error reads as, by its `Encoding` first (core §5.2,
+/// "Reading an error"): [`read_error`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum ErrorReading<'a> {
     /// Under `zenoh/bytes`, an error form the parse accepts: the owner's.
     Form(ErrorForm<'a>),
-    /// Under one of the envelope's three encodings ([`JSON`], [`CBOR`],
-    /// [`PROTOBUF`]), the bare wire's envelope: decoded, the owner's
-    /// answer, or refused by [`decode`], a malformed error and so the
-    /// transport's (core 0.95 §5.2, zk2py round 101's F-473).
-    Envelope(Result<Envelope, EnvelopeError>),
     /// The transport's: under `zenoh/bytes`, bytes the parse refuses (its
     /// refusal), such as a router's `Timeout` (`sample_kind`); under any
     /// other `Encoding`, `None`, such as a querier's own `Timeout` under
-    /// `zenoh/string`. A caller reads either as silence (§5.1, "Retries").
+    /// `zenoh/string`, or an earlier core's envelope under
+    /// `application/json`. A caller reads either as silence (§5.1,
+    /// "Retries").
     Transport(Option<Refusal>),
 }
 
 /// A call's `reply_err` read by its `Encoding` (core §5.2): under
 /// `zenoh/bytes`, exactly, as the error form ([`ErrorForm::read`]), the
-/// transport's when the parse refuses it; under the envelope's three
-/// encodings as the bare wire's envelope ([`decode`]); under any other as
-/// the transport's. No contract is read: only a detail needs the `error`
+/// transport's when the parse refuses it; under any other as the
+/// transport's. No contract is read: only a detail needs the `error`
 /// type, and it is taken unread.
 #[must_use]
 pub fn read_error<'a>(encoding: &str, payload: &'a [u8]) -> ErrorReading<'a> {
     match ErrorForm::read(encoding, payload) {
         Ok(form) => ErrorReading::Form(form),
         Err(FormRefusal::Form(r)) => ErrorReading::Transport(Some(r)),
-        Err(FormRefusal::Encoding(_)) if [JSON, CBOR, PROTOBUF].contains(&encoding) => {
-            ErrorReading::Envelope(decode(encoding, payload))
-        }
         Err(FormRefusal::Encoding(_)) => ErrorReading::Transport(None),
     }
 }
 
-/// A decoded envelope.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Envelope {
-    pub code: String,
-    pub message: String,
-    pub cause: Option<String>,
-    pub detail: Option<Detail>,
-}
-
-/// An `app` error's detail: the declared `error` type's value inline (JSON,
-/// CBOR), its encoded message (protobuf), or a raw type's bytes as base64
-/// text in a JSON envelope ([`Detail::raw`]).
+/// An `app` error's detail as its owner gives it, before the error form
+/// carries it (core §5.2, "`app`"): a value of the operation's `error`
+/// type for the runtime to encode (a JSON Schema value, or a packed
+/// record's JSON reading), or that type's own bytes. A caller reads an
+/// error form's detail as its bytes.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Detail {
     Value(Value),
     Bytes(Vec<u8>),
-}
-
-impl Detail {
-    /// A raw `error` type's detail (spec §5.2, 0.7, F-65): its bytes as
-    /// base64 text (RFC 4648 §4, padded), the JSON form of bytes (§7.2), in
-    /// the JSON envelope a raw type takes.
-    #[must_use]
-    pub fn raw(bytes: &[u8]) -> Self {
-        use base64::Engine as _;
-        Self::Value(Value::String(
-            base64::engine::general_purpose::STANDARD.encode(bytes),
-        ))
-    }
-
-    /// A raw `error` type's bytes, read back from their base64 text: what a
-    /// caller holding the contract does with a detail a tool reads as a
-    /// string (§5.2, "Reading one"). `None` for anything but padded base64
-    /// text.
-    #[must_use]
-    pub fn raw_bytes(&self) -> Option<Vec<u8>> {
-        use base64::Engine as _;
-        match self {
-            Self::Value(Value::String(s)) => {
-                base64::engine::general_purpose::STANDARD.decode(s).ok()
-            }
-            _ => None,
-        }
-    }
-}
-
-/// Why an envelope was refused.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum EnvelopeError {
-    #[error("unknown envelope encoding {0:?}")]
-    Encoding(String),
-    #[error("malformed envelope: {0}")]
-    Decode(String),
-    #[error("unknown error code {0:?}")]
-    Code(String),
-    #[error("cause: {0}")]
-    Cause(String),
-    #[error("detail: {0}")]
-    Detail(String),
-}
-
-impl EnvelopeError {
-    /// The refusal's name, as `spec/conformance/errors/` spells it.
-    #[must_use]
-    pub fn tag(&self) -> &'static str {
-        match self {
-            Self::Encoding(_) => "encoding",
-            Self::Decode(_) => "decode",
-            Self::Code(_) => "code",
-            Self::Cause(_) => "cause",
-            Self::Detail(_) => "detail",
-        }
-    }
-}
-
-#[derive(Clone, PartialEq, prost::Message)]
-struct ErrorPb {
-    #[prost(string, tag = "1")]
-    code: String,
-    #[prost(string, tag = "2")]
-    message: String,
-    #[prost(string, optional, tag = "3")]
-    cause: Option<String>,
-    #[prost(bytes = "vec", optional, tag = "4")]
-    detail: Option<Vec<u8>>,
-}
-
-/// Decodes and checks an envelope received with Zenoh encoding `encoding`.
-pub fn decode(encoding: &str, bytes: &[u8]) -> Result<Envelope, EnvelopeError> {
-    let env = match encoding {
-        JSON => {
-            let text =
-                std::str::from_utf8(bytes).map_err(|e| EnvelopeError::Decode(e.to_string()))?;
-            let v = crate::strict::parse_json(text)
-                .map_err(|e| EnvelopeError::Decode(e.to_string()))?;
-            from_value(v)?
-        }
-        CBOR => {
-            let mut rest = bytes;
-            let item: ciborium::Value = ciborium::from_reader(&mut rest)
-                .map_err(|e| EnvelopeError::Decode(e.to_string()))?;
-            if !rest.is_empty() {
-                return Err(EnvelopeError::Decode(format!(
-                    "{} bytes after the CBOR item",
-                    rest.len()
-                )));
-            }
-            from_value(cbor_to_json(item)?)?
-        }
-        PROTOBUF => {
-            let pb = <ErrorPb as prost::Message>::decode(bytes)
-                .map_err(|e| EnvelopeError::Decode(e.to_string()))?;
-            Envelope {
-                code: pb.code,
-                message: pb.message,
-                cause: pb.cause,
-                detail: pb.detail.map(Detail::Bytes),
-            }
-        }
-        other => return Err(EnvelopeError::Encoding(other.to_owned())),
-    };
-    check(&env)?;
-    Ok(env)
-}
-
-/// Encodes an envelope (the owner's side).
-#[must_use]
-pub fn encode(env: &Envelope, encoding: &str) -> Option<Vec<u8>> {
-    match encoding {
-        JSON | CBOR => {
-            let mut m = Map::new();
-            m.insert("code".into(), env.code.clone().into());
-            m.insert("message".into(), env.message.clone().into());
-            if let Some(c) = &env.cause {
-                m.insert("cause".into(), c.clone().into());
-            }
-            match &env.detail {
-                Some(Detail::Value(v)) => {
-                    m.insert("detail".into(), v.clone());
-                }
-                Some(Detail::Bytes(_)) => return None,
-                None => {}
-            }
-            let v = Value::Object(m);
-            if encoding == JSON {
-                serde_json::to_vec(&v).ok()
-            } else {
-                let mut out = Vec::new();
-                ciborium::into_writer(&v, &mut out).ok()?;
-                Some(out)
-            }
-        }
-        PROTOBUF => {
-            let detail = match &env.detail {
-                Some(Detail::Bytes(b)) => Some(b.clone()),
-                Some(Detail::Value(_)) => return None,
-                None => None,
-            };
-            let pb = ErrorPb {
-                code: env.code.clone(),
-                message: env.message.clone(),
-                cause: env.cause.clone(),
-                detail,
-            };
-            Some(prost::Message::encode_to_vec(&pb))
-        }
-        _ => None,
-    }
-}
-
-fn from_value(v: Value) -> Result<Envelope, EnvelopeError> {
-    let Value::Object(mut m) = v else {
-        return Err(EnvelopeError::Decode("not an object".into()));
-    };
-    if let Some(k) = m
-        .keys()
-        .find(|k| !matches!(k.as_str(), "code" | "message" | "cause" | "detail"))
-    {
-        return Err(EnvelopeError::Decode(format!("unknown member {k:?}")));
-    }
-    let text = |m: &mut Map<String, Value>, k: &str| -> Result<String, EnvelopeError> {
-        match m.remove(k) {
-            Some(Value::String(s)) => Ok(s),
-            Some(_) => Err(EnvelopeError::Decode(format!("`{k}` is not a string"))),
-            None => Err(EnvelopeError::Decode(format!("no `{k}`"))),
-        }
-    };
-    let code = text(&mut m, "code")?;
-    let message = text(&mut m, "message")?;
-    let cause = match m.remove("cause") {
-        None | Some(Value::Null) => None,
-        Some(Value::String(s)) => Some(s),
-        Some(_) => return Err(EnvelopeError::Decode("`cause` is not a string".into())),
-    };
-    let detail = match m.remove("detail") {
-        None | Some(Value::Null) => None,
-        Some(v) => Some(Detail::Value(v)),
-    };
-    Ok(Envelope {
-        code,
-        message,
-        cause,
-        detail,
-    })
-}
-
-fn check(env: &Envelope) -> Result<(), EnvelopeError> {
-    if !CODES.contains(&env.code.as_str()) {
-        return Err(EnvelopeError::Code(env.code.clone()));
-    }
-    match (&env.cause, env.code == "unavailable") {
-        (None, true) => return Err(EnvelopeError::Cause("`unavailable` without a cause".into())),
-        (Some(c), true) if !CAUSES.contains(&c.as_str()) => {
-            return Err(EnvelopeError::Cause(format!(
-                "{c:?} is not build, config or capability"
-            )));
-        }
-        (Some(_), false) => {
-            return Err(EnvelopeError::Cause(format!("a cause on {:?}", env.code)));
-        }
-        _ => {}
-    }
-    if env.detail.is_some() && env.code != "app" {
-        return Err(EnvelopeError::Detail(format!("a detail on {:?}", env.code)));
-    }
-    Ok(())
-}
-
-/// CBOR → JSON, for the envelope's members (spec §5.2). Map keys must be
-/// text. A tag decodes as its content, `undefined` as `null`, and a byte
-/// string as base64 text (RFC 4648 §4, padded): the JSON form of bytes
-/// (spec §7.2), so a CBOR detail reads like the same detail sent as JSON.
-fn cbor_to_json(v: ciborium::Value) -> Result<Value, EnvelopeError> {
-    use ciborium::Value as C;
-    Ok(match v {
-        C::Null => Value::Null,
-        C::Bool(b) => Value::Bool(b),
-        // A signed or an unsigned 64-bit value: −2^63 to 2^64−1, what JSON
-        // decoding holds, and what this module's own encoder writes for a
-        // `u64` (spec §5.2, 0.6). CBOR's −2^64 to −2^63−1 is out of range.
-        C::Integer(i) => {
-            let n = i128::from(i);
-            i64::try_from(n)
-                .map(Value::from)
-                .or_else(|_| u64::try_from(n).map(Value::from))
-                .map_err(|_| EnvelopeError::Decode("integer out of range".into()))?
-        }
-        C::Float(f) => serde_json::Number::from_f64(f)
-            .map(Value::Number)
-            .ok_or_else(|| EnvelopeError::Decode("non-finite float".into()))?,
-        C::Text(s) => Value::String(s),
-        C::Bytes(b) => {
-            use base64::Engine as _;
-            Value::String(base64::engine::general_purpose::STANDARD.encode(b))
-        }
-        C::Array(a) => Value::Array(a.into_iter().map(cbor_to_json).collect::<Result<_, _>>()?),
-        C::Map(m) => {
-            let mut out = Map::new();
-            for (k, v) in m {
-                let C::Text(k) = k else {
-                    return Err(EnvelopeError::Decode("a map key is not text".into()));
-                };
-                if out.insert(k, cbor_to_json(v)?).is_some() {
-                    return Err(EnvelopeError::Decode("a duplicate map key".into()));
-                }
-            }
-            Value::Object(out)
-        }
-        C::Tag(_, inner) => cbor_to_json(*inner)?,
-        _ => return Err(EnvelopeError::Decode("an unsupported CBOR item".into())),
-    })
 }
 
 #[cfg(test)]
@@ -730,90 +468,6 @@ mod tests {
             .step_by(2)
             .map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap())
             .collect()
-    }
-
-    /// `{"code": "app", "message": "x", "detail": <item>}`.
-    fn app_with(item: &str) -> Vec<u8> {
-        hex(&format!(
-            "a364636f646563617070676d65737361676561786664657461696c{item}"
-        ))
-    }
-
-    #[test]
-    fn cbor_items_map_to_json() {
-        let detail = |item: &str| decode(CBOR, &app_with(item)).map(|e| e.detail);
-        // A byte string is base64 text, as bytes are in JSON (spec §7.2).
-        assert_eq!(
-            detail("420102"),
-            Ok(Some(Detail::Value(Value::String("AQI=".into()))))
-        );
-        // `undefined` is `null`, so no detail.
-        assert_eq!(detail("f7"), Ok(None));
-        // A tag decodes as its content.
-        assert_eq!(
-            detail("c11a00000001"),
-            Ok(Some(Detail::Value(Value::from(1))))
-        );
-    }
-
-    /// Spec §5.2 (0.6, F-58): a CBOR integer decodes from −2^63 to 2^64−1,
-    /// and an envelope this module encodes with a `u64` above `i64::MAX`
-    /// decodes back.
-    #[test]
-    fn cbor_integers_are_64_bit_signed_or_unsigned() {
-        let detail = |item: &str| decode(CBOR, &app_with(item)).map(|e| e.detail);
-        let value = |v: Value| Ok(Some(Detail::Value(v)));
-        assert_eq!(detail("1bffffffffffffffff"), value(Value::from(u64::MAX)));
-        assert_eq!(
-            detail("1b8000000000000000"),
-            value(Value::from(1_u64 << 63))
-        );
-        assert_eq!(detail("3b7fffffffffffffff"), value(Value::from(i64::MIN)));
-        for below in ["3b8000000000000000", "3bffffffffffffffff"] {
-            assert_eq!(
-                decode(CBOR, &app_with(below)).map_err(|e| e.tag()),
-                Err("decode"),
-                "{below}"
-            );
-        }
-        let env = Envelope {
-            code: "app".into(),
-            message: "x".into(),
-            cause: None,
-            detail: Some(Detail::Value(Value::from(u64::MAX))),
-        };
-        let bytes = encode(&env, CBOR).unwrap();
-        assert_eq!(decode(CBOR, &bytes), Ok(env));
-    }
-
-    #[test]
-    fn trailing_bytes_are_malformed() {
-        let mut bytes = hex("a264636f646563617070676d6573736167656178");
-        assert!(decode(CBOR, &bytes).is_ok());
-        bytes.push(0);
-        assert_eq!(decode(CBOR, &bytes).map_err(|e| e.tag()), Err("decode"));
-    }
-
-    /// Spec §5.2 (0.7, F-65): a raw detail is base64 text, padded, and
-    /// reads as the fixture `json-app-raw-detail` does.
-    #[test]
-    fn a_raw_detail_is_base64_text() {
-        let d = Detail::raw(&[0xff, 0xd8, 0xff, 0xe0]);
-        assert_eq!(d, Detail::Value(Value::String("/9j/4A==".into())));
-        assert_eq!(d.raw_bytes(), Some(vec![0xff, 0xd8, 0xff, 0xe0]));
-        let env = Envelope {
-            code: "app".into(),
-            message: "camera fault".into(),
-            cause: None,
-            detail: Some(d),
-        };
-        let bytes = encode(&env, JSON).unwrap();
-        assert_eq!(decode(JSON, &bytes), Ok(env));
-        assert_eq!(
-            Detail::Value(Value::String("/9j/4A".into())).raw_bytes(),
-            None
-        );
-        assert_eq!(Detail::Bytes(vec![1]).raw_bytes(), None);
     }
 
     /// Core 0.92 §7.5's worked bytes: `0xa0` is `busy`, `0x50` is
@@ -844,22 +498,11 @@ mod tests {
         assert_eq!(cut(""), "");
     }
 
-    #[test]
-    fn encodings_match_exactly() {
-        for enc in [
-            "application/json;charset=utf-8",
-            "application/protobuf",
-            "application/protobuf;other.Error",
-        ] {
-            assert_eq!(decode(enc, b"{}").map_err(|e| e.tag()), Err("encoding"));
-        }
-    }
-
-    /// Core §5.2, "Reading an error", with the bare wire beside it: the
-    /// error form under `zenoh/bytes` alone; a router's `Timeout` and a
-    /// form refused by its byte the transport's; the envelope under its
-    /// three encodings; any other `Encoding` the transport's, an error
-    /// form's bytes included (`operations.md` §9 steps 5 and 7).
+    /// Core §5.2, "Reading an error": the error form under `zenoh/bytes`
+    /// alone; a router's `Timeout` and a form refused by its byte the
+    /// transport's; any other `Encoding` the transport's, an error form's
+    /// bytes and an earlier core's JSON envelope included (`operations.md`
+    /// §9 steps 5 and 7).
     #[test]
     fn a_reply_error_is_read_by_its_encoding_first() {
         let busy = hex("600001000007a0");
@@ -883,19 +526,21 @@ mod tests {
             panic!("a cause on busy")
         };
         assert_eq!(r.token(), "cause");
-        assert_eq!(
-            read_error(JSON, br#"{"code":"busy","message":""}"#),
-            ErrorReading::Envelope(Ok(Envelope {
-                code: "busy".into(),
-                message: String::new(),
-                cause: None,
-                detail: None
-            }))
-        );
-        assert!(matches!(
-            read_error(JSON, b"{"),
-            ErrorReading::Envelope(Err(EnvelopeError::Decode(_)))
-        ));
+        for (encoding, bytes) in [
+            ("application/json", &br#"{"code":"busy","message":""}"#[..]),
+            ("application/json", br#"{"code":"busy"}"#),
+            ("application/cbor", &hex("a164636f64656462757379")),
+            (
+                "application/protobuf;zk2.core.v1.Error",
+                &hex("0a0462757379"),
+            ),
+        ] {
+            assert_eq!(
+                read_error(encoding, bytes),
+                ErrorReading::Transport(None),
+                "{encoding}"
+            );
+        }
         for other in ["zenoh/string", "zenoh/bytes;x", "text/plain"] {
             assert_eq!(
                 read_error(other, &busy),

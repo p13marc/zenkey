@@ -13,6 +13,32 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.27 — 2026-11-07: §7.3, the bare wire removed (#980, #985)
+
+Core 0.99 removes the bare wire, #985's C4d
+([`CHANGELOG.md`](CHANGELOG.md)). This text drops its tool half, and is
+written against core 0.99.
+
+**Changed: §7.3, "A call's forms first."**
+- **Another `Encoding`.** A reply under any other `Encoding` is no value
+  form, and is undecodable as a refused one is. It said "unless the tool
+  reads the bare wire".
+- **Removed: "The bare wire."** A tool that read it read a bare value by
+  the decode order, and an envelope as core §5.2 said. Core §5.2 defines
+  no envelope now.
+
+**Deliberately not changed.**
+- **No rule.** §7.3's MUST and MUST NOT stand, and neither named the
+  bare wire.
+- **"The transport's."** A reply error under one of the envelope's old
+  `Encoding`s is one core §5.2 reads as the transport's. A tool shows it
+  so, with its `Encoding` and its bytes, never as an owner's error.
+- **"The envelope first"** and the decode order, which read a stream's,
+  a state's and an event's samples.
+- **The reference's tools** read the forms alone with this text, C4d's
+  code half beside it.
+- **The header** is written against core 0.99.
+
 ## 0.26 — 2026-11-02: a provider found by its instance token, and a first hop (#982 H1)
 
 Core 0.96 lets an owner on a first hop hold its instance token alone.

@@ -693,15 +693,6 @@ impl Render for ConfigActReport {
                 view_grid_with(t, view, &differs_in(record));
             }
             ConfigActAnswer::Refused { refusal } => refusal_lines(t, refusal),
-            ConfigActAnswer::Malformed { malformed } => {
-                t.line_styled(
-                    format!(
-                        "malformed envelope ({}): {}",
-                        malformed.encoding, malformed.error
-                    ),
-                    style::ERROR,
-                );
-            }
             ConfigActAnswer::Undecodable { reason, size } => {
                 t.line_styled(
                     format!("a value reply of {size} B that is not the reply type: {reason}"),

@@ -235,7 +235,6 @@ ANTECEDENTS = {
         ("It", "the owner"), ("over them", "its interfaces' `state/**` and `@state/**`")],
     ("core.md", "It MUST keep the newer by its in-band stamp"): ("It", "a late joiner"),
     ("core.md", "It names the member each reply answers for"): ("It", "a server declared over the whole template"),
-    ("core.md", "It MUST refuse:"): ("It", "a caller or a tool decoding an envelope"),
     ("core.md", "A deployment's access control MUST NOT grant it"): ("grant it", "a write under another service's prefix"),
     ("core.md", "It MUST NOT add a schema suffix"): ("It", "an owner"),
     ("core.md", "Every instance MUST hold one"): ("hold one", "an instance token"),
@@ -273,10 +272,6 @@ EXCEPTED_BY = {
     # core §4.3: S7's consumer MUST to accept another run, and the MAY for a
     # profile's stricter order, which a `desired.v1` target uses (F-394).
     ("core.md", "A consumer MUST accept a value under a run other than"): "A profile MAY order a consumer's values more strictly",
-    # core §5.2: the MUST to read a reply error that is no error form as the
-    # transport's, and §5.1's MAY to read the bare wire, a call with no form,
-    # whose envelope a reader then reads as an owner's (#985's C4c).
-    ("core.md", "MUST read every other `reply_err` as the transport's"): "An implementation MAY read a call's sample whose `Encoding` is not",
     # the self-test's text
     ("text.md", "An owner MUST publish with the contract's QoS."): "One that does not, or whose binding",
     ("text.md", "A consumer MUST order an owner's values by time."): "A profile MAY order",

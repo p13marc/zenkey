@@ -173,8 +173,9 @@ pub async fn run(
 
 /// The call's line. A value prints its record alone, after the value
 /// form's CH and as-of mark (core §5.1, "Reading a value"; zk2py round
-/// 101's F-479), and one the form's parse refuses is malformed, its
-/// refusal named: an answer all the same.
+/// 101's F-479), and one the form's parse refuses, or under another
+/// `Encoding`, is malformed, its refusal named (`encoding` for the
+/// latter): an answer all the same.
 pub fn call_line(outcome: &Outcome) -> String {
     match outcome {
         Outcome::Value(a) => match a.record() {
@@ -182,7 +183,6 @@ pub fn call_line(outcome: &Outcome) -> String {
             Err(refusal) => format!("call malformed {}", refusal.token()),
         },
         Outcome::Refused(e) => format!("call refused {} {}", e.code, e.message),
-        Outcome::Malformed(_) => "call malformed".to_owned(),
         Outcome::NoAnswer(_) => "call silent".to_owned(),
     }
 }

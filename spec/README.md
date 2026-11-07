@@ -159,8 +159,7 @@ section number alone is the core's.
   ([observer §3.7](observer.md#37-the-watch-session)).
 - **Error**: what a failed call's `reply_err` carries: a code, and a
   message where one is sent. `unavailable` adds a cause, and `app` may
-  add a detail ([§5.2](core.md#52-errors)). On the bare wire it travelled
-  in an **envelope** of JSON, CBOR or protobuf.
+  add a detail ([§5.2](core.md#52-errors)).
 - **zk2c envelope**: a header byte, a run and a seq, then the record. A
   put carries one as its payload, and a delete as its attachment
   ([§7.5](core.md#75-the-zk2c-envelope)). An owner writes one on every
@@ -169,8 +168,7 @@ section number alone is the core's.
 - **Forms of a call**: a request, a value and an error, in bytes
   ([§7.5](core.md#75-the-zk2c-envelope)). A value and an error carry an
   **as-of mark**, a run and a seq ([§5.1](core.md#51-rules)). An error
-  holds §5.2's fields. Every call travels in them. The **bare wire** is a
-  call with no form, which a reader may still read.
+  holds §5.2's fields. Every call travels in them.
 - **Packed record**: bit fields, each as wide as its codes need
   ([§7.6](core.md#76-packed-records)). Its layout gives its envelope's
   tag.
@@ -222,7 +220,7 @@ section number alone is the core's.
 | [`contract.schema.json`](contract.schema.json) | JSON Schema (2020-12) of the contract authoring format, draft 3. It is generated from `zenkey-model`'s authoring types and checked in CI. | `zenkey-model/src/authoring.rs` |
 | [`descriptor.schema.json`](descriptor.schema.json) | JSON Schema of the descriptor record (core §3.3), generated the same way | `zenkey-model/src/descriptor.rs` |
 | [`catalog.schema.json`](catalog.schema.json) | JSON Schema of the deployment catalog (core §8.6), generated the same way. The reading rules it cannot state are §8.6's. | `zenkey-model/src/catalog.rs` |
-| [`core/`](core/) | The bare wire's error envelope: `error.proto`, `error.schema.json` (core §5.2) | |
+| [`core/`](core/) | History, read by no rule: `error.proto` and `error.schema.json`, the error envelope an earlier version of the core had an owner send in JSON, CBOR or protobuf. A failed call is answered in core §7.5's error form (§5.2). | |
 | [`conformance/`](conformance/) | Fixtures: keys, slugs, templates, contract lints, canonical forms, fingerprints, bundles, set checks, history, descriptors, errors, the compatibility matrix, the population budget, a late joiner's merge, the zk2c envelope, heartbeats, snapshots' pages, packed records, frames, deployment catalogs. | `zenkey-model/tests/conformance.rs` |
 | [`scenarios/`](scenarios/) | Network rules that a fixture cannot check: setup, steps, expected observations. | the spike's runs |
 | [`profiles/`](profiles/) | The profiles (core §10), one directory each, with its own text version, changelog, fixtures and scenarios. They are listed, each with its text version, status, who uses it and the core version it is written against, in [the index](profiles/README.md#index), those nobody uses yet (`experimental`) in a table of their own, beside the template and the process. | `zenkey-model/tests/profiles.rs` |

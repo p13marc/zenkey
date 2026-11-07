@@ -46,8 +46,8 @@
 //! - [`descriptor`]: the descriptor record an instance serves, checked
 //!   against its contracts; `spec/descriptor.schema.json` is generated
 //!   from it.
-//! - [`envelope`]: the error envelope of a failed call, decoded and
-//!   checked by its Zenoh encoding (`spec/core/error.proto`).
+//! - [`envelope`]: a failed call's error in its error form (core §5.2,
+//!   §7.5), read by its `Encoding` first, and an `app` error's detail.
 //! - [`decode`]: a payload decoded from a bundle alone, for tools (§7.2).
 //! - [`validate`]: a value checked against a JSON Schema type of a bundle,
 //!   the §7.3 subset and nothing more, for tools that build a payload from

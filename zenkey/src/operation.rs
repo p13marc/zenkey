@@ -5,8 +5,9 @@
 //! a call ─► O2: not concrete, and fanout forbidden?  ─ reply_err fanout_forbidden
 //!        ─► O3: optional, and not exposed here?      ─ reply_err unavailable + cause
 //!        ─► a key that names no member?              ─ reply_err invalid_request
-//!        ─► the request: §7.5's form, a packed record
-//!           under CH's tag, or the bare wire's?       ─ reply_err invalid_request
+//!        ─► the request: no request form (another
+//!           `Encoding`, or §7.5's refusal), or a
+//!           packed record refused under CH's tag?    ─ reply_err invalid_request
 //!        ─► the handler, on the server's tokio runtime:
 //!             reply / reply_value      one value ("one"), any number ("many")
 //!             summary / summary_value  O6: the replier's last reply,
@@ -32,8 +33,9 @@
 //!   bytes; both under `zenoh/bytes`, with the instance's as-of mark, its
 //!   run and the last state or event seq it minted ([`Call::mark`]). A
 //!   refusal its error type cannot carry goes out as `internal`. A request
-//!   comes as `CH · record`, and one under another `Encoding` is read as
-//!   the bare wire's (§5.1's MAY, until C4d).
+//!   comes as `CH · record` under `zenoh/bytes`, and one under another
+//!   `Encoding` carries no request form and is refused `invalid_request`
+//!   (§5.1, "The request"; core 0.99, #985's C4d).
 //!   The active instance answers `unavailable`, with its cause, for every
 //!   optional operation it does not expose; a standby declares nothing, and
 //!   a replica nothing on an exclusive operation (§5.1, "Beside replicas").
@@ -145,7 +147,8 @@ fn detail_bytes(op: &Operation, forms: &Forms, epoch: i64, detail: &Detail) -> O
 ///   type;
 /// - an error §7.5's writer refuses: an unknown code, `unavailable` without
 ///   a valid cause or a cause on another code, a detail on a code but
-///   `app`. Only an envelope relayed with `From<Envelope>` can be one.
+///   `app`. Only a refusal relayed ([`crate::call::Refusal::relay`]) can
+///   be one.
 pub(crate) fn error_form(
     op: &Operation,
     forms: &Forms,
@@ -153,17 +156,16 @@ pub(crate) fn error_form(
     mark: Stamp,
     e: &OpError,
 ) -> Vec<u8> {
-    let env = e.envelope();
-    let message = Some(env.message.as_str()).filter(|m| !m.is_empty());
-    let cause = match env.cause.as_deref() {
+    let message = Some(e.message()).filter(|m| !m.is_empty());
+    let cause = match e.cause() {
         None => Some(None),
         Some(c) => FormCause::from_name(c).map(Some),
     };
-    let detail = match &env.detail {
+    let detail = match e.detail() {
         None => Some(None),
         Some(d) => detail_bytes(op, forms, epoch, d).map(Some),
     };
-    let sent = match (Code::from_name(&env.code), cause, detail) {
+    let sent = match (Code::from_name(e.code()), cause, detail) {
         (Some(code), Some(cause), Some(detail)) => forms
             .error(mark, code, cause, message, detail.as_deref())
             .ok(),
@@ -171,12 +173,12 @@ pub(crate) fn error_form(
     };
     sent.unwrap_or_else(|| {
         tracing::warn!(
-            code = env.code,
+            code = e.code(),
             "a refusal its operation's error type cannot carry; sent as internal (spec §5.2)"
         );
         let why = format!(
             "the {} refusal does not fit this operation's error form (§5.2)",
-            env.code
+            e.code()
         );
         forms
             .error(mark, Code::Internal, None, Some(&why), None)
@@ -184,15 +186,13 @@ pub(crate) fn error_form(
     })
 }
 
-/// Decodes a JSON Schema value by its sample's `Encoding`, else by the
-/// contract's `encoding` (§7.2's decode order).
+/// Decodes a call's record as a JSON Schema value on the contract's
+/// `encoding` (§7.2: a form's `zenoh/bytes` picks no wire).
 pub(crate) fn decode_value<T: DeserializeOwned>(
     bytes: &[u8],
-    sample: Option<&Encoding>,
     wire: Option<WireEncoding>,
 ) -> std::result::Result<T, String> {
-    let sample = sample.map(ToString::to_string);
-    crate::codec::decode_json(bytes, crate::codec::wire_of(sample.as_deref(), wire))
+    crate::codec::decode_json(bytes, wire)
 }
 
 /// Every member of an operation's template on `addr`: each parameter
@@ -304,15 +304,6 @@ pub(crate) struct ServedBy<'a> {
     pub(crate) epoch: i64,
 }
 
-/// A request as its owner read it (core §5.1, "The request"): in the
-/// request form, CH's tag and the record after it; or on the bare wire,
-/// the payload under its `Encoding` (§5.1, "The bare wire").
-#[derive(Debug, Clone)]
-enum RequestWire {
-    Form { tag: Tag },
-    Bare { encoding: Encoding },
-}
-
 impl OpSpec {
     fn new(addr: &Addr, iface: &IfaceId, r: &Resource, serving: &ServedBy<'_>) -> Result<Self> {
         let op = operation(iface, r)?;
@@ -337,30 +328,27 @@ impl OpSpec {
 
     /// A query's request, read as its owner reads it (§5.1, "The
     /// request"): under `zenoh/bytes`, §7.5's request form, a packed record
-    /// checked under CH's tag; under any other `Encoding`, the bare wire's
-    /// request, its payload the record. The record after CH, and how it
-    /// came; `Err` is `invalid_request`, before any handler runs.
-    fn read_request(&self, q: &Query) -> std::result::Result<(Vec<u8>, RequestWire), OpError> {
+    /// checked under CH's tag. Under any other `Encoding` a query carries no
+    /// request form, whatever its bytes. The record after CH, and CH's tag;
+    /// `Err` is `invalid_request`, before any handler runs.
+    fn read_request(&self, q: &Query) -> std::result::Result<(Vec<u8>, Tag), OpError> {
+        if let Some(e) = q.encoding().map(ToString::to_string)
+            && e != wire::ENCODING
+        {
+            return Err(OpError::invalid_request(format!(
+                "a query under {e} carries no request form: a request is CH and its record \
+                 under zenoh/bytes (core §5.1, \"The request\")"
+            )));
+        }
         let bytes = q
             .payload()
             .map(|p| p.to_bytes().into_owned())
             .unwrap_or_default();
-        match q.encoding() {
-            Some(e) if e.to_string() != wire::ENCODING => Ok((
-                bytes,
-                RequestWire::Bare {
-                    encoding: e.clone(),
-                },
-            )),
-            _ => match self.forms.read_request(&bytes) {
-                Ok(req) => {
-                    let tag = req.tag;
-                    Ok((bytes[1..].to_vec(), RequestWire::Form { tag }))
-                }
-                Err(r) => Err(OpError::invalid_request(format!(
-                    "the request is refused: {r} (core §5.1, §7.5)"
-                ))),
-            },
+        match self.forms.read_request(&bytes) {
+            Ok(req) => Ok((bytes[1..].to_vec(), req.tag)),
+            Err(r) => Err(OpError::invalid_request(format!(
+                "the request is refused: {r} (core §5.1, §7.5)"
+            ))),
         }
     }
 
@@ -647,8 +635,8 @@ pub struct Call {
     member: Arc<OnceLock<Member>>,
     metadata: Option<CallMetadata>,
     sent: Arc<Mutex<Sent>>,
-    /// The request's record, and how it came (§5.1, "The request").
-    request: Arc<(Vec<u8>, RequestWire)>,
+    /// The request's record, and its form's CH tag (§5.1, "The request").
+    request: Arc<(Vec<u8>, Tag)>,
 }
 
 impl Call {
@@ -657,7 +645,7 @@ impl Call {
         spec: Arc<OpSpec>,
         bound: Bindings,
         member: Option<Member>,
-        request: (Vec<u8>, RequestWire),
+        request: (Vec<u8>, Tag),
     ) -> Self {
         let metadata = query
             .attachment()
@@ -723,33 +711,19 @@ impl Call {
         self.query.payload()
     }
 
-    /// The request's record (core §5.1, §7.5): the bytes after a request
-    /// form's CH, or the bare wire's payload. A packed one was read under
-    /// CH's tag before the handler ran.
+    /// The request's record (core §5.1, §7.5): the bytes after the request
+    /// form's CH, read on the contract's `encoding` (§7.2: `zenoh/bytes`
+    /// picks no wire). A packed one was read under CH's tag before the
+    /// handler ran.
     #[must_use]
     pub fn record(&self) -> &[u8] {
         &self.request.0
     }
 
-    /// CH's tag, when the request came in its form; `None` on the bare
-    /// wire (§5.1, "The bare wire").
+    /// The request form's CH tag: the `request` type's (§5.1, "The forms").
     #[must_use]
-    pub fn request_tag(&self) -> Option<Tag> {
-        match &self.request.1 {
-            RequestWire::Form { tag } => Some(*tag),
-            RequestWire::Bare { .. } => None,
-        }
-    }
-
-    /// The `Encoding` [`Call::record`] is read on: a bare request's own;
-    /// `None` for a form's, read on the contract's `encoding` (§7.2:
-    /// `zenoh/bytes` picks no wire).
-    #[must_use]
-    pub fn record_encoding(&self) -> Option<&Encoding> {
-        match &self.request.1 {
-            RequestWire::Form { .. } => None,
-            RequestWire::Bare { encoding } => Some(encoding),
-        }
+    pub fn request_tag(&self) -> Tag {
+        self.request.1
     }
 
     /// The service's deployment epoch, which a packed record's `time`
@@ -759,17 +733,17 @@ impl Call {
         self.spec.epoch
     }
 
-    /// The request, decoded as its JSON Schema type: on a bare request's
-    /// `Encoding`, else the contract's `encoding` (§7.2). A request that
-    /// does not decode is `invalid_request` (O3). The Rust type is the
-    /// validator: the runtime does not evaluate the schema itself.
+    /// The request, decoded as its JSON Schema type on the contract's
+    /// `encoding` (§7.2). A request that does not decode is
+    /// `invalid_request` (O3). The Rust type is the validator: the runtime
+    /// does not evaluate the schema itself.
     pub fn request<T: DeserializeOwned>(&self) -> Result<T, OpError> {
         if !self.spec.op.request.is_json() {
             return Err(OpError::internal(
                 "request() decodes JSON Schema types; this operation's request is not one",
             ));
         }
-        decode_value(self.record(), self.record_encoding(), self.spec.op.encoding)
+        decode_value(self.record(), self.spec.op.encoding)
             .map_err(|e| OpError::invalid_request(format!("the request does not decode: {e}")))
     }
 
@@ -1315,7 +1289,7 @@ mod tests {
     use super::{OpError, bound_by};
     use crate::codec::{Codec, Raw};
     use serde_json::json;
-    use zenkey_model::envelope::{Code, Envelope, ErrorForm};
+    use zenkey_model::envelope::{Code, ErrorForm};
     use zenkey_model::forms::Forms;
     use zenkey_model::template::{Bindings, Template};
     use zenkey_model::wire::{Run, Seq, Stamp, read_reply_err};
@@ -1446,28 +1420,25 @@ mod tests {
             (Code::App, Some(jpeg.clone()))
         );
 
-        // A relayed envelope §7.5's writer would refuse is not sent as given.
-        for env in [
-            Envelope {
-                code: "busy".into(),
-                message: "x".into(),
-                cause: None,
-                detail: Some(zenkey_model::envelope::Detail::Value(json!(1))),
-            },
-            Envelope {
-                code: "busy".into(),
-                message: "x".into(),
-                cause: Some("config".into()),
-                detail: None,
-            },
-            Envelope {
-                code: "nope".into(),
-                message: "x".into(),
-                cause: None,
-                detail: None,
-            },
+        // A relayed refusal §7.5's writer would refuse is not sent as given.
+        let refusal = |code: &str, cause: Option<&str>, detail| crate::call::Refusal {
+            code: code.into(),
+            message: "x".into(),
+            cause: cause.map(Into::into),
+            detail,
+            form: None,
+        };
+        for r in [
+            refusal(
+                "busy",
+                None,
+                Some(zenkey_model::envelope::Detail::Value(json!(1))),
+            ),
+            refusal("busy", Some("config"), None),
+            refusal("nope", None, None),
         ] {
-            assert_eq!(sent(&json_error, &OpError::from(env)).0, Code::Internal);
+            let relayed = r.relay(&json_error.0);
+            assert_eq!(sent(&json_error, &relayed).0, Code::Internal, "{r:?}");
         }
     }
 

@@ -760,11 +760,11 @@ fn op_check<Req: Codec, Resp: Codec, Sum: Codec>(op: &Operation, at: &str) -> Re
     kind_check::<Sum>(op.summary.as_ref(), &format!("{at} summary"))
 }
 
-/// A value reply decoded as `C`, from either wire (core §5.1, observer
-/// §7.3): a value form's record by CH's tag on the contract's `encoding`,
-/// a bare reply's payload on its `Encoding`, a packed record's `time`
-/// fields under the caller's deployment epoch (§7.6, §8.6). A value form
-/// refused does not decode.
+/// A value reply decoded as `C` (core §5.1, observer §7.3): a value
+/// form's record by CH's tag on the contract's `encoding`, a packed
+/// record's `time` fields under the caller's deployment epoch (§7.6,
+/// §8.6). A malformed reply, refused by the form's parse or under another
+/// `Encoding`, does not decode.
 fn decode_answer<C: Codec>(a: &Answer, wire: Option<WireEncoding>, epoch: i64) -> Result<C::Value> {
     let fail = |e: String| {
         Error::Payload(format!(
@@ -773,8 +773,7 @@ fn decode_answer<C: Codec>(a: &Answer, wire: Option<WireEncoding>, epoch: i64) -
         ))
     };
     let record = a.record().map_err(|r| fail(r.reason()))?;
-    let encoding = a.record_encoding();
-    C::decode_record_in(&record, wire_of(encoding.as_deref(), wire), a.tag(), epoch).map_err(fail)
+    C::decode_record_in(&record, wire, a.tag(), epoch).map_err(fail)
 }
 
 fn typed_replies<Resp: Codec, Sum: Codec>(
@@ -848,19 +847,17 @@ pub async fn fan_out<Req: Codec, Resp: Codec, Sum: Codec>(
 }
 
 /// A call's request decoded as `C` (core §5.1, "The request"): its
-/// record, by CH's tag when it came in the request form, on the contract's
-/// `encoding`, or a bare request's payload on its `Encoding`; a packed
-/// record's `time` fields under the service's deployment epoch. One that
-/// does not decode is `invalid_request`.
+/// record, by the request form's CH tag, on the contract's `encoding`; a
+/// packed record's `time` fields under the service's deployment epoch. One
+/// that does not decode is `invalid_request`.
 fn decode_request<C: Codec>(
     call: &Call,
     wire: Option<WireEncoding>,
 ) -> std::result::Result<C::Value, OpError> {
-    let enc = call.record_encoding().map(ToString::to_string);
     C::decode_record_in(
         call.record(),
-        wire_of(enc.as_deref(), wire),
-        call.request_tag(),
+        wire,
+        Some(call.request_tag()),
         call.deployment_epoch(),
     )
     .map_err(|e| OpError::invalid_request(format!("the request does not decode: {e}")))
