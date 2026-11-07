@@ -285,8 +285,8 @@ pub use judge::common::EXPANSION_CAP;
 // notifier compares runs with.
 pub use judge::doctor::{
     AdminSpace, ArchiveKeys, DEFAULT_GRACE, DEFAULT_PRESENCE_BUDGET, DOMAIN_SELECTORS, DoctorBus,
-    DoctorObservation, DoctorSpec, DomainTokens, Memlock, StateStamps, judge as judge_doctor,
-    observe as observe_doctor, run_doctor,
+    DoctorObservation, DoctorSpec, DomainTokens, HeldBundles, Memlock, StateStamps,
+    judge as judge_doctor, observe as observe_doctor, run_doctor,
 };
 pub use judge::doctor_delta::doctor_delta;
 // zk2's `why` (#702): a key's or a service's silence, rung by rung — the
@@ -410,6 +410,9 @@ pub use model::deployment::{
     CatalogId, Catalogs, DeploymentCatalog, Epoch as DeploymentEpoch, Lack as CatalogLack,
     Placed as CatalogPlaced, Stated as CatalogStated,
 };
+// The owners a tool is told are on a first hop (observer §3.11, #982 H3):
+// a face policy's devices, reported link closed, never down.
+pub use model::first_hop::FirstHop;
 pub use model::presence_live::{
     DEFAULT_MAX_GONE, LiveAddress, LiveInstance, LivePresence, PresenceBasis, PresenceIgnored,
 };

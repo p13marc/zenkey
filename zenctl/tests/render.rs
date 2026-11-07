@@ -136,6 +136,7 @@ fn a_doctor_run_spells_every_verdict_pole_apart_in_every_medium() {
 ✓  timing-declaration (timing.v1 §2.2)             clean — 2 timed resource(s) in 1 revision(s) named by descriptors, each declaration one a reader judges
 ✓  arbitration-declaration (arbitration.v1 §2.14)  clean — 1 arbitrated role(s) of running consumers, each declaration valid and each binding of exact entries, none shadowed
 ✓  catalog-missing (§8.6)                          clean — 3 running revision(s), each in the catalog it is judged against (catalog 0a90fd61)
+✓  first-hop-token (§8.1)                          clean — 1 device(s) the face policy lists, 1 instance(s) of them present, none holding an interface token or a contract queryable that reached this reader (a device face's carve denies both on ingress, link.v2 §2.6)
 
 "#]]
     );

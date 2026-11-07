@@ -189,6 +189,25 @@ fn configure_button<'a>(
     })
 }
 
+/// An address status's tone: a first-hop device's link closed is neither
+/// pole (observer §3.11, #982 H3), so it takes the unobservable tone.
+fn tone_of(status: AddressStatus) -> PresenceTone {
+    match status {
+        AddressStatus::Up => PresenceTone::Up,
+        AddressStatus::Down => PresenceTone::Down,
+        AddressStatus::Unobservable | AddressStatus::LinkClosed => PresenceTone::Unobservable,
+    }
+}
+
+/// An address status as a person reads it: its wire word, `link_closed`
+/// spaced.
+fn words(status: AddressStatus) -> &'static str {
+    match status {
+        AddressStatus::LinkClosed => "link closed",
+        s => s.as_str(),
+    }
+}
+
 /// One address's presence in a row: its status — up, down or unobservable,
 /// never folded — since when, how many instances, and how fresh its state
 /// is when a watch covers it.
@@ -202,15 +221,17 @@ fn presence_row<'a>(
     nodes: &NodesState,
     sp: Spacing,
 ) -> Element<'a, Message> {
-    let tone = match live.status {
-        AddressStatus::Up => PresenceTone::Up,
-        AddressStatus::Down => PresenceTone::Down,
-        AddressStatus::Unobservable => PresenceTone::Unobservable,
-    };
+    let tone = tone_of(live.status);
     let since = ago(live.since);
     let status = match live.status {
         AddressStatus::Up => format!("since {since}"),
         AddressStatus::Down => format!("no instance token since {since}"),
+        // A device on a first hop (observer §3.11, #982 H3): its token
+        // follows its link, so its absence is the link's, never down.
+        AddressStatus::LinkClosed => format!(
+            "a device on a first hop: its link closed since {since} — not down; its liveness \
+             is what crosses, its heartbeat among it (observer §3.11)"
+        ),
         // Why it is not down, said: a loss, a read not made, a withdrawal
         // heard and the read it owes not yet made, or no complete seed
         // behind it (§8.1, 0.37).
@@ -252,7 +273,7 @@ fn presence_row<'a>(
         (false, _) => "state not watched — freshness unknown".to_string(),
     };
     let mut r = row![
-        kit::badge_presence(tone, format!("{addr}: {}", live.status.as_str())),
+        kit::badge_presence(tone, format!("{addr}: {}", words(live.status))),
         kit::muted(status),
     ]
     .spacing(sp.sm)
@@ -297,16 +318,16 @@ pub fn address_sections<'a>(
         None => {
             let status = update.presence.status(addr);
             col = col.push(kit::badge_presence(
-                match status {
-                    AddressStatus::Down => PresenceTone::Down,
-                    AddressStatus::Up => PresenceTone::Up,
-                    AddressStatus::Unobservable => PresenceTone::Unobservable,
-                },
-                format!("{addr}: {}", status.as_str()),
+                tone_of(status),
+                format!("{addr}: {}", words(status)),
             ));
             col = col.push(kit::muted(match status {
                 AddressStatus::Down => {
                     "no token of it in a complete presence read of this namespace"
+                }
+                AddressStatus::LinkClosed => {
+                    "a device on a first hop with no token in a complete read: its link \
+                     closed, not down (observer §3.11)"
                 }
                 _ => "no token of it observed, and no complete read behind that — not down",
             }));

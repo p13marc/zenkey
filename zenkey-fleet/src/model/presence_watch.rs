@@ -17,7 +17,9 @@
 //! the projection's basis is the reader's to report ([`LivePresence::basis`]).
 //! So an address that went before a loss is still gone across it, and one
 //! whose going was hidden in the loss is found by the re-read that restores
-//! the basis.
+//! the basis. A first-hop device's [link closed](AddressStatus::LinkClosed)
+//! moves nothing either (observer §3.11, #982 H3): its instance token
+//! follows its link, so its absence is never gone.
 //!
 //! **What a pattern can call gone.** Under a wildcard (`*/tc`, `host-a/*`)
 //! an address is watched from the first time it is seen held: a second
@@ -100,7 +102,11 @@ impl AddressWatch {
             let held = match record.status {
                 AddressStatus::Up => true,
                 AddressStatus::Down if self.is_exact() => false,
-                AddressStatus::Down | AddressStatus::Unobservable => continue,
+                // A first-hop device's link closed is never gone (observer
+                // §3.11): its token follows its link, not its liveness.
+                AddressStatus::Down | AddressStatus::Unobservable | AddressStatus::LinkClosed => {
+                    continue;
+                }
             };
             self.said.insert(addr.clone(), held);
             out.insert(addr.clone(), held);

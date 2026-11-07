@@ -163,6 +163,10 @@ pub struct DoctorSpec {
     /// `catalog-missing` judges each running revision against. None given:
     /// it is not asked.
     pub catalogs: crate::model::deployment::Catalogs,
+    /// The owners a face policy lists on its device faces (`--face-policy`,
+    /// observer §3.11; #982 H3), which `first-hop-token` judges. None
+    /// given: it is not asked.
+    pub first_hop: crate::model::first_hop::FirstHop,
 }
 
 impl DoctorSpec {
@@ -178,6 +182,7 @@ impl DoctorSpec {
             clocks_synced: false,
             desired_behind: DEFAULT_DESIRED_BEHIND,
             catalogs: crate::model::deployment::Catalogs::default(),
+            first_hop: crate::model::first_hop::FirstHop::default(),
         }
     }
 
@@ -308,6 +313,25 @@ pub struct DoctorObservation {
     /// each slice from its author. `None` when no `desired-*` check was
     /// asked.
     pub desired: Option<crate::model::desired::DesiredRead>,
+    /// `first-hop-token`'s probe (#982 H3): each instance of a device the
+    /// face policy lists, present with a served descriptor, and which of
+    /// the bundles its descriptor names its own session answered for, or
+    /// why that cannot be told. Empty when the check was not asked.
+    pub first_hop: BTreeMap<(Addr, InstanceId), Result<HeldBundles, String>>,
+}
+
+/// Which bundles one first-hop device's own session holds (#982 H3): a GET
+/// of each contract key its descriptor names (core §8.4), target `All`, a
+/// reply attributed to the device when its replier id is the zid its
+/// descriptor states as `meta.zid` (core §3.3).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HeldBundles {
+    /// `<iface> <fingerprint>` of each bundle the device's session answered.
+    pub held: BTreeSet<String>,
+    /// How many contract keys were asked.
+    pub asked: usize,
+    /// The GETs that could not be put on the bus, each with why.
+    pub failed: Vec<String>,
 }
 
 /// The routers' admin space, as two reads found it.
@@ -607,6 +631,7 @@ pub async fn observe(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec) ->
         config_records: p.config_records,
         alarms: p.alarms,
         desired: p.desired,
+        first_hop: p.first_hop,
     }
 }
 
@@ -624,6 +649,7 @@ struct PresencePhase {
     config_records: Option<Result<ConfigGet, String>>,
     alarms: Option<Result<crate::model::alarms::SeedRead, String>>,
     desired: Option<crate::model::desired::DesiredRead>,
+    first_hop: BTreeMap<(Addr, InstanceId), Result<HeldBundles, String>>,
 }
 
 async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec) -> PresencePhase {
@@ -777,12 +803,27 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
             None
         }
     };
-    let ((contracts, stamps), archives, second, second_config, alarms) = tokio::join!(
+    // first-hop-token (#982 H3): each listed device's contract keys.
+    let first_hop = async {
+        if !spec.asks(CheckId::FirstHopToken) || spec.first_hop.is_empty() {
+            return BTreeMap::new();
+        }
+        let mut out = BTreeMap::new();
+        for (addr, instance, d) in served(observed) {
+            if spec.first_hop.contains(addr) {
+                let read = held_bundles(s, d, t).await;
+                out.insert((addr.clone(), instance.clone()), read);
+            }
+        }
+        out
+    };
+    let ((contracts, stamps), archives, second, second_config, alarms, first_hop) = tokio::join!(
         contracts_then_stamps,
         archives,
         second,
         second_config,
-        alarms
+        alarms,
+        first_hop
     );
     readings.extend(second);
     config_readings.extend(second_config);
@@ -836,6 +877,7 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
         config_records,
         alarms,
         desired,
+        first_hop,
     }
 }
 
@@ -1167,6 +1209,107 @@ fn catalog_missing(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
         format!(
             "{} running revision(s), each in the catalog it is judged against (catalog {ids})",
             running.len()
+        ),
+    )
+}
+
+/// Core §8.1, §8.4 on a first hop (#982 H3; observer §3.11): each device
+/// the face policy lists, as this reader sees it. An instance holding an
+/// interface token, or whose own session answers a contract key its
+/// descriptor names, is a warning: an owner on a first hop holds its
+/// instance token alone and no bundle, and each other declaration crosses
+/// the hop at every transport, whether the face denies it or not (core
+/// Appendix B). `ServiceConfig::first_hop` makes it so.
+///
+/// **What it can see.** A device face's carve denies interface tokens and
+/// contract keys on ingress (`link.v2` §2.6), so a reader behind it sees
+/// neither, whatever the device declares: the clean pole is what reached
+/// this reader, and says so. It finds a device left at its defaults where
+/// the face lets its declarations through: no carve yet, a lab, a reader on
+/// the device's side.
+fn first_hop_token(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
+    const C: CheckId = CheckId::FirstHopToken;
+    if spec.first_hop.is_empty() {
+        return CheckReport::not_asked(C);
+    }
+    let mut findings = Vec::new();
+    let mut undecided = Vec::new();
+    let mut present = 0usize;
+    for ((addr, instance), inst) in &p.now {
+        if !spec.first_hop.contains(addr) {
+            continue;
+        }
+        present += 1;
+        let face = spec.first_hop.face(addr).unwrap_or_default();
+        let subject = format!("{addr}@{instance}");
+        let mut held: Vec<String> = Vec::new();
+        if !inst.alive.is_empty() {
+            held.push(format!(
+                "interface token(s) of {}",
+                inst.alive
+                    .keys()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        match p.obs.first_hop.get(&(addr.clone(), instance.clone())) {
+            Some(Ok(b)) => {
+                if !b.held.is_empty() {
+                    held.push(format!(
+                        "a contract queryable for {}",
+                        b.held.iter().cloned().collect::<Vec<_>>().join(", ")
+                    ));
+                }
+                if let Some(first) = b.failed.first() {
+                    undecided.push(unjudged(
+                        subject.clone(),
+                        format!(
+                            "{} of {} contract GET(s) could not be put on the bus, the first: \
+                             {first}",
+                            b.failed.len(),
+                            b.asked
+                        ),
+                    ));
+                }
+            }
+            Some(Err(why)) => undecided.push(unjudged(subject.clone(), why.clone())),
+            None => match inst.descriptor {
+                Some(read) if read.descriptor().is_none() => undecided.push(unjudged(
+                    subject.clone(),
+                    format!(
+                        "its descriptor did not read ({}): the bundles it names are unknown",
+                        undescribed_why(read)
+                    ),
+                )),
+                _ => {}
+            },
+        }
+        if !held.is_empty() {
+            findings.push(finding(
+                C,
+                DoctorSeverity::Warning,
+                subject,
+                format!(
+                    "a device on the face policy's device face {face:?} holds {}: an owner on \
+                     a first hop holds its instance token alone and no bundle (core §8.1, \
+                     §8.4), and each other declaration crosses the hop at every transport, \
+                     the face's deny or not (core Appendix B); start it with \
+                     `ServiceConfig::first_hop` (`first_hop: true`)",
+                    held.join(" and ")
+                ),
+            ));
+        }
+    }
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!(
+            "{} device(s) the face policy lists, {present} instance(s) of them present, none \
+             holding an interface token or a contract queryable that reached this reader (a \
+             device face's carve denies both on ingress, link.v2 §2.6)",
+            spec.first_hop.len()
         ),
     )
 }
@@ -1539,6 +1682,62 @@ async fn domain_tokens(raw: &Session, timeout: Duration) -> Result<DomainTokens,
     })
 }
 
+/// Which bundles a first-hop device's own session holds (#982 H3): each
+/// contract key `d` names (core §8.4), target `All`, consolidation `None`,
+/// a reply its device's when its replier id is `d`'s `meta.zid` by value.
+/// A descriptor that states no `meta.zid` attributes no reply: why, as the
+/// error.
+async fn held_bundles(
+    s: &Session,
+    d: &Descriptor,
+    timeout: Duration,
+) -> Result<HeldBundles, String> {
+    let zid = d
+        .meta
+        .get("zid")
+        .and_then(|v| v.as_str())
+        .map(zid_value)
+        .ok_or_else(|| {
+            "its descriptor states no meta.zid, so no contract reply can be told its own \
+             (core §3.3)"
+                .to_owned()
+        })?;
+    let mut out = HeldBundles::default();
+    for e in &d.interfaces {
+        let (Ok(iface), Ok(fp)) = (IfaceId::from_str(&e.iface), Fingerprint::parse(&e.contract))
+        else {
+            continue;
+        };
+        let Ok(key) = zenkey_model::grammar::contract_key(&iface, fp.hex()) else {
+            continue;
+        };
+        out.asked += 1;
+        let selector = key.to_string();
+        let replies = match s
+            .get(&selector)
+            .target(QueryTarget::All)
+            .consolidation(ConsolidationMode::None)
+            .timeout(timeout)
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                out.failed.push(format!("GET {selector}: {e}"));
+                continue;
+            }
+        };
+        while let Ok(reply) = replies.recv_async().await {
+            if reply
+                .replier_id()
+                .is_some_and(|id| zid_value(&id.zid().to_string()) == zid)
+            {
+                out.held.insert(format!("{iface} {fp}"));
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// One archive's keys: a GET over its whole `@state` (§4.4), target `All`
 /// and consolidation `None`, each value's attachment read for
 /// `confirmed`.
@@ -1718,6 +1917,7 @@ pub fn judge(obs: &DoctorObservation, spec: &DoctorSpec) -> DoctorReport {
                 CheckId::TimingDeclaration => timing_declaration(p),
                 CheckId::ArbitrationDeclaration => arbitration_declaration(p),
                 CheckId::CatalogMissing => catalog_missing(p, spec),
+                CheckId::FirstHopToken => first_hop_token(p, spec),
                 _ => unreachable!("every check that reads presence is above"),
             }
         })

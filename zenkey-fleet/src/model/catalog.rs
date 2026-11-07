@@ -44,13 +44,16 @@ use zenkey_model::descriptor::{Descriptor, InterfaceEntry};
 use zenkey_model::grammar::{Addr, Fp16, IfaceId, InstanceId, ZkKey};
 use zenkey_model::schema::{ArtifactData, TypeId};
 
+use crate::bus::presence::Scope;
+use crate::model::first_hop::FirstHop;
 use crate::report::{
-    Asked, BindingGraph, ContractAnswer, ContractSource, ContractView, DescriptorAnswer, GraphEdge,
-    GraphNode, GraphRole, IfaceConsumer, IfaceListing, IfaceProvider, IfaceRevision, IfaceSighting,
-    IfaceSummary, IfaceView, InstanceRef, InstanceSighting, MemberId, MemberSighting,
-    NamespaceListing, NamespaceSighting, PresenceChange, PresenceTransition, RequirementView,
-    ResourceBody, ResourceView, SchemaArtifact, SchemaDocument, SchemaMember, SchemaView,
-    ServiceListing, ServiceSighting, ServiceView, TypeView,
+    AddressStatus, Asked, BindingGraph, ContractAnswer, ContractSource, ContractView,
+    DescriptorAnswer, FirstHopSighting, GraphEdge, GraphNode, GraphRole, IfaceConsumer,
+    IfaceListing, IfaceProvider, IfaceRevision, IfaceSighting, IfaceSummary, IfaceView,
+    InstanceRef, InstanceSighting, MemberId, MemberSighting, NamespaceListing, NamespaceSighting,
+    PresenceChange, PresenceTransition, RequirementView, ResourceBody, ResourceView,
+    SchemaArtifact, SchemaDocument, SchemaMember, SchemaView, ServiceListing, ServiceSighting,
+    ServiceView, TypeView,
 };
 
 // ─── what presence brought back ─────────────────────────────────────────────
@@ -304,6 +307,171 @@ impl Observed {
                     .is_none_or(|d| !d.contains_key(key))
             })
             .collect()
+    }
+}
+
+/// How many descriptors a [`KeptDescriptors`] keeps of instances whose
+/// instance token went, before it forgets the oldest.
+pub const DEFAULT_MAX_KEPT: usize = 1_024;
+
+/// Descriptors kept across an instance token's return (observer §3.11's
+/// MAY; #982 H3): what an instance that left took with it, kept by its
+/// address and instance id, so that its token's return under the same id
+/// costs no descriptor GET.
+///
+/// **Why.** A first-hop owner's instance token follows its link: each
+/// transport its session loses withdraws it, and each it opens declares it
+/// again (core Appendix B), several times a day over a radio. A reader that
+/// describes each instance that appears pays a descriptor GET across the
+/// hop per reconnect, about 760 B on RF with the JSON descriptor.
+///
+/// **By (instance, run).** One instance id is one session of the owner
+/// (core §1.5), and the descriptor kept states the run it wrote under
+/// ([`KeptDescriptors::run_of`]): a new instance is a new id, described as
+/// any; a new run within the instance is a descriptor put, and a read of
+/// the instance that states another run replaces what is kept. What the
+/// owner put while its token was gone is lost to the reader until its next
+/// put or the next full read, which the observer text accepts.
+///
+/// Only a served descriptor is kept: a silent GET, a failed one or an
+/// invalid reply proves nothing to keep. Bounded at [`DEFAULT_MAX_KEPT`],
+/// the oldest kept forgotten first and counted (O6). Session-free.
+#[derive(Debug, Clone)]
+pub struct KeptDescriptors {
+    kept: BTreeMap<(Addr, InstanceId), (u64, Box<Descriptor>)>,
+    /// The next keep's order, for the bound.
+    next: u64,
+    max: usize,
+    reused: u64,
+    forgotten: u64,
+}
+
+impl Default for KeptDescriptors {
+    fn default() -> KeptDescriptors {
+        KeptDescriptors {
+            kept: BTreeMap::new(),
+            next: 0,
+            max: DEFAULT_MAX_KEPT,
+            reused: 0,
+            forgotten: 0,
+        }
+    }
+}
+
+impl KeptDescriptors {
+    /// At most `n` kept; zero is clamped to one.
+    #[must_use]
+    pub fn max(mut self, n: usize) -> KeptDescriptors {
+        self.max = n.max(1);
+        self
+    }
+
+    /// Keep what `read` found of one instance whose token went, replacing
+    /// what was kept of it; anything but a served descriptor is not kept,
+    /// and forgets what was.
+    pub fn keep(&mut self, addr: &Addr, instance: &InstanceId, read: &DescriptorRead) {
+        let key = (addr.clone(), instance.clone());
+        let Some(d) = read.descriptor() else {
+            self.kept.remove(&key);
+            return;
+        };
+        self.next += 1;
+        self.kept.insert(key, (self.next, Box::new(d.clone())));
+        while self.kept.len() > self.max {
+            let oldest = self
+                .kept
+                .iter()
+                .min_by_key(|(_, (order, _))| *order)
+                .map(|(k, _)| k.clone());
+            let Some(oldest) = oldest else { break };
+            self.kept.remove(&oldest);
+            self.forgotten += 1;
+        }
+    }
+
+    /// The descriptor kept of an instance whose token returned, taken out
+    /// and counted: the reader holds it again as the instance's read.
+    pub fn reuse(&mut self, addr: &Addr, instance: &InstanceId) -> Option<DescriptorRead> {
+        let (_, d) = self.kept.remove(&(addr.clone(), instance.clone()))?;
+        self.reused += 1;
+        Some(DescriptorRead::Served(d))
+    }
+
+    /// Forget what is kept of every instance `observed` describes: a full
+    /// read's descriptor is newer than what an instance took with it.
+    pub fn forget_described(&mut self, observed: &Observed) {
+        if let Some(d) = &observed.descriptors {
+            self.kept.retain(|k, _| !d.contains_key(k));
+        }
+    }
+
+    /// The run the descriptor kept of an instance states (core §4.3), when
+    /// one is kept and states one.
+    pub fn run_of(&self, addr: &Addr, instance: &InstanceId) -> Option<&str> {
+        self.kept
+            .get(&(addr.clone(), instance.clone()))
+            .and_then(|(_, d)| d.run.as_deref())
+    }
+
+    /// How many descriptors are kept now.
+    pub fn len(&self) -> usize {
+        self.kept.len()
+    }
+
+    /// Whether none is kept.
+    pub fn is_empty(&self) -> bool {
+        self.kept.is_empty()
+    }
+
+    /// How many times a token's return reused a kept descriptor: each a
+    /// descriptor GET not made.
+    pub fn reused(&self) -> u64 {
+        self.reused
+    }
+
+    /// How many kept descriptors the bound forgot.
+    pub fn forgotten(&self) -> u64 {
+        self.forgotten
+    }
+}
+
+impl Observed {
+    /// What one instance's descriptor read found, when it was read.
+    pub fn descriptor_of(&self, addr: &Addr, instance: &InstanceId) -> Option<&DescriptorRead> {
+        self.descriptors
+            .as_ref()?
+            .get(&(addr.clone(), instance.clone()))
+    }
+
+    /// [`Observed::follow`], keeping in `kept` the descriptor each instance
+    /// that leaves takes with it, and taking back from `kept` the
+    /// descriptor of each instance whose token returns (observer §3.11's
+    /// MAY; #982 H3): such an instance is not [undescribed](Observed::undescribed).
+    /// Returns whether the read changed, and the instances whose kept
+    /// descriptor was reused.
+    pub fn follow_keeping(
+        &mut self,
+        moved: &[PresenceTransition],
+        kept: &mut KeptDescriptors,
+    ) -> (bool, Vec<(Addr, InstanceId)>) {
+        for t in moved {
+            if let PresenceChange::InstanceGone { instance } = &t.change
+                && let Some(read) = self.descriptor_of(&t.address, instance)
+            {
+                kept.keep(&t.address, instance, read);
+            }
+        }
+        if !self.follow(moved) {
+            return (false, Vec::new());
+        }
+        let mut reused = Vec::new();
+        for (addr, instance) in self.undescribed() {
+            if let Some(read) = kept.reuse(&addr, &instance) {
+                self.with_descriptor(&addr, &instance, read);
+                reused.push((addr, instance));
+            }
+        }
+        (true, reused)
     }
 }
 
@@ -1419,7 +1587,36 @@ impl Catalog {
             cut_off_during: self.cut_off_during,
             services,
             unparsed: self.unparsed.clone(),
+            first_hop: Vec::new(),
         }
+    }
+
+    /// What this read says of a first-hop device's link (observer §3.11,
+    /// #982 H3): up while one of its instance tokens is held, link closed
+    /// when the read is complete and shows none — never down, since its
+    /// token follows its link — and unobservable otherwise.
+    pub fn first_hop_status(&self, addr: &Addr) -> AddressStatus {
+        if self.has_instance(addr) {
+            AddressStatus::Up
+        } else if self.complete {
+            AddressStatus::LinkClosed
+        } else {
+            AddressStatus::Unobservable
+        }
+    }
+
+    /// Each device of `hop` that `scope` covers, with its face and
+    /// [`Catalog::first_hop_status`]: what `service list --face-policy`
+    /// adds to [`Catalog::services`].
+    pub fn first_hop(&self, hop: &FirstHop, scope: &Scope) -> Vec<FirstHopSighting> {
+        hop.devices()
+            .filter(|(addr, _)| scope.contains(addr))
+            .map(|(addr, face)| FirstHopSighting {
+                address: addr.to_string(),
+                face: face.to_owned(),
+                status: self.first_hop_status(addr),
+            })
+            .collect()
     }
 
     /// `service show`: one address, as [`Catalog::services`] shows it. An
@@ -1441,6 +1638,20 @@ impl Catalog {
             instances,
             members,
             unparsed: self.unparsed.clone(),
+            first_hop: None,
+        }
+    }
+
+    /// [`Catalog::service`], with `addr`'s first hop when `hop` lists it
+    /// (observer §3.11, #982 H3).
+    pub fn service_given(&self, addr: &Addr, hop: &FirstHop) -> ServiceView {
+        ServiceView {
+            first_hop: hop.face(addr).map(|face| FirstHopSighting {
+                address: addr.to_string(),
+                face: face.to_owned(),
+                status: self.first_hop_status(addr),
+            }),
+            ..self.service(addr)
         }
     }
 
@@ -2270,6 +2481,91 @@ mod tests {
             }),
             "a contract key is not a token"
         );
+    }
+
+    /// Observer §3.11's MAY (#982 H3): an instance that leaves takes its
+    /// descriptor with it, and its token's return under the same id reads
+    /// it again, owing no GET; a new instance id owes one; a read stating
+    /// another run replaces what is kept, a silent one forgets it; and the
+    /// bound forgets the oldest kept.
+    #[test]
+    fn a_descriptor_is_kept_across_its_token_s_return() {
+        use crate::report::PresenceSource;
+        let addr: Addr = "lab/radio-a".parse().expect("addr");
+        let (inst, other) = (InstanceId::from_u64(9), InstanceId::from_u64(10));
+        let t = |change| PresenceTransition {
+            at: std::time::SystemTime::UNIX_EPOCH,
+            source: PresenceSource::Event,
+            address: addr.clone(),
+            change,
+        };
+        let appeared = |i: &InstanceId| {
+            t(PresenceChange::InstanceAppeared {
+                instance: i.clone(),
+            })
+        };
+        let gone = |i: &InstanceId| {
+            t(PresenceChange::InstanceGone {
+                instance: i.clone(),
+            })
+        };
+        let served = |run: &str| {
+            DescriptorRead::Served(Box::new(descriptor(
+                "lab/radio-a",
+                &inst.to_string(),
+                json!({"run": run, "interfaces": [
+                    {"iface": "tc.netem.v1", "contract": format!("sha256:{NETIF_FP}"), "minor": 0, "token": false},
+                ]}),
+            )))
+        };
+        let netem: IfaceId = "tc.netem.v1".parse().expect("iface");
+        let mut o = observed(&[]);
+        o.descriptors = Some(BTreeMap::new());
+        let mut kept = KeptDescriptors::default();
+
+        assert!(o.follow_keeping(&[appeared(&inst)], &mut kept).0);
+        assert_eq!(o.undescribed(), [(addr.clone(), inst.clone())]);
+        o.with_descriptor(&addr, &inst, served("00ab"));
+
+        // The link closes and opens again: one transport, then another.
+        let (changed, reused) = o.follow_keeping(&[gone(&inst)], &mut kept);
+        assert!(changed && reused.is_empty());
+        assert_eq!(kept.run_of(&addr, &inst), Some("00ab"));
+        assert!(!Catalog::new(&o).provides(&addr, &netem), "gone with it");
+        let (_, reused) = o.follow_keeping(&[appeared(&inst)], &mut kept);
+        assert_eq!(reused, [(addr.clone(), inst.clone())]);
+        assert!(o.undescribed().is_empty(), "no GET owed");
+        assert!(Catalog::new(&o).provides(&addr, &netem));
+        assert_eq!((kept.reused(), kept.len()), (1, 0));
+
+        // A gone and back in one batch is the same.
+        let (_, reused) = o.follow_keeping(&[gone(&inst), appeared(&inst)], &mut kept);
+        assert_eq!(reused.len(), 1);
+        assert_eq!(kept.reused(), 2);
+
+        // A new instance owes its GET.
+        let (_, reused) = o.follow_keeping(&[appeared(&other)], &mut kept);
+        assert!(reused.is_empty());
+        assert_eq!(o.undescribed(), [(addr.clone(), other.clone())]);
+
+        // Another run replaces what is kept; a silent read forgets it.
+        kept.keep(&addr, &inst, &served("00ab"));
+        kept.keep(&addr, &inst, &served("00ac"));
+        assert_eq!(kept.run_of(&addr, &inst), Some("00ac"));
+        kept.keep(&addr, &inst, &DescriptorRead::Silent);
+        assert!(kept.is_empty(), "a silent GET proves nothing to keep");
+
+        // A full read's descriptor is newer than what is kept.
+        kept.keep(&addr, &inst, &served("00ab"));
+        kept.forget_described(&o);
+        assert!(kept.is_empty(), "the read describes the instance");
+
+        // The bound forgets the oldest, counted.
+        let mut small = KeptDescriptors::default().max(1);
+        small.keep(&addr, &inst, &served("00ab"));
+        small.keep(&addr, &other, &served("00ab"));
+        assert_eq!((small.len(), small.forgotten()), (1, 1));
+        assert!(small.run_of(&addr, &inst).is_none(), "the oldest went");
     }
 
     /// The providers of an interface, by token or by descriptor alone

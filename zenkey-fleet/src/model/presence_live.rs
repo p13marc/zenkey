@@ -72,6 +72,18 @@
 //! session strips its namespace from what it hears, and refuses a key
 //! outside it ([`crate::WatchSession`], #875).
 //!
+//! **A first hop's link closed, never down** (observer §3.11, #982 H3).
+//! An owner the reader knows is on a first hop — a device a face policy's
+//! device face lists ([`LivePresence::with_first_hop`]) — holds an
+//! instance token that follows its link: each transport its session loses
+//! withdraws it. Where the down pole would stand for it (no instance token
+//! held, a complete read behind the claim), its status is
+//! [`AddressStatus::LinkClosed`] instead, and it is never down. Everything
+//! short of that pole is as for any address: a withdrawal heard live
+//! leaves it unobservable until the read it owes, and that read says link
+//! closed or up. Each device is tracked from the start, so a complete read
+//! that shows none of it says so.
+//!
 //! **A move of the watch session's transport unconfirms what is held**
 //! (core §8.1, 0.42, F-229; [`LivePresence::moved`]): its subscribers have
 //! no history, and may not have heard what moved while the transport was
@@ -113,6 +125,7 @@ use zenkey_model::grammar::{Addr, Fp16, IfaceId, InstanceId, ZkKey};
 
 use crate::bus::presence::Scope;
 use crate::model::catalog::Observed;
+use crate::model::first_hop::FirstHop;
 use crate::model::target::Target;
 use crate::report::{AddressStatus, MemberId, PresenceChange, PresenceSource, PresenceTransition};
 
@@ -330,6 +343,9 @@ pub struct LivePresence {
     unread: u64,
     /// Complete reads folded.
     reads: u64,
+    /// The owners the reader was told are on a first hop (observer §3.11):
+    /// link closed where another address would be down.
+    first_hop: FirstHop,
 }
 
 impl LivePresence {
@@ -347,7 +363,27 @@ impl LivePresence {
             forgotten: 0,
             unread: 0,
             reads: 0,
+            first_hop: FirstHop::default(),
         }
+    }
+
+    /// The owners on a first hop the reader was told of (observer §3.11,
+    /// #982 H3), each tracked from `at`: where a complete read shows none
+    /// of a device's instance tokens its status is
+    /// [`AddressStatus::LinkClosed`], never down. Given before the seed,
+    /// as a pattern is tracked.
+    pub fn with_first_hop(mut self, hop: FirstHop, at: SystemTime) -> LivePresence {
+        let devices: Vec<Addr> = hop.devices().map(|(a, _)| a.clone()).collect();
+        self.first_hop = hop;
+        for addr in &devices {
+            self.track(addr, at);
+        }
+        self
+    }
+
+    /// The owners on a first hop the reader was told of.
+    pub fn first_hop(&self) -> &FirstHop {
+        &self.first_hop
     }
 
     /// How many records with nothing held to keep before forgetting the
@@ -409,7 +445,8 @@ impl LivePresence {
 
     /// An address's status, whether or not the projection holds a record of
     /// it: one never heard of is down under a complete seed of a scope that
-    /// covers it, and unobservable otherwise.
+    /// covers it (link closed for a first-hop device, observer §3.11), and
+    /// unobservable otherwise.
     pub fn status(&self, address: &Addr) -> AddressStatus {
         match self.addresses.get(address) {
             Some(a) => a.status,
@@ -739,9 +776,20 @@ impl LivePresence {
     /// The status of an address with nothing held, under `basis`.
     fn unheard(&self, basis: PresenceBasis, address: &Addr) -> AddressStatus {
         if basis == PresenceBasis::Complete && self.scope.contains(address) {
-            AddressStatus::Down
+            self.absent(address)
         } else {
             AddressStatus::Unobservable
+        }
+    }
+
+    /// What a complete read showing none of `address`'s instance tokens
+    /// says of it: down, or, for a first-hop device, its link closed
+    /// (observer §3.11).
+    fn absent(&self, address: &Addr) -> AddressStatus {
+        if self.first_hop.contains(address) {
+            AddressStatus::LinkClosed
+        } else {
+            AddressStatus::Down
         }
     }
 
@@ -755,6 +803,7 @@ impl LivePresence {
     ) {
         let basis = self.basis;
         let in_scope = self.scope.contains(address);
+        let absent = self.absent(address);
         let Some(record) = self.addresses.get_mut(address) else {
             return;
         };
@@ -767,7 +816,8 @@ impl LivePresence {
             // Heard withdrawn, and no complete read since: never down on
             // the withdrawal alone (core §8.1, 0.37).
             _ if record.withdrawn => (AddressStatus::Unobservable, PresenceSource::Withdrawn),
-            PresenceBasis::Complete => (AddressStatus::Down, source),
+            // Down, or a first-hop device's link closed (observer §3.11).
+            PresenceBasis::Complete => (absent, source),
             _ => (AddressStatus::Unobservable, source),
         };
         if now != record.status {
