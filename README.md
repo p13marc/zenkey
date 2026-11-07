@@ -43,11 +43,14 @@ they land:
 
 ## Components
 
-The zk2 crates are unpublished (`publish = false`). Publishing waits on
-the maintainer's call ([#585](https://git.marcpardo.eu/marcpardo/zenkey/issues/585),
-[#929](https://git.marcpardo.eu/marcpardo/zenkey/issues/929)), so a port
-builds against `main` from source. The crates on crates.io under the same
-names are v1's ([below](#v1)).
+zk2's four libraries, `zenkey-model`, `zenkey`, `zenkey-build` and
+`zenkey-fleet`, go to crates.io from `main` at 0.20.0
+([#929](https://git.marcpardo.eu/marcpardo/zenkey/issues/929)). Each
+crate's README says what 0.20 does not promise: the wire and the
+authoring format are still moving (epic
+[#975](https://git.marcpardo.eu/marcpardo/zenkey/issues/975)), and a 0.21
+may break them. crates.io's `zenkey` and `zenkey-build` 0.11.x and
+`zenkey-fleet` 0.18.x are v1's ([below](#v1)).
 
 | Part | What it is |
 |------|-----------|
@@ -77,8 +80,8 @@ subsystem invents its own layout, none of those can be written down.
 ## Adopting zk2
 
 An application adopts zk2 through a contract, `zenkey-build` and the
-runtime's `ServiceBuilder`. The crates are unpublished, so a port builds
-against `main` from source.
+runtime's `ServiceBuilder`: `zenkey = "0.20"` among its dependencies and
+`zenkey-build = "0.20"` among its build dependencies, or both from `main`.
 
 1. **A contract** per interface major, in the authoring format
    ([`examples/zk2/README.md`](examples/zk2/README.md)), checked by the
@@ -135,7 +138,8 @@ says what is generated. A team on v1 starts from
 
 ## Status
 
-zk2 is built on `main` and unpublished. Its design record is in
+zk2 is built on `main`, and its libraries go to crates.io at 0.20.0
+([#929](https://git.marcpardo.eu/marcpardo/zenkey/issues/929)). Its design record is in
 [`docs/zk2/`](docs/zk2/README.md) (epic
 [#585](https://git.marcpardo.eu/marcpardo/zenkey/issues/585)). No adopter
 runs it yet: ZenSight, tcgui and zenoh-modem are mapped onto it in
@@ -163,6 +167,7 @@ history.
 
 `zenkey`, `zenkey-build`, `zenkey-model` (libs): MIT. `zenkey-fleet` (lib),
 `zenctl` (CLI), `zengui` (GUI), `zenwatch` (notifier), `zenkey-explorer-config`:
-Apache-2.0. crates.io receives the lib crates only (the `v1` branch
-publishes zenkey → zenkey-build → zenkey-fleet, in that order); binaries
-ride Forgejo releases (linux x86_64).
+Apache-2.0. crates.io receives the lib crates only: `main` publishes
+zenkey-model → zenkey → zenkey-build → zenkey-fleet, and the `v1` branch
+zenkey → zenkey-build → zenkey-fleet, each in that order. Binaries ride
+Forgejo releases (linux x86_64).

@@ -9,7 +9,7 @@ v1's `zenkey-build` (0.11.x on crates.io) is the `v1` branch's, and that branch'
 
 ## zk2
 
-- **`zenkey-build/`** 0.20.0 (MIT, unpublished; v1's `zenkey-build` 0.11.x
+- **`zenkey-build/`** 0.20.0 (MIT, on crates.io from 0.20.0, #929; v1's `zenkey-build` 0.11.x
   is the `v1` branch's, and no member of `main` uses it) is zk2's codegen
   (#611, FI; the design is `docs/zk2/codegen.md`). A consumer's build
   script runs `zenkey-model`'s lints and the history's compatibility gate

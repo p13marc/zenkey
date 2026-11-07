@@ -210,8 +210,10 @@ pub mod v1 {
 /// The standard contract's bundle, revision 1.1 as published in
 /// `spec/profiles/.history/health.v1/` (§3), byte for byte: it uses
 /// `freshness.v2`, so its owner's heartbeat confirms the status.
+/// The crate reads it through `bundles/`, a link to that file, so its
+/// package carries the bytes (#929).
 pub const BUNDLE: &[u8] = include_bytes!(
-    "../../spec/profiles/.history/health.v1/60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f.bundle.json"
+    "../bundles/health.v1/60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f.bundle.json"
 );
 
 /// Its fingerprint (§3).

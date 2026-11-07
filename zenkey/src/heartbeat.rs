@@ -49,8 +49,10 @@ use crate::writer::Writer;
 
 /// The standard contract's bundle, revision 2.0 as published in
 /// `spec/profiles/.history/freshness.v2/` (v2 §3), byte for byte.
+/// The crate reads it through `bundles/`, a link to that file, so its
+/// package carries the bytes (#929).
 pub const BUNDLE: &[u8] = include_bytes!(
-    "../../spec/profiles/.history/freshness.v2/8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890.bundle.json"
+    "../bundles/freshness.v2/8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890.bundle.json"
 );
 
 /// Its fingerprint (v2 §3).

@@ -22,20 +22,20 @@ The **keyspace-v2 convention** for Zenoh keyspaces; on `main`, zk2:
   (`docs/zk2/tooling-guide.md`) is guidance, and its §8 holds the v1
   practices the reference tools keep (session posture, `$*`, matching
   status, router storages).
-- `zenkey-model/` — zk2's **session-free half** (MIT, unpublished): keys,
+- `zenkey-model/` — zk2's **session-free half** (MIT, on crates.io from 0.20.0): keys,
   the authoring format and its lints, bundles, `compat`, the late joiner's
   merge, each profile's session-free half, the zk2c envelope, and the `zk2`
   contract CI. Detail: `zenkey-model/CLAUDE.md`.
 - `zenkey/` — the **runtime crate**: on `main`, 0.20.0 is zk2's session
-  half (MIT, unpublished): `ServiceBuilder`, presence, writers, state,
+  half (MIT, on crates.io from 0.20.0): `ServiceBuilder`, presence, writers, state,
   consumers, operations and each profile's runtime. v1's 0.11.x stays on
   crates.io, from the `v1` branch. Detail: `zenkey/CLAUDE.md`.
 - `zenkey-build/` — the **codegen crate**: on `main`, 0.20.0 is zk2's (MIT,
-  unpublished): a consumer's build script lints its contracts, gates their
+  on crates.io): a consumer's build script lints its contracts, gates their
   history, embeds the bundles and generates one module per interface. v1's
   0.11.x is the `v1` branch's. Detail: `zenkey-build/CLAUDE.md`.
 - `zenkey-fleet/` — the **fleet engine crate** (Apache-2.0; the in-tree
-  0.20.0 is zk2's and `publish = false`, 0.18.x on crates.io is v1's): the
+  0.20.0 is zk2's, on crates.io; 0.18.x is v1's): the
   shared core of zenctl, zengui and zenwatch, in five layers (`bus/`,
   `model/`, `judge/`, `report/`, `tape/`). Detail: `zenkey-fleet/CLAUDE.md`.
 - `zenkey-explorer-config/` — the **shared explorer config crate**
@@ -66,8 +66,8 @@ releases 0.14.x patches. No member of `main` links v1: zenctl and the
 in-tree fleet left it at FJ9 (#612), zenwatch at FL2–FL3 and zengui at
 FL11b (#614), so `cargo tree -i zenkey@0.11.1` and `-i
 zenkey-fleet@0.18.0` match no package, and `Cargo.lock` holds one
-`zenkey` and one `zenkey-fleet`. zk2 reuses the crate names at 0.20.0
-(`publish = false`), every member takes them by path, and the workspace
+`zenkey` and one `zenkey-fleet`. zk2 reuses the crate names from 0.20.0
+(published since #929), every member takes them by path, and the workspace
 table pins none; plain `-p zenkey` and `-p zenkey-fleet` name them. The
 `registry-conventions` skill describes the v1 registry format; its
 fixtures are the `v1` branch's.
@@ -273,7 +273,12 @@ never a verdict. Scouting is opt-in.
   v1's RFC set: `scripts/check-v1-citations.sh` (in `just ci` and ci.yml)
   fails on `RFC 01`–`RFC 13` in any `.rs`, `.trycmd` or `tests/{cmd,fixtures}`
   file (#925). An IETF RFC (`RFC 3339`) is fine.
-- Publishing (crates.io, LIB CRATES ONLY): on `main` every crate is 0.20.0
-  with `publish = false` (#929 tracks a path); the `v1` branch publishes
-  `zenkey` → `zenkey-build` → `zenkey-fleet`, in that order. Binaries
-  (zenctl, zengui, zenwatch) ship via the `release.yml` binary lane.
+- Publishing (crates.io, LIB CRATES ONLY): `main` publishes zk2's four lib
+  crates at one version (from 0.20.0, #929), `zenkey-model` → `zenkey` →
+  `zenkey-build` → `zenkey-fleet` (`publish-crates.yml`); each path
+  dependency between them carries that `version`, each README says what the
+  release does not promise, and `zenkey/tests/published.rs` keeps every
+  include inside its crate. zenctl, zengui, zenwatch,
+  `zenkey-explorer-config` and the test crates stay `publish = false`. The
+  `v1` branch publishes `zenkey` → `zenkey-build` → `zenkey-fleet`,
+  dispatched at its tag. Binaries ship via the `release.yml` binary lane.

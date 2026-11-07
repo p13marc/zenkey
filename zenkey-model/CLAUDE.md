@@ -2,7 +2,7 @@
 
 Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md` is the index.
 
-- **`zenkey-model/`** (MIT, unpublished: the maintainer's call, #585, #929) is zk2's session-free
+- **`zenkey-model/`** (MIT, on crates.io from 0.20.0, first in the lane's order, #929) is zk2's session-free
   half (#608): keys, templates, §1.3's kind selectors and what a selector
   cannot see (`grammar::blind_spots`, #614 FL4), the authoring format
   (draft 4: draft 3 plus a plain stream's `frame` table, core 0.83; draft 3: draft 2 plus `[schemas] packed` and `packed:` references, core 0.75; draft 2: draft 1 plus `cardinality = "unbounded"`, the no-ceiling

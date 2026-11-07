@@ -7,8 +7,11 @@ license = "MIT"
 repository.workspace = true
 authors.workspace = true
 description = "zk2 keys and contracts without a Zenoh session: the key grammar, the contract authoring format, canonical form, fingerprints and bundles"
-# Not on crates.io until the zk2 core spec is accepted (#606, #615).
-publish = false
+readme = "README.md"
+keywords = ["zenoh", "zk2", "contracts", "keyspace", "schema"]
+categories = ["network-programming", "encoding"]
+# `CLAUDE.md` is the repository's note for Claude Code, not the crate's.
+exclude = ["CLAUDE.md"]
 
 [dependencies]
 zenoh-keyexpr = { workspace = true }
