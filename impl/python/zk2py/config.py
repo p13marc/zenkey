@@ -1459,20 +1459,29 @@ class ConfigOwner:
 
     # -- after each step ------------------------------------------------------------------
 
-    def _after(self, step: Step) -> None:
+    def _after(self, step: Step, put_first: bool = False) -> None:
         """Events published, and the view and the status put when either
         changed (§2.3), the view first; one revision may name several such
         pairs (§2.3, 0.2: "An owner SHOULD put the view first"). The timer is told of a new due
-        instant."""
-        try:
+        instant. ``put_first``: the puts before the events, as a re-mint's
+        pending change ends (§2.12, text 0.11: "its read-back is put", then
+        "Its event is published")."""
+
+        def publish() -> None:
             for ev in step.events:
                 self.owner.occur(self.event_member, encode_json(ev))
                 self.events.append(ev)
+
+        try:
+            if not put_first:
+                publish()
             now = (encode_json(self.core.view()), encode_json(self.core.status()))
             if now != self._last_put and self.owner.session is not None:
                 self.owner.set_state(self.view_key, now[0])
                 self.owner.set_state(self.status_key, now[1])
                 self._last_put = now
+            if put_first:
+                publish()
         finally:
             # An act's end reaches the feed even when a put raises (a
             # session closing under it): the role is never left running.
@@ -1756,6 +1765,12 @@ class ConfigOwner:
         """Core §1.5's re-mint while running. ``config.v1`` §2.12: "A re-mint
         is a restart": the new instance starts from its startup values, the
         revision from 0, nothing pending, its device returned to them first.
+        Text 0.11 (F-481) orders it: a pending change ends first, in the old
+        instance, as ``cancel`` ends it, its view and status put, then its
+        event, ``rolled-back`` or ``partial``; then the device returns to its
+        startup values; then the new instance. It refuses, the instance
+        running on, with an act in flight (§2.7) and with a parameter set at
+        runtime whose startup value is unknown.
         Fed through ``desired.v1``, §2.16 (text 0.10): it "begins a new run,
         so §2.7's restart holds of it: it MUST act on the first version it
         reads, the one it acted on before the re-mint included". zk2py's new
@@ -1771,6 +1786,20 @@ class ConfigOwner:
         if self.remint_policy == "refuse":
             raise OwnerRefused("config.v1 §2.12: a re-mint is a restart, and this owner refuses one while it runs")
         with self.cv:
+            if self.core.in_flight is not None:
+                raise OwnerRefused("config.v1 §2.12: an act in flight (§2.7): no re-mint")
+            unknown = sorted(f"{g}.{p}" for (g, p), prm in self.core.running.items()
+                             if prm.source == "runtime" and self.core.startup_value(g, p)[0] is UNKNOWN)
+            if unknown:
+                raise OwnerRefused(f"config.v1 §2.12: {', '.join(unknown)} set at runtime, its startup value "
+                                   "unknown: no re-mint")
+            change = self.core.pending
+            if change is not None:
+                now_ns = time.time_ns()
+                ended = Step()
+                self.core._now = now_ns  # noqa: SLF001 - the undo's event instant
+                self.core._undo(change, ended, now_ns)  # noqa: SLF001 - as cancel ends it (§2.10)
+                self._after(ended, put_first=True)
             new = secrets.token_hex(8)
             self.core.restart(new)
             self.device.boot(self._startup_values())
