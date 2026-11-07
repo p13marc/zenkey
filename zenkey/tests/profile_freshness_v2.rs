@@ -1,6 +1,7 @@
 //! `spec/profiles/freshness/scenarios-v2.md` §1–§7 (`freshness.v2`, #978's
 //! F3), one test per section, named after it, and §2's step 6, a
-//! candidate's, in a test of its own.
+//! candidate's, in a test of its own; #1080's heartbeat time under a
+//! catalog's epoch, beside the same owner's frames, is the last test.
 //!
 //! Common setup: R1 is a router (timestamping on, a router's default); the
 //! owner `lab/beacon` implements `beacon.v2` with every resource exposed
@@ -1018,4 +1019,149 @@ link_bps     = 64000
         Verdict::Fresh,
         "live across the face"
     );
+}
+
+/// #1080 (v2 §2.4, core §7.6, §8.6), no scenario's: an owner given a
+/// catalog counts its heartbeats' time from the catalog's epoch, as its
+/// frames' record 0 counts. `lab/beacon` implements `beacon.v2` and
+/// `linkframes.v1` under zenoh-modem's catalog (epoch 1767225600); H reads
+/// its heartbeats and its frames raw. Each heartbeat's time, read under the
+/// epoch, is the owner's wall clock, exactly the instant a GET's reply
+/// carries as the status's last confirmation, and its seconds are the
+/// frame's, never Unix seconds (which would read as 2082).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_heartbeats_time_counts_from_the_catalogs_epoch() {
+    use zenkey::model::catalog::Catalog;
+    use zenkey::model::frame::{Frame, Layout as FrameLayout};
+    let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../examples/zk2/zenoh-modem/catalog.json");
+    let catalog = Catalog::parse_bytes(&std::fs::read(file).unwrap()).unwrap();
+    let epoch = catalog.epoch();
+    assert_eq!(epoch, 1_767_225_600, "zenoh-modem's epoch, 2026-01-01");
+    let unix_ms = |t: SystemTime| {
+        i128::try_from(
+            t.duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
+        )
+        .unwrap()
+    };
+
+    let (_r1, ep) = router(None).await;
+    let os = client(&ep).await;
+    let rs = client(&ep).await;
+    let hs = client(&ep).await;
+    let (_h, beats) = heartbeats(&hs, HB_KEY).await;
+    let frames_c = contract("frames/linkframes.v1");
+    let link_r = frames_c
+        .resources
+        .iter()
+        .find(|r| r.template.as_str() == "frames/link")
+        .unwrap();
+    let link_layout = FrameLayout::of_resource(&frames_c, link_r)
+        .unwrap()
+        .expect("a frame resource");
+    let frames: Arc<Mutex<Vec<Frame>>> = Arc::default();
+    let f = Arc::clone(&frames);
+    let _fs = hs
+        .declare_subscriber("zk2/lab/beacon/linkframes.v1/stream/frames/link")
+        .callback(move |sample| {
+            let bytes = sample.payload().to_bytes();
+            let e = Envelope::parse(&bytes).expect("an envelope");
+            assert!(e.is_frame(), "core §7.7's form 5");
+            f.lock()
+                .unwrap()
+                .push(Frame::parse(e.tag, e.record, &link_layout).expect("a frame of its layout"));
+        })
+        .await
+        .unwrap();
+
+    let linkframes: IfaceId = "linkframes.v1".parse().unwrap();
+    let none = Bindings::new();
+    let mut b = ServiceBuilder::new(&os, config("lab/beacon"));
+    b.catalog(catalog).unwrap();
+    b.implement(imp("beacon.v2")).unwrap();
+    b.implement(imp("frames/linkframes.v1")).unwrap();
+    let status = b
+        .declare_state_writer(&beacon(), STATUS, &none)
+        .await
+        .unwrap();
+    for r in [PEER, "state/intent", "state/note", LEVEL] {
+        b.expose(&beacon(), r).unwrap();
+    }
+    let link = b
+        .declare_frame_writer(&linkframes, "stream/frames/link")
+        .await
+        .unwrap();
+    let _sample = b
+        .declare_frame_writer(&linkframes, "stream/frames/sample")
+        .await
+        .unwrap();
+    b.expose(&linkframes, LEVEL).unwrap();
+    let svc = b.start().await.unwrap();
+    assert_eq!(svc.deployment_epoch(), epoch, "the catalog's");
+    matched(link.writer()).await;
+
+    // The status put and vouched for; a frame's one record.
+    let before = unix_ms(SystemTime::now());
+    status.put("up").await.unwrap();
+    link.record_json(&serde_json::json!({
+        "dropped": 7, "queue_depth": 12, "duty_available": 1, "duty_wait_ms": "1500",
+    }))
+    .await
+    .unwrap()
+    .expect("a frame of one record");
+    let t0 = Instant::now();
+    eventually("H hears the frame and two heartbeats", || async {
+        !frames.lock().unwrap().is_empty() && beats_after(&beats, t0).len() >= 2
+    })
+    .await;
+    let after = unix_ms(SystemTime::now());
+
+    // Each heartbeat's time is the wall clock under the epoch.
+    let heard = beats_after(&beats, t0);
+    let wall = before - 1_000..=after + 1_000;
+    for b in &heard {
+        let at = b.hb.time.unix_ms(epoch).expect("a known time");
+        assert!(
+            wall.contains(&at),
+            "{at} ms under the epoch, the wall clock between {before} and {after}"
+        );
+    }
+    // Beside the frame's record 0: the same seconds, give or take the
+    // heartbeat's period.
+    let frame = frames.lock().unwrap()[0].clone();
+    let ft = frame.time.expect("record 0's time");
+    let fat = ft.unix_ms(epoch);
+    assert!(
+        wall.contains(&fat),
+        "the frame's {fat} ms, the wall clock between {before} and {after}"
+    );
+    let Time::At { secs, .. } = heard[0].hb.time else {
+        unreachable!("a known time")
+    };
+    assert!(
+        (i64::from(secs) - i64::from(ft.s)).abs() <= 2,
+        "the heartbeat's {secs} s beside the frame's {} s",
+        ft.s
+    );
+
+    // Exactly the instant a reply carries as its last confirmation.
+    let c = reader(&rs, "lab/beacon");
+    let reply = match c.get(STATUS, None, T).await.unwrap() {
+        StateGet::Answered(mut v) => v.remove(0),
+        StateGet::Silent => panic!("the owner did not answer"),
+    };
+    let ts = reply.timestamp().expect("the last confirmation");
+    let reply_ms = unix_ms(ts.get_time().to_system_time());
+    tokio::time::sleep(JITTER).await;
+    assert!(
+        beats
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|b| b.hb.time.unix_ms(epoch) == Some(reply_ms)),
+        "a heartbeat at the reply's instant under the epoch, {reply_ms} ms"
+    );
+    svc.close().await.unwrap();
 }

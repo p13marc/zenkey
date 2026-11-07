@@ -5,6 +5,40 @@ entry naming its text. Each entry records what changed, what deliberately
 did not, and why. A breaking change is a new major, a new file, never an
 entry here ([`../README.md`](../README.md)).
 
+## `v2.md` 0.6 — 2026-11-07: a heartbeat's time from the catalog's epoch (#1080)
+
+#1080 found the reference's heartbeat writing its time in Unix seconds
+beside frames that count from the catalog's epoch. A zenoh-modem owner's
+frames read `t=26837269` while its heartbeat read `s: 1794062759`. Read
+under that catalog's epoch, the heartbeat would date from 2082. The text
+said "counts from the deployment epoch (core §7.6)", which is right, but
+said it through a pointer alone. It left an instant with no code unsaid:
+a clock before the epoch, or 2^32 s or more after it. This text, still
+written against core 0.90, answers both.
+
+**Changed: §2.4's "The time".**
+- **Its epoch,** editorial. The catalog's epoch, the one the owner's
+  frames and packed records count from (core §8.6), else 0, with Unix
+  seconds to 2106. Before, the text named core §7.6 and stopped.
+- **No code,** one rule added. An owner MUST write all ones as its
+  heartbeat's time while its clock reads an instant before the epoch, or
+  2^32 s or more after it. Before, the text said nothing of it. Core §7.6
+  gives such an instant no code, and §2.4 asks for a heartbeat every
+  period, so all ones was the one body an owner could send. The reference
+  already writes it so.
+- **The evidence** is the core's `heartbeat/times.json`: 13 writes and
+  13 reads of `bare.v1`'s body, under zenoh-modem's epoch 1767225600 and
+  under none. It was written by an independent reading of the text and
+  checked by a second, never blessed. The header's evidence row names it.
+
+**Deliberately not changed.**
+- **The body:** core §7.5's form, its other fixtures and the standard
+  contract's fingerprint are unchanged.
+- **A reader** reads a heartbeat's time through the catalog its owner
+  names, as core §8.6 says of every time counted from the epoch.
+- **Core §7.7's frames** leave a record 0 before the epoch unsaid too.
+  That is the core's question, left to it.
+
 ## `v2.md` 0.5 — 2026-11-02: a candidate's held write clears its bit (#978)
 
 zk2py's round 98 found §2.10 contradicting core §4.3 for a

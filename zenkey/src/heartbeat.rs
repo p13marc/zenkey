@@ -33,8 +33,11 @@
 //!   until a write of it goes through (F-461). Its time is unknown while
 //!   the guard holds: the owner's clock is ahead, and the time is its word
 //!   of it.
-//! - **The time** is under the deployment epoch, 0 until #980's catalog
-//!   carries one (core §7.6), as a packed record's `time` fields are.
+//! - **The time** counts from the deployment epoch (core §7.6, §8.6;
+//!   v2 §2.4, #1080): the catalog's the service was given, the one its
+//!   frames and packed records count from, else 0 (Unix seconds). An
+//!   instant with no code under it, before the epoch or 2^32 s or more
+//!   after it, is written as the unknown time, all ones.
 
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
@@ -63,10 +66,6 @@ pub const HEARTBEAT: &str = "stream/heartbeat/{iface}";
 
 /// The template's parameter: the covered interface's id.
 pub const PARAM: &str = "iface";
-
-/// The deployment epoch a heartbeat's time counts from, in Unix seconds:
-/// 0 until #980's catalog carries one (core §7.6, §7.5).
-pub const EPOCH: i64 = 0;
 
 static IMPLEMENTATION: LazyLock<Implementation> = LazyLock::new(|| {
     Implementation::from_bundle(BUNDLE).expect("the published freshness.v2 bundle verifies")
@@ -100,6 +99,19 @@ pub fn period(layout: &Layout) -> Option<Duration> {
         .filter(|p| !p.is_zero())
 }
 
+/// A heartbeat's time for the owner's clock reading `wall`, under the
+/// deployment epoch `epoch` in Unix seconds (v2 §2.4): unknown, all ones,
+/// for an instant with no code, before the epoch or 2^32 s or more after
+/// it (core §7.6), a clock before the Unix epoch included.
+#[must_use]
+pub(crate) fn time_at(wall: std::time::SystemTime, epoch: i64) -> Time {
+    wall.duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|d| i128::try_from(d.as_millis()).ok())
+        .and_then(|ms| Time::from_unix_ms(ms, epoch))
+        .unwrap_or(Time::Unknown)
+}
+
 /// One covered interface's heartbeat, as its task sends it.
 pub(crate) struct Beat {
     pub(crate) writer: Writer,
@@ -110,6 +122,10 @@ pub(crate) struct Beat {
     pub(crate) store: Arc<Store>,
     pub(crate) minter: Arc<Minter>,
     pub(crate) period: Duration,
+    /// The deployment epoch its time counts from, in Unix seconds: the
+    /// service's ([`crate::Service::deployment_epoch`]), as its frames'
+    /// (v2 §2.4).
+    pub(crate) epoch: i64,
 }
 
 impl Beat {
@@ -128,12 +144,7 @@ impl Beat {
         let time = if self.minter.is_ahead() {
             Time::Unknown
         } else {
-            let ms = at
-                .get_time()
-                .to_system_time()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_millis() as i128);
-            Time::from_unix_ms(ms, EPOCH).unwrap_or(Time::Unknown)
+            time_at(at.get_time().to_system_time(), self.epoch)
         };
         let iface = self.layout.iface.to_string();
         let Some((hb, vouched)) = self.store.heartbeat(&iface, &self.exposed, time) else {
@@ -217,6 +228,43 @@ impl Drop for Tasks {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// v2 §2.4 (#1080): the time counts from the epoch given, and an
+    /// instant with no code under it is the unknown time, as
+    /// `spec/conformance/heartbeat/times.json` writes it.
+    #[test]
+    fn a_time_counts_from_the_epoch_and_one_with_no_code_is_unknown() {
+        use std::time::{Duration, UNIX_EPOCH};
+        let e = 1_767_225_600;
+        let at = |ms: u64| UNIX_EPOCH + Duration::from_millis(ms);
+        assert_eq!(
+            time_at(at(1_794_062_759_123), e),
+            Time::At {
+                secs: 26_837_159,
+                ms: 123
+            }
+        );
+        assert_eq!(
+            time_at(at(1_794_062_759_123), 0),
+            Time::At {
+                secs: 1_794_062_759,
+                ms: 123
+            },
+            "no catalog: Unix seconds"
+        );
+        assert_eq!(time_at(at(1_767_225_599_999), e), Time::Unknown);
+        assert_eq!(time_at(at(0), e), Time::Unknown, "a clock with no RTC");
+        assert_eq!(
+            time_at(at(6_062_192_896_000), e),
+            Time::Unknown,
+            "2^32 s on"
+        );
+        assert_eq!(
+            time_at(UNIX_EPOCH - Duration::from_millis(1), 0),
+            Time::Unknown,
+            "before the Unix epoch, with no catalog"
+        );
+    }
 
     #[test]
     fn the_embedded_bundle_is_the_published_standard_contract() {
