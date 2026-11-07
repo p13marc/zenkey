@@ -53,11 +53,11 @@ The owner, consumer and caller sections each point to them.
 |---|---|
 | [Owner](#owner) | 76 |
 | [Consumer](#consumer) | 22 |
-| [Caller](#caller) | 18 |
+| [Caller](#caller) | 17 |
 | [Deployment](#deployment) | 18 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 73, 27 of them a reader's |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 72, 27 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 67 |
-| Every rule, once | 250 |
+| Every rule, once | 249 |
 | [Rule ids](#rule-ids) | 85 |
 
 ## Owner
@@ -340,7 +340,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [O4](core.md#51-rules) | **Caller:** MUST NOT retry an operation that is not declared `idempotent`, and retries one that is only after silence (below). | `[Sc: operations.md §4]` |
 | [O5](core.md#51-rules) | **Caller and tool:** MUST NOT treat an empty reply set as a verdict. | `[Sc: operations.md §5]` |
 | [O6](core.md#51-rules) | **Caller:** MUST use consolidation `None`, since `Latest` and `Auto` drop replies (spike S6, Appendix B). | `[Sc: operations.md §6]` `[F: contracts/e033-summary]` |
-| [§5.1](core.md#51-rules) | A caller MUST NOT depend on a refusal of what the schema refuses: a writer sends only what its schema declares (§9.8). | `[Sc: operations.md §3]` |
+| [§5.1](core.md#51-rules) | A caller MUST NOT depend on a refusal of what the schema refuses: a writer sends only what its schema declares (§9.8). | `[Sc: operations.md §3, §9]` |
 | [§5.1](core.md#51-rules) | **Caller:** a caller MUST write its request as §7.5's request, `CH · record`, under the `Encoding` `zenoh/bytes`. | `[F: envelope/calls.json, vectors.json]` `[Sc: operations.md §9]` |
 
 ### [core §5.2 Errors](core.md#52-errors)
@@ -348,8 +348,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§5.2](core.md#52-errors) | A caller or a tool MUST read a `reply_err` under the `Encoding` `zenoh/bytes` by §7.5's parse. | `[F: errors/forms.json]` `[Sc: operations.md §9]` |
-| [§5.2](core.md#52-errors) | **Reading an error.** … A caller or a tool MUST read every other `reply_err` as the transport's: one the parse refuses, and one under another `Encoding`. *Except:* An implementation MAY read a call's sample whose `Encoding` is not `zenoh/bytes` as the bare wire. | `[F: errors/forms.json]` `[Sc: operations.md §9]` |
-| [§5.2](core.md#52-errors) | **Decoding.** … It [a caller or a tool decoding an envelope] MUST refuse: (5 items) | `[F: errors/cases.json]` |
+| [§5.2](core.md#52-errors) | **Reading an error.** … A caller or a tool MUST read every other `reply_err` as the transport's: one the parse refuses, and one under another `Encoding`. | `[F: errors/forms.json]` `[Sc: operations.md §9]` |
 
 ### [core §8.1 Tokens](core.md#81-tokens)
 
@@ -475,8 +474,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§5.2](core.md#52-errors) | A caller or a tool MUST read a `reply_err` under the `Encoding` `zenoh/bytes` by §7.5's parse. | `[F: errors/forms.json]` `[Sc: operations.md §9]` |
-| [§5.2](core.md#52-errors) | **Reading an error.** … A caller or a tool MUST read every other `reply_err` as the transport's: one the parse refuses, and one under another `Encoding`. *Except:* An implementation MAY read a call's sample whose `Encoding` is not `zenoh/bytes` as the bare wire. | `[F: errors/forms.json]` `[Sc: operations.md §9]` |
-| [§5.2](core.md#52-errors) | **Decoding.** … It [a caller or a tool decoding an envelope] MUST refuse: (5 items) | `[F: errors/cases.json]` |
+| [§5.2](core.md#52-errors) | **Reading an error.** … A caller or a tool MUST read every other `reply_err` as the transport's: one the parse refuses, and one under another `Encoding`. | `[F: errors/forms.json]` `[Sc: operations.md §9]` |
 
 ### [core §7.7 Frames](core.md#77-frames)
 
