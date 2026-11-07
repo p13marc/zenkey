@@ -839,13 +839,19 @@ def section6(report: Report, pairing: str) -> None:
         evs = bus.events(since=t0u)
         at = (evs[0][0] - t0u) / NS if evs else None
         # Text 0.2 (F-490): "That is 80.4 s to 81.4 s after step 1, by its
-        # phase", and the event "at that deadline, ± 0.5 s"; the extend's
-        # receipt comes a few ms after C sends it.
+        # phase", and the event "at that deadline, ± 0.5 s". The window is
+        # the text's, its top moved only by what the text leaves out (the
+        # mend after round 103): how late past 20.4 s C sent the extend, and
+        # 50 ms for its receipt.
+        late = (t2u - t0u) / NS - 20.4
+        top = 81.4 + late + 0.05
         report.check(sec, "step 3: the undo at the new deadline, not the first: the rolled-back event at the record's "
-                          "deadline, ± 0.5 s, that deadline 80.4 s to 81.4 s after step 1 by its phase",
+                          "deadline, ± 0.5 s, that deadline 80.4 s to 81.4 s after step 1 by its phase (the top "
+                          "plus how late C sent the extend, and 50 ms for its receipt)",
                      len(evs) == 1 and evs[0][2]["outcome"] == "rolled-back" and at is not None
-                     and abs(at - (dl2 - recv) / 1000) <= 0.5 and 80.4 <= (dl2 - recv) / 1000 <= 81.6,
-                     f"event at {at and round(at, 3)} s; deadline - step 1 {(dl2 - recv) / 1000:.3f} s")
+                     and abs(at - (dl2 - recv) / 1000) <= 0.5 and 80.4 <= (dl2 - recv) / 1000 <= top,
+                     f"event at {at and round(at, 3)} s; deadline - step 1 {(dl2 - recv) / 1000:.3f} s; the extend "
+                     f"sent {late * 1000:.1f} ms late, the window's top {top:.3f} s")
     finally:
         bus.close()
 
@@ -1594,8 +1600,72 @@ def section_remint(report: Report, pairing: str) -> None:
                      quiet and r5.kind == "value" and f"{tok >> 16:08x}" == run
                      and (r5.state or {}).get("instance") == (r4.state or {}).get("instance") == nr[2].get("instance"),
                      f"run {run}; token {hex(tok)}; instance {(r5.state or {}).get('instance')}")
+        if not bus.rust:
+            _remint_refused(report, sec, bus, o)
     finally:
         bus.close()
+
+
+def _remint_refused(report: Report, sec: str, bus: Any, o: Any) -> None:
+    """zk2py's owner alone (the mend after round 103, review-bot on #1076):
+    a re-mint the device refuses at its return to the startup values, after
+    step 1 ended a pending change. The ending stays, as review-bot says the
+    reference keeps it (#1055); v1 §2.12 says "the instance runs on", and
+    not what becomes of the change (F-499)."""
+    from .owner import OwnerRefused
+
+    inst = o.instance
+    t6 = time.time_ns()
+    r6 = bus.call("set/radio", {"frequency_hz": 869525000, "confirm_s": 120})
+    p6 = _pending(r6) or {}
+    number = (r6.state or {}).get("instance")
+    _wait(lambda: _held_applied(bus, t6), 5.0)
+    # step 1's undo answers ok; step 2's return to the startup values (duty
+    # runs 2, set at runtime) fails, the device reading back the 2 it holds
+    o.o.device.next_undo += ["ok", {"failed": "the radio did not answer",
+                                    "readback": {"duty": {"fraction_ppm": 2}}}]
+    t7 = time.time_ns()
+    try:
+        o.remint()
+        refused = ""
+    except OwnerRefused as e:
+        refused = str(e)
+    time.sleep(0.6)
+    recs = bus.records(since=t7)
+    evs = bus.events(since=t7)
+    after = [r for r in bus.tokens.of("/@zk/instance/") if r[1] == "put" and r[0] >= t7]
+    r7 = bus.call("confirm", {"token": p6.get("token", 0)})
+    ended = [x for x in recs if x[2].get("instance") == number and x[2].get("pending") is None]
+    held = o.device()["held"]
+    report.check(sec, "a re-mint the device refuses at step 2, after step 1 ended a pending change: refused, the "
+                      "instance runs on; the ending stays: the record, nothing pending, and one rolled-back event, "
+                      "each under the instance number it had; a late confirm not_found; duty still 2",
+                 bool(refused) and o.instance == inst and len(ended) >= 1 and len(evs) == 1
+                 and evs[0][2]["outcome"] == "rolled-back" and evs[0][2].get("token") == p6.get("token")
+                 and evs[0][2].get("instance") == number and r7.code == "not_found"
+                 and (held.get("duty") or {}).get("fraction_ppm") == 2 and not after,
+                 f"refused {refused!r}; instance {o.instance} (was {inst}); records "
+                 f"{[(r.get('instance'), r.get('revision'), bool(r.get('pending'))) for _, _, r in recs]}; events "
+                 f"{[(e['outcome'], e.get('token'), e.get('instance')) for _, _, e in evs]}; confirm {r7.short()}; "
+                 f"device {held}; r6 {r6.short()}; tokens after {after}")
+    # again, nothing pending, the device reading back nothing: what it runs
+    # is unknown, and the record says so (zk2py's reading, F-499)
+    o.o.device.next_undo.append({"failed": "the radio did not answer", "readback": {}})
+    t8 = time.time_ns()
+    try:
+        o.remint()
+        refused = ""
+    except OwnerRefused as e:
+        refused = str(e)
+    time.sleep(0.6)
+    recs = bus.records(since=t8)
+    last = recs[-1][2] if recs else {}
+    report.check(sec, "a re-mint refused by a device that reads back nothing: the instance runs on, no event, and "
+                      "one record whose fraction_ppm is unknown, one revision on",
+                 bool(refused) and o.instance == inst and len(recs) == 1 and not bus.events(since=t8)
+                 and _p(last, "duty", "fraction_ppm").get("value", "absent") is None
+                 and last.get("revision") == (ended[-1][2].get("revision", -2) + 1 if ended else -1),
+                 f"refused {refused!r}; records {[(r.get('revision'), _p(r, 'duty', 'fraction_ppm')) for _, _, r in recs]}")
 
 
 SECTIONS = {"1": section1, "2": section2, "3": section3, "4": section4, "5": section5, "6": section6,

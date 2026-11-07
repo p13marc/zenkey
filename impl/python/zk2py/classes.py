@@ -395,10 +395,10 @@ WALK: list[tuple[str, str, str, str, str]] = [
           "call) (round 101, core 0.94)"),
     ("caller", "core §5.2", "A caller or a tool MUST read every other `reply_err` as the transport's", MET,
      "live.read_reply_error: one the parse refuses and one under another Encoding the transport's, silence, an "
-     "idempotent call retried; §5.1's MAY reads the bare wire's three envelope encodings, a malformed one the "
-     "transport's (forms_live §9 steps 5 to 7) (round 101, core 0.94)"),
-    ("caller", "core §5.2", "It MUST refuse", MET,
-     "envelope.decode, the bare wire's envelope (errors family: cases.json) (core 0.94)"),
+     "idempotent call retried; an earlier core's JSON envelope under application/json among them since core 0.99 "
+     "(forms_live §9 steps 5 to 7) (round 101, core 0.94; round 104, core 0.99)"),
+    # core 0.99 (#985 C4d, round 104): §5.2's Decoding MUST removed with the
+    # bare wire, under the caller and the observer.
     ("caller", "core §8.1", "Every instance MUST hold one, including pure consumers", MET,
      "a zk2py service that calls is an owner.Owner, which holds one (presence_scenarios §1; F-361)"),
     ("caller", "core §8.1", "A caller, a consumer or a tool across a constrained face whose face policy states a reply timeout", MET,
@@ -431,15 +431,13 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "state_pairings §7, §10, §13) (round 93, core 0.73)"),
     ("observer", "core §5.1", "Caller and tool: MUST NOT treat an empty", MET,
      "judgement, live.o3_verdict (observer_scenarios, operations.md §5)"),
-    ("observer", "core §5.2", "It MUST refuse", MET,
-     "envelope.decode (errors family); a caller's or a tool's that reads the bare wire, listed under the caller "
-     "alone at core 0.94 (F-472) and under both since core 0.95's index (round 102)"),
+    # core 0.99 (round 104): §5.2's Decoding MUST removed (F-472's row).
     ("observer", "core §5.2", "A caller or a tool MUST read a `reply_err` under the `Encoding` `zenoh/bytes` by",
      MET, "live.read_reply_error, which live.o3_verdict and live.show_reply read through (forms_live §9 step 5) "
           "(round 101, core 0.94)"),
     ("observer", "core §5.2", "A caller or a tool MUST read every other `reply_err` as the transport's", MET,
-     "live.read_reply_error; live.show_reply shows the transport's with its Encoding and its bytes (forms_live §9 "
-     "steps 5 and 6) (round 101, core 0.94)"),
+     "live.read_reply_error; live.show_reply shows the transport's with its Encoding and its bytes, an earlier "
+     "core's envelope among them (forms_live §9 steps 5 to 7) (round 101, core 0.94; round 104, core 0.99)"),
     ("observer", "core §8.1", "Every instance MUST hold one, including pure consumers", NA,
      "no zk2py tool is a service, so none is an instance (observer §7.1's refusal of a self.system provider, met)"),
     ("observer", "core §8.1", "A caller, a consumer or a tool across a constrained face whose face policy states a reply timeout", MET,
@@ -921,6 +919,17 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "owner.Owner._declare_instance's first put and _put_descriptor's, each stamped from Owner.mint, on a  "
      "session without timestamping, the session's zid its id (state_pairings §7 step 3) (core 0.74's F-415, the  "
      "mend after round 93)"),
+    # core 0.99 (#985 C4d): stated without a keyword, the owner's half of
+    # the bare wire's removal.
+    ("owner", "core §5.1", "The request. An owner reads a query under `zenoh/bytes` by §7.5's parse", MET,
+     "owner.OpCall: a query under another Encoding is refused invalid_request, its bytes never parsed, no handler "
+     "run, after the three refusals before it (forms_live §9 step 8, py-py and zenctl-py) (round 104, core 0.99)"),
+    ("caller", "core §5.1", "Under another `Encoding` a reply is no value form, so it is malformed too", MET,
+     "live.read_reply: refused_value, its refusal encoding, an answer all the same, never parsed (readings) (round "
+     "104, core 0.99)"),
+    ("observer", "observer §7.3", "Another `Encoding`. A reply under any other `Encoding` is no value form", MET,
+     "live.read_reply and live.show_reply: undecodable, its refusal encoding (readings) (round 104, observer "
+     "0.27)"),
 ]
 
 

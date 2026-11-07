@@ -3,7 +3,10 @@ example, the ``consume`` example and ``zenctl``, built from main elsewhere and
 run, never read (#609).
 
 One constant for every runner (review-bot on round 102, #1069): the
-directory is ``$ZK2PY_BLACKBOX``, and :data:`DEFAULT` where it is unset.
+directory is ``$ZK2PY_BLACKBOX``, and :data:`DEFAULT` where it is unset,
+read once, when zk2py is imported. There is no second, live reading of the
+environment (review-bot on round 103, #1076): a runner started under
+another ``ZK2PY_BLACKBOX`` is a new process.
 """
 
 from __future__ import annotations
@@ -18,10 +21,6 @@ DEFAULT = "/srv/dev/scratch/zenkey/bin/current"
 ENV = "ZK2PY_BLACKBOX"
 
 
-def directory() -> Path:
-    """The black boxes' directory: ``$ZK2PY_BLACKBOX``, or :data:`DEFAULT`."""
-    return Path(os.environ.get(ENV, DEFAULT))
-
-
-#: The directory as the environment named it when zk2py was imported.
-BLACKBOX = directory()
+#: The black boxes' directory: ``$ZK2PY_BLACKBOX`` as the environment named it
+#: when zk2py was imported, or :data:`DEFAULT`.
+BLACKBOX = Path(os.environ.get(ENV, DEFAULT))

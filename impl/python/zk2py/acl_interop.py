@@ -29,7 +29,6 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-import threading
 import time
 from typing import Any
 from . import zk2c
@@ -154,7 +153,7 @@ def _keys(res) -> list[str]:
 def run_python_acl(report, repo) -> None:
     """security.md §1–§3 step 3, and 0.14's measured facts, on generated
     grants. Each posture or variant gets a router of its own."""
-    from . import acl, live
+    from . import acl
 
     principals = deployment(repo)
     workdir = tempfile.mkdtemp(prefix="zk2py-acl-")
@@ -600,7 +599,6 @@ def _allow_full(report, repo, block, workdir) -> None:
 
 
 def _allow_rules_only(report, repo, block, workdir) -> None:
-    from . import live
 
     run = "acl: the deny posture's allow rules, with default_permission allow (security.md §2)"
     w = World(repo, block, workdir)

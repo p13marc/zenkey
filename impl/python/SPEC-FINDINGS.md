@@ -25676,3 +25676,248 @@ all three pairings, 170 of 170, the re-mint not run with `zenctl`).
   reference, and F-488 is zenoh-modem's call, stated in its binding.
 - **Open:** F-436 (not re-run), F-437 to F-441, F-495 to F-497. F-365
   stays open as #965's.
+
+## At core 0.99 (#985 C4d)
+
+Round 104 read, cold, the texts at main 4b802646, each changelog entry
+first: core 0.99 (#985 C4d, the bare wire removed), observer 0.27, and
+telemetry.v1 0.9, config.v1 0.12, config.v2 0.3 and redundancy.v1 0.10,
+which follow it. Then core §5.1 and §5.2 whole, observer §7.3,
+telemetry.v1 §2.6 and config.v1 §2.5. zk2py then lost the bare wire, caller
+and owner, and ran `scenarios/operations.md` §9 steps 7 and 8 live on main
+4b802646's black boxes.
+
+**No rule changed beyond the changelogs, but one fixture has no entry.**
+zk2py diffed `spec/` and `examples/zk2/` between 2688123d (round 103's
+base) and 4b802646.
+- **Core** changed in §5.1, §5.2, Appendix C and Appendix E as 0.99's
+  entry says, and in its version. No keyword was added. "The request" now
+  refuses a query under another `Encoding`, with no keyword, as the entry
+  says. `RULES.md` lists 249 rules: the caller 17, the observer 72.
+- **Observer** changed in §7.3 and its header alone, as 0.27's entry says.
+- **The fixtures:**
+  - `errors/cases.json` is removed;
+  - `forms.json` changed its description and three notes;
+  - `vectors.json` changed three notes;
+  - no case changed in either;
+  - `operations.md` §9's step 7 is rewritten, and step 8 is new.
+- **The four profiles** changed as their entries say, with no keyword
+  added: telemetry.v1 §2.6 and `samples.json`'s F-144 note; config.v1 §0,
+  §2.5, §2.15 and Appendix A, and `redaction.json`'s description; config.v2
+  Appendix A and its header; redundancy.v1's `scenarios.md` §8 expected 3.
+  Whether telemetry.v1 0.9 changed a rule turns on how 0.8's citation was
+  read (F-500).
+- **#977 E2** (c6f64924) added `conformance/seed/snapshot.json`, 42 cases,
+  and its `conformance/README.md` row, with no core version and no entry
+  (F-498).
+- **examples/zk2:** zenoh-modem's `MIGRATION.md` marks the bare wire's
+  removal landed. Examples carry no entry.
+
+**The bare wire out of zk2py.**
+- **The caller:** `live.read_reply` reads a reply under another `Encoding`
+  as a refused value. Its refusal is `encoding`, it is never parsed, and
+  it is an answer all the same. `live.read_reply_error` reads every reply
+  error under another `Encoding` as the transport's, an earlier core's
+  envelope among them. `live.call` writes the request form alone, and
+  refuses to send under another `Encoding`.
+- **The owner:** `owner.OpCall` refuses a query under another `Encoding`
+  `invalid_request`. Its bytes are never parsed, and no handler runs.
+- **What went:** `envelope.py`, the decoder no rule asks for, went. So did
+  the errors family's `cases.json` branch.
+- **Live, on 4b802646's black boxes:** `forms_live` 128 of 128. That is
+  py-py 53, py-rust 26 and zenctl-py 49.
+  - **Step 7.** zk2py's caller and `zenctl call` each read the envelope
+    under `application/json` as the transport's. Each calls `set` once
+    and `ping` twice, then reports silence. `zenctl` shows `answer:
+    silent`, with the Encoding and the bytes.
+  - **Step 8.** The owner example and zk2py's owner each answer
+    `invalid_request`, one error form under `zenoh/bytes`. They answer so
+    for step 1's form under `application/json`, for `set-raw`'s form, and
+    for its bare record under `application/octet-stream`. zk2py's owner
+    runs no handler.
+  - **The order.** Both owners answer a wildcard call to `set` under
+    `application/json` `fanout_forbidden` (F-502).
+
+**F-495 to F-497 stay open.** No text they name changed at 4b802646.
+
+### F-498 · gap · `conformance/seed/snapshot.json` (#977 E2) and core §4.2: a fixture whose rules no text states
+
+> `seed/snapshot.json`'s description: "core §4.2, a late joiner's seed over
+> snapshots: the merge of a GET's snapshots and per-key replies with its
+> subscription's samples, the omission rule, asof and pages. … Then, on a
+> key K that is the snapshot key or a member's key of the collection with
+> that coll, the omission rule drops each member of the collection at K or
+> under it that the reader holds and the snapshot lists neither live nor
+> as a tombstone, unless held under the snapshot's run with a seq above
+> asof, or under another run and heard after the GET was asked". Core
+> 0.97's entry: "**E3's rules wait for E3:** which key answers what,
+> consolidation `None`, the omission rule, asof's and a confirmation's
+> owner rules, and archives." Core §7.5: "No rule at this version has an
+> owner write one, or a reader read one (§4.2)."
+
+- **The gap.** Core §4.2 at 0.99 says nothing of a snapshot. It merges
+  "the GET's replies and the subscription's samples per key". Nothing in
+  the fixture has a text:
+  - the snapshot key: no text uses the words;
+  - a page's entries merged on their members' keys;
+  - completeness as a seed reads it;
+  - the omission rule and its two guards;
+  - a page heard on a subscription, neither merged nor counted;
+  - a reader without the contract, for which no omission applies.
+- **No entry records the file.** `conformance/README.md`'s seed row cites
+  "(`snapshot.json`, §4.2): the omission rule, asof and pages". Appendix
+  E's `conformance/seed/` row names `merge.json` and `inband.json` alone.
+  No changelog names `snapshot.json`.
+- **It drops what a reader holds.** That is a rule a fixture cannot
+  introduce by itself. 0.97's entry left the omission rule to E3.
+- **What zk2py does:** it reads the fixture from its description alone,
+  in `seed_snapshot`: 42 cases of 42, each page read from its bytes. A member matches "its template under the
+  snapshot key, each parameter one chunk". zk2py reads the snapshot key
+  as the key of the template's literal chunks before its first parameter,
+  which every case bears out. zk2py claims no rule from it, and no row of
+  the walk is keyed to it.
+- **Fix:** core §4.2 states the seed over snapshots, with an entry:
+  - the snapshot key;
+  - a page's entries merged as they arrive;
+  - when a snapshot is complete;
+  - the omission rule, with its two guards and what "heard after the
+    GET" means;
+  - a page heard on a subscription;
+  - a reader with no contract.
+
+  Appendix E's seed row then names `snapshot.json`. Or the fixture waits
+  for E3, as 0.97's entry says the rule does.
+- **Changes:** whether a late joiner drops a member it holds on an
+  owner's snapshot.
+
+### F-499 · gap · config.v1 §2.12: a re-mint refused after its step 1 ended a pending change
+
+> config.v1 §2.12: "It gets there in this order: 1. **A pending change**
+> ends first, in the old instance, as `cancel` ends it (§2.10). Its undo
+> runs and its read-back is put. 2. **Its event** is published,
+> `rolled-back` or `partial` (§2.17). … 3. **The device** returns to its
+> startup values, where a runtime change left a parameter elsewhere, as at
+> a restart." And: "It refuses the re-mint, and the instance runs on, in
+> four cases: … a device that refuses to return to its startup values".
+
+- **The gap.** That refusal comes at step 3, after steps 1 and 2 have
+  ended the pending change and published its event. The text says the
+  instance runs on. It does not say:
+  - whether the ending stays;
+  - what the instance holds of a device that failed its return, one that
+    reads back other values;
+  - what happens when step 1's undo is left in flight (§2.7). §2.12's
+    "an act in flight" is checked before step 1.
+- **The reference keeps the ending,** review-bot says (#1055: "a cancel
+  made before a refusal stays made").
+- **What zk2py does:** both owners keep the ending.
+  - A late `confirm` of it is `not_found`.
+  - config.v2's record takes the device's read-back as §2.11 reads a
+    failed undo's: a value read back, else unknown, one revision on.
+  - config.v1's owner refuses on a device that raises at its return.
+  - Step 1's undo left in flight refuses the re-mint, and the change
+    ends when the undo completes.
+  - `config_v2_scenarios` checks both read-backs, py-py.
+- **Fix:** §2.12: "A refusal at step 3 leaves steps 1 and 2 done: the
+  change stays ended, and its event stands. The instance runs on with
+  what the device reads back, as after a failed undo (§2.11)."
+- **Changes:** what a caller finds after a refused re-mint: the change
+  ended, and the view, the status or the record.
+
+### F-500 · ambiguity · telemetry.v1 0.9 §2.6: a CBOR sample's indefinite lengths, and bytes after its data item
+
+> telemetry.v1 0.9 §2.6: "Every other tag, and a tag 2 or 3 around anything
+> but a byte string, is read as its content. A map is read as its pairs:
+> each key a text string, and no key twice. The simple value `undefined` is
+> read as `null`. Anything else does not decode." 0.8 read "a map as the
+> envelope's are read (core §5.2): its keys text, none twice, and
+> `undefined` is `null`". Core 0.98 §5.2's CBOR edges: "the bytes hold one
+> data item and nothing after it (`decode` otherwise). Indefinite lengths
+> are accepted." 0.9's entry: "These are the three readings the citation
+> named after its colon, and nothing else of the envelope's decoding."
+
+- **The ambiguity.** 0.8 sent its reader to the envelope's reading of a
+  map. That reading accepted indefinite lengths, and held a payload to one
+  data item. 0.9 states an indefinite length only for a bignum's byte
+  string ("definite or not"). It says nothing of bytes after the data item.
+- **Two readings.** "Anything else does not decode" can be read to refuse
+  an indefinite-length map, array or string, or to leave it to RFC 8949,
+  which accepts it. A trailing byte is likewise either way. `samples.json`
+  holds neither case.
+- **Whether 0.9 changed a rule** turns on how 0.8's citation was read. Read
+  as its colon's three readings, as the entry says, no rule changed.
+- **What zk2py does:** it accepts indefinite lengths for every data item
+  (RFC 8949 §3.2.2), and reads a byte after the data item `undecodable`.
+- **Fix:** §2.6 "CBOR": "Indefinite lengths are accepted for every data
+  item (RFC 8949 §3.2.2). A sample holds one data item and nothing after
+  it." Add two `samples.json` cases: an indefinite-length Point, and a
+  counter with a byte after it.
+- **Changes:** whether those two samples decode.
+
+### F-501 · minor · config.v1 §2.5 and config.v2 §2.5: the core's refusals before the rows leave out a query under another `Encoding`
+
+> config.v1 §2.5: "The core's own refusals come first (core §5.1, "The
+> order of refusals"): … a request that does not decode as `SetRequest` is
+> `invalid_request`." config.v2 §2.5: "Then a request that does not parse
+> is `invalid_request`: core §7.5's refusals for a query, then core §7.6's
+> for `Set<T>`." Core 0.99 §5.1: "Under another `Encoding` a query carries
+> no request form … Such a query, a request the parse refuses, and one
+> whose record does not decode as the operation's `request` type are
+> refused with `invalid_request`." config.v1 0.12's entry: "The owner
+> refuses as it did since core 0.94".
+
+- **The error.** Each list reads as the core's refusals, whole. Neither
+  names core 0.99's query under another `Encoding`. config.v1's names no
+  request §7.5's parse refuses either.
+- **Why it matters.** A `config.v1` owner that read a `SetRequest`'s JSON
+  under `application/json`, as 0.94's MAY let it, answered it. Since core
+  0.99 it refuses it. "As it did since core 0.94" is not quite so.
+- **What zk2py does:** its owners refuse such a query `invalid_request`
+  after the core's three refusals and before row 1 (`owner.OpCall`).
+- **Fix:**
+  - v1: "a query under another `Encoding`, a request §7.5's parse refuses,
+    and one that does not decode as `SetRequest` are `invalid_request`
+    (core §5.1, "The request")";
+  - v2: "Then a query under another `Encoding`, and a request that does
+    not parse, are `invalid_request`".
+- **Changes:** wording. The rule is the core's.
+
+### F-502 · minor · core §5.1 "The order of refusals" names a request that does not decode, not a query under another `Encoding`
+
+> Core §5.1, "The order of refusals": "So a wildcard call to an operation
+> that forbids fan-out is `fanout_forbidden`, whatever its other chunks
+> hold. A request that does not decode is refused after these, by the
+> server's decode (below)." "The request" (0.99): "Such a query, a request
+> the parse refuses, and one whose record does not decode as the
+> operation's `request` type are refused with `invalid_request`."
+
+- **The error.** "The request" now names three refusals. "The order of
+  refusals" places one of them, "a request that does not decode", after
+  the three key refusals.
+- **Where a query under another `Encoding` falls** can be seen. A
+  wildcard call under `application/json` is `fanout_forbidden` if the
+  key refusals come first, and `invalid_request` if the `Encoding` does.
+  The text places only "a request that does not decode".
+- **Live, both owners agree:** the owner example and zk2py's each answer
+  a wildcard call to `set` under `application/json` `fanout_forbidden`.
+- **What zk2py does:** it refuses the `Encoding` after the three key
+  refusals.
+- **Fix:** "A query under another `Encoding`, a request the parse
+  refuses, and one that does not decode are refused after these ("The
+  request", below)."
+- **Changes:** wording.
+
+### Counts at core 0.99 (#985 C4d)
+
+502 entries.
+- **New: F-498 to F-502:**
+  - two gaps: F-498, the seed fixture with no text, and F-499;
+  - an ambiguity: F-500;
+  - two minor errors: F-501 and F-502.
+  None is a blocker.
+- **Open:**
+  - F-436 (not re-run);
+  - F-437 to F-441;
+  - F-495 to F-502.
+
+  F-365 stays open as #965's.

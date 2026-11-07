@@ -920,7 +920,7 @@ def section9(ctx: Ctx) -> None:
     and the Rust one (``zenctl desired``, the doctor's ``desired-*`` checks,
     ``check conform``'s ``desired-*`` cases) as a black box, each against
     §9's Expected and against each other."""
-    from . import desired_tool as dt, live
+    from . import desired_tool as dt
     from .contract import load_contract
 
     sec, rp = ctx.name("§9 a tool's questions"), ctx.report
@@ -1740,6 +1740,7 @@ def section12(ctx: Ctx) -> None:
                          and len(o.device.acts("apply")) == applies,
                          f"refused {refused!r}; tokens {_tokens12(bus, t1)}; St {st}")
             else:
+                old_run = o.owner.run_hex()
                 new = o.remint()
                 ok = _wait(lambda: settled(o) and bool(_applied12(bus, t1, new)), 10.0, 0.1)
                 order = [x[1] for x in o.device.log[n0:]]
@@ -1758,6 +1759,14 @@ def section12(ctx: Ctx) -> None:
                 rp.check(sec, "step 1: no St of the new instance shows desired converged on revision 1 while it "
                               "says fraction_ppm 10000, and the device never held 10000 under a converged report",
                          bool(sts) and not wrong, f"{len(sts)} St of the new instance; wrong {wrong}")
+                # the mend after round 103: the new instance's view and status
+                # go out once its run is taken (core §4.3, "A new instance
+                # writes under a new run"), where round 103's put them first
+                runs = [g[6] for g in bus.since(t1, ST12) if g[2] == "put" and json.loads(g[3]).get("instance") == new]
+                rp.check(sec, "step 1: every St of the new instance is put under its new run, none under the old "
+                              "(core §4.3)",
+                         bool(runs) and set(runs) == {o.owner.run_hex()} and old_run not in runs,
+                         f"old run {old_run}, new run {o.owner.run_hex()}, St runs {runs}")
             # Step 2: the owner's process stops, and starts again.
             last = o.instance
             t2 = time.monotonic()

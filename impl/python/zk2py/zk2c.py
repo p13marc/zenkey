@@ -420,8 +420,8 @@ def read_reply_err(encoding: str, payload: bytes) -> Envelope:
     under ``zenoh/bytes`` is ``sample_kind``: "T is a value's CH". Core 0.94
     §5.2: "A caller or a tool MUST read a reply_err under the Encoding
     zenoh/bytes by §7.5's parse", and every other one as the transport's;
-    zk2py's caller reads so (:func:`zk2py.live.read_reply_error`), and takes
-    §5.1's MAY for the bare wire's envelope."""
+    zk2py's caller reads so (:func:`zk2py.live.read_reply_error`), an
+    earlier core's envelope among them since core 0.99."""
     if str(encoding) != FORM_ENCODING:
         raise Refused("encoding", f"{encoding!r} carries no form: only {FORM_ENCODING} does")
     return parse(payload, "reply_err")

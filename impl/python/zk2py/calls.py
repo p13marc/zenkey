@@ -1,6 +1,6 @@
-"""Core §5.1 and §5.2 (0.94, #985 C4c): a call's forms by its operation's
-types, the codec beside :mod:`zk2py.zk2c`'s bytes (``conformance/envelope/
-calls.json``; ``scenarios/operations.md`` §9).
+"""Core §5.1 and §5.2 (0.94, #985 C4c; 0.99, C4d): a call's forms by its
+operation's types, the codec beside :mod:`zk2py.zk2c`'s bytes
+(``conformance/envelope/calls.json``; ``scenarios/operations.md`` §9).
 
 **What 0.94 adopts.** "A call travels in §7.5's forms, whatever its types'
 kind: a JSON Schema, protobuf, raw or packed record is carried alike. A
@@ -37,11 +37,19 @@ tag is not checked" (calls.json's description, and 0.94's entry: "A packed
 detail is read under CH's tag, and an error with no detail reads no
 record").
 
-**The bare wire** (core §5.1, a MAY): "An implementation MAY read a call's
-sample whose ``Encoding`` is not ``zenoh/bytes`` as the bare wire. It tells
-the two wires apart by the ``Encoding`` alone". :func:`bare` says which a
-sample is, and the readers of :mod:`zk2py.live` and :mod:`zk2py.owner` take
-the MAY; "None writes the bare wire", and no writer here does.
+**Another ``Encoding``** (core 0.99, the bare wire removed): a call is read
+in the forms alone, and :func:`in_forms` says whether a sample's
+``Encoding`` is theirs.
+- **A reply:** "Under another ``Encoding`` a reply is no value form, so it
+  is malformed too" (§5.1, "Reading a value"), an answer all the same
+  (:func:`zk2py.live.read_reply`).
+- **A reply error:** "A caller or a tool MUST read every other
+  ``reply_err`` as the transport's: one the parse refuses, and one under
+  another ``Encoding``" (§5.2), an earlier core's envelope among them
+  (:func:`zk2py.live.read_reply_error`).
+- **A query:** "Under another ``Encoding`` a query carries no request form
+  … Such a query … [is] refused with ``invalid_request``" (§5.1, "The
+  request"; :class:`zk2py.owner.OpCall`).
 """
 
 from __future__ import annotations
@@ -55,15 +63,16 @@ from . import packed, zk2c
 #: An operation's four types, by role (core §5.1, §9.1).
 ROLES = ("request", "response", "summary", "error")
 
-#: core §5.1: "a call's sample whose Encoding is not zenoh/bytes" is the
-#: bare wire; zk2c's ENCODING, "compared as an exact string".
+#: core §5.1: every form travels "under the Encoding zenoh/bytes"; zk2c's
+#: ENCODING, "compared as an exact string".
 FORM_ENCODING = zk2c.ENCODING
 
 
-def bare(encoding: Any) -> bool:
-    """Whether a call's sample under ``encoding`` is the bare wire (core
-    §5.1: "It tells the two wires apart by the Encoding alone")."""
-    return str(encoding) != FORM_ENCODING
+def in_forms(encoding: Any) -> bool:
+    """Whether a call's sample under ``encoding`` can carry a form (core
+    0.99 §5.1: "only the Encoding tells a record sent with no form from
+    one")."""
+    return str(encoding) == FORM_ENCODING
 
 
 class Refused(ValueError):
@@ -296,7 +305,7 @@ def read(op: Operation, sample: str, payload: bytes, summary: bool = False) -> R
     record as its type under CH's tag (:class:`zk2py.packed.Refused` or
     :class:`Refused`). An error's detail its type refuses is kept as
     ``detail_refusal``, never raised; an error with no detail reads no
-    record. The ``Encoding`` is the caller's to check first (:func:`bare`)."""
+    record. The ``Encoding`` is the caller's to check first (:func:`in_forms`)."""
     env = zk2c.parse(payload, sample)
     if env.error is not None:
         if env.error.detail is None or op.types.get("error") is None:

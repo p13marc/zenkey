@@ -44,9 +44,11 @@ a failed call in §7.5's error form". Each CH carries its type's tag
 (:mod:`zk2py.calls`). A request is read by §7.5's parse, and its record as
 the ``request`` type, a packed one under CH's tag; one either refuses is
 ``invalid_request``, after the three refusals before any handler (§5.1,
-"The request"). A request under another ``Encoding`` is read as the bare
-wire, its payload the record (§5.1's MAY). An answer sent again is its
-first bytes, mark included (:meth:`OpCall.resend`).
+"The request"). Since core 0.99 (#985 C4d) the bare wire is gone: "Under
+another ``Encoding`` a query carries no request form", and is refused
+``invalid_request`` as a request the parse refuses is, whatever its bytes,
+no handler run. An answer sent again is its first bytes, mark included
+(:meth:`OpCall.resend`).
 
 **Bring-up (§8.2).** Step 2 runs first (the order of steps 1 and 2 is free),
 so a refusal declares nothing: a required resource not exposed, an optional
@@ -109,7 +111,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 import zenoh
 
@@ -339,19 +341,20 @@ class OpCall:
         self.wire = b"" if query.payload is None else query.payload.to_bytes()
         enc = getattr(query, "encoding", None)
         self.encoding = calls.FORM_ENCODING if enc is None else str(enc)
-        #: core §5.1's MAY: a request under another Encoding is the bare
-        #: wire, its payload the record. A query with no payload at all
-        #: carries no Encoding of its own, and is read as a form: it has no
-        #: CH (``short``).
-        self.bare = query.payload is not None and calls.bare(self.encoding)
         #: the request's record (``payload``), its CH's tag, and the token of
-        #: §7.5's parse that refused it, then invalid_request (§5.1)
-        self.payload, self.tag, self.request_refusal = self.wire, None, None
-        if not self.bare:
+        #: the refusal, then invalid_request (§5.1, "The request"): core
+        #: 0.99, "Under another Encoding a query carries no request form",
+        #: ``encoding``, its bytes never parsed; else §7.5's parse's. A query
+        #: with no payload at all carries no Encoding of its own, and is read
+        #: as a form: it has no CH (``short``).
+        self.payload, self.tag, self.request_refusal = b"", None, None
+        if query.payload is not None and not calls.in_forms(self.encoding):
+            self.request_refusal = "encoding"
+        else:
             try:
                 env = zk2c.parse(self.wire, "query")
             except zk2c.Refused as e:
-                self.payload, self.request_refusal = b"", e.token
+                self.request_refusal = e.token
             else:
                 self.payload, self.tag = env.record or b"", env.tag
         #: the request read as its type (:meth:`zk2py.calls.Operation.decode`),
@@ -1083,7 +1086,6 @@ class Owner:
         record (core §7.6 "Writing", "What a writer takes"), under the
         deployment epoch. Raises :class:`zk2py.packed.Refused`: nothing is
         put of a value the text refuses."""
-        from . import packed
 
         rec = self.packed_record(key)
         if rec is None:
@@ -1559,14 +1561,19 @@ class Owner:
             raise StandbyRefused(f"{key}: it stands by on {iface}, and a standby puts and deletes none of its "
                                  "keys (redundancy.v1 §2.4)")
 
-    def new_epoch(self, new: str | None = None) -> str:
+    def new_epoch(self, new: str | None = None, before: Callable[[], None] | None = None) -> str:
         """Core §1.5 and §8.1: a new instance id while running, "make-before-
         break": the new descriptor's queryable and first put, then its
         tokens, in §8.2's order, and only then the old ones undeclared, "an
         overlap, never a gap". The session is kept (core §1.5's SHOULD of a
         new session is not taken: ``telemetry.v1`` scenarios §2, "the process
         unchanged"), so the stamps' id stays. ``new`` is the new id, a test's
-        choice, else 64 random bits. Returns the old instance id."""
+        choice, else 64 random bits. ``before`` runs once the new run is
+        taken and before the new instance declares anything, so what it puts
+        is the new instance's, under the new run ("A new instance writes
+        under a new run", core §4.3), before its tokens (``config.v1`` §2.3);
+        one that raises fails the re-mint as a declaration does. Returns the
+        old instance id."""
         assert self.session is not None
         old, old_entities = self.instance, self._instance_entities
         new = new or secrets.token_hex(8)
@@ -1580,15 +1587,17 @@ class Owner:
             # run", which its first descriptor states. A declaration that
             # raises leaves the old run too.
             with self._seq_lock:
-                before = (self.run, self._seq, dict(self._stream_seq), self._minted)
+                held = (self.run, self._seq, dict(self._stream_seq), self._minted)
                 self.take_run()
             try:
+                if before is not None:
+                    before()
                 entities, doc, tokens = self._declare_instance(self._plan_made, new)
             except Exception:
                 # The old run, its seq and its stream seqs come back; the run
                 # the failed re-mint took stays in runs_used (see the field).
                 with self._seq_lock:
-                    self.run, self._seq, self._stream_seq, self._minted = before[0], before[1], before[2], before[3]
+                    self.run, self._seq, self._stream_seq, self._minted = held[0], held[1], held[2], held[3]
                 raise
             self.instance, self._instance_entities, self.descriptor = new, entities, doc
             self._iface_tokens = tokens
@@ -2523,25 +2532,26 @@ class Owner:
 
     @staticmethod
     def _read_request(call: "OpCall") -> str | None:
-        """Core §5.1, "The request" (0.94): "A request that §7.5's parse
-        refuses, or whose record does not decode as the operation's request
-        type, is refused with invalid_request. The record is read on the
-        contract's encoding (§7.2), and a packed one under its CH's tag
-        (§7.6)." Sets ``call.request``; returns why it is refused, or None.
-        A protobuf or raw record is handed to the handler as its bytes: its
-        decode is the handler's. A bare request (§5.1's MAY) has no CH, so a
-        packed one has no tag and cannot be read (observer §7.3: "One that
-        came in no envelope has no tag")."""
+        """Core §5.1, "The request" (0.99): "An owner reads a query under
+        zenoh/bytes by §7.5's parse. Under another Encoding a query carries
+        no request form … Such a query, a request the parse refuses, and one
+        whose record does not decode as the operation's request type are
+        refused with invalid_request. The record is read on the contract's
+        encoding (§7.2), and a packed one under its CH's tag (§7.6)." Sets
+        ``call.request``; returns why it is refused, or None. A protobuf or
+        raw record is handed to the handler as its bytes: its decode is the
+        handler's."""
         from . import calls, packed
 
+        if call.request_refusal == "encoding":
+            return (f"a query under {call.encoding} carries no request form, whatever its bytes: only "
+                    f"{calls.FORM_ENCODING} does (core §5.1, \"The request\")")
         if call.request_refusal is not None:
             return f"the request is no request form: {call.request_refusal} (core §7.5)"
         kind = call.op.kind("request")
         if kind not in ("packed", "jsonschema"):
             call.request = call.payload
             return None
-        if kind == "packed" and call.bare:
-            return "a packed request on the bare wire has no CH, so no tag (core §7.6)"
         try:
             call.request = call.op.decode("request", call.tag or 0, call.payload)
         except (packed.Refused, calls.Refused) as e:

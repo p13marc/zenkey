@@ -197,26 +197,15 @@ def family_descriptors(root: Path) -> list[Result]:
 # -- errors/ (core.md §5.2) --------------------------------------------------
 
 def family_errors(root: Path) -> list[Result]:
-    """``errors/``, every file, an unknown one failing: ``cases.json``, §5.2's
-    envelope decoded by its Encoding; ``forms.json`` (core 0.92), §7.5's
-    error form (:func:`_error_forms`)."""
-    from .envelope import EnvelopeError, decode
-
+    """``errors/``, every file, an unknown one failing: ``forms.json`` (core
+    0.92), §7.5's error form (:func:`_error_forms`), alone since core 0.99
+    removed ``cases.json`` with the bare wire's envelope (#985 C4d)."""
     out: list[Result] = []
     for path in sorted((root / "errors").iterdir()):
         if path.name == "forms.json":
             out += _error_forms(_load_json(path))
             continue
-        if path.name != "cases.json":
-            out.append((f"errors/{path.name}", False, "an unknown fixture file: the runner does not read it"))
-            continue
-        for c in _load_json(path)["cases"]:
-            payload = c["text"].encode("utf-8") if "text" in c else bytes.fromhex(c["hex"])
-            try:
-                got: Any = decode(c["encoding"], payload)
-            except EnvelopeError as e:
-                got = {"refused": e.tag}
-            out.append(_check(c["name"], got, c["expect"]))
+        out.append((f"errors/{path.name}", False, "an unknown fixture file: the runner does not read it"))
     return out
 
 
@@ -4000,7 +3989,8 @@ def family_readings(root: Path) -> list[Result]:
         + _mend_after_round93_readings(root) + _round94_readings(root) + _mend_after_round94_readings(root) \
         + _round95_readings(root) + _round96_readings(root) + _round96_k1_readings(root) + _round97_readings(root) \
         + _round98_readings(root) + _round99_readings(root) + _round100_readings(root) \
-        + _round101_readings(root) + _round102_readings(root) + _round103_readings(root)
+        + _round101_readings(root) + _round102_readings(root) + _round103_readings(root) \
+        + _round104_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -4014,7 +4004,7 @@ def _round97_readings(root: Path) -> list[tuple[str, Any, Any]]:
     :class:`zk2py.owner.Owner` before it starts. No session is opened."""
     import re
 
-    from . import acl, echo_tool, frame, freshness as fr, freshness_v2 as fv2, heartbeat, link, packed, zk2c
+    from . import acl, echo_tool, frame, freshness as fr, heartbeat, link, packed, zk2c
     from .contract import load_contract
     from .owner import Owner
 
@@ -4658,7 +4648,7 @@ def _round100_readings(root: Path) -> list[tuple[str, Any, Any]]:
     ``freshness_v2_scenarios`` §2 step 6 (F-467) and ``forms_live``."""
     import re
 
-    from . import envelope, link, zk2c
+    from . import link, zk2c
     from .contract import load_contract
 
     spec = root.parent
@@ -4734,14 +4724,14 @@ def _round100_readings(root: Path) -> list[tuple[str, Any, Any]]:
     # envelope's kinds are the bare wire's, which no owner writes.
     s52 = core[core.index("### 5.2 Errors"):core.index("## 6. Ownership and serving")]
     by = {r["template"]: r for r in op.canonical["resources"]}
-    out.append(("F-471 (round 100; answered by core 0.94, round 101): the envelope's kinds name a JSON Schema, a "
-                "protobuf and a raw type and no packed one, and are now the bare wire's alone; zk2py's envelope "
-                "kind for a packed operation, on the bare wire it writes no more, stays JSON",
-                missing(s52, "**a JSON Schema type:**", "**a protobuf type:**", "**a raw type:**",
-                        "**The envelope, on the bare wire.**")
-                + [("**a packed type" in s52), envelope.envelope_encoding(by["calibrate"]),
-                   envelope.envelope_encoding(by["scan"])],
-                [False, "application/json", "application/json"]))
+    # Core 0.99 (#985 C4d, round 104) removes the envelope, its kinds with it.
+    out.append(("F-471 (round 100; answered by core 0.94, round 101): the envelope's kinds named a JSON Schema, a "
+                "protobuf and a raw type and no packed one, and were the bare wire's alone; core 0.99 removes the "
+                "envelope and its kinds (round 104), and ok-packed-operation's two packed operations still load",
+                [q for q in ("**a JSON Schema type:**", "**a protobuf type:**", "**a raw type:**",
+                             "**The envelope, on the bare wire.**", "**a packed type") if q in s52]
+                + [sorted(t for t in ("calibrate", "scan") if t in by)],
+                [["calibrate", "scan"]]))
     # Round 99's answers, as the texts now read, and zk2py's reading.
     out.append(("F-465 answered (link.v2 0.6 §2.3, §2.7): an empty frames lists no frame, every exposed frame denied "
                 "by name; F-466 (link.v1 0.16 §2.7, §2.9): an implied freshness.v2 is listed for stream alone; "
@@ -4828,17 +4818,17 @@ def _round101_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  {"Sensor": 6, "Status": 14, "Change": 2}, 21, 18, 22, 159, 256, 22, 17]))
     # §5.1's four additions and §5.2's two, as the entry names them.
     out.append(("core 0.94 §5.1: the caller's request MUST, the owner's value MUST with its as-of mark, reading a "
-                "value, an answer sent again MUST, and the bare wire's MAY",
+                "value, an answer sent again MUST; the bare wire's MAY, gone since core 0.99 (round 104)",
                 missing(core, "a caller MUST write its request as §7.5's request, `CH · record`, under the "
                               "`Encoding` `zenoh/bytes`. CH's width bit is 0, and its tag is the `request` type's.",
                         "an owner MUST write each value reply in §7.5's value form, under the `Encoding` "
                         "`zenoh/bytes`, with its as-of mark (below).",
                         "A reply the parse or the type refuses is malformed, and an answer all the same (above).",
-                        "The owner MUST then send that answer's bytes unchanged, its mark included.",
-                        "An implementation MAY read a call's sample whose `Encoding` is not `zenoh/bytes` as the "
-                        "bare wire.", "None writes the bare wire"), []))
+                        "The owner MUST then send that answer's bytes unchanged, its mark included.")
+                + [q for q in ("An implementation MAY read a call's sample whose `Encoding` is not `zenoh/bytes` "
+                               "as the bare wire.", "None writes the bare wire") if q in core], []))
     out.append(("core 0.94 §5.2: the owner's error form MUST, the detail its type's own bytes, the two reading MUSTs, "
-                "a malformed error the transport's, and the envelope the bare wire's",
+                "a malformed error the transport's; the envelope, the bare wire's, gone since core 0.99 (round 104)",
                 missing(core, "An owner MUST answer a failed call in §7.5's error form, under the `Encoding` "
                               "`zenoh/bytes`, with its as-of mark (§5.1).",
                         "a raw type's are themselves, never base64, and a packed type's are its record (§7.6).",
@@ -4846,11 +4836,12 @@ def _round101_readings(root: Path) -> list[tuple[str, Any, Any]]:
                         "parse.",
                         "A caller or a tool MUST read every other `reply_err` as the transport's: one the parse "
                         "refuses, and one under another `Encoding`.",
-                        "**A malformed error** is the transport's too.",
-                        "**The envelope, on the bare wire.**",
-                        "**Decoding.** A caller or a tool that reads the bare wire decodes an envelope")
+                        "**A malformed error** is the transport's too.")
                 + [q for q in ("**The `Encoding` of the owner's reply** MUST say which",
-                               "No rule at this version has an owner answer in it") if q in core], []))
+                               "No rule at this version has an owner answer in it",
+                               "**The envelope, on the bare wire.**",
+                               "**Decoding.** A caller or a tool that reads the bare wire decodes an envelope")
+                   if q in core], []))
     out.append(("observer 0.24 §7.3, \"A call's forms first\": the MUST, the MUST NOT on a refused value, an error by "
                 "its code, cause and message, the transport's shown so",
                 missing(obs, "A tool that shows or judges a call's reply MUST read a reply under `zenoh/bytes` as "
@@ -4870,46 +4861,49 @@ def _round101_readings(root: Path) -> list[tuple[str, Any, Any]]:
                               "alike.", "A packed record** always travels in an envelope or a call's form")
                 + [calls.error(cal, st, "busy").hex()], ["620001000007a0"]))
     out.append(("operations.md §9 (new): a call's forms for each kind of type, the packed tags, a wrong tag, the as-of "
-                "mark, four reply errors a test session plays, a timeout behind a router, and the bare wire",
+                "mark, four reply errors a test session plays, a timeout behind a router; its bare wire step 7 is an "
+                "envelope since core 0.99, beside step 8, a request under another Encoding (round 104)",
                 missing(ops, "## §9 A call's forms (core §5.1, §5.2, §7.5)", "**The wrong tag.**",
                         "**The as-of mark.**", "**Errors that are no owner's.**",
-                        "**A timeout behind a router.**", "**The bare wire.**"), []))
+                        "**A timeout behind a router.**", "7. **An envelope.**",
+                        "8. **A request under another `Encoding`.**")
+                + [q for q in ("**The bare wire.**",) if q in ops], []))
     # RULES.md, as the entry counts it.
     rules = (spec / "RULES.md").read_text(encoding="utf-8")
     counted = {n: int(c) for n, c in re.findall(r"^\| \[([^\]]+)\]\(#[^)]*\) \| (\d+)", rules, re.M)}
     once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
     out.append(("core 0.94's entry: RULES.md lists 239 rules, 7 more; the owner 73, the caller 18 (core 0.96's "
-                "index lists more, round 102)",
+                "index lists more, round 102), 17 since core 0.99 removes §5.2's Decoding MUST (round 104)",
                 missing(" ".join((spec / "CHANGELOG.md").read_text(encoding="utf-8").split()),
                         "lists 239 rules")
-                + [(int(once.group(1)) if once else 0) >= 239, counted.get("Caller")], [True, 18]))
+                + [(int(once.group(1)) if once else 0) >= 239, counted.get("Caller")], [True, 17]))
     # F-472: §5.2's Decoding MUST binds "a caller or a tool that reads the
     # bare wire", and RULES.md lists it under the caller alone, where the two
     # reading MUSTs of the same subject are under both.
-    from . import classes, live
+    from . import classes
 
     rows = classes._rules_md(spec)
     dec = sorted(r[0] for r in rows if r[1] == "core §5.2" and "**Decoding.**" in r[3])
     read = sorted(r[0] for r in rows if r[1] == "core §5.2" and "MUST read a `reply_err` under" in r[3])
     out.append(("F-472 (round 101; answered by core 0.95's index, round 102): §5.2's Decoding MUST, of \"A caller or "
-                "a tool that reads the bare wire\", was listed under the caller alone; it is under both now, as the "
-                "reading MUST beside it, and the observer class counts 70",
-                missing(core, "**Decoding.** A caller or a tool that reads the bare wire decodes an envelope")
+                "a tool that reads the bare wire\", was listed under the caller alone, then under both; core 0.99 "
+                "removes it (round 104), and the reading MUST beside it stays under both",
+                [q for q in ("**Decoding.** A caller or a tool that reads the bare wire decodes an envelope",)
+                 if q in core]
                 + [dec, read, (counted.get("Observer: the tool role, and a reader") or 0) >= 70],
-                [["caller", "observer"], ["caller", "observer"], True]))
+                [[], ["caller", "observer"], True]))
     # F-473: a bare-wire envelope its decoding refuses: "that envelope …
     # not as the transport's", or "A malformed error is the transport's
     # too". zk2py reads it as the transport's, its decoding's token named.
-    bad = live.read_reply_error("application/json", b'{"code":"busy"}')
-    good = live.read_reply_error("application/json", b'{"code":"busy","message":""}')
-    out.append(("F-473 (round 101; answered by core 0.95 §5.2, round 102): a bare-wire envelope its decoding refuses "
-                "is a malformed error, the transport's; zk2py reads it so (decode), a good one busy",
-                missing(core, "under one of the envelope's three encodings as that envelope (below), not as the "
-                              "transport's. One its decoding refuses (below, \"Decoding\") is a malformed error, the "
-                              "transport's, as an error form the parse refuses is.",
-                        "**A malformed error** is the transport's too.")
-                + [(bad.kind, bad.refusal), (good.kind, good.code, good.bare)],
-                [("transport", "decode"), ("error", "busy", True)]))
+    # Core 0.99 (round 104) removes the bare-wire bullet that F-473's answer
+    # was: every reply_err under another Encoding is the transport's, an
+    # envelope included (_round104_readings reads zk2py so).
+    out.append(("F-473 (round 101; answered by core 0.95 §5.2, round 102): a bare-wire envelope its decoding refused "
+                "was a malformed error, the transport's; core 0.99 removes the bare-wire bullet, and a malformed "
+                "error is the transport's still (round 104)",
+                [q for q in ("under one of the envelope's three encodings as that envelope (below), not as the "
+                             "transport's.",) if q in core]
+                + missing(core, "**A malformed error** is the transport's too."), []))
     # F-474: §9 step 4 puts "its state", and neither setup declares one.
     sec9 = ops[ops.index("## §9 A call's forms"):]
     setup = sec9[:sec9.index("**Steps.**")]
@@ -4930,10 +4924,10 @@ def _round101_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "reply under zenoh/bytes by §7.5's parse, and one under another Encoding is no value form; "
                 "[1,2,3,4] still parses as a value, tag 11, record ']', so only the Encoding tells them apart",
                 missing(core, "**Reading a value.** A caller reads a reply under `zenoh/bytes` by §7.5's parse,",
-                        "**Under another `Encoding`** a reply is no value form, so it is malformed too, unless the "
-                        "caller reads the bare wire (below).")
+                        # core 0.99 (round 104): "unless the caller reads the bare wire" gone
+                        "**Under another `Encoding`** a reply is no value form, so it is malformed too.")
                 + missing(obs, "**Another `Encoding`.** A reply under any other `Encoding` is no value form, and is "
-                               "undecodable as a refused one is, unless the tool reads the bare wire")
+                               "undecodable as a refused one is (core §5.1,")
                 + [(arr.form, arr.width, arr.tag, arr.record)],
                 [("value", 32, 11, b"]")]))
     # F-476: the as-of mark's seq is "the last it minted …, or 0 when it has
@@ -4982,11 +4976,13 @@ def _round103_readings(root: Path) -> list[tuple[str, Any, Any]]:
     m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
     core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
     out: list[tuple[str, Any, Any]] = [
-        ("core 0.97 and 0.98 or later, each with its entry (#977 E1, F-492); observer.md stays text 0.26",
+        ("core 0.97 and 0.98 or later, each with its entry (#977 E1, F-492); observer.md stays text 0.26 at both, "
+         "and is 0.27 or later since core 0.99 (round 104)",
          [core_v >= (0, 98)] + entry("CHANGELOG.md", "0.97", "a collection's snapshot defined")
          + entry("CHANGELOG.md", "0.98", "the rule index reads a subject's own role")
-         + missing(obs, "| **Text version** | 0.26") + missing(log, "`observer.md` stays text 0.26"),
-         [True]),
+         + missing(log, "`observer.md` stays text 0.26")
+         + [bool(re.search(r"\| \*\*Text version\*\* \| 0\.(2[7-9]|[3-9]\d)", obs))],
+         [True, True]),
     ]
     # 0.97's evidence, as its entry counts it.
     vec = _load_json(root / "envelope" / "vectors.json")
@@ -5020,10 +5016,11 @@ def _round103_readings(root: Path) -> list[tuple[str, Any, Any]]:
     counted = {n: int(c) for n, c in re.findall(r"^\| \[([^\]]+)\]\(#[^)]*\) \| (\d+)", rules, re.M)}
     once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
     out.append(("core 0.97's and 0.98's entries: RULES.md lists 250 rules, the static rules 67 with §7.5's four, the "
-                "owner 76",
-                missing(log, "`RULES.md` lists 250 rules, 4 more", "The owner class counts 76 where it counted 78")
+                "owner 76; 249 since core 0.99's one fewer (round 104)",
+                missing(log, "`RULES.md` lists 250 rules, 4 more", "The owner class counts 76 where it counted 78",
+                        "[`RULES.md`](RULES.md) lists 249 rules, 1 fewer")
                 + [int(once.group(1)) if once else None, counted.get("Implementation: the static rules"),
-                   counted.get("Owner")], [250, 67, 76]))
+                   counted.get("Owner")], [249, 67, 76]))
     # §7.5's "Sizes", by zk2py's own writer.
     base = {"tag": 0, "run_width": 16, "run": 1, "asof": 9, "time": {"s": 3600, "ms": 250}, "index": 0,
             "more": False, "coll": 0, "live": [], "tombs": []}
@@ -5122,6 +5119,263 @@ def _round103_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 ["snapshot", page["expect"]["asof"], 4,
                  [snapshot.member_key(key, e["id"]) for e in page["expect"]["live"] + page["expect"]["tombs"]],
                  None, None, "the snapshot's body is refused", None]))
+    return out
+
+
+def _round104_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.99 and observer 0.27 (#985 C4d, the bare wire removed), read at
+    main 4b802646 (#609, round 104): zk2py read as the texts now say. A reply
+    under another Encoding is malformed, a reply error under one the
+    transport's, an earlier core's envelope among them; an owner refuses a
+    query under one ``invalid_request``, its bytes unparsed; the caller sends
+    only the request form, and zk2py holds no envelope decoder. The live half
+    is ``forms_live`` §9 steps 7 and 8."""
+    import importlib.util
+    from types import SimpleNamespace
+
+    from . import calls, live, zk2c
+    from .owner import OpCall, Owner
+
+    out: list[tuple[str, Any, Any]] = []
+    envs = [("application/json", b'{"code":"busy","message":""}'), ("application/json", b'{"code":"busy"}'),
+            ("application/cbor", bytes.fromhex("a264636f64656462757379676d65737361676560")),
+            ("application/protobuf;zk2.core.v1.Error", bytes.fromhex("0a0462757379")),
+            ("application/protobuf", bytes.fromhex("0a0462757379"))]
+    got = [live.read_reply_error(e, d) for e, d in envs]
+    out.append(("core 0.99 §5.2: a reply error under an earlier core's envelope Encodings, application/json, "
+                "application/cbor and application/protobuf with the suffix zk2.core.v1.Error, is the transport's, "
+                "its refusal encoding, whatever its bytes; zk2py's live.read_reply_error reads each so",
+                [(r.kind, r.refusal, r.code) for r in got], [("transport", "encoding", None)] * len(envs)))
+    shown = live.show_reply(got[0])
+    out.append(("observer 0.27 §7.3: a tool shows such a reply error as the transport's, with its Encoding and its "
+                "bytes, never as busy",
+                [shown.get("kind"), shown.get("transport"), "code" in shown],
+                ["transport", {"encoding": "application/json", "bytes": envs[0][1].hex(), "refusal": "encoding"},
+                 False]))
+    # "Under another Encoding a reply is no value form, so it is malformed
+    # too": vectors.json's JSON array of 8 bytes parses as a value form, and
+    # under application/json it is no value.
+    arr = bytes.fromhex("5b312c322c332c345d")
+    sample = SimpleNamespace(key_expr="zk2/h1/tc/tc.v1/@op/ping", encoding="application/json",
+                             payload=SimpleNamespace(to_bytes=lambda: arr), attachment=None)
+    rv = live.read_reply(sample)
+    sample_f = SimpleNamespace(key_expr="zk2/h1/tc/tc.v1/@op/ping", encoding="zenoh/bytes",
+                               payload=SimpleNamespace(to_bytes=lambda: arr), attachment=None)
+    rf = live.read_reply(sample_f)
+    out.append(("core 0.99 §5.1, \"Reading a value\": a reply under another Encoding is malformed, an answer all "
+                "the same, whatever its bytes; [1,2,3,4] under application/json is a refused value (encoding), and "
+                "under zenoh/bytes a value form, tag 11; a tool shows the first undecodable",
+                [(rv.kind, rv.refusal, rv.payload), (rf.kind, rf.tag), live.show_reply(rv).get("undecodable"),
+                 live.CallResult([rv]).silent],
+                [("refused_value", "encoding", b""), ("value", 11), "encoding", False]))
+    # The owner's half: a query under another Encoding carries no request form.
+    contract = _load_json(root / "envelope" / "calls.json")["contract"]
+    from .contract import load_contract
+
+    k = load_contract(root / contract)
+    res = next(r for r in k.canonical["resources"] if r["kind"] == "operation" and r["template"] == "reset")
+    op = calls.Operation.of_resource(res, k.schemas)
+    rec = op.encode("request", {"duty_available": "12.5", "signal_bars": 3, "oper": "up", "admin": True})
+
+    def query(payload: bytes, enc: str | None) -> Any:
+        return SimpleNamespace(payload=SimpleNamespace(to_bytes=lambda: payload), encoding=enc, attachment=None)
+
+    def read(payload: bytes, enc: str | None) -> tuple[Any, ...]:
+        c = OpCall(query(payload, enc), "zk2/h1/tc/seed.v1", res, op, lambda: zk2c.InBand(16, 1, 0), {},
+                   "zk2/h1/tc/seed.v1/@op/reset")
+        why = Owner._read_request(c)
+        return c.request_refusal, why is None, c.request
+    form = zk2c.request(rec, op.tag("request"))
+    rows = [read(form, "zenoh/bytes"), read(form, "application/json"), read(rec, "application/octet-stream"),
+            read(form, "zenoh/bytes;x"), read(form, None)]
+    out.append(("core 0.99 §5.1, \"The request\": an owner reads a query under zenoh/bytes by §7.5's parse, and "
+                "refuses one under another Encoding invalid_request, a form's bytes and a bare record alike; "
+                "zk2py's OpCall: reset's Status form read, refused encoding under application/json, "
+                "application/octet-stream and a schema suffix",
+                [(r[0], r[1]) for r in rows] + [rows[0][2] is not None],
+                [(None, True), ("encoding", False), ("encoding", False), ("encoding", False), (None, True), True]))
+    # The caller's half, and no decoder left.
+    try:
+        live.call(None, "zk2/h1/tc/seed.v1/@op/reset", rec, op=op, encoding="application/json")  # type: ignore[arg-type]
+    except ValueError as e:
+        refused: Any = "never" in str(e)
+    else:
+        refused = False
+    out.append(("core 0.99 §5.1: a caller writes its request as §7.5's request under zenoh/bytes; zk2py's live.call "
+                "refuses to send under another Encoding, and zk2py holds no envelope decoder (zk2py.envelope gone); "
+                "calls.in_forms is zenoh/bytes alone, compared as an exact string",
+                [refused, importlib.util.find_spec("zk2py.envelope") is None,
+                 [calls.in_forms(e) for e in ("zenoh/bytes", "application/json", "zenoh/bytes;x", "zenoh/string")]],
+                [True, True, [True, False, False, False]]))
+    out += _round104_texts(root)
+    out += _mend_after_round103()
+    return out
+
+
+def _round104_texts(root: Path) -> list[tuple[str, Any, Any]]:
+    """Round 104's cold read at main 4b802646: each text at its version with
+    its entry, what each says changed and did not, §9 steps 7 and 8, the
+    fixtures' counts, and F-498 to F-502 as their texts read."""
+    import re
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def present(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    def header(rel: str) -> tuple[str | None, str | None]:
+        t = flat(rel)
+        v = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+)", t)
+        w = re.search(r"\| \*\*Written against\*\* \| core (\d+\.\d+)", t)
+        return (v.group(1) if v else None, w.group(1) if w else None)
+
+    core, obs, ops = flat("core.md"), flat("observer.md"), flat("scenarios/operations.md")
+    log = flat("CHANGELOG.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.99 or later, observer 0.27 written against it, telemetry.v1 0.9, config.v1 0.12, config.v2 0.3 and "
+         "redundancy.v1 0.10, each with its entry (#985 C4d)",
+         [core_v >= (0, 99), header("observer.md"), header("profiles/telemetry/v1.md")[0],
+          header("profiles/config/v1.md")[0], header("profiles/config/v2.md")[0],
+          header("profiles/redundancy/v1.md")[0]]
+         + entry("CHANGELOG.md", "0.99", "the bare wire removed")
+         + entry("observer-CHANGELOG.md", "0.27", "the bare wire removed")
+         + entry("profiles/telemetry/CHANGELOG.md", "0.9", "no rule changed")
+         + entry("profiles/config/CHANGELOG.md", "0.12", "no rule changed")
+         + entry("profiles/config/CHANGELOG.md", "config.v2 0.3", "no rule changed")
+         + entry("profiles/redundancy/CHANGELOG.md", "0.10", "no rule changed"),
+         [True, ("0.27", "0.99"), "0.9", "0.12", "0.3", "0.10"]),
+    ]
+    out.append(("core 0.99 §5.1 and §5.2 as the entry says: the MAY, \"None writes the bare wire\", the envelope, its "
+                "Decoding MUST and the bare-wire bullet gone; \"Reading a value\" without the exception; \"The "
+                "request\" refusing a query under another Encoding, with no keyword",
+                present(core, "MAY read a call's sample whose `Encoding` is not `zenoh/bytes`", "None writes the bare wire",
+                        "**The envelope, on the bare wire.**", "**Decoding.**", "A reader of the bare wire",
+                        "unless the caller reads the bare wire")
+                + missing(core, "An owner reads a query under `zenoh/bytes` by §7.5's parse. Under another `Encoding` "
+                                "a query carries no request form",
+                          "Such a query, a request the parse refuses, and one whose record does not decode as the "
+                          "operation's `request` type are refused with `invalid_request`.",
+                          "**Under another `Encoding`** a reply is no value form, so it is malformed too.",
+                          "a record sent with no form can parse as one"), []))
+    out.append(("operations.md §9: step 7 an earlier core's envelope, the transport's, set called once and ping twice; "
+                "step 8 a request form under application/json, invalid_request and no handler",
+                missing(ops, "7. **An envelope.** A session of the test's own answers `set` with the JSON error "
+                             "envelope that an earlier version of the core had an owner write, "
+                             "`{\"code\":\"busy\",\"message\":\"\"}`, under `application/json`.",
+                        "8. **A request under another `Encoding`.** `h1/tc` serves `set` again.",
+                        "It calls `set` once, since `set` is not idempotent, and `ping` twice.",
+                        "8. `invalid_request`, and no handler runs. Under another `Encoding` a query carries no request "
+                        "form, whatever its bytes"), []))
+    cases_gone = not (root / "errors" / "cases.json").exists()
+    forms = _load_json(root / "errors" / "forms.json")
+    out.append(("core 0.99's evidence: errors/cases.json removed, forms.json's reads unchanged (17), its three envelope "
+                "reads encoding; RULES.md 249 rules, the caller 17, the observer 72",
+                [cases_gone, len(forms["reads"]),
+                 sorted(c["expect"].get("refused") for c in forms["reads"]
+                        if c["encoding"] in ("application/json", "application/cbor",
+                                             "application/protobuf;zk2.core.v1.Error"))]
+                + missing(log, "lists 249 rules, 1 fewer", "The caller class counts 17 and the observer 72"),
+                [True, 17, ["encoding", "encoding", "encoding"]]))
+    from . import telemetry
+
+    tel = flat("profiles/telemetry/v1.md")
+
+    def tcbor(h: str) -> Any:
+        try:
+            return telemetry.decode_cbor(bytes.fromhex(h))
+        except telemetry.Undecodable:
+            return "undecodable"
+
+    out.append(("telemetry.v1 0.9 §2.6: a CBOR map read as its pairs, keys text, none twice, undefined null, no longer "
+                "\"as the envelope's are read\"; indefinite length stated for a bignum's byte string alone (F-500, "
+                "open); zk2py accepts an indefinite-length map, array and string, and reads a byte after the data "
+                "item undecodable",
+                missing(tel, "A map is read as its pairs: each key a text string, and no key twice. The simple value "
+                             "`undefined` is read as `null`.", "a byte string of any length, definite or not")
+                + present(tel, "as the envelope's are read", "core §5.2", "Indefinite lengths", "nothing after it")
+                + [tcbor("bf6576616c756501ff"), tcbor("9f0102ff"), tcbor("7f61616162ff"), tcbor("0100"),
+                   tcbor("a1016161"), tcbor("a16576616c7565f7")],
+                [{"value": 1}, [1, 2], "ab", "undecodable", "undecodable", {"value": None}]))
+    cv1, cv2 = flat("profiles/config/v1.md"), flat("profiles/config/v2.md")
+    out.append(("F-501 (open): config.v1 §2.5 and config.v2 §2.5 list the core's refusals before the rows, and neither "
+                "names core 0.99's query under another Encoding",
+                missing(cv1, "The core's own refusals come first (core §5.1, \"The order of refusals\"):",
+                        "a request that does not decode as `SetRequest` is `invalid_request`.")
+                + missing(cv2, "Then a request that does not parse is `invalid_request`: core §7.5's refusals for a "
+                               "query, then core §7.6's for `Set<T>`.")
+                + present(cv1 + cv2, "under another `Encoding`"), []))
+    out.append(("F-502 (open): core §5.1's order of refusals names \"A request that does not decode\" after the three, "
+                "and \"The request\" now refuses a query under another Encoding too",
+                missing(core, "A request that does not decode is refused after these, by the server's decode (below).")
+                + present(core, "A query under another `Encoding` is refused after these"), []))
+    # F-498: seed/snapshot.json, a fixture whose rules no text states.
+    seed_fx = _load_json(root / "seed" / "snapshot.json")
+    s42 = core[core.index("### 4.2 Rules for owners and consumers"):core.index("### 4.3 Runs and sequence numbers")]
+    out.append(("F-498 (open): seed/snapshot.json (#977 E2) cites core §4.2 for a seed over snapshots, a snapshot key "
+                "and the omission rule; §4.2 names no snapshot, no text names a snapshot key, Appendix E's seed row "
+                "and every changelog leave the file out, and core 0.97's entry left the omission rule to E3",
+                [seed_fx["description"].startswith("core §4.2, a late joiner's seed over snapshots"),
+                 len(seed_fx["cases"]), "snapshot" in s42, "snapshot key" in core + obs,
+                 "snapshot.json" in core + log + flat("observer-CHANGELOG.md")]
+                + missing(log, "**E3's rules wait for E3:** which key answers what, consolidation `None`, the omission "
+                               "rule")
+                + missing(flat("conformance/README.md"), "(`snapshot.json`, §4.2): the omission rule, asof and pages"),
+                [True, 42, False, False, False]))
+    # F-499: config.v1 §2.12's refusal after step 1.
+    out.append(("F-499 (open): config.v1 §2.12 has the reference refuse a re-mint for a device that will not return "
+                "to its startup values, step 3, after steps 1 and 2 ended a pending change and published its event, "
+                "and says neither that the ending stays nor what the instance then holds",
+                missing(cv1, "1. **A pending change** ends first, in the old instance, as `cancel` ends it (§2.10).",
+                        "3. **The device** returns to its startup values,",
+                        "It refuses the re-mint, and the instance runs on, in four cases:",
+                        "a device that refuses to return to its startup values;")
+                + present(cv1, "stays ended", "a refusal leaves"), []))
+    return out
+
+
+def _mend_after_round103() -> list[tuple[str, Any, Any]]:
+    """review-bot's notes on round 103 (#1076), the parts a reading shows:
+    a snapshot's id one encoding, a bad one always ``Refused``; config.v1's
+    re-mint through public Core methods; one black-box constant."""
+    from . import blackbox, config, config_v2, snapshot
+
+    base = {"tag": 0, "run_width": 16, "run": 1, "asof": 9, "time": {"s": 3600, "ms": 250}, "coll": 0, "tombs": []}
+    got = []
+    for bad in ("é", "a/é", 5, "a//b", "x\u00a0y"):
+        live_ = [{"id": bad, "run_width": None, "run": None, "seq": 1, "confirmation": "none", "record": "00"}]
+        row = []
+        for f in (lambda x: snapshot.write_page({**x, "index": 0, "more": False}), lambda x: snapshot.cut(x, 100),
+                  lambda x: snapshot.cut_by_arithmetic(x, 100), lambda x: snapshot.entries(x)):
+            try:
+                f({**base, "live": live_})
+                row.append("accepted")
+            except snapshot.Refused as e:
+                row.append(e.token)
+            except Exception as e:  # noqa: BLE001 - what the mend removes
+                row.append(type(e).__name__)
+        got.append(row)
+    out: list[tuple[str, Any, Any]] = [
+        ("the mend after round 103, 3: a snapshot id's bytes are ASCII in every writer, measure and order "
+         "(snapshot.id_bytes), so an id outside ASCII, no string, or no plain chunks is refused id, never an "
+         "encoding error", got, [["id"] * 4] * 5)]
+    out.append(("the mend after round 103, 1: config.v1's Core re-mints by public methods, end_for_remint, "
+                "startup_values and remint (which returns the old instance back), and config.v2's Core by remint "
+                "and returned; the black boxes' directory is one constant, read once",
+                [all(callable(getattr(config.Core, m, None)) for m in ("end_for_remint", "startup_values", "remint")),
+                 all(callable(getattr(config_v2.Core, m, None)) for m in ("remint", "returned")),
+                 hasattr(blackbox, "directory"), isinstance(blackbox.BLACKBOX, Path)],
+                [True, True, False, True]))
     return out
 
 
@@ -5442,17 +5696,19 @@ def _core096_readings(root: Path) -> list[tuple[str, Any, Any]]:
          + entry("observer-CHANGELOG.md", "0.26", "first hop")
          + entry("profiles/link/CHANGELOG.md", "link.v2 0.7", "device face")
          + entry("profiles/config/CHANGELOG.md", "0.10", "first hop")
-         + missing(obs, "| **Text version** | 0.26", "| **Written against** | core 0.96"),
-         [True]),
+         # observer 0.27 is written against core 0.99 (round 104)
+         + [bool(re.search(r"\| \*\*Text version\*\* \| 0\.(2[6-9]|[3-9]\d)", obs))],
+         [True, True]),
     ]
     rules = (spec / "RULES.md").read_text(encoding="utf-8")
     counted = {n: int(c) for n, c in re.findall(r"^\| \[([^\]]+)\]\(#[^)]*\) \| (\d+)", rules, re.M)}
     once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
     out.append(("core 0.96's entry: RULES.md lists 246 rules, 0.95's 239, the core's four and observer 0.26's three; "
-                "250 since core 0.97's four, and core 0.98's still",
+                "250 since core 0.97's four, and core 0.98's still; 249 since core 0.99 (round 104)",
                 missing(flat("CHANGELOG.md"), "lists 246 rules: 0.95's 239, these four and observer 0.26's three",
-                        "`RULES.md` lists 250 rules, 4 more", "the index still lists 250 rules")
-                + [int(once.group(1)) if once else None], [250]))
+                        "`RULES.md` lists 250 rules, 4 more", "the index still lists 250 rules",
+                        "lists 249 rules, 1 fewer")
+                + [int(once.group(1)) if once else None], [249]))
     out.append(("core 0.96 §8.1, §8.4, §8.5 and observer 0.26 §3.6, §3.11: the rules as their texts state them",
                 missing(core, "Such an owner SHOULD put every interface it implements in its tokenless set.",
                         "Such an owner MUST NOT implement `archive.v1`, nor an interface whose contract uses "
@@ -8099,9 +8355,9 @@ def _round89_readings(root: Path) -> list[tuple[str, Any, Any]]:
         ("**An archive's backend MUST NOT accept a put older than a delete it holds.**", "**Its backend MUST NOT"),
         ("A request type SHOULD NOT repeat a template parameter (W102).", "repeat a template parameter. `"),
         # core 0.94 (round 101, #985 C4c): the reply's Encoding MUST removed,
-        # the bare wire's envelope stated with no keyword; the detail's
+        # the bare wire's envelope stated with no keyword (its sentence gone
+        # with the envelope at core 0.99, round 104: below); the detail's
         # MUST NOT reworded by its type, still the owner's
-        ("**Its `Encoding`** is `application/json` or `application/cbor`", "**The reply's `Encoding`**"),
         ("or a packed value with no code (§7.6), MUST NOT be sent by an owner.", "protobuf one, MUST NOT be sent. "),
         # core 0.75 (round 94, #979 B1): the uniqueness split by kind
         ("The name MUST be unique across the listed JSON Schema files (E024).", "unique across the listed files. |"),
@@ -8120,10 +8376,13 @@ def _round89_readings(root: Path) -> list[tuple[str, Any, Any]]:
         ("A tool's grace period SHOULD exceed the longest re-mint overlap", "tool setting. It SHOULD exceed"),
     ]
     out.append(("core 0.66's nineteen and observer.md 0.8's three sentences that now name their role, as they read, "
-                "and none of the old forms",
+                "and none of the old forms; the bare wire's envelope `Encoding`, the nineteenth, is gone with the "
+                "envelope since core 0.99 (round 104)",
                 [missing(core, *[n for n, _ in core_pairs]), present(core, *[o for _, o in core_pairs]),
-                 missing(obs, *[n for n, _ in obs_pairs]), present(obs, *[o for _, o in obs_pairs])],
-                [[], [], [], []]))
+                 missing(obs, *[n for n, _ in obs_pairs]), present(obs, *[o for _, o in obs_pairs]),
+                 present(core, "**Its `Encoding`** is `application/json` or `application/cbor`",
+                         "**The reply's `Encoding`**"), len(core_pairs)],
+                [[], [], [], [], [], 18]))
     out.append(("core §12 0.66: five classes, the static rules' sections, constrained a modifier, profiles one "
                 "class each; observer.md §0's classes",
                 missing(core, "## 12. Conformance classes",
@@ -9987,6 +10246,9 @@ def family_seed(root: Path) -> list[Result]:
                     out.append(_check(f"seed: inband merge (consumer): {c['note']}",
                                       seed.kept(marks, c["kind"], consumer=True), want["consumer_accepts"]))
             continue
+        if path.name == "snapshot.json":
+            out += _seed_snapshots(_load_json(path))
+            continue
         if path.name != "merge.json":
             out.append((f"seed/{path.name}", False, "an unknown fixture file: the runner does not read it"))
             continue
@@ -9998,6 +10260,32 @@ def family_seed(root: Path) -> list[Result]:
         for c in data["cases"]:
             got = seed.kept([(stamp(a["stamp"]), a["kind"]) for a in c["arrivals"]])
             out.append(_check(f"seed: merge: {c['note']}", {"kept": got}, c["expect"]))
+    return out
+
+
+def _seed_snapshots(data: dict[str, Any]) -> list[Result]:
+    """``seed/snapshot.json`` (#977 E2): a late joiner's seed over a GET's
+    snapshots, per-key replies and live samples, read from the fixture's
+    description alone (:mod:`zk2py.seed_snapshot`; core §4.2 states none of
+    it at 0.99, F-498). Each page is read from its bytes and checked against
+    the fixture's ``page``; each collection's snapshot key ends with its
+    template's literal chunks."""
+    from . import seed_snapshot, snapshot, zk2c
+
+    unknown = set(data) - {"description", "cases"}
+    out: list[Result] = [("seed: snapshot.json holds a description and cases", not unknown,
+                          f"members the runner does not read: {sorted(unknown)}" if unknown else "")]
+    for c in data["cases"]:
+        bad = [x["template"] for x in c["collections"]
+               if not seed_snapshot.Collection(x["coll"], x["template"], x["snapshot_key"]).prefix_ok()]
+        if bad:
+            out.append((f"seed: snapshot: {c['note']}", False, f"a snapshot key that is not its template's: {bad}"))
+            continue
+        try:
+            got: Any = seed_snapshot.run_case(c)
+        except (snapshot.Refused, zk2c.Refused, ValueError) as e:
+            got = {"raised": f"{type(e).__name__}: {e}"}
+        out.append(_check(f"seed: snapshot: {c['note']}", got, c["expect"]))
     return out
 
 

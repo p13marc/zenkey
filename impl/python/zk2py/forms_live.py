@@ -1,5 +1,6 @@
 """``scenarios/operations.md`` §9, a call's forms (core 0.94 §5.1, §5.2,
-§7.5; observer 0.24 §7.3; #985 C4c, #609 round 101), on an in-process
+§7.5; observer 0.24 §7.3; #985 C4c, #609 round 101; core 0.99 and observer
+0.27, the bare wire removed, #985 C4d, round 104), on an in-process
 zenoh-python router: ``python -m zk2py.forms_live [--pairing P]… [--out
 report.json]``.
 
@@ -9,6 +10,9 @@ the owner example (a black box). ``zenctl-py``: ``zenctl call`` (a black box)
 and zk2py's owner. Steps 5 to 7 play no owner: "A session of the test's own"
 answers, so they test the caller alone, zk2py's in ``py-py`` (and so for
 ``py-rust``, whose caller is the same) and ``zenctl call`` in ``zenctl-py``.
+Step 8 plays no caller: a session of the test's own sends a request form's
+bytes under ``application/json`` to the pairing's owner, zk2py's in
+``py-py`` and ``zenctl-py`` and the owner example in ``py-rust``.
 
 **The setup.** ``h1/tc`` implements ``interop/operations/tc.v1.toml``
 (zk2py's: ``set`` over ``interfaces/{if}`` with JSON Schema types and
@@ -629,53 +633,117 @@ def steps_5_to_7(ck: Checks, caller: str, ep: str, cli: Any, ops: dict[str, Any]
             held.clear()
             frozen.undeclare()
         # -- step 7 -----------------------------------------------------------------------------
+        # core 0.99 (#985 C4d): the JSON error envelope an earlier core had
+        # an owner write is under another Encoding, so the transport's
+        # (§5.2), silence: set, not idempotent, called once; ping twice.
         st = "§9 step 7"
-        mode["set"] = (b'{"code":"busy","message":""}', "application/json")
-        if caller == "py":
-            for read_bare in (True, False):
-                hits["set"] = 0
-                res = live.call(cli, "zk2/h9/tc/tc.v1/@op/interfaces/eth0/set", ops["tc/set"].encode(
-                    "request", JSON_OK), op=ops["tc/set"], timeout=1.5, attempts=2, read_bare=read_bare)
+        env = b'{"code":"busy","message":""}'
+        for name in ("set", "ping"):
+            mode[name] = (env, "application/json")
+            hits[name] = 0
+            want_hits = 1 if name == "set" else 2
+            key = "zk2/h9/tc/tc.v1/@op/" + ("interfaces/eth0/set" if name == "set" else "ping")
+            if caller == "py":
+                rec = ops["tc/set"].encode("request", JSON_OK) if name == "set" else b"ping"
+                res = live.call(cli, key, rec, op=ops[f"tc/{name}"], timeout=1.5, attempts=2,
+                                idempotent=name == "ping")
                 shown = [live.show_reply(r) for r in res.replies]
-                if read_bare:
-                    ck.check(st, "a caller that reads the bare wire (zk2py's) reports busy, from the JSON envelope "
-                                 "under application/json", [x.get("code") for x in shown] == ["busy"]
-                             and shown[0].get("bare") is True and hits["set"] == 1, shown)
-                else:
-                    ck.check(st, "a caller that does not reports the transport's, and calls set once: it is not "
-                                 "idempotent", res.silent and hits["set"] == 1 and [x["kind"] for x in shown] == [
-                                     "transport"], {"hits": hits["set"], "shown": shown})
-            # core 0.95 (F-473's answer, round 102): ping answered by an
-            # envelope with no message, which §5.2's decoding refuses: a
-            # malformed error, the transport's to both callers, after which
-            # the idempotent ping is called again, then silence.
-            mode["ping"] = (b'{"code":"busy"}', "application/json")
-            for read_bare in (True, False):
-                hits["ping"] = 0
-                res = live.call(cli, "zk2/h9/tc/tc.v1/@op/ping", b"ping", op=ops["tc/ping"], timeout=1.5,
-                                attempts=2, idempotent=True, read_bare=read_bare)
-                shown = [live.show_reply(r) for r in res.replies]
-                ck.check(st, f"ping answered {{\"code\":\"busy\"}} under application/json, a caller that "
-                             f"{'reads' if read_bare else 'does not read'} the bare wire: the transport's, ping "
-                             "called twice, then silence (core 0.95 §5.2)",
-                         res.silent and hits["ping"] == 2 and all(x["kind"] == "transport" for x in shown),
-                         {"hits": hits["ping"], "shown": shown})
-        else:
-            hits["set"] = 0
-            z = zenctl_call(ep, "h9/tc", "tc/set", json.dumps(JSON_OK), retries=1, timeout=2.0)
-            ck.check(st, "zenctl call set answered by the bare wire's JSON envelope: busy (exit 1) if it reads the bare "
-                         "wire, the transport's (exit 2) if not; set called once", z["exit"] in (1, 2)
-                     and hits["set"] == 1, {"hits": hits["set"], **z})
-            mode["ping"] = (b'{"code":"busy"}', "application/json")
-            hits["ping"] = 0
-            z = zenctl_call(ep, "h9/tc", "tc/ping", "ping", retries=1, timeout=2.0)
-            ck.check(st, "zenctl call ping answered by an envelope with no message: malformed, the transport's: "
-                         "silence (exit 2), ping called twice (core 0.95 §5.2)",
-                     z["exit"] == 2 and hits["ping"] == 2, {"hits": hits["ping"], **z})
+                ck.check(st, f"{name} answered by the envelope under application/json: the transport's (another "
+                             f"Encoding), silence; {name} called {want_hits} time(s); a tool shows it with its "
+                             "Encoding and its bytes, never as busy",
+                         res.silent and hits[name] == want_hits and res.attempts == want_hits and shown
+                         and all(x["kind"] == "transport" and x["transport"]["refusal"] == "encoding"
+                                 and x["transport"]["encoding"] == "application/json"
+                                 and x["transport"]["bytes"] == env.hex() and "code" not in x for x in shown),
+                         {"attempts": res.attempts, "hits": hits[name], "shown": shown})
+            else:
+                z = zenctl_call(ep, "h9/tc", f"tc/{name}", json.dumps(JSON_OK) if name == "set" else "ping",
+                                retries=1, timeout=2.0)
+                ck.check(st, f"zenctl call {name} answered by the envelope under application/json: the "
+                             f"transport's, silence (exit 2); {name} called {want_hits} time(s)",
+                         z["exit"] == 2 and hits[name] == want_hits, {"hits": hits[name], **z})
+                out = z["out"] if isinstance(z["out"], dict) else {}
+                tr = str((out.get("silence") or {}).get("transport", ""))
+                ck.check(st, f"zenctl call {name}: shows silence, the transport's with its Encoding and its bytes, "
+                             "never as busy", out.get("answer") == "silent" and tr.startswith("application/json")
+                         and env.decode() in tr and "envelope" not in out, out)
+                ck.info(st, f"zenctl call {name} shows", {"out": z["out"], "err": z["err"]})
     finally:
         for e in ents:
             e.undeclare()
         live.close(srv)
+
+
+# -- step 8: a request under another Encoding --------------------------------------------------
+
+def step_8(ck: Checks, pairing: str, ep: str, cli: Any, ops: dict[str, Any]) -> None:
+    """``h1/tc`` serves ``set`` again, and a session of the test's own sends
+    it step 1's request form, ``0x40`` then the record, under
+    ``application/json``: ``invalid_request``, and no handler runs (core
+    0.99 §5.1, "The request": "Such a query … [is] refused with
+    invalid_request"). Beyond the step, the same for ``set-raw``'s form and
+    its bare record under ``application/octet-stream``, which an owner that
+    read the bare wire would answer, and zk2py's caller refusing to send
+    under another Encoding at all."""
+    from . import live
+
+    st = "§9 step 8"
+    rust = pairing == "py-rust"
+    owner: Any = RustOwner(ep) if rust else PyOwner(ep)
+    try:
+        time.sleep(1.0)
+        form = b"\x40" + ops["tc/set"].encode("request", JSON_OK)
+        probes = [("tc/set", form, "application/json", "step 1's request form under application/json"),
+                  ("tc/set-raw", b"\x40" + RAW_OK, "application/octet-stream",
+                   "set-raw's request form under application/octet-stream (beyond the step)"),
+                  ("tc/set-raw", RAW_OK, "application/octet-stream",
+                   "set-raw's bare record under application/octet-stream (beyond the step)")]
+        for op, payload, enc, what in probes:
+            h0 = None if rust else len(owner.o.handled)
+            q0 = None if rust else len(owner.o.queries)
+            got = _raw_get(cli, _key("h1/tc", op), payload, encoding=enc)
+            rr = [live.read_reply_error(e, d) for ok, e, d in got if not ok]
+            ck.check(st, f"{what}: invalid_request, one error form under zenoh/bytes, no value",
+                     len(got) == 1 and len(rr) == 1 and rr[0].kind == "error" and rr[0].code == "invalid_request"
+                     and rr[0].encoding == "zenoh/bytes",
+                     [live.show_reply(x) for x in rr] + [(ok, e, d.hex()) for ok, e, d in got if ok])
+            if not rust:
+                ck.check(st, f"{what}: no handler runs; the owner received it under {enc}, as sent",
+                         len(owner.o.handled) == h0 and [(e, w) for _, e, w in owner.o.queries[q0:]] == [
+                             (enc, payload)],
+                         {"handled": owner.o.handled[h0:], "queries": [(k, e, w.hex()) for k, e, w in
+                                                                       owner.o.queries[q0:]]})
+        # Beyond the step: core §5.1, "The order of refusals". A key that is
+        # not concrete, on an operation that forbids fan-out, is refused
+        # first, "whatever its other chunks hold"; "A request that does not
+        # decode is refused after these". A query under another Encoding
+        # reads so here: fanout_forbidden.
+        wild = "zk2/h1/tc/tc.v1/@op/interfaces/*/set"
+        h0 = None if rust else len(owner.o.handled)
+        got = _raw_get(cli, wild, form, encoding="application/json")
+        rr = [live.read_reply_error(e, d) for ok, e, d in got if not ok]
+        ck.check(st, "a wildcard call to set, which forbids fan-out, with step 1's form under application/json "
+                     "(beyond the step): fanout_forbidden, refused before the request is read (core §5.1, \"The "
+                     "order of refusals\")",
+                 len(rr) == 1 and rr[0].kind == "error" and rr[0].code == "fanout_forbidden"
+                 and (rust or len(owner.o.handled) == h0),
+                 [live.show_reply(x) for x in rr] + [(ok, e, d.hex()) for ok, e, d in got if ok])
+        # zk2py's caller sends only the request form (core 0.99 §5.1)
+        try:
+            live.call(cli, _key("h1/tc", "tc/set"), form, encoding="application/json", timeout=1.0)
+        except ValueError as e:
+            refused: Any = str(e)
+        else:
+            refused = None
+        ck.check(st, "zk2py's caller will not send a request under another Encoding", refused is not None, refused)
+        if not rust:
+            n0 = len(owner.o.handled)
+            rp = py_call(cli, ops, "h1/tc", "tc/set", ops["tc/set"].encode("request", JSON_OK), first=True)
+            ck.check(st, "the same request in its form, under zenoh/bytes, is answered: the handler runs",
+                     len(owner.o.handled) == n0 + 1 and rp and rp[0].kind == "value",
+                     [live.show_reply(r) for r in rp])
+    finally:
+        owner.close()
 
 
 def run(pairings: list[str]) -> list[tuple[str, str, str, bool, Any]]:
@@ -696,6 +764,7 @@ def run(pairings: list[str]) -> list[tuple[str, str, str, bool, Any]]:
                 steps_5_to_7(ck, "py", ep, cli, ops)
             elif pairing == "zenctl-py":
                 steps_5_to_7(ck, "zenctl", ep, cli, ops)
+            step_8(ck, pairing, ep, cli, ops)
         except Exception as e:  # noqa: BLE001 - a pairing that broke is a failure, named
             import traceback
 
