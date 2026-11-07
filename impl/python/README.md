@@ -77,6 +77,7 @@ case name. It exits with:
 | freshness | profiles/freshness §2.1–§2.8 | `freshness` | every file of `spec/profiles/freshness/conformance/`: `horizons.json` (a resource's horizon), `judgements.json` (one member's combined verdict, seconds read exactly to the nanosecond) and `clock-trust.json` (a measured clock's trust over one reading, 0.2). An unknown file there fails. |
 | health | profiles/health §2.2, §2.10, §2.11 | `health` | every file of `spec/profiles/health/conformance/`: `judgements.json` (§2.11's procedure over one reading), `rollups.json` (a tool's roll-up), `codes.json` (fault codes) and `clock.json` (§5's clock question, 0.3). An unknown file there fails. |
 | config | profiles/config §2.2–§2.19, `v2.md` §2–§3 | `config`, `config_v2` | every file of `spec/profiles/config/conformance/`: `validation.json` (§2.5's, §2.10's and §2.13's orders of refusals), `window.json` (§2.8's window and deadline), `lifecycle.json` (the owner as a state machine: each step's reply, device acts, events and state), `desired.json` (§2.18) and `redaction.json` (§2.15); and config.v2's (round 102): `v2/`'s six files, `derive.json` (the declaration, the derived types and their layouts, the contract's lint), `records.json`, `validation.json`, `window.json`, `lifecycle.json` and `redaction.json`, and `contracts/rfcfg.v1`, lint-clean. An unknown file there fails. |
+| snapshot | §7.5 (0.97) | `snapshot`, `zk2c` | every file of `snapshot/`: `bodies.json`'s `writes` (each page's bytes and size, or the writer's refusal, read back to its value), `reads` (each page, written back, or the first refusal in the reading's order) and `pages` (each snapshot's pages and sizes, or the refusal, read back complete, and cut a second way by arithmetic). An unknown file there fails. |
 | frame | §7.7, observer §7.6 | `frame` | every file of `frame/`: `layouts.json` (the frame form, its tag, the widths and the span), `bodies.json` (each write's bits, pad and bytes or its refusal, each read's value or its first refusal, every accepted one written back and sealed in form 5) and `apply.json` (round 97: one key's frames through `frame.Reader`, from each body's value and as a sealed put, envelope first). An unknown file there fails. |
 | link | profiles/link §2.1–§2.15 | `link` | every file of `spec/profiles/link/conformance/`, `contracts/` (0.13: each contract there valid, each artifact listed) among them: `exposure.json` (§2.2's exposure and whether a resource's pushes cross), `plan.json` (a face policy and a deployment to each face's plan, or its refusal) and `lints.json` (the policy's linter, the plan's warnings, the windows and a router's block). An unknown file there fails. |
 | alarms | profiles/alarms §2.2–§2.6, §2.12, §2.14, §2.15, §5 | `alarms` | every file of `spec/profiles/alarms/conformance/`: `keys.json` (the recipe through the sanitizing step, the strict recipe beside it, host-scoped names, references and their keys), `documents.json` (readable, the owner's errors and warnings; a case given as its `text` read as strict JSON first, 0.2), `transitions.json` (one key's samples read in stamp order) and `conclusions.json` (§5's four questions, and §2.15's verdict on an owner's alarms). An unknown file there fails. |
@@ -6374,6 +6375,152 @@ None is a blocker. F-472 to F-479 are resolved. See "At core 0.96,
 config.v2 0.1 and modem.v3 3.3 (#985, #982 H1, #991)" in
 `SPEC-FINDINGS.md`.
 
+## Core 0.97 and 0.98, `config.v1` 0.11, `config.v2` 0.2 and `telemetry.v2` 0.4: form 7, a collection's snapshot, and round 102 answered (round 103)
+
+Since round 102 main took:
+- **core 0.97** (#977 E1): §7.5's form 7, a collection's snapshot, in
+  pages. No rule adopts it yet. Its fixtures: `envelope/vectors.json` (12
+  new cases, 7 changed), `carries.json` (12 new reads) and the new
+  `snapshot/bodies.json`;
+- **core 0.98:** the rule index reads a subject's own role (F-492). No rule
+  changed, and the owner class counts 76;
+- **#1075:** config.v1 0.11, config.v2 0.2 and telemetry.v2 0.4, which
+  answer F-480 to F-494. F-485 was fixed in the reference (`zenctl
+  config`).
+
+zk2py diffed `spec/` and `examples/zk2/` between cc10c662 and 2688123d.
+**No rule changed beyond what the changelogs state.** The keywords added
+are §7.5's four, the snapshot's. F-494's fix in zenoh-modem's README and
+`MIGRATION.md` has no entry, and examples carry none.
+
+### The classes zk2py claims
+
+Unchanged: the **owner**, **consumer**, **caller** and **observer**
+classes, at the full level, and the static rules. The snapshot's four
+rules are static: zk2py reads, writes and cuts pages, and no zk2py owner
+writes one, as no rule asks yet.
+
+### Its walk of `RULES.md` at 0.98
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 80 | 69 | 3 | 8 |
+| consumer | 23 | 19 | 0 | 4 |
+| caller | 18 | 18 | 0 | 0 |
+| observer | 93 | 89 | 2 | 2 |
+| static, in every class | 68 | 66 | 0 | 2 |
+
+- **256 rows walked of 256, none without a verdict.**
+  - The static rules gain §7.5's four, each met by `snapshot`.
+  - The owner loses round 102's two n/a's, which core 0.98's index no
+    longer lists under the owner (F-492).
+  - The heartbeat's reading is keyed to "in this order": the snapshot's
+    reading shares its first words.
+- The walk was re-keyed first, in the commit that brings `just
+  py-conformance` level. Round 102's readings of F-480 to F-494 now read
+  their answers.
+
+### What round 103 changed in zk2py
+
+- **`zk2c`:** form 7 is defined. A put carries a snapshot, and `key_kind`
+  refuses one on a key that is no state's, before `short`. Form 4 is the
+  one reserved, so the readings' refused envelope is form 4's CH.
+- **`snapshot`** (new), from §7.5 and the fixtures' descriptions alone:
+  - `read_page` and `read_body`: the envelope, then the body, refusing in
+    the reading's order;
+  - `write_page`: every field checked in that order, with the reading's
+    token, so no page it writes is refused;
+  - `write_back`, `cut` (the paging rule, each candidate page written and
+    measured) and `complete`;
+  - `cut_by_arithmetic`, a second reading, which sums §7.5's sizes and
+    writes no page;
+  - `cross_check`, the two readings on random snapshots.
+- **The snapshot family** (new) reads `snapshot/` whole: 269 of 269. Each
+  page written reads back and writes back. Each set of pages reads back,
+  complete, to its snapshot's entries, and is cut by arithmetic too. **The
+  envelope family:** 367 of 367.
+- **`echo_tool`:** a snapshot on a state key is shown by its page, read
+  without the contract, each member's key the reply's key and its id. Its
+  body is never decoded as the resource's type, nor sniffed.
+- **`config_v2`** and **`config`**, round 102's answers:
+  - §2.18 (F-482): each converging change is put, then its event; then the
+    report in a put of its own.
+  - §2.12 (F-481): a re-mint ends a pending change first in the old
+    instance, as `cancel` does: the record is put, then its event. Then
+    the device returns to its startup values, then the new instance. A
+    runtime parameter with no known startup value, an act in flight and a
+    device that will not return each refuse the re-mint.
+- **`config_v2_scenarios`** reads 0.2: §6's event at the record's
+  deadline (F-490), §12's record, event, then report (F-482), and the
+  re-mint's ended change checked (F-481).
+- **The mend** (review-bot on #1069):
+  - `blackbox.BLACKBOX`, one constant for the ten runners and
+    `health_scenarios`;
+  - `packed.field_of` public, so `config_v2`'s lint has no private
+    access;
+  - §8's dead `ds = […]` gone;
+  - `_config_v2`'s unknown-fixture gate kept.
+- **`readings`: 937**, up from 927:
+  - round 102's F-480 to F-494 read as answered;
+  - core 0.97's and 0.98's entries, their counts and rules;
+  - §7.5's sizes by zk2py's writer;
+  - 300 random snapshots cut both ways;
+  - the echo tool on a snapshot;
+  - F-495 to F-497.
+
+**`just py-conformance`: 6346 of 6346** on main 2688123d. Of them,
+`envelope` 367, `snapshot` 269 and `readings` 937.
+
+`snapshot.cross_check(20000)`: 20,000 random snapshots, 793,039 pages,
+both readings agree on every page. 3,933 of the snapshots pass 64 pages.
+
+### Live
+
+On main 2688123d's black boxes, `config_v2_scenarios` (`scenarios-v2.md`,
+text 0.2), every section in each pairing: **170 of 170**.
+
+| Section | zk2py's owner and caller | the owner example, zk2py's caller | zk2py's owner, `zenctl config` |
+|---|---|---|---|
+| §1 to §5, §7 to §10, §13, §14 | 44/44 | 44/44 | 44/44 |
+| §6 an extend (F-490) | 3/3 | 3/3 | 3/3 |
+| §11 sensitive values (F-485) | 4/4 | 4/4 | 4/4 |
+| §12 desired state refused (F-482) | 3/3 | 3/3 | 3/3 |
+| a re-mint (config.v1 §2.12, F-480, F-481) | 4/4 | 4/4 | not run |
+
+- **§11 step 2:** `zenctl config set` now shows the owner's refusal as
+  `device_refused`, with no message (F-485 fixed).
+- **§12 step 1:** each owner puts the applied value at seq 1, publishes
+  `applied` at seq 2, then puts the report `converged` at seq 3.
+- **The re-mint:** with a reach change pending and applied, each owner
+  puts the undone record under the old run, nothing pending. It then
+  publishes one `rolled-back` event under the old instance number. Then
+  comes the new instance's record, revision 0, which T's GET at the new
+  token answers.
+- **§6:** the deadlines fell 81.20 s, 80.53 s and 80.95 s after step 1,
+  and each event came within 3 ms of its deadline.
+
+Also run after the mend, on the same black boxes: `forms_live` 105 of
+105, `first_hop_live` 22 of 22, and `desired_scenarios --only 12 --only
+config-fed` 16 of 16 (zk2py's `config.v1` owner fed through `desired.v1`,
+its re-mint refused and a restart).
+
+**Not run:**
+- form 7 live: no owner writes a snapshot (E3), so form 7 is fixtures, the
+  echo tool and the readings only;
+- the four cases in which config.v1 0.11 says the reference refuses a
+  re-mint, against the owner example;
+- `live_interop` whole, `link.v2`'s scenarios on routers, and §10's block
+  halves, as round 102 said.
+
+Round 103 found F-495 to F-497:
+- two minor errors: the fixtures' collection index for zenoh-modem's
+  endpoints, 3.2's at 3.3, and Appendix E's `pages`;
+- a gap: which revision a reader maps a snapshot's collection index
+  with.
+
+None is a blocker. F-480 to F-494 are resolved. See "At core 0.98 (#977
+E1, round 102's answers)" in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -6427,6 +6574,10 @@ config.v2 0.1 and modem.v3 3.3 (#985, #982 H1, #991)" in
   zk2py's owner holds values only for parameterless state. It answers
   templated operations through the handlers and members it is given, and
   otherwise names no member.
+- **A collection's snapshot** (core 0.97, round 103): zk2py reads, writes
+  and cuts pages, and its echo tool shows one. Its owners answer a GET
+  per key and its readers read with `Latest`, as S2 to S4 still say: no
+  rule adopts the snapshot until E3.
 - **A call's forms** (core 0.94, round 101): zk2py's owners answer in
   them and its callers write them; its readers read the bare wire too, as
   §5.1's MAY allows. zk2py's tools show a call's reply only through
@@ -6507,7 +6658,8 @@ impl/python/
                                 under CH's tag, calls.json's writes and reads (core 0.94, round 101)
     zk2c.py           §7.5, observer §7.3 the zk2c envelope: parse, write, which sample carries one, a sample read
                                 envelope first (round 93); a call's forms, the request, the value and the error,
-                                parsed, written and read by a reply error's Encoding (core 0.92, round 100)
+                                parsed, written and read by a reply error's Encoding (core 0.92, round 100);
+                                form 7, a snapshot, on a put, key_kind off a state key (core 0.97, round 103)
     forms_live.py     §5.1 §5.2 operations.md §9, a call's forms, in three pairings: zk2py's caller and owner, zk2py's
                                 caller and the owner example, zenctl call and zk2py's owner (core 0.94, round 101;
                                 round 100's run measured a router's own Timeout)
@@ -6534,6 +6686,8 @@ impl/python/
     freshness_scenarios.py freshness.v1 scenarios.md §1–§6 on an in-process router
     heartbeat.py      §7.5      the heartbeat: the tag, the collections, the body written and read, the digest
                                 (round 96)
+    snapshot.py       §7.5      the snapshot, form 7: a page read, written and written back, cut by the paging
+                                rule twice (by writing, by arithmetic), held complete (core 0.97, round 103)
     frame.py          §7.7      frames: the declaration, the frame form and its tag, the body written and read
                                 over packed's fields (round 96, core 0.83)
     freshness_v2.py   freshness.v2 §2.5's rule (the view), a subscriber that re-reads, the owner's body (round 96)
@@ -6647,6 +6801,8 @@ impl/python/
     admin_records.py  observer §4.3, §11.1 the keys a node answers under its tables' read lock, shared by live and acl
     adminspace.py     observer §4.3, App. B a router or a peer in a process of its own, the load beside it, the @/** recorder,
                                 and the freeze measurement (never a suite), under access control too (0.50)
+    blackbox.py                 where the live runners find the reference's black boxes: $ZK2PY_BLACKBOX, else
+                                /srv/dev/scratch/zenkey/bin/current (the mend, round 103)
     proc.py                     helper processes for the measurements: a router, a publisher, a consumer that stops
     checks.py                   a live runner's checks: known failures by identity, XFAIL and XPASS, the exit
   interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan, sysinfo,

@@ -25479,3 +25479,200 @@ plan:
 - **Resolved: F-472 to F-479**, as above.
 - **Open:** F-436 (not re-run), F-437 to F-441, F-480 to F-494. F-365
   stays open as #965's.
+
+## At core 0.98 (#977 E1, round 102's answers)
+
+Round 103 read, cold, the texts at main 2688123d, each changelog entry
+first: core 0.97 (#977 E1, form 7, a collection's snapshot) and 0.98
+(F-492's index), then config.v1 0.11, config.v2 0.2 and telemetry.v2 0.4
+(#1075, round 102's answers). Then core §7.5's form 7 whole, from "A
+**snapshot** is one collection's state" to "**Complete.**", with its
+glossary entry, §12's static acts and Appendix E. Its evidence:
+`envelope/vectors.json` and `carries.json` and the new
+`snapshot/bodies.json`, read whole by zk2py's own `zk2c` and `snapshot`
+(envelope 367 of 367, snapshot 269 of 269); a second reading of the paging
+rule, by arithmetic, beside the first, by writing; and, live on main
+2688123d's black boxes, `scenarios-v2.md` §1 to §14 and the re-mint in
+three pairings.
+
+**No rule changed beyond the changelogs.** zk2py diffed `spec/` and
+`examples/zk2/` between cc10c662 (round 102's merge) and 2688123d.
+- **Core** changed in §7.5, §12 and Appendix E as 0.97's entry says, and
+  in its version alone at 0.98. The keywords added are §7.5's four:
+  "MUST refuse a body … reading its fields in order", "MUST NOT write a
+  page that this reading refuses", "MUST write back to the same bytes",
+  "MUST cut it so". `RULES.md` lists 250 rules, the static rules 67 and
+  the owner 76.
+- **The fixtures:** `vectors.json` 22 headers and 159 cases, 12 new and 7
+  changed, as the entry counts them; `carries.json` 28 reads, 12 new, and
+  one re-hexed to form 4; `bodies.json` 39 writes (12 refused), 109 reads
+  (79 refused) and 13 snapshots (2 refused).
+- **config.v1, config.v2 and telemetry.v2** changed as their entries say,
+  with no keyword added. `scenarios-v2.md` §6 and §12, `rfcfg.v1.toml`'s
+  comment and `derive.json`'s note likewise.
+- **examples/zk2:** `config.v2-binding.md` §3 (SF12) and §15 (the date),
+  zenoh-modem's README (the counters' lead-in, 8 to 26 B) and
+  `MIGRATION.md` (8 to 26 B). No entry names F-494's two, and examples
+  carry none.
+
+**F-480 to F-494's answers hold.** Each was read in its text, and the
+live ones were run on main 2688123d's black boxes (`config_v2_scenarios`,
+all three pairings, 170 of 170, the re-mint not run with `zenctl`).
+- **F-480:** config.v1 §2.12: "**The reference restarts the
+  configuration** so (`zenkey::config_v1`, `zenkey::config_v2`)", and it
+  names the four cases it refuses in. The four cases are not run live.
+- **F-481:** §2.12's four steps, §2.17's `rolled-back` "by `cancel` or a
+  re-mint", and v2 §2.12's old instance number. Live, both owners, with a
+  reach change pending and applied, put the undone record under the old
+  run, nothing pending, then one `rolled-back` event under the old
+  instance number, then the new instance's record. zk2py's two owners now
+  do this (`ConfigV2Owner.remint`, `ConfigOwner.remint`).
+- **F-482:** v2 §2.18, "**After the acts.**", and §12 expected 1. Live, in
+  each pairing: the record with `fraction_ppm` 20000 at seq 1, `applied`
+  at seq 2, then the report `converged` at seq 3. zk2py's owner did both
+  in one put and now puts them apart (`Core._converge`).
+- **F-483:** §3's desired fields, the escape's code not judged, as
+  `records.json` read 22 has it.
+- **F-484:** §2.2's items 3 and 4, `units = 3` reported and `units = {pin
+  = ""}` not beside an invalid type, as `derive.json` has it.
+- **F-485, fixed in the reference:** §11 step 2 through `zenctl config
+  set`: the refusal's `Error` code is `device_refused`, and no message is
+  shown. 4 of 4.
+- **F-486:** §2.19, "30 to 50 bytes with its envelope".
+- **F-487:** "Three hot groups" in `rfcfg.v1.toml`'s comment and
+  `derive.json`'s note.
+- **F-488:** zenoh-modem's call (marcpardo/zenoh-modem#213). The binding's
+  §3 says SF12 is outside the bound, and the contract stays 7 to 9.
+- **F-489:** the binding's §15 dates its steps 2026-11-02.
+- **F-490:** §6 expected 2 and 3. Live, the deadlines fell 81.20 s, 80.53 s
+  and 80.95 s after step 1, and each event was at its deadline within
+  3 ms. The owner example's 80.53 s is 0.03 s inside the old text's
+  tolerance.
+- **F-491:** the config.v2 0.2 entry records the intro's sentence.
+- **F-492:** `RULES.md` lists the deployment's SHOULD under the deployment
+  alone, and the tool's MUST NOT under the observer alone. The owner
+  counts 76. zk2py's walk dropped its two owner n/a's.
+- **F-493:** Appendix B states 42 of the 51 widths and excepts the kernel's
+  nine, at zk2py's 7.3 min and 2.4 min. The README's lead-in says the same.
+- **F-494:** zenoh-modem's README and `MIGRATION.md`, "8 to 26 B". No
+  entry names the fix, and examples carry none.
+
+**Form 7 in zk2py.**
+- **`zk2c`:** form 7 defined, a put carries a snapshot, and `key_kind`
+  refuses one off a state key, before `short`.
+- **`snapshot` (new), from §7.5 and the fixtures' descriptions alone:**
+  - a page read, refusing in the reading's order;
+  - written, refusing with the reading's token;
+  - written back;
+  - cut by the paging rule;
+  - held complete.
+- **The three fixture files pass whole:** envelope 367 of 367, snapshot
+  269 of 269. The 269 count each page written read back and each set of
+  pages read back to its snapshot.
+- **A second reading** of the paging rule, `cut_by_arithmetic`, sums §7.5's
+  sizes into the page each entry would join, and writes no page.
+  - It agrees with `cut` on all 13 of `pages` and on 20,000 random
+    snapshots, 793,039 pages.
+  - The random snapshots take both run widths, own runs, every
+    confirmation and the empty id. Counts and lengths cross 128, and 3,933
+    of the snapshots pass 64 pages.
+  - The readings run 300 of them each time.
+- **§7.5's "Sizes"** hold by zk2py's writer. A page with no entry is 16 B,
+  or 18 B with a 32-bit run. A live entry adds 6 B over its id and record,
+  and a tombstone 5 B over its id. An own run adds 2 or 4 B, a conf 6 B,
+  and confirmation 1 nothing. The page integer is one byte to page 63.
+- **zk2py's echo tool** shows a snapshot on a state key by its page, read
+  without the contract. Each member's key is the reply's key and its id.
+  The body is never decoded as the resource's type, nor sniffed: "never a
+  record of the resource's type" (§7.5). `observer.md` says nothing of a
+  snapshot yet, as 0.97's entry intends (E2's).
+- **The walk:** §7.5's four static rules met, 256 rows of 256. The
+  heartbeat's reading is keyed to "in this order", since the snapshot's
+  reading shares its first words.
+
+### F-495 · minor · `conformance/snapshot/README.md` and `bodies.json` beside `modem.v3` 3.3: the endpoints' collection index
+
+> `snapshot/README.md`: "**zenoh-modem's endpoints.**
+> `sdu/endpoint/{endpoint}` is collection 4 of modem.v3's state, in the
+> canonical form's order." `bodies.json`, write 26 and its read: "zenoh-modem's
+> sdu/endpoint/{endpoint}, collection 4 of modem.v3's state". Core §7.5:
+> "**The collection's index** is its resource's place, from 0, among the
+> interface's resources of the reply key's kind token, in the canonical
+> form's order (§9.5)."
+
+- **The error.** `modem.v3` 3.3 (71f55126, catalog index 8, the
+  example's head) declares 14 state resources. Its seven `packed/` states
+  sort before `radio` and `sdu/`, so `sdu/endpoint/{endpoint}` is 11 and 4
+  is `packed/identity`. 4 is the index in 3.0 to 3.2 (9a3e2859, 69081ed3,
+  a584f236), which declare 7. `oper`, the fixtures' other collection, is 2
+  in every revision.
+- **What zk2py does:** the fixtures' bytes, which hold the number and
+  read no contract. Its reading computes the index from each revision in
+  `examples/zk2/.history`.
+- **Fix:** "collection 11 of modem.v3 3.3's state (4 in 3.0 to 3.2)", in
+  the README and both notes. Or the cases' `coll` becomes 11, which moves
+  their bytes.
+- **Changes:** what a reader with the example's head contract maps the
+  fixtures' pages to.
+
+### F-496 · minor · core Appendix E's `snapshot/` row: the paging cases' refusal left out
+
+> Appendix E: "A snapshot and a page size → its pages' bytes and sizes
+> (`pages`)." `snapshot/README.md`: "A snapshot and a page size → its
+> pages' bytes and sizes, or the writer's refusal (`pages`)."
+> `conformance/README.md`: "A snapshot and a page size → its pages, as the
+> paging rule cuts them, or the writer's refusal (`pages`)". 0.97's
+> entry: "13 snapshots paged, 2 refused".
+
+- **The error.** `pages` holds two refused snapshots, `order` and `id`.
+  Appendix E names a refusal for `writes` and `reads`, but not for
+  `pages`.
+- **Fix:** "… → its pages' bytes and sizes, or the writer's refusal
+  (`pages`)."
+- **Changes:** wording.
+
+### F-497 · gap · core §7.5 "The collection's index": which revision a reader maps it with
+
+> §7.5: "**The collection's index** is its resource's place, from 0, among
+> the interface's resources of the reply key's kind token, in the
+> canonical form's order (§9.5). A reader with the contract maps it to a
+> template." "A snapshot's is its collection's type's, as a mutation's
+> is." Beside it, a heartbeat: "A heartbeat's tag names a contract
+> revision", and `freshness.v2` §2.5 step 1: "**Another revision.** CH's
+> tag is not the revision the reader holds: nothing is confirmed".
+
+- **The gap.** The index is the owner's revision's. Nothing in the
+  snapshot names that revision. Its CH tag is the collection's type's:
+  0 for a JSON collection, and for a packed one its layout's, which a new
+  resource does not change. A minor revision that adds a resource sorting
+  before a collection moves its index.
+  - `modem.v3` 3.3 did so with seven `packed/` states. Its index 4 is
+    `packed/identity`, where 3.2's is `sdu/endpoint/{endpoint}`.
+  - 3.3's endpoints are 11, past 3.2's 7 state resources.
+  - 3.3 is a review against 3.2, accepted in its history root (round
+    102), so one deployment may run both.
+- **So a reader holding 3.2** maps a 3.3 owner's snapshot to another
+  collection, or to none. The text does not say whether the reply's key,
+  which names the collection too, overrides the index. Nor does it say
+  that the reader uses the owner's revision, which the owner's descriptor
+  names.
+- **What zk2py does:** nothing yet. No rule has a reader read a snapshot,
+  and zk2py's echo tool shows the index unmapped.
+- **Fix:** §7.5: "A reader maps the index with the revision the owner's
+  descriptor names for the interface, and refuses a page whose index
+  names no state resource of the reply key's kind token in it." Or: "The
+  reply's key names the collection. The index is checked against it, and a
+  page whose index the reader's revision maps to another template is
+  read by its key." E3, which adopts the snapshot, may say either.
+- **Changes:** whether a reader on another minor revision maps a snapshot
+  to the right collection.
+
+### Counts at core 0.98 (#977 E1, round 102's answers)
+
+497 entries.
+- **New: F-495 to F-497:** two minor errors (F-495, F-496) and a gap
+  (F-497). None is a blocker.
+- **Resolved: F-480 to F-494**, as above. F-485 was fixed in the
+  reference, and F-488 is zenoh-modem's call, stated in its binding.
+- **Open:** F-436 (not re-run), F-437 to F-441, F-495 to F-497. F-365
+  stays open as #965's.
