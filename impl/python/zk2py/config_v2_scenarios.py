@@ -55,11 +55,11 @@ from . import config as v1
 from . import config_v2 as c2
 from . import freshness as fr
 from . import zk2c
+from .blackbox import BLACKBOX
 
 REPO = Path(__file__).resolve().parents[3]
 LIFECYCLE = REPO / "spec" / "profiles" / "config" / "conformance" / "v2" / "lifecycle.json"
 NAV = REPO / "examples" / "zk2" / "walkthrough" / "nav.v2.toml"
-BLACKBOX = Path(os.environ.get("ZK2PY_BLACKBOX", "/srv/dev/scratch/zenkey/bin/current"))
 IFACE = "rfcfg.v1"
 NS = 1_000_000_000
 PAIRINGS = ("py-py", "rust-py", "py-zenctl")
@@ -831,18 +831,21 @@ def section6(report: Report, pairing: str) -> None:
         p2 = _pending(r2) or {}
         time.sleep(0.3)
         dl2 = p2.get("deadline", 0)
-        report.check(sec, "step 2: the record, its deadline the extend's receipt plus 60 s, rounded up: 81 s after "
-                          "step 1's call; no event",
+        report.check(sec, "step 2: the record, its deadline the extend's receipt plus 60 s, rounded up (§2.8); no "
+                          "event",
                      dl2 % 1000 == 0 and 60_000 <= dl2 - t2u // 1_000_000 < 61_000 and not bus.events(since=t0u),
                      f"{r2.short()}; deadline - step 1 {(dl2 - recv) / 1000:.3f} s")
         _wait(lambda: bool(bus.events(since=t0u)), 75.0, 0.1)
         evs = bus.events(since=t0u)
         at = (evs[0][0] - t0u) / NS if evs else None
-        report.check(sec, "step 3: the undo at the new deadline, not the first: the rolled-back event 81 s after "
-                          "step 1, ± 0.5 s",
+        # Text 0.2 (F-490): "That is 80.4 s to 81.4 s after step 1, by its
+        # phase", and the event "at that deadline, ± 0.5 s"; the extend's
+        # receipt comes a few ms after C sends it.
+        report.check(sec, "step 3: the undo at the new deadline, not the first: the rolled-back event at the record's "
+                          "deadline, ± 0.5 s, that deadline 80.4 s to 81.4 s after step 1 by its phase",
                      len(evs) == 1 and evs[0][2]["outcome"] == "rolled-back" and at is not None
-                     and abs(at - (dl2 - recv) / 1000) <= 0.5 and 80.5 <= at <= 82.0,
-                     f"event at {at and round(at, 3)} s")
+                     and abs(at - (dl2 - recv) / 1000) <= 0.5 and 80.4 <= (dl2 - recv) / 1000 <= 81.6,
+                     f"event at {at and round(at, 3)} s; deadline - step 1 {(dl2 - recv) / 1000:.3f} s")
     finally:
         bus.close()
 
@@ -1010,7 +1013,6 @@ def section8(report: Report, pairing: str) -> None:
         _, g2, _ = bus.get("lab/rf2", session=admin)
         tok3 = ((g2 or {}).get("last") or {}).get("token", 1)
         r3 = bus.call("persist", {"token": tok3}, address="lab/rf2", actor="admin")
-        ds = [d for d in bus.s.rows if False]
         desc = None
         rf2 = [x for x in bus.owners if getattr(x, "service", None) == "rf2" or (
             getattr(x, "instance_key", "").startswith("zk2/lab/rf2/"))]
@@ -1023,7 +1025,7 @@ def section8(report: Report, pairing: str) -> None:
                      r3.code == "unavailable" and (r3.error or {}).get("cause") == "config"
                      and any(u.get("resource") == "@op/persist" and u.get("cause") == "config"
                              for u in entry.get("unavailable", [])),
-                     f"{r3.short()}; descriptor unavailable {entry.get('unavailable')} {len(ds)}")
+                     f"{r3.short()}; descriptor unavailable {entry.get('unavailable')}")
         o.restart()
         _, g, _ = bus.get(session=admin)
         report.check(sec, "step 4: fraction_ppm is 20000 at overlay: step 1's change survived, step 2's did not",
@@ -1197,11 +1199,21 @@ def section12(report: Report, pairing: str) -> None:
         recs = bus.records(since=t0)
         evs = bus.events(since=t0)
         conv = next((x for x in recs if (x[2].get("desired") or {}).get("observed_revision") == 1), None)
-        report.check(sec, "step 1: S receives the record, fraction_ppm 20000, desired converged at revision 1, then "
-                          "one event, applied",
-                     conv is not None and _p(conv[2], "duty", "fraction_ppm").get("value") == 20000
+        val = next((x for x in recs if _p(x[2], "duty", "fraction_ppm").get("value") == 20000), None)
+        # Text 0.2 (F-482): §2.18 "After the acts. The report changes in a put
+        # of its own … Each converging change's put and its event come
+        # before it", and §12 expected 1: the record, the event, then the
+        # next record with the report.
+        order = (val is not None and conv is not None and len(evs) == 1 and val[1] is not None
+                 and conv[1] is not None and evs[0][1] is not None
+                 and val[1].seq < evs[0][1].seq < conv[1].seq
+                 and [x for x in recs if x[1] is not None and val[1].seq < x[1].seq < conv[1].seq] == [])
+        report.check(sec, "step 1: S receives the record, fraction_ppm 20000, then one event, applied; then the next "
+                          "record, its report desired converged at revision 1 (§2.18)",
+                     order and (val[2].get("desired") or {}).get("observed_revision") != 1
+                     and _p(conv[2], "duty", "fraction_ppm").get("value") == 20000
                      and conv[2]["desired"] == {"outcome": "converged", "observed_revision": 1, "refusal": None}
-                     and len(evs) == 1 and evs[0][2]["outcome"] == "applied" and evs[0][0] >= conv[0],
+                     and evs[0][2]["outcome"] == "applied",
                      f"records {[(st and st.seq, _p(r, 'duty', 'fraction_ppm').get('value'), r.get('desired')) for _, st, r in recs]}; "
                      f"events {[(st and st.seq, e['outcome']) for _, st, e in evs]}")
         before = o.device()["applies"]
@@ -1551,11 +1563,23 @@ def section_remint(report: Report, pairing: str) -> None:
                      f"T's GET at the new token: instance {(at_token or {}).get('instance')}; S heard the new record "
                      f"{(nr[0] - min(declared)) / 1e6 if declared and nr[0] else None} ms after the token; "
                      f"withdrawn {len(withdrawn)}; held {dev['held']['radio']}; undos {dev['undos']}")
-        report.check(sec, "what is published of the old pending change (informative: config.v1 §2.12 \"no event is "
-                          "published for it\" beside §2.17 \"exactly one event for each change, when the change "
-                          "ends\")", True,
+        # config.v1 0.11 §2.12 (F-481): "A pending change ends first, in the
+        # old instance, as cancel ends it … its read-back is put", then "Its
+        # event is published, rolled-back or partial"; config.v2 0.2 §2.12:
+        # "That change's record and event carry the old instance number."
+        old_recs = [x for x in recs if x[2].get("instance") == old_number and x[1] is not None]
+        ended = next((x for x in old_recs if x[2].get("pending") is None), None)
+        ev_old = [x for x in evs if x[2].get("instance") == old_number]
+        ev_new = [x for x in evs if x[2].get("instance") != old_number]
+        report.check(sec, "the pending change ends first in the old instance (config.v1 0.11 §2.12): its record, "
+                          "nothing pending, then one event, rolled-back, each under the old instance number and run, "
+                          "both before the new instance's record; none under the new",
+                     ended is not None and len(ev_old) == 1 and ev_old[0][2]["outcome"] == "rolled-back"
+                     and ev_old[0][2].get("token") == p1.get("token") and ev_old[0][1] is not None
+                     and ended[1].run == ev_old[0][1].run and ended[1].seq < ev_old[0][1].seq
+                     and nr[0] is not None and ended[0] <= ev_old[0][0] <= nr[0] and not ev_new,
                      f"events {[(str(st), e['outcome'], e['instance']) for _, st, e in evs]}; records under the old "
-                     f"instance number {[(str(st), r.get('revision')) for _, st, r in recs if r.get('instance') == old_number]}")
+                     f"instance number {[(str(st), r.get('revision'), bool(r.get('pending'))) for _, st, r in old_recs]}")
         r3 = bus.call("confirm", {"token": p1.get("token", 0)})
         report.check(sec, "a late confirm with the old token: not_found", r3.code == "not_found", r3.short())
         r4 = bus.call("set/duty", {"fraction_ppm": 1})

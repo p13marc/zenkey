@@ -436,7 +436,7 @@ def _normal(item: Any) -> Any:
     if item == MARKER or not isinstance(item, dict):
         return item
     try:
-        f = packed._field_of(item)  # noqa: SLF001
+        f = packed.field_of(item)
         width = f.width
     except Exception:  # noqa: BLE001 - a field the codec cannot read differs from every derivation
         return ("unreadable", json.dumps(item, sort_keys=True, default=str))
@@ -1617,10 +1617,14 @@ class Core:
             self._converge(now, step)
 
     def _converge(self, now: int, step: Step) -> None:
+        """§2.18 (text 0.2, F-482): "The report changes in a put of its own,
+        once the owner has acted on the document. Each converging change's
+        put and its event come before it (§2.17)." So each group's change is
+        put, then its event published, the record still carrying the earlier
+        report; then the report's put."""
         doc = self._desired_doc
         if doc is None or self.pending is not None:
             return
-        events: list[tuple[Change, str]] = []
         failed = None
         for gname in v1.bytewise(doc["values"]):
             want = doc["values"][gname]
@@ -1639,13 +1643,30 @@ class Core:
             self._moved(change, gname, want)
             self.last_change = {"token": change.token, "groups": set(change.groups), "sensitive": False,
                                 "values": dict(change.new)}
-            events.append((change, "applied"))
+            self._put(step)
+            self._event(change, "applied", step, now)
         self.desired = {"outcome": "failed" if failed else "converged", "observed_revision": doc["revision"],
                         "refusal": failed}
         self._desired_doc = None
         self._put(step)
-        for change, outcome in events:
-            self._event(change, outcome, step, now)
+
+    # -- a re-mint (v1 §2.12, text 0.11) -------------------------------------------------------
+
+    def end_for_remint(self, now: int) -> Step:
+        """v1 §2.12 (text 0.11, F-481), step 1 and 2 of a re-mint: "A pending
+        change ends first, in the old instance, as ``cancel`` ends it (§2.10).
+        Its undo runs and its read-back is put", then "Its event is
+        published, ``rolled-back`` or ``partial`` (§2.17). The rate counts
+        it." v2 §2.12: "That change's record and event carry the old
+        instance number." Nothing pending: an empty step."""
+        step = Step()
+        change = self.pending
+        if change is None:
+            return step
+        outcome = self._undo(change, step)
+        self._put(step)
+        self._event(change, outcome, step, now)
+        return step
 
 
 # -- the fixtures' shapes ---------------------------------------------------------------------
@@ -1877,9 +1898,11 @@ class ConfigV2Owner:
       each states (§2.8).
     - A token is the run and a 16-bit counter, each run's counter drawn at
       random, or from ``counter_start`` (a test's hook, scenarios §7 step 5).
-    - :meth:`remint` is a restart of the configuration (v1 §2.12, core §1.5):
-      the device returned to its startup values, then a new instance whose
-      record, under its new run, is put before its tokens."""
+    - :meth:`remint` is a restart of the configuration (v1 §2.12, text 0.11,
+      core §1.5): a pending change ended first in the old instance, as
+      ``cancel`` ends it, its record put and its event published; the device
+      returned to its startup values; then a new instance whose record,
+      under its new run, is put before its tokens."""
 
     def __init__(self, system: str, service: str, contract: Any, *, startup: dict[str, dict[str, dict[str, Any]]],
                  overlay: dict[str, dict[str, Any]] | None = None, floor_s: int = 10, apply_after_ms: int = 1000,
@@ -1964,17 +1987,41 @@ class ConfigV2Owner:
 
     def remint(self) -> str:
         """Core §1.5's re-mint while running, a restart of the configuration
-        (v1 §2.12): the device back to its startup values (one undo where it
-        holds others), then a new instance and run, its record put before
-        its tokens; nothing of the old pending change is published. Returns
-        the new instance id."""
+        (v1 §2.12, text 0.11), "in this order":
+        1. a pending change ends in the old instance, as ``cancel`` ends it:
+           its undo, its record put, then its event, ``rolled-back`` or
+           ``partial``, the rate counting it (:meth:`Core.end_for_remint`);
+        2. the device returns to its startup values, one undo where it holds
+           others;
+        3. the new instance and run, its record put before its tokens:
+           revision 0, nothing pending, no last change, no key held.
+
+        Refused (:class:`zk2py.owner.OwnerRefused`), the instance running on,
+        where §2.12 says the reference refuses: a parameter set at runtime
+        whose startup value is unknown, checked before anything moves, and a
+        device that refuses to return to its startup values. An act is never
+        in flight here: the owner acts under its lock. Returns the new
+        instance id."""
+        from .owner import OwnerRefused
+
         with self.lock:
+            unknown = sorted(f"{g}.{p}" for (g, p), r in self.core.running.items()
+                             if r.source == "runtime" and self.core.startup_value(g, p)[0] is UNKNOWN)
+            if unknown:
+                raise OwnerRefused(f"config.v1 §2.12: {', '.join(unknown)} set at runtime, its startup value "
+                                   "unknown: no re-mint")
+            step = self.core.end_for_remint(self.now_ms())
+            self.steps.append(step)
             startup = self._startup_values()
             moved = {g: {p: v for p, v in ps.items() if self.device.values.get(g, {}).get(p) != v}
                      for g, ps in startup.items()}
             moved = {g: ps for g, ps in moved.items() if ps}
             if moved:
-                self.device(("undo", moved))
+                result = self.device(("undo", moved))
+                if not (result == "ok" or result is None):
+                    self.cv.notify_all()
+                    raise OwnerRefused("config.v1 §2.12: the device refuses to return to its startup values: no "
+                                       f"re-mint ({result})")
             original = self.owner._declare_instance  # noqa: SLF001
 
             def declare(plan: Any, instance: str, bundles: bool = False) -> Any:

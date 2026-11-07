@@ -52,13 +52,13 @@ from typing import Any, Callable
 
 from . import zk2c
 from .arbitration_scenarios import Proc
+from .blackbox import BLACKBOX
 
 REPO = Path(__file__).resolve().parents[3]
 INTEROP = REPO / "impl" / "python" / "interop"
 GUARD = INTEROP / "grammar" / "zk2py_guard.v1.toml"
 FROZEN = INTEROP / "operations" / "zk2py_frozen.v1.toml"
 TC = INTEROP / "zk2py_tc.v1.toml"
-BLACKBOX = Path(os.environ.get("ZK2PY_BLACKBOX", "/srv/dev/scratch/zenkey/bin/current"))
 OWNER, ZENCTL = BLACKBOX / "owner", BLACKBOX / "zenctl"
 EVERY = ["@stream", "@state", "@op", "@adv", "@zk"]
 #: grammar.md §1's data resources, in the order the owner puts them

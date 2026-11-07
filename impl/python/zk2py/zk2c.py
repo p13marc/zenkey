@@ -3,19 +3,22 @@ observer §7.3's step that reads an envelope first (text 0.14), with core
 §4.3's in-band stamp it carries (0.73).
 
 **The bytes (core §7.5).** A put carries an envelope as its payload, a
-delete as its attachment, and a call's query, reply and reply error a form
-as their payload::
+delete as its attachment, a GET's reply a snapshot as its payload (0.97),
+and a call's query, reply and reply error a form as their payload::
 
     mutation, a put's payload            CH · run · seq · record
     delete, a delete's attachment        CH · run · seq
     heartbeat, a put's payload           CH · run · seq · body
     frame, a put's payload               CH · run · seq · body
+    snapshot, a GET reply's payload      CH · run · asof · body
     request, a query's payload           CH · record
     value, a reply's payload             CH · run · seq · record
     error, a reply error's payload       CH · run · seq · error
 
 The heartbeat is form 6 (core 0.81, #978 F1): :mod:`zk2py.heartbeat` reads
 and writes its body, and checks its tag against the covered revision. The
+snapshot is form 7 (core 0.97, #977 E1), ``CH · run · asof · body``, "a GET
+reply's payload": :mod:`zk2py.snapshot` reads, writes and cuts its pages. The
 value is form 2, a request among them ("A value carried by a query is a
 request. It has no run and no seq"), and the error form 3 (core 0.92, #985
 C4a): its byte holds §5.2's code, its cause, a detail bit, a message bit
@@ -29,8 +32,8 @@ after the seq, possibly none; a request's every byte after its CH.
 key is (§1.1). The parser knows what carries the bytes, its sample":
 ``put``, ``delete``, ``query``, ``reply`` or ``reply_err``. :func:`parse`
 refuses for the first of §7.5's reasons, in its order, each with its token
-(:class:`Refused`): ``short`` (no CH), ``form`` (4 or 7), ``sample_kind``,
-``key_kind`` (a frame's, given its key), ``tag`` (a delete's),
+(:class:`Refused`): ``short`` (no CH), ``form`` (4, core 0.97), ``sample_kind``,
+``key_kind`` (a frame's or a snapshot's, given its key), ``tag`` (a delete's),
 ``request_run``, ``short`` (the stamp, and an error's byte after it),
 ``trailing`` (a delete's), then on an error's byte ``cause``, ``detail``,
 ``extension``, ``short`` (its message), ``utf8`` and ``trailing``. "Every
@@ -73,18 +76,23 @@ from typing import Any
 
 from . import keys
 
-#: core §7.5's forms by code. Six are defined at this version (core 0.81
-#: adds the heartbeat, code 6, 0.83 the frame, code 5, #981 K1, and 0.92 the
-#: value, code 2, and the error, code 3, #985 C4a); "a reserved form, 4 or
-#: 7" is refused (``form``).
+#: core §7.5's forms by code. Seven are defined at this version (core 0.81
+#: adds the heartbeat, code 6, 0.83 the frame, code 5, #981 K1, 0.92 the
+#: value, code 2, and the error, code 3, #985 C4a, and 0.97 the snapshot,
+#: code 7, #977 E1); "a reserved form, 4" is refused (``form``).
 FORMS = ("mutation", "delete", "value", "error", "event", "frame", "heartbeat", "snapshot")
-DEFINED = ("mutation", "delete", "value", "error", "frame", "heartbeat")
-#: core §7.5 (0.92): "A put carries a mutation, a heartbeat or a frame, and a
-#: delete's attachment a delete. A query and a reply carry a value, and a
-#: reply_err an error." A GET's reply that represents a put is ``put``, and a
-#: ``reply_del``'s attachment ``delete``.
-CARRIES = {"put": ("mutation", "frame", "heartbeat"), "delete": ("delete",), "query": ("value",),
+DEFINED = ("mutation", "delete", "value", "error", "frame", "heartbeat", "snapshot")
+#: core §7.5 (0.97): "A put carries a mutation, a heartbeat, a frame or a
+#: snapshot, and a delete's attachment a delete. A query and a reply carry a
+#: value, and a reply_err an error." A GET's reply that represents a put, or
+#: carries a snapshot, is ``put``, and a ``reply_del``'s attachment
+#: ``delete``. "Only a GET's reply carries a snapshot … The parser cannot
+#: tell how a put came, so it reads a snapshot either way."
+CARRIES = {"put": ("mutation", "frame", "heartbeat", "snapshot"), "delete": ("delete",), "query": ("value",),
            "reply": ("value",), "reply_err": ("error",)}
+#: core §7.5 (0.97): "a snapshot on a key whose kind token is neither
+#: ``state`` nor ``@state``" is ``key_kind``
+SNAPSHOT_TOKENS = ("state", "@state")
 SAMPLES = tuple(CARRIES)
 #: the forms a put's payload carries; a delete's attachment carries a delete
 PUT_FORMS = CARRIES["put"]
@@ -254,9 +262,12 @@ def parse(data: bytes, sample: str, key_token: str | None = None) -> Envelope:
     or ``reply_err`` (each one's payload, core 0.92). Raises
     :class:`Refused` for the first reason that applies, in the text's
     order. ``key_token``, the kind token "the grammar reads from the key
-    alone", refuses a frame on a key that is not a plain stream's
-    (``key_kind``, core 0.83, after ``sample_kind``); None parses with no
-    key, as ``vectors.json`` does."""
+    alone", refuses a frame on a key that is not a plain stream's, and a
+    snapshot on one that is no state's (``key_kind``, core 0.83 and 0.97,
+    after ``sample_kind``); None parses with no key, as ``vectors.json``
+    does. "Of a snapshot, it takes the body unread": its asof is the
+    envelope's ``seq`` and its body the ``record`` (:mod:`zk2py.snapshot`
+    reads it)."""
     if sample not in CARRIES:
         raise ValueError(f"no such sample kind: {sample!r}")
     data = bytes(data)
@@ -269,6 +280,8 @@ def parse(data: bytes, sample: str, key_token: str | None = None) -> Envelope:
         raise Refused("sample_kind", f"a {h['form']} as {_CARRIER[sample]}")
     if h["form"] == "frame" and key_token is not None and key_token != "stream":
         raise Refused("key_kind", f"a frame on a {key_token} key: only a plain stream's carries one (core §7.5)")
+    if h["form"] == "snapshot" and key_token is not None and key_token not in SNAPSHOT_TOKENS:
+        raise Refused("key_kind", f"a snapshot on a {key_token} key: only a state's carries one (core §7.5)")
     if h["form"] == "delete" and h["tag"] != 0:
         raise Refused("tag", f"a delete whose tag is {h['tag']}")
     if sample == "query":

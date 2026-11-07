@@ -52,6 +52,7 @@ from typing import Any
 from . import freshness as fr
 from . import freshness_v2 as fv2
 from . import heartbeat, zk2c
+from .blackbox import BLACKBOX
 
 REPO = Path(__file__).resolve().parents[3]
 BEACON = REPO / "impl" / "python" / "interop" / "freshness" / "beacon.v2.toml"
@@ -61,7 +62,6 @@ BEACON_FACE = BEACON
 #: zenkey/tests/contracts/beacon-governed.v2.toml", a contract file read as
 #: any contract is
 GOVERNED = REPO / "zenkey" / "tests" / "contracts" / "beacon-governed.v2.toml"
-BLACKBOX = Path(os.environ.get("ZK2PY_BLACKBOX", "/srv/dev/scratch/zenkey/bin/current"))
 IFACE = "beacon.v2"
 BASE = f"zk2/lab/beacon/{IFACE}"
 STATUS, PEER_A, PEER_B = f"{BASE}/state/status", f"{BASE}/state/peer/a", f"{BASE}/state/peer/b"

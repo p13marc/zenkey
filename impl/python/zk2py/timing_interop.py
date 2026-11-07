@@ -71,10 +71,10 @@ from typing import Any, Callable
 
 from . import zk2c
 from . import timing as tm
+from .blackbox import BLACKBOX
 
 REPO = Path(__file__).resolve().parents[3]
 PACE = REPO / "impl" / "python" / "interop" / "timing" / "pace.v1.toml"
-BLACKBOX = Path(os.environ.get("ZK2PY_BLACKBOX", "/srv/dev/scratch/zenkey/bin/current"))
 ADDRESS = "lab/pace"
 BASE = "zk2/lab/pace/pace.v1/stream"
 CMD = f"{BASE}/cmd"

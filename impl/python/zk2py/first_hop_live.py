@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import socket
 import sys
 import threading
@@ -39,10 +38,11 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .blackbox import BLACKBOX
+
 REPO = Path(__file__).resolve().parents[3]
 PROBE = REPO / "spec" / "profiles" / "link" / "conformance" / "contracts" / "probe.v1.toml"
 CATALOG_CONTRACT = REPO / "examples" / "zk2" / "zensight" / "zs.catalog.v1.toml"
-BLACKBOX = Path(os.environ.get("ZK2PY_BLACKBOX", "/srv/dev/scratch/zenkey/bin/current"))
 KEY_FORMS = {"instance": b"/@zk/instance/", "alive": b"/@zk/alive/", "member": b"/@zk/member/",
              "contract": b"@zk/contract/"}
 

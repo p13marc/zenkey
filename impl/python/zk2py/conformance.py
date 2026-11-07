@@ -4000,7 +4000,7 @@ def family_readings(root: Path) -> list[Result]:
         + _mend_after_round93_readings(root) + _round94_readings(root) + _mend_after_round94_readings(root) \
         + _round95_readings(root) + _round96_readings(root) + _round96_k1_readings(root) + _round97_readings(root) \
         + _round98_readings(root) + _round99_readings(root) + _round100_readings(root) \
-        + _round101_readings(root) + _round102_readings(root)
+        + _round101_readings(root) + _round102_readings(root) + _round103_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -4688,12 +4688,13 @@ def _round100_readings(root: Path) -> list[tuple[str, Any, Any]]:
     forms = _load_json(root / "errors" / "forms.json")
     exp = _load_json(root / "contracts" / "expect.json")["cases"]
     out.append(("core 0.92's entry: vectors.json's 20 headers and 147 cases, 91 of them on query, reply and "
-                "reply_err; forms.json's 256 error bytes, 22 writes and 17 reads; e044-packed-place lists two E044",
+                "reply_err, and core 0.97's 2 headers and 12 cases, 2 of them on query and reply (22, 159 and 93); "
+                "forms.json's 256 error bytes, 22 writes and 17 reads; e044-packed-place lists two E044",
                 [len(vec["headers"]), len(vec["cases"]),
                  sum(1 for c in vec["cases"] if c["sample"] in ("query", "reply", "reply_err")),
                  len(forms["bytes"]), len(forms["writes"]), len(forms["reads"]),
                  exp["e044-packed-place"]["codes"]],
-                [20, 147, 91, 256, 22, 17, ["E044", "E044"]]))
+                [22, 159, 93, 256, 22, 17, ["E044", "E044"]]))
     # What no rule adopted at 0.92 (core §5.1 "The forms", §5.2 "The error
     # form"). Core 0.94 (#985 C4c) adopts the forms: round 101 re-keys this
     # reading to the three sentences' absence, and reads 0.94's own rules in
@@ -4817,14 +4818,14 @@ def _round101_readings(root: Path) -> list[tuple[str, Any, Any]]:
     vec = _load_json(root / "envelope" / "vectors.json")
     forms = _load_json(root / "errors" / "forms.json")
     out.append(("core 0.94's entry: calls.json holds ok-packed-operation's three operations, CHs by the tags Sensor 6, "
-                "Status 14 and Change 2, 21 writes and 18 reads; vectors.json (20 headers, 147 cases) and "
-                "forms.json (256 bytes, 22 writes, 17 reads) change no case",
+                "Status 14 and Change 2, 21 writes and 18 reads; vectors.json (20 headers, 147 cases, and 0.97's 2 "
+                "and 12) and forms.json (256 bytes, 22 writes, 17 reads) change no case",
                 [cj["contract"], [f["operation"] for f in cj["forms"]],
                  {n.split("#")[1]: t["tag"] for n, t in cj["types"].items()}, len(cj["writes"]), len(cj["reads"]),
                  len(vec["headers"]), len(vec["cases"]), len(forms["bytes"]), len(forms["writes"]),
                  len(forms["reads"])],
                 ["contracts/ok-packed-operation.toml", ["calibrate", "scan", "reset"],
-                 {"Sensor": 6, "Status": 14, "Change": 2}, 21, 18, 20, 147, 256, 22, 17]))
+                 {"Sensor": 6, "Status": 14, "Change": 2}, 21, 18, 22, 159, 256, 22, 17]))
     # §5.1's four additions and §5.2's two, as the entry names them.
     out.append(("core 0.94 §5.1: the caller's request MUST, the owner's value MUST with its as-of mark, reading a "
                 "value, an answer sent again MUST, and the bare wire's MAY",
@@ -4950,6 +4951,180 @@ def _round101_readings(root: Path) -> list[tuple[str, Any, Any]]:
     return out
 
 
+def _round103_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.97 (#977 E1, form 7, a collection's snapshot) and 0.98 (F-492),
+    read at main 2688123d (#609, round 103): each entry, what each says
+    changed and did not, the snapshot's sizes by zk2py's own writer, its
+    collection index for zenoh-modem's endpoints, zk2py's echo tool on a
+    snapshot, and F-495 and F-496. The fixtures themselves are the envelope
+    and snapshot families'. Round 102's F-480 to F-494 are re-keyed to their
+    answers in place (:func:`_config_v2_readings`, :func:`_core096_readings`,
+    :func:`_modem33_readings`)."""
+    import re
+
+    from . import echo_tool, snapshot, zk2c
+    from .contract import load_contract
+
+    spec = root.parent
+    repo = spec.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, obs, glossary = flat("core.md"), flat("observer.md"), flat("README.md")
+    log = flat("CHANGELOG.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.97 and 0.98 or later, each with its entry (#977 E1, F-492); observer.md stays text 0.26",
+         [core_v >= (0, 98)] + entry("CHANGELOG.md", "0.97", "a collection's snapshot defined")
+         + entry("CHANGELOG.md", "0.98", "the rule index reads a subject's own role")
+         + missing(obs, "| **Text version** | 0.26") + missing(log, "`observer.md` stays text 0.26"),
+         [True]),
+    ]
+    # 0.97's evidence, as its entry counts it.
+    vec = _load_json(root / "envelope" / "vectors.json")
+    car = _load_json(root / "envelope" / "carries.json")
+    bod = _load_json(root / "snapshot" / "bodies.json")
+    refused = lambda cases: sum(1 for c in cases if "refused" in c["expect"])  # noqa: E731
+    form7 = [c for c in vec["cases"] if c["hex"] and int(c["hex"][:2], 16) >> 5 == 7]
+    out.append(("core 0.97's entry: vectors.json 22 headers and 159 cases; carries.json 28 reads; snapshot/bodies.json "
+                "39 writes, 12 refused, 109 reads, 79 refused, and 13 snapshots paged, 2 refused; of vectors.json's "
+                "cases, 18 are a snapshot's CH, 11 on a put, of which 7 parse",
+                missing(log, "22 headers and 159 cases, 12 of them new", "28 reads, 12 new",
+                        "39 writes, 12 of them refused, 109 reads, 79 refused, and 13 snapshots paged, 2 refused")
+                + [len(vec["headers"]), len(vec["cases"]), len(car["reads"]), len(bod["writes"]),
+                   refused(bod["writes"]), len(bod["reads"]), refused(bod["reads"]), len(bod["pages"]),
+                   refused(bod["pages"]), len(form7), sum(1 for c in form7 if c["sample"] == "put"),
+                   sum(1 for c in form7 if c["sample"] == "put" and "refused" not in c["expect"])],
+                [22, 159, 28, 39, 12, 109, 79, 13, 2, 18, 11, 7]))
+    out.append(("core 0.97 §7.5: the snapshot's four static rules as the text states them, §12's static acts, "
+                "form 4 the one reserved, and no rule adopting a snapshot",
+                missing(core, "An implementation MUST refuse a body for the first of these that applies, reading its "
+                              "fields in order, naming the refusal:",
+                        "An implementation MUST NOT write a page that this reading refuses.",
+                        "Every page an implementation accepts MUST write back to the same bytes.",
+                        "An implementation that cuts a snapshot into pages MUST cut it so.",
+                        "So are reading or writing a snapshot's page, and cutting a snapshot into pages (§7.5).",
+                        "No rule at this version has an owner write one, or a reader read one (§4.2).",
+                        "a reserved form, 4 (`form`);",
+                        "**Only a GET's reply carries a snapshot.** No owner puts one on its key.")
+                + missing(glossary, "**Snapshot**: one collection's state in a GET's reply, in pages"), []))
+    rules = (spec / "RULES.md").read_text(encoding="utf-8")
+    counted = {n: int(c) for n, c in re.findall(r"^\| \[([^\]]+)\]\(#[^)]*\) \| (\d+)", rules, re.M)}
+    once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
+    out.append(("core 0.97's and 0.98's entries: RULES.md lists 250 rules, the static rules 67 with §7.5's four, the "
+                "owner 76",
+                missing(log, "`RULES.md` lists 250 rules, 4 more", "The owner class counts 76 where it counted 78")
+                + [int(once.group(1)) if once else None, counted.get("Implementation: the static rules"),
+                   counted.get("Owner")], [250, 67, 76]))
+    # §7.5's "Sizes", by zk2py's own writer.
+    base = {"tag": 0, "run_width": 16, "run": 1, "asof": 9, "time": {"s": 3600, "ms": 250}, "index": 0,
+            "more": False, "coll": 0, "live": [], "tombs": []}
+
+    def size(**kw: Any) -> int:
+        return len(snapshot.write_page({**base, **kw}))
+
+    def live(**kw: Any) -> dict[str, Any]:
+        return {"id": "abc", "run_width": None, "run": None, "seq": 1, "confirmation": "none", "record": "00" * 100,
+                **kw}
+
+    tomb = {"id": "abc", "run_width": None, "run": None, "seq": 1}
+    empty = size()
+    sizes = [empty, size(run_width=32), size(live=[live()]) - empty - 3 - 100, size(tombs=[tomb]) - empty - 3,
+             size(live=[live(run_width=16, run=7)]) - size(live=[live()]),
+             size(live=[live(run_width=32, run=7)]) - size(live=[live()]),
+             size(live=[live(confirmation="conf", conf={"s": 1, "ms": 0})]) - size(live=[live()]),
+             size(live=[live(confirmation="time")]) - size(live=[live()]),
+             snapshot.leb128_size(63 * 2 + 1), snapshot.leb128_size(64 * 2)]
+    out.append(("core 0.97 §7.5 \"Sizes\": a page with no entry 16 bytes, 18 with a 32-bit run; a live entry 6 over its "
+                "id and record, a tombstone 5 over its id; an own run 2 or 4, a conf 6, confirmation 1 nothing; the "
+                "page integer one byte to page 63 (zk2py's writer)",
+                missing(core, "A snapshot's page** with no entry is 16 bytes, or 18 with a 32-bit run",
+                        "A live entry adds 6 bytes over its id and its record, while each is below 128 bytes. A "
+                        "tombstone adds 5 bytes over its id. An entry's own run adds 2 or 4, and its confirmation's "
+                        "time 6.")
+                + missing(log, "The integer stays one byte to page 63.") + sizes,
+                [16, 18, 6, 5, 2, 4, 6, 0, 1, 2]))
+    # The paging rule read twice, by writing and by arithmetic.
+    cc = snapshot.cross_check(300, seed=97)
+    out.append(("core 0.97 §7.5 \"Pages\": zk2py's two readings of the paging rule, one writing each candidate page and "
+                "one summing §7.5's sizes, agree on 300 random snapshots, each page read back, written back and "
+                "the pages complete to the snapshot",
+                [cc["snapshots"], cc["failed"], cc["over_64_pages"] > 0, cc["single_over"] > 0], [300, 0, True, True]))
+    # F-495: the endpoints' collection index at modem.v3 3.3.
+    readme = flat("conformance/snapshot/README.md")
+    modem = load_contract(repo / "examples" / "zk2" / "zenoh-modem" / "modem.v3.toml")
+    states = [r["template"] for r in modem.canonical["resources"] if r["kind"] == "state"]
+    history = repo / "examples" / "zk2" / ".history" / "modem.v3"
+    earlier = {}
+    for b in sorted(history.glob("*.bundle.json")):
+        doc = json.loads(b.read_text(encoding="utf-8"))
+        st = [r["template"] for r in (doc.get("contract") or doc)["resources"] if r["kind"] == "state"]
+        earlier[b.name[:8]] = st.index("sdu/endpoint/{endpoint}")
+    notes = [c["note"] for c in bod["writes"] if "collection 4 of modem.v3's state" in c["note"]]
+    out.append(("F-495 (open): snapshot/README.md and bodies.json say sdu/endpoint/{endpoint} is \"collection 4 of "
+                "modem.v3's state, in the canonical form's order\"; at modem.v3 3.3 (71f55126, catalog index 8) it is "
+                "11 of 14, the seven packed states before it; 4 is 3.0 to 3.2's, of 7; oper is 2 in each",
+                missing(readme, "`sdu/endpoint/{endpoint}` is collection 4 of modem.v3's state, in the canonical "
+                                "form's order.")
+                + [modem.fingerprint[7:15], len(states), states.index("sdu/endpoint/{endpoint}"),
+                   states.index("oper"), sorted(earlier.items()), len(notes)],
+                ["71f55126", 14, 11, 2, [("69081ed3", 4), ("71f55126", 11), ("9a3e2859", 4), ("a584f236", 4)], 1]))
+    # F-497: the collection's index under two revisions a deployment runs at
+    # once. modem.v3 3.2 (a584f236, catalog index 6) and 3.3 (71f55126,
+    # index 8): 3.3 adds seven state resources that sort before sdu/.
+    def state_of(prefix: str) -> list[str]:
+        b = next(history.glob(f"{prefix}*.bundle.json"))
+        doc = json.loads(b.read_text(encoding="utf-8"))
+        return [r["template"] for r in (doc.get("contract") or doc)["resources"] if r["kind"] == "state"]
+
+    s32, s33 = state_of("a584f236"), state_of("71f55126")
+    endpoint = next(r for r in modem.canonical["resources"] if r["template"] == "sdu/endpoint/{endpoint}")
+    out.append(("F-497 (open): core §7.5 \"The collection's index … A reader with the contract maps it to a "
+                "template\" names no revision, and a snapshot's CH tag is its collection's type's: modem.v3 3.2's "
+                "index 4 is sdu/endpoint/{endpoint}, 3.3's is packed/identity, and 3.3's endpoints are 11, past 3.2's "
+                "7; both JSON collections' tag is 0",
+                missing(core, "A reader with the contract maps it to a template.",
+                        "A snapshot's is its collection's type's, as a mutation's is.")
+                + [s32[4], s33[4], s33.index("sdu/endpoint/{endpoint}"), len(s32), endpoint["type"]["kind"]],
+                ["sdu/endpoint/{endpoint}", "packed/identity", 11, 7, "jsonschema"]))
+    # F-496: Appendix E's snapshot/ row and the paging refusals.
+    out.append(("F-496 (open): core Appendix E's snapshot/ row gives pages as \"its pages' bytes and sizes\", with no "
+                "writer's refusal; bodies.json's pages holds 2 refused, and its README says \"or the writer's "
+                "refusal\", as conformance/README.md's row does",
+                missing(core, "A snapshot and a page size → its pages' bytes and sizes (`pages`).")
+                + ["A snapshot and a page size → its pages' bytes and sizes, or the writer's refusal" in core,
+                   "A snapshot and a page size → its pages' bytes and sizes, or the writer's refusal (`pages`)"
+                   in flat("conformance/snapshot/README.md"),
+                   "A snapshot and a page size → its pages, as the paging rule cuts them, or the writer's refusal "
+                   "(`pages`)" in flat("conformance/README.md"), refused(bod["pages"])],
+                [False, True, True, 2]))
+    # zk2py's echo tool on a snapshot: its page shown, never decoded nor sniffed.
+    page = next(c for c in bod["reads"] if "zenoh-modem's sdu/endpoint" in c["note"])
+    raw = bytes.fromhex(page["hex"])
+    key = "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint"
+    row = echo_tool.row_of(key, False, len(raw), zk2c.ENCODING, raw, None, None)
+    bad = echo_tool.row_of(key, False, 6, zk2c.ENCODING, bytes.fromhex("e00001000009"), None, None)
+    snap = row.get("snapshot") or {}
+    out.append(("core 0.97 §7.5 in zk2py's echo tool: a snapshot's page read without the contract, its members' keys "
+                "the reply's key and each id, never decoded as the resource's type nor sniffed; a body the reading "
+                "refuses named",
+                [snap.get("form"), snap.get("asof"), (snap.get("page") or {}).get("coll"),
+                 (snap.get("page") or {}).get("members"), row["sniffed"], row["undecodable"],
+                 ((bad.get("snapshot") or {}).get("says") or "").split(" (")[0].split(": ")[-1], bad["sniffed"]],
+                ["snapshot", page["expect"]["asof"], 4,
+                 [snapshot.member_key(key, e["id"]) for e in page["expect"]["live"] + page["expect"]["tombs"]],
+                 None, None, "the snapshot's body is refused", None]))
+    return out
+
+
 def _round102_readings(root: Path) -> list[tuple[str, Any, Any]]:
     """Core 0.95 and observer 0.25 (round 101's F-472 to F-479 answered),
     config.v2 0.1 and its status draft, and link.v2's status draft, read at
@@ -4995,13 +5170,15 @@ def _round102_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 + [(int(once.group(1)) if once else 0) >= 239], [True]))
     # The statuses: config.v2 and link.v2 draft, each used by zenoh-modem,
     # their texts unchanged at 0.1 and 0.6.
-    out.append(("config.v2 0.1 and link.v2 0.6 or later are draft, used by zenoh-modem, in the index's first table",
-                missing(v2, "| **Text version** | 0.1", "| **Status** | draft |",
-                        "| **Written against** | core 0.94")
+    out.append(("config.v2 0.1 or later and link.v2 0.6 or later are draft, used by zenoh-modem, in the index's first "
+                "table (config.v2 0.2 since round 102's answers)",
+                missing(v2, "| **Status** | draft |", "| **Written against** | core 0.94")
+                + [bool(re.search(r"\| \*\*Text version\*\* \| 0\.\d+ ", v2))]
                 + missing(l2, "| **Status** | draft |")
-                + missing(idx, "| [`config.v2`](config/v2.md) | 0.1 | draft | zenoh-modem | 0.94 |")
+                + [bool(re.search(r"\| \[`config\.v2`\]\(config/v2\.md\) \| 0\.\d+ \| draft \| zenoh-modem \| 0\.94 \|",
+                                  idx))]
                 + [bool(re.search(r"\| \[`link\.v2`\]\(link/v2\.md\) \| 0\.\d+ \| draft \| zenoh-modem \|", idx))],
-                [True]))
+                [True, True, True]))
     return out + _config_v2_readings(root) + _core096_readings(root) + _modem33_readings(root)
 
 
@@ -5144,15 +5321,16 @@ def _modem33_readings(root: Path) -> list[tuple[str, Any, Any]]:
     windows = {"bytes": 2 ** 23 / worst[24], "airtime_ms": 2 ** 23 / 1000, "sdu_plane": 2 ** 19 / worst[20],
                "octets": 2 ** 39 / worst[40], "kernel_packets": 2 ** 31 / worst[32]}
     short = sorted(k for k, s in windows.items() if s < 900)
-    out.append(("F-493 (open): telemetry.v2 0.3 Appendix B says each counter's width holds its worst rate between two "
-                "frames 900 s apart; at the README's worst rates zk2py's windows for 3.3's widths are 51 min, 2.3 h "
-                "and 29 min, but 7.3 min for the 2 octet counters and 2.4 min for the 7 kernel packet counters: 9 of "
-                "51 below 900 s, which the README excepts (\"no shipped face carries\" a netdev) and Appendix B "
-                "does not",
-                missing(t2_text, "**Each counter's width** holds its worst rate within its serial window (§2.20). "
-                        "The rate is taken between two frames of the slowest cadence a face lists, 900 s.")
+    out.append(("F-493 answered (telemetry.v2 0.4): Appendix B says 42 of the 51 counters' widths hold their worst "
+                "rate between two frames 900 s apart, and the kernel's nine do not (7.3 min and 2.4 min), as zk2py's "
+                "windows for 3.3's widths read at the README's worst rates; the README's lead-in names the nine",
+                missing(t2_text, "**42 of its 51 counters' widths** hold their worst rate within the serial window "
+                                 "(§2.20).", "**The kernel's nine do not.** At a 10 Gbit/s bearer's rates, the two "
+                                 "octet counters' window is 7.3 min, and that of the seven packet, error and discard "
+                                 "counters 2.4 min.")
                 + missing(readme, "2,734 B/s", "1,000 ms/s", "300/s", "1.25 GB/s", "14.88 Mpps",
-                          "The kernel's are a netdev's, which no shipped face carries")
+                          "The kernel's are a netdev's, which no shipped face carries",
+                          "Each width but the kernel's holds its counters' worst rate")
                 + [{k: math.floor(s / 6) / 10 for k, s in windows.items()}, short,
                    sum(len(widths.get(w, [])) for w in (32, 40))],
                 [{"airtime_ms": 139.8, "bytes": 51.1, "kernel_packets": 2.4, "octets": 7.3, "sdu_plane": 29.1},
@@ -5176,10 +5354,12 @@ def _modem33_readings(root: Path) -> list[tuple[str, Any, Any]]:
                    longest, (rec_bytes[0], rec_bytes[-1])],
                 [7, True, {"DestinationRecord": 158, "EndpointRecord": 17, "IdentityRecord": 52, "LinkRecord": 145,
                            "OperRecord": 83, "RadioRecord": 9, "SecurityRecord": 10}, (2, 20)]))
-    out.append(("F-494 (open): the README says a packed state \"Put with a 16-bit run, each is 8 to 21 B\"; with core "
-                "§7.5's 6-byte envelope zk2py's longest puts are 8 to 26 B, DestinationRecord's 158 bits 20 B and "
-                "26 B put, LinkRecord's 145 bits 19 B and 25 B",
-                missing(readme, "Put with a 16-bit run, each is 8 to 21 B")
+    out.append(("F-494 answered (the README and MIGRATION.md, telemetry.v2 0.4's entry): a packed state \"Put with a "
+                "16-bit run, each is 8 to 26 B\", as zk2py's longest puts are with core §7.5's 6-byte envelope, "
+                "DestinationRecord's 158 bits 20 B and 26 B put",
+                missing(readme, "Put with a 16-bit run, each is 8 to 26 B")
+                + missing(" ".join((fm / "MIGRATION.md").read_text(encoding="utf-8").split()),
+                          "3.3's packed records, put with a 16-bit run, are 8 to 26 B")
                 + [(puts16[0], puts16[-1]), len(zk2c.write("mutation", 16, 1, 0, 0, b"\x00" * 20))],
                 [(8, 26), 26]))
     # Catalog e3a529fe, index 8.
@@ -5268,9 +5448,11 @@ def _core096_readings(root: Path) -> list[tuple[str, Any, Any]]:
     rules = (spec / "RULES.md").read_text(encoding="utf-8")
     counted = {n: int(c) for n, c in re.findall(r"^\| \[([^\]]+)\]\(#[^)]*\) \| (\d+)", rules, re.M)}
     once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
-    out.append(("core 0.96's entry: RULES.md lists 246 rules, 0.95's 239, the core's four and observer 0.26's three",
-                missing(flat("CHANGELOG.md"), "lists 246 rules: 0.95's 239, these four and observer 0.26's three")
-                + [int(once.group(1)) if once else None], [246]))
+    out.append(("core 0.96's entry: RULES.md lists 246 rules, 0.95's 239, the core's four and observer 0.26's three; "
+                "250 since core 0.97's four, and core 0.98's still",
+                missing(flat("CHANGELOG.md"), "lists 246 rules: 0.95's 239, these four and observer 0.26's three",
+                        "`RULES.md` lists 250 rules, 4 more", "the index still lists 250 rules")
+                + [int(once.group(1)) if once else None], [250]))
     out.append(("core 0.96 §8.1, §8.4, §8.5 and observer 0.26 §3.6, §3.11: the rules as their texts state them",
                 missing(core, "Such an owner SHOULD put every interface it implements in its tokenless set.",
                         "Such an owner MUST NOT implement `archive.v1`, nor an interface whose contract uses "
@@ -5289,13 +5471,17 @@ def _core096_readings(root: Path) -> list[tuple[str, Any, Any]]:
     rows = classes._rules_md(spec)
     dep = sorted(r[0] for r in rows if r[1] == "core §8.4" and "A deployment with such an owner" in r[3])
     tool = sorted(r[0] for r in rows if r[1] == "observer §3.11" and "A tool that knows an owner" in r[3])
-    out.append(("F-492 (open): RULES.md lists core §8.4's \"A deployment with such an owner SHOULD\" and observer "
-                "§3.11's \"A tool that knows an owner … MUST NOT\" under the owner too; the owner class counts 78",
-                [dep, tool, counted.get("Owner")], [["deployment", "owner"], ["observer", "owner"], 78]))
-    out.append(("config.v1 0.10 §2.1: the SHOULD NOT on the tokenless set excepts a first hop; §2.12 still names the "
-                "reference's refusal of a re-mint (F-480)",
-                missing(cv1, "The reference refuses the re-mint (`zenkey::config_v1`)") + ["first hop" in cv1],
-                [True]))
+    out.append(("F-492 answered (core 0.98): RULES.md lists core §8.4's \"A deployment with such an owner SHOULD\" "
+                "under the deployment alone, and observer §3.11's \"A tool that knows an owner … MUST NOT\" under the "
+                "observer alone; the owner class counts 76, no text changed",
+                missing(flat("CHANGELOG.md"), "It now reads the role a subject opens with, and each role joined to it",
+                        "The owner class counts 76 where it counted 78")
+                + [dep, tool, counted.get("Owner")], [["deployment"], ["observer"], 76]))
+    out.append(("config.v1 0.10 §2.1: the SHOULD NOT on the tokenless set excepts a first hop; since 0.11 §2.12 names "
+                "the reference's restart of the configuration (F-480)",
+                ["The reference refuses the re-mint (`zenkey::config_v1`)" in cv1, "first hop" in cv1,
+                 "**The reference restarts the configuration** so" in cv1],
+                [False, True, True]))
     return out
 
 
@@ -5356,78 +5542,103 @@ def _config_v2_readings(root: Path) -> list[tuple[str, Any, Any]]:
     # F-480: config.v1 §2.12 names the reference's refusal; the binding and
     # the reference (#1064) restart the configuration.
     binding = (repo / "examples" / "zk2" / "zenoh-modem" / "config.v2-binding.md").read_text(encoding="utf-8")
-    out.append(("F-480 (open): config.v1 §2.12 says the reference refuses the re-mint; config.v2-binding.md §8 says a "
-                "re-mint is a restart of the record (#1064), as the owner example's frame new-epoch measures",
-                missing(v1t, "The reference refuses the re-mint (`zenkey::config_v1`), the simplest owner that keeps "
-                             "the rule.")
-                + ["A re-mint is a restart too" in " ".join(binding.split())], [True]))
+    out.append(("F-480 answered (config.v1 0.11): §2.12 says the reference restarts the configuration, as "
+                "config.v2-binding.md §8 says (#1064), and names the four cases it refuses a re-mint in",
+                missing(v1t, "**The reference restarts the configuration** so (`zenkey::config_v1`, "
+                             "`zenkey::config_v2`). It refuses the re-mint, and the instance runs on, in four cases:",
+                        "an act in flight (§2.7);", "a parameter set at runtime whose startup value is unknown;",
+                        "a device that refuses to return to its startup values;",
+                        "an owner fed through `desired.v1` (`desired.v1` §2.16).")
+                + ["The reference refuses the re-mint (`zenkey::config_v1`), the simplest owner" in v1t,
+                   "A re-mint is a restart too" in " ".join(binding.split())], [False, True]))
     # F-481: a re-mint with a change pending.
-    out.append(("F-481 (open): config.v1 §2.12, \"no event is published for it\", beside §2.17, \"exactly one event "
-                "for each change, when the change ends\", whose rolled-back cases name no re-mint",
-                missing(v1t, "The new instance says nothing of the old one's pending change,** which it never knew: "
-                             "no event is published for it.",
-                        "`rolled-back`: undone, by `cancel`, at its deadline, or after its apply failed;"), []))
+    out.append(("F-481 answered (config.v1 0.11, config.v2 0.2): a re-mint ends a pending change first, in the old "
+                "instance, as cancel does, its event rolled-back or partial; §2.17's rolled-back names a re-mint; "
+                "\"says nothing\" is after a restart; v2 §2.12: the old instance number on its record and event",
+                missing(v1t, "1. **A pending change** ends first, in the old instance, as `cancel` ends it (§2.10). Its "
+                             "undo runs and its read-back is put.",
+                        "2. **Its event** is published, `rolled-back` or `partial` (§2.17). The rate counts it.",
+                        "4. **The new instance** starts as after a restart: revision 0, nothing pending, no last "
+                        "change, no idempotency key held.",
+                        "A late `confirm` of the ended change is `not_found`, as after a restart.",
+                        "**After a restart,** the new instance says nothing of the old one's pending change",
+                        "`rolled-back`: undone, by `cancel` or a re-mint (§2.12), at its deadline, or after its apply "
+                        "failed;")
+                + missing(v2, "A re-mint ends a pending change in the old instance first (v1 §2.12). That change's "
+                              "record and event carry the old instance number."), []))
     # F-482: the desired report beside the converging put.
-    out.append(("F-482 (open): scenarios-v2 §12 expected 1 reads one record with fraction_ppm 20000 and desired "
-                "converged, then the event; §2.18 says nothing of the order",
-                missing(scen, "S receives the record, `fraction_ppm` 20000, `desired` `converged`, `desired_revision` "
-                              "1, then one event, `applied`."), []))
+    out.append(("F-482 answered (config.v2 0.2): §2.18's report changes in a put of its own, after each converging "
+                "change's put and event; scenarios-v2 §12 expected 1 reads the value, the event, then the report",
+                missing(v2, "**After the acts.** The report changes in a put of its own, once the owner has acted on "
+                            "the document. Each converging change's put and its event come before it (§2.17).")
+                + missing(scen, "1. S receives the record, `fraction_ppm` 20000, then one event, `applied`. Then the "
+                                "next record, its report `desired` `converged`, `desired_revision` 1 (§2.18)."), []))
     # F-483: the escape outcome with a code.
     esc = next(r for r in rec["reads"] if r["note"].startswith("an outcome this revision does not name"))
     L = c2.Layout.of_contract(load_contract(c2.TEST_CONTRACT, check_file_name=True))
     f = L.record.read(esc["tag"], bytes.fromhex(esc["hex"]), esc["epoch"])
-    out.append(("F-483 (open): §3 \"`desired_code` is present for `refused` and `failed` alone\", where records.json "
-                "reads the escape outcome with a code as a state, \"its code unjudged\"; zk2py reads the fixture",
-                missing(v2, "`desired_code` is present for `refused` and `failed` alone")
+    out.append(("F-483 answered (config.v2 0.2): §3's desired_code is present for refused and failed, absent for "
+                "converged, and not judged beside the escape, as records.json reads it; zk2py reads the fixture",
+                missing(v2, "`desired_code` is present for `refused` and `failed`, and absent for `converged`. Beside "
+                            "the escape, an outcome this revision does not name (§4), it is not judged;")
                 + [f.get("desired"), f.get("desired_code"), "state" in esc["expect"]], [None, "busy", True]))
     # F-484: which of group_units' and group_sensitive's checks need a valid type.
     cases = {c["note"]: c for c in der["cases"]}
     every = cases["every check of one entry, each alone, in order"]
     bad = cases["a bad type skips the checks that read it: group_units and group_sensitive need its fields"]
-    out.append(("F-484 (open): §2.2 \"Each needs a valid type to name its parameters\", where derive.json reports "
-                "units that are no table without one, and skips an empty unit without one",
-                missing(v2, "`group_units`, `group_sensitive`: that member is not as above. Each needs a valid type to "
-                            "name its parameters.")
+    out.append(("F-484 answered (config.v2 0.2): §2.2's items 3 and 4 check a member's own form whatever the type, "
+                "its keys, items and values beside a valid type, as derive.json does",
+                missing(v2, "3. `group_units`: the member is not a table; or, beside a valid type, a key names no "
+                            "`int` field of it, or a value is not a non-empty string;",
+                        "4. `group_sensitive`: the member is not an array; or, beside a valid type, an item names no "
+                        "field of it, or names one twice.",
+                        "So `units = 3` is reported beside an invalid type, and `units = {pin = \"\"}` is not.")
                 + [every["groups"][0]["units"], [r["reason"] for r in every["expect"]["reasons"]][-2:],
                    bad["groups"][0]["units"], [r["reason"] for r in bad["expect"]["reasons"]]],
                 [3, ["group_units", "group_sensitive"], {"pin": ""}, ["group_type"]]))
     # F-486: §2.19's range.
-    out.append(("F-486 (open): §2.19 \"36 to 50 bytes with its envelope\", where the record at start is 30 B with its "
-                "envelope (24 B, binding §7, and the draft entry's \"24 at start\")",
-                missing(v2, "For zenoh-modem's SX1262 it is 36 to 50 bytes with its envelope")
+    out.append(("F-486 answered (config.v2 0.2): §2.19 \"30 to 50 bytes with its envelope\", the record at start 30 B "
+                "with its envelope (24 B, binding §7, and the draft entry's \"24 at start\")",
+                missing(v2, "For zenoh-modem's SX1262 it is 30 to 50 bytes with its envelope")
                 + missing(log, "and 24 at start") + [rt["start"]["put"]], [30]))
     # F-487: four hot groups, where there are three.
     toml = (spec / "profiles" / "config" / "conformance" / "contracts" / "rfcfg.v1.toml").read_text(encoding="utf-8")
     hot = [g for g in L.decl.groups if g.cls == "hot"]
-    out.append(("F-487 (open): rfcfg.v1.toml's comment and derive.json's first note say four hot groups; the contract "
-                "declares three (duty, sim, queue)",
-                ["Four hot groups" in toml, der["cases"][0]["note"].startswith("the test contract's six groups: four "
-                                                                               "hot"), [g.name for g in hot]],
+    out.append(("F-487 answered (config.v2 0.2): rfcfg.v1.toml's comment and derive.json's first note say three hot "
+                "groups, as the contract declares (duty, sim, queue)",
+                ["Three hot groups" in toml, der["cases"][0]["note"].startswith("the test contract's six groups: three "
+                                                                                "hot"), [g.name for g in hot]],
                 [True, True, ["duty", "sim", "queue"]]))
     # F-488: spreading_factor 7 to 9, beside the SF12 face.
     sx = c2.Layout.of_contract(k)
     sf = sx.decl.group("modulation").param("spreading_factor")
-    out.append(("F-488 (open): sx1262_config.v1's spreading_factor is 7 to 9, beside zenoh-modem's SF12 face and the "
-                "binding's \"At SF12\"; App. B's start check refuses a device whose schema differs",
+    out.append(("F-488 answered as zenoh-modem's call (config.v2 0.2, \"deliberately not changed\"): "
+                "sx1262_config.v1's spreading_factor stays 7 to 9 beside the SF12 face, and the binding's §3 says "
+                "SF12 is outside the bound until zenoh-modem#213 decides",
                 [sf.minimum, sf.maximum, (repo / "examples" / "zk2" / "zenoh-modem" / "faces"
                                           / "zenohd-lora0-sf12.face.toml").is_file(), "At SF12" in binding]
-                + missing(v2, "and refuses to start on a difference"), [7, 9, True, True]))
+                + missing(v2, "and refuses to start on a difference")
+                + missing(" ".join(binding.split()), "**SF12 is outside `spreading_factor`'s bound.** The contract "
+                                                     "states 7 to 9 in 2 bits"), [7, 9, True, True]))
     # F-489: §15 names no date.
-    out.append(("F-489 (open): config.v2-binding.md §15's steps are times of day with no date, and its bytes date them "
-                "2026-11-02 (zk2py's codec writes them so)",
-                ["12:01:00Z" in binding, "2026-11-02" in binding, rt["bytes"]["reply2"].startswith("495a17")],
-                [True, False, True]))
+    out.append(("F-489 answered (the mapping's, config.v2 0.2): config.v2-binding.md §15's setup dates its steps "
+                "2026-11-02, and step 1 says \"12:00:00Z on 2026-11-02\" (zk2py's codec writes the bytes so)",
+                ["12:01:00Z" in binding, "The steps run on 2026-11-02" in " ".join(binding.split()),
+                 "12:00:00Z on 2026-11-02" in binding, rt["bytes"]["reply2"].startswith("495a17")],
+                [True, True, True, True]))
     # F-490: §6's tolerance against §2.8's rounding.
-    out.append(("F-490 (open): scenarios-v2 §6 expected 3, \"81 s after step 1, ± 0.5 s\", where §2.8's rounding "
-                "puts the deadline 80.4 to 81.4 s after step 1, by step 1's phase in its second",
-                missing(scen, "S receives the `rolled-back` event 81 s after step 1, ± 0.5 s.")
+    out.append(("F-490 answered (config.v2 0.2): scenarios-v2 §6 reads the event at the record's deadline, ± 0.5 s, "
+                "80.4 to 81.4 s after step 1 by its phase, as §2.8's rounding puts it",
+                missing(scen, "That is 80.4 s to 81.4 s after step 1, by its phase.",
+                        "S receives the `rolled-back` event at that deadline, ± 0.5 s.")
                 + [sorted({c2.deadline_ms(t1 + 20_400, 60, 10) - t1 for t1 in range(0, 1000, 50)})[:1],
                    sorted({c2.deadline_ms(t1 + 20_400, 60, 10) - t1 for t1 in range(0, 1000, 50)})[-1:]],
                 [[80_400], [81_350]]))
     # F-491: the scenarios' intro changed after the draft entry.
-    out.append(("F-491 (open): the draft entry says the scenarios are as they were; scenarios-v2's intro names zenctl's "
-                "tests, a sentence no entry records",
-                missing(log, "and its fixtures and scenarios are as they were")
+    out.append(("F-491 answered (config.v2 0.2): the entry records scenarios-v2's intro, which names zenctl's tests "
+                "and changes no rule",
+                missing(log, "and its fixtures and scenarios are as they were",
+                        "**Recorded: `scenarios-v2.md`'s intro (F-491).**")
                 + missing(scen, "They are `zenctl`'s `config_v2_scenario_13_…` and `config_v2_scenario_14_…`."), []))
     return out
 
@@ -5791,10 +6002,10 @@ def _round96_readings(root: Path) -> list[tuple[str, Any, Any]]:
             beacon.fingerprint == ref.fingerprint],
          [[], ["freshness.v2", "link.v1"], ["level", "status"], True]),
         ("F-444 answered (core 0.85, observer 0.20): a heartbeat carries a body, never a record of its resource's "
-         "type, and a tool MUST NOT read one as such",
+         "type, and a tool MUST NOT read one as such (the sentence names a snapshot too since core 0.97)",
          missing(core, "**The record** is every byte after a mutation's seq, possibly none. It is read as the "
-                       "resource's type says (§7.1). A heartbeat and a frame carry a **body** there instead, never a "
-                       "record of the resource's type.")
+                       "resource's type says (§7.1). A heartbeat, a frame and a snapshot carry a **body** there "
+                       "instead, never a record of the resource's type.")
          + missing(obs, "A tool MUST NOT decode, render or judge a heartbeat's body as a record of its resource's "
                         "type.",
                    "it shows the heartbeat by its envelope: its form, the interface it covers and its size.")
@@ -6192,7 +6403,10 @@ def _mend_after_round94_readings(root: Path) -> list[tuple[str, Any, Any]]:
             for x, e in ((good, zk2c.ENCODING), (zk2c.write("mutation", 16, 7, 2, (sensor.tag + 1) % 16,
                                                              sensor.write(v)), zk2c.ENCODING),
                          (good + b"\x00", zk2c.ENCODING), (sensor.write(v), "application/octet-stream"),
-                         (b"\xe0", zk2c.ENCODING))]
+                         (b"\x80", zk2c.ENCODING))]
+    # The refused envelope is form 4's CH since core 0.97, which defines
+    # form 7 (a snapshot, key_kind on this stream key); form 4 is the one
+    # reserved (round 103).
     out.append(("observer §7.3 (0.16) in zk2py's echo tool: a packed record decoded under its tag and named "
                 "packed:Sensor; one under another tag, one with a byte after its pad, one in no envelope and a "
                 "refused envelope undecodable as packed:Sensor, the refusal named (the envelope's own token for "
@@ -6208,7 +6422,7 @@ def _mend_after_round94_readings(root: Path) -> list[tuple[str, Any, Any]]:
     # packed.read_sample: an accepted envelope (enveloped, its tag), a
     # refused one (enveloped, its token) and a sample that carries none (not
     # enveloped, its bytes), which alone reads no_envelope.
-    reads = [zk2c.read_put(key, zk2c.ENCODING, good), zk2c.read_put(key, zk2c.ENCODING, b"\xe0"),
+    reads = [zk2c.read_put(key, zk2c.ENCODING, good), zk2c.read_put(key, zk2c.ENCODING, b"\x80"),
              zk2c.read_put(key, "application/octet-stream", sensor.write(v))]
     out.append(("review-bot on PR #1019, 1: zk2c.Read is enveloped for an envelope accepted or refused and not for a "
                 "sample that carries none; read_sample gives the value, the envelope's token, and no_envelope",
@@ -10115,6 +10329,76 @@ def family_frame(root: Path) -> list[Result]:
     return out
 
 
+def family_snapshot(root: Path) -> list[Result]:
+    """``snapshot/`` (core §7.5's snapshot, 0.97, #977 E1), every file, an
+    unknown one failing, through :mod:`zk2py.snapshot`. ``bodies.json``: a
+    page -> its bytes and size, or the writer's refusal, every page written
+    read back to its value; a page's bytes -> the page, written back to the
+    same bytes, or the first refusal reading its fields in order; a snapshot
+    and a page size -> its pages' bytes and sizes, or the writer's refusal,
+    each set of pages read back, page by page, to the snapshot's entries and
+    held complete, and cut a second way, by arithmetic
+    (:func:`zk2py.snapshot.cut_by_arithmetic`)."""
+    from . import snapshot, zk2c
+
+    def read(raw: bytes) -> Any:
+        try:
+            return snapshot.read_page(raw)
+        except (snapshot.Refused, zk2c.Refused) as e:
+            return {"refused": e.token}
+
+    out: list[Result] = []
+    for path in sorted((root / "snapshot").iterdir()):
+        if path.name == "README.md":
+            continue
+        data = _load_json(path)
+        if path.name != "bodies.json":
+            out.append((f"snapshot/{path.name}", False, "an unknown fixture file: the runner does not read it"))
+            continue
+        state_key = "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint"
+        for i, c in enumerate(data["writes"]):
+            name = f"snapshot: write {i}: {c['note']}"
+            try:
+                raw = snapshot.write_page(c["page"])
+                got: Any = {"hex": raw.hex(), "size": len(raw)}
+            except snapshot.Refused as e:
+                got = {"refused": e.token}
+            out.append(_check(name, got, c["expect"]))
+            if "refused" not in got:
+                out.append(_check(f"{name}: reads back to its value", read(raw), c["page"]))
+                out.append(_check(f"{name}: reads as a snapshot on a state key, key_kind on a stream key",
+                                  [zk2c.reads(state_key, raw),
+                                   zk2c.reads("zk2/rf0/modem/modem.v3/stream/frames/link", raw)],
+                                  [{"reads": "snapshot"}, {"refused": "key_kind"}]))
+        for i, c in enumerate(data["reads"]):
+            name = f"snapshot: read {i} {c['hex'][:48]}: {c['note']}"
+            got = read(bytes.fromhex(c["hex"]))
+            out.append(_check(name, got, c["expect"]))
+            if "refused" not in got:
+                out.append(_check(f"{name}: writes back", snapshot.write_back(got).hex(), c["hex"]))
+        for i, c in enumerate(data["pages"]):
+            name = f"snapshot: pages {i} at {c['page_bytes']} B: {c['note']}"
+            try:
+                cut = snapshot.cut(c["snapshot"], c["page_bytes"])
+                got = {"pages": [p.hex() for p in cut], "sizes": [len(p) for p in cut]}
+            except snapshot.Refused as e:
+                got = {"refused": e.token}
+            out.append(_check(name, got, c["expect"]))
+            try:
+                second: Any = [size for _, size in snapshot.cut_by_arithmetic(c["snapshot"], c["page_bytes"])]
+            except snapshot.Refused as e:
+                second = {"refused": e.token}
+            out.append(_check(f"{name}: cut by arithmetic", second, c["expect"].get("sizes", c["expect"])))
+            if "refused" in got:
+                continue
+            pages = [read(p) for p in cut]
+            whole = snapshot.complete(pages)
+            want = {k: c["snapshot"][k] for k in ("live", "tombs")}
+            out.append(_check(f"{name}: reads back, page by page, to its entries, complete",
+                              None if whole is None else {k: whole[k] for k in ("live", "tombs")}, want))
+    return out
+
+
 def _frame_apply(data: dict[str, Any], layouts: dict[str, Any]) -> list[Result]:
     """``apply.json`` (observer 0.21, #981 K2): one key's frames, each its
     run, seq and body, read in arrival order by one :class:`zk2py.frame.Reader`
@@ -10220,7 +10504,7 @@ def family_catalog(root: Path) -> list[Result]:
 #: family cannot land unrun.
 KNOWN_ENTRIES = {"README.md", "keys.json", "slugs.json", "templates.json", "contracts", "sets", "bundles",
                  "history", "descriptors", "errors", "compat", "budget", "seed", "envelope", "packed",
-                 "catalog", "heartbeat", "frame"}
+                 "catalog", "heartbeat", "frame", "snapshot"}
 
 
 def family_layout(root: Path) -> list[Result]:
@@ -10257,6 +10541,7 @@ FAMILIES: dict[str, Callable[[Path], list[Result]]] = {
     "catalog": family_catalog,
     "heartbeat": family_heartbeat,
     "frame": family_frame,
+    "snapshot": family_snapshot,
     "examples": family_examples,
     # zk2py's own readings of open findings: not a fixture family.
     "readings": family_readings,
