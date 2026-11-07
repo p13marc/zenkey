@@ -167,30 +167,38 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "scenarios §5's owner that breaks it on purpose (the mend after round 93)"),
     # core 0.100 (#977 E3, round 105): S2 answers a GET per collection, by
     # snapshot, and keeps a reply per key for the per-key resources alone.
-    # Re-keyed at round 105's walk, before its owner answers so: not met
-    # until then.
-    ("owner", "core §4.2", "It MUST answer a GET over them per collection", NOT_MET,
-     "owner.Owner.state_answer answers a reply per key (round 105 re-keys it)"),
+    ("owner", "core §4.2", "It MUST answer a GET over them per collection", MET,
+     "owner.Owner.state_answer: owner.Owner.collections, a snapshot per collection read, per member reached, and "
+     "of no entry at a concrete key it holds no member at; owner.per_key's replies (snapshot_live §14, py-py and "
+     "py-rust; state_pairings §1, §2, §10) (round 105, core 0.100)"),
     ("owner", "core §4.2", "An owner's per-key reply MUST carry the in-band stamp of the mutation it represents", MET,
      "owner.Owner.answer_state: a reply as the bytes the mutation put, a reply_del with the delete's  "
-     "attachment (state_pairings §1 expected 2, §2) (round 93, core 0.73; re-keyed at core 0.100)"),
+     "attachment (state_pairings §1 expected 5) (round 93, core 0.73; re-keyed at core 0.100)"),
     ("owner", "core §4.2", "It MUST also carry the mutation's Zenoh timestamp, where the mutation carried one", MET,
      "owner.Owner.answer_state: the held Zenoh timestamp, where the mutation carried one (state_pairings §1  "
      "expected 5) (round 93, core 0.73; re-keyed at core 0.100)"),
-    ("owner", "core §4.2", "An owner MUST answer a collection read with the collection's snapshot", NOT_MET,
-     "owner.Owner.state_answer answers a reply per key (round 105 re-keys it)"),
+    ("owner", "core §4.2", "An owner MUST answer a collection read with the collection's snapshot", MET,
+     "owner.Owner.state_answer: a GET whose selector includes the snapshot key and /** draws the collection's "
+     "snapshot on that key (snapshot_live §14 step 1; state_pairings §2, §10) (round 105)"),
     ("owner", "core §4.2", "An owner MUST answer each member a member read reaches with a snapshot of that member alone",
-     NOT_MET, "owner.Owner.state_answer answers a reply per key (round 105 re-keys it)"),
-    ("owner", "core §4.2", "An owner MUST answer a member read of one concrete key that it holds no member at", NOT_MET,
-     "owner.Owner.state_answer answers nothing there (round 105 re-keys it)"),
+     MET, "owner.Owner.state_answer: one page on the member's key, its one entry the empty id (snapshot_live §14 "
+          "step 2; state_pairings §1 expected 2, §2) (round 105)"),
+    ("owner", "core §4.2", "An owner MUST answer a member read of one concrete key that it holds no member at", MET,
+     "owner.Owner.state_answer: a concrete key its collection's template wins, held by no member live or within "
+     "the window, draws a snapshot of no entry (snapshot_live §14 steps 2, 5) (round 105)"),
     ("owner", "core §4.2", "An owner MUST answer each member of a per-key resource that a GET reaches with its reply",
-     MET, "owner.Owner.state_answer: every matching key, reply_del within the window (state_scenarios §10)"),
-    ("owner", "core §4.2", "An owner MUST write as asof a seq of its run at or below which it has recorded", NOT_MET,
-     "zk2py's owner writes no snapshot yet (round 105 re-keys it)"),
+     MET, "owner.Owner.state_answer: owner.per_key's members, each its reply or reply_del within the window "
+          "(state_pairings §1 expected 5) (round 105)"),
+    ("owner", "core §4.2", "An owner MUST write as asof a seq of its run at or below which it has recorded", MET,
+     "owner.Owner._snapshot_header under the writes' lock, which every state mutation mints and records under: the "
+     "last seq minted, or one taken when none was (state_pairings §10 step 3) (round 105)"),
     ("owner", "core §4.2", "An owner MUST give each live entry of a collection with a horizon its confirmation",
-     NOT_MET, "zk2py's owner writes no snapshot yet (round 105 re-keys it)"),
-    ("owner", "core §4.2", "An owner MUST cut each snapshot into pages by §7.5's paging rule", NOT_MET,
-     "snapshot.cut cuts by the rule (snapshot family), and the owner sends no snapshot yet (round 105 re-keys it)"),
+     MET, "owner.Owner._entry: 1 while it vouches, else 2 with _Held.confirm, from the deployment epoch "
+          "(freshness_v2_scenarios §3 py-py and py-zenctl; heartbeat_epoch_live) (round 105)"),
+    ("owner", "core §4.2", "An owner MUST cut each snapshot into pages by §7.5's paging rule", MET,
+     "owner.Owner._pages through snapshot.cut, under owner.PAGE_SIZE, every page a reply to the one GET (snapshot "
+     "family; snapshot_live §14 step 1, 4 pages of 8 and the reference's 3 pages of 200 entries cut alike) "
+     "(round 105)"),
     ("owner", "core §12", "An owner's page size MUST fit one fragment of each constrained reader", NA,
      "zk2py claims no class at the constrained level"),
     ("owner", "core §4.2", "Owner: for a key it deleted within the", MET,
@@ -333,18 +341,22 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("consumer", "core §3.2", "A consumer's runtime MUST resolve a provider whose", MET,
      "owner.resolve_providers at start (live_interop bindings.md §5)"),
     # core 0.100 (round 105): consolidation None, merged per key.
-    ("consumer", "core §4.2", "Consumer: a state GET MUST be addressed to", NOT_MET,
-     "live.get_state and seed.LateJoiner set All and Latest, where core 0.100 says None (round 105 re-keys it)"),
+    ("consumer", "core §4.2", "Consumer: a state GET MUST be addressed to", MET,
+     "live.get_state and seed.LateJoiner: All and None (state_scenarios §3) (round 105, core 0.100)"),
     ("consumer", "core §4.2", "The consumer MUST merge the GET's replies per key, each snapshot's entries among them",
-     NOT_MET, "seed.LateJoiner merges replies per key, and no snapshot's entries (round 105 re-keys it)"),
-    ("consumer", "core §4.2", "A late joiner MUST apply the omission rule when it holds a snapshot complete", NOT_MET,
-     "seed_snapshot.Seed applies it in the seed family; seed.LateJoiner does not yet (round 105 re-keys it)"),
+     MET, "live.get_state and seed.LateJoiner: each page's entries merged as replies, by the in-band stamp (seed "
+          "family, snapshot.json; state_pairings §10; snapshot_live §14) (round 105)"),
+    ("consumer", "core §4.2", "A late joiner MUST apply the omission rule when it holds a snapshot complete", MET,
+     "seed.LateJoiner over seed_snapshot.omitted, its guards by asof and by arrival after the GET (seed family; "
+     "snapshot_live §14 steps 3, 5, 6, 7, py-py and rust-py) (round 105)"),
     ("consumer", "core §4.2", "A late joiner applies no omission rule over an incomplete snapshot, and SHOULD read",
-     NOT_MET, "seed_snapshot.Seed drops nothing over one; seed.LateJoiner reads no snapshot yet (round 105)"),
-    ("consumer", "core §4.2", "A consumer or a tool MUST NOT merge a snapshot heard on a subscription", NOT_MET,
-     "seed_snapshot.Seed in the seed family; seed.LateJoiner not yet (round 105 re-keys it)"),
-    ("consumer", "core §4.2", "A late joiner MUST map a snapshot's collection index with the revision", NOT_MET,
-     "seed_snapshot.collections_of in the seed family; seed.LateJoiner not yet (round 105 re-keys it)"),
+     MET, "seed.LateJoiner drops nothing over one, and read_again (snapshot_live §14 steps 3, 4) (round 105)"),
+    ("consumer", "core §4.2", "A consumer or a tool MUST NOT merge a snapshot heard on a subscription", MET,
+     "seed.LateJoiner._snapshot_locked: a page heard live is counted in live_snapshots, never merged (seed "
+     "family) (round 105)"),
+    ("consumer", "core §4.2", "A late joiner MUST map a snapshot's collection index with the revision", MET,
+     "seed_snapshot.ByDescriptor: the revision the owner's descriptor names, by the snapshot's run where two "
+     "answer (seed family, F-497's cases; state_pairings §10; snapshot_live §14) (round 105)"),
     ("consumer", "core §4.2", "Consumer: last-known state MUST be read from an", NA,
      "zk2py's consumers read no last-known state"),
     ("consumer", "core §4.2", "The archive's answer is last-known, never current, and", NA,
@@ -450,16 +462,21 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "config readers merge their recordings and GETs through seed.merged (round 91)"),
     # core 0.73 (#976): the merge's second sentence, by the in-band stamp.
     # core 0.100 (round 105): a tool's seed over snapshots.
-    ("observer", "core §4.2", "A late joiner MUST apply the omission rule when it holds a snapshot complete", NOT_MET,
-     "seed_snapshot.Seed applies it in the seed family; a tool's seed.LateJoiner does not yet (round 105)"),
+    ("observer", "core §4.2", "A late joiner MUST apply the omission rule when it holds a snapshot complete", MET,
+     "seed.LateJoiner, a tool's, over seed_snapshot.omitted (snapshot_live §14, T) (round 105)"),
     ("observer", "core §4.2", "A late joiner applies no omission rule over an incomplete snapshot, and SHOULD read",
-     NOT_MET, "seed_snapshot.Seed drops nothing over one; a tool's seed.LateJoiner reads no snapshot yet (round 105)"),
-    ("observer", "core §4.2", "A consumer or a tool MUST NOT merge a snapshot heard on a subscription", NOT_MET,
-     "seed_snapshot.Seed in the seed family; a tool's seed.LateJoiner not yet (round 105)"),
-    ("observer", "core §4.2", "A late joiner MUST map a snapshot's collection index with the revision", NOT_MET,
-     "seed_snapshot.collections_of in the seed family; a tool's seed.LateJoiner not yet (round 105)"),
+     MET, "seed.LateJoiner, a tool's, and read_again (snapshot_live §14 steps 3, 4) (round 105)"),
+    ("observer", "core §4.2", "A consumer or a tool MUST NOT merge a snapshot heard on a subscription", MET,
+     "seed.LateJoiner, a tool's: live_snapshots (round 105)"),
+    ("observer", "core §4.2", "A late joiner MUST map a snapshot's collection index with the revision", MET,
+     "seed_snapshot.ByDescriptor (snapshot_live §14) (round 105)"),
+    # observer 0.28: a tool's GET. Not met where a reader merges a recording
+    # with a GET: the alarms, health and config readers (seed.merged) merge
+    # a GET's entries, and apply no omission rule over what they recorded.
     ("observer", "observer §4.1", "A tool MUST make a state GET with target `All` and consolidation `None`", NOT_MET,
-     "a tool's GETs set Latest, where observer 0.28 says None (round 105 re-keys it)"),
+     "live.get_state and seed.LateJoiner: None, entries merged per key, the omission rule in LateJoiner; the alarms, "
+     "health and config readers merge their recordings with a GET's entries through seed.merged and apply no "
+     "omission rule (round 105)"),
     ("observer", "core §4.2", "It MUST keep the newer by its in-band stamp", MET,
      "seed.LateJoiner, a tool's: seed.relation within one run by seq, plain or serial as the key's kind says,  "
      "for as long as it follows; seed.merged for the alarms, health and config readers (inband.json;  "

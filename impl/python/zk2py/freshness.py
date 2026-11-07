@@ -723,8 +723,26 @@ class GetReading:
     encoding: str = ""
     #: core §4.3 (0.73): the reply's in-band stamp, or None
     inband: Any = None
+    #: ``freshness.v2`` 0.7 §2.6 (core 0.100): where the member came as a
+    #: snapshot's entry, its confirmation's instant in Unix ns ("the
+    #: snapshot's time for confirmation 1, and the entry's conf for 2"),
+    #: None for none or an unknown time; ``snapshot`` whether it so came,
+    #: ``complete`` whether its snapshot is complete (a member it omits: no
+    #: entry), and the owner's session id, whose clock built the snapshot
+    snapshot: bool = False
+    complete: bool = False
+    confirmed_ns: int | None = None
+    owner_id: str | None = None
 
-    def observation(self, trust: ClockTrust, now_utc_ns: int | None = None) -> Get:
+    def observation(self, trust: ClockTrust, now_utc_ns: int | None = None) -> Observation:
+        if self.snapshot:
+            # v2 §2.6: "a GET reader MUST age an entry from its confirmation
+            # as v1 §2.6 ages a reply from its stamp". "The clock is the
+            # owner's, which built the snapshot."
+            entry = None if self.reply is None else "tombstone" if self.reply == "delete" else "live"
+            now = time.time_ns() if now_utc_ns is None else now_utc_ns
+            age = None if self.confirmed_ns is None else now - self.confirmed_ns
+            return Snapshot(self.complete, entry, age, trust.trusted(self.owner_id), trust.delta_ns)
         if self.reply is None:
             return Get(None, trust.word, trust.delta_ns)
         if self.reply == "delete":
@@ -734,16 +752,50 @@ class GetReading:
         return Get(Reply("put", age), trust.trusted(self.stamp_id), trust.delta_ns)
 
 
-def get_reading(session: Any, key: str, timeout: float = 1.0) -> GetReading:
+def reading_of(r: Any, epoch_s: int = 0, complete: bool = True, owner_id: str | None = None) -> GetReading:
+    """One reply of S4's GET (:class:`zk2py.live.StateReply`) as §2.6 reads
+    it: a per-key resource's reply by its Zenoh timestamp, a snapshot's
+    entry (core 0.100) by its confirmation, ``freshness.v2`` 0.7 §2.6,
+    counted from the deployment epoch ``epoch_s``."""
+    if r is None:
+        return GetReading(None)
+    if getattr(r, "snapshot_key", None) is not None:
+        t = r.snapshot_time if r.confirmation == "time" else r.conf if r.confirmation == "conf" else None
+        at = None if t is None else ((epoch_s + t["s"]) * 1000 + t["ms"]) * 1_000_000
+        return GetReading("delete" if r.deleted else "put", None, None, None, r.payload, r.encoding, r.inband,
+                          True, complete, at, owner_id)
+    if r.deleted:
+        return GetReading("delete", r.stamp_ns, r.stamp_id, r.stamp, inband=r.inband)
+    if r.refusal is not None:
+        return GetReading("put", r.stamp_ns, r.stamp_id, r.stamp, b"", r.encoding, r.inband)
+    return GetReading("put", r.stamp_ns, r.stamp_id, r.stamp, r.payload, r.encoding, r.inband)
+
+
+def get_reading(session: Any, key: str, timeout: float = 1.0, epoch_s: int = 0,
+                owner_id: str | None = None) -> GetReading:
     """A GET of one state member as core S4 says (target All, consolidation
-    Latest), the member's reply kept for §2.6."""
+    None, core 0.100), the member's reply kept for §2.6. Where it comes as a
+    snapshot's entry (a member read: "a snapshot of that member alone, on
+    the member's own key"), ``freshness.v2`` 0.7 §2.6 ages it from its
+    confirmation, each time counted from the deployment epoch ``epoch_s``
+    (the catalog's, else 0); a snapshot of no entry on the key is the
+    owner's word, its member deleted (§2.6: "A member a complete snapshot
+    omits has no value")."""
     from . import live
 
     st = live.get_state(session, key, timeout=timeout)
     mine = [r for r in st.replies if r.key == key]
+    whole = bool(st.complete_for(key))
     if not mine:
+        if st.snapshots:
+            return GetReading(None, snapshot=True, complete=whole, owner_id=owner_id)
         return GetReading(None)
     r = mine[-1]
+    if r.snapshot_key is not None:
+        t = r.snapshot_time if r.confirmation == "time" else r.conf if r.confirmation == "conf" else None
+        at = None if t is None else ((epoch_s + t["s"]) * 1000 + t["ms"]) * 1_000_000
+        return GetReading("delete" if r.deleted else "put", None, None, None, r.payload, r.encoding, r.inband,
+                          True, whole, at, owner_id)
     if r.deleted:
         return GetReading("delete", r.stamp_ns, r.stamp_id, r.stamp, inband=r.inband)
     if r.refusal is not None:

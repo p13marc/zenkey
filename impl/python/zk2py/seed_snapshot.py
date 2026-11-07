@@ -90,17 +90,19 @@ class Collection:
         return not lit or self.snapshot_key.split("/")[-len(lit):] == lit
 
     def member(self, key: str) -> bool:
-        """"A member matches its template under the snapshot key, each
-        parameter one chunk": a rest parameter one chunk too, as the
-        description says."""
-        rest = self.rest()
-        if key == self.snapshot_key:
-            return not rest
-        if not rest or not key.startswith(self.snapshot_key + "/"):
+        """Whether ``key`` is a member's key of this collection: its
+        template matches the key's resource chunks (core §2.2), the
+        snapshot key holding the template's chunks before its first
+        parameter. The fixture's description says "A member matches its
+        template under the snapshot key, each parameter one chunk"; a rest
+        parameter takes one or more, as core §2.2 says."""
+        segs = self._segments()
+        lit = len(segs) - len(self.rest())
+        chunks = self.snapshot_key.split("/")
+        base = "/".join(chunks[:len(chunks) - lit])
+        if not key.startswith(base + "/"):
             return False
-        tail = key[len(self.snapshot_key) + 1:].split("/")
-        return len(tail) == len(rest) and all(
-            t != "" and (seg.kind != templates.LITERAL or t == seg.text) for t, seg in zip(tail, rest))
+        return templates.match(templates.parse_template(self.template), key[len(base) + 1:].split("/")) is not None
 
 
 @dataclass
@@ -248,3 +250,201 @@ def run_case(case: dict[str, Any]) -> dict[str, Any]:
                 raise ValueError(f"page {a['hex'][:32]}… reads {got!r}, the fixture's page is {a['page']!r}")
         seed.arrive(a)
     return seed.result()
+
+
+# -- the live reader: a GET's snapshots, read off the bus (core 0.100) ----------
+
+@dataclass(frozen=True)
+class Member:
+    """One entry of a snapshot's page as a reply it stands for (core §4.2,
+    "A snapshot's entries merge as replies do … A live entry is a put, and a
+    tombstone a delete. Each has its stamp: its own run or the header's,
+    and its seq"): its member's key, a put's record or a delete, its
+    in-band stamp, and what it says of its confirmation (§7.5): ``none``,
+    ``time`` (the snapshot's ``time``) or ``conf`` (``conf``), each time
+    ``{"s", "ms"}`` or None for the unknown time."""
+
+    key: str
+    deleted: bool
+    record: bytes
+    inband: Any
+    tag: int
+    confirmation: str | None = None
+    conf: dict[str, int] | None = None
+    time: dict[str, int] | None = None
+
+    def put_bytes(self) -> bytes:
+        """The put the entry stands for, as core §4.4 has an archive keep
+        it: "CH of form 0 with the snapshot's tag and the run's width, the
+        entry's run and seq, then its record"; a tombstone's delete
+        envelope."""
+        from . import zk2c
+
+        if self.deleted:
+            return zk2c.deletion(self.inband)
+        return zk2c.mutation(self.inband, self.record, self.tag)
+
+
+def read_page_of(key: str, payload: bytes) -> dict[str, Any]:
+    """A GET reply's payload read as a snapshot's page (§7.5), with the
+    reply key's kind token; :class:`zk2py.snapshot.Refused` or
+    :class:`zk2py.zk2c.Refused` for one the reading refuses."""
+    from . import zk2c
+
+    return snapshot.read_page(payload, zk2c.key_token(key))
+
+
+def members_of(key: str, page: dict[str, Any]) -> list[Member]:
+    """Each entry of ``page``, heard on ``key``, as the reply it stands for:
+    "on its member's key: the snapshot's key, then ``/`` and the id"."""
+    from . import zk2c
+
+    out = []
+    for tomb, entries in ((False, page["live"]), (True, page["tombs"])):
+        for e in entries:
+            width = e["run_width"] if e["run_width"] is not None else page["run_width"]
+            run = e["run"] if e["run"] is not None else page["run"]
+            ib = zk2c.InBand(width, run, e["seq"])
+            mk = snapshot.member_key(key, e["id"])
+            if tomb:
+                out.append(Member(mk, True, b"", ib, page["tag"]))
+            else:
+                out.append(Member(mk, False, bytes.fromhex(e["record"]), ib, page["tag"], e["confirmation"],
+                                  e.get("conf"), page["time"]))
+    return out
+
+
+class Tracker:
+    """The snapshots one GET brought, by key and header (§7.5, "Complete":
+    "one page of each index from 0 to a page whose more bit is 0, all on one
+    key with one CH, run, asof, time and coll")."""
+
+    def __init__(self) -> None:
+        self.heard: list[Heard] = []
+
+    def add(self, key: str, page: dict[str, Any]) -> tuple[Heard, dict[str, Any] | None]:
+        """One page heard by the GET: its snapshot, and the whole snapshot
+        the first time it is complete, else None."""
+        header = {k: page[k] for k in snapshot.HEADER_FIELDS}
+        snap = next((s for s in self.heard if s.key == key and s.header == header), None)
+        if snap is None:
+            snap = Heard(key, header)
+            self.heard.append(snap)
+        snap.pages.setdefault(page["index"], page)
+        if snap.done:
+            return snap, None
+        whole = snapshot.complete(list(snap.pages.values()))
+        if whole is None:
+            return snap, None
+        snap.done = True
+        return snap, whole
+
+
+def collections_from(contract: Any, prefix: str) -> list[Collection]:
+    """A contract's collections as a reader maps a snapshot's index with
+    them (core §4.2, §7.5): each ``state`` and ``@state`` resource, its
+    index "among the interface's resources of the reply key's kind token, in
+    the canonical form's order", its snapshot key under ``prefix``
+    (``zk2/<system>/<service>/<iface>``), or none where its first chunk is a
+    parameter."""
+    out = []
+    for token in ("state", "@state"):
+        rows = [r for r in contract.canonical["resources"] if r["token"] == token]
+        for i, r in enumerate(rows):
+            lit = []
+            for chunk in r["template"].split("/"):
+                if chunk.startswith("{"):
+                    break
+                lit.append(chunk)
+            if lit:
+                out.append(Collection(i, r["template"], f"{prefix}/{token}/{'/'.join(lit)}"))
+    return out
+
+
+def omitted(snap: Heard, whole: dict[str, Any], collections: list[Collection],
+            held: dict[str, tuple[Any, bool]]) -> list[str]:
+    """Core §4.2's omission rule over a complete snapshot ``whole`` heard on
+    ``snap.key``: the keys of ``held`` (each its in-band stamp, or None, and
+    whether it was heard after the GET was asked) that "a member of the
+    collection at K or under it, that the snapshot lists neither live nor
+    as a tombstone" holds, and that are not "newer than the snapshot: a
+    value under R with a seq above A; a value under another run that it
+    heard after it asked the GET". An index that names no collection of the
+    reply's key ("neither the snapshot key nor a member's key") draws no
+    omission rule."""
+    h = snap.header
+    cols = [c for c in collections if c.coll == h["coll"] and (snap.key == c.snapshot_key or c.member(snap.key))
+            and snap.key.split("/")[4:5] == c.snapshot_key.split("/")[4:5]]
+    if not cols:
+        return []
+    listed = {snapshot.member_key(snap.key, e["id"]) for e in whole["live"] + whole["tombs"]}
+    run = (h["run_width"], h["run"])
+    out = []
+    for key, (ib, after) in held.items():
+        if key in listed or not (key == snap.key or key.startswith(snap.key + "/")):
+            continue
+        if not any(c.member(key) for c in cols):
+            continue
+        same_run = ib is not None and (ib.width, ib.run) == run
+        spared = (same_run and ib.seq > h["asof"]) or (not same_run and after)
+        if not spared:
+            out.append(key)
+    return out
+
+
+class ByDescriptor:
+    """"The owner's revision maps the index" (core §4.2, F-497's answer): a
+    late joiner's collections for a snapshot, by "the revision of the
+    interface that the owner's descriptor names (§3.3), never with another
+    revision it holds". :meth:`prepare` reads the descriptors of the
+    services a selector reaches, before the GET, so that the GET's
+    callbacks make no query; :meth:`__call__` maps a reply key and a page's
+    header to the collections of the revision named, or none: "Without the
+    contract, or without the owner's revision, a reader … applies no
+    omission rule".
+
+    **Two instances.** Where two descriptors of one service answer, the one
+    whose ``run`` is the snapshot's names its revision (§3.3: "``run`` is
+    the run the instance writes under now"); where none states it, no
+    revision is named."""
+
+    def __init__(self, contracts: list[Any]):
+        self.by_fp = {c.fingerprint: c for c in contracts}
+        #: "<system>/<service>" -> each descriptor read, as a dict
+        self.descriptors: dict[str, list[dict[str, Any]]] = {}
+
+    def prepare(self, session: Any, selector: str) -> None:
+        import json
+
+        from . import live
+
+        chunks = selector.split("/")
+        if len(chunks) < 3 or chunks[0] != "zk2":
+            return
+        for a in live.get_descriptor(session, f"zk2/{chunks[1]}/{chunks[2]}/@zk/instance/*"):
+            if not a.ok:
+                continue
+            try:
+                doc = json.loads(a.payload)
+            except ValueError:
+                continue
+            if isinstance(doc, dict) and isinstance(doc.get("service"), str):
+                self.descriptors.setdefault(doc["service"], []).append(doc)
+
+    def __call__(self, key: str, header: dict[str, Any]) -> list[Collection]:
+        from . import live, zk2c
+
+        chunks = key.split("/")
+        if len(chunks) < 5:
+            return []
+        service, iface = f"{chunks[1]}/{chunks[2]}", chunks[3]
+        docs = self.descriptors.get(service, [])
+        run = zk2c.InBand(header["run_width"], header["run"], 0).run_hex()
+        named = [d for d in docs if d.get("run") == run] or (docs if len(docs) == 1 else [])
+        fps = {live.fingerprint_of(d, iface) for d in named} - {None}
+        if len(fps) != 1:
+            return []
+        contract = self.by_fp.get(fps.pop())
+        if contract is None:
+            return []
+        return collections_from(contract, "/".join(chunks[:4]))

@@ -1,0 +1,35 @@
+# zk2py's contract for spec/scenarios/state.md §14 at core 0.100 (#609,
+# round 105, #977 E3): a collection's snapshot, its pages, and a seed from
+# it. `plans/{vehicle}` is the setup's 32 plans, raised past §14's count so
+# that the Rust owner example, whose records are its own, can be filled
+# past one page; `oper` a state with no parameter, its own snapshot key;
+# `{peer}/route` a template whose first chunk is a parameter, which has no
+# snapshot key. None declares `freshness.ttl_s`, so none is a per-key
+# resource (core §4.2). `poke` is there since the Rust `consume` example
+# reads one state and calls one operation. It must load with no finding.
+[interface]
+name    = "zk2py_fleet"
+major   = 1
+minor   = 0
+summary = "state.md §14's plans, a state with no parameter and one keyed by its first chunk"
+
+[resources."plans/{vehicle}"]
+kind        = "state"
+type        = { raw = "text/plain" }
+params      = { vehicle = "string" }
+cardinality = 512
+
+[resources.oper]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources."{peer}/route"]
+kind        = "state"
+type        = { raw = "text/plain" }
+params      = { peer = "string" }
+cardinality = 8
+
+[resources.poke]
+kind     = "operation"
+request  = { raw = "application/octet-stream" }
+response = { raw = "application/octet-stream" }

@@ -446,11 +446,17 @@ def section1(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         report.check(sec, "2. S reads it raised", bus.reads(k) == [al.RAISED], f"{bus.reads(k)}")
         rg = fr.get_reading(bus.g_session, k)
         f1, _ = g.answers()[k] if k in g.readings else (None, None)
-        report.check(sec, "2. G's reply holds the same document under the same stamp (core S2): the put's "
-                          "in-band stamp, and the owner's Zenoh timestamp, its last confirmation (core 0.85 S2)",
-                     bool(got) and rg.inband == got[0].inband and _zid_eq(rg.stamp_id, g.meta_zid)
-                     and g.documents.get(k) == d,
-                     f"reply in-band {rg.inband}, stamp {rg.stamp_id}, document {g.documents.get(k)}")
+        # core 0.100 (round 105): an alarm's state is a freshness.v2
+        # collection, answered by snapshot; "its last confirmation (core S2)"
+        # is the entry's confirmation, in band, never a Zenoh timestamp
+        # (F-503: the scenario, at alarms.v1 0.13, still reads a stamp).
+        report.check(sec, "2. G's answer holds the same document under the same in-band stamp, a snapshot's entry "
+                          "whose confirmation is in band, 1, vouched for at the snapshot's time (core 0.100 S2; "
+                          "the scenario's Zenoh-timestamp confirmation is F-503)",
+                     bool(got) and rg.inband == got[0].inband and rg.snapshot and rg.confirmed_ns is not None
+                     and rg.stamp_id is None and g.documents.get(k) == d,
+                     f"entry in-band {rg.inband}, snapshot {rg.snapshot}, confirmed {rg.confirmed_ns}, stamp "
+                     f"{rg.stamp_id}, document {g.documents.get(k)}")
         report.check(sec, "2. G judges yes, firing", f1 is not None and _pair(f1) == "yes, firing",
                      f1 and _pair(f1))
         mark = time.monotonic_ns()
@@ -588,11 +594,15 @@ def section3(report: Report, mode: Any, ctx: dict[str, Any], reraise: bool = Fal
             report.check(sec, "2. G judges no, deleted", f1 is not None and _pair(f1) == "no, deleted", f1 and _pair(f1))
             # 0.13 (core 0.89 S2, F-460's answer): "and its last confirmation,
             # the timestamp the owner minted at the delete"
-            report.check(sec, "2. the reply_del carries its last confirmation, a Zenoh timestamp of the owner's "
-                              "minted at the delete (core 0.89 S2)",
-                         rg.stamp_id is not None and _zid_eq(rg.stamp_id, g.meta_zid) and rg.stamp_ns is not None
-                         and fired is not None and rg.stamp_ns // 1_000_000 >= fired.timestamp,
-                         f"reply_del stamp {rg.stamp}, meta.zid {g.meta_zid}")
+            # core 0.100 (round 105): the delete is a tombstone in the
+            # owner's snapshot, confirmation 0, no time: "its last
+            # confirmation, the timestamp the owner minted at the delete" has
+            # nothing to ride (F-503).
+            report.check(sec, "2. the delete is a tombstone of the owner's snapshot, with the delete's in-band stamp "
+                              "and no time and no Zenoh timestamp: the scenario's last confirmation at the delete is "
+                              "carried by nothing (core 0.100 §7.5; F-503)",
+                         rg.snapshot and rg.reply == "delete" and rg.stamp_id is None and rg.confirmed_ns is None,
+                         f"snapshot {rg.snapshot}, reply {rg.reply}, stamp {rg.stamp}, meta.zid {g.meta_zid}")
             if ctx.get("quick"):
                 report.cannot(sec, "3. the 65 s wait for the tombstone window: skipped by --quick")
             else:
@@ -731,17 +741,21 @@ def section5(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
                 "S saw no new instance token" if not new_tokens else f"the GET did not return ({new_tokens})"))
         elif st is not None and st.errors:
             problems.append(f"the GET's errors {st.errors}")
-        if seen and (a_doc is None or not a_doc.firing or a_doc.timestamp != t0
-                     or not _zid_eq(a_at.stamp_id if a_at else None, g.meta_zid)):
+        # core 0.100 (round 105): the GET's answer is the owner's snapshot,
+        # whose entries carry no Zenoh timestamp: "stamped by the new
+        # instance" is read by the in-band run, the descriptor's (F-503)
+        def new_inst(r_: Any) -> bool:
+            return r_ is not None and r_.inband is not None and r_.inband.run_hex() == new_run
+
+        if seen and (a_doc is None or not a_doc.firing or a_doc.timestamp != t0 or not new_inst(a_at)):
             problems.append(f"A not firing under the new instance's stamp with t0 kept: {a_doc}, "
-                            f"stamp {a_at and a_at.stamp_id}")
-        if seen and (b_at is None or b_at.deleted or not _zid_eq(b_at.stamp_id, g.meta_zid)):
+                            f"in-band {a_at and a_at.inband} (run {new_run})")
+        if seen and (b_at is None or b_at.deleted or not new_inst(b_at)):
             problems.append(f"B not put by the new instance: {b_at}")
         for name, k in (("R", kr), ("P", kp)):
             if seen and not (k in rep_at and rep_at[k].deleted):
                 problems.append(f"no reply_del for {name}'s key")
-            elif seen and not (rep_at[k].inband is not None and rep_at[k].inband.run_hex() == new_run
-                               and _zid_eq(rep_at[k].stamp_id, g.meta_zid)):
+            elif seen and not new_inst(rep_at[k]):
                 # 0.13 (F-459, F-460's answers): "stamped in band by it, each
                 # under the timestamp it minted at the delete": the delete's
                 # attachment under the new instance's run, and the owner's
@@ -769,10 +783,17 @@ def section5(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
                      [x.kind for x in b] == ["put", "put", "delete"] and bus.reads(kb)[-3:] == [
                          al.CONFIRMED, al.RESOLVED, al.RETIRED], f"{[x.kind for x in b]}, {bus.reads(kb)}")
         f1 = g.answers()[ka][0] if ka in g.readings else None
-        report.check(sec, "4. G's reply holds A stamped by the new instance, whose meta.zid is the stamp's id",
-                     _zid_eq(g.stamps.get(ka), g.meta_zid) and not g.readings[ka].previous_instance
-                     and not g.foreign,
-                     f"stamp {g.stamps.get(ka)}, meta.zid {g.meta_zid}")
+        # core 0.100 (round 105): the entry carries no Zenoh timestamp, so
+        # §2.14 step 5's attribution by the stamp's id has none to read: A is
+        # unattributable, never previous_instance, and goes to step 6 (F-503)
+        a_rep = rep_at.get(ka)
+        report.check(sec, "4. G's answer holds A under the new instance's run, the descriptor's, and no Zenoh "
+                          "timestamp: unattributable, never previous_instance, never foreign (§2.14 step 5; "
+                          "F-503)",
+                     a_rep is not None and new_inst(a_rep) and a_rep.stamp_id is None
+                     and not g.readings[ka].previous_instance and not g.foreign,
+                     f"in-band {a_rep and a_rep.inband} (run {new_run}), stamp {a_rep and a_rep.stamp_id}, meta.zid "
+                     f"{g.meta_zid}")
         report.check(sec, "4. G judges A yes, firing, never previous_instance",
                      f1 is not None and _pair(f1) == "yes, firing", f1 and _pair(f1))
         if o.rust:

@@ -115,7 +115,7 @@ from typing import Any, Callable
 
 import zenoh
 
-from . import bundle, freshness, freshness_v2, templates, zk2c
+from . import bundle, freshness, freshness_v2, snapshot, templates, zk2c
 from . import heartbeat as hbeat
 from .contract import Contract
 from .lexical import parse_interface_id
@@ -161,6 +161,9 @@ _PRIORITY = {"real_time": "REAL_TIME", "interactive_high": "INTERACTIVE_HIGH",
              "data_low": "DATA_LOW", "background": "BACKGROUND"}
 #: core.md S3: the tombstone window, unless the deployment configures another.
 TOMBSTONE_WINDOW_S = 60.0
+#: core §4.2 (0.100), "Pages": "The page size is 1,024 bytes, unless the
+#: deployment configures the owner with another."
+PAGE_SIZE = 1024
 #: core §2.4's ``reliability`` → zenoh's.
 _RELIABILITY = {"reliable": "RELIABLE", "best_effort": "BEST_EFFORT"}
 
@@ -256,6 +259,59 @@ def keeps_timestamp(c: Contract, r: dict[str, Any]) -> bool:
         if d.declaration == timing.DECLARED and d.lifespan_ms is not None:
             return True
     return False
+
+
+def per_key(c: Contract, r: dict[str, Any]) -> bool:
+    """Core §4.2 (0.100), "A per-key resource keeps S2's reply per key …
+    These are the states §4.3's table lists": a state that declares
+    ``freshness.ttl_s`` above 0 of a contract that does not use
+    ``freshness.v2``, a ``desired.v1`` desired resource, a ``telemetry.v1``
+    or ``telemetry.v2`` metric state, and "every state of an interface whose
+    contract uses ``redundancy.v1``" (:func:`keeps_timestamp` reads the
+    first three)."""
+    if r["token"] not in ("state", "@state"):
+        return False
+    return keeps_timestamp(c, r) or "redundancy.v1" in c.canonical["uses"]
+
+
+@dataclass(frozen=True)
+class Collection:
+    """Core §4.2 (0.100): "one ``state`` or ``@state`` resource of an
+    interface it exposes, with its members (§7.5)". ``index`` is "its
+    resource's place, from 0, among the interface's resources of the reply
+    key's kind token, in the canonical form's order" (§7.5); ``key`` its
+    snapshot key, None for "A template whose first chunk is a parameter";
+    ``horizon`` whether it is "a resource that declares ``freshness.ttl_s``
+    above 0, of a contract that uses ``freshness.v2``"."""
+
+    contract: Any
+    resource: dict[str, Any]
+    base: str            # zk2/<system>/<service>/<iface>/<token>
+    index: int
+    key: str | None
+    tag: int
+    horizon: bool
+
+    def member(self, key: str) -> bool:
+        """Whether ``key`` is a member key of this collection's template."""
+        if not key.startswith(self.base + "/"):
+            return False
+        return templates.match(templates.parse_template(self.resource["template"]),
+                               key[len(self.base) + 1:].split("/")) is not None
+
+
+def snapshot_key(base: str, template: str) -> str | None:
+    """Core §4.2: "its resource's key up to the template's first parameter
+    … A template with no parameter is its own snapshot key", and "A template
+    whose first chunk is a parameter has no snapshot key"."""
+    lit: list[str] = []
+    for chunk in template.split("/"):
+        if chunk.startswith("{"):
+            break
+        lit.append(chunk)
+    if not lit:
+        return None
+    return f"{base}/{'/'.join(lit)}"
 
 
 #: core §4.3: the kinds an owner writes the envelope on (``@stream`` keeps
@@ -758,6 +814,12 @@ class Owner:
         #: query is handed to it, and answered when it calls
         #: :meth:`answer_state` with what :meth:`state_answer` made
         self.state_hold: Any = None
+        #: core §4.2 (0.100) "Pages": "The page size is 1,024 bytes, unless
+        #: the deployment configures the owner with another."
+        self.page_size = PAGE_SIZE
+        #: each snapshot this owner built, (key, coll, asof, pages): what a
+        #: scenario checks of its answers
+        self.snapshots_sent: list[tuple[str, int, int, int]] = []
         self.before_tokens = before_tokens
         #: §8.2's plan, kept for a re-mint (:meth:`new_epoch`)
         self._plan_made: dict[str, list[tuple[dict[str, Any], str]]] = {}
@@ -2445,40 +2507,189 @@ class Owner:
     # -- handlers ---------------------------------------------------------
 
     def _state_handler(self, query: zenoh.Query) -> None:
-        """S2: "every matching live key, plus a reply_del for each matching
-        key it deleted within the window", each with its mutation's
-        timestamp (S2, S3)."""
+        """S2 (core 0.100): "It MUST answer a GET over them per collection,
+        as 'Answering a state GET' below says" (:meth:`state_answer`)."""
         if self.state_hold is not None:
             self.state_hold(query)
             return
         self.answer_state(query, self.state_answer(query), finish=False)
 
-    def state_answer(self, query: zenoh.Query) -> list[tuple[str, _Held]]:
-        """The answer to a state GET, made now: each matching live key, and
-        each key deleted within the window."""
-        asked = zenoh.KeyExpr(str(query.key_expr))
-        now = time.monotonic()
-        out = []
-        for key, held in list(self._held.items()):
-            if not asked.intersects(zenoh.KeyExpr(key)):
+    def collections(self) -> list[Collection]:
+        """Each collection this owner answers by snapshot (core §4.2, 0.100):
+        every exposed ``state`` and ``@state`` resource of an interface it
+        serves that is no per-key resource (:func:`per_key`)."""
+        out: list[Collection] = []
+        plan = getattr(self, "_plan_made", None) or {}
+        for c in self.contracts:
+            if c.interface in self.standing_by:
                 continue
-            if held.payload is not None or now - held.at <= self.tombstone_s:
-                out.append((key, held))
+            exposed = {(r["token"], r["template"]) for r, status in plan.get(c.interface, []) if status == "exposed"}
+            for token in ("state", "@state"):
+                rows = [r for r in c.canonical["resources"] if r["token"] == token]
+                for i, r in enumerate(rows):
+                    if (token, r["template"]) not in exposed or per_key(c, r):
+                        continue
+                    base = f"{self.prefix(c)}/{token}"
+                    horizon = freshness.horizon("state", r["annotations"]).horizon == "within" \
+                        and freshness_v2.uses_v2(c.canonical)
+                    out.append(Collection(c, r, base, i, snapshot_key(base, r["template"]), self._tag_for(c, r),
+                                          horizon))
         return out
 
-    def answer_state(self, query: zenoh.Query, answer: list[tuple[str, _Held]], finish: bool = True) -> None:
+    def _resource_key(self, key: str) -> tuple[Any, dict[str, Any]] | None:
+        return self._resource_of.get(key) or self._member_of.get(key)
+
+    def _live_or_windowed(self, now: float) -> list[tuple[str, _Held]]:
+        return [(k, h) for k, h in list(self._held.items())
+                if h.payload is not None or now - h.at <= self.tombstone_s]
+
+    def state_answer(self, query: zenoh.Query | str) -> list[tuple[Any, ...]]:
+        """The answer to a state GET, made now (core §4.2, 0.100, "Answering
+        a state GET"), as items :meth:`answer_state` sends:
+
+        - ``("reply", key, held)``: "A per-key resource keeps S2's reply per
+          key … An owner MUST answer each member of a per-key resource that a
+          GET reaches with its reply, or with its ``reply_del`` within the
+          window";
+        - ``("snapshot", key, pages)``: a collection read's snapshot, "on its
+          snapshot key, in pages"; a member read's "snapshot of that member
+          alone, on the member's own key … one page, whose one entry has the
+          empty id"; or, for "a member read of one concrete key that it holds
+          no member at, live or deleted within the window", "a snapshot of no
+          entry on that key".
+
+        A collection read "is a GET whose selector includes the snapshot key
+        followed by ``/**``"; a member read reaches a collection's member
+        keys and is no collection read of it. Every snapshot of one answer
+        is built at once, under the writes' lock, "from one state of the
+        collection"."""
+        sel = str(query if isinstance(query, str) else query.key_expr)
+        asked = zenoh.KeyExpr(sel)
+        concrete = not any(templates.is_wild(c) for c in sel.split("/"))
+        out: list[tuple[Any, ...]] = []
+        with self._writes:
+            now = time.monotonic()
+            held = self._live_or_windowed(now)
+            cols = self.collections()
+            snap_cols = {(id(c.contract), c.resource["token"], c.resource["template"]) for c in cols}
+            for key, h in held:
+                cr = self._resource_key(key)
+                if cr is not None and (id(cr[0]), cr[1]["token"], cr[1]["template"]) in snap_cols:
+                    continue
+                if asked.intersects(zenoh.KeyExpr(key)):
+                    out.append(("reply", key, h))
+            header: dict[str, Any] | None = None
+            for col in cols:
+                members = [(k, h) for k, h in held if self._resource_key(k) is not None
+                           and self._resource_key(k)[1] is col.resource]  # type: ignore[index]
+                if col.key is not None and asked.includes(zenoh.KeyExpr(col.key + "/**")):
+                    header = header or self._snapshot_header()
+                    entries = [(k[len(col.key) + 1:] if k != col.key else "", h) for k, h in members]
+                    out.append(("snapshot", col.key, self._pages(col, header, entries)))
+                    continue
+                reached = [(k, h) for k, h in members if asked.intersects(zenoh.KeyExpr(k))]
+                for k, h in sorted(reached, key=lambda x: x[0].encode()):
+                    header = header or self._snapshot_header()
+                    out.append(("snapshot", k, self._pages(col, header, [("", h)])))
+                if concrete and not reached and col.member(sel) and self._winner(col, sel):
+                    header = header or self._snapshot_header()
+                    out.append(("snapshot", sel, self._pages(col, header, [])))
+        return out
+
+    def _winner(self, col: Collection, key: str) -> bool:
+        """Whether ``key`` is ``col``'s member by core §2.2's ranking among
+        its interface's templates of its kind token."""
+        rows = [r for r in col.contract.canonical["resources"] if r["token"] == col.resource["token"]]
+        won = templates.resolve([templates.parse_template(r["template"]) for r in rows],
+                                key[len(col.base) + 1:].split("/"))
+        return won is not None and won[0].text == col.resource["template"]
+
+    def _snapshot_header(self) -> dict[str, Any]:
+        """One answer's run, asof and time (core §4.2, 0.100): "Its run is
+        the one the owner writes under"; "An owner MUST write as asof a seq
+        of its run at or below which it has recorded every state mutation it
+        minted" — this owner mints and records each state mutation under
+        the writes' lock, which its caller holds, so the last seq minted is
+        such a seq; "A run that has minted none takes one for its first
+        snapshot, as an occurrence does". "Its time is the owner's clock as
+        it builds the snapshot, minted as a last confirmation is", counted
+        from the deployment epoch (the unknown time outside 32 bits)."""
+        with self._seq_lock:
+            if self.run is None:
+                self.take_run()
+            minted = self._minted
+        if minted is None:
+            minted = self._next_inband().seq
+        assert self.run is not None
+        return {"run_width": self.run[0], "run": self.run[1], "asof": minted, "time": self._time(self.mint())}
+
+    def _time(self, ts: zenoh.Timestamp | None) -> dict[str, int] | None:
+        """A timestamp's instant as a snapshot carries it: "to the
+        millisecond, counted from the deployment epoch (§7.6)"."""
+        if ts is None:
+            return None
+        return hbeat.time_of(ts.get_time_as_ntp64().as_nanos(), self.writing_epoch())
+
+    def _entry(self, col: Collection, header: dict[str, Any], entry_id: str, key: str, h: _Held
+               ) -> tuple[bool, dict[str, Any]] | None:
+        """One member as a snapshot lists it (core §4.2 "What a snapshot
+        lists", §7.5): a live entry, "the record that mutation put", with its
+        confirmation where the collection has a horizon; or a tombstone. Its
+        own run where its last mutation was under another than the
+        header's."""
+        ib = h.inband
+        if ib is None:
+            return None
+        own = (ib.width, ib.run) != (header["run_width"], header["run"])
+        e: dict[str, Any] = {"id": entry_id, "run_width": ib.width if own else None, "run": ib.run if own else None,
+                             "seq": ib.seq}
+        if h.payload is None:
+            return True, e
+        conf: dict[str, Any] = {"confirmation": "none"}
+        if col.horizon:
+            # "It is 1 while the owner vouches for the member …, and
+            # otherwise 2, with the member's last confirmation".
+            if key not in self.unvouched:
+                conf = {"confirmation": "time"}
+            else:
+                conf = {"confirmation": "conf", "conf": self._time(h.confirm or h.stamp)}
+        e.update(conf)
+        e["record"] = h.payload.hex()
+        return False, e
+
+    def _pages(self, col: Collection, header: dict[str, Any], members: list[tuple[str, _Held]]) -> list[bytes]:
+        """The snapshot's pages, cut "by §7.5's paging rule, under its page
+        size" (:func:`zk2py.snapshot.cut`)."""
+        snap: dict[str, Any] = {"tag": col.tag, **header, "coll": col.index, "live": [], "tombs": []}
+        for entry_id, h in members:
+            key = col.key + ("/" + entry_id if entry_id else "") if col.key is not None else None
+            got = self._entry(col, header, entry_id, key or "", h)
+            if got is None:
+                continue
+            tomb, e = got
+            snap["tombs" if tomb else "live"].append(e)
+        return snapshot.cut(snap, self.page_size)
+
+    def answer_state(self, query: zenoh.Query, answer: list[tuple[Any, ...]], finish: bool = True) -> None:
         """Send an answer :meth:`state_answer` made, and, for a held query,
-        end it (its final reply)."""
-        for key, held in answer:
-            # S2 (0.73): "a reply as the bytes the mutation put, a reply_del
-            # as the delete's attachment", and the mutation's Zenoh
-            # timestamp where it carried one.
+        end it (its final reply). A per-key reply carries "the in-band stamp
+        of the mutation it represents: a reply as the bytes the mutation
+        put, a ``reply_del`` as the delete's attachment", and "the
+        mutation's Zenoh timestamp, where the mutation carried one" (S2). A
+        snapshot's pages go "as a reply to the one GET", each under
+        ``zenoh/bytes``, with no Zenoh timestamp."""
+        for item in answer:
+            if len(item) == 2:
+                item = ("reply", *item)  # an answer made before core 0.100's items
+            what, key, x = item
+            if what == "snapshot":
+                for page in x:
+                    query.reply(key, page, encoding=zk2c.ENCODING)
+                first = snapshot.read_page(x[0])
+                self.snapshots_sent.append((key, first["coll"], first["asof"], len(x)))
+                continue
+            held = x
             kw: dict[str, Any] = {} if held.stamp is None else {"timestamp": held.stamp}
-            if held.stamp is None and held.confirm is not None:
-                # S2 (core 0.82): "The owner's reply of a member a
-                # freshness.v2 heartbeat confirms MUST carry instead that
-                # member's last confirmation".
-                kw["timestamp"] = held.confirm
             if held.payload is not None:
                 if held.inband is not None:
                     query.reply(key, held.wire, encoding=zk2c.ENCODING, **kw)

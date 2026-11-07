@@ -1735,7 +1735,11 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
             if r is None:
                 g = fr.GetReading(None)
             else:
-                g = fr.GetReading("delete" if r.deleted else "put", r.stamp_ns, r.stamp_id, r.stamp, r.payload)
+                # core 0.100: an alarm's state (a freshness.v2 collection) is
+                # answered by snapshot, its entry aged by its confirmation
+                # (freshness.v2 0.7 §2.6), counted from epoch 0: this reader
+                # holds no catalog
+                g = fr.reading_of(r, 0, True, meta_zid)
                 if (r.stamp is not None or r.inband is not None) and r.refusal is None:
                     cands.append((sd.Mark(r.inband, sd.Stamp.of(r.stamp)), "delete" if r.deleted else "put",
                                   r.payload, r.stamp_id))

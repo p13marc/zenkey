@@ -268,8 +268,9 @@ def run(puts: int = 10) -> dict[str, Any]:
                        **_count(proxy, put, heard, name, puts, key_text.encode())}
                 if get is not None:
                     mark = proxy.mark()
+                    # core 0.100 S4: consolidation None
                     replies = list(session.get(get, target=zenoh.QueryTarget.ALL,
-                                               consolidation=zenoh.ConsolidationMode.LATEST, timeout=5.0))
+                                               consolidation=zenoh.ConsolidationMode.NONE, timeout=5.0))
                     time.sleep(0.2)
                     got = [b for b in proxy.batches(mark) if get.encode() in b]
                     row["get"] = {"selector": get, "replies": len([r for r in replies if r.ok is not None]),

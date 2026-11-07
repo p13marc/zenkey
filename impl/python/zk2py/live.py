@@ -1967,35 +1967,83 @@ class StateReply:
     raw: bytes = b""
     #: a reply_del's attachment as it arrived
     attachment: bytes | None = None
+    #: core 0.100 (#977 E3): where the value came as a snapshot's entry, the
+    #: snapshot's key it rode (its member's key is ``key``), and what the
+    #: entry says of its confirmation (§7.5): ``none``, ``time`` (vouched for
+    #: at ``snapshot_time``) or ``conf`` (its last confirmation, ``conf``),
+    #: each time ``{"s", "ms"}`` from the deployment epoch, None unknown
+    snapshot_key: str | None = None
+    confirmation: str | None = None
+    conf: dict[str, int] | None = None
+    snapshot_time: dict[str, int] | None = None
 
 
 @dataclass
 class StateReading:
     """The owner's answer to one state GET. ``silent`` is no reply at all:
-    "That silence is not a verdict about the key" (S6, O5)."""
+    "That silence is not a verdict about the key" (S6, O5). ``replies``
+    holds one value per key, merged per key (core 0.100 S4), a snapshot's
+    entries among them; ``snapshots`` each snapshot the GET brought, with
+    its pages and whether it is complete (§7.5); ``arrivals`` every reply as
+    it came, ``(key, what, stamp)``, ``what`` ``put``, ``delete``, ``page``
+    or ``refused``, ``stamp`` its Zenoh timestamp's text or None."""
 
     replies: list[StateReply] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    snapshots: list[Any] = field(default_factory=list)
+    arrivals: list[tuple[str, str, str | None]] = field(default_factory=list)
 
     @property
     def silent(self) -> bool:
-        return not self.replies and not self.errors
+        return not self.arrivals and not self.errors
+
+    def complete_for(self, key: str) -> list[Any]:
+        """The complete snapshots heard on ``key`` or above it (core §4.2:
+        "on a key K that is its collection's snapshot key or a member's
+        key")."""
+        return [h for h in self.snapshots if h.done and (key == h.key or key.startswith(h.key + "/"))]
 
 
 def get_state(session: zenoh.Session, selector: str, timeout: float = GET_TIMEOUT_S,
               across: Any = None) -> StateReading:
-    """S4: "a state GET MUST be addressed to the owner's keys, with target
-    All and consolidation Latest set explicitly." Current state is the
-    owner's answer (S6). §3.2 R6: a reply on a key that is not concrete is
-    discarded. ``across``, a :class:`zk2py.far_side.FarSide`: the GET waits
-    at least the face's reply timeout (core §8.1, 0.91)."""
+    """S4 (core 0.100): "a state GET MUST be addressed to the owner's keys,
+    with target All and consolidation None set explicitly. The consumer MUST
+    merge the GET's replies per key, each snapshot's entries among them, as a
+    late joiner's seed merges them". Current state is the owner's answer
+    (S6). §3.2 R6: a reply on a key that is not concrete is discarded.
+    ``across``, a :class:`zk2py.far_side.FarSide`: the GET waits at least the
+    face's reply timeout (core §8.1, 0.91).
+
+    A reply whose payload is a snapshot's page (§7.5) is read as its
+    entries, each "on its member's key" with its stamp, merged as replies
+    are: within one run the higher seq, an equal stamp kept once, another
+    run the later arrival (§4.2, observer §4.1). One GET holds no view
+    before it, so its omission rule drops nothing (every value it holds was
+    heard after it asked); :attr:`StateReading.snapshots` says which were
+    complete, for a reader that holds one."""
+    from . import seed as sd
+    from . import seed_snapshot as ss
+    from . import snapshot as snap_mod
+
     if across is not None:
         timeout = across.get_timeout_s(timeout)
     q: queue.Queue = queue.Queue()
     session.get(selector, zenoh.handlers.Callback(q.put, lambda: q.put(_DONE)),
-                target=zenoh.QueryTarget.ALL, consolidation=zenoh.ConsolidationMode.LATEST,
+                target=zenoh.QueryTarget.ALL, consolidation=zenoh.ConsolidationMode.NONE,
                 timeout=timeout)
     out = StateReading()
+    tracker = ss.Tracker()
+    held: dict[str, StateReply] = {}
+    marks: dict[str, Any] = {}
+
+    def merge(r: StateReply, mark: Any) -> None:
+        if r.key in held:
+            rel = sd.relation(mark, marks[r.key], sd.kind_of(r.key))
+            if rel not in ("greater", "unordered"):
+                return
+        held[r.key] = r
+        marks[r.key] = mark
+
     while True:
         try:
             item = q.get(timeout=timeout + 5.0)
@@ -2015,13 +2063,35 @@ def get_state(session: zenoh.Session, selector: str, timeout: float = GET_TIMEOU
         raw = s.payload.to_bytes()
         att = None if s.attachment is None else s.attachment.to_bytes()
         deleted = s.kind == zenoh.SampleKind.DELETE
-        out.replies.append(StateReply(
+        if not deleted and read.form == "snapshot":
+            try:
+                page = ss.read_page_of(key, raw)
+            except (snap_mod.Refused, zk2c.Refused) as e:
+                out.arrivals.append((key, "refused", None if ts is None else str(ts)))
+                out.replies.append(StateReply(key, False, b"", str(s.encoding), None, None, None, None,
+                                              getattr(e, "token", "snapshot"), raw, att))
+                continue
+            out.arrivals.append((key, "page", None if ts is None else str(ts)))
+            tracker.add(key, page)
+            for m in ss.members_of(key, page):
+                merge(StateReply(m.key, m.deleted, m.record, zk2c.ENCODING, None, None, None, m.inband, None,
+                                 m.put_bytes() if not m.deleted else b"", m.put_bytes() if m.deleted else None,
+                                 key, m.confirmation, m.conf, m.time), sd.Mark(m.inband, None))
+            continue
+        out.arrivals.append((key, "delete" if deleted else "put", None if ts is None else str(ts)))
+        r = StateReply(
             key, deleted, b"" if deleted or read.refused else (read.record if read.record is not None else raw),
             str(s.encoding),
             None if ts is None else str(ts),
             None if ts is None else str(ts).split("/", 1)[1],
             None if ts is None else ts.get_time_as_ntp64().as_nanos(),
-            read.stamp, read.refusal, raw, att))
+            read.stamp, read.refusal, raw, att)
+        if read.refused:
+            out.replies.append(r)
+            continue
+        merge(r, sd.Mark(read.stamp, sd.Stamp.of(ts)))
+    out.replies.extend(held.values())
+    out.snapshots = list(tracker.heard)
     return out
 
 
