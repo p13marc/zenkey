@@ -1877,6 +1877,99 @@ fn heartbeat_digest_vectors() {
     }
 }
 
+/// An instant in milliseconds since the Unix epoch in RFC 3339, UTC, to
+/// the millisecond: the civil date by days from 1970-01-01 (H. Hinnant's
+/// `civil_from_days`), so `times.json`'s `utc` is checked against its
+/// `at` and nothing else.
+fn utc_of(ms: i128) -> String {
+    let (days, ms) = (ms.div_euclid(86_400_000), ms.rem_euclid(86_400_000));
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i128::from(m <= 2);
+    let (h, min, s, ms) = (ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000);
+    format!("{y:04}-{m:02}-{d:02}T{h:02}:{min:02}:{s:02}.{ms:03}Z")
+}
+
+/// `spec/conformance/heartbeat/times.json` (core §7.5, §7.6, §8.6;
+/// `freshness.v2` §2.4; #1080): a deployment epoch and an instant → the
+/// time `heartbeat::Time::from_unix_ms` gives, the unknown time where the
+/// instant has no code (before the epoch, or 2^32 s or more after it) or
+/// the clock guard holds, and `bare.v1`'s body; an epoch and bytes → the
+/// instant `Time::unix_ms` reads, or the refusal. No epoch given is E = 0,
+/// as an owner with no catalog counts from the Unix epoch. Every known
+/// write reads back to its `at`. Written by an independent reading of the
+/// text, checked by a second, never blessed.
+#[test]
+fn heartbeat_time_vectors() {
+    use zenkey_model::catalog::EPOCH_WITHOUT_CATALOG;
+    use zenkey_model::heartbeat::{Heartbeat, Time};
+    let doc = read_json(&spec().join("conformance/heartbeat/times.json"));
+    let layouts = heartbeat_layouts();
+    let hex = |b: &[u8]| -> String { b.iter().map(|x| format!("{x:02x}")).collect() };
+    let epoch_of = |case: &Value| match &case["epoch"] {
+        Value::Null => EPOCH_WITHOUT_CATALOG,
+        e => e.as_i64().expect("epoch"),
+    };
+    let time_json = |t: Time| match t {
+        Time::Unknown => Value::Null,
+        Time::At { secs, ms } => json!({"s": secs, "ms": ms}),
+    };
+    let writes = doc["writes"].as_array().expect("writes");
+    assert!(!writes.is_empty());
+    for case in writes {
+        let note = &case["note"];
+        let l = &layouts[case["layout"].as_str().expect("layout")];
+        let epoch = epoch_of(case);
+        let time = match &case["at"] {
+            Value::Null => Time::Unknown,
+            at => {
+                let at = i128::from(at.as_i64().expect("at"));
+                assert_eq!(case["utc"], json!(utc_of(at)), "{note}: utc is at");
+                let t = Time::from_unix_ms(at, epoch).unwrap_or(Time::Unknown);
+                if t != Time::Unknown {
+                    assert_eq!(t.unix_ms(epoch), Some(at), "{note}: reads back");
+                }
+                t
+            }
+        };
+        let r = Heartbeat {
+            time,
+            sections: vec![None; l.collections.len()],
+        }
+        .record(l)
+        .expect("writes");
+        let got = json!({
+            "time": time_json(time),
+            "bits": r.bit_string(),
+            "pad": r.pad(),
+            "hex": hex(&r.bytes),
+        });
+        assert_eq!(case["expect"], got, "{note}");
+    }
+    let reads = doc["reads"].as_array().expect("reads");
+    assert!(!reads.is_empty());
+    for case in reads {
+        let note = &case["note"];
+        let l = &layouts[case["layout"].as_str().expect("layout")];
+        let epoch = epoch_of(case);
+        let bytes = unhex(case["hex"].as_str().expect("hex"));
+        let got = match Heartbeat::parse(&bytes, l) {
+            Ok(hb) => match hb.time.unix_ms(epoch) {
+                None => json!({"at": null}),
+                Some(at) => json!({"at": i64::try_from(at).expect("at"), "utc": utc_of(at)}),
+            },
+            Err(r) => json!({"refused": r.token()}),
+        };
+        assert_eq!(case["expect"], got, "{note}");
+    }
+}
+
 /// `spec/conformance/packed/vectors.json` (core §7.6, 0.75; #979 B1): each
 /// type's layout form, its sha256 and tag, each item's width and start, and
 /// the shortest and longest record; a value → its bits, pad and bytes, or
