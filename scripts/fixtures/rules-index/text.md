@@ -83,6 +83,12 @@ The seconds MUST fit an unsigned 64-bit integer (E026).
 A caller or a tool that reads the old wire decodes its error without the
 contract. It MUST refuse an unknown encoding. `[F: errors/cases.json]`
 
+A deployment with an owner on a first hop SHOULD hold its bundles near.
+`[Sc: constrained.md §10]`
+
+A tool that knows an owner is far MUST NOT report it down.
+`[Sc: presence.md §9]`
+
 ## 9. Contracts
 
 - **A `$ref`** is split at its `#`. Each failure below is E032.
