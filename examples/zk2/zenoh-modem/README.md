@@ -319,8 +319,9 @@ read at `d8c62df`.
 
 The 22 gauges take 305 bits. The 51 counters are each the code's u64 (`Report`, `Metrics`,
 `NetdevStats`, the layers' `Counter`s), carried modulo 2^w, a declared loss (`telemetry.v2`
-§2.20). Each width holds its counters' worst rate between two frames of the slowest cadence a face
-lists, 900 s, within the serial window 2^(w−1):
+§2.20). Each width but the kernel's holds its counters' worst rate between two frames of the
+slowest cadence a face lists, 900 s, within the serial window 2^(w−1). The kernel's nine, the last
+two rows, do not: at theirs, their windows are 7.3 min and 2.4 min.
 
 | Counters | Width | Worst rate | Window |
 |---|---:|---|---:|
@@ -391,7 +392,7 @@ collection each (`freshness.v2` §2.4). A packed field holds an enum, a number, 
 | `packed/destination/{destination}` | `DestinationRecord`, 158 | the eight DLEP metrics, at `Readings`' ranges | the addresses |
 
 Each record ends with an extension marker, so a later minor appends fields. Put with a 16-bit run,
-each is 8 to 21 B, against 111 to 585 B of JSON (`modem-contract/src/documents.rs`), so a GET across
+each is 8 to 26 B, against 111 to 585 B of JSON (`modem-contract/src/documents.rs`), so a GET across
 a face by grant (`link.v1` §2.9), and #977's snapshots, carry a record's size. None is exposed: a
 state exposed `link` crosses every face that exposes, since a `link.v2` face lists frames only, and
 its heartbeat with it every 30 s, which SBD's messages and LoRa's duty cannot afford.

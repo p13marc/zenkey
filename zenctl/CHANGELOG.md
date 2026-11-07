@@ -6,6 +6,17 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a `config.v2` refusal in its own words (#609, F-485)
+
+zk2py's round 102 found `config` showing a `config.v2` refusal as
+`config.v1`'s.
+
+| Before | Now | Notes |
+|---|---|---|
+| a `config.v2` act refused `app`: `"error": {"code": "device-refused"}`, `config.v1`'s `ConfigError`; the table's `ConfigError device-refused` | `"error": {"code": "device_refused"}`, the `Error` record as the contract's layout reads it; the table's `Error device_refused` | v2 §2.5, §4 |
+| a `config.v2` `Error` holding the escape: `detail_undecodable`, "an Error code this revision does not name" | `"error": {"code": null}`, the escape; the table's `Error the escape: a code this revision does not name` | v2 §2.5: a reader shows the escape, and acts on none |
+| a refusal whose error form carried no message (`config.v1` or `config.v2`): `"message": ""`; the table's `refused — app: ` | no `message` member; the table's `refused — app, no message` | core §7.5; v2 §2.15 sends none for a change carrying a sensitive value. The bare wire's envelope always carries one |
+
 ## Unreleased (`main`, zk2) — the tools for a first hop (#982 H3)
 
 Observer 0.26 §3.11: a tool that knows an owner is on a first hop reports

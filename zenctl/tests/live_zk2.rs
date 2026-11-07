@@ -7950,6 +7950,63 @@ async fn config_v2_verbs_read_change_and_end_a_change() {
         Some(zenkey::config_v1::Value::Integer(4321))
     );
 
+    // scenarios-v2 §11 step 2: the device refuses a set of `pin` and
+    // `attempts`, in words holding the PIN. The error form, `app`, an
+    // `Error` detail `device_refused` and no message (§2.5, §2.15), shown
+    // as the packed enum names it and with no message, never config.v1's
+    // `device-refused` and `""` (zk2py round 102, F-485).
+    let refused = [
+        "config",
+        "set",
+        "lab/rf0",
+        "sim",
+        "pin=@-",
+        "attempts=5",
+        "--format",
+        "json",
+    ];
+    let refuse = || {
+        rf.device
+            .with(|d| d.refuse_apply = Some("PIN 1234 rejected by the SIM".into()));
+    };
+    refuse();
+    let run = bus.zenctl_stdin(&refused, "1234\n").await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["answer"], "refused", "{run}");
+    assert_eq!(doc["refusal"]["code"], "app", "{run}");
+    assert_eq!(
+        doc["refusal"]["error"],
+        json!({"code": "device_refused"}),
+        "{run}"
+    );
+    assert!(
+        doc["refusal"].get("message").is_none(),
+        "no message, never \"\": {run}"
+    );
+    assert!(doc["refusal"]["mark"]["seq"].is_u64(), "{run}");
+    assert!(
+        !run.stdout.contains("1234") && !run.stderr.contains("1234"),
+        "{run}"
+    );
+    refuse();
+    let mut table = refused[..6].to_vec();
+    table.extend(["--format", "table"]);
+    let run = bus.zenctl_stdin(&table, "1234\n").await;
+    exits(&run, 1);
+    assert!(
+        run.stdout.contains("refused — app, no message")
+            && run.stdout.contains("  Error device_refused")
+            && !run.stdout.contains("ConfigError")
+            && !run.stdout.contains("1234"),
+        "{run}"
+    );
+    assert_eq!(
+        rf.device.holds("sim", "pin"),
+        Some(zenkey::config_v1::Value::Integer(4321)),
+        "a refused apply changes nothing"
+    );
+
     // A reach change asks first (§2.4): from a script, --i-know.
     let reach = [
         "config",

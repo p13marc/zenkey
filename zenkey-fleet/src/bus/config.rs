@@ -81,8 +81,8 @@ use crate::model::config::{
 };
 use crate::model::deployment::{Catalogs, Stated};
 use crate::report::{
-    ConfigActAnswer, ConfigActReport, ConfigChecked, ConfigRefusal, ConfigReport, MalformedReply,
-    SilenceView,
+    ConfigActAnswer, ConfigActReport, ConfigAppError, ConfigChecked, ConfigRefusal, ConfigReport,
+    MalformedReply, SilenceView,
 };
 
 /// A document as read: its value, or why the bytes are not one.
@@ -1098,13 +1098,13 @@ fn refusal(env: &zenkey::call::Refusal, secrets: &[String]) -> ConfigRefusal {
         None => (None, None),
         Some(Ok(mut e)) => {
             e.detail = e.detail.map(|d| scrub(&d, secrets));
-            (Some(e), None)
+            (Some(ConfigAppError::V1(e)), None)
         }
         Some(Err(err)) => (None, Some(format!("not a ConfigError (§2.5): {err}"))),
     };
     ConfigRefusal {
         code: env.code.clone(),
-        message: scrub(&env.message, secrets),
+        message: message(env, secrets),
         cause: env.cause.clone(),
         error,
         detail_undecodable,
@@ -1114,8 +1114,9 @@ fn refusal(env: &zenkey::call::Refusal, secrets: &[String]) -> ConfigRefusal {
 
 /// A `config.v2` owner's refusal (v2 §2.5, §2.9): core §7.5's error form,
 /// its `app` detail `Error` read by the contract's layout under the form's
-/// tag; `device_refused` is `config.v1`'s `device-refused`. Every sensitive
-/// value sent is taken out of its words.
+/// tag, its code the packed enum's own name (`device_refused`), never
+/// `config.v1`'s spelling, and the escape shown as the escape (zk2py round
+/// 102, F-485). Every sensitive value sent is taken out of its words.
 fn refusal_v2(env: &zenkey::call::Refusal, target: &V2Target, secrets: &[String]) -> ConfigRefusal {
     let (error, detail_undecodable) = match (&env.detail, env.form) {
         (None, _) => (None, None),
@@ -1126,19 +1127,21 @@ fn refusal_v2(env: &zenkey::call::Refusal, target: &V2Target, secrets: &[String]
                 .error()
                 .read(form.tag.get(), b, None)
             {
-                Ok(f) if f["code"] == zenkey_model::config::v2::DEVICE_REFUSED => (
-                    Some(ConfigError {
-                        code: zenkey_model::config::ErrorCode::DeviceRefused,
-                        detail: None,
-                    }),
-                    None,
-                ),
-                Ok(f) => (
-                    None,
-                    Some(format!(
-                        "an Error code this revision does not name: {f} (config.v2 §4)"
-                    )),
-                ),
+                Ok(f) => match &f["code"] {
+                    serde_json::Value::String(code) => (
+                        Some(ConfigAppError::V2 {
+                            code: Some(code.clone()),
+                        }),
+                        None,
+                    ),
+                    serde_json::Value::Null => (Some(ConfigAppError::V2 { code: None }), None),
+                    other => (
+                        None,
+                        Some(format!(
+                            "an Error whose code is no name: {other} (config.v2 §4)"
+                        )),
+                    ),
+                },
                 Err(r) => (
                     None,
                     Some(format!(
@@ -1156,12 +1159,21 @@ fn refusal_v2(env: &zenkey::call::Refusal, target: &V2Target, secrets: &[String]
     };
     ConfigRefusal {
         code: env.code.clone(),
-        message: scrub(&env.message, secrets),
+        message: message(env, secrets),
         cause: env.cause.clone(),
         error,
         detail_undecodable,
         mark: env.form.map(|f| f.stamp.into()),
     }
+}
+
+/// A refusal's message as the owner sent it, scrubbed: absent when its
+/// error form carried none (core §7.5), never read back as `""`. The bare
+/// wire's envelope always carries one.
+fn message(env: &zenkey::call::Refusal, secrets: &[String]) -> Option<String> {
+    env.form
+        .is_none_or(|f| f.message)
+        .then(|| scrub(&env.message, secrets))
 }
 
 /// The act on a `config.v2` owner: the request, `config.v1`'s as the tool
@@ -1483,8 +1495,8 @@ mod tests {
             )),
         };
         let r = refusal(&zenkey::call::Refusal::of_envelope(env), &["1234".into()]);
-        assert_eq!(r.message, "pin <redacted> refused");
-        assert_eq!(r.error.unwrap().detail.as_deref(), Some("bad <redacted>"));
+        assert_eq!(r.message.as_deref(), Some("pin <redacted> refused"));
+        assert_eq!(r.error.unwrap().detail(), Some("bad <redacted>"));
         // An error form's detail is the ConfigError's own JSON (core §5.2).
         let form = zenkey_model::envelope::ErrorForm {
             message: Some("pin 1234 refused"),
@@ -1500,7 +1512,21 @@ mod tests {
             )
         };
         let r = refusal(&zenkey::call::Refusal::of_form(&form), &["1234".into()]);
-        assert_eq!(r.message, "pin <redacted> refused");
-        assert_eq!(r.error.unwrap().detail.as_deref(), Some("bad <redacted>"));
+        assert_eq!(r.message.as_deref(), Some("pin <redacted> refused"));
+        assert_eq!(r.error.unwrap().detail(), Some("bad <redacted>"));
+        // A form that carries no message reads as none, never as "" (core
+        // §7.5); an empty one is a message, and stays one.
+        let none = zenkey_model::envelope::ErrorForm {
+            message: None,
+            ..form
+        };
+        let r = refusal(&zenkey::call::Refusal::of_form(&none), &[]);
+        assert_eq!(r.message, None);
+        let empty = zenkey_model::envelope::ErrorForm {
+            message: Some(""),
+            ..form
+        };
+        let r = refusal(&zenkey::call::Refusal::of_form(&empty), &[]);
+        assert_eq!(r.message.as_deref(), Some(""));
     }
 }

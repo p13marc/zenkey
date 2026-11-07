@@ -5728,7 +5728,7 @@ mod tests {
         let refused = |code: &str, cause: Option<&str>| ConfigActAnswer::Refused {
             refusal: ConfigRefusal {
                 code: code.into(),
-                message: "m".into(),
+                message: Some("m".into()),
                 cause: cause.map(str::to_owned),
                 error: None,
                 detail_undecodable: None,

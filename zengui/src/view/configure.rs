@@ -1153,27 +1153,27 @@ fn landed<'a>(r: &'a ConfigActReport, act: &Act, sp: Spacing) -> Element<'a, Mes
         .spacing(sp.xs)
         .into(),
         ConfigActAnswer::Refused { refusal } => {
-            let mut c = column![
-                row![
-                    kit::status_chip(Tone::Negative, format!("refused: {}", refusal.code)),
-                    kit::caption(refusal.message.clone()),
-                ]
-                .spacing(sp.sm)
-                .align_y(iced::Alignment::Center)
-                .wrap()
-            ]
-            .spacing(sp.xs);
+            // A message the error form did not carry is absent, never an
+            // empty caption (core §7.5).
+            let mut head = row![kit::status_chip(
+                Tone::Negative,
+                format!("refused: {}", refusal.code)
+            )];
+            head = match &refusal.message {
+                Some(m) => head.push(kit::caption(m.clone())),
+                None => head.push(kit::muted("no message")),
+            };
+            let mut c =
+                column![head.spacing(sp.sm).align_y(iced::Alignment::Center).wrap()].spacing(sp.xs);
             if let Some(cause) = &refusal.cause {
                 c = c.push(kit::muted(format!("cause: {cause}")));
             }
             if let Some(e) = &refusal.error {
                 c = c.push(kit::muted(format!(
-                    "ConfigError {}{}",
-                    e.code.as_str(),
-                    e.detail
-                        .as_ref()
-                        .map(|d| format!(" — {d}"))
-                        .unwrap_or_default()
+                    "{} {}{}",
+                    e.type_name(),
+                    e.code(),
+                    e.detail().map(|d| format!(" — {d}")).unwrap_or_default()
                 )));
             }
             if let Some(u) = &refusal.detail_undecodable {

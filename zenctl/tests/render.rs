@@ -4431,6 +4431,26 @@ refused — app: the device refused group "sim"
 
 "#]]
     );
+    // A config.v2 refusal (zk2py round 102, F-485): its Error code as the
+    // packed enum names it, never config.v1's, and a message the error form
+    // did not carry absent, never `""`.
+    let v2 = fx::config_act_refused_v2();
+    assert_data_eq!(
+        table(&v2),
+        str![[r#"
+set/sim on lab/rf0 in namespace "acme"  (2s)
+  request {"values":{"pin":"<redacted>"}} — 9 B as set/sim's record
+refused — app, no message (as of run 0001, seq 4)
+  Error device_refused
+
+"#]]
+    );
+    let doc = serde_json::to_value(&v2).unwrap();
+    assert_eq!(
+        doc["refusal"],
+        serde_json::json!({"code": "app", "error": {"code": "device_refused"},
+                           "mark": {"run": "0001", "seq": 4}})
+    );
     assert_data_eq!(
         table(&fx::config_act_status()),
         str![[r#"

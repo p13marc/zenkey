@@ -7,6 +7,34 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `telemetry.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## telemetry.v2 0.4 — 2026-11-07: editorial: Appendix B's counter widths, no rule changed (#609, #991)
+
+zk2py's round 102 read `modem.v3` 3.3's widths from `Readings` (F-493).
+Appendix B said each counter's width holds its worst rate between two
+frames of the slowest cadence a face lists, 900 s. At zenoh-modem's
+README's rates 9 of the 51 do not. The two kernel octet counters' window
+is 7.3 min, and that of the seven kernel packet, error and discard
+counters 2.4 min.
+
+**Changed: Appendix B, which states no rule.**
+- **Which hold:** the 42 of the SDU plane and its layers, whose windows
+  are 29 min and longer.
+- **Which do not:** the kernel's nine. At their worst rate, two of
+  SF12's frames 900 s apart read them `wrap_or_decrease` (§2.20). They
+  are a netdev's, which no shipped face carries.
+- **zenoh-modem's README** said the same of its table's lead-in, and now
+  names the nine too.
+
+**Deliberately not changed.**
+- **No rule and no fixture.** §2.20's SHOULD is the owner's, and a
+  reader reads any width within its window.
+- **No width.** Widening a counter is a new revision of `modem.v3`,
+  zenoh-modem's call (marcpardo/zenoh-modem#213). So is the description
+  of `schemas/modem-readings.json`, which makes the same claim: the
+  packed file's id hashes it, so its words change only with a revision.
+- **Written against core 0.90**, and restating `telemetry.v1` text 0.7,
+  as 0.3 said.
+
 ## telemetry.v2 0.3 — 2026-11-02: editorial: Appendix B reads `modem.v3` 3.3, no rule changed (#991)
 
 `modem.v3` 3.3 (#991) carries its 73 readings in three frame resources

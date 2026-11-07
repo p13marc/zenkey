@@ -493,7 +493,12 @@ impl Render for ConfigReport {
 }
 
 fn refusal_lines(t: &mut Table, r: &ConfigRefusal) {
-    let mut head = format!("refused — {}: {}", r.code, r.message);
+    // A message the error form did not carry is absent, never `""` (core
+    // §7.5): the head names the code alone.
+    let mut head = match &r.message {
+        Some(m) => format!("refused — {}: {m}", r.code),
+        None => format!("refused — {}, no message", r.code),
+    };
     if let Some(c) = &r.cause {
         head.push_str(&format!(" (cause: {c})"));
     }
@@ -503,12 +508,10 @@ fn refusal_lines(t: &mut Table, r: &ConfigRefusal) {
     t.line_styled(head, style::ERROR);
     if let Some(e) = &r.error {
         t.line(format!(
-            "  ConfigError {}{}",
-            e.code.as_str(),
-            e.detail
-                .as_deref()
-                .map(|d| format!(": {d}"))
-                .unwrap_or_default()
+            "  {} {}{}",
+            e.type_name(),
+            e.code(),
+            e.detail().map(|d| format!(": {d}")).unwrap_or_default()
         ));
     }
     if let Some(why) = &r.detail_undecodable {

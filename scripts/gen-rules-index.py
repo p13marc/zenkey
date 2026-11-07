@@ -18,8 +18,11 @@ From each sentence that states a rule, three things are read.
     of the sentence. Parentheses and inline code are set aside. ROLE_WORDS
     maps core §0's role words and their plain synonyms ("an owner", "the
     owner's", "an archive", "a reader") to roles, each synonym with its
-    reason. Every role word the subject holds counts, so "a caller or
-    tool" binds two, and a word that names several roles binds each: a
+    reason. A subject that opens with a role word binds it and each role
+    word joined to it, so "a caller or tool" binds two, never a role named
+    in what qualifies it: "a deployment with such an owner" binds a
+    deployment (F-492). Any other subject binds every role word it holds.
+    A word that names several roles binds each: a
     late joiner is a consumer or a tool (core §4.2), and every instance and
     every holder are any role a service plays (core §8.1, §8.4). A reader's rules are the observer class's, marked so
     (READER), and the index points the roles that read to them (core §12).
@@ -200,6 +203,9 @@ LEADING = re.compile(r"^(?:a|an|the|every|each|its|their)\s+(?:[\w’'-]+\s+){0,
 # A further role word joined to a leading one: "A caller or a tool", "An
 # owner, a consumer and a caller".
 COORDINATED = re.compile(r"^(?:\s*,)?\s+(?:(?:or|and)\s+)?(?:a|an|the|every|each)\s+", re.I)
+# The same in a keyword's subject, where the joined word's determiner may
+# go: "A caller or tool MUST …".
+JOINED = re.compile(r"^(?:\s*,\s*(?:(?:or|and)\s+)?|\s+(?:or|and)\s+)(?:(?:a|an|the|every|each)\s+)?", re.I)
 
 # The sentences the reading cannot parse and the text should not change:
 # {(file, a phrase of the sentence): (roles, reason)}. None today: each
@@ -393,6 +399,35 @@ def leading_roles(sentence: str) -> list:
             break
         head = head[hit.end() + joined.end():]
     return [r for r in ROLES + [READER] if r in found]
+
+
+def subject_roles(subject: str) -> list:
+    """The roles a keyword's subject binds. A subject that opens with a
+    role word binds that role, and each role word joined to it, never one
+    named in what qualifies it: "A deployment with such an owner" binds a
+    deployment, and "A tool that knows an owner is on a first hop" a tool
+    (zk2py round 102's F-492). "Every instance" still binds what
+    ROLE_WORDS says, and "A caller or tool" both. A subject that opens
+    otherwise binds every role word it holds, as roles_in reads it."""
+    text = plain(LABEL.sub(" ", subject)).strip()
+    m = LEADING.match(text)
+    if not m:
+        return roles_in(text)
+    pos, end = m.end(), None
+    while True:
+        hit = None
+        for rx, _roles in ROLE_RX:
+            hit = rx.match(text[pos:])
+            if hit:
+                break
+        if not hit:
+            break
+        end = pos + hit.end()
+        joined = JOINED.match(text[end:])
+        if not joined:
+            break
+        pos = end + joined.end()
+    return roles_in(text[:end]) if end else roles_in(text)
 
 
 def subject_of(before: str) -> str:
@@ -846,7 +881,7 @@ def within(line, top, parents) -> bool:
 def read_role(s, k_off, kw, subject, before, label, last_roles, static, rel):
     """(roles, how) a keyword binds, read in the order the module's
     docstring gives; ([], "") when none can be read."""
-    got = roles_in(subject) or roles_in(LABEL.sub(" ", before))
+    got = subject_roles(subject) or roles_in(LABEL.sub(" ", before))
     if got:
         return got, "subject"
     m = PASSIVE.match(plain(s[k_off + len(kw) :]))

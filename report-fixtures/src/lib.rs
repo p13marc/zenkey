@@ -3879,17 +3879,48 @@ pub fn config_act_refused() -> ConfigActReport {
         ConfigActAnswer::Refused {
             refusal: ConfigRefusal {
                 code: "app".into(),
-                message: "the device refused group \"sim\"".into(),
+                message: Some("the device refused group \"sim\"".into()),
                 cause: None,
-                error: Some(zenkey_model::config::ConfigError {
+                error: Some(ConfigAppError::V1(zenkey_model::config::ConfigError {
                     code: zenkey_model::config::ErrorCode::DeviceRefused,
                     detail: None,
-                }),
+                })),
                 detail_undecodable: None,
                 mark: None,
             },
         },
     )
+}
+
+/// `zenctl config set lab/rf0 sim pin=@pin.txt` on a `config.v2` owner:
+/// the device's refusal in the error form, its `Error` code the packed
+/// enum's own name, and no message, since the change carries a sensitive
+/// value (v2 §2.5, §2.15; zk2py round 102, F-485).
+pub fn config_act_refused_v2() -> ConfigActReport {
+    ConfigActReport {
+        profile: zenkey_fleet::report::ConfigProfile::V2,
+        key: "zk2/lab/rf0/rfcfg.v1/@op/set/sim".into(),
+        request_bytes: Some(9),
+        ..config_act(
+            "set/sim",
+            serde_json::json!({"values": {"pin": "<redacted>"}}),
+            ConfigActAnswer::Refused {
+                refusal: ConfigRefusal {
+                    code: "app".into(),
+                    message: None,
+                    cause: None,
+                    error: Some(ConfigAppError::V2 {
+                        code: Some("device_refused".into()),
+                    }),
+                    detail_undecodable: None,
+                    mark: Some(InbandStamp {
+                        run: "0001".into(),
+                        seq: 4,
+                    }),
+                },
+            },
+        )
+    }
 }
 
 /// `zenctl config confirm lab/rf0 … --status --across-face`: the compact

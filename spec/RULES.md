@@ -51,7 +51,7 @@ The owner, consumer and caller sections each point to them.
 
 | Role | Rules |
 |---|---|
-| [Owner](#owner) | 78 |
+| [Owner](#owner) | 76 |
 | [Consumer](#consumer) | 22 |
 | [Caller](#caller) | 18 |
 | [Deployment](#deployment) | 18 |
@@ -240,19 +240,12 @@ The owner, consumer and caller sections each point to them.
 |---|---|---|
 | [§8.4](core.md#84-contract-retrieval) | Every holder MUST declare a `complete` queryable on it [a contract bundle's key]. | `[Sc: retrieval.md §1–§3]` |
 | [§8.4](core.md#84-contract-retrieval) | An owner on a first hop (§8.1) SHOULD NOT hold its bundles. | `[Sc: constrained.md §10]` |
-| [§8.4](core.md#84-contract-retrieval) | A deployment with such an owner SHOULD hold each of its bundles on the near side of the hop: in a holder there, or provisioned to each reader. | `[Sc: constrained.md §10]` |
 
 ### [core §12 Conformance classes](core.md#12-conformance-classes)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§12](core.md#12-conformance-classes) | An owner's descriptor MUST fit one fragment (Appendix B gives its size under zenoh-pico's default) | `[Sc: constrained.md §5]` |
-
-### [observer §3.11 A first hop](observer.md#311-a-first-hop)
-
-| Rule | Sentence | Evidence |
-|---|---|---|
-| [§3.11](observer.md#311-a-first-hop) | A tool that knows an owner is on a first hop MUST NOT report it down from its instance token's absence, even where a complete read establishes that absence. | `[Sc: constrained.md §10]` |
 
 ## Consumer
 

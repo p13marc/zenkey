@@ -7,6 +7,120 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `config.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## config.v2 0.2 — 2026-11-07: zk2py round 102's findings answered (#609, #985)
+
+zk2py's round 102 read `config.v2` 0.1 cold, with its six fixtures, and
+ran its scenarios live in each pairing. It filed F-480 to F-491 against
+the config texts, none a blocker. `config.v1` 0.11 answers F-480 and
+F-481 (below). This version answers the rest but F-485, a bug in the
+reference's `zenctl config`, which the reference fixes.
+
+**Stated: §2.18, the report after the acts (F-482).** No text said
+whether the report changes in the put that applies a document's last
+group, or later. The reference puts it later, and the text now says so:
+in a put of its own, after each converging change's put and event. A
+record that applies a converging change still carries the earlier
+report.
+- **`scenarios-v2.md` §12** expected the report and the applied value in
+  one put. It now reads the value, then the event, then the report in
+  the next record.
+- **`config.v1`'s scenarios §12** already read the event first.
+- **No keyword.** The order is stated as a fact of the owner, cited
+  `[Sc: §12]`.
+
+**Stated: §3, a code beside the escape (F-483).** §3 said
+`desired_code` is present for `refused` and `failed` alone. So a code
+beside the escape broke the fields, and a reader would refuse the
+record. `records.json`'s read 22 reads a state, its code unjudged, and
+its description states the rule another way. §3 now says the
+description's rule:
+- present for `refused` and `failed`;
+- absent for `converged`;
+- not judged beside the escape, an outcome this revision does not name.
+
+A later revision's outcome may carry a code, and a reader of this one
+cannot know that it does not.
+
+**Stated: §2.2, which checks need a valid type (F-484).** Item 3 said
+that `group_units` and `group_sensitive` each need a valid type. That
+read as every part of them, and `units = 3` beside an invalid type would
+go unreported. `derive.json` checks a member's own form whatever the
+type, and its keys, items and values only beside a valid type, as its
+description says. Item 3 is now two items that say so, with the two
+cases.
+
+**Corrected, stating no rule.**
+- **§2.19, the SX1262's smallest record (F-486):** 30 bytes with its
+  envelope, at start, where it said 36.
+- **`rfcfg.v1.toml` and `derive.json`'s case 0 (F-487):** three hot
+  groups, where they said four. One is a comment and one a note, so no
+  fingerprint and no expectation moves.
+- **`scenarios-v2.md` §6 (F-490):** the extended deadline falls 80.4 s
+  to 81.4 s after step 1, by step 1's phase within its second. Expected
+  3 reads the event at the deadline the record states, ± 0.5 s, where it
+  read 81 s.
+
+**Recorded: `scenarios-v2.md`'s intro (F-491).** #985's G3 named the
+tests that run §13 and §14, `zenctl`'s `config_v2_scenario_13_…` and
+`config_v2_scenario_14_…`. It came after the draft entry, and no entry
+said so. It names tests, and changes no rule.
+
+**Restates `config.v1` text 0.11,** where it said 0.9.
+- 0.10 changed §2.1's tokenless set, whose advice §2.1 here drops.
+- 0.11 changed §2.12's re-mint, which §2.12 here keeps. §2.12 adds that
+  the ended change's record and event carry the old instance number.
+
+**Deliberately not changed.**
+- **F-485 is the reference's.** `zenctl config` showed a
+  `device_refused` code in `config.v1`'s spelling, and an absent message
+  as empty. §4 and observer §7.3 say what a tool shows.
+- **F-488, `sx1262_config.v1`'s spreading factor.** The contract states
+  7 to 9, and zenoh-modem's mapping plans SF12. Which way it goes is
+  zenoh-modem's call (marcpardo/zenoh-modem#213). `config.v2-binding.md`
+  §3 says so, and the contract stays as it is.
+- **F-489** is the mapping's: `config.v2-binding.md` §15 dates its steps
+  2026-11-02, the date its bytes are written for.
+- **The fixtures' expectations,** and the core version: written against
+  core 0.94, still.
+
+## 0.11 — 2026-11-07: a re-mint ends a pending change first (#609, #985)
+
+zk2py's round 102 filed two findings against §2.12 (F-480, F-481), none
+a blocker.
+
+**Corrected: §2.12, the reference's word (F-480).** §2.12 said the
+reference refuses a re-mint. Since #1055 and #1064 it restarts the
+configuration in place, as `config.v2-binding.md` §8 says. §2.12 now
+says so, and names the four cases in which it still refuses:
+- an act in flight;
+- a parameter set at runtime whose startup value is unknown;
+- a device that refuses to return to its startup values;
+- an owner fed through `desired.v1`, as `desired.v1` §2.16 says.
+
+**Stated: §2.12, a change pending at a re-mint (F-481).** §2.12 said
+the new instance publishes nothing for the old one's pending change.
+§2.17 said every change ends in exactly one event. A restart cannot
+publish one, but a re-mint's old instance still runs. §2.12 now takes
+the reference's reading, in order:
+1. the change ends in the old instance as `cancel` ends it: its undo,
+   and its read-back put;
+2. its event is published, `rolled-back` or `partial`, and the rate
+   counts it;
+3. the device returns to its startup values;
+4. the new instance starts at revision 0, nothing pending.
+
+§2.17's `rolled-back` names a re-mint beside `cancel`, and "says
+nothing" now opens "After a restart". zk2py's owner had published
+nothing and put nothing under the old run.
+
+**Deliberately not changed.**
+- **No keyword.** §2.17's MUST stands, its list naming one more cause.
+- **No fixture and no scenario.** `lifecycle.json` and `scenarios.md` §7
+  restart a process. The reference's owner example re-mints its
+  configuration (`frame new-epoch`), as zk2py measured it, and
+  `desired.v1`'s scenarios §12 a fed owner, whose re-mint is refused.
+- **Written against core 0.96**, still.
+
 ## 0.10 — 2026-11-02: `config.v1` tokenless on a first hop (#982 H1)
 
 Core 0.96 asks an owner on a first hop to put every interface it

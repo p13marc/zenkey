@@ -98,6 +98,12 @@ The bounds are illustrative, and zenoh-modem chooses the real ones.
 - **A bound is the wire.** A radio variant with a wider frequency range is a breaking revision
   (config.v2 §2.2), so the contract should state the backend's widest bounds. A device that refuses
   a value within them answers `device_refused`.
+- **SF12 is outside `spreading_factor`'s bound.** The contract states 7 to 9 in 2 bits, and the
+  mapping plans SF12 (§11, [`faces/zenohd-lora0-sf12.face.toml`](faces/zenohd-lora0-sf12.face.toml)).
+  A radio started at SF12 runs a value its record has no code for, so its owner's start-time check
+  refuses it (§13). Either the bound becomes 7 to 12, 3 bits, which moves the record's sizes and
+  §15's bytes, or SF12 runs another revision. That is zenoh-modem's call (marcpardo/zenoh-modem#213),
+  and this contract stays as it is until it is made.
 
 **The derived types,** which the packed file holds after the group types:
 
@@ -325,16 +331,18 @@ keys alone, so `@zk` and the change event stay on the vehicle's side. The owner 
 `sx1262_config.v1` over a simulated device.
 
 **Setup.** The owner writes under the 16-bit run 0x5A17. Its token count starts at 0x9C41. The
-catalog's epoch is 1,767,225,600. The startup values are from the file: `fraction_ppm` 10,000,
-`period_s` 3,600, `frequency_hz` 868,100,000 and `spreading_factor` 7. `writable` holds `duty` and
-`radio`. The floor is 15 s, and `apply_at` comes 2 s after a reach `set`.
+catalog's epoch is 1,767,225,600, 2026-01-01. The steps run on 2026-11-02, and the replies'
+`apply_at` and deadline codes are of that date. The startup values are from the file:
+`fraction_ppm` 10,000, `period_s` 3,600, `frequency_hz` 868,100,000 and `spreading_factor` 7.
+`writable` holds `duty` and `radio`. The floor is 15 s, and `apply_at` comes 2 s after a reach
+`set`.
 
 **Steps,** with the bytes lane P's config.v2 codec writes:
 
 | # | At | The ground sends | The owner puts, then replies |
 |---|---|---|---|
 | 0 | start | — | the record, 30 B: revision 0 |
-| 1 | 12:00:00Z | `set/duty`, `fraction_ppm` 9,000: 5 B | put and reply 36 B each: revision 1, `last_token` 0x5A179C41; the event after |
+| 1 | 12:00:00Z on 2026-11-02 | `set/duty`, `fraction_ppm` 9,000: 5 B | put and reply 36 B each: revision 1, `last_token` 0x5A179C41; the event after |
 | 2 | 12:01:00Z | `set/radio`, 869,525,000 Hz, `confirm_s` 120, `expected_revision` 1, key 0x3D2C1B0A: 16 B | put and reply 50 B each, at seq 3: `pending_token` 0x5A179C42, `apply_at` 12:01:02Z, deadline 12:03:00Z; no apply yet |
 | 3 | 12:01:01Z | `confirm`: 8 B | `busy`, 7 B: not applied |
 | 4 | 12:01:02Z | — | the apply, then the put, 46 B at seq 4: still pending, no `apply_at` |

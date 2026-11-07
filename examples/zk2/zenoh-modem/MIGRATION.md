@@ -238,8 +238,8 @@ move together.
   - Across the face, nothing: 3.2 and 3.3 keep every state `host`, so no `modem.v3` heartbeat
     crosses. Exposing one later costs its heartbeat too: about 179 KB a day on RF at a 60 s
     horizon, 36 KB at 300 s (#978's design, §3).
-  - 3.3's packed records are 8 to 21 B, against 111 to 585 B of JSON. A GET across a face by
-    grant carries the record's size.
+  - 3.3's packed records, put with a 16-bit run, are 8 to 26 B, against 111 to 585 B of JSON. A
+    GET across a face by grant carries the record's size.
 
 ### Step 7. Configuration
 

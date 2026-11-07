@@ -8,7 +8,8 @@ use std::sync::Arc;
 use zengui::configure::{Act, Answer, Answered, ConfigState, Draft, Masked, ReadLanding, ReadWhy};
 use zengui::view::configure::{ConfigData, pane};
 use zenkey_fleet::report::{
-    ConfigActAnswer, ConfigActReport, ConfigRefusal, PresenceAttribution, SilenceView,
+    ConfigActAnswer, ConfigActReport, ConfigAppError, ConfigRefusal, PresenceAttribution,
+    SilenceView,
 };
 use zenkey_model::config::{ConfigError, ConfigView, ErrorCode, PendingReply};
 use zenkey_model::grammar::Addr;
@@ -167,12 +168,12 @@ fn a_sensitive_value_is_never_rendered() {
             ConfigActAnswer::Refused {
                 refusal: ConfigRefusal {
                     code: "app".into(),
-                    message: "the device refused pin <redacted>".into(),
+                    message: Some("the device refused pin <redacted>".into()),
                     cause: None,
-                    error: Some(ConfigError {
+                    error: Some(ConfigAppError::V1(ConfigError {
                         code: ErrorCode::DeviceRefused,
                         detail: None,
-                    }),
+                    })),
                     detail_undecodable: None,
                     mark: None,
                 },
@@ -240,19 +241,42 @@ fn each_answer_renders_by_its_union() {
             ConfigActAnswer::Refused {
                 refusal: ConfigRefusal {
                     code: "app".into(),
-                    message: "group \"modulation\" is part of what this service was started \
-                              against"
-                        .into(),
+                    message: Some(
+                        "group \"modulation\" is part of what this service was started \
+                         against"
+                            .into(),
+                    ),
                     cause: None,
-                    error: Some(ConfigError {
+                    error: Some(ConfigAppError::V1(ConfigError {
                         code: ErrorCode::RestartRequired,
                         detail: None,
-                    }),
+                    })),
                     detail_undecodable: None,
                     mark: None,
                 },
             },
             "ConfigError restart-required",
+        ),
+        // A config.v2 owner's refusal (zk2py round 102, F-485): its Error
+        // code as the packed enum names it, and no message, said so.
+        (
+            Act::Set {
+                group: "sim".into(),
+                dry_run: false,
+            },
+            ConfigActAnswer::Refused {
+                refusal: ConfigRefusal {
+                    code: "app".into(),
+                    message: None,
+                    cause: None,
+                    error: Some(ConfigAppError::V2 {
+                        code: Some("device_refused".into()),
+                    }),
+                    detail_undecodable: None,
+                    mark: None,
+                },
+            },
+            "Error device_refused",
         ),
         (
             Act::Set {

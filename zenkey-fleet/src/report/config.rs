@@ -466,22 +466,73 @@ pub enum ConfigTyping {
 }
 
 /// A refusal, as the core's envelope carries it (§2.5): its code, the
-/// message for a person, `unavailable`'s cause, and `app`'s `ConfigError`.
+/// message for a person, `unavailable`'s cause, and `app`'s detail, decoded
+/// as its profile's type.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ConfigRefusal {
     pub code: String,
-    pub message: String,
+    /// For a person, never parsed (core §5.2). Absent when an error form
+    /// carried none (core §7.5), as a `config.v2` owner refuses a change
+    /// that carries a sensitive value (v2 §2.5, §2.15); the bare wire's
+    /// envelope always carries one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cause: Option<String>,
-    /// The `app` detail, decoded as `ConfigError`.
+    /// The `app` detail, decoded as its profile's type.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<ConfigError>,
-    /// Why an `app` detail is not a `ConfigError`.
+    pub error: Option<ConfigAppError>,
+    /// Why an `app` detail is not its profile's type.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail_undecodable: Option<String>,
     /// The error form's as-of mark (core §5.2); absent on the bare wire.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mark: Option<InbandStamp>,
+}
+
+/// A refusal's `app` detail, as its profile names it. Each spells its own
+/// codes, so the two are never mapped onto each other.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub enum ConfigAppError {
+    /// `config.v1`'s `ConfigError` (§2.5): `{"code": "device-refused"}`.
+    V1(ConfigError),
+    /// `config.v2`'s `Error` record (v2 §2.5, §4), read by the contract's
+    /// layout: its code the packed enum's own name, `{"code":
+    /// "device_refused"}`, or `null` for the escape, a code this revision
+    /// does not name.
+    V2 { code: Option<String> },
+}
+
+impl ConfigAppError {
+    /// The detail's type, as its profile names it.
+    #[must_use]
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Self::V1(_) => "ConfigError",
+            Self::V2 { .. } => "Error",
+        }
+    }
+
+    /// Its code for a person: the profile's own name, or for `config.v2`'s
+    /// escape what it is.
+    #[must_use]
+    pub fn code(&self) -> &str {
+        match self {
+            Self::V1(e) => e.code.as_str(),
+            Self::V2 { code: Some(c) } => c,
+            Self::V2 { code: None } => "the escape: a code this revision does not name",
+        }
+    }
+
+    /// `config.v1`'s detail text; `config.v2`'s `Error` carries none.
+    #[must_use]
+    pub fn detail(&self) -> Option<&str> {
+        match self {
+            Self::V1(e) => e.detail.as_deref(),
+            Self::V2 { .. } => None,
+        }
+    }
 }
 
 /// What an act got back. Tagged `answer`; each case is distinct (core O5).
@@ -791,13 +842,14 @@ mod tests {
         let refused = act(ConfigActAnswer::Refused {
             refusal: ConfigRefusal {
                 code: "app".into(),
-                message: "group \"modulation\" is part of what this service was started against"
-                    .into(),
+                message: Some(
+                    "group \"modulation\" is part of what this service was started against".into(),
+                ),
                 cause: None,
-                error: Some(ConfigError {
+                error: Some(ConfigAppError::V1(ConfigError {
                     code: zenkey_model::config::ErrorCode::RestartRequired,
                     detail: None,
-                }),
+                })),
                 detail_undecodable: None,
                 mark: None,
             },
@@ -860,5 +912,41 @@ mod tests {
             (json!(36), json!({"run": "1234", "seq": 41}))
         );
         assert_eq!(r.exit_code(), 0);
+    }
+
+    /// `config.v2`'s refusal (zk2py round 102, F-485): its `Error` code as
+    /// the packed enum names it, never `config.v1`'s spelling, the escape
+    /// `null`, and a message the error form did not carry absent, never
+    /// `""` (v2 §2.5, core §7.5).
+    #[test]
+    fn a_config_v2_refusal_pins_its_own_code_and_no_message() {
+        let refused = |code: Option<&str>| {
+            let mut r = act(ConfigActAnswer::Refused {
+                refusal: ConfigRefusal {
+                    code: "app".into(),
+                    message: None,
+                    cause: None,
+                    error: Some(ConfigAppError::V2 {
+                        code: code.map(str::to_owned),
+                    }),
+                    detail_undecodable: None,
+                    mark: Some(InbandStamp {
+                        run: "1234".into(),
+                        seq: 7,
+                    }),
+                },
+            });
+            r.profile = ConfigProfile::V2;
+            serde_json::to_value(&r).unwrap()
+        };
+        assert_eq!(
+            refused(Some("device_refused"))["refusal"],
+            json!({"code": "app", "error": {"code": "device_refused"},
+                   "mark": {"run": "1234", "seq": 7}})
+        );
+        assert_eq!(refused(None)["refusal"]["error"], json!({"code": null}));
+        let escape = ConfigAppError::V2 { code: None };
+        assert_eq!(escape.type_name(), "Error");
+        assert!(escape.code().starts_with("the escape"));
     }
 }

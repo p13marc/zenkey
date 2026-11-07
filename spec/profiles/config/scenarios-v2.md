@@ -162,10 +162,11 @@ and run as tests of the tool that reads `config.v2`. They are `zenctl`'s
 **Expected.**
 1. The record, the change applied and pending, deadline 30 s after the
    call.
-2. The record, its deadline 81 s after step 1's call: the extend's
-   receipt plus 60 s, rounded up. No event.
-3. The undo runs at the new deadline, not the first: S receives the
-   `rolled-back` event 81 s after step 1, ± 0.5 s.
+2. The record. Its deadline is the extend's receipt plus 60 s, rounded
+   up (§2.8). That is 80.4 s to 81.4 s after step 1, by its phase. No
+   event.
+3. The undo runs at the new deadline, not the first. S receives the
+   `rolled-back` event at that deadline, ± 0.5 s.
 
 ## §7 Tokens, and a restart during a pending change (§2.6, §2.12)
 
@@ -294,8 +295,9 @@ author service `lab/author` as its own state.
 3. The author puts `{"revision": 3, "values": {"sim": {"pin": 1234}}}`.
 
 **Expected.**
-1. S receives the record, `fraction_ppm` 20000, `desired` `converged`,
-   `desired_revision` 1, then one event, `applied`.
+1. S receives the record, `fraction_ppm` 20000, then one event,
+   `applied`. Then the next record, its report `desired` `converged`,
+   `desired_revision` 1 (§2.18).
 2. No act and no event. The record's `desired` is `refused`, at revision
    2, `desired_code` `reach`, `desired_group` 1, radio's index, with no
    parameter index. `fraction_ppm` is still 20000: a document is refused
