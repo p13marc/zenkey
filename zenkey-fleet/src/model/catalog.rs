@@ -315,6 +315,11 @@ impl Observed {
 /// instance token went, before it forgets the oldest.
 pub const DEFAULT_MAX_KEPT: usize = 1_024;
 
+/// How many runs a [`KeptDescriptors`] keeps as asked of one address
+/// before it forgets the oldest: a run forgotten is read again at its next
+/// put, one GET more at most.
+pub const MAX_ASKED_RUNS: usize = 16;
+
 /// Descriptors kept across an instance token's return (observer §3.11's
 /// MAY; #982 H3): what an instance that left took with it, kept by its
 /// address and instance id, so that its token's return under the same id
@@ -339,8 +344,19 @@ pub const DEFAULT_MAX_KEPT: usize = 1_024;
 ///   address is forgotten, so its token's return owes the GET.
 /// - **Reused:** the token's return comes before any put across the
 ///   reopened link, so a descriptor reused there stands **on trust**
-///   ([`KeptDescriptors::on_trust`]) until a put states another run, and
-///   is then read again, once.
+///   ([`KeptDescriptors::on_trust`]). A put stating another run owes its
+///   GET, and it stands on trust until a GET serves its descriptor
+///   ([`KeptDescriptors::served`]): a silent GET proves nothing (§3.3).
+///
+/// **Asked once** (#1079). A put's `(address, run)` is read against what
+/// is kept and on trust once ([`KeptDescriptors::asked`]): the GETs it
+/// owed, in flight or answered silent, are not asked again, and a run that
+/// owed none owes none, until a token of the address goes or comes, or
+/// the next full read. A descriptor GET silent across a face is then one
+/// GET however many puts follow, and two instances of one address putting
+/// under two runs (an old session and a new one: a put names its address,
+/// never its instance) cost at most one GET per instance on trust per run
+/// heard.
 ///
 /// What the owner put while its token was gone is lost to the reader
 /// until its next put or the next full read, which the observer text
@@ -348,15 +364,21 @@ pub const DEFAULT_MAX_KEPT: usize = 1_024;
 ///
 /// Only a served descriptor is kept: a silent GET, a failed one or an
 /// invalid reply proves nothing to keep. Bounded at [`DEFAULT_MAX_KEPT`],
-/// the oldest kept forgotten first and counted (O6). Session-free.
+/// the oldest kept forgotten first and counted (O6), and at
+/// [`MAX_ASKED_RUNS`] runs asked of an address. Session-free.
 #[derive(Debug, Clone)]
 pub struct KeptDescriptors {
     kept: BTreeMap<(Addr, InstanceId), (u64, Box<Descriptor>)>,
     /// `kept`'s keys by their keep's order: the bound forgets the first.
     order: BTreeMap<u64, (Addr, InstanceId)>,
     /// The instances whose read is a kept descriptor reused, standing until
-    /// a put states another run.
-    on_trust: BTreeSet<(Addr, InstanceId)>,
+    /// a GET serves their descriptor, each by its reuse (the count of reuses
+    /// at it): an answer asked of one reuse never lands on the next.
+    on_trust: BTreeMap<(Addr, InstanceId), u64>,
+    /// The runs a put of each address was read at since a token of it last
+    /// moved or the last full read, oldest first: only of an address with a
+    /// descriptor kept or on trust.
+    asked: BTreeMap<Addr, Vec<Run>>,
     /// The next keep's order, for the bound.
     next: u64,
     max: usize,
@@ -370,7 +392,8 @@ impl Default for KeptDescriptors {
         KeptDescriptors {
             kept: BTreeMap::new(),
             order: BTreeMap::new(),
-            on_trust: BTreeSet::new(),
+            on_trust: BTreeMap::new(),
+            asked: BTreeMap::new(),
             next: 0,
             max: DEFAULT_MAX_KEPT,
             reused: 0,
@@ -397,6 +420,7 @@ impl KeptDescriptors {
         self.on_trust.remove(&key);
         self.take(&key);
         let Some(d) = read.descriptor() else {
+            self.prune(addr);
             return;
         };
         self.next += 1;
@@ -408,24 +432,25 @@ impl KeptDescriptors {
             };
             self.kept.remove(&oldest);
             self.forgotten += 1;
+            self.prune(&oldest.0);
         }
     }
 
     /// The descriptor kept of an instance whose token returned, taken out
     /// and counted: the reader holds it again as the instance's read, on
-    /// trust until a put states another run ([`Observed::heard_run`]).
+    /// trust until a GET serves its descriptor ([`Observed::heard_run`]).
     pub fn reuse(&mut self, addr: &Addr, instance: &InstanceId) -> Option<DescriptorRead> {
         let key = (addr.clone(), instance.clone());
         let d = self.take(&key)?;
         self.reused += 1;
-        self.on_trust.insert(key);
+        self.on_trust.insert(key, self.reused);
         Some(DescriptorRead::Served(d))
     }
 
     /// Forget what is kept of every instance `observed` describes: a full
     /// read's descriptor is newer than what an instance took with it. The
     /// full read replaces the one a reused descriptor was held in, so none
-    /// stands on trust after it.
+    /// stands on trust after it, and no run is asked.
     pub fn forget_described(&mut self, observed: &Observed) {
         if let Some(d) = &observed.descriptors {
             let described: Vec<_> = self
@@ -439,6 +464,7 @@ impl KeptDescriptors {
             }
         }
         self.on_trust.clear();
+        self.asked.clear();
     }
 
     /// The run the descriptor kept of an instance states (core §4.3), when
@@ -449,10 +475,52 @@ impl KeptDescriptors {
             .and_then(|(_, d)| d.run.as_deref())
     }
 
-    /// Whether the instance's read is a kept descriptor reused that no put
-    /// has contradicted yet.
+    /// Whether the instance's read is a kept descriptor reused that no GET
+    /// has served yet.
     pub fn on_trust(&self, addr: &Addr, instance: &InstanceId) -> bool {
-        self.on_trust.contains(&(addr.clone(), instance.clone()))
+        self.on_trust
+            .contains_key(&(addr.clone(), instance.clone()))
+    }
+
+    /// Which reuse the instance's read on trust is (the count of reuses at
+    /// it), while it stands on trust: what a GET asked of it is answered
+    /// against ([`KeptDescriptors::served`]).
+    pub fn reuse_of(&self, addr: &Addr, instance: &InstanceId) -> Option<u64> {
+        self.on_trust
+            .get(&(addr.clone(), instance.clone()))
+            .copied()
+    }
+
+    /// A GET asked of an instance on trust under `reuse`
+    /// ([`KeptDescriptors::reuse_of`]) served its descriptor. Returns
+    /// whether the instance still stood on trust under that reuse, and
+    /// takes it off trust if so: the answer is then the latest word of it.
+    /// `false` when something newer replaced the read meanwhile — its token
+    /// went, or went and came back (a reuse of its own), a full read
+    /// replaced it, or another GET's answer came first — and the answer is
+    /// stale.
+    pub fn served(&mut self, addr: &Addr, instance: &InstanceId, reuse: u64) -> bool {
+        let key = (addr.clone(), instance.clone());
+        if self.on_trust.get(&key) != Some(&reuse) {
+            return false;
+        }
+        self.on_trust.remove(&key);
+        self.prune(addr);
+        true
+    }
+
+    /// Whether a put of `addr` under `run` was read already
+    /// ([`Observed::heard_run`]), since a token of the address last went or
+    /// came, or the last full read: its GETs owed are asked, in flight or
+    /// answered silent, and none is asked again.
+    pub fn asked(&self, addr: &Addr, run: Run) -> bool {
+        self.asked.get(addr).is_some_and(|runs| runs.contains(&run))
+    }
+
+    /// The runs a put of `addr` was read at ([`KeptDescriptors::asked`]),
+    /// oldest first.
+    pub fn asked_of(&self, addr: &Addr) -> &[Run] {
+        self.asked.get(addr).map_or(&[], Vec::as_slice)
     }
 
     /// The addresses a put's run tells something of: each with a descriptor
@@ -461,7 +529,7 @@ impl KeptDescriptors {
     pub fn addresses(&self) -> BTreeSet<Addr> {
         self.kept
             .keys()
-            .chain(&self.on_trust)
+            .chain(self.on_trust.keys())
             .map(|(a, _)| a.clone())
             .collect()
     }
@@ -488,7 +556,8 @@ impl KeptDescriptors {
     }
 
     /// How many descriptors, kept or reused on trust, a put under another
-    /// run outran: each a descriptor GET owed again.
+    /// run outran: each kept one forgotten, each on trust a descriptor GET
+    /// owed again.
     pub fn outrun(&self) -> u64 {
         self.outrun
     }
@@ -514,15 +583,61 @@ impl KeptDescriptors {
             self.take(k);
             self.outrun += 1;
         }
+        self.prune(addr);
     }
 
     /// The instances of `addr` standing on trust.
     fn on_trust_of(&self, addr: &Addr) -> Vec<(Addr, InstanceId)> {
         self.on_trust
             .range((addr.clone(), InstanceId::from_u64(0))..)
-            .take_while(|(a, _)| a == addr)
-            .cloned()
+            .take_while(|((a, _), _)| a == addr)
+            .map(|(k, _)| k.clone())
             .collect()
+    }
+
+    /// Mark a put of `addr` under `run` read, while anything of the address
+    /// is kept or on trust, the oldest run forgotten past
+    /// [`MAX_ASKED_RUNS`].
+    fn ask(&mut self, addr: &Addr, run: Run) {
+        if !self.holds(addr) {
+            self.asked.remove(addr);
+            return;
+        }
+        let runs = self.asked.entry(addr.clone()).or_default();
+        if !runs.contains(&run) {
+            if runs.len() >= MAX_ASKED_RUNS {
+                runs.remove(0);
+            }
+            runs.push(run);
+        }
+    }
+
+    /// A token of `addr` went or came: every run asked of it is read again
+    /// at its next put.
+    fn moved(&mut self, addr: &Addr) {
+        self.asked.remove(addr);
+    }
+
+    /// Whether anything of `addr` is kept or on trust.
+    fn holds(&self, addr: &Addr) -> bool {
+        let from = (addr.clone(), InstanceId::from_u64(0));
+        self.kept
+            .range(from.clone()..)
+            .next()
+            .is_some_and(|((a, _), _)| a == addr)
+            || self
+                .on_trust
+                .range(from..)
+                .next()
+                .is_some_and(|((a, _), _)| a == addr)
+    }
+
+    /// Forget the runs asked of `addr` once nothing of it is kept or on
+    /// trust.
+    fn prune(&mut self, addr: &Addr) {
+        if !self.holds(addr) {
+            self.asked.remove(addr);
+        }
     }
 }
 
@@ -544,15 +659,20 @@ impl Observed {
     /// that leaves takes with it, and taking back from `kept` the
     /// descriptor of each instance whose token returns (observer §3.11's
     /// MAY; #982 H3): such an instance is not [undescribed](Observed::undescribed),
-    /// and its read stands on trust until a put states another run
-    /// ([`Observed::heard_run`]). Returns whether the read changed, and the
-    /// instances whose kept descriptor was reused.
+    /// and its read stands on trust until a GET serves its descriptor
+    /// ([`Observed::heard_run`]). A token of an address gone or come reads
+    /// every run asked of it again ([`KeptDescriptors::asked`]). Returns
+    /// whether the read changed, and the instances whose kept descriptor
+    /// was reused.
     pub fn follow_keeping(
         &mut self,
         moved: &[PresenceTransition],
         kept: &mut KeptDescriptors,
     ) -> (bool, Vec<(Addr, InstanceId)>) {
         for t in moved {
+            if !matches!(t.change, PresenceChange::Status { .. }) {
+                kept.moved(&t.address);
+            }
             if let PresenceChange::InstanceGone { instance } = &t.change {
                 match self.descriptor_of(&t.address, instance) {
                     Some(read) => kept.keep(&t.address, instance, read),
@@ -577,42 +697,47 @@ impl Observed {
 
     /// A put of `addr` stated `run` in band (core §4.3; #1074): what it
     /// says of the descriptors kept of that address, and of those reused
-    /// there on trust (see [`KeptDescriptors`], by instance and run).
+    /// there on trust (see [`KeptDescriptors`], by instance and run). Read
+    /// once per `(addr, run)` until a token of the address goes or comes,
+    /// or the next full read ([`KeptDescriptors::asked`]; #1079): a pair
+    /// asked again returns nothing.
     ///
     /// - **Kept:** each that states another run is forgotten, so its
     ///   token's return owes its GET.
     /// - **Reused on trust:** each instance whose read states another run
-    ///   is returned, off trust, its descriptor owed again: the caller GETs
-    ///   it ([`crate::LensFeed::on_runs`]). One stating `run` stays on
-    ///   trust, so a later run is caught too. Either way a reused
-    ///   descriptor costs at most one GET more.
+    ///   is returned, its descriptor owed again: the caller GETs it
+    ///   ([`crate::LensFeed::on_runs`]), and takes it off trust only when
+    ///   the GET serves it ([`KeptDescriptors::served`]). One stating `run`
+    ///   stays on trust, so a later run is caught too.
     ///
     /// A put names its address, never its instance (§1.1), so a put of
     /// another instance of `addr` outruns one that did not move: that costs
-    /// a GET, never a stale read. A descriptor stating no run states no
-    /// other. Hand it live puts: a GET's reply keeps the run it was put
-    /// under (§4.3), so an old one costs a GET for nothing. Session-free.
+    /// a GET, never a stale read, and at most one per instance on trust per
+    /// run heard. A descriptor stating no run states no other. Hand it live
+    /// puts: a GET's reply keeps the run it was put under (§4.3), so an old
+    /// one costs a GET for nothing. Session-free.
     pub fn heard_run(
         &mut self,
         addr: &Addr,
         run: Run,
         kept: &mut KeptDescriptors,
     ) -> Vec<(Addr, InstanceId)> {
-        let run = run.hex();
-        kept.forget_other_runs(addr, &run);
+        if kept.asked(addr, run) {
+            return Vec::new();
+        }
+        let hex = run.hex();
+        kept.forget_other_runs(addr, &hex);
         let owed: Vec<_> = kept
             .on_trust_of(addr)
             .into_iter()
             .filter(|(a, i)| {
                 self.descriptor_of(a, i)
                     .and_then(DescriptorRead::descriptor)
-                    .is_some_and(|d| states_another_run(d, &run))
+                    .is_some_and(|d| states_another_run(d, &hex))
             })
             .collect();
-        for key in &owed {
-            kept.on_trust.remove(key);
-            kept.outrun += 1;
-        }
+        kept.outrun += owed.len() as u64;
+        kept.ask(addr, run);
         owed
     }
 }
@@ -2806,9 +2931,15 @@ mod tests {
             o.heard_run(&addr, r2, &mut kept),
             std::slice::from_ref(&key)
         );
-        assert!(!kept.on_trust(&addr, &inst) && kept.addresses().is_empty());
+        assert!(kept.on_trust(&addr, &inst), "until a GET serves it");
         assert!(o.heard_run(&addr, r2, &mut kept).is_empty(), "owed once");
         assert_eq!(kept.outrun(), 2);
+        // The GET serves it: off trust, and no put is read against it.
+        let reuse = kept.reuse_of(&addr, &inst).expect("on trust");
+        assert!(kept.served(&addr, &inst, reuse));
+        o.with_descriptor(&addr, &inst, at("00ac"));
+        assert!(!kept.on_trust(&addr, &inst) && kept.addresses().is_empty());
+        assert!(!kept.served(&addr, &inst, reuse), "served once");
 
         // A run of the other width is another run; a descriptor stating no
         // run states no other one.
@@ -2823,6 +2954,147 @@ mod tests {
         assert!(kept.on_trust(&addr, &inst));
         assert!(o.heard_run(&addr, r2, &mut kept).is_empty());
         assert!(kept.on_trust(&addr, &inst));
+    }
+
+    /// #1079: a put's `(address, run)` is read once. The GET it owes stays
+    /// asked, in flight or answered silent, and the instance on trust; a
+    /// later run asks again; a token of the address gone or come, or a full
+    /// read, reads every run again; two instances putting under two runs
+    /// owe one GET each, however the puts alternate; an answer to one
+    /// reuse never lands on the next; the runs asked are bounded.
+    #[test]
+    fn a_run_is_asked_once_until_a_token_of_its_address_moves() {
+        use crate::report::PresenceSource;
+        let addr: Addr = "lab/radio-a".parse().expect("addr");
+        let elsewhere: Addr = "lab/ground".parse().expect("addr");
+        let (a, b) = (InstanceId::from_u64(9), InstanceId::from_u64(10));
+        let t = |address: &Addr, change| PresenceTransition {
+            at: std::time::SystemTime::UNIX_EPOCH,
+            source: PresenceSource::Event,
+            address: address.clone(),
+            change,
+        };
+        let appeared = |i: &InstanceId| {
+            t(
+                &addr,
+                PresenceChange::InstanceAppeared {
+                    instance: i.clone(),
+                },
+            )
+        };
+        let gone = |i: &InstanceId| {
+            t(
+                &addr,
+                PresenceChange::InstanceGone {
+                    instance: i.clone(),
+                },
+            )
+        };
+        let at = |i: &InstanceId, run: &str| {
+            DescriptorRead::Served(Box::new(descriptor(
+                "lab/radio-a",
+                &i.to_string(),
+                json!({"run": run}),
+            )))
+        };
+        let (r1, r2, r3) = (Run::U16(0xab), Run::U16(0xac), Run::U16(0xad));
+        let mut o = observed(&[]);
+        o.descriptors = Some(BTreeMap::new());
+        let mut kept = KeptDescriptors::default();
+        // `a` described under r1, then its token goes and comes: on trust.
+        o.follow_keeping(&[appeared(&a)], &mut kept);
+        o.with_descriptor(&addr, &a, at(&a, "00ab"));
+        o.follow_keeping(&[gone(&a), appeared(&a)], &mut kept);
+        assert!(kept.on_trust(&addr, &a));
+
+        // A silent GET: one, however many puts state the run, and the
+        // instance stays on trust; a later run asks again.
+        assert_eq!(
+            o.heard_run(&addr, r2, &mut kept),
+            [(addr.clone(), a.clone())]
+        );
+        for _ in 0..10 {
+            assert!(o.heard_run(&addr, r2, &mut kept).is_empty());
+        }
+        assert!(kept.asked(&addr, r2) && kept.on_trust(&addr, &a));
+        assert_eq!(o.heard_run(&addr, r3, &mut kept).len(), 1, "a later run");
+        assert_eq!(kept.asked_of(&addr), [r2, r3]);
+        assert!(o.heard_run(&addr, r1, &mut kept).is_empty(), "its own run");
+        assert_eq!(kept.asked_of(&addr), [r2, r3, r1], "read, and owed none");
+
+        // A status, or another address's token, moves nothing asked here;
+        // a token of this address reads every run again.
+        o.follow_keeping(
+            &[
+                t(
+                    &addr,
+                    PresenceChange::Status {
+                        from: AddressStatus::Up,
+                        to: AddressStatus::Unobservable,
+                    },
+                ),
+                t(
+                    &elsewhere,
+                    PresenceChange::InstanceAppeared {
+                        instance: b.clone(),
+                    },
+                ),
+            ],
+            &mut kept,
+        );
+        assert!(kept.asked(&addr, r2));
+        let iface: IfaceId = "tc.netem.v1".parse().expect("iface");
+        let fp: Fp16 = NETIF_FP[..16].parse().expect("fp16");
+        o.follow_keeping(
+            &[t(
+                &addr,
+                PresenceChange::InterfaceAppeared {
+                    instance: a.clone(),
+                    iface,
+                    fp,
+                },
+            )],
+            &mut kept,
+        );
+        assert!(kept.asked_of(&addr).is_empty());
+        assert_eq!(o.heard_run(&addr, r2, &mut kept).len(), 1, "asked again");
+        // A full read reads every run again, and stands on no trust.
+        kept.forget_described(&o);
+        assert!(kept.asked_of(&addr).is_empty() && !kept.on_trust(&addr, &a));
+
+        // Two instances of the address, an old session under r1 and a new
+        // one under r2, both reused on trust: the puts alternate, and each
+        // instance is owed once, its GETs silent.
+        o.follow_keeping(&[appeared(&b)], &mut kept);
+        o.with_descriptor(&addr, &b, at(&b, "00ac"));
+        o.follow_keeping(&[gone(&a), gone(&b), appeared(&a), appeared(&b)], &mut kept);
+        assert!(kept.on_trust(&addr, &a) && kept.on_trust(&addr, &b));
+        let mut owed = Vec::new();
+        for _ in 0..10 {
+            owed.extend(o.heard_run(&addr, r1, &mut kept));
+            owed.extend(o.heard_run(&addr, r2, &mut kept));
+        }
+        assert_eq!(owed, [(addr.clone(), b.clone()), (addr.clone(), a.clone())]);
+
+        // An answer to one reuse never lands on the next.
+        let first = kept.reuse_of(&addr, &b).expect("on trust");
+        o.follow_keeping(&[gone(&b), appeared(&b)], &mut kept);
+        let second = kept.reuse_of(&addr, &b).expect("on trust again");
+        assert_ne!(first, second);
+        assert!(!kept.served(&addr, &b, first), "stale");
+        assert!(kept.on_trust(&addr, &b));
+        assert!(kept.served(&addr, &b, second));
+
+        // The runs asked of an address are bounded, the oldest forgotten.
+        for v in 0..=MAX_ASKED_RUNS as u16 {
+            o.heard_run(&addr, Run::U16(0x100 + v), &mut kept);
+        }
+        let asked = kept.asked_of(&addr);
+        assert_eq!(asked.len(), MAX_ASKED_RUNS);
+        assert_eq!(asked[0], Run::U16(0x101), "the oldest went");
+        // Nothing of an address kept or on trust: nothing asked of it.
+        assert!(o.heard_run(&elsewhere, r1, &mut kept).is_empty());
+        assert!(kept.asked_of(&elsewhere).is_empty());
     }
 
     /// The providers of an interface, by token or by descriptor alone

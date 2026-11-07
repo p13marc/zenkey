@@ -162,6 +162,30 @@ async fn until(
     }
 }
 
+/// Folds the feed as [`until`] does until `want` holds of the lens's
+/// catalog: what its counters are read after, so a status settled one
+/// batch before the lens folded the token's return is never what they say
+/// (review-bot on #1073).
+async fn until_lens(
+    feed: &mut PresenceFeed,
+    lens: &LensFeed,
+    seen: &mut Vec<PresenceTransition>,
+    what: &str,
+    want: impl Fn(&Catalog) -> bool,
+) {
+    let deadline = tokio::time::Instant::now() + util::SETTLE;
+    while !lens.catalog().is_some_and(|c| want(&c)) {
+        match tokio::time::timeout_at(deadline, feed.next()).await {
+            Ok(Some(moved)) => {
+                lens.on_presence(&moved).await;
+                seen.extend(moved);
+            }
+            Ok(None) => panic!("the monitor's broadcast closed"),
+            Err(_) => panic!("never: {what}; saw {seen:#?}"),
+        }
+    }
+}
+
 /// `address`'s status moves in `seen`, each `(from, to)`.
 fn statuses(seen: &[PresenceTransition], address: &str) -> Vec<(AddressStatus, AddressStatus)> {
     seen.iter()
@@ -374,6 +398,14 @@ async fn s10_a_device_on_a_device_face_is_link_closed_never_down() {
         f.presence().status(&device) == AddressStatus::Up
     })
     .await;
+    until_lens(
+        &mut feed,
+        &lens,
+        &mut seen,
+        "the lens lists the device's interface again",
+        |c| c.provided(&device).contains(&ping().iface),
+    )
+    .await;
     assert_eq!(
         lens.descriptors_read(),
         described,
@@ -437,8 +469,9 @@ async fn runs_heard(
 /// the descriptor put stating it does not cross while the link is closed:
 /// the lens reuses what it kept at the token's return, on trust, and reads
 /// the descriptor again at the first put stating the new run, once. A put
-/// under the run kept costs no GET, and before any token went nothing is
-/// read of a put at all.
+/// under the run kept costs no GET, and is read once (#1079): the next
+/// put under it hands nothing on. Before any token went nothing is read of
+/// a put at all.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s10_a_run_moved_while_the_link_was_closed_is_read_again() {
     let (_router, ep) = router(None).await;
@@ -506,6 +539,14 @@ async fn s10_a_run_moved_while_the_link_was_closed_is_read_again() {
         f.presence().status(&device) == AddressStatus::Up
     })
     .await;
+    until_lens(
+        &mut feed,
+        &lens,
+        &mut seen,
+        "the device described again",
+        |c| c.descriptors().any(|d| d.service == DEVICE),
+    )
+    .await;
     assert_eq!(lens.descriptors_kept().await, 1);
     let runs = runs_heard(&lens, &level, &heard).await;
     assert_eq!(
@@ -517,6 +558,10 @@ async fn s10_a_run_moved_while_the_link_was_closed_is_read_again() {
         "its own run reads nothing again"
     );
     assert_eq!(lens.descriptors_read(), described);
+    assert!(
+        runs_heard(&lens, &level, &heard).await.is_empty(),
+        "a run read once is not read again (#1079)"
+    );
 
     // Again, and the run moves while the link is closed: its descriptor
     // put does not cross, the token's return reuses what was kept, and
@@ -535,6 +580,14 @@ async fn s10_a_run_moved_while_the_link_was_closed_is_read_again() {
         &mut seen,
         "the device up a third time",
         |f| f.presence().status(&device) == AddressStatus::Up,
+    )
+    .await;
+    until_lens(
+        &mut feed,
+        &lens,
+        &mut seen,
+        "the device described a third time",
+        |c| c.descriptors().any(|d| d.service == DEVICE),
     )
     .await;
     assert_eq!(lens.descriptors_kept().await, 2);

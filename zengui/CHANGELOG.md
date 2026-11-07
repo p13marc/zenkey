@@ -22,6 +22,14 @@ JSON, CBOR or protobuf envelope.
 | a state key's owner read: a snapshot's page undecodable | the entry on its key read as its value, a chip "snapshot as of seq N" (", incomplete" when a page was lost); a snapshot of no entry is "its snapshot lists no member", never silence | core §7.5's form 7; `Latest` kept until E3 |
 | a seeded watch's state leg | reads a page's entries as per-key samples; its coverage carries each snapshot heard | |
 
+## Unreleased (`main`, zk2) — a put's run read once, its GET outside the lens's lock (#1079)
+
+| Before | Now | Notes |
+|---|---|---|
+| a reused descriptor's GET, silent or denied across a constrained face, held the lens's read until it timed out: presence moves and the background re-read waited, and each tick hearing the run spawned a call queued behind it | the GET holds no lock: presence and the re-read fold meanwhile, and a tick hearing a run whose GET is out, or answered silent, spawns no call | each `(address, run)` read once, again only when a token of the address goes or comes, or at the next full read |
+| a silent GET took the reused descriptor off trust: no later run was read against it until a token moved | it stays held and on trust (a silent GET proves nothing, §3.3): a later run asks once more | two instances of one address putting under two runs cost one GET per instance per run heard; a put names its address, never its instance (§1.1) |
+| — | a GET's answer is dropped when the instance's token went or came, or a re-read replaced the read, while it was out | the GET no longer holds the read, so something newer can land first |
+
 ## Unreleased (`main`, zk2) — a descriptor kept is by instance and run (#1074)
 
 | Before | Now | Notes |
