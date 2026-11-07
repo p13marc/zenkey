@@ -67,10 +67,10 @@ case name. It exits with:
 | bundles | §9.6 | `bundle` | the twelve verification steps and their tags. `seed.toml` also **builds** to `valid.bundle.json` byte for byte, and `contracts/ok-packed.toml` to `packed.bundle.json` (0.75). |
 | history | §9.7 | `history` | `[at, tag]` per history root |
 | descriptors | §3.3 | `descriptor` | the D codes (D012, a standby marked tokenless, since 0.39), against `descriptors/contracts/nav.v2.toml`. That contract's fingerprint, computed here, is the `sha256:fea2…` the fixtures expect. |
-| errors | §5.2, §7.5 | `envelope`, `cbor`, `zk2c` | `cases.json`: JSON, CBOR and protobuf envelopes, the bare wire's since core 0.94, and the refusal tags; `forms.json`: the error form's 256 bytes, its writes and its reads by Encoding |
+| errors | §5.2, §7.5 | `zk2c` | `forms.json`: the error form's 256 bytes, its writes and its reads by Encoding, an earlier core's three envelopes `encoding`. `cases.json`, the bare wire's envelope, went with core 0.99 (round 104). An unknown file there fails. |
 | envelope | §7.5, §5.1, §5.2 (0.72 to 0.94) | `zk2c`, `calls` | `vectors.json` (each header and case, accepted ones written back), `carries.json`, and `calls.json` (round 101): an operation's forms by its types' tags, its writes and its reads, a packed record under CH's tag |
 | budget | core §2.7, observer §5 (0.24, 0.25, 0.27) | `budget` | every file of `budget/`: `bounds.json` (the bound across instances), `population.json` (a GET's or a window's population against it), `rate.json` (an event's rate per member) and `lossless.json` (whether a window is shown to have lost no delivery, 0.25; its `reader_stall` and `stall_bounds`, 0.27). An unknown file there fails. |
-| seed | §4.2 (0.27) | `seed` | `seed/merge.json`: `order` (two stamps, or a stamp and none, compared) and `cases` (a key's arrivals, each kept or not). An unknown file there fails. |
+| seed | §4.2 (0.27) | `seed`, `seed_snapshot` | `seed/merge.json`: `order` (two stamps, or a stamp and none, compared) and `cases` (a key's arrivals, each kept or not); `inband.json`; and `snapshot.json` (#977 E2, round 104), a seed over snapshots read from its description alone, since no text states it (F-498). An unknown file there fails. |
 | compat | §9.7, §9.8 | `compat` | **all 100 cases** (spec 0.8), evaluated through `compat/README.md`'s one-resource wrapper: §9.8's six tables, the JSON Schema and protobuf rules, `same_revision`, and the FULL_TRANSITIVE cases (with each pairwise `against`). The packed cases (0.75) are wrapped as `packed` artifacts. |
 | packed | §7.6, §7.5 (0.75, 0.76) | `packed`, `zk2c` | `packed/vectors.json`: each layout's form, sha256, tag, items and bit bounds; each write's bits, pad and bytes, or the writer's refusal; each read's JSON reading, or the first refusal in §7.6's order. Every accepted write is sealed in the envelope, opened and read back; every read is made through the envelope too. Live against the reference: `python -m zk2py.packed_live` (the mend after round 94). |
 | hostid | profiles/hostid §2.1, §2.11 | `hostid` | every file of `spec/profiles/hostid/conformance/`: `vectors.json` (the derivation) and `shapes.json` (the minted shape). An unknown file there fails (`profiles/README.md`). |
@@ -573,10 +573,12 @@ Every wait is the 1 s that §8.1 gives a conformance run.
   consolidation `Latest`. It returns current replies with their stamps, or
   silence.
 - `zk2py.live.call` makes a call: `BestMatching` (O1), or `All` for a
-  fan-out (O2), with consolidation `None`. It returns a value, a decoded
-  §5.2 envelope, a transport error, or silence (O5). Since core 0.94
+  fan-out (O2), with consolidation `None`. It returns a value, an
+  owner's error, a transport error, or silence (O5). Since core 0.94
   (round 101) it writes the request form and reads the value and error
-  forms, and the bare wire as §5.1's MAY allows.
+  forms. Since core 0.99 (round 104) it reads them alone: a reply under
+  another `Encoding` is malformed, and a reply error under one the
+  transport's.
 - `zk2py.owner.Owner` is a minimal owner, a router or a client of one. It
   brings itself up in §8.2's order: a stamped raw state value (S1, S2),
   parameterless operations answered per O1–O3 (echo, a JSON operation,
@@ -6521,6 +6523,166 @@ Round 103 found F-495 to F-497:
 None is a blocker. F-480 to F-494 are resolved. See "At core 0.98 (#977
 E1, round 102's answers)" in `SPEC-FINDINGS.md`.
 
+## Core 0.99 and `observer.md` 0.27: the bare wire removed (round 104)
+
+Since round 103 main took:
+- **core 0.99** (#985 C4d): the bare wire is removed.
+  - §5.1's MAY is gone. A reply under another `Encoding` is malformed, and
+    an answer all the same.
+  - "The request" refuses a query under another `Encoding` with
+    `invalid_request`.
+  - §5.2's envelope and its Decoding MUST are gone, so a reply error under
+    an earlier core's envelope `Encoding`s is the transport's.
+  - `errors/cases.json` is removed, and `operations.md` §9's step 7 is
+    rewritten, with a new step 8.
+- **observer 0.27:** §7.3 loses its bare-wire branch;
+- **the profiles, editorially:** telemetry.v1 0.9, config.v1 0.12,
+  config.v2 0.3 and redundancy.v1 0.10;
+- **#977 E2** (#1078): `conformance/seed/snapshot.json`, a seed over
+  snapshots, with no core version and no text (F-498).
+
+zk2py diffed `spec/` and `examples/zk2/` between 2688123d and 4b802646.
+**No rule changed beyond what the changelogs state.** No keyword was
+added. The E2 fixture is the one change with no entry. Whether
+telemetry.v1 0.9 changed a rule turns on how 0.8's citation was read
+(F-500).
+
+### The classes zk2py claims
+
+Unchanged: the **owner**, **consumer**, **caller** and **observer**
+classes, at the full level, and the static rules. Since core 0.99 a
+caller reads a call in the forms alone, and so does an owner.
+
+### Its walk of `RULES.md` at 0.99
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 81 | 70 | 3 | 8 |
+| consumer | 23 | 19 | 0 | 4 |
+| caller | 18 | 18 | 0 | 0 |
+| observer | 93 | 89 | 2 | 2 |
+| static, in every class | 68 | 66 | 0 | 2 |
+
+- **254 rows walked of 254, none without a verdict.** 29 verdicts are
+  beyond the index.
+  - **Gone:** §5.2's Decoding MUST, under the caller and the observer.
+  - **New, beyond the index:** three rules core 0.99 and observer 0.27
+    state without a keyword. They are the owner's §5.1 "The request", the
+    caller's "Under another `Encoding`" and observer §7.3's "Another
+    `Encoding`".
+- **The re-key came first,** in the commit that brings `just
+  py-conformance` level. Rounds 89 and 100 to 103's readings now read core
+  0.99, and `seed/snapshot.json` is read.
+
+### What round 104 changed in zk2py
+
+- **The bare wire is gone:**
+  - `live.read_reply` reads a reply under another `Encoding` as a refused
+    value, its refusal `encoding`, never parsed;
+  - `live.read_reply_error` reads a reply error under one as the
+    transport's, an earlier core's JSON, CBOR or protobuf envelope among
+    them;
+  - `live.call` writes only the request form, under `zenoh/bytes`, and
+    refuses another `Encoding`. config.v2's caller passes the form it
+    writes itself (`written`);
+  - `owner.OpCall` refuses a query under another `Encoding`
+    `invalid_request`, its bytes never parsed, no handler run, after the
+    three key refusals;
+  - `calls.bare` is `calls.in_forms`, and `envelope.py` is gone. Its two
+    protobuf helpers moved into `health.py`.
+- **`seed_snapshot`** (new) reads `seed/snapshot.json` from its
+  description alone: a page's entries merged on their members' keys, a
+  snapshot complete, and the omission rule with its two guards. That is
+  42 cases of 42.
+- **`forms_live`:** step 7 is rewritten for core 0.99, and step 8 is new.
+  Beyond the step, it sends `set-raw`'s form and bare record under
+  `application/octet-stream`, and a wildcard call under `application/json`.
+- **The mend** (review-bot on #1076):
+  - `config.ConfigOwner.remint` goes in §2.12's order, through public
+    Core methods: `end_for_remint`, `startup_values` and `remint`.
+    - The device returns before the core restarts.
+    - The new instance's view and status go out once its run is taken,
+      through `Owner.new_epoch`'s new `before`. Round 103's went out
+      first, under the old run, which `desired_scenarios` §12 now checks.
+    - A failed declaration puts the old instance back.
+    - config.v2's re-mint uses the same hook, with no private access.
+  - **config.v2:** a pending change ended before the device refuses its
+    return stays ended, as the reference keeps it (#1055). The record
+    takes the device's read-back (`Core.returned`). §2.12 says neither
+    (F-499).
+  - `snapshot.id_bytes`: ASCII in every writer, measure and order, so a
+    bad id is always refused `id`.
+  - **The nits:**
+    - `blackbox.BLACKBOX` alone, read once;
+    - §6's window is the text's 81.4 s, its top moved by the extend's
+      measured lateness and 50 ms;
+    - no `import os` was left unused at main, and the other unused
+      imports are gone.
+- **`readings`: 953**, up from 937:
+  - the bare wire read out of zk2py;
+  - core 0.99's and the profiles' entries and counts;
+  - §9 steps 7 and 8;
+  - F-498 to F-502;
+  - the mend.
+
+**`just py-conformance`: 6360 of 6360** on main 4b802646. Of them,
+`errors` 316, `seed` 110 and `readings` 953.
+
+### Live
+
+On main 4b802646's black boxes.
+
+`forms_live` (`operations.md` §9): **128 of 128**.
+
+| Step | zk2py's owner and caller | the owner example, zk2py's caller | zk2py's owner, `zenctl call` |
+|---|---|---|---|
+| 1 to 4 | 37/37 | 21/21 | 31/31 |
+| 5 and 6, the test's session | 5/5 | as py-py's caller | 5/5 |
+| 7, an earlier core's envelope | 2/2 | as py-py's caller | 4/4 |
+| 8, a request under another `Encoding` | 9/9 | 5/5 | 9/9 |
+
+- **Step 7.** zk2py's caller and `zenctl call` each read
+  `{"code":"busy","message":""}` under `application/json` as the
+  transport's. Each calls `set` once and `ping` twice, then reports
+  silence. `zenctl` shows `answer: silent`, with the Encoding and the
+  bytes.
+- **Step 8.** Each owner answers step 1's form under `application/json`
+  `invalid_request`, in one error form under `zenoh/bytes`. So it does
+  `set-raw`'s form and its bare record under `application/octet-stream`.
+  zk2py's owner runs no handler. Each answers a wildcard call under
+  `application/json` `fanout_forbidden` (F-502).
+- **The Rust caller.** `zenctl call` writes only the forms, so step 8's
+  request under another `Encoding` is the test's session's, in every
+  pairing.
+
+Also run, after the mend:
+- `config_v2_scenarios`: **172 of 172** in the three pairings. The
+  re-mint is py-py 6/6 and rust-py 4/4, with the two refusals of F-499
+  new.
+- `first_hop_live`: 22 of 22.
+- `desired_scenarios --only 12 --only config-fed`: 17 of 17. This adds
+  the new instance's status under its new run.
+
+**Not run:**
+- step 8's refusal order against an operation not exposed: `tc.v1` has no
+  optional operation;
+- the four cases in which config.v1 says the reference refuses a re-mint,
+  against the owner example;
+- form 7 and `seed/snapshot.json` live: no owner writes a snapshot (E3);
+- `live_interop` whole, `link.v2`'s scenarios on routers, and §10's block
+  halves, as round 102 said.
+
+Round 104 found F-498 to F-502:
+- two gaps: `seed/snapshot.json`'s rules have no text, and config.v1
+  §2.12's re-mint is refused after its step 1;
+- an ambiguity: telemetry.v1 0.9 §2.6's CBOR indefinite lengths and
+  trailing bytes;
+- two minor errors: the config texts' §2.5 lists, and core §5.1's order of
+  refusals.
+
+None is a blocker. F-495 to F-497 stay open. See "At core 0.99 (#985 C4d)"
+in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -6578,9 +6740,10 @@ E1, round 102's answers)" in `SPEC-FINDINGS.md`.
   and cuts pages, and its echo tool shows one. Its owners answer a GET
   per key and its readers read with `Latest`, as S2 to S4 still say: no
   rule adopts the snapshot until E3.
-- **A call's forms** (core 0.94, round 101): zk2py's owners answer in
-  them and its callers write them; its readers read the bare wire too, as
-  §5.1's MAY allows. zk2py's tools show a call's reply only through
+- **A call's forms** (core 0.94, round 101; core 0.99, round 104): zk2py's
+  owners answer in them and refuse a query under another `Encoding`, and
+  its callers write them and read nothing else. zk2py's tools show a
+  call's reply only through
   `live.show_reply`, which `forms_live` judges: no zk2py command-line tool
   calls an operation, as `zenctl call` does.
 - **Of config.v2** (round 102): §12's desired document reaches each owner
@@ -6653,7 +6816,8 @@ impl/python/
     history.py        §9.7      the history check
     descriptor.py     §3.3      the D codes
     catalog.py        §8.6      the deployment catalog: its reading, id, succession and a reader's resolution (round 95)
-    cbor.py, envelope.py §5.2   the error envelope, the bare wire's since core 0.94; cbor's writer (round 101)
+    cbor.py                     CBOR read and written (cbor's writer, round 101); envelope.py, the bare wire's
+                                error envelope, went with core 0.99 (round 104)
     calls.py          §5.1 §5.2 a call's forms by its operation's types: tags, records encoded and read, a packed one
                                 under CH's tag, calls.json's writes and reads (core 0.94, round 101)
     zk2c.py           §7.5, observer §7.3 the zk2c envelope: parse, write, which sample carries one, a sample read
@@ -6662,7 +6826,8 @@ impl/python/
                                 form 7, a snapshot, on a put, key_kind off a state key (core 0.97, round 103)
     forms_live.py     §5.1 §5.2 operations.md §9, a call's forms, in three pairings: zk2py's caller and owner, zk2py's
                                 caller and the owner example, zenctl call and zk2py's owner (core 0.94, round 101;
-                                round 100's run measured a router's own Timeout)
+                                round 100's run measured a router's own Timeout); steps 7 and 8, an envelope the
+                                transport's and a request under another Encoding refused (core 0.99, round 104)
     packed.py         §7.6 §9.2 the packed kind: a file's lints (E038–E045), layouts, the tag, the writer and the
                                 reader in exact decimals, a record in the envelope (round 94); a sample read
                                 as observer §7.3 reads it, the deployment epoch (the mend after round 94)
@@ -6688,6 +6853,8 @@ impl/python/
                                 (round 96)
     snapshot.py       §7.5      the snapshot, form 7: a page read, written and written back, cut by the paging
                                 rule twice (by writing, by arithmetic), held complete (core 0.97, round 103)
+    seed_snapshot.py  §4.2      seed/snapshot.json's seed over snapshots, from its description alone: a page's
+                                entries merged, completeness, the omission rule (#977 E2, round 104; F-498)
     frame.py          §7.7      frames: the declaration, the frame form and its tag, the body written and read
                                 over packed's fields (round 96, core 0.83)
     freshness_v2.py   freshness.v2 §2.5's rule (the view), a subscriber that re-reads, the owner's body (round 96)
