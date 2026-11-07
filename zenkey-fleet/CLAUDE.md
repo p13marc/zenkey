@@ -447,5 +447,6 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   again once (`outrun`), a silent GET leaving it held; the
   doctor's `first-hop-token` (35 checks, a warning, `DoctorSpec::first_hop`,
   not asked without one): an interface token, or a contract key a device's
-  own session answers (`HeldBundles`, replier zid against `meta.zid`).
+  own session answers (`HeldBundles`, replier zid against `meta.zid`, every
+  GET at once).
   `tests/first_hop.rs` is constrained.md §10 from the tools' side.
