@@ -75,8 +75,8 @@ named after it). §2's step 6 has a test of its own,
   to its heartbeat key. It records each delivery's arrival on its
   monotonic clock. "S judges" applies v2.md §2.5 at that instant.
 - **G** GETs the owner's state keys as core S4 says. "G judges" applies
-  v2.md §2.6 to the reply, the delta at 500 ms, on the deployment's word:
-  every session runs on one host.
+  v2.md §2.6 to the answer's entry, the delta at 500 ms, on the
+  deployment's word: every session runs on one host.
 - **Jitter.** The reference allows 200 ms on loopback.
 
 ## §1 The cadence, and the bits (§2.4)
@@ -139,9 +139,10 @@ named after it). §2's step 6 has a test of its own,
   (§2.10). H2 hears heartbeats while the guard holds, the time unknown,
   all 42 bits set. Each has its map, `1 0 1`, vouches for `status`, and
   holds `status`'s digest over the second put's stamp. S2 judges `status`
-  fresh 4 s on, past its horizon. G's reply carries the owner's stamp
-  from the clock ahead, ahead of G's clock beyond the delta. G judges
-  `status` unobservable (v1 §2.6's band).
+  fresh 4 s on, past its horizon. G's answer is a snapshot of `status`
+  alone, its entry vouched for at the snapshot's time. That time is from
+  the clock ahead, ahead of G's clock beyond the delta. G judges `status`
+  unobservable (v1 §2.6's band).
 - **Step 5.** A silent heartbeat: S judges `status` stale more than 2 s
   after the last heartbeat. It never reports the owner down.
 - **Step 6.** Before the second put, its heartbeats vouch for `status`,
@@ -152,23 +153,28 @@ named after it). §2's step 6 has a test of its own,
   known, and the bit stays clear. The third put goes on, and a heartbeat
   after it vouches for `status`, its digest over that put's stamp.
 
-## §3 A GET reader's age from the confirmation stamp (§2.4, §2.6)
+## §3 A GET reader's age from the confirmation (§2.4, §2.6)
 
 **Steps.**
 1. The owner puts `status` = `up`. S and H listen, and 3 s later G GETs
    `status`.
 2. The owner clears `status`'s bit. 3.5 s later, G GETs `status`.
+3. G GETs `state/peer/**` after §1's steps 1 and 2: `peer/a` vouched for,
+   `peer/b` not.
 
 **Expected.**
 - **The put** reaches S stamped by R1's clock, if at all: the owner set
   no Zenoh timestamp (core §4.3's table).
-- **Step 1.** G's reply carries a Zenoh timestamp of the owner's zid,
-  later than the put and within 1 s plus jitter of G's clock. It is the
-  last heartbeat's that vouched for `status`. To the millisecond, its
-  instant is the time H read in that heartbeat (core §4.3). G judges
-  `status` fresh, 3 s after its put.
-- **Step 2.** The reply's stamp is the last confirmation before the bit
-  cleared. G judges `status` stale: its age is above ttl + δ.
+- **Step 1.** G's answer is a snapshot of `status` alone, with no Zenoh
+  timestamp. Its entry has confirmation 1: vouched for at the snapshot's
+  time, within jitter of G's clock. G judges `status` fresh, 3 s after
+  its put.
+- **Step 2.** The entry has confirmation 2. Its conf is the last
+  confirmation before the bit cleared: to the millisecond, the time H
+  read in the last heartbeat that vouched for `status` (core §4.3). G
+  judges `status` stale: its age is above ttl + δ.
+- **Step 3.** One snapshot of `peer/{peer}`: `a` with confirmation 1, and
+  `b` with confirmation 2 and its last confirmation.
 
 ## §4 A lost change, detected and re-read (§2.5)
 
@@ -197,8 +203,8 @@ loss.
 
 **Steps.**
 1. The owner puts `peer/a` = `1` and `peer/b` = `1`, then nothing.
-2. 1 s later, S subscribes to `state/peer/*`, then GETs it, and seeds its
-   view with the answer.
+2. 1 s later, S subscribes to `state/peer/*`, then GETs `state/peer/**`,
+   a collection read, and seeds its view with the answer.
 3. At the same time S′ subscribes to `state/peer/*` and does not GET.
 4. Both listen 5 s.
 
@@ -222,8 +228,9 @@ loss.
   none as following a lost heartbeat.
 - **The leftover.** S's view holds `peer/b` from the old run, which the new
   owner does not hold, so its heartbeats diverge.
-- **The re-read** replaces the view: `peer/b` leaves it, and the next
-  heartbeat confirms `peer/a`. No heartbeat confirms `peer/b` again, and S
+- **The re-read** replaces the view: the new instance's snapshot is
+  complete and omits `peer/b`, which leaves the view by core §4.2's
+  omission rule. The next heartbeat confirms `peer/a`. No heartbeat confirms `peer/b` again, and S
   judges it stale more than 4 s after its last confirmation.
 
 ## §7 Across a face: liveness, and no downsampling (§2.9; link.v1 §2.8, §2.12)
