@@ -478,7 +478,7 @@
   ],
   "cases": [
     {
-      "note": "the test contract's six groups: four hot, two reach and a contract group; sim's pin sensitive, so its value has no field in the Record (§2.2, §2.15, §3)",
+      "note": "the test contract's six groups: three hot, two reach and a contract group; sim's pin sensitive, so its value has no field in the Record (§2.2, §2.15, §3)",
       "groups": [
         {
           "name": "duty",

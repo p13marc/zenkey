@@ -1,7 +1,7 @@
 # config.v2's test contract (spec/profiles/config/v2.md, text 0.1): the
 # scenarios' rf owner (scenarios-v2.md). derive.json reads it whole, and
 # records.json, validation.json, lifecycle.json and redaction.json write
-# its records and its requests. Four hot groups, two
+# its records and its requests. Three hot groups, two
 # reach groups and a contract group; sim's pin is sensitive and queue is
 # the one the scenarios' allowlist leaves out. rfcfg.json holds the six
 # group types, then the eight types `zk2 config derive` writes from them.
