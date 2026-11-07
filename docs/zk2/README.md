@@ -42,7 +42,8 @@ observability shape.
 1. Fix on a branch cut from `v1`, and open the PR against `v1`. CI runs there.
 2. The maintainer tags `0.14.N` on `v1`. The release lane triggers on bare
    tags, whatever the branch.
-3. Dispatch the crates lane with `ref: "0.14.N"`, never `main`.
+3. Dispatch the crates lane with `ref: "0.14.N"`, never `main`: from
+   `main` it publishes zk2's crates (#929).
 4. Production source builds track `--branch v1`, or pin the latest `0.14.N`
    tag.
 

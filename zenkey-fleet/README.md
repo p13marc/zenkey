@@ -1,6 +1,6 @@
 # zenkey-fleet
 
-The fleet engine for [zk2](https://github.com/p13marc/zenkey) Zenoh tooling —
+The fleet engine for [zk2](https://git.marcpardo.eu/marcpardo/zenkey) Zenoh tooling —
 the shared core of the zk2 explorers (`zenctl`, `zengui` and the `zenwatch`
 notifier), in five layers:
 
@@ -28,6 +28,16 @@ and the profile-backed features — left at FJ9 (#612) and lives on the `v1`
 branch, released as `zenkey-fleet` 0.18.x. Every frontend on `main` runs on
 this crate since #614 (zenwatch at FL3, zengui at FL11b); none links the v1
 engine.
+
+## Starting
+
+An application does not start here: it writes a contract, generates its
+typed module with [`zenkey-build`](https://crates.io/crates/zenkey-build)
+in `build.rs`, and brings a service up with `zenkey::ServiceBuilder::new`
+([`zenkey`'s README](https://crates.io/crates/zenkey) has the example).
+This crate is for a tool that reads a deployment it does not own: open a
+session (`bus::session`), read presence and the contracts, and render or
+judge what the bus carries, as `zenctl`, `zengui` and `zenwatch` do.
 
 ## `bus/` — everything holding a session
 
@@ -121,3 +131,51 @@ sees the wire as it really is. Do not "fix" that.
 Explorer *configuration* — named connection contexts, `~/.config`, the
 completion cache — is not here; it lives in `zenkey-explorer-config`, so a
 library consumer of this crate does not pay for `dirs` and `toml`.
+
+## What 0.20 does not promise
+
+0.20 is the first zk2 release. Two things under it are still moving, and
+a 0.21 may break either:
+
+- **The wire.** zk2c, the bandwidth-first wire (epic
+  [#975](https://git.marcpardo.eu/marcpardo/zenkey/issues/975)), is being
+  specified: one snapshot per collection
+  ([#977](https://git.marcpardo.eu/marcpardo/zenkey/issues/977)), and
+  config.v2's calls without the bare wire (C4d,
+  [#985](https://git.marcpardo.eu/marcpardo/zenkey/issues/985)). What
+  the readers decode, and how they order it, moves with it.
+- **The authoring format** and the canonical form a fingerprint is taken
+  over, which the lens and the contract retrieval read.
+
+A 0.20.x patch release changes neither.
+
+## Zenoh's unstable API
+
+This crate takes `zenoh` 1.10 with its `unstable` feature, as `zenkey`
+does (its README lists what the runtime opts into, and why). A tool
+reads more of a session than an owner does, and the fleet's library
+code opts into these, each where `spec/observer.md` names it:
+
+| Unstable in zenoh 1.10.1 | Where | Why |
+|---|---|---|
+| `Reply::replier_id` | `bus::admin`, `tape::snapshot` | Which node sent an admin-space answer, whatever key it is on: S4's check against the admin space verifies an answer by it (observer §4.2). |
+| `SessionInfo::transport_events_listener`, `TransportEventsListener` | `bus::stall` | A window's reader watching its own receive path: a router that gave up on it closes its transport (core §2.7, observer §5.2). |
+| `Sample::source_info`, `SourceInfo::source_id`, `SourceInfo::source_sn` | `bus::monitor` | The publishing entity and its sample number, where a sample carries them, for the monitor's gap count and a recording's source (zenoh 1.10.1 delivers none to a subscriber, and the tools say so). |
+| `Sample::reliability`, `PublicationBuilder::reliability` | `bus::monitor`, `bus::write` | A sample's QoS axes, as a `.zrec` row records them, and a foreign key written on the axes it is asked for. |
+| `Config::from_file` of a `.toml` file | `bus::session` | zenoh reads a TOML config file only under `unstable`, and a tool's `--zenoh-config` may be one. |
+
+It names no `zenoh-ext` item: its tests use `AdvancedPublisher`, a
+dev-dependency.
+
+## Documentation
+
+- [`docs/zk2/`](https://git.marcpardo.eu/marcpardo/zenkey/src/branch/main/docs/zk2/README.md):
+  the design record, and the
+  [tooling guide](https://git.marcpardo.eu/marcpardo/zenkey/src/branch/main/docs/zk2/tooling-guide.md),
+  how the reference tools meet the observer rules
+  ([`spec/observer.md`](https://git.marcpardo.eu/marcpardo/zenkey/src/branch/main/spec/observer.md)).
+- Issues: [git.marcpardo.eu/marcpardo/zenkey](https://git.marcpardo.eu/marcpardo/zenkey/issues).
+  The GitHub repository is a mirror.
+
+zenkey-fleet 0.18.x on crates.io is v1's engine, maintained on the `v1`
+branch. Apache-2.0.

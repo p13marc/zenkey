@@ -7,10 +7,13 @@ license = "MIT"
 repository.workspace = true
 authors.workspace = true
 description = "The zk2 runtime: services, presence, descriptors and contract retrieval over Zenoh"
-# Not on crates.io until the zk2 runtime chunks land (#610 onward). v1's
-# `zenkey` 0.11.x stays there, from the `v1` branch; no member links it
-# since #614 (FL11b), so `-p zenkey` names this crate in every command.
-publish = false
+# zk2's runtime, on crates.io from 0.20.0 (#929). v1's `zenkey` 0.11.x is
+# there too, from the `v1` branch; no member links it since #614 (FL11b),
+# so `-p zenkey` names this crate in every command.
+readme = "README.md"
+keywords = ["zenoh", "zk2", "pubsub", "contracts", "keyspace"]
+categories = ["network-programming", "asynchronous"]
+exclude = ["CLAUDE.md"]
 
 [features]
 default = ["zenoh"]
@@ -25,7 +28,7 @@ zenoh = ["hostid", "dep:zenoh", "dep:zenoh-ext", "dep:flume", "dep:tokio", "dep:
 hostid = ["dep:libc", "dep:rand", "dep:tracing"]
 
 [dependencies]
-zenkey-model = { path = "../zenkey-model" }
+zenkey-model = { path = "../zenkey-model", version = "0.20.0" }
 zenoh = { workspace = true, optional = true }
 # An unbounded liveliness and reply handler (spec §8.1: zenoh's default
 # 256-slot handler hangs a liveliness GET on a session that also holds a

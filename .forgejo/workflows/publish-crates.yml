@@ -54,15 +54,17 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          for crate in zenkey zenkey-build zenkey-fleet; do
-            # The strangler layout (#615): the v1 libraries' sources are on
-            # `v1`, where all three are present; a crate this tree does not
-            # build is skipped.
+          # zk2's four lib crates, each after what it depends on (#929):
+          # zenkey and zenkey-build take zenkey-model, zenkey-fleet takes
+          # zenkey and zenkey-model. On `v1`, which has no zenkey-model, the
+          # list is v1's three (that branch's copy of this file).
+          for crate in zenkey-model zenkey zenkey-build zenkey-fleet; do
+            # A crate this tree does not build is skipped.
             version=$(cargo metadata --no-deps --format-version 1 \
               | python3 -c "import sys,json;print(next((p['version'] for p in json.load(sys.stdin)['packages'] if p['name']=='$crate'), ''))")
             if [ -z "$version" ]; then echo "$crate is not in this tree — skipping"; continue; fi
-            # zk2 re-creates these names at 0.20.0 with `publish = false`
-            # (#612): cargo metadata reports that as an empty registry list.
+            # A crate with `publish = false` is skipped too: cargo metadata
+            # reports it as an empty registry list.
             unpublished=$(cargo metadata --no-deps --format-version 1 \
               | python3 -c "import sys,json;print(next((p['publish']==[] for p in json.load(sys.stdin)['packages'] if p['name']=='$crate'), False))")
             if [ "$unpublished" = "True" ]; then echo "$crate $version is publish = false here — skipping"; continue; fi

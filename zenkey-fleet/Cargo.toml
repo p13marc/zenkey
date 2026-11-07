@@ -2,14 +2,13 @@
 name = "zenkey-fleet"
 description = "Fleet engine for zk2 Zenoh tooling: disciplined fan-in queries, presence, contract-resolved decode through a lens, live key-tree monitoring, recording and replay — the shared core of the zk2 explorers"
 readme = "README.md"
-keywords = ["zenoh", "keyspace", "explorer", "fleet"]
+keywords = ["zenoh", "zk2", "keyspace", "explorer", "fleet"]
 categories = ["network-programming", "development-tools"]
 license = "Apache-2.0"
 version = "0.20.0"
-# zk2's engine (#612). The v1 engine is 0.18.x on crates.io, from the `v1`
-# branch; no member links it since #614 (FL11b). Nothing is published from
-# `main`: when zk2 publishes is the maintainer's call (#585).
-publish = false
+# zk2's engine (#612), on crates.io from 0.20.0 (#929). The v1 engine is
+# 0.18.x there, from the `v1` branch; no member links it since #614 (FL11b).
+exclude = ["CLAUDE.md"]
 rust-version.workspace = true
 edition.workspace = true
 repository.workspace = true
@@ -26,13 +25,12 @@ rustdoc-args = ["--cfg", "docsrs", "-Zunstable-options", "--generate-link-to-def
 [dependencies]
 # The zk2 runtime (#612, FJ3). It took the name back at FJ9, when the v1
 # library this crate used to pin from crates.io (`zenkey =0.11.1`) left.
-zenkey = { path = "../zenkey" }
-zenkey-model = { path = "../zenkey-model" }
+zenkey = { path = "../zenkey", version = "0.20.0" }
+zenkey-model = { path = "../zenkey-model", version = "0.20.0" }
 # gen's descriptor-driven synthesis (#162), and the descriptor sets zk2's
 # `schema show` reads (FJ4).
 prost-reflect = { workspace = true }
 zenoh = { workspace = true }
-zenoh-ext = { workspace = true }
 tokio = { workspace = true }
 # The event sources are `Stream`s (#343). An engine whose consumers all reach
 # for streams should not make each of them rebuild the adapter — zengui carried
@@ -75,6 +73,9 @@ arc-swap = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+# The tests' advanced publishers (`seeding.rs`, `streams.rs`, `acl_live.rs`).
+# The library names no zenoh-ext item.
+zenoh-ext = { workspace = true }
 # The enrollment file's parse test only (`report::acl`); the library never
 # reads a TOML — that is the frontend's job, as it is for every other file.
 toml = { workspace = true }

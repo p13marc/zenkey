@@ -9,7 +9,12 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
 
 ## zk2
 
-- **`zenkey/`** 0.20.0 (MIT, unpublished) is zk2's session half (#610,
+- **`zenkey/`** 0.20.0 (MIT, on crates.io from 0.20.0, #929: its README says
+  what 0.20 does not promise and which zenoh unstable APIs it uses; the
+  standard bundles are read through `bundles/`, links into
+  `spec/profiles/.history/`, so the package carries them, and
+  `tests/published.rs` refuses an include from outside a published crate)
+  is zk2's session half (#610,
   FE): `ServiceBuilder` → `start()` in spec §8.2's order (exposure checked,
   descriptor D-checked and served, bundles on `complete` queryables, the
   instance token, then the interface tokens), and the running `Service`
