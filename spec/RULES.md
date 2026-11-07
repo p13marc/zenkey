@@ -51,13 +51,13 @@ The owner, consumer and caller sections each point to them.
 
 | Role | Rules |
 |---|---|
-| [Owner](#owner) | 76 |
-| [Consumer](#consumer) | 22 |
+| [Owner](#owner) | 83 |
+| [Consumer](#consumer) | 26 |
 | [Caller](#caller) | 18 |
 | [Deployment](#deployment) | 18 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 73, 27 of them a reader's |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 77, 27 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 67 |
-| Every rule, once | 250 |
+| Every rule, once | 262 |
 | [Rule ids](#rule-ids) | 85 |
 
 ## Owner
@@ -130,11 +130,17 @@ The owner, consumer and caller sections each point to them.
 |---|---|---|
 | [S1](core.md#42-rules-for-owners-and-consumers) | **Owner:** every state mutation, put **and** delete, MUST carry its in-band stamp (§4.3): a put in its payload's envelope, a delete in its attachment (§7.5). | `[Sc: state.md §1]` |
 | [S1](core.md#42-rules-for-owners-and-consumers) | On a resource §4.3's table lists, the owner MUST also set a Zenoh timestamp on each mutation. | `[Sc: state.md §1]` |
-| [S2](core.md#42-rules-for-owners-and-consumers) | **Owner:** a GET reply MUST carry the in-band stamp of the mutation it represents: a reply as the bytes the mutation put, a `reply_del` as the delete's attachment. | `[Sc: state.md §1, §2]` `[Sc: profiles/freshness/scenarios-v2.md §3]` `[Sc: profiles/alarms/scenarios.md §3]` |
-| [S2](core.md#42-rules-for-owners-and-consumers) | The owner's reply MUST also carry the mutation's Zenoh timestamp, where the mutation carried one. | `[Sc: state.md §1, §2]` `[Sc: profiles/freshness/scenarios-v2.md §3]` `[Sc: profiles/alarms/scenarios.md §3]` |
-| [S2](core.md#42-rules-for-owners-and-consumers) | The owner's reply of a member of a state that §4.3's table lists under `freshness.v2` MUST carry instead that member's last confirmation, as the table says. | `[Sc: state.md §1, §2]` `[Sc: profiles/freshness/scenarios-v2.md §3]` `[Sc: profiles/alarms/scenarios.md §3]` |
-| [S2](core.md#42-rules-for-owners-and-consumers) | It [the owner] MUST answer a selector over them [its interfaces' `state/**` and `@state/**`] with every matching live key, plus a `reply_del` for each matching key it deleted within the window. | `[Sc: state.md §1, §2]` `[Sc: profiles/freshness/scenarios-v2.md §3]` `[Sc: profiles/alarms/scenarios.md §3]` |
-| [S3](core.md#42-rules-for-owners-and-consumers) | **Owner:** for a key it deleted within the tombstone window, the owner MUST answer a GET with `reply_del` and the deletion's stamps (S2). | `[Sc: state.md §2, §6]` |
+| [S2](core.md#42-rules-for-owners-and-consumers) | It [the owner] MUST answer a GET over them [its interfaces' `state/**` and `@state/**`] per collection, as "Answering a state GET" below says … | `[Sc: state.md §1, §2, §14]` |
+| [S2](core.md#42-rules-for-owners-and-consumers) | An owner's per-key reply MUST carry the in-band stamp of the mutation it represents: a reply as the bytes the mutation put, a `reply_del` as the delete's attachment. | `[Sc: state.md §1, §2, §14]` |
+| [S2](core.md#42-rules-for-owners-and-consumers) | It [an owner's per-key reply] MUST also carry the mutation's Zenoh timestamp, where the mutation carried one. | `[Sc: state.md §1, §2, §14]` |
+| [S3](core.md#42-rules-for-owners-and-consumers) | **Owner:** for a key it deleted within the tombstone window, the owner MUST answer a GET with the deletion's stamp (S2): a tombstone in a snapshot, or a per-key resource's `reply_del`. | `[Sc: state.md §2, §6, §14]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | An owner MUST answer a collection read with the collection's snapshot, on its snapshot key, in pages (below). | `[Sc: state.md §14]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | An owner MUST answer each member a member read reaches with a snapshot of that member alone, on the member's own key. | `[Sc: state.md §1, §2]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | An owner MUST answer a member read of one concrete key that it holds no member at, live or deleted within the window, with a snapshot of no entry on that key. | `[Sc: state.md §14]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | An owner MUST answer each member of a per-key resource that a GET reaches with its reply, or with its `reply_del` within the window. | `[Sc: state.md §1]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | An owner MUST write as asof a seq of its run at or below which it has recorded every state mutation it minted. | `[Sc: state.md §14]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | An owner MUST give each live entry of a collection with a horizon its confirmation. | `[Sc: profiles/freshness/scenarios-v2.md §3]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | An owner MUST cut each snapshot into pages by §7.5's paging rule, under its page size, and send each page as a reply to the one GET. | `[Sc: state.md §14]` |
 
 ### [core §4.3 Runs and sequence numbers (S7)](core.md#43-runs-and-sequence-numbers-s7)
 
@@ -246,6 +252,7 @@ The owner, consumer and caller sections each point to them.
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§12](core.md#12-conformance-classes) | An owner's descriptor MUST fit one fragment (Appendix B gives its size under zenoh-pico's default) | `[Sc: constrained.md §5]` |
+| [§12](core.md#12-conformance-classes) | An owner's page size MUST fit one fragment of each constrained reader that GETs its state. | `[Sc: constrained.md §5]` |
 
 ## Consumer
 
@@ -270,13 +277,17 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [S4](core.md#42-rules-for-owners-and-consumers) | **Consumer:** a state GET MUST be addressed to the owner's keys, with target `All` and consolidation `Latest` set explicitly. | `[Sc: state.md §3]` |
+| [S4](core.md#42-rules-for-owners-and-consumers) | **Consumer:** a state GET MUST be addressed to the owner's keys, with target `All` and consolidation `None` set explicitly. | `[Sc: state.md §3, §14]` |
+| [S4](core.md#42-rules-for-owners-and-consumers) | The consumer MUST merge the GET's replies per key, each snapshot's entries among them, as a late joiner's seed merges them (below). | `[Sc: state.md §3, §14]` |
 | [S5](core.md#42-rules-for-owners-and-consumers) | **Consumer:** last-known state MUST be read from an archive (§4.4), explicitly. | `[Sc: state.md §4–§6, §9]` |
 | [S6](core.md#42-rules-for-owners-and-consumers) | The archive's answer is last-known, never current, and a consumer MUST NOT present it as current. | `[Sc: state.md §4]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST declare its subscription first, then make S4's GET. | `[Sc: state.md §10]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST merge the GET's replies and the subscription's samples per key, whichever path brought each one. | `[F: seed/inband.json]` `[Sc: state.md §7, §10]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | **The merge.** … It [a late joiner] MUST keep the newer by its in-band stamp: within one run, by seq (§4.3). | `[F: seed/inband.json]` `[Sc: state.md §7, §10]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | **The merge.** … Across two runs, a consumer MUST instead keep what §4.3's consumer rule accepts. | `[F: seed/inband.json]` `[Sc: state.md §7, §10]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST apply the omission rule when it holds a snapshot complete (§7.5) under run R as of asof A, on a key K that is its collection's snapshot key or a member's key. | `[F: seed/snapshot.json]` `[Sc: state.md §14]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner applies no omission rule over an incomplete snapshot, and SHOULD read the collection again. | `[F: seed/snapshot.json]` `[Sc: state.md §14]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | A consumer or a tool MUST NOT merge a snapshot heard on a subscription, nor count it toward a complete snapshot. | `[F: seed/snapshot.json]` |
 
 ### [core §4.3 Runs and sequence numbers (S7)](core.md#43-runs-and-sequence-numbers-s7)
 
@@ -387,8 +398,8 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [S3](core.md#42-rules-for-owners-and-consumers) | A deployment MUST configure it, for state that an archive records, to at least the longest outage it expects between the archive and the owner. | `[Sc: state.md §2, §6]` |
-| [S4](core.md#42-rules-for-owners-and-consumers) | **Deployment:** MUST NOT run a storage that answers on an owner's `state/**` or `@state/**` keys. | `[Sc: state.md §3]` |
+| [S3](core.md#42-rules-for-owners-and-consumers) | A deployment MUST configure it to at least the longest outage it expects between an archive and the owner, for each resource the archive records whose deletes only a tombstone proves (§4.4). | `[Sc: state.md §2, §6, §14]` |
+| [S4](core.md#42-rules-for-owners-and-consumers) | **Deployment:** MUST NOT run a storage that answers on an owner's `state/**` or `@state/**` keys. | `[Sc: state.md §3, §14]` |
 
 ### [core §6 Ownership and serving](core.md#6-ownership-and-serving)
 
@@ -463,6 +474,9 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST declare its subscription first, then make S4's GET. | `[Sc: state.md §10]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST merge the GET's replies and the subscription's samples per key, whichever path brought each one. | `[F: seed/inband.json]` `[Sc: state.md §7, §10]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | **The merge.** … It [a late joiner] MUST keep the newer by its in-band stamp: within one run, by seq (§4.3). | `[F: seed/inband.json]` `[Sc: state.md §7, §10]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST apply the omission rule when it holds a snapshot complete (§7.5) under run R as of asof A, on a key K that is its collection's snapshot key or a member's key. | `[F: seed/snapshot.json]` `[Sc: state.md §14]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner applies no omission rule over an incomplete snapshot, and SHOULD read the collection again. | `[F: seed/snapshot.json]` `[Sc: state.md §14]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | A consumer or a tool MUST NOT merge a snapshot heard on a subscription, nor count it toward a complete snapshot. | `[F: seed/snapshot.json]` |
 
 ### [core §5.1 Rules](core.md#51-rules)
 
@@ -605,6 +619,12 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§3.11](observer.md#311-a-first-hop) | A tool that knows an owner is on a first hop MUST NOT report it down from its instance token's absence, even where a complete read establishes that absence. | `[Sc: constrained.md §10]` |
+
+### [observer §4.1 A seed](observer.md#41-a-seed)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§4.1](observer.md#41-a-seed) | A tool MUST make a state GET with target `All` and consolidation `None`, and merge its replies per key as core §4.2 merges a seed's, snapshots' entries and the omission rule included. | `[F: seed/snapshot.json]` `[Sc: state.md §14]` |
 
 ### [observer §4.3 What a tool does not ask of the admin space](observer.md#43-what-a-tool-does-not-ask-of-the-admin-space)
 
@@ -888,7 +908,7 @@ MAY, and a row with no keyword, are listed here alone.
 | [D011](core.md#33-the-descriptor-record) | implementation | core §3.3 The descriptor record | an interface entry for `archive.v1` is marked `"token": false` … |
 | [D012](core.md#33-the-descriptor-record) | implementation | core §3.3 The descriptor record | an interface entry is marked both `"standby": true` and `"token": false` … |
 | [S1](core.md#42-rules-for-owners-and-consumers) | owner | core §4.2 Rules for owners and consumers | **Owner:** every state mutation, put **and** delete, MUST carry its in-band stamp (§4.3): a … |
-| [S2](core.md#42-rules-for-owners-and-consumers) | owner | core §4.2 Rules for owners and consumers | **Owner:** a GET reply MUST carry the in-band stamp of the mutation it represents … |
+| [S2](core.md#42-rules-for-owners-and-consumers) | owner | core §4.2 Rules for owners and consumers | **Owner:** the owner's state queryables cover its interfaces' `state/**` and `@state/**`. It MUST answer … |
 | [S3](core.md#42-rules-for-owners-and-consumers) | owner, deployment | core §4.2 Rules for owners and consumers | **Owner:** for a key it deleted within the tombstone window, the owner MUST answer … |
 | [S4](core.md#42-rules-for-owners-and-consumers) | consumer, deployment | core §4.2 Rules for owners and consumers | **Consumer:** a state GET MUST be addressed to the owner's keys, with target `All` … |
 | [S5](core.md#42-rules-for-owners-and-consumers) | consumer | core §4.2 Rules for owners and consumers | **Consumer:** last-known state MUST be read from an archive (§4.4), explicitly. **Owner of an archive:** … |

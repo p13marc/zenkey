@@ -13,6 +13,44 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.27 — 2026-11-07: a tool's seed over snapshots (#977)
+
+Core 0.99 (#977's E3) answers a state GET by snapshot, one collection
+per reply in pages, and moves S4 to consolidation `None`. This version is
+the reader's half.
+
+**Added: §4.1, "A tool's GET is S4's".** A tool MUST make a state GET
+with target `All` and consolidation `None`, and merge its replies as core
+§4.2 merges a seed's, the omission rule included.
+`[F: seed/snapshot.json]` `[Sc: state.md §14]` Under `Latest` it would
+keep one page of a snapshot. To read a collection whole it makes a
+collection read.
+
+**Changed: §4.1, "What a seed cannot know".**
+- **An incomplete snapshot** seeds possibly incompletely, as a GET that
+  ran to its timeout does. Its entries stand.
+- **Without the contract** a tool cannot map a snapshot's collection to a
+  template. It applies no omission rule there, and shows the keys it
+  held as possibly stale.
+
+**Changed: §2, §4.5 and §5.2.**
+- **§2's state instance.** An incomplete snapshot is no verdict. A
+  complete one, empty or not, is the owner's word for its collection.
+- **§4.5.** An archive aligns from the owner's snapshot, and drops a key
+  a complete one omits.
+- **§5.2's complete reading of a state** needs each snapshot complete.
+  Its members are the live entries and the per-key replies, never a
+  tombstone.
+
+**§4.2's first line** no longer names `Latest`: a consumer cannot tell
+from its replies which replier answered.
+
+**Deliberately not changed.**
+- **A tool's merge** (§4.1): its order, its bound and R6, which read an
+  entry as a reply.
+- **§4.2's check** and the admin space.
+- **No rule moves section.** The header's core version is 0.99.
+
 ## 0.26 — 2026-11-02: a provider found by its instance token, and a first hop (#982 H1)
 
 Core 0.96 lets an owner on a first hop hold its instance token alone.

@@ -50,12 +50,16 @@ crosses. With 1 KB batches, presence arrives at link speed: about 7 KB in
 *Spike S3: default 85 s with 4 reconnects in the probe, never in the full
 profile; 1 KB 24 s.*
 
-## §5 A one-fragment descriptor (§3.3, §12)
+## §5 A one-fragment descriptor, and pages (§3.3, §4.2, §12)
 
-**Setup.** A zenoh-pico owner with the default `Z_FRAG_MAX_SIZE` of 4 KB.
+**Setup.** A zenoh-pico owner and a zenoh-pico reader, each with the
+default `Z_FRAG_MAX_SIZE` of 4 KB. The owner serves a collection of 64
+members of about 110 bytes each, at the default page size.
 
 **Expected.** Its descriptor is under 4 KB, and a GET of its instance key
-returns it whole.
+returns it whole. The reader's collection read of the 64 members returns
+every page whole, each within 1,024 bytes. The reader holds the snapshot
+complete.
 
 *Spike S15: the pico's descriptor was answered.*
 

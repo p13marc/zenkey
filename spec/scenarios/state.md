@@ -4,9 +4,13 @@ Common setup: an owner `ground/fleet-mgr` with a state template
 `plans/{vehicle}` and a tombstone window W (60 s unless stated). Its
 session's timestamping is off, and its runs come from a record unless
 stated. The template declares no `freshness.ttl_s`, so core §4.3's table
-does not list it. A consumer `vehicle-01/executor`, bound with
+does not list it. The owner answers a GET of it by snapshot (core §4.2):
+its collection's snapshot key is
+`zk2/ground/fleet-mgr/mission_plan.v1/state/plans`, and its page size
+1,024 bytes. A consumer `vehicle-01/executor`, bound with
 `{vehicle} = self.system`, its session's timestamping off too, zenoh's
-default for a client (core §4.1).
+default for a client (core §4.1). Every state GET is made with target
+`All` and consolidation `None` (S4).
 
 ## §1 In-band stamps (S1, S2, §4.3)
 
@@ -21,7 +25,7 @@ puts carry no Zenoh timestamp.
 
 **Steps.**
 1. The owner puts v1, then v2, then deletes the key. The consumer
-   subscribes before, and GETs with `All` + `Latest` after v2.
+   subscribes before, and GETs its plan after v2.
 2. **The control:** a third client of the router puts on a key of its own
    without setting a timestamp, and the consumer subscribes to it.
 3. The owner puts v3 and v4 back to back, with nothing between them.
@@ -31,16 +35,19 @@ puts carry no Zenoh timestamp.
 1. Every put's payload is an envelope of the mutation form, whose run is
    the descriptor's `run`. The delete's attachment is a delete envelope of
    the same run. Each seq is above the one before.
-2. The GET after v2 returns v2's bytes, its envelope included.
+2. The GET after v2 is a member read. It returns a snapshot of the plan
+   alone, on the plan's own key: one page, whose one entry has the empty
+   id, v2's seq and v2's record.
 3. Through R1, no put, delete or reply of `plans/{vehicle}` carries a
    Zenoh timestamp. The owner sets none, and R1 adds none. Through R2,
    each of its puts arrives with R2's zid, and its delete and its reply
    with none. The control's put arrives with no timestamp through R1, and
    with R2's zid through R2.
 4. v4's seq is v3's plus 1.
-5. Through either router, each put and the reply of `status` carry a
-   Zenoh timestamp whose id is the owner session's zid. The second put's
-   is above the first's.
+5. `status` is a per-key resource (core §4.2). Through either router,
+   each put and the reply of `status` carry a Zenoh timestamp whose id is
+   the owner session's zid. The second put's is above the first's. The
+   reply is the second put's bytes, its envelope included.
 
 *The reference (`zenkey/tests/state.rs`) plays both as
 `s1_in_band_stamps_and_no_per_put_hlc`.*
@@ -48,15 +55,22 @@ puts carry no Zenoh timestamp.
 ## §2 Deletes inside the window, and the collection (S2, S3)
 
 **Steps.** The owner holds `plans/a` and `plans/b`, and deletes `plans/b`.
-Within W, the consumer GETs `plans/b`, then the selector `plans/*`.
+Within W, the consumer GETs `plans/b`, then the selector `plans/*`, then
+`plans/**`.
 
 **Expected.**
-- For `plans/b`: a `reply_del` whose attachment is the delete's envelope.
-- For `plans/*`: `plans/a` with the bytes the owner put, and a `reply_del`
-  for `plans/b`.
+- For `plans/b`, a member read: a snapshot on `…/plans/b` whose one entry
+  is a tombstone, the empty id with the delete's run and seq.
+- For `plans/*`, a member read: a snapshot of each member on its own key.
+  `plans/a`'s lists its put's record and stamp, and `plans/b`'s its
+  tombstone.
+- For `plans/**`, a collection read: one snapshot on `…/state/plans`, one
+  page. It lists `a` live, with the record the owner put, and `b` as a
+  tombstone, each with its stamp.
 
 *The reference (`zenkey/tests/state.rs`) runs it as
-`s2_a_reply_del_carries_the_delete_envelope`.*
+`s2_a_reply_del_carries_the_delete_envelope`, a name kept from before
+snapshots.*
 
 ## §3 The owner is authoritative (S4)
 
@@ -71,7 +85,7 @@ Within W, the consumer GETs `plans/b`, then the selector `plans/*`.
 **Expected.**
 1. The tool reports the storage as a finding: no storage may answer on an
    owner's state keys.
-2. The consumer's query carries target `All` and consolidation `Latest`,
+2. The consumer's query carries target `All` and consolidation `None`,
    and the owner alone answers it.
 
 ## §4 Last-known from an archive (S5, S6)
@@ -101,10 +115,12 @@ GETs the owner.
    still records the plan's deletion.
 
 **Expected.**
-1. The archive re-reads the owner's collection before serving it as
-   confirmed. The owner answers the plan with a `reply_del`, and the archive
-   drops it. Should the owner's token arrive before the route to its state
-   queryable, the first read returns empty, and a retry drops the plan.
+1. The archive re-reads what it records of the owner's collection, the
+   one plan, by a member read of its key, before serving it as confirmed.
+   The owner's snapshot of the plan holds its tombstone, and the archive
+   drops it. Should the owner's
+   token arrive before the route to its state queryable, the first read
+   returns empty, and a retry drops the plan.
 2. The empty reply sets drop nothing, however often the archive retries.
    The archive keeps serving the plan, with `confirmed: false`.
 3. When the link heals, the vehicle's archive aligns from the owner-side
@@ -115,19 +131,32 @@ GETs the owner.
 *The reference (`zenkey/tests/state.rs`) refuses every read in step 2: a
 refusal of one read alone would be healed by the retry.*
 
-## §6 A window shorter than the outage (S3)
+## §6 A window shorter than the outage (S3, §4.4)
 
-**Steps.** As §5.1, but the link stays cut for longer than 60 s.
-1. The deployment has configured W to the face's maximum outage.
-2. W is left at 60 s.
+**Setup.** As §5. The owner-side archive of §5.3 keeps each tombstone for
+W. The owner also serves §1's `status`, a per-key resource (core §4.2),
+which the vehicle's archive records too.
+
+**Steps.** As §5.1, but the link stays cut for longer than 60 s, and the
+owner deletes `status` too while it is cut.
+1. W is left at 60 s, and the owner is back at the heal.
+2. W is left at 60 s, and the owner stops before the heal, as in §5.3.
+3. As step 2, with W configured to the face's maximum outage.
 
 **Expected.**
-1. After the heal, the owner still answers the deleted plan with
-   `reply_del`, and the archive drops it.
-2. The owner answers nothing for the plan: there is no positive evidence.
-   The archive keeps serving the deleted plan, with `confirmed: false`.
+1. The owner answers the plan's key with a snapshot of no entry:
+   positive evidence, whatever W. The archive drops the plan. The
+   owner answers nothing for `status`, whose tombstone is gone: there is
+   no positive evidence. The archive keeps serving `status`, with
+   `confirmed: false`.
+2. The owner-side archive answers per key, and its tombstones are gone
+   with W. The vehicle's archive keeps serving the plan and `status`, with
+   `confirmed: false`.
+3. The owner-side archive answers each with its `reply_del`, and the
+   vehicle's archive drops both.
 
-The second run is the failure that rule S3's raised window prevents.
+The unconfirmed keys are the failure that rule S3's raised window
+prevents: a per-key resource's, and one aligned from a peer archive.
 
 *Spike S5 measured this resurrection with a storage ("after the producer's
 window": wrong without replication).*
@@ -159,18 +188,17 @@ window": wrong without replication).*
    11, then rev 12. The tool keeps §4.2's merge for as long as it follows
    (observer §4.1). It keeps the later arrival across two runs, so rev
    11, then rev 12.
-5. **Inside the seed.** The owner writes rev 10. A second session holds a
-   queryable on the plans that is not `complete`, and keeps each query it
-   takes. A consumer and a tool each subscribe, then make S4's GET, which
-   the owner answers and the second queryable holds open. While it is
-   open, the owner restarts and writes rev 11 under its new run, which
-   both hear live. Then the second queryable lets the GET end, and the
-   owner writes rev 12.
-   - `Latest` delivers the owner's reply of rev 10 at the GET's end,
-     after rev 11's live sample (core §4.1).
-   - The consumer accepts rev 11, then the reply, which carries the old
-     run. It holds rev 10 until rev 12, which it accepts.
-   - The tool keeps the later arrival too: it holds rev 10, the reply that
+5. **Inside the seed.** The owner writes rev 10. A consumer and a tool
+   each subscribe, then make S4's GET. The test holds the owner's answer,
+   a snapshot whose entry is rev 10, as §10 holds one. While it is held,
+   the owner restarts and writes rev 11 under its new run, which both
+   hear live. Then the test releases the old answer, and the owner writes
+   rev 12.
+   - Under `None`, the answer arrives when it is released, after rev 11's
+     live sample (core §4.1).
+   - The consumer accepts rev 11, then the answer's entry, which carries
+     the old run. It holds rev 10 until rev 12, which it accepts.
+   - The tool keeps the later arrival too: it holds rev 10, the entry that
      arrived last, until rev 12.
 6. **Ahead.** The owner's clock runs 2 s ahead, beyond the router's HLC
    delta, and it holds a subscription to a router-stamped heartbeat. It
@@ -243,35 +271,37 @@ owner from a session of its own, whose puts, replies and `reply_del`
 carry the envelopes it writes (core §4.3).
 
 **Steps.**
-1. The late joiner subscribes to `plans/*`, then GETs `plans/*` with `All`
-   + `Latest`.
+1. The late joiner subscribes to `plans/*`, then GETs `plans/**`, a
+   collection read.
 2. The owner takes the GET and holds it. It puts `plans/d` (v1, seq 3).
-3. The owner makes its answer: `plans/a` (v1, seq 1), a `reply_del` for
-   `plans/b` (seq 2), and `plans/d` (v1, seq 3).
+3. The owner makes its answer, a snapshot as of seq 3: `a` (v1, seq 1),
+   a tombstone `b` (seq 2), and `d` (v1, seq 3).
 4. Before it sends the answer, the owner puts `plans/a` (v2, seq 4), then
    `plans/c` (v1, seq 5).
 5. The owner sends its answer and ends the GET.
 6. **The control:** the other order. The late joiner GETs first; the owner
-   holds the GET, makes its answer (`plans/a` and the `reply_del` for
-   `plans/b`), puts `plans/c` (v1, seq 5), and answers; the late joiner
-   subscribes once the answer has arrived.
+   holds the GET, makes its answer (`a` and the tombstone `b`), puts
+   `plans/c` (v1, seq 5), and answers; the late joiner subscribes once the
+   answer has arrived.
 
 **Expected.** When the GET has ended, the late joiner holds:
-1. `plans/a` as v2 with seq 4. The reply (seq 1) is older than the live
+1. `plans/a` as v2 with seq 4. The entry (seq 1) is older than the live
    put, and is dropped by the merge, never shown after v2.
-2. `plans/c` as v1 with seq 5: the put the GET's answer does not hold
-   arrived through the subscription.
-3. `plans/b` as a deletion with seq 2: the `reply_del` reached the merge
-   as a deletion, never as an absence.
-4. `plans/d` as v1 with seq 3, once: the live put and the reply carry one
+2. `plans/c` as v1 with seq 5: the put the snapshot does not hold arrived
+   through the subscription. The omission rule keeps it: its seq is above
+   the snapshot's asof, 3.
+3. `plans/b` as a deletion with seq 2: the tombstone reached the merge as
+   a deletion, never as an absence.
+4. `plans/d` as v1 with seq 3, once: the live put and the entry carry one
    stamp, and are one mutation.
-5. Its seed ran to its final reply, with no error reply: complete.
+5. The snapshot complete at its one page, before the GET's final reply.
 6. In the control, `plans/c` is missing: it was put after the answer was
    made and before the subscription existed.
 
 *The reference (`zenkey-fleet/tests/seeding.rs`) runs it through the
 fleet's seeded subscription, the one zengui's tree seeds through, and the
-control on the bare session.*
+control on the bare session. `conformance/seed/snapshot.json` states the
+merge and the omission rule as a pure fixture.*
 
 ## §11 A late joiner's merge: unstamped samples, equal times, a key that is not concrete (§4.2)
 
@@ -413,3 +443,66 @@ subscription (`zenkey-fleet/tests/seeding.rs`,
 `zenkey/tests/profile_redundancy.rs`'s
 `a_stream_keys_seq_continues_across_a_takeover`.
 `conformance/seed/inband.json` states the order as a pure fixture.*
+
+## §14 A collection's snapshot, its pages, and a seed from it (S2, S4, §4.2, §7.5)
+
+**Setup.** As above. The owner holds 32 plans, put under one run, each a
+record of 110 bytes: `plans/v00` to `plans/v30`, and `plans/vehicle-01`,
+the consumer's. Its pages then hold 8 entries each, at most 975 bytes. A tool T, a late joiner, subscribes
+to `plans/*` before each GET. For steps 3, 5 and 7, a session of the
+test's own plays the owner, writing the snapshots it is given, as §10's
+does.
+
+**Steps.**
+1. **A collection read.** T GETs `plans/**`.
+2. **A member read.** T GETs `plans/v07`, then `plans/*`, then
+   `plans/v99`, which the owner does not hold.
+3. **A page lost.** The owner's answer to T's `plans/**` holds pages 0,
+   1 and 3 of its 4. T holds `plans/v99` from an earlier seed, which the
+   owner no longer has.
+4. **The control: `Latest`.** As step 1, with T's GET under `Latest`.
+5. **A delete beyond the window.** T holds the 32 plans of step 1, and
+   the consumer its plan. Their links to the router are cut for longer
+   than W. Meanwhile the owner deletes `plans/v05` and
+   `plans/vehicle-01`. At the heal T seeds again, and the owner puts
+   `plans/v31` between taking T's GET and sending its answer. The
+   consumer GETs its plan again.
+6. **An empty collection.** The owner deletes every plan, and W passes.
+   T GETs `plans/**`.
+7. **Two instances answer.** As step 1, but a second instance of the
+   owner, under another run, answers too: its snapshot lists
+   `plans/x1` alone.
+
+**Expected.**
+1. One snapshot on `…/state/plans`, in 4 pages with indices 0 to 3, the
+   last with its more bit 0. Each page is within 1,024 bytes, and all four
+   have one run, asof and time. Each live entry's id is a vehicle, its seq
+   its put's, and its confirmation 0. T holds the snapshot complete at its
+   last page, before the GET's final reply, and holds the 32 plans.
+2. `plans/v07`: one snapshot on `…/plans/v07`, one page whose one entry
+   has the empty id. `plans/*`: 32 such snapshots, each on its plan's own
+   key, and none drops another plan T holds. `plans/v99`: one page with
+   no entry, on `…/plans/v99`.
+3. T holds the snapshot incomplete. It merges the entries of pages 0, 1
+   and 3, and drops nothing: it still holds `plans/v99`. It reads the
+   collection again, and that snapshot, complete, drops `plans/v99`.
+4. T receives one page of the four: `Latest` keeps one reply per key, and
+   the four share theirs. Its index shows the snapshot incomplete, so T
+   drops nothing (core §4.2, "Why `None`").
+5. The owner's tombstones went with W, and its snapshot lists the 30
+   plans left. T's omission rule drops `plans/v05` and `plans/vehicle-01`:
+   the deletes reach T beyond the window. `plans/v31`, heard live at a seq
+   above the snapshot's asof, is kept, though the snapshot does not list
+   it. The consumer's member read draws one page with no entry on
+   `…/plans/vehicle-01`, and the consumer drops its plan.
+6. One page with no entry, complete: the owner's word. T's omission rule
+   drops every plan it held.
+7. Both snapshots arrive, one for each run, and both are complete. Each
+   one's omission rule spares the other run's plans, which T heard after
+   it asked the GET. T holds the 32 plans and `plans/x1`, whichever
+   snapshot arrived first.
+
+*The reference runs steps 1, 2 and 4 in `zenkey/tests/state.rs`, and
+steps 3 and 5 to 7 through the fleet's seeded subscription
+(`zenkey-fleet/tests/seeding.rs`). `conformance/seed/snapshot.json` states
+the merge, pages and the omission rule as a pure fixture.*

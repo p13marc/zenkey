@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.26 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.27 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.96 ([`core.md`](core.md)) |
+| **Written against** | core 0.99 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
@@ -169,7 +169,9 @@ Its instances, each normative where it lives:
   not complete (§3.5); absence is established only by a complete read
   (§3.6).
 - **State** (core S4–S6; §4). Silence from the owner's GET is not "no
-  value". An archive's answer is last-known, never current (core S6).
+  value", and neither is an incomplete snapshot. A complete snapshot,
+  empty or not, is the owner's word for its collection (core §4.2). An
+  archive's answer is last-known, never current (core S6).
 - **Contracts** (core §8.4, §9.6). A bundle that no holder served, or that
   failed verification, is "contract unavailable", not "no contract".
 - **A window** (§5.2). What a window did not hear may be live, unless the
@@ -649,6 +651,14 @@ and merge, a selector over several owners and "Observing S1" stay in core
 
 ### 4.1 A seed
 
+- **A tool's GET is S4's.** A tool MUST make a state GET with target
+  `All` and consolidation `None`, and merge its replies per key as core
+  §4.2 merges a seed's, snapshots' entries and the omission rule
+  included. `[F: seed/snapshot.json]` `[Sc: state.md §14]`
+  - Under `Latest` it would keep one page of a snapshot, and never hold
+    one complete (core §4.2, "Why `None`").
+  - To read a collection whole, it asks a collection read: the snapshot
+    key followed by `/**`, or a wider selector that includes it.
 - **A tool's merge lasts.** A tool keeps core §4.2's merge for as long as
   it follows. Within one run it orders by seq, plain or serial as the
   key's kind says (core §4.3). Across two runs it keeps the later arrival,
@@ -675,6 +685,13 @@ and merge, a selector over several owners and "Observing S1" stay in core
   - A GET that ran to its timeout seeds possibly incompletely. §3.3's
     reading of a liveliness GET applies to a state GET: in zenoh 1.10.1, a
     GET that reached its timeout ends with an error reply (core Appendix B).
+  - So does a snapshot it holds incomplete: a page lost, or one the
+    timeout cut off. Its entries stand, and the keys it did not list may
+    still be held.
+  - **Without the contract** a tool cannot map a snapshot's collection
+    index to a template, so it cannot tell which keys it holds are the
+    collection's. It applies no omission rule over that snapshot, and
+    shows the keys it held there as possibly stale. `[F: seed/snapshot.json]`
   - An owner absent at the GET seeds nothing for its keys. That is O5's
     silence, never "no state", and the subscription shows its keys as
     they change from then on.
@@ -684,7 +701,7 @@ and merge, a selector over several owners and "Observing S1" stay in core
 ### 4.2 S4's check against the admin space
 
 A **tool** checks S4 against the routers' storage admin space. A consumer
-cannot tell under `Latest` which replier answered.
+cannot tell from its replies which replier answered.
 - **The admin space is off by default** in zenoh 1.10.1 (core Appendix B). A
   deployment that wants S4 checked enables it, read-only, for the tools'
   principals (core §4.2). Without it, a tool reports the check
@@ -794,6 +811,10 @@ cannot tell under `Latest` which replier answered.
 
 ### 4.5 An archive's alignment
 
+- **From snapshots.** An archive aligns a collection from its owner's
+  snapshot, and drops a key that a complete one omits (core §4.4). A tool
+  still sees each key's `confirmed` alone, never whether a snapshot
+  reached the archive complete (below).
 - **What a tool can see.** An archive publishes no alignment status
   at this version: not when it last aligned, from where, or how many
   attempts it made. A tool sees each key's `confirmed` and nothing more, so
@@ -819,8 +840,10 @@ owner's rule and an event's rate stay in core §2.7, and the QoS in core
 
 - **A complete reading of a state** is an S4 GET to its owner (core §4.2) that
   ran to its final reply, with no error reply: a GET that reached its
-  timeout ends with one (core Appendix B). Its members are the keys answered
-  with a value. A `reply_del` is not a member.
+  timeout ends with one (core Appendix B). Each snapshot it holds is
+  complete. Its members are the keys answered with a value: a snapshot's
+  live entries and a per-key resource's replies. A tombstone and a
+  `reply_del` are not members.
 - **A complete reading of a stream or an event** is a subscription window
   that hears every member live at its end. It is complete when all three
   hold:
@@ -1393,8 +1416,8 @@ tooling guide's rules that carry evidence were promoted with text 0.1.
 | `conformance/envelope/vectors.json`, `calls.json`, `conformance/errors/forms.json` | §7.3, a call's forms first |
 | `conformance/frame/apply.json` | §7.6 |
 | `scenarios/presence.md` §4, §6–§10 | §1, §2, §3 |
-| `conformance/seed/` (`inband.json`, `merge.json`) | §4.1 |
-| `scenarios/state.md` §1, §7, §11, §12, §13 | §4.1 (§7 steps 4 and 5: a tool's merge across two runs, after its seed and inside it; §13 a stream key's serial order), §4.3, §4.4 (§1), §8.1, §8.3 |
+| `conformance/seed/` (`inband.json`, `merge.json`, `snapshot.json`) | §4.1 (`snapshot.json`: a seed over snapshots, the omission rule, a tool without the contract) |
+| `scenarios/state.md` §1, §7, §11, §12, §13, §14 | §2, §4.1 (§7 steps 4 and 5: a tool's merge across two runs, after its seed and inside it; §13 a stream key's serial order; §14 a tool's GET under `None`, pages and the omission rule), §4.3, §4.4 (§1), §5.2, §8.1, §8.3 |
 | `scenarios/security.md` §3 | §4.2 |
 | `scenarios/budget.md` §1–§3 | §5.2, §5.3 |
 | `scenarios/operations.md` §3, §5, §8, §9 | §2, §3.2 (§8 step 6), §6.1, §7.2 (§5 step 2), §7.3 (§9) |
