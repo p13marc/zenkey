@@ -6,6 +6,16 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a heartbeat's time from the catalog's epoch (#1080)
+
+`freshness.v2` 0.7 §2.4: an owner's heartbeat counts its time from the
+deployment epoch, the catalog's, as its frames and packed records do.
+
+| Before | Now | Notes |
+|---|---|---|
+| `gen`, `serve` with `--catalog`: a `freshness.v2` heartbeat's time in Unix seconds, which a reader under the catalog's epoch dates 56 years late | from the catalog's epoch, beside the same owner's frames; without `--catalog`, Unix seconds as before | an instant with no code under the epoch is written as the unknown time (all ones) |
+| `catalog show`, `catalog check`, `check face` on zenoh-modem's `catalog.json`: `e3a529fe`, 9 entries | `0ff6bf6d`, which succeeds `e3a529fe` and appends `freshness.v2` 8756e6a6 at index 9 | the example's catalog, not the tool, moved |
+
 ## Unreleased (`main`, zk2) — a call in its forms alone, the bare wire removed (#985 C4d)
 
 Core 0.99 removes the bare wire: a call with no form, its error in a

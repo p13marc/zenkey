@@ -2392,6 +2392,9 @@ impl Service {
             return Ok(());
         };
         let r = hb.imp.resource(crate::heartbeat::HEARTBEAT)?.clone();
+        // Its time counts from the catalog's epoch, as the frames' do
+        // (v2 §2.4, #1080).
+        let epoch = self.deployment_epoch();
         let mut tasks = Vec::new();
         for s in &self.impls {
             let Some(layout) = &s.heartbeat else {
@@ -2440,6 +2443,7 @@ impl Service {
                 store: Arc::clone(&self.store),
                 minter: Arc::clone(&self.minter),
                 period,
+                epoch,
             };
             tasks.push(tokio::spawn(beat.run(self.closed.subscribe())));
         }
