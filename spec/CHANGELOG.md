@@ -3,6 +3,119 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.97 — 2026-11-02: a collection's snapshot defined (#977)
+
+Epic #975, zk2c, makes the wire bandwidth-first. An owner answers a state
+GET with a reply per key, and zenoh 1.10.1 rewrites each reply's key to
+its full text at every router. With the responder's id, that is about
+120 bytes over each member's value. #977's design memo answers a whole
+collection in one reply instead, in five chunks. This version is E1. §7.5
+defines form 7, the snapshot, which 0.72 reserved. No rule adopts it yet:
+E2 reads it beside today's replies, and E3 moves owners and readers onto
+it.
+
+**Added: §7.5, the snapshot.**
+- **The layout.** A page is a GET reply's payload, `CH · run · asof ·
+  body`. CH's tag is the collection's type's, as a mutation's is.
+- **The body** is the time the owner built the snapshot, the page, the
+  collection's index, then the live entries and the tombstones, each
+  list counted.
+- **The page** is one integer, the page's index × 2, plus 1 when a later
+  page follows.
+- **An entry** is its id below the reply's key, a flags byte, its own run
+  where it is not the header's, and its seq. A live entry adds its
+  confirmation's time where it has one, then its record's length and
+  bytes.
+- **The flags** hold the run bit, the confirmation in 2 bits and the run's
+  width. The confirmation is 0 for no horizon, 1 for vouched for at the
+  snapshot's time, and 2 for its own time, `conf`.
+- **A time** is 32 bits of seconds from the deployment epoch, then 16 of
+  milliseconds. All ones then 0 is the unknown time.
+- **An integer** is LEB128, at most 5 bytes and 2^32 − 1, in its shortest
+  form.
+- **asof** is a seq of the snapshot's run. The snapshot reflects every
+  state mutation of that run at or below it.
+- **Reading** refuses, reading the fields in order: `short`, `leb128`,
+  `time`, `id`, `order`, `flags`, `run` and `trailing`. A writer writes no
+  page the reading refuses, and every page accepted writes back.
+- **Pages.** The entries, live and tombstones together in the byte order
+  of their ids, fill page 0, then page 1. A page takes the next entry
+  while its bytes stay within the owner's page size, and always takes its
+  first. An implementation that pages MUST page so. A snapshot is
+  complete when a reader holds every index up to a page whose more bit is
+  0.
+- **Sizes.** A page with no entry is 16 bytes. A live entry is 6 bytes
+  over its id and record, and a tombstone 5 over its id.
+
+**Changed: §7.5's parse.** Form 7 is no longer reserved, so `form` is
+form 4 alone.
+- **A put carries a snapshot** too: a GET's reply that carries one is a
+  put to the parser.
+- **`key_kind`** refuses a snapshot on a key whose kind token is neither
+  `state` nor `@state`, as it refuses a frame off a `stream` key.
+- **Elsewhere,** a snapshot is now `sample_kind`, where it was `form`: on
+  a delete's attachment, a query, a call's reply and a `reply_err`.
+- **The body is taken unread,** as a heartbeat's is. Its own reading
+  follows.
+
+**Changed: §12.** Reading or writing a snapshot's page, and cutting a
+snapshot into pages, join the static acts.
+
+**Decided here, where the memo left it open or said otherwise.**
+- **The sample.** The memo had a reply carry a snapshot, and refuse a
+  mutation. But 0.92 made a GET's reply that represents a put a put to
+  the parser. One GET's replies hold both forms: S2's per-key replies stay
+  for three resources, and a selector can span both. So a put carries a
+  snapshot, and its key's kind token checks it.
+- **The page** is an integer, not the memo's more bit and 7-bit index. A
+  state collection of 100,000 members, as `zs.catalog.v1` declares, needs
+  far more than 128 pages of 1 KB. The integer stays one byte to page 63.
+- **Integers in their shortest form,** at most 5 bytes, so that every
+  page writes back to its bytes (`leb128`, new).
+- **An id** is empty or plain chunks joined by `/`, since a reader forms a
+  key from it (`id`, new).
+- **Order.** Each list rises by its ids' bytes, and no id is both live and
+  a tombstone (`order`, new). The paging rule takes both lists together.
+- **An entry's own run** that is the header's is refused (`run`, new), so
+  each run has one spelling.
+- **The unknown time** is t32 all ones with ms16 0. Every other ms16 with
+  it is unused, as is any ms16 above 999.
+- **The refusals' order** is the fields' reading order. The memo listed
+  every `short` first, which a reader cannot know before it reads the
+  flags.
+- **The paging rule** is greedy. A page larger than the page size holds a
+  single entry, or none. A snapshot with no entry is one page.
+- **The collection's index** counts every state resource of the reply
+  key's kind token, with a horizon or without. A heartbeat's collections
+  are only those with one.
+
+**The evidence.**
+- **`envelope/vectors.json`:** 22 headers and 159 cases, 12 of them new.
+  Seven change their token: three snapshots on a put parse or are
+  `short`, and four elsewhere are `sample_kind`.
+- **`envelope/carries.json`:** 28 reads, 12 new. A reserved form on a
+  state key is now form 4's.
+- **`snapshot/bodies.json`,** new: 39 writes, 12 of them refused, 109
+  reads, 79 refused, and 13 snapshots paged, 2 refused.
+- **Written by an independent reading** of the text, in Python with the
+  standard library, and checked by a second that pages by arithmetic.
+  They agree on 64,000 random pages and snapshots too. Checked, never
+  blessed.
+
+**Deliberately not changed.**
+- **No rule adopts the snapshot.** S2 to S4 stand: an owner answers a GET
+  per key, and a reader reads with `Latest`.
+- **E3's rules wait for E3:** which key answers what, consolidation
+  `None`, the omission rule, asof's and a confirmation's owner rules, and
+  archives.
+- **§4.3's table,** `freshness.v2` and `link.v1` §2.11 are unchanged.
+- **`observer.md`** is unchanged: how a tool shows a snapshot is E2's.
+- **No section number** and no fingerprint moves.
+
+**The figures.** `RULES.md` lists 250 rules, 4 more: §7.5's reading of a
+page, its writing, its write-back and the paging rule. The glossary gains
+"Snapshot".
+
 ## 0.96 — 2026-11-02: an owner on a first hop holds its instance token alone (#982 H1)
 
 A session that is its router's client sends each token and queryable it

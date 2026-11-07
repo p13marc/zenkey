@@ -56,8 +56,8 @@ The owner, consumer and caller sections each point to them.
 | [Caller](#caller) | 18 |
 | [Deployment](#deployment) | 18 |
 | [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 73, 27 of them a reader's |
-| [Implementation: the static rules](#implementation-the-static-rules) | 63 |
-| Every rule, once | 246 |
+| [Implementation: the static rules](#implementation-the-static-rules) | 67 |
+| Every rule, once | 250 |
 | [Rule ids](#rule-ids) | 85 |
 
 ## Owner
@@ -768,6 +768,10 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§7.5](core.md#75-the-zk2c-envelope) | An implementation MUST compute a digest so. | `[F: heartbeat/digests.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | **Reading a body.** … An implementation MUST refuse a body for the first of these that applies, in this order, naming the refusal: (3 items) | `[F: heartbeat/bodies.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | Every body an implementation accepts MUST write back to the same bytes. | `[F: heartbeat/bodies.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | **Reading a snapshot's body.** … An implementation MUST refuse a body for the first of these that applies, reading its fields in order, naming the refusal: (8 items) | `[F: snapshot/bodies.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | An implementation MUST NOT write a page that this reading refuses. | `[F: snapshot/bodies.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | Every page an implementation accepts MUST write back to the same bytes. | `[F: snapshot/bodies.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | An implementation that cuts a snapshot into pages MUST cut it so. | `[F: snapshot/bodies.json]` |
 
 ### [core §7.6 Packed records](core.md#76-packed-records)
 
