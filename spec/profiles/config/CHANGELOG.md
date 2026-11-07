@@ -7,6 +7,54 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `config.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## config.v2 0.3 — 2026-11-07: editorial: Appendix A reads `config.v1`'s error as it is sent, no rule changed (#985)
+
+Core 1.00 is #985's C4d, and removes the bare wire, a call with no form.
+Its error travelled in an envelope of JSON, CBOR or protobuf, which core
+§5.2 defined.
+
+**Changed: Appendix A's error row, which states no rule.** It set "the
+JSON error envelope (core §5.2)" against core §7.5's error form. Since
+core 0.94, `config.v1` refuses in the error form too, and core §5.2 now
+defines no envelope. The row sets `config.v1`'s `ConfigError` detail in
+JSON, the device's words in its `detail`, against this text's `Error`
+record, the device's words in the message (§2.5).
+
+**Restates `config.v1` text 0.12,** where it said 0.11. 0.12 changed no
+rule (below).
+
+**Deliberately not changed.**
+- **No rule and no fixture.** §2.5's error form is unchanged.
+- **Written against core 0.94**, still.
+
+## 0.12 — 2026-11-07: editorial: the error, in core §7.5's form, no rule changed (#985)
+
+Core 1.00 is #985's C4d, and removes the bare wire: a call with no form,
+whose error travelled in an envelope of JSON, CBOR or protobuf. Since
+core 0.94 every owner refuses in core §7.5's error form, and core 0.94's
+entry said that §2.5's "the envelope is core §5.2's" read as §5.2's
+error. Core §5.2 now defines no envelope, so this text names the error
+and its form.
+
+**Restated, stating no new rule.**
+- **§0's "First answer"** is the value or the error an owner sent, where
+  it said "the reply, or the error envelope".
+- **§2.5, "The error."** It is core §5.2's, in core §7.5's error form,
+  where it said "The envelope is core §5.2's". Only `app` carries a
+  detail, a `ConfigError` in its JSON bytes. The rest of the bullet is
+  unchanged.
+- **§2.15's list** names an error's `message` or `detail`, where it said
+  an error envelope's.
+- **Appendix A's error row** names core §5.2's error, in core §7.5's
+  error form, where it said core §5.2's envelope.
+- **`redaction.json`'s description** says "an error", where it said "an
+  error envelope". No case changes.
+
+**Deliberately not changed.**
+- **No keyword and no fixture's expectation.** The owner refuses as it
+  did since core 0.94: §2.15's MUST NOT names the same fields.
+- **Written against core 0.96**, still: nothing here needs a later core.
+
 ## config.v2 0.2 — 2026-11-07: zk2py round 102's findings answered (#609, #985)
 
 zk2py's round 102 read `config.v2` 0.1 cold, with its six fixtures, and

@@ -7,6 +7,36 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `telemetry.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## 0.9 — 2026-11-07: editorial: §2.6 reads a CBOR map in its own words, no rule changed (#985)
+
+Core 1.00 is #985's C4d, and removes the bare wire: a call with no form,
+whose error travelled in an envelope of JSON, CBOR or protobuf. Core
+§5.2's decoding of that envelope goes with it. §2.6 read a CBOR map "as
+the envelope's are read (core §5.2)", so that reading needs its own
+words first.
+
+**Restated: §2.6, "CBOR".** A map is read as its pairs: each key a text
+string, and no key twice. The simple value `undefined` is read as
+`null`. These are the three readings the citation named after its
+colon, and nothing else of the envelope's decoding.
+
+**Removed: §2.6's sentence on the envelope's `null`.** "A member written
+`null` is present" said that core §5.2's "a `cause` or `detail` that is
+`null` is absent" was the envelope's own rule. That rule is gone, so the
+sentence has nothing left to set apart.
+
+**Changed: `samples.json`'s F-144 note.** Its map with a duplicate key is
+read "as §2.6 reads one", where it said "as core §5.2 reads one". The
+case and its expectation are unchanged.
+
+**Deliberately not changed.**
+- **No rule.** A CBOR sample reads as it did: the readings are the same,
+  stated here instead of cited. The reference's reader,
+  `zenkey_model::telemetry::decode::cbor`, never used the envelope's
+  decoder.
+- **Written against core 0.35**, still: nothing here needs a later core.
+- **`telemetry.v2` restates text 0.7**, and stays correct: no rule moved.
+
 ## telemetry.v2 0.4 — 2026-11-07: editorial: Appendix B's counter widths, no rule changed (#609, #991)
 
 zk2py's round 102 read `modem.v3` 3.3's widths from `Readings` (F-493).

@@ -4165,7 +4165,7 @@
         "unit": "By",
         "unit_from": "declared"
       },
-      "note": "F-144: a CBOR map with a duplicate key, as core §5.2 reads one: undecodable",
+      "note": "F-144: a CBOR map with a duplicate key, as §2.6 reads one: undecodable",
       "resource": {
         "annotations": {
           "telemetry.kind": "counter",

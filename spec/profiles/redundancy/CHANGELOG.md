@@ -4,6 +4,21 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.10 — 2026-11-07: editorial: the scenarios' §8 says "error", no rule changed (#985)
+
+Core 0.94 moved every call onto core §7.5's forms, and its entry left a
+profile's scenario that says "envelope" to its profile's next version.
+Core 1.00 removes the bare wire, whose error travelled in an envelope,
+so no reply error is one now.
+
+**Changed: `scenarios.md` §8, expected 3, which states no rule.** "No
+value and no error from B", where it said "no envelope".
+
+**Deliberately not changed.**
+- **No rule, no fixture and no step.** B, a standby, still declares no
+  queryable, so the call finds none.
+- **Written against core 0.73**, still.
+
 ## 0.9 — 2026-11-01: editorial: core 0.73's runs and session posture cited, no rule changed (#976)
 
 Core 0.73 orders state by an owner's run and seq, carried in band. Its
