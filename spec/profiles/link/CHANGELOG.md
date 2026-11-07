@@ -7,6 +7,24 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.10 — 2026-11-07: editorial: §2.21 points to a tool's scope, the face's plan, no rule changed (#990 V1)
+
+Observer text 0.29 makes a tool's scope across a face the face's plan,
+given the policy and the face. This text points to it from the reader's
+section.
+
+**Added: §2.21, "A tool's scope".** A tool given this policy and the
+face declares nothing the plan keeps off the face (observer §7.5).
+- **Why here.** §2.21 is where a reader across the face learns what it
+  declares again. A declaration for a resource that never crosses costs
+  the face at every reconnect, and again after every two horizons where
+  `arq` is false.
+
+**Deliberately not changed.**
+- **No rule of this text.** The rule is observer §7.5's. The plan is
+  §2.3's, unchanged, and no fixture of this profile moves.
+- **The header** is still written against core 0.100.
+
 ## link.v2 0.9 — 2026-11-07: §2.11, windows floored only where a tombstone alone proves a delete (#977 E5)
 
 Core 0.100 (#977's E3) answers a state GET by snapshot. A complete
