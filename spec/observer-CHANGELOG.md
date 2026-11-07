@@ -13,6 +13,104 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.29 — 2026-11-07: across a face, the face's plan for a scope and CH's tag for a revision; a packed record never sniffed (#990 V1, V2)
+
+#990's black-box run read zenoh-modem's RF face with `zenctl`. Its scope
+held 103 selectors, where one frame crosses, and not the heartbeat.
+Given modem.v3's four revisions, every sample read `ambiguous`. A packed
+record whose type was not in hand was sniffed as text. This version is
+the text of the design's V1 and V2. The reference follows it.
+
+**Changed: §7.5, now "Reading across a face"** (it was "Subscribing
+across a face").
+- **The heartbeat.** An interface in hand whose contract uses
+  `freshness.v2` and has a collection adds its heartbeat's exact key to
+  the scopes. A `freshness.v2` contract adds no scope of its own.
+- **With a face policy and its face**, the scopes are what the face's
+  plan lets cross. To subscribe, that is each crossing resource and each
+  crossing heartbeat. To GET, it is each state resource, since a request
+  crosses by grant. A tool given the face SHOULD NOT declare a scope for
+  a resource the plan keeps off it. `[F: scope/faces.json]`
+- **The plan** is derived from the policy and the contracts in hand,
+  each listed service taken to implement them all. A plan the profile
+  refuses gives no scope.
+- **A selector given.** One that includes a scope is narrowed to it. One
+  that meets a scope without including it stays as given. A tool MUST
+  NOT drop silently one that meets none: it refuses it.
+  `[F: scope/faces.json]`
+- **Why.** Each scope is a declaration across the face at every
+  reconnect. Where `arq` is false, one with a horizon is also declared
+  again after two horizons of silence. Nothing of a resource the plan
+  keeps off the face ends that silence, so it would cost the face for as
+  long as the tool reads.
+- **A heartbeat's horizon** for declaring again is the shortest of its
+  collections, as core §8.5 says. This text now says so too.
+- **The scope SHOULD** cites `scope/faces.json` beside its scenario.
+
+**Added: §7.5, "The revision of a key".** A tool that reads a mutation,
+a frame or a heartbeat with no descriptor naming the owner's revision
+MUST read it with the revision chosen in three steps.
+`[F: envelope/tags.json]`
+1. **The deployment's word:** the revisions held that give the key a
+   resource, and of those the ones the catalog given lists. One left is
+   the deployment's word for the owner's revision.
+2. **The tag:** of several, those whose tag is CH's.
+3. **The latest:** of several that read the sample alike, the one at the
+   catalog's highest index.
+
+- **By tag.** Steps 2 and 3 are the tool's reading of CH, and it says so.
+  Such a revision maps no snapshot's index.
+- **None left** is `not_held`, `no_resource`, `not_listed` or `tag`.
+  Several the third step cannot order are ambiguous. Either way the
+  sample reads as one whose type the tool does not hold.
+- **A heartbeat's revisions** are those of the interface it covers whose
+  contracts use `freshness.v2`.
+- **Squared with core §4.2.** Where no descriptor reaches a reader, core
+  §4.2 makes the owner's revision the deployment's word, and a catalog
+  that lists one revision names it. Step 1 is that rule. Steps 2 and 3
+  only read a record where that word leaves several.
+- **Why the latest.** A packed type grows behind its marker and keeps
+  its layout form, so a later revision reads an earlier writer's record.
+  A bundle states no minor, so the catalog is the only order a tool
+  across a face holds.
+
+**Added: §7.3, "CH's tag".** Only the packed kind defines a tag. So a
+record under a tag other than 0 is a packed record.
+- **Not its type's tag.** A tool MUST NOT decode a record as its
+  declared type under a tag that is not that type's. The refusal is
+  `tag`. `[F: envelope/tags.json]`
+- **No type held.** A tool that holds no type for a record under a tag
+  other than 0 MUST NOT sniff it. It shows it by its tag and size, as
+  `<packed record, tag t, n bytes>` would. `[F: envelope/tags.json]`
+- **Tag 0** is sniffed as before: every other kind carries 0, and so
+  does one packed type in 16.
+- §7.3's sniffing sentences now set aside a record under a tag other
+  than 0.
+
+**Evidence.** Two new fixtures, written from the text, checked by a
+second and independent reading, never blessed:
+- **`conformance/envelope/tags.json`**, 31 cases. They read modem.v3's
+  four published revisions and zenoh-modem's catalog `e3a529fe`, with
+  two of its predecessors. `carries.json` reads a key and bytes, and
+  these cases need the revisions held and a catalog, so they have a file
+  of their own.
+- **`conformance/scope/faces.json`**, 17 cases over zenoh-modem's rf0,
+  lora0 (SF12) and sat0 faces. The second reading takes their plans from
+  `link.v2`'s `plan.json`, cases 14, 17 and 18.
+
+**Deliberately not changed.**
+- **No core rule.** The tags of a packed type, a frame form and a
+  heartbeat are core §7.5 to §7.7's, and this text only reads them.
+- **`field` over a frame's records** is the reference's (#990 V2c). No
+  rule needs it, and the tooling guide lists no verb's readings.
+- **No `--revision` flag.** An operator's word for a revision stays a
+  later addition.
+- **zengui and zenwatch** have no face scope until #990's V7.
+- **The scenarios**, `constrained.md` §7 and §9, stand.
+- **`link.v2` 0.10** points to §7.5 from its §2.21.
+- **`RULES.md`** counts 255 rules, 78 of them the observer's.
+- **The header** is written against core 0.100.
+
 ## 0.26 — 2026-11-02: a provider found by its instance token, and a first hop (#982 H1)
 
 Core 0.96 lets an owner on a first hop hold its instance token alone.

@@ -55,9 +55,9 @@ The owner, consumer and caller sections each point to them.
 | [Consumer](#consumer) | 22 |
 | [Caller](#caller) | 18 |
 | [Deployment](#deployment) | 18 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 73, 27 of them a reader's |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 78, 27 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 67 |
-| Every rule, once | 250 |
+| Every rule, once | 255 |
 | [Rule ids](#rule-ids) | 85 |
 
 ## Owner
@@ -641,6 +641,8 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§7.3](observer.md#73-decoding-and-rendering) | A tool MUST NOT decode, render or judge a heartbeat's body as a record of its resource's type. | `[F: envelope/carries.json, heartbeat/bodies.json]` `[Sc: profiles/freshness/scenarios-v2.md §1]` |
 | [§7.3](observer.md#73-decoding-and-rendering) | A tool that shows or judges a call's reply MUST read a reply under `zenoh/bytes` as core §7.5's value form, and a reply error as core §5.2 reads it. | `[F: envelope/vectors.json, errors/forms.json]` `[Sc: operations.md §9]` |
 | [§7.3](observer.md#73-decoding-and-rendering) | The tool MUST NOT decode or sniff a refused value's bytes as a bare record. | `[F: envelope/vectors.json]` |
+| [§7.3](observer.md#73-decoding-and-rendering) | A tool MUST NOT decode a record as its declared type under a tag that is not that type's: a packed type's own (core §7.6), and 0 for a type of any other kind. | `[F: envelope/tags.json]` |
+| [§7.3](observer.md#73-decoding-and-rendering) | A tool that holds no type for a record whose tag is not 0 MUST NOT sniff it. | `[F: envelope/tags.json]` |
 | [§7.3](observer.md#73-decoding-and-rendering) | A tool that shows a payload it cannot decode MUST render it as its declared type and size, or through a plugin. | `[Sc: types.md §2]` |
 | [§7.3](observer.md#73-decoding-and-rendering) | **Honest rendering.** … It [a tool that shows a payload it cannot decode] MUST NOT show garbage, and MUST NOT drop the sample silently. | `[Sc: types.md §2]` |
 
@@ -650,12 +652,15 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 |---|---|---|
 | [§7.4](observer.md#74-shared-memory) | A tool SHOULD check the limit at start: the `RLIMIT_MEMLOCK` that core §7.4 asks a deployment to set to at least the pool plus 2 MiB. | none cited |
 
-### [observer §7.5 Subscribing across a face](observer.md#75-subscribing-across-a-face)
+### [observer §7.5 Reading across a face](observer.md#75-reading-across-a-face)
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§7.5](observer.md#75-subscribing-across-a-face) | A tool across a constrained face SHOULD subscribe as core §8.5 says, by the scopes the contracts in hand give for the addresses it reads. | `[Sc: constrained.md §7]` |
-| [§7.5](observer.md#75-subscribing-across-a-face) | A tool across a constrained face whose medium repairs no lost frame SHOULD declare a scope again when it has heard nothing on it for two of its horizons while its session's transport stayed up, as core §8.5 says. | `[Sc: constrained.md §9]` |
+| [§7.5](observer.md#75-reading-across-a-face) | A tool across a constrained face SHOULD subscribe as core §8.5 says, by the scopes the contracts in hand give for the addresses it reads. | `[Sc: constrained.md §7]` `[F: scope/faces.json]` |
+| [§7.5](observer.md#75-reading-across-a-face) | A tool given the face SHOULD NOT declare a scope for a resource the plan keeps off it. | `[F: scope/faces.json]` |
+| [§7.5](observer.md#75-reading-across-a-face) | **A selector given.** … A tool MUST NOT drop silently a selector it was given that meets none of its scopes: it refuses it, and says why. | `[F: scope/faces.json]` |
+| [§7.5](observer.md#75-reading-across-a-face) | A tool across a constrained face whose medium repairs no lost frame SHOULD declare a scope again when it has heard nothing on it for two of its horizons while its session's transport stayed up, as core §8.5 says. | `[Sc: constrained.md §9]` |
+| [§7.5](observer.md#75-reading-across-a-face) | **The revision of a key.** … A tool that reads a mutation, a frame or a heartbeat with no descriptor naming the owner's revision MUST read it with the revision chosen in this order. | `[F: envelope/tags.json]` |
 
 ### [observer §7.6 Frames](observer.md#76-frames)
 
