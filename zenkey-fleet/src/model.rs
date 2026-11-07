@@ -32,7 +32,10 @@
 //! frame's records are read by a reader per key into their field states
 //! ([`frame`], core §7.7). The devices a face policy lists on its device
 //! faces are the owners a tool knows are on a first hop, each reported
-//! link closed, never down ([`first_hop`], observer §3.11, #982 H3).
+//! link closed, never down ([`first_hop`], observer §3.11, #982 H3). A
+//! raw observer's scope across a constrained face is read from the
+//! contracts in hand and, given a face policy, the face's plan
+//! ([`face_scope`], observer §7.5, #990 V1).
 //!
 //! The rest is generation-neutral: a stream of samples becomes rates and
 //! latencies ([`stats`]) or a tree ([`tree`]), two payloads become a diff
@@ -77,6 +80,7 @@ pub mod deployment;
 pub mod desired;
 pub mod diff;
 pub mod examples;
+pub mod face_scope;
 pub mod first_hop;
 pub mod frame;
 pub mod health;

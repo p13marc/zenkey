@@ -16,10 +16,8 @@ use zenkey_fleet::{
     BundleStore, Catalog, ContractSet, ContractState, PresenceScope, ResolvedTarget, Revision,
 };
 use zenkey_model::canonical::Fingerprint;
-use zenkey_model::contract::Resource;
-use zenkey_model::grammar::{AMBIENT, Addr, GRAMMAR, IfaceId, KindToken, kind_selector};
-use zenkey_model::template::{Bindings, Segment};
-use zenoh::key_expr::{KeyExpr, OwnedKeyExpr};
+use zenkey_model::grammar::{AMBIENT, Addr, GRAMMAR, KindToken, kind_selector};
+use zenkey_model::template::Bindings;
 
 use crate::bus::Deployment;
 use crate::cli::{ContractArgs, RevisionSpec};
@@ -384,57 +382,41 @@ impl Reads {
             Reads::State => &[KindToken::ExplicitState],
         }
     }
-
-    /// Whether a resource of kind `token` delivers what a verb that reads
-    /// this way reads: every data kind a sample, `state` and `@state` a
-    /// GET's answer; an operation never.
-    fn takes(self, token: KindToken) -> bool {
-        match self {
-            Reads::Samples => token != KindToken::Op,
-            Reads::State => matches!(token, KindToken::State | KindToken::ExplicitState),
-        }
-    }
-
-    /// What a verb that reads this way subscribes to or asks, in words.
-    fn what(self) -> &'static str {
-        match self {
-            Reads::Samples => "stream, state or event",
-            Reads::State => "state",
-        }
-    }
 }
 
 /// A raw observer's scope across a constrained face (core §8.5, observer
-/// §7.5; #980 C1b), built from `--across-face` and the contracts in hand
-/// before any session opens.
+/// §7.5; #980 C1b, #990 V1), built from `--across-face` and the contracts
+/// in hand before any session opens: the fleet's
+/// [`zenkey_fleet::FaceScope`], with what only a CLI has around it.
 ///
 /// No descriptor crosses a face, so each address is taken, at the
 /// deployment's word, to implement every contract in hand (core R7), as
 /// `telemetry --across-face` takes it. The scope is one selector per
-/// resource under each address: a concrete resource's exact key, and a
+/// resource under each address, a concrete resource's exact key and a
 /// template's key with every parameter a wildcard, an event's ULID chunk
-/// too. Each subscription then declares the deepest prefix of its keys
-/// there is, and a put toward the tool rides it, where under `<ns>/zk2/**`
-/// it would carry its key's text after `zk2` (core Appendix B).
+/// too, and each interface's `freshness.v2` heartbeat by its exact key.
 ///
-/// With `--face-policy` and `--face` (#988 L4), the face's far side
-/// ([`zenkey_model::link::FarSide`]) comes with it: [`FaceScope::deployment`]
-/// opens every session with the face's transport and makes its
-/// `reply_timeout_ms` the default `--timeout` (core §8.1), and
-/// [`FaceScope::watch`] declares a selector again after two horizons of
+/// With `--face-policy` and `--face` (#988 L4, #990 V1), the scope is what
+/// the face's plan lets cross (observer §7.5), and the face's far side
+/// ([`zenkey_model::link::FarSide`]) comes with it:
+/// [`FaceScope::deployment`] opens every session with the face's transport
+/// and makes its `reply_timeout_ms` the default `--timeout` (core §8.1),
+/// and [`FaceScope::watch`] declares a selector again after two horizons of
 /// silence where the face's medium repairs no lost frame (core §8.5,
 /// observer §7.5), each selector's horizon read from the contracts in hand.
 #[derive(Debug, Clone)]
 pub struct FaceScope {
-    addresses: Vec<Addr>,
-    selectors: Vec<String>,
-    /// Each selector's horizon, in the same order: that of what it hears
-    /// ([`zenkey_model::link::redeclare_horizon`]), `None` with none.
-    horizons: Vec<Option<std::time::Duration>>,
-    /// The namespace the selectors carry in front: each is a wire key.
-    namespace: String,
-    /// The face's far side, given `--face-policy` and `--face`.
-    far: Option<zenkey_model::link::FarSide>,
+    scope: zenkey_fleet::FaceScope,
+}
+
+impl Reads {
+    /// The fleet's spelling of it.
+    fn face(self) -> zenkey_fleet::model::face_scope::Reads {
+        match self {
+            Reads::Samples => zenkey_fleet::model::face_scope::Reads::Samples,
+            Reads::State => zenkey_fleet::model::face_scope::Reads::State,
+        }
+    }
 }
 
 /// A `--face-policy` file the linter accepts (#1047): the one reading
@@ -491,8 +473,9 @@ pub fn far_side(policy: &std::path::Path, face: &str) -> Result<zenkey_model::li
 impl FaceScope {
     /// The scope `--across-face` asks for, or `None` when it was not given.
     /// Refused, exit 2: an address that is not `SYSTEM/SERVICE` with each a
-    /// plain chunk, no contract in hand, no resource of a kind the verb
-    /// reads, and a `--face-policy` [`far_side`] refuses.
+    /// plain chunk, no contract in hand, a `--face-policy` [`far_side`]
+    /// refuses, a face whose plan the profile refuses (observer §7.5: no
+    /// scope, its errors named), and nothing to read.
     pub fn of(
         face: &crate::cli::AcrossFaceArgs,
         contracts: &ContractSet,
@@ -503,8 +486,8 @@ impl FaceScope {
         if across.is_empty() {
             return Ok(None);
         }
-        let far = match (&face.face_policy, &face.face) {
-            (Some(policy), Some(name)) => Some(far_side(policy, name)?),
+        let policy = match (&face.face_policy, &face.face) {
+            (Some(path), Some(name)) => Some((path, name, face_policy(path)?)),
             _ => None,
         };
         let mut addresses: Vec<Addr> = Vec::new();
@@ -516,58 +499,44 @@ impl FaceScope {
                      (core §8.5)"
                 )
             })?;
-            if !addresses.contains(&addr) {
-                addresses.push(addr);
-            }
+            addresses.push(addr);
         }
-        if contracts.is_empty() {
-            return Err(unaskable!(
-                "--across-face builds its scope from the contracts in hand, since no descriptor \
-                 crosses a face (observer §7.5): give --contracts"
-            ));
-        }
-        let mut selectors: Vec<String> = Vec::new();
-        let mut horizons: Vec<Option<std::time::Duration>> = Vec::new();
-        for addr in &addresses {
-            for revision in contracts.iter() {
-                for r in &revision.contract().resources {
-                    if !reads.takes(r.token) {
-                        continue;
-                    }
-                    let s = resource_selector(addr, revision.iface(), r)?;
-                    let s = zenkey_fleet::with_namespace(namespace, &s);
-                    let h = zenkey_model::link::redeclare_horizon(revision.contract(), r);
-                    match selectors.iter().position(|x| *x == s) {
-                        // Two revisions of one interface: the shorter horizon.
-                        Some(i) => horizons[i] = shorter(horizons[i], h),
-                        None => {
-                            selectors.push(s);
-                            horizons.push(h);
+        let given =
+            policy
+                .as_ref()
+                .map(|(_, name, policy)| zenkey_fleet::model::face_scope::Face {
+                    policy,
+                    name: name.as_str(),
+                });
+        let scope =
+            zenkey_fleet::FaceScope::of(&addresses, contracts, namespace, reads.face(), given)
+                .map_err(|e| {
+                    let at = || match &policy {
+                        Some((path, name, _)) => {
+                            format!("--face-policy {} --face {name}", path.display())
+                        }
+                        None => "--across-face".to_owned(),
+                    };
+                    use zenkey_fleet::model::face_scope::Refusal;
+                    match e {
+                        Refusal::NoContracts => unaskable!(
+                            "--across-face builds its scope from the contracts in hand, since no \
+                         descriptor crosses a face (observer §7.5): give --contracts"
+                        ),
+                        Refusal::FarSide(_) | Refusal::Plan(_) => unaskable!("{}: {e}", at()),
+                        Refusal::Empty { .. } | Refusal::NoAddress | Refusal::Key { .. } => {
+                            unaskable!("--across-face: {e}")
                         }
                     }
-                }
-            }
-        }
-        if selectors.is_empty() {
-            return Err(unaskable!(
-                "--across-face: the contracts in hand declare no {} resource to read",
-                reads.what()
-            ));
-        }
-        Ok(Some(FaceScope {
-            addresses,
-            selectors,
-            horizons,
-            namespace: namespace.to_owned(),
-            far,
-        }))
+                })?;
+        Ok(Some(FaceScope { scope }))
     }
 
     /// `dep` read across the face (#988 L4): its sessions run the face's
     /// transport, and its default `--timeout` is the face's reply timeout
     /// (core §8.1). Unchanged without `--face-policy`.
     pub fn deployment(&self, dep: Deployment) -> Deployment {
-        match &self.far {
+        match self.scope.far() {
             Some(far) => dep.across(far.clone()),
             None => dep,
         }
@@ -576,12 +545,12 @@ impl FaceScope {
     /// The horizon of `selector`, a scope selector or one narrowed from
     /// it: the shortest of the face selectors it meets that have one.
     pub fn horizon(&self, selector: &str) -> Option<std::time::Duration> {
-        let sk = KeyExpr::new(selector).ok()?;
-        self.selectors
-            .iter()
-            .zip(&self.horizons)
-            .filter(|(f, _)| KeyExpr::new(f.as_str()).is_ok_and(|fk| fk.intersects(&sk)))
-            .fold(None, |acc, (_, h)| shorter(acc, *h))
+        self.scope.horizon(selector)
+    }
+
+    /// The face's far side, given `--face-policy` and `--face`.
+    pub fn far(&self) -> Option<&zenkey_model::link::FarSide> {
+        self.scope.far()
     }
 
     /// Watches `selector` on `monitor`: declared again after two horizons
@@ -594,8 +563,7 @@ impl FaceScope {
         selector: &str,
     ) -> Result<zenkey_fleet::WatchId> {
         let redeclares = self
-            .far
-            .as_ref()
+            .far()
             .is_some_and(zenkey_model::link::FarSide::redeclares);
         Ok(match self.horizon(selector).filter(|_| redeclares) {
             Some(h) => monitor.watch_across(selector, h).await?,
@@ -605,21 +573,39 @@ impl FaceScope {
 
     /// The namespace the scope's wire keys carry in front.
     pub fn namespace(&self) -> &str {
-        &self.namespace
+        self.scope.namespace()
     }
 
-    /// One selector per resource the contracts give under each address.
+    /// One selector per scope: each resource the contracts give under each
+    /// address and each heartbeat, or with a face what its plan lets cross.
     pub fn selectors(&self) -> &[String] {
-        &self.selectors
+        self.scope.selectors()
     }
 
     /// The addresses across the face, as `--across-face` named them.
     pub fn addresses(&self) -> String {
-        self.addresses
+        self.scope
+            .addresses()
             .iter()
             .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join(", ")
+    }
+
+    /// What the scopes are, in words: the contracts' resources, or what
+    /// the face's plan lets cross of them.
+    fn whose(&self) -> String {
+        match self.scope.face() {
+            None => format!(
+                "the resources the contracts in hand give for {} across the face",
+                self.addresses()
+            ),
+            Some(face) => format!(
+                "the resources the contracts in hand give for {} that face {face:?}'s plan lets \
+                 cross (observer §7.5)",
+                self.addresses()
+            ),
+        }
     }
 
     /// `scope` narrowed to the face's selectors, in order, each once: a
@@ -629,49 +615,41 @@ impl FaceScope {
     /// (core §8.5).
     ///
     /// With `typed`, the scope is what the user typed, and a selector of it
-    /// that reaches none of the face's resources is refused, exit 2. The
+    /// that meets none of the face's scopes is refused, exit 2, never
+    /// dropped silently (observer §7.5), every such selector named. The
     /// default scope's explicit selectors reach nothing when the contracts
     /// declare no explicit resource, and that is no refusal; a scope that
     /// reaches nothing at all is.
     pub fn narrow(&self, scope: &[String], typed: bool) -> Result<Vec<String>> {
-        let mut out: Vec<String> = Vec::new();
-        for t in scope {
-            let tk = KeyExpr::new(t.as_str()).map_err(|e| {
-                unaskable!(
-                    "{t}: across a face a selector is a key expression, {}",
-                    crate::errors::without_source_locations(&e.to_string())
-                )
-            })?;
-            let mut reached = false;
-            for f in &self.selectors {
-                let fk = KeyExpr::new(f.as_str()).map_err(|e| anyhow::anyhow!("{f}: {e}"))?;
-                let pick = if tk.includes(&fk) {
-                    f
-                } else if tk.intersects(&fk) {
-                    t
-                } else {
-                    continue;
-                };
-                reached = true;
-                if !out.contains(pick) {
-                    out.push(pick.clone());
-                }
-            }
-            if typed && !reached {
-                return Err(unaskable!(
-                    "{t} reaches none of the resources the contracts in hand give for {} across \
-                     the face: type a selector under one of them, or none{}",
-                    self.addresses(),
-                    wire_key_hint(t, &self.namespace)
-                ));
-            }
-        }
-        if out.is_empty() {
+        let n = self.scope.narrow(scope).map_err(|b| {
+            unaskable!(
+                "{}: across a face a selector is a key expression, {}",
+                b.selector,
+                crate::errors::without_source_locations(&b.error)
+            )
+        })?;
+        if typed && !n.unmet.is_empty() {
+            let hints: String = n
+                .unmet
+                .iter()
+                .map(|t| wire_key_hint(t, self.namespace()))
+                .collect();
             return Err(unaskable!(
-                "{} reaches none of the resources the contracts in hand give for {} across the \
-                 face{}",
+                "{} {} none of {}: type a selector under one of them, or none{hints}",
+                n.unmet.join(" + "),
+                if n.unmet.len() == 1 {
+                    "reaches"
+                } else {
+                    "each reach"
+                },
+                self.whose(),
+            ));
+        }
+        if n.selectors.is_empty() {
+            return Err(unaskable!(
+                "{} reaches none of {}{}",
                 scope.join(" + "),
-                self.addresses(),
+                self.whose(),
                 if typed {
                     ""
                 } else {
@@ -679,15 +657,16 @@ impl FaceScope {
                 }
             ));
         }
-        Ok(out)
+        Ok(n.selectors)
     }
 
     /// The line a raw observer says on stderr before it starts.
     pub fn note(&self, selectors: &[String]) -> String {
-        let far = match &self.far {
+        let far = match self.far() {
             None => String::new(),
             Some(f) => format!(
-                "; face {:?}: its transport, a {} ms reply timeout (core §8.1){}",
+                "; face {:?}: what its plan lets cross (observer §7.5), its transport, a {} ms \
+                 reply timeout (core §8.1){}",
                 f.face,
                 f.reply_timeout_ms,
                 if f.redeclares() {
@@ -700,8 +679,9 @@ impl FaceScope {
         };
         format!(
             "across a constrained face to {}: {} selector(s) from the contracts in hand, each a \
-             resource's exact key or a template's literal prefix, never `zk2/**` (core §8.5); \
-             no presence is read, so keys resolve through --contracts alone{far}",
+             resource's or a heartbeat's exact key or a template's literal prefix, never \
+             `zk2/**` (core §8.5); no presence is read, so keys resolve through --contracts \
+             alone{far}",
             self.addresses(),
             selectors.len()
         )
@@ -741,17 +721,6 @@ pub fn routers(
     Ok(routers)
 }
 
-/// The shorter of two horizons, either absent.
-fn shorter(
-    a: Option<std::time::Duration>,
-    b: Option<std::time::Duration>,
-) -> Option<std::time::Duration> {
-    match (a, b) {
-        (Some(a), Some(b)) => Some(a.min(b)),
-        (a, b) => a.or(b),
-    }
-}
-
 /// What a selector typed outside the namespace is told, or nothing: a raw
 /// observer's selectors, a rule's included, are wire keys, and a
 /// base-relative `zk2/…` one under a namespace reaches nothing of it.
@@ -766,36 +735,6 @@ pub fn wire_key_hint(selector: &str, namespace: &str) -> String {
         " (selectors are wire keys: did you mean {:?}?)",
         zenkey_fleet::with_namespace(namespace, selector)
     )
-}
-
-/// The selector of `r` under `addr`, base-relative: its exact key for a
-/// concrete resource, and for a template its key with each parameter a
-/// wildcard (`*`, a rest parameter `**`), an event's ULID chunk too.
-/// Built from the grammar's chunks, never `format!`, as
-/// [`kind_selector`] is, then canonized (a rest parameter before an
-/// event's ULID).
-fn resource_selector(addr: &Addr, iface: &IfaceId, r: &Resource) -> Result<String> {
-    let iface = iface.to_string();
-    let mut chunks: Vec<&str> = vec![
-        GRAMMAR,
-        addr.system.as_str(),
-        addr.service.as_str(),
-        &iface,
-        r.token.as_str(),
-    ];
-    for seg in r.template.segments() {
-        chunks.push(match seg {
-            Segment::Literal(l) => l.as_str(),
-            Segment::Param(_) => "*",
-            Segment::Rest(_) => "**",
-        });
-    }
-    if r.token == KindToken::Events {
-        chunks.push("*");
-    }
-    let key = OwnedKeyExpr::autocanonize(chunks.join("/"))
-        .map_err(|e| anyhow::anyhow!("a resource of {iface} makes no key expression: {e}"))?;
-    Ok(key.to_string())
 }
 
 /// The wire selectors `--explicit` adds (#924): each explicit kind named on
@@ -1173,19 +1112,25 @@ mod tests {
         }
     }
 
-    /// With `--face-policy` and `--face` (#988 L4): the far side is the
-    /// policy's face, a selector's horizon is the shortest of the
-    /// resources it meets that have one (`level`'s 5 s here, none for the
-    /// rest), and a link.v1 policy or an unknown face is refused, exit 2.
+    /// With `--face-policy` and `--face` (#988 L4, #990 V1): the far side
+    /// is the policy's face, the scope what its plan lets cross (`quiet`,
+    /// `host`, stays off it, and a selector given under it alone is
+    /// refused), a selector's horizon the shortest of the resources it
+    /// meets that have one (`level`'s 5 s here, none for the rest); a face
+    /// that lets nothing cross, a link.v1 policy and an unknown face are
+    /// refused, exit 2.
     #[test]
-    fn across_a_face_the_policy_gives_the_far_side_and_horizons() {
+    fn across_a_face_the_policy_gives_the_far_side_its_plan_and_horizons() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("hop.v1.toml"),
-            "[interface]\nname = \"hop\"\nmajor = 1\nminor = 0\nuses = [\"freshness.v1\"]\n\
+            "[interface]\nname = \"hop\"\nmajor = 1\nminor = 0\n\
+             uses = [\"freshness.v1\", \"link.v1\"]\n\
              [resources.level]\nkind = \"stream\"\ntype = { raw = \"text/plain\" }\n\
-             annotations = { \"freshness.ttl_s\" = 5 }\n\
-             [resources.mode]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n",
+             annotations = { \"freshness.ttl_s\" = 5, \"link.exposure\" = \"link\" }\n\
+             [resources.quiet]\nkind = \"stream\"\ntype = { raw = \"text/plain\" }\n\
+             [resources.mode]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n\
+             annotations = { \"link.exposure\" = \"link\" }\n",
         )
         .unwrap();
         let (set, problems) = ContractSet::load_path(dir.path());
@@ -1199,7 +1144,7 @@ mod tests {
              wait_before_close_ms = 240000\nsequence = \"16bit\"\nbatch_bytes = 222\n\
              [face.rf]\nfar = \"ground\"\nattach = \"client\"\n\
              select = { link_protocols = [\"tcp\"] }\nclass = \"constrained\"\n\
-             expose = \"none\"\nmax_outage_s = 3600\nlink_bps = 2400\nloss_ppm = 50000\n\
+             expose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nlink_bps = 2400\nloss_ppm = 50000\n\
              arq = false\nreply_timeout_ms = 15000\n",
         )
         .unwrap();
@@ -1211,10 +1156,23 @@ mod tests {
         let face = FaceScope::of(&args("rf"), &set, "prod", Reads::Samples)
             .unwrap()
             .expect("asked");
-        let far = face.far.as_ref().expect("the face's far side");
+        let far = face.far().expect("the face's far side");
         assert_eq!(far.reply_timeout_ms, 15_000);
         assert!(far.redeclares());
         let key = |rest: &str| format!("prod/zk2/v/hop/hop.v1/{rest}");
+        assert_eq!(
+            sorted(face.selectors().to_vec()),
+            [key("state/mode"), key("stream/level")],
+            "what the plan lets cross, never `quiet`"
+        );
+        let off = face
+            .narrow(&[key("stream/quiet")], true)
+            .expect_err("kept off the face");
+        assert!(
+            off.to_string()
+                .contains("that face \"rf\"'s plan lets cross (observer §7.5)"),
+            "{off}"
+        );
         let s = std::time::Duration::from_secs;
         assert_eq!(face.horizon(&key("stream/level")), Some(s(5)));
         assert_eq!(face.horizon(&key("state/mode")), None);
@@ -1227,6 +1185,27 @@ mod tests {
             face.note(face.selectors())
                 .contains("15000 ms reply timeout")
         );
+
+        let closed = dir.path().join("closed.toml");
+        std::fs::write(
+            &closed,
+            std::fs::read_to_string(&policy)
+                .unwrap()
+                .replace("expose = \"link\"\ninterval_s = 60", "expose = \"none\""),
+        )
+        .unwrap();
+        let shut = FaceScope::of(
+            &crate::cli::AcrossFaceArgs {
+                face_policy: Some(closed),
+                ..args("rf")
+            },
+            &set,
+            "prod",
+            Reads::Samples,
+        )
+        .expect_err("nothing crosses");
+        assert!(shut.to_string().contains("lets no stream"), "{shut}");
+        assert!(shut.downcast_ref::<crate::exit::Unaskable>().is_some());
 
         let unknown =
             FaceScope::of(&args("sbd"), &set, "prod", Reads::Samples).expect_err("no such face");

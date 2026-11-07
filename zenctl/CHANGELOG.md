@@ -6,6 +6,24 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — across a face, the face's plan for a scope (#990 V1)
+
+Observer 0.29 §7.5: a tool's scope across a constrained face adds each
+interface's `freshness.v2` heartbeat, and with `--face-policy F --face N`
+it is what the face's plan lets cross, never a resource the plan keeps off
+the face. Each scope is one declaration across the face at every
+reconnect, and where `arq = false` one with a horizon is declared again
+after two horizons of silence, forever where nothing of it crosses. The
+scope is the fleet's now (`zenkey_fleet::FaceScope`), for zengui and
+zenwatch to take up at #990's V7.
+
+| Before | Now | Notes |
+|---|---|---|
+| `--across-face` on `echo`, `rate`, `field`, `timeline`, `snapshot`, `record`, `record --on` and `watchdog`: one selector per resource of the contracts in hand, no heartbeat | also each heartbeat by its exact key, `…/freshness.v2/stream/heartbeat/<iface>`, for each interface in hand whose contract uses `freshness.v2` and has a collection; a `freshness.v2` contract in hand adds no scope of its own, so its `…/stream/heartbeat/*` template is gone | the watchdog's "reaches none of the selectors across the face (…)" lists the heartbeat too |
+| with `--face-policy F --face N`: the same scope, the face setting only the transport, the timeout and the re-declaring | what the face's plan lets cross (`link.v2` §2.3), each listed service taken to implement every contract in hand: to subscribe, each crossing resource and heartbeat (zenoh-modem's rf0: `frames/fast` alone, where it was every resource); for `snapshot`, a GET, every state resource, since a request crosses by grant | the stderr note adds "what its plan lets cross (observer §7.5)" |
+| — | a plan the profile refuses: exit 2, `--face-policy F --face N: the face's plan is refused (link.v2 §2.3), so there is no scope (observer §7.5): …`, each error named with what it means; a face whose plan lets nothing the verb reads cross: exit 2 | observer §7.5: no scope, never every resource |
+| a typed or rule selector meeting no scope: exit 2, the first such selector named | exit 2, every such selector named (`A + B each reach none of …`); with a face, "reaches none of the resources the contracts in hand give for … that face "N"'s plan lets cross (observer §7.5)" | never dropped silently (observer §7.5's MUST); one that includes a scope is narrowed to it, one that only meets a scope stays as given, as before |
+| the stderr note: "each a resource's exact key or a template's literal prefix" | "each a resource's or a heartbeat's exact key or a template's literal prefix" | |
 ## Unreleased (`main`, zk2) — owners answer in snapshots (#977 E3)
 
 Core 0.100 has an owner answer a state GET per collection: a collection read

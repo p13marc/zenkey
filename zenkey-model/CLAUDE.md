@@ -79,6 +79,9 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   `implements` by its address and read on every face but for
   downsampling on its own), `presence_required` (`archive.v1`, or
   `Deployment::governed`), `epoch_on_device` (`Res::epoch`),
+  `FacePlan::crossing` (never serialized: each crossing resource by name
+  and each crossing heartbeat, `crosses`/`heartbeat_crosses`, a tool's
+  scope across the face, observer 0.29 §7.5, #990 V1),
   `AttachPlan::Device`, `zk_carve()` (`zk`, `zk:instance:egress`,
   `zk:instance:ingress`; `OWN_PAIRS`, `ZK_CARVED`, `ZK_INSTANCE`), and
   `check_block(face, device, block)` reading the carve on a device face),

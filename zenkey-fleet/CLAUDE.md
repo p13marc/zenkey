@@ -339,7 +339,25 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   through `zenkey::redeclare::Redeclaring` (`Monitor::redeclared`,
   `redeclare_failed`), `tests/redeclare.rs` is `constrained.md` §9 step 2
   through a lossy relay, and #1047's `unwatch` returning while a re-declare
-  waits behind a stalled relay (no QoS, blocking puts).
+  waits behind a stalled relay (no QoS, blocking puts). The scope itself
+  is `model::face_scope::FaceScope` since #990 V1 (observer 0.29 §7.5,
+  moved from zenctl, for zengui and zenwatch at V7): each address's
+  resources of the contracts in hand (a template's parameters and an
+  event's ULID `*`) and each interface's `freshness.v2` heartbeat where
+  its contract uses it and has a collection (a `freshness.v2` contract
+  adds none of its own), each with its horizon
+  (`link::redeclare_horizon`, `redeclare_heartbeat_horizon`, the shortest
+  across revisions); given a `Face` (a policy and a face's name), the
+  far side and the face's plan, derived as a generator does with each
+  owner the policy lists implementing every interface in hand, the
+  scopes then what `FacePlan::crossing` names (`Reads::Samples`) or every
+  state resource (`Reads::State`, a GET crossing by grant); refused
+  (`Refusal`) with no address, no contract, the far side's refusal, the
+  plan's errors (`Plan`, no scope) or nothing in it. `narrow` keeps each
+  scope a selector given includes and the selector itself where it only
+  meets one, and names the rest in `Narrowed::unmet`, never dropping one.
+  `tests/face_scope.rs` runs `spec/conformance/scope/faces.json` whole
+  (17 cases over zenoh-modem's rf0, lora0 and sat0 faces).
   A call's forms alone (#985 C4b; C4d, core 0.99, removed the bare
   wire): `model::render`'s `read` reads a `response` or `summary` under
   `zenoh/bytes` as the value form (`Payload::Record`, or `Refused`, never
