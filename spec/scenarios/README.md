@@ -9,7 +9,7 @@ with these scenarios written, and the reference runtime's tests run them.
 | File | Rules |
 |---|---|
 | [`grammar.md`](grammar.md) | §1.3 the guard, §1.6 namespaces |
-| [`state.md`](state.md) | §4: S1–S7 over runs and seqs, archives, events, a late joiner's seed and its merge's open cases, S4's check reads beside a router that is declaring, a stream key's seq wrapping, and a collection's snapshot in pages; §8.2's session posture |
+| [`state.md`](state.md) | §4: S1–S7 over runs and seqs, archives, events, a late joiner's seed and its merge's open cases, S4's check reads beside a router that is declaring, a stream key's seq wrapping, a collection's snapshot in pages, and a stray `reply_del`; §8.2's session posture |
 | [`operations.md`](operations.md) | §5: O1–O7; §6 split-brain |
 | [`presence.md`](presence.md) | §1.5 epochs, §3.2 an unbound required role, §3.3 the descriptor, §8.1–§8.2 |
 | [`bindings.md`](bindings.md) | §3.2: R1–R6, a binding's order kept |
