@@ -393,3 +393,100 @@ async fn two_instances_per_key_replies_keep_one_value_per_key() {
         assert_eq!(a.inband.get(&y), Some(&at(2)), "the stamped reply is kept");
     }
 }
+
+/// Review-bot on #1086: the owner's revision maps a snapshot's index
+/// (core §4.2, F-497), and a read of its descriptor that failed is no
+/// deployment's word. The owner's answer is a stale per-key reply for
+/// `vehicle-09` under the snapshot's run at seq 2, below its asof 7, then
+/// the complete snapshot, which omits it. With no descriptor answering,
+/// the reader's own revision is the deployment's word, and the omission
+/// rule drops it; with a descriptor that does not read, or one whose read
+/// runs to its timeout, nothing drops, and every entry still merges.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_failed_descriptor_read_drops_nothing() {
+    use zenkey::model::wire::{Envelope, Form, Seq, Stamp, Tag};
+    let (_r, ep) = router(None).await;
+    let raw = client(&ep).await;
+    let reader = client(&ep).await;
+    let stale = owner::member(ADDRESS, "vehicle-09");
+    let pages: Vec<Vec<u8>> = owner::snapshot()
+        .paginate(owner::PAGE_BYTES)
+        .unwrap()
+        .iter()
+        .map(|p| p.write().unwrap())
+        .collect();
+    let put = Envelope {
+        form: Form::Mutation,
+        tag: Tag::NONE,
+        stamp: Stamp {
+            run: RUN,
+            seq: Seq::new(2).unwrap(),
+        },
+        record: b"stale",
+    }
+    .write();
+    let (plans, k) = (owner::plans(ADDRESS), stale.clone());
+    let _q = raw
+        .declare_queryable(format!("zk2/{ADDRESS}/mission_plan.v1/state/**"))
+        .callback(move |q| {
+            q.reply(k.clone(), put.clone())
+                .encoding(Encoding::ZENOH_BYTES)
+                .wait()
+                .unwrap();
+            for b in &pages {
+                q.reply(plans.clone(), b.clone())
+                    .encoding(Encoding::ZENOH_BYTES)
+                    .wait()
+                    .unwrap();
+            }
+        })
+        .await
+        .unwrap();
+    let consumer = tool(&reader);
+    let read = || async {
+        let a = consumer.get_answer(PLANS, None, T).await.unwrap();
+        a.snapshots
+            .first()
+            .is_some_and(|h| h.complete())
+            .then_some(a)
+    };
+    // No descriptor: the deployment's word, and the omission rule.
+    let a = eventually_some("the owner answers", read).await;
+    assert_eq!(a.omitted, vec![vec![stale.clone()]], "{a:?}");
+    assert_eq!(a.current.len(), 3);
+    // A descriptor that does not read: nothing drops.
+    let instance = format!("zk2/{ADDRESS}/@zk/instance/1");
+    let i = instance.clone();
+    let unreadable = raw
+        .declare_queryable(format!("zk2/{ADDRESS}/@zk/instance/*"))
+        .callback(move |q| q.reply(i.clone(), "not a descriptor").wait().unwrap())
+        .await
+        .unwrap();
+    let b = eventually_some("the descriptor is read", || async {
+        let a = read().await?;
+        a.omitted.iter().all(Vec::is_empty).then_some(a)
+    })
+    .await;
+    assert!(b.complete, "{b:?}");
+    assert_eq!(b.current.len(), 4, "the stale entry still merges: {b:?}");
+    assert_eq!(text(find(&b, "vehicle-09")).as_deref(), Some("stale"));
+    // A read that runs to its timeout: nothing drops either.
+    unreadable.undeclare().await.unwrap();
+    let held: Arc<Mutex<Vec<zenoh::query::Query>>> = Arc::default();
+    let h = Arc::clone(&held);
+    let _silent = raw
+        .declare_queryable(format!("zk2/{ADDRESS}/@zk/instance/*"))
+        .callback(move |q| h.lock().unwrap().push(q))
+        .await
+        .unwrap();
+    let c = eventually_some("the descriptor read is held", || async {
+        let a = read().await?;
+        (!held.lock().unwrap().is_empty()).then_some(a)
+    })
+    .await;
+    assert!(c.omitted.iter().all(Vec::is_empty), "{c:?}");
+    assert!(
+        c.current.iter().any(|x| x.key() == stale),
+        "the stale entry still merges: {c:?}"
+    );
+}
