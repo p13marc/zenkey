@@ -5207,7 +5207,140 @@ def _round104_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 [refused, importlib.util.find_spec("zk2py.envelope") is None,
                  [calls.in_forms(e) for e in ("zenoh/bytes", "application/json", "zenoh/bytes;x", "zenoh/string")]],
                 [True, True, [True, False, False, False]]))
+    out += _round104_texts(root)
     out += _mend_after_round103()
+    return out
+
+
+def _round104_texts(root: Path) -> list[tuple[str, Any, Any]]:
+    """Round 104's cold read at main 4b802646: each text at its version with
+    its entry, what each says changed and did not, §9 steps 7 and 8, the
+    fixtures' counts, and F-498 to F-502 as their texts read."""
+    import re
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def present(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    def header(rel: str) -> tuple[str | None, str | None]:
+        t = flat(rel)
+        v = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+)", t)
+        w = re.search(r"\| \*\*Written against\*\* \| core (\d+\.\d+)", t)
+        return (v.group(1) if v else None, w.group(1) if w else None)
+
+    core, obs, ops = flat("core.md"), flat("observer.md"), flat("scenarios/operations.md")
+    log = flat("CHANGELOG.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.99 or later, observer 0.27 written against it, telemetry.v1 0.9, config.v1 0.12, config.v2 0.3 and "
+         "redundancy.v1 0.10, each with its entry (#985 C4d)",
+         [core_v >= (0, 99), header("observer.md"), header("profiles/telemetry/v1.md")[0],
+          header("profiles/config/v1.md")[0], header("profiles/config/v2.md")[0],
+          header("profiles/redundancy/v1.md")[0]]
+         + entry("CHANGELOG.md", "0.99", "the bare wire removed")
+         + entry("observer-CHANGELOG.md", "0.27", "the bare wire removed")
+         + entry("profiles/telemetry/CHANGELOG.md", "0.9", "no rule changed")
+         + entry("profiles/config/CHANGELOG.md", "0.12", "no rule changed")
+         + entry("profiles/config/CHANGELOG.md", "config.v2 0.3", "no rule changed")
+         + entry("profiles/redundancy/CHANGELOG.md", "0.10", "no rule changed"),
+         [True, ("0.27", "0.99"), "0.9", "0.12", "0.3", "0.10"]),
+    ]
+    out.append(("core 0.99 §5.1 and §5.2 as the entry says: the MAY, \"None writes the bare wire\", the envelope, its "
+                "Decoding MUST and the bare-wire bullet gone; \"Reading a value\" without the exception; \"The "
+                "request\" refusing a query under another Encoding, with no keyword",
+                present(core, "MAY read a call's sample whose `Encoding` is not `zenoh/bytes`", "None writes the bare wire",
+                        "**The envelope, on the bare wire.**", "**Decoding.**", "A reader of the bare wire",
+                        "unless the caller reads the bare wire")
+                + missing(core, "An owner reads a query under `zenoh/bytes` by §7.5's parse. Under another `Encoding` "
+                                "a query carries no request form",
+                          "Such a query, a request the parse refuses, and one whose record does not decode as the "
+                          "operation's `request` type are refused with `invalid_request`.",
+                          "**Under another `Encoding`** a reply is no value form, so it is malformed too.",
+                          "a record sent with no form can parse as one"), []))
+    out.append(("operations.md §9: step 7 an earlier core's envelope, the transport's, set called once and ping twice; "
+                "step 8 a request form under application/json, invalid_request and no handler",
+                missing(ops, "7. **An envelope.** A session of the test's own answers `set` with the JSON error "
+                             "envelope that an earlier version of the core had an owner write, "
+                             "`{\"code\":\"busy\",\"message\":\"\"}`, under `application/json`.",
+                        "8. **A request under another `Encoding`.** `h1/tc` serves `set` again.",
+                        "It calls `set` once, since `set` is not idempotent, and `ping` twice.",
+                        "8. `invalid_request`, and no handler runs. Under another `Encoding` a query carries no request "
+                        "form, whatever its bytes"), []))
+    cases_gone = not (root / "errors" / "cases.json").exists()
+    forms = _load_json(root / "errors" / "forms.json")
+    out.append(("core 0.99's evidence: errors/cases.json removed, forms.json's reads unchanged (17), its three envelope "
+                "reads encoding; RULES.md 249 rules, the caller 17, the observer 72",
+                [cases_gone, len(forms["reads"]),
+                 sorted(c["expect"].get("refused") for c in forms["reads"]
+                        if c["encoding"] in ("application/json", "application/cbor",
+                                             "application/protobuf;zk2.core.v1.Error"))]
+                + missing(log, "lists 249 rules, 1 fewer", "The caller class counts 17 and the observer 72"),
+                [True, 17, ["encoding", "encoding", "encoding"]]))
+    from . import telemetry
+
+    tel = flat("profiles/telemetry/v1.md")
+
+    def tcbor(h: str) -> Any:
+        try:
+            return telemetry.decode_cbor(bytes.fromhex(h))
+        except telemetry.Undecodable:
+            return "undecodable"
+
+    out.append(("telemetry.v1 0.9 §2.6: a CBOR map read as its pairs, keys text, none twice, undefined null, no longer "
+                "\"as the envelope's are read\"; indefinite length stated for a bignum's byte string alone (F-500, "
+                "open); zk2py accepts an indefinite-length map, array and string, and reads a byte after the data "
+                "item undecodable",
+                missing(tel, "A map is read as its pairs: each key a text string, and no key twice. The simple value "
+                             "`undefined` is read as `null`.", "a byte string of any length, definite or not")
+                + present(tel, "as the envelope's are read", "core §5.2", "Indefinite lengths", "nothing after it")
+                + [tcbor("bf6576616c756501ff"), tcbor("9f0102ff"), tcbor("7f61616162ff"), tcbor("0100"),
+                   tcbor("a1016161"), tcbor("a16576616c7565f7")],
+                [{"value": 1}, [1, 2], "ab", "undecodable", "undecodable", {"value": None}]))
+    cv1, cv2 = flat("profiles/config/v1.md"), flat("profiles/config/v2.md")
+    out.append(("F-501 (open): config.v1 §2.5 and config.v2 §2.5 list the core's refusals before the rows, and neither "
+                "names core 0.99's query under another Encoding",
+                missing(cv1, "The core's own refusals come first (core §5.1, \"The order of refusals\"):",
+                        "a request that does not decode as `SetRequest` is `invalid_request`.")
+                + missing(cv2, "Then a request that does not parse is `invalid_request`: core §7.5's refusals for a "
+                               "query, then core §7.6's for `Set<T>`.")
+                + present(cv1 + cv2, "under another `Encoding`"), []))
+    out.append(("F-502 (open): core §5.1's order of refusals names \"A request that does not decode\" after the three, "
+                "and \"The request\" now refuses a query under another Encoding too",
+                missing(core, "A request that does not decode is refused after these, by the server's decode (below).")
+                + present(core, "A query under another `Encoding` is refused after these"), []))
+    # F-498: seed/snapshot.json, a fixture whose rules no text states.
+    seed_fx = _load_json(root / "seed" / "snapshot.json")
+    s42 = core[core.index("### 4.2 Rules for owners and consumers"):core.index("### 4.3 Runs and sequence numbers")]
+    out.append(("F-498 (open): seed/snapshot.json (#977 E2) cites core §4.2 for a seed over snapshots, a snapshot key "
+                "and the omission rule; §4.2 names no snapshot, no text names a snapshot key, Appendix E's seed row "
+                "and every changelog leave the file out, and core 0.97's entry left the omission rule to E3",
+                [seed_fx["description"].startswith("core §4.2, a late joiner's seed over snapshots"),
+                 len(seed_fx["cases"]), "snapshot" in s42, "snapshot key" in core + obs,
+                 "snapshot.json" in core + log + flat("observer-CHANGELOG.md")]
+                + missing(log, "**E3's rules wait for E3:** which key answers what, consolidation `None`, the omission "
+                               "rule")
+                + missing(flat("conformance/README.md"), "(`snapshot.json`, §4.2): the omission rule, asof and pages"),
+                [True, 42, False, False, False]))
+    # F-499: config.v1 §2.12's refusal after step 1.
+    out.append(("F-499 (open): config.v1 §2.12 has the reference refuse a re-mint for a device that will not return "
+                "to its startup values, step 3, after steps 1 and 2 ended a pending change and published its event, "
+                "and says neither that the ending stays nor what the instance then holds",
+                missing(cv1, "1. **A pending change** ends first, in the old instance, as `cancel` ends it (§2.10).",
+                        "3. **The device** returns to its startup values,",
+                        "It refuses the re-mint, and the instance runs on, in four cases:",
+                        "a device that refuses to return to its startup values;")
+                + present(cv1, "stays ended", "a refusal leaves"), []))
     return out
 
 

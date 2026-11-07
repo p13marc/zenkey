@@ -713,6 +713,21 @@ def step_8(ck: Checks, pairing: str, ep: str, cli: Any, ops: dict[str, Any]) -> 
                              (enc, payload)],
                          {"handled": owner.o.handled[h0:], "queries": [(k, e, w.hex()) for k, e, w in
                                                                        owner.o.queries[q0:]]})
+        # Beyond the step: core §5.1, "The order of refusals". A key that is
+        # not concrete, on an operation that forbids fan-out, is refused
+        # first, "whatever its other chunks hold"; "A request that does not
+        # decode is refused after these". A query under another Encoding
+        # reads so here: fanout_forbidden.
+        wild = "zk2/h1/tc/tc.v1/@op/interfaces/*/set"
+        h0 = None if rust else len(owner.o.handled)
+        got = _raw_get(cli, wild, form, encoding="application/json")
+        rr = [live.read_reply_error(e, d) for ok, e, d in got if not ok]
+        ck.check(st, "a wildcard call to set, which forbids fan-out, with step 1's form under application/json "
+                     "(beyond the step): fanout_forbidden, refused before the request is read (core §5.1, \"The "
+                     "order of refusals\")",
+                 len(rr) == 1 and rr[0].kind == "error" and rr[0].code == "fanout_forbidden"
+                 and (rust or len(owner.o.handled) == h0),
+                 [live.show_reply(x) for x in rr] + [(ok, e, d.hex()) for ok, e, d in got if ok])
         # zk2py's caller sends only the request form (core 0.99 §5.1)
         try:
             live.call(cli, _key("h1/tc", "tc/set"), form, encoding="application/json", timeout=1.0)
