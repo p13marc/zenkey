@@ -6858,9 +6858,14 @@ On the black boxes of 324c6d4f: their owner serves what zk2py's tool reads.
   `air/**` is refused, exit 2; one over `frames/*` is narrowed.
 - `constrained_live` 14/14 and `far_side_live` 16/16 with the new echo.
 
-**Waits on the black boxes** with V1, V2 and E4: `zenctl echo --across-face`
-against zk2py's owner of a packed state and a heartbeat, its scope by the
-plan and its revision by tag.
+**On e2bdd8ce's black boxes** (V1, V2 and E4), `across_live`'s reverse half,
+2 of 2: `zenctl echo --across-face` holding modem.v3's four revisions and
+the catalog, against zk2py's owner putting `packed/oper` and `oper` beside
+its heartbeat. With no policy it hears all three, `oper`'s revision chosen
+by tag at step 3 and the heartbeat's at step 2. Through the RF face it
+declares `frames/fast` alone and hears none of them. After E4,
+`snapshot_live` is 40 of 40 and `state_pairings` passes in all three
+pairings (50, 40 and 28).
 
 Round 106 found F-509 to F-511: a minor error (`tags.json`'s `e3a529fe` is a
 successor's file), an ambiguity (a refused selector, or a refused read), and

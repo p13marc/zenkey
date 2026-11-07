@@ -15,6 +15,9 @@ policy shapes the tool's scopes and its session's transport, not the path.
 - **A selector given that meets none,** ``modem.v3/stream/air/**``: refused,
   exit 2, never dropped.
 
+**The reverse** (:func:`run_zenctl`): zk2py's owner read by ``zenctl echo
+--across-face``, its scope by the face's plan, and its revision by tag.
+
 Exit 0 when every check passes, 1 when any fails.
 """
 
@@ -90,9 +93,86 @@ def run() -> list[tuple[str, bool, str]]:
     return out
 
 
+def _zenctl_echo(ep: str, history: Path, extra: list[str], window: float) -> tuple[list[dict], str]:
+    """``zenctl echo --across-face`` (a black box), ndjson, for ``window``
+    seconds: its rows and its standard error."""
+    p = subprocess.Popen([str(BLACKBOX / "zenctl"), "echo", "-c", ep, "--format", "ndjson", "--contracts",
+                          str(history), "--catalog", str(MODEM / "catalog.json"), "--across-face", ADDRESS, *extra],
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        out, err = p.communicate(timeout=window)
+    except subprocess.TimeoutExpired:
+        p.terminate()
+        out, err = p.communicate(timeout=10)
+    return [json.loads(x) for x in out.splitlines() if x.strip().startswith("{")], err
+
+
+def run_zenctl() -> list[tuple[str, bool, str]]:
+    """The reverse: zk2py's owner of ``modem.v3`` 3.3 at rf0, under
+    zenoh-modem's catalog, putting ``state/packed/oper`` (a packed state) and
+    ``state/oper`` every 2 s beside its ``freshness.v2`` heartbeat, read by
+    ``zenctl echo --across-face`` holding modem.v3's four published revisions
+    (a ``.history`` root of them alone) and the catalog: observer 0.29 §7.5's
+    scope by the face's plan, and the revision of a key by tag."""
+    import shutil
+    import tempfile
+    import threading
+
+    from . import catalog
+    from .contract import load_contract
+    from .live_interop import _r1
+    from .owner import Owner
+
+    out: list[tuple[str, bool, str]] = []
+    tmp = Path(tempfile.mkdtemp(prefix="zk2py-hist-"))
+    shutil.copytree(REPO / "examples" / "zk2" / ".history" / "modem.v3", tmp / ".history" / "modem.v3")
+    r, ep, _ = _r1(timestamping=False)
+    o = Owner("h-3fa9c2d41b7e", "rf0", [load_contract(MODEM / "modem.v3.toml")], connect=ep)
+    o.catalog = catalog.read((MODEM / "catalog.json").read_bytes())
+    stop = threading.Event()
+    base = f"zk2/{ADDRESS}/modem.v3/state"
+    try:
+        o.start()
+
+        def puts() -> None:
+            while not stop.is_set():
+                o.set_state(f"{base}/packed/oper", b"\x00" * 9)
+                o.set_state(f"{base}/oper", b'{"status": "up"}')
+                stop.wait(2.0)
+
+        threading.Thread(target=puts, daemon=True).start()
+        hb = f"zk2/{ADDRESS}/freshness.v2/stream/heartbeat/modem.v3"
+        rows, err = _zenctl_echo(ep, tmp / ".history", [], 35.0)
+        by = {}
+        for x in rows:
+            by.setdefault(x.get("key"), x)
+        chosen = {k: (x.get("identity") or {}).get("chosen") for k, x in by.items()}
+        out.append(("zenctl echo --across-face, no face policy, four revisions held and the catalog: it hears the "
+                    "packed state, oper and the heartbeat; oper's revision chosen by tag at step 3, the heartbeat's "
+                    "by tag at step 2, packed/oper's by the deployment's word (no choice shown)",
+                    {f"{base}/packed/oper", f"{base}/oper", hb} <= set(by)
+                    and chosen.get(f"{base}/oper") == {"by": "tag", "step": 3}
+                    and chosen.get(hb) == {"by": "tag", "step": 2} and chosen.get(f"{base}/packed/oper") is None,
+                    f"{len(rows)} rows; chosen {chosen}"))
+        rows, err = _zenctl_echo(ep, tmp / ".history", ["--face-policy", str(MODEM / "faces" / "zenohd-rf0.face.toml"),
+                                                       "--face", "rf"], 35.0)
+        out.append(("zenctl echo --across-face through the RF face: one selector, frames/fast, the plan's; nothing "
+                    "of the packed state, oper or the heartbeat heard",
+                    "1 selector(s)" in err and f"echoing zk2/{ADDRESS}/modem.v3/stream/frames/fast " in err
+                    and not rows, f"{len(rows)} rows; {err[-500:]}"))
+    except Exception as e:  # noqa: BLE001 - a run that could not finish is a failure
+        out.append(("the zenctl run finished", False, f"{type(e).__name__}: {e}"))
+    finally:
+        stop.set()
+        o.close()
+        r.close()
+        shutil.rmtree(tmp, ignore_errors=True)
+    return out
+
+
 def main() -> int:
     failed = 0
-    for name, ok, detail in run():
+    for name, ok, detail in run() + run_zenctl():
         print(f"{'PASS' if ok else 'FAIL'} {name}" + (f": {detail}" if detail else ""), flush=True)
         failed += not ok
     return 1 if failed else 0
