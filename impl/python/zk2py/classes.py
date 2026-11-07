@@ -283,12 +283,10 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("owner", "core §8.4", "An owner on a first hop (§8.1) SHOULD NOT hold its bundles", MET,
      "owner.Owner(first_hop=True) declares no contract queryable; a near holder answers (first_hop_live §10 step 1) "
      "(round 102, core 0.96)"),
-    ("owner", "core §8.4", "A deployment with such an owner SHOULD hold each of its bundles on the near side", NA,
-     "a deployment's rule, which the index lists under the owner too (F-492); first_hop_live's near holder plays "
-     "it (round 102)"),
-    ("owner", "observer §3.11", "A tool that knows an owner is on a first hop MUST NOT report it down", NA,
-     "a tool's rule, which the index lists under the owner too (F-492); the observer class's verdict holds it "
-     "(round 102)"),
+    # Round 102 gave core §8.4's deployment SHOULD and observer §3.11's tool
+    # MUST NOT an owner's n/a, the index listing both under the owner too
+    # (F-492). Core 0.98 lists each under its subject's role alone, so the
+    # two owner verdicts are gone (round 103): the observer's holds §3.11.
     ("owner", "core §8.1", "Every instance MUST hold one, including pure consumers", MET,
      "owner.Owner._declare_instance (presence_scenarios §1)"),
     ("owner", "core §8.1", "An owner MUST hold one per interface of", MET,
@@ -675,10 +673,10 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "zk2c.write_error refuses cause, then detail, as the parse would (errors family: forms.json's writes); every "
      "zk2py owner's error goes through it since core 0.94 (round 100, core 0.92; round 101)"),
     ("static", "core §7.5", "An implementation MUST refuse an envelope or a form for the first of these", MET,
-     "zk2c.parse, in §7.5's order, each token, on put, delete, query, reply and reply_err, a frame's key_kind "
-     "on its key, an error's byte and message after the stamp (envelope family: vectors.json, carries.json's "
-     "reads; errors family: forms.json's bytes and reads) (round 93, core 0.72; round 96, core 0.83; round 100, "
-     "core 0.92)"),
+     "zk2c.parse, in §7.5's order, each token, on put, delete, query, reply and reply_err, a frame's and a "
+     "snapshot's key_kind on its key, an error's byte and message after the stamp (envelope family: vectors.json, "
+     "carries.json's reads; errors family: forms.json's bytes and reads) (round 93, core 0.72; round 96, core "
+     "0.83; round 100, core 0.92; round 103, core 0.97)"),
     ("static", "core §7.5", "Every envelope and form an implementation accepts MUST write back to the same bytes",
      MET, "zk2c.write_back, every accepted case and header written back, a request, a value and an error "
      "included (envelope family) (round 93, core 0.72; round 100, core 0.92)"),
@@ -691,11 +689,28 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "bitmap (heartbeat family: bodies.json's writes) (round 96, core 0.81)"),
     ("static", "core §7.5", "An implementation MUST compute a digest so", MET,
      "heartbeat.member_value and digest (heartbeat family: digests.json) (round 96, core 0.81)"),
-    ("static", "core §7.5", "An implementation MUST refuse a body for the first of these", MET,
-     "heartbeat.read: short and code as the fields are read, then trailing, then pad (heartbeat family: "
+    # Keyed to "in this order" since core 0.97, whose snapshot's reading
+    # refuses a body "for the first of these that applies, reading its fields
+    # in order" (round 103).
+    ("static", "core §7.5", "An implementation MUST refuse a body for the first of these that applies, in this order",
+     MET, "heartbeat.read: short and code as the fields are read, then trailing, then pad (heartbeat family: "
      "bodies.json's reads) (round 96, core 0.81)"),
     ("static", "core §7.5", "Every body an implementation accepts MUST write back to the same bytes", MET,
      "heartbeat.write in the form read (heartbeat family: every accepted read written back) (round 96, core 0.81)"),
+    # core 0.97 (#977 E1): the snapshot's four static rules (round 103).
+    ("static", "core §7.5", "An implementation MUST refuse a body for the first of these that applies, reading its "
+     "fields in order", MET,
+     "snapshot.read_body: short, leb128, time, id, order, flags, run and trailing, each as its field is read, the "
+     "earlier in the list for one field (snapshot family: bodies.json's 109 reads, 79 refused) (round 103, core "
+     "0.97)"),
+    ("static", "core §7.5", "An implementation MUST NOT write a page that this reading refuses", MET,
+     "snapshot.write_body checks each field in the reading's order with its token, and every page written reads "
+     "back to its value (snapshot family: bodies.json's 39 writes, 12 refused) (round 103, core 0.97)"),
+    ("static", "core §7.5", "Every page an implementation accepts MUST write back to the same bytes", MET,
+     "snapshot.write_back (snapshot family: every accepted read written back) (round 103, core 0.97)"),
+    ("static", "core §7.5", "An implementation that cuts a snapshot into pages MUST cut it so", MET,
+     "snapshot.cut, greedy by each candidate page's bytes, and cut_by_arithmetic by §7.5's sizes, agreeing "
+     "(snapshot family: bodies.json's 13 snapshots, 2 refused) (round 103, core 0.97)"),
     # core 0.83 (#981 K1): §7.7's frames. The owner's and the reader's rules
     # were n/a at round 96; observer 0.21 and core 0.87 (#981 K2, K3) bring
     # zk2py's reader and owner (round 97).
