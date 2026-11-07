@@ -1,5 +1,5 @@
 {
-  "description": "config.v2 §2.5, §2.10, §2.13, §2.18: one request against the test contract `contracts/rfcfg.v1.toml` and an owner's state -> accepted, or the refusal the owner sends, before any act. Written by an independent reading of the text (Python, standard library), checked, never blessed. A case gives op (set, confirm, cancel, extend, persist), group (set's, the {g} of set/{g}), the request as `fields`, the JSON reading of its type (Set<T> for a set, Control otherwise; null where only bytes can say it), `hex`, the query's payload (core §7.5: CH, form 2, run width 0, the type's tag, then the record), and `state`: revision; pending, null or {token, applied: whether every group of the change is applied, deadline_passed: whether its deadline has come and its undo not yet run}; last, null or {token, set_sensitive}; persist, whether the owner has a persisted layer; in_flight, whether an act is in flight; writable, the groups the startup allowlist lets a set reach. Rows that need more state (an idempotency key held, the event's rate, a reach join near its deadline, the device) are lifecycle.json's. The order: persist without a layer, unavailable cause config, before the request is read; then a payload that does not parse as the request (core §7.5's refusals for a query, then §7.6's for the type: a value outside its bounds is an unused code) is invalid_request; then config.v1's rows without rows 3, 8 and 11. expect is {accepted: true}, or {refused: {code, cause, app}, reply_err}: code is core §5.2's, cause unavailable's alone, app the Error code app's alone, and reply_err the error form the owner sends (core §7.5, form 3) under `stamp`, the as-of mark the cases share, with Error's tag `error_tag`, no message and no detail. `desired`: a DesiredConfig (config.v1 §3) against the test contract and an allowlist -> {accepted: true} or {refused: {code, group, parameter}}: its revision above 4294967295 first (invalid_request, no group), then config.v1 §2.18's order, groups in the byte order of their names, each group's checks (not_found, contract, reach, unavailable), then each parameter in the byte order of its name (not_found, sensitive, invalid_request: not of its kind, a JSON integer with no fraction or exponent for an int, true or false for a bool, or outside its bounds). A group or parameter the contract does not declare is named null in the refusal, since the record carries indices.",
+  "description": "config.v2 §2.5, §2.10, §2.13, §2.18: one request against the test contract `contracts/rfcfg.v1.toml` and an owner's state -> accepted, or the refusal the owner sends, before any act. Written by an independent reading of the text (Python, standard library), checked, never blessed. A case gives op (set, confirm, cancel, extend, persist), group (set's, the {g} of set/{g}), the request as `fields`, the JSON reading of its type (Set<T> for a set, Control otherwise; null where only bytes can say it), `hex`, the query's payload (core §7.5: CH, form 2, run width 0, the type's tag, then the record), and `state`: revision; pending, null or {token, applied: whether every group of the change is applied, deadline_passed: whether its deadline has come and its undo not yet run}; last, null or {token, set_sensitive}; persist, whether the owner has a persisted layer; in_flight, whether an act is in flight; writable, the groups the startup allowlist lets a set reach. Rows that need more state (an idempotency key held, the event's rate, a reach join near its deadline, the device) are lifecycle.json's. The order: persist without a layer, unavailable cause config, before the request is read; then a query under another Encoding (`encoding`, where a case gives it, zenoh/bytes where it gives none) is invalid_request, its bytes never read (core §5.1, \"The request\"; text 0.4); then a payload that does not parse as the request (core §7.5's refusals for a query, then §7.6's for the type: a value outside its bounds is an unused code) is invalid_request; then config.v1's rows without rows 3, 8 and 11. expect is {accepted: true}, or {refused: {code, cause, app}, reply_err}: code is core §5.2's, cause unavailable's alone, app the Error code app's alone, and reply_err the error form the owner sends (core §7.5, form 3) under `stamp`, the as-of mark the cases share, with Error's tag `error_tag`, no message and no detail. `desired`: a DesiredConfig (config.v1 §3) against the test contract and an allowlist -> {accepted: true} or {refused: {code, group, parameter}}: its revision above 4294967295 first (invalid_request, no group), then config.v1 §2.18's order, groups in the byte order of their names, each group's checks (not_found, contract, reach, unavailable), then each parameter in the byte order of its name (not_found, sensitive, invalid_request: not of its kind, a JSON integer with no fraction or exponent for an int, true or false for a bool, or outside its bounds). A group or parameter the contract does not declare is named null in the refusal, since the record carries indices.",
   "contract": "contracts/rfcfg.v1.toml",
   "stamp": {
     "run_width": 16,
@@ -657,6 +657,35 @@
         "last": null,
         "persist": true,
         "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "invalid_request",
+          "cause": null,
+          "app": null
+        },
+        "reply_err": "6d123400002900"
+      }
+    },
+    {
+      "note": "a query under another Encoding carries no request form: invalid_request, its bytes never read, before an act in flight (core §5.1, \"The request\")",
+      "op": "set",
+      "group": "duty",
+      "encoding": "application/json",
+      "fields": null,
+      "hex": "4b81388000",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": true,
+        "in_flight": true,
         "writable": [
           "duty",
           "radio",
@@ -1798,6 +1827,35 @@
       "group": null,
       "fields": null,
       "hex": "ff",
+      "state": {
+        "revision": 4,
+        "pending": null,
+        "last": null,
+        "persist": false,
+        "in_flight": false,
+        "writable": [
+          "duty",
+          "radio",
+          "link",
+          "sim"
+        ]
+      },
+      "expect": {
+        "refused": {
+          "code": "unavailable",
+          "cause": "config",
+          "app": null
+        },
+        "reply_err": "6d123400002950"
+      }
+    },
+    {
+      "note": "no persisted layer, under another Encoding: unavailable, cause config, first, an operation not exposed coming before the request (core §5.1, \"The order of refusals\")",
+      "op": "persist",
+      "group": null,
+      "encoding": "application/json",
+      "fields": null,
+      "hex": "4800001234a00100",
       "state": {
         "revision": 4,
         "pending": null,
