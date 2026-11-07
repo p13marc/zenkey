@@ -306,6 +306,15 @@ def read(layout: Layout, data: bytes) -> dict[str, Any]:
     return out
 
 
+def instant_of(time: dict[str, int] | None, epoch_s: int) -> int | None:
+    """A heartbeat's time read back to an instant in Unix milliseconds,
+    counted from the deployment epoch ``epoch_s`` (core §7.6, ``freshness.v2``
+    0.6 §2.4: the catalog's epoch, else 0); None for the unknown time."""
+    if time is None:
+        return None
+    return (epoch_s + time["s"]) * 1000 + time["ms"]
+
+
 def time_of(now_ns: int, epoch_s: int) -> dict[str, int] | None:
     """The time field of an owner's clock ``now_ns`` (Unix ns), counted from
     the deployment epoch ``epoch_s`` (core §7.6): None, the unknown time,

@@ -193,7 +193,37 @@ class Archive:
     """An archive's answer: last-known, never current (§2.8)."""
 
 
-Observation = Subscription | Get | Archive
+@dataclass(frozen=True)
+class Snapshot:
+    """``freshness.v2`` §2.6 (text 0.7, core 0.100): what a GET reader's
+    snapshot says of one member. ``complete`` is whether the reader holds the
+    member's collection's snapshot complete (core §7.5); ``entry`` is None
+    when the snapshot lists the member neither live nor as a tombstone,
+    ``tombstone``, or ``live``; ``age_ns`` is the reader's clock minus the
+    confirmation's time ("the snapshot's time for confirmation 1, and the
+    entry's conf for 2"), None for confirmation 0 or an unknown time; the
+    clock is the owner's, "which built the snapshot"."""
+
+    complete: bool
+    entry: str | None
+    age_ns: int | None = None
+    trusted: bool = False
+    delta_ns: int = DEFAULT_DELTA_NS
+
+    def as_get(self) -> Get | None:
+        """v2 §2.6: "v1 §2.6, word for word, read over a snapshot's entries
+        … The order is v1 §2.6's, an entry for a reply: no entry, then a
+        tombstone, then no confirmation's time, then a clock not trusted,
+        then the band." None for a member no entry lists: deleted or
+        silent, by :func:`judge_snapshot`."""
+        if self.entry is None:
+            return None
+        if self.entry == "tombstone":
+            return Get(Reply("delete"), self.trusted, self.delta_ns)
+        return Get(Reply("put", self.age_ns), self.trusted, self.delta_ns)
+
+
+Observation = Subscription | Get | Archive | Snapshot
 
 
 def judge_subscription(h: Horizon, obs: Subscription) -> Verdict:
@@ -248,6 +278,19 @@ def judge_get(h: Horizon, obs: Get) -> Verdict:
     return Verdict(UNOBSERVABLE, "near_horizon", f"aged {age / NS:.3f} s, within the delta of the horizon")
 
 
+def judge_snapshot(h: Horizon, obs: Snapshot) -> Verdict:
+    """``freshness.v2`` §2.6: "A member a complete snapshot omits has no
+    value, by core §4.2's omission rule: deleted, as a tombstone. One an
+    incomplete snapshot omits is a member the read did not reach:
+    unobservable." An entry is judged as v1 §2.6 judges a reply."""
+    g = obs.as_get()
+    if g is None:
+        if obs.complete:
+            return Verdict(NOT_ASKED, "deleted", "a complete snapshot omits the member (core §4.2)")
+        return Verdict(UNOBSERVABLE, "silent", "an incomplete snapshot omits the member: the read did not reach it")
+    return judge_get(h, g)
+
+
 def judge_observation(kind: str, annotations: dict[str, Any] | Horizon, obs: Observation) -> Verdict:
     """§2.7 "The order of the checks", for one observation: no horizon; an
     event or an operation; an archive's value; a value that is no horizon;
@@ -263,6 +306,8 @@ def judge_observation(kind: str, annotations: dict[str, Any] | Horizon, obs: Obs
         return Verdict(UNOBSERVABLE, "not_a_horizon", f"freshness.ttl_s = {h.value!r} is not a horizon (§2.1)")
     if isinstance(obs, Subscription):
         return judge_subscription(h, obs)
+    if isinstance(obs, Snapshot):
+        return judge_snapshot(h, obs)
     return judge_get(h, obs)
 
 

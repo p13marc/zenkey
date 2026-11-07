@@ -1,40 +1,55 @@
-"""A late joiner's seed over snapshots: ``conformance/seed/snapshot.json``
-(#977 E2), read from that fixture's description alone.
+"""A late joiner's seed over snapshots: ``conformance/seed/snapshot.json``,
+read from core §4.2 as core 0.100 (#977 E3) states it.
 
-**No text states it yet.** The fixture names "core §4.2, a late joiner's
-seed over snapshots: … the omission rule, asof and pages", and core 0.99's
-§4.2 says nothing of a snapshot, a snapshot key or an omission: its seed
-merges "the GET's replies and the subscription's samples per key" (F-498).
-So every rule below is quoted from the fixture's description, and none is
-a core sentence.
+Round 104 read the fixture from its description alone (F-498): core 0.99
+stated none of it. Core 0.100's §4.2 states every rule below, and each is
+quoted from it.
 
-**The merge** (:meth:`Seed.merge`): "The merge keeps the newer by in-band
-stamp: within one run, one width and one value, a higher seq; another run
-is unordered and kept, the later arrival; an equal stamp is one mutation,
-kept once." Every key is an owner's state key and every sample carries an
-in-band stamp, "so a consumer's merge and a tool's agree on every case".
+**The merge** (:meth:`Seed.merge`): "A late joiner MUST merge the GET's
+replies and the subscription's samples per key, whichever path brought
+each one. It MUST keep the newer by its in-band stamp: within one run, by
+seq (§4.3)." "Two samples with one in-band stamp are the same mutation,
+kept once." Across two runs "a tool keeps the later arrival", and a
+consumer "keeps a value under a run other than its held value's": every
+sample here carries an in-band stamp, so the two agree.
 
-**A page** (:meth:`Seed.arrive`): "A page's entries merge as it arrives,
-each on its member's key: the page's key, then ``/`` and the id, the key
-itself for the empty id. A live entry is a put, a tombstone a delete, each
-stamped with its own run or the header's, and its seq." "A page heard on a
-subscription is neither merged nor counted."
+**A page** (:meth:`Seed.arrive`): "A snapshot's entries merge as replies
+do, each as its page arrives, on its member's key: the snapshot's key,
+then ``/`` and the id (§7.5). A live entry is a put, and a tombstone a
+delete. Each has its stamp: its own run or the header's, and its seq." "A
+consumer or a tool MUST NOT merge a snapshot heard on a subscription, nor
+count it toward a complete snapshot."
 
-**A snapshot** is its pages that "share their key, tag, run width, run,
-asof, time and coll. It is complete once it holds each index from 0 to a
-page whose more bit is 0" (:func:`zk2py.snapshot.complete`).
+**A snapshot** is complete, by §7.5, "when it holds one page of each index
+from 0 to a page whose more bit is 0, all on one key with one CH, run,
+asof, time and coll" (:func:`zk2py.snapshot.complete`).
 
-**The omission rule** (:meth:`Seed._omit`), once a snapshot is complete:
-"on a key K that is the snapshot key or a member's key of the collection
-with that coll, the omission rule drops each member of the collection at K
-or under it that the reader holds and the snapshot lists neither live nor
-as a tombstone, unless held under the snapshot's run with a seq above asof,
-or under another run and heard after the GET was asked: every arrival was,
-no view entry was, and a held value heard again by an arrival with its
-stamp, kept once, then was. A member matches its template under the
-snapshot key, each parameter one chunk." A reader without the contract
-holds no collection, so "no omission applies, since coll maps to no
-template".
+**The omission rule** (:meth:`Seed._omit`): "A late joiner MUST apply the
+omission rule when it holds a snapshot complete (§7.5) under run R as of
+asof A, on a key K that is its collection's snapshot key or a member's
+key. A member of the collection at K or under it, that the snapshot lists
+neither live nor as a tombstone, has no value. The late joiner drops what
+it holds for the member, unless that is newer than the snapshot: a value
+under R with a seq above A; a value under another run that it heard after
+it asked the GET, by either path. A mutation heard again then counts,
+though it is kept once." "An incomplete snapshot drops nothing."
+
+**The owner's revision maps the index** (F-497): "A late joiner MUST map a
+snapshot's collection index with the revision of the interface that the
+owner's descriptor names (§3.3), never with another revision it holds."
+A case's ``revisions`` and ``descriptor`` give that: :func:`collections_of`
+takes the named revision's collections alone. "Where that revision has no
+state resource of the reply key's kind token at the index, or has one of
+which the reply's key is neither the snapshot key nor a member's key, the
+late joiner applies no omission rule over that snapshot. Its entries still
+merge." "Without the contract, or without the owner's revision, a reader
+cannot map a collection's index to its template, so it applies no omission
+rule."
+
+**A member** of a collection is a key its template matches under the
+snapshot key, each parameter one chunk (the fixture's description). The
+snapshot key is "its resource's key up to the template's first parameter
+… A template with no parameter is its own snapshot key".
 """
 
 from __future__ import annotations
@@ -210,10 +225,22 @@ class Seed:
         return {"view": [self.view[k].as_json(k) for k in keys], "snapshots": [s.as_json() for s in self.heard]}
 
 
+def collections_of(case: dict[str, Any]) -> list[dict[str, Any]]:
+    """The collections a case's reader maps a snapshot's index by: its
+    contract's ``collections``, or, where it holds several revisions, those
+    of the revision the owner's descriptor names (core §4.2, F-497), "never
+    … another revision it holds". A descriptor naming a revision the reader
+    does not hold maps nothing: "without the owner's revision", no omission
+    rule."""
+    if "revisions" in case:
+        return list(case["revisions"].get(case.get("descriptor"), []))
+    return list(case["collections"])
+
+
 def run_case(case: dict[str, Any]) -> dict[str, Any]:
     """One of ``seed/snapshot.json``'s cases, read: every page read from its
     bytes, and checked against the fixture's ``page``."""
-    seed = Seed(case["collections"], case["view"])
+    seed = Seed(collections_of(case), case["view"])
     for a in case["arrivals"]:
         if "page" in a:
             got = snapshot.read_page(bytes.fromhex(a["hex"]), "state")

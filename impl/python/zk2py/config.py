@@ -406,6 +406,22 @@ def check_control(op: str, request: dict[str, Any], f: Facts) -> Refusal | None:
     return None
 
 
+#: core §5.1 "The request" (0.99): a call's request form travels under
+#: this Encoding alone.
+FORM_ENCODING = "zenoh/bytes"
+
+
+def encoding_refusal(encoding: str | None) -> Refusal | None:
+    """§2.5 (text 0.13, F-501's answer): "a query under another ``Encoding``"
+    is ``invalid_request``, its bytes never read (core §5.1, "The
+    request"), with no field: validation.json's ``encoding``, "zenoh/bytes
+    (the request form's) where it gives none". It comes "after persist's
+    unavailable … and before the request's type and row 1"."""
+    if encoding is None or encoding == FORM_ENCODING:
+        return None
+    return Refusal("invalid_request", None, f"a query under {encoding}: no request form (core §5.1)")
+
+
 def persist_unavailable(f: Facts, writable: bool = True) -> Refusal | None:
     """§2.13 row 1: "no persisted layer: unavailable, cause config", which
     the core answers before any handler runs, the request's type included;
