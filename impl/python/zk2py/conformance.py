@@ -5049,11 +5049,11 @@ def _round103_readings(root: Path) -> list[tuple[str, Any, Any]]:
     once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
     out.append(("core 0.97's and 0.98's entries: RULES.md lists 250 rules, the static rules 67 with §7.5's four, the "
                 "owner 76; 249 since core 0.99's one fewer (round 104); 262 and the owner 83 since core 0.100 "
-                "(round 105)",
+                "(round 105); 267 since observer 0.29's five (round 106)",
                 missing(log, "`RULES.md` lists 250 rules, 4 more", "The owner class counts 76 where it counted 78",
                         "[`RULES.md`](RULES.md) lists 249 rules, 1 fewer", "`RULES.md` lists 262 rules, 13 more")
                 + [int(once.group(1)) if once else None, counted.get("Implementation: the static rules"),
-                   counted.get("Owner")], [262, 67, 83]))
+                   counted.get("Owner")], [267, 67, 83]))
     # §7.5's "Sizes", by zk2py's own writer.
     base = {"tag": 0, "run_width": 16, "run": 1, "asof": 9, "time": {"s": 3600, "ms": 250}, "index": 0,
             "more": False, "coll": 0, "live": [], "tombs": []}
@@ -5253,6 +5253,7 @@ def _round104_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out += _mend_after_round103()
     out += _mend_after_round104(root)
     out += _round105_readings(root)
+    out += _round106_readings(root)
     return out
 
 
@@ -5417,6 +5418,75 @@ def _round104_texts(root: Path) -> list[tuple[str, Any, Any]]:
                         "**Each step ends before the next starts.** The re-mint waits for step 1's undo, one act "
                         "(§2.11), as a `cancel`'s reply does (§2.10). A re-mint asked while an act is in flight is "
                         "refused before step 1."), []))
+    return out
+
+
+def _round106_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Observer 0.29 and link.v2 0.10 (#990 V1, V2), read cold (#609, round
+    106): the versions, observer §7.3's and §7.5's new rules as they state
+    them, zk2py's echo tool over them (the scope and the revision are the
+    scope and envelope families'), and the texts F-509 to F-511 quote."""
+    import re
+
+    from . import across, link_v2
+
+    spec = root.parent
+    repo = spec.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    obs, l2 = flat("observer.md"), flat("profiles/link/v2.md")
+    v = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+)", obs)
+    lv = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+)", l2)
+    out: list[tuple[str, Any, Any]] = [
+        ("observer 0.29 or later and link.v2 0.10 or later, each with its entry; observer §7.5 is \"Reading across a "
+         "face\", and link.v2 §2.21 points to a tool's scope",
+         [_at_least(v.group(1) if v else None, "0.29"), _at_least(lv.group(1) if lv else None, "0.10")]
+         + missing(obs, "### 7.5 Reading across a face",
+                   "A tool given the face SHOULD NOT declare a scope for a resource the plan keeps off it.",
+                   "A tool MUST NOT drop silently a selector it was given that meets none of its scopes: it refuses "
+                   "it, and says why.",
+                   "A tool that reads a mutation, a frame or a heartbeat with no descriptor naming the owner's "
+                   "revision MUST read it with the revision chosen in this order.",
+                   "A tool MUST NOT decode a record as its declared type under a tag that is not that type's",
+                   "A tool that holds no type for a record whose tag is not 0 MUST NOT sniff it.")
+         + missing(l2, "**A tool's scope** is the face's plan (§2.3, observer §7.5)."),
+         [True, True]),
+    ]
+    # F-509: tags.json's e3a529fe, a file whose id is its successor's
+    tags = _load_json(root / "envelope" / "tags.json")
+    cat_file = _load_json(repo / tags["catalogs"]["e3a529fe"])
+    from . import catalog as cat_mod
+
+    out.append(("F-509 (open): envelope/tags.json maps e3a529fe to examples/zk2/zenoh-modem/catalog.json, whose id is "
+                "0ff6bf6d since #1080; e3a529fe is the catalog of its first nine entries, by its lineage, which the "
+                "description does not say",
+                [tags["catalogs"]["e3a529fe"], cat_mod.catalog_id(cat_file),
+                 any(x.get("id") == "e3a529fe" for x in cat_file.get("lineage") or []),
+                 across.catalog_by_id("e3a529fe", tags["catalogs"]["e3a529fe"], repo).id]
+                + missing(" ".join(tags["description"].split()),
+                          "`catalogs` maps a catalog's id to its file, or to its document, each a predecessor of "
+                          "e3a529fe in its lineage, so a reader checks each id."),
+                ["examples/zk2/zenoh-modem/catalog.json", "0ff6bf6d", True, "e3a529fe"]))
+    faces = _load_json(root / "scope" / "faces.json")
+    c12 = faces["cases"][12]
+    out.append(("F-510 (open): observer §7.5's \"it refuses it, and says why\" leaves unsaid whether the tool still "
+                "declares a selector given beside it that meets a scope; scope/faces.json case 12 gives `refused` "
+                "alone (zk2py's echo tool refuses the read)",
+                missing(obs, "A tool MUST NOT drop silently a selector it was given that meets none of its scopes: it "
+                             "refuses it, and says why.")
+                + [len(c12["typed"]), sorted(c12["expect"])], [2, ["refused"]]))
+    plan22 = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "plan.json")["cases"][22]
+    pol, _ = link_v2.parse_policy(plan22["policy"])
+    ifs = _link_interfaces(plan22)
+    services_only = link_v2.plan(plan22["policy"], {s: list(ifs) for s in pol.services}, ifs, None)
+    out.append(("F-511 (open): observer §7.5 derives the plan with \"each service the policy lists taken to implement "
+                "them all\", and names no device of a device face (link.v2 §2.5): read so, link.v2's plan.json case "
+                "22's device face is refused service_unknown, and the tool has no scope",
+                missing(obs, "each service the policy lists taken to implement them all")
+                + [sorted(f["code"] for f in services_only.get("refused", []))], [["service_unknown"]]))
     return out
 
 
@@ -5925,11 +5995,12 @@ def _core096_readings(root: Path) -> list[tuple[str, Any, Any]]:
     once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
     out.append(("core 0.96's entry: RULES.md lists 246 rules, 0.95's 239, the core's four and observer 0.26's three; "
                 "250 since core 0.97's four, and core 0.98's still; 249 since core 0.99 (round 104); 262 since core "
-                "0.100's 13 (round 105)",
+                "0.100's 13 (round 105); 267 since observer 0.29 (round 106)",
                 missing(flat("CHANGELOG.md"), "lists 246 rules: 0.95's 239, these four and observer 0.26's three",
                         "`RULES.md` lists 250 rules, 4 more", "the index still lists 250 rules",
                         "lists 249 rules, 1 fewer", "`RULES.md` lists 262 rules, 13 more than 0.99's")
-                + [int(once.group(1)) if once else None], [262]))
+                + missing(flat("observer-CHANGELOG.md"), "**`RULES.md`** counts 267 rules, 82 of them the observer's.")
+                + [int(once.group(1)) if once else None], [267]))
     out.append(("core 0.96 §8.1, §8.4, §8.5 and observer 0.26 §3.6, §3.11: the rules as their texts state them",
                 missing(core, "Such an owner SHOULD put every interface it implements in its tokenless set.",
                         "Such an owner MUST NOT implement `archive.v1`, nor an interface whose contract uses "
@@ -6624,8 +6695,10 @@ def _round95_readings(root: Path) -> list[tuple[str, Any, Any]]:
          missing(core, "**A template's selector** is its key with each parameter a wildcard, and an event's ULID "
                        "chunk too. Its literal prefix is what is declared.",
                  "**`{name...}`** is a **rest** parameter: one or more chunks, each slugged.")
-         + missing(obs, "Each concrete resource is its exact key, and each template its key with every parameter a "
-                        "wildcard. An event's ULID chunk is a wildcard too."), []),
+         # observer 0.29 (round 106) rewords the scope's sentence; still no
+         # wildcard for a rest parameter
+         + missing(obs, "A scope** is a resource's exact key where the resource is concrete, and its key with every "
+                        "parameter a wildcard where it is a template. An event's ULID chunk is a wildcard too."), []),
         ("F-438 (zk2py's reading): a rest parameter is */**, an event's ULID chunk * with or without a parameter, "
          "and the literal prefix is what precedes the first wildcard",
          [face.scope("stream", "path/{path...}"), face.scope("events", "alarm"), face.scope("events", "fault/{k}"),
@@ -7510,11 +7583,15 @@ def _mend93_readings(root: Path) -> list[tuple[str, Any, Any]]:
          [True, True, True]),
         ("F-406, F-407, F-409, F-412: observer §7.3's sniffing of a type not held and what the tool says, the "
          "decode order, a profile's reader, §4.1's count of each forgetting, §8.1's pointer; the old forms gone",
-         missing(obs, "A payload whose declared type the tool does not hold is sniffed (§8.1). That is a foreign "
-                      "key's, or a zk2 key's whose contract is not in hand or is unavailable (§2). The tool says "
-                      "which, naming where it stopped resolving the key.",
+         # observer 0.29 (round 106): sniffing sets aside a record under a tag
+         # other than 0, and names a revision a tool across a face cannot
+         # choose (§7.5)
+         missing(obs, "A payload whose declared type the tool does not hold is sniffed (§8.1), unless its CH carries a "
+                      "tag other than 0 (below). That is a foreign key's, or a zk2 key's whose contract is not in "
+                      "hand or is unavailable (§2), or whose revision a tool across a face cannot choose (§7.5). The "
+                      "tool says which, naming where it stopped resolving the key.",
                  "a payload whose declared type the tool holds is decoded by that type, on the wire its sample's "
-                 "`Encoding` names (below). Any other payload is sniffed.",
+                 "`Encoding` names (below). Any other payload is sniffed, unless its CH carries a tag other than 0.",
                  "A profile that says how its reader reads a sample's bytes decides for that reader.",
                  "counts each time the bound forgets a key, and reports the count.",
                  "(§7.3's sniffing)")
@@ -8010,9 +8087,12 @@ def _round92_readings(root: Path) -> list[tuple[str, Any, Any]]:
          # Re-read under observer 0.12 (the mend after #926 part 5): F-412
          # reworded the decode order, F-406 placed a zk2 key whose contract is
          # not in hand, and F-407 the bound's count.
+         # observer 0.29 (round 106): "unless its CH carries a tag other than 0"
          missing(obs, "**Decode order** for a tool: a payload whose declared type the tool holds is decoded by that "
-                      "type, on the wire its sample's `Encoding` names (below). Any other payload is sniffed.",
-                 "A payload whose declared type the tool does not hold is sniffed (§8.1).",
+                      "type, on the wire its sample's `Encoding` names (below). Any other payload is sniffed, unless "
+                      "its CH carries a tag other than 0.",
+                 "A payload whose declared type the tool does not hold is sniffed (§8.1), unless its CH carries a "
+                 "tag other than 0 (below).",
                  "So a state declared `cbor` whose sample's `Encoding` is JSON is read as JSON.",
                  "A tool that bounds what it holds counts each time the bound forgets a key, and reports the count.")
          + missing(types, "The second carries CBOR's `Encoding` or zenoh's default. Its reason says it was read as "
@@ -10576,8 +10656,79 @@ def family_envelope(root: Path) -> list[Result]:
                                   zk2c.reads(c["key"], bytes.fromhex(c["hex"])), c["expect"]))
         elif path.name == "calls.json":
             out += _envelope_calls(root, data)
+        elif path.name == "tags.json":
+            out += _envelope_tags(root, data)
         else:
             out.append((f"envelope/{path.name}", False, "an unknown fixture file: the runner does not read it"))
+    return out
+
+
+def _envelope_tags(root: Path, data: dict[str, Any]) -> list[Result]:
+    """``envelope/tags.json`` (observer 0.29 §7.3 "CH's tag", §7.5 "The
+    revision of a key", #990 V2; round 106): a key, CH, a record's size, the
+    revisions held and a catalog -> the revision a tool reads the sample
+    with, the step and how, the tag refusal, or the step that left none, or
+    the ones left ambiguous, and what is shown (:mod:`zk2py.across`). Each
+    catalog is read and its id checked, a predecessor through its
+    successor's lineage."""
+    from . import across
+
+    repo = root.parent.parent
+    unknown = set(data) - {"description", "history", "catalogs", "cases"}
+    out: list[Result] = [("envelope: tags.json holds its history, catalogs and cases", not unknown,
+                          f"members the runner does not read: {sorted(unknown)}" if unknown else "")]
+    hist = across.load_history(repo / data["history"])
+    cats = {}
+    for cid, src in data["catalogs"].items():
+        try:
+            cats[cid] = across.catalog_by_id(cid, src, repo)
+            out.append((f"envelope: tags.json catalog {cid} reads with its id", True, ""))
+        except ValueError as e:
+            out.append((f"envelope: tags.json catalog {cid} reads with its id", False, str(e)))
+    for i, c in enumerate(data["cases"]):
+        if c.get("sample") == "reply":
+            got: Any = {"shows": across.shows_reply(int(c["ch"], 16), c["size"])}
+        else:
+            missing_ = [fp for fp in c["held"] if fp not in hist]
+            if missing_:
+                out.append((f"envelope: tags #{i}: {c['note']}", False, f"revisions not in the history: {missing_}"))
+                continue
+            got = across.revision_of_key(c["key"], int(c["ch"], 16), c["size"], {fp: hist[fp] for fp in c["held"]},
+                                         cats.get(c["catalog"]) if c["catalog"] else None).expect()
+        out.append(_check(f"envelope: tags #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def family_scope(root: Path) -> list[Result]:
+    """``scope/`` (observer 0.29 §7.5 "Reading across a face", #990 V1; round
+    106), every file, an unknown one failing. ``faces.json``: the contracts
+    in hand, the addresses read, a face policy and its face or none, a
+    subscription or a GET, and the selectors given -> what the tool
+    declares, the selectors it refuses, or the plan's refusal
+    (:mod:`zk2py.across`, the plan :func:`zk2py.link_v2.plan`'s, from the
+    policy and the contracts in hand alone)."""
+    from . import across
+    from .contract import load_contract
+
+    repo = root.parent.parent
+    out: list[Result] = []
+    for path in sorted((root / "scope").iterdir()):
+        if path.name != "faces.json":
+            out.append((f"scope/{path.name}", False, "an unknown fixture file: the runner does not read it"))
+            continue
+        data = _load_json(path)
+        for i, c in enumerate(data["cases"]):
+            cs = [load_contract(repo / x) for x in c["contracts"]]
+            pol = None if c["policy"] is None else (repo / c["policy"]).read_text(encoding="utf-8")
+            # "The tool derives the plan from the policy and the contracts in
+            # hand": no catalog is given
+            sc = across.scopes(cs, c["across"], c["reads"], pol, c["face"], None)
+            if sc.plan_refused is not None:
+                got: Any = {"plan_refused": sc.plan_refused}
+            else:
+                d = across.declared(sc.scopes, c["typed"])
+                got = {"refused": d.refused} if d.refused else {"selectors": d.selectors}
+            out.append(_check(f"scope: faces #{i}: {c['note']}", got, c["expect"]))
     return out
 
 
@@ -11080,7 +11231,7 @@ def family_catalog(root: Path) -> list[Result]:
 #: family cannot land unrun.
 KNOWN_ENTRIES = {"README.md", "keys.json", "slugs.json", "templates.json", "contracts", "sets", "bundles",
                  "history", "descriptors", "errors", "compat", "budget", "seed", "envelope", "packed",
-                 "catalog", "heartbeat", "frame", "snapshot"}
+                 "catalog", "heartbeat", "frame", "snapshot", "scope"}
 
 
 def family_layout(root: Path) -> list[Result]:
@@ -11118,6 +11269,7 @@ FAMILIES: dict[str, Callable[[Path], list[Result]]] = {
     "heartbeat": family_heartbeat,
     "frame": family_frame,
     "snapshot": family_snapshot,
+    "scope": family_scope,
     "examples": family_examples,
     # zk2py's own readings of open findings: not a fixture family.
     "readings": family_readings,
