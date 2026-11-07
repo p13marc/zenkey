@@ -56,10 +56,10 @@ from pathlib import Path
 from typing import Any
 
 from . import frame, zk2c
+from .blackbox import BLACKBOX
 
 REPO = Path(__file__).resolve().parents[3]
 CONTRACT = REPO / "impl" / "python" / "interop" / "frames" / "linkframes.v1.toml"
-BLACKBOX = Path(os.environ.get("ZK2PY_BLACKBOX", "/srv/dev/scratch/zenkey/bin/current"))
 IFACE = "linkframes.v1"
 LINK, SAMPLE = "frames/link", "frames/sample"
 BASE = {"dropped": 7, "queue_depth": 12, "duty_available": 1, "duty_wait_ms": "1500"}

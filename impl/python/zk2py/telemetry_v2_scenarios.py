@@ -62,10 +62,10 @@ from pathlib import Path
 from typing import Any
 
 from . import frame, telemetry_v2 as t2, zk2c
+from .blackbox import BLACKBOX
 
 REPO = Path(__file__).resolve().parents[3]
 CONTRACT = REPO / "spec" / "profiles" / "telemetry" / "conformance" / "contracts" / "meterframe.v1.toml"
-BLACKBOX = Path(os.environ.get("ZK2PY_BLACKBOX", "/srv/dev/scratch/zenkey/bin/current"))
 IFACE, ADDRESS = "meterframe.v1", "lab/meterframe"
 LINK, TOTALS, BYTES, BARE = "frames/link", "frames/totals", "frames/bytes", "sdu/dropped_total"
 PAIRINGS = ("py-py", "rust-py", "py-zenctl")

@@ -436,7 +436,7 @@ def _normal(item: Any) -> Any:
     if item == MARKER or not isinstance(item, dict):
         return item
     try:
-        f = packed._field_of(item)  # noqa: SLF001
+        f = packed.field_of(item)
         width = f.width
     except Exception:  # noqa: BLE001 - a field the codec cannot read differs from every derivation
         return ("unreadable", json.dumps(item, sort_keys=True, default=str))

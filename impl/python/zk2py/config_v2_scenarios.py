@@ -55,11 +55,11 @@ from . import config as v1
 from . import config_v2 as c2
 from . import freshness as fr
 from . import zk2c
+from .blackbox import BLACKBOX
 
 REPO = Path(__file__).resolve().parents[3]
 LIFECYCLE = REPO / "spec" / "profiles" / "config" / "conformance" / "v2" / "lifecycle.json"
 NAV = REPO / "examples" / "zk2" / "walkthrough" / "nav.v2.toml"
-BLACKBOX = Path(os.environ.get("ZK2PY_BLACKBOX", "/srv/dev/scratch/zenkey/bin/current"))
 IFACE = "rfcfg.v1"
 NS = 1_000_000_000
 PAIRINGS = ("py-py", "rust-py", "py-zenctl")
@@ -1013,7 +1013,6 @@ def section8(report: Report, pairing: str) -> None:
         _, g2, _ = bus.get("lab/rf2", session=admin)
         tok3 = ((g2 or {}).get("last") or {}).get("token", 1)
         r3 = bus.call("persist", {"token": tok3}, address="lab/rf2", actor="admin")
-        ds = [d for d in bus.s.rows if False]
         desc = None
         rf2 = [x for x in bus.owners if getattr(x, "service", None) == "rf2" or (
             getattr(x, "instance_key", "").startswith("zk2/lab/rf2/"))]
@@ -1026,7 +1025,7 @@ def section8(report: Report, pairing: str) -> None:
                      r3.code == "unavailable" and (r3.error or {}).get("cause") == "config"
                      and any(u.get("resource") == "@op/persist" and u.get("cause") == "config"
                              for u in entry.get("unavailable", [])),
-                     f"{r3.short()}; descriptor unavailable {entry.get('unavailable')} {len(ds)}")
+                     f"{r3.short()}; descriptor unavailable {entry.get('unavailable')}")
         o.restart()
         _, g, _ = bus.get(session=admin)
         report.check(sec, "step 4: fraction_ppm is 20000 at overlay: step 1's change survived, step 2's did not",

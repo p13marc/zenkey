@@ -580,7 +580,9 @@ def section4r(report: Report) -> None:
     from .live_interop import Owner as Exe
 
     sec = "§4 clock ahead (the owner example)"
-    exe = Path(os.environ.get("ZK2PY_BLACKBOX", "/srv/dev/scratch/zenkey/bin/current")) / "owner"
+    from .blackbox import directory
+
+    exe = directory() / "owner"
     if not exe.is_file():
         report.check(sec, "the section ran", False, f"{exe} not found")
         return

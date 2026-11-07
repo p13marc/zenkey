@@ -641,7 +641,12 @@ def _repeats(names: list[str]) -> int:
     return len(names) - len(set(names))
 
 
-def _field_of(item: dict[str, Any]) -> Field:
+def field_of(item: dict[str, Any]) -> Field:
+    """One item of a type's ``fields``, as §7.6 declares it, read into its
+    :class:`Field`: its kind, its bounds, reserved names, values or width.
+    The item is read as written; :func:`lint` judges it (E038 to E045). A
+    caller that compares fields by their widths, as config.v2's lint does
+    (``config_v2._normal``), reads them here."""
     t = item["type"]
     f = Field(item["name"], t, optional=item.get("optional", False))
     if t in ("int", "fixed"):
@@ -688,7 +693,7 @@ def _declaration_problem(item: dict[str, Any]) -> tuple[str, str] | None:
             if not 1 <= w <= 64 or (1 << w) < need:
                 return "E041", f"width {w} does not hold {need} codes, or is not from 1 to 64"
             return None
-    w = _field_of(item).width
+    w = field_of(item).width
     if not 1 <= w <= 64:
         return "E041", f"a width of {w} bits"
     return None
@@ -760,7 +765,7 @@ def lint(doc: Any, where: str = "") -> Linted:
             if problem is not None:
                 out.err(problem[0], f"{at}: {problem[1]}")
             else:
-                fields.append(_field_of(item))
+                fields.append(field_of(item))
             read.append((item["name"], item.get("optional", False)))
         if not any(isinstance(x, dict) for x in items):
             out.err("E039", f"{here}: a record with no field")

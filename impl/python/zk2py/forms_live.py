@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import queue
 import subprocess
 import sys
@@ -36,8 +35,9 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .blackbox import BLACKBOX
+
 REPO = Path(__file__).resolve().parents[3]
-BLACKBOX = Path(os.environ.get("ZK2PY_BLACKBOX", "/srv/dev/scratch/zenkey/bin/current"))
 TC = REPO / "impl" / "python" / "interop" / "operations" / "tc.v1.toml"
 SEED = REPO / "spec" / "conformance" / "contracts" / "ok-packed-operation.toml"
 PAIRINGS = ("py-py", "py-rust", "zenctl-py")
