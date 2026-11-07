@@ -65,6 +65,7 @@ owner's instance token crosses, and shows its link, not its liveness.
   as any is. What the rule changes is what a tool may conclude from it.
 - **`RULES.md`** counts these three among core 0.96's 246.
 - **The header** is written against core 0.96.
+
 ## 0.25 — 2026-11-02: §7.3, a reply under another `Encoding` (#609, #985)
 
 zk2py's round 101 read core 0.94 and this text's 0.24 cold, and filed

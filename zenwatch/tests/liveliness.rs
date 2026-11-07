@@ -509,3 +509,46 @@ async fn the_token_ledger_is_unconfirmed_by_a_move_and_complete_after_its_reread
     );
     monitor.shutdown().await.expect("shutdown");
 }
+
+/// `liveliness-gone` on a tokenless interface's tokens is refused by name
+/// (#982 H3; core §8.1, observer §3.6): an owner on a first hop puts every
+/// interface in its tokenless set, so it holds no interface token, and a
+/// rule on one would never see it held nor gone. Exit 2, naming the rule,
+/// the owner, the interface and the rule to write instead.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn liveliness_gone_on_a_tokenless_interface_is_refused_by_name() {
+    let (_router, ep) = zk2::router().await;
+    let owners = zk2::client_ns(&ep, Some(NS)).await;
+    let tool = zk2::client_ns(&ep, Some(NS)).await;
+    let ping = zk2::scenario("ping.v1");
+    let svc = zk2::bring_up(
+        &owners,
+        zk2::config("h1/tc").first_hop(),
+        std::slice::from_ref(&ping),
+    )
+    .await;
+    zk2::tokens(&tool, "zk2/h1/tc/@zk/instance/*", 1).await;
+
+    let e = engine::run_once_refused(
+        zk2::daemon_bus(&ep, NS).await,
+        vec![engine::rule(
+            "ping-gone",
+            &format!("liveliness-gone {NS}/zk2/*/tc/@zk/alive/ping.v1/**"),
+            "warning",
+        )],
+        Options::default(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(zenwatch::exit::code_for(&e), zenwatch::exit::REFUSED, "{e}");
+    let text = e.to_string();
+    for needle in [
+        "\"ping-gone\"",
+        "h1/tc",
+        "ping.v1 \"token\": false",
+        "instance-gone h1/tc",
+    ] {
+        assert!(text.contains(needle), "{needle:?} not in {text}");
+    }
+    svc.close().await.expect("close");
+}

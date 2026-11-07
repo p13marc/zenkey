@@ -377,6 +377,14 @@ pub fn doctor_report() -> DoctorReport {
                 "3 running revision(s), each in the catalog it is judged against (catalog \
                  0a90fd61)",
             ),
+            CheckReport::of(
+                CheckId::FirstHopToken,
+                vec![],
+                vec![],
+                "1 device(s) the face policy lists, 1 instance(s) of them present, none holding \
+                 an interface token or a contract queryable that reached this reader (a device \
+                 face's carve denies both on ingress, link.v2 §2.6)",
+            ),
         ],
         unobservable: None,
     }

@@ -460,6 +460,25 @@ fn face_policy(path: &std::path::Path) -> Result<zenkey_model::link::FacePolicy>
     })
 }
 
+/// The owners on a first hop `--face-policy` lists (observer §3.11; #982
+/// H3): each device of its device faces. Nothing given is none. Refused,
+/// exit 2: what [`face_policy`] refuses, and a policy with no device face,
+/// which would tell the reader nothing.
+pub fn first_hop(path: Option<&std::path::Path>) -> Result<zenkey_fleet::FirstHop> {
+    let Some(path) = path else {
+        return Ok(zenkey_fleet::FirstHop::default());
+    };
+    let hop = zenkey_fleet::FirstHop::of_policy(&face_policy(path)?);
+    if hop.is_empty() {
+        return Err(unaskable!(
+            "--face-policy {}: no face attaches a device (`attach = \"device\"`, link.v2 \
+             §2.5), so it names no owner on a first hop",
+            path.display()
+        ));
+    }
+    Ok(hop)
+}
+
 /// The far side `--face-policy F --face NAME` names (#988 L4): the face of
 /// a `link.v2` policy. Refused, exit 2: what [`face_policy`] refuses, a
 /// `link.v1` policy, and a face it does not name.

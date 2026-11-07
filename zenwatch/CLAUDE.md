@@ -62,7 +62,11 @@ Claude Code loads this file when working in `zenwatch/`; the root `CLAUDE.md` is
   plane (saying what to write), an alarm selector carrying the namespace,
   `origin-down`, inhibition switched on (removed with v1's catalog),
   `group_by: ["origin"]` (zk2 groups by `system`/`address`),
-  `bus.registry`, the doctor's `sample`, a version-1 state file.
+  `bus.registry`, the doctor's `sample`, a version-1 state file, and at
+  `run`'s start a `liveliness-gone` naming an interface that an instance
+  present marks `"token": false` (#982 H3: a first-hop owner holds no
+  interface token; `PresenceRules::refuse_tokenless`, saying to write
+  `instance-gone`).
   `check-config` and `run` pass one gate (`load_checked`: the file, the
   context, the namespace, the contracts, the state file). Sinks: `ntfy`,
   `smtp`, `webhook`, `exec` — the one that runs code, deliberately last.
@@ -92,7 +96,8 @@ Claude Code loads this file when working in `zenwatch/`; the root `CLAUDE.md` is
   clean stop; and it caches no discovery: it is not the noun
   `docs/redesign-2026-07.md` §6.1 rejected. **The scheduled
   doctor** (#390, `doctor.rs`): a `doctor` block runs zk2's `run_doctor`
-  (`deep`, thirty-four checks since #980's C1c, `arbitration-declaration`
+  (`deep`, thirty-five checks since #982's H3, `first-hop-token` not asked
+  since zenwatch takes no face policy, `arbitration-declaration`
   and `catalog-missing` among them; top-level `clocks_synced` for the
   `health-*` checks, which a `doctor` rule reads too; top-level `catalog`,
   the deployment catalogs core §8.6 provisions, loaded by `load_checked`

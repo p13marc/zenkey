@@ -49,6 +49,11 @@ pub struct ServiceListing {
     /// shown rather than dropped.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unparsed: Vec<String>,
+    /// Each device in scope the tool was told is on a first hop
+    /// (`--face-policy`, observer §3.11; #982 H3), by address, with what
+    /// this read says of its link. Absent when it was told of none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub first_hop: Vec<FirstHopSighting>,
 }
 
 /// One service (`service show`): its instances, each with its tokens and
@@ -79,6 +84,27 @@ pub struct ServiceView {
     /// Keys under the scope that are not zk2 tokens, verbatim.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unparsed: Vec<String>,
+    /// The address is a device the tool was told is on a first hop
+    /// (`--face-policy`, observer §3.11; #982 H3): its face, and what this
+    /// read says of its link. Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_hop: Option<FirstHopSighting>,
+}
+
+/// A device the tool was told is on a first hop (observer §3.11; #982 H3),
+/// as one presence read shows it: its instance token shows its link, not
+/// its liveness, so its absence is never down.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FirstHopSighting {
+    /// `<system>/<service>`.
+    pub address: String,
+    /// The device face that attaches it, by its name in the face policy
+    /// (`[face.<name>]`, `link.v2` §2.5).
+    pub face: String,
+    /// `up` while one of its instance tokens is held; `link_closed` when
+    /// the read is complete and shows none, never `down`; `unobservable`
+    /// when the read is possibly incomplete.
+    pub status: AddressStatus,
 }
 
 /// Every deployment namespace in which a zk2 service holds an instance
@@ -205,7 +231,9 @@ pub enum DescriptorAnswer {
 // ─── live presence (#614) ────────────────────────────────────────────────────
 
 /// An address's presence, in the three states (spec §8.1, O5, R7):
-/// `"up"`, `"down"`, `"unobservable"` on the wire.
+/// `"up"`, `"down"`, `"unobservable"` on the wire; and, for an owner the
+/// reader knows is on a first hop, `"link_closed"` in place of down
+/// (observer §3.11, #982 H3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AddressStatus {
@@ -219,16 +247,24 @@ pub enum AddressStatus {
     /// cut off, or a withdrawal heard live with no complete read since
     /// (`model::presence_live`'s doc).
     Unobservable,
+    /// An owner the reader knows is on a first hop
+    /// ([`crate::FirstHop`], from a face policy's device face), with no
+    /// instance token held and a complete read behind it: its link is
+    /// closed, which is what its instance token's absence shows (observer
+    /// §3.11). Never down: its liveness is that of what else crosses, its
+    /// heartbeat among it (observer §7.1).
+    LinkClosed,
 }
 
 impl AddressStatus {
     /// The status as a person reads it, and as it serializes: `up`,
-    /// `down`, `unobservable`.
+    /// `down`, `unobservable`, `link_closed`.
     pub fn as_str(self) -> &'static str {
         match self {
             AddressStatus::Up => "up",
             AddressStatus::Down => "down",
             AddressStatus::Unobservable => "unobservable",
+            AddressStatus::LinkClosed => "link_closed",
         }
     }
 }
@@ -428,6 +464,7 @@ mod tests {
                 }],
             }],
             unparsed: vec!["zk2/host-a/tc/@zk/bogus".into()],
+            first_hop: vec![],
         };
         assert_eq!(
             serde_json::to_value(&listing).expect("serialize"),
@@ -490,6 +527,7 @@ mod tests {
             instances: vec![],
             members: vec![],
             unparsed: vec![],
+            first_hop: None,
         };
         assert_eq!(
             serde_json::to_value(&view).expect("serialize"),
@@ -498,6 +536,29 @@ mod tests {
                 "selector": "zk2/host-a/tc/@zk/**",
                 "complete": false,
                 "instances": [],
+            })
+        );
+        // A device the tool was told is on a first hop (observer §3.11,
+        // #982 H3): its face, and its link closed, never down.
+        let device = ServiceView {
+            address: "lab/probe-a".into(),
+            selector: "zk2/lab/probe-a/@zk/**".into(),
+            complete: true,
+            first_hop: Some(FirstHopSighting {
+                address: "lab/probe-a".into(),
+                face: "radio".into(),
+                status: AddressStatus::LinkClosed,
+            }),
+            ..view
+        };
+        assert_eq!(
+            serde_json::to_value(&device).expect("serialize"),
+            json!({
+                "address": "lab/probe-a",
+                "selector": "zk2/lab/probe-a/@zk/**",
+                "complete": true,
+                "instances": [],
+                "first_hop": {"address": "lab/probe-a", "face": "radio", "status": "link_closed"},
             })
         );
         let listing = NamespaceListing {
@@ -675,6 +736,7 @@ mod tests {
             (AddressStatus::Up, "up"),
             (AddressStatus::Down, "down"),
             (AddressStatus::Unobservable, "unobservable"),
+            (AddressStatus::LinkClosed, "link_closed"),
         ] {
             assert_eq!(serde_json::to_value(status).expect("serialize"), word);
             assert_eq!(status.as_str(), word);

@@ -171,11 +171,19 @@ pub enum CheckId {
     /// time the instance writes under it. Asked only of a run given a
     /// catalog (`--catalog`), since a catalog is provisioned, never served.
     CatalogMissing,
+    /// A device a face policy lists on a device face holding an interface
+    /// token or a contract queryable this reader can see: an owner on a
+    /// first hop holds its instance token alone and no bundle (core §8.1,
+    /// §8.4; #982 H3), and each declaration beyond those crosses the hop at
+    /// every transport, denied or not. A warning. Asked only of a run given
+    /// a face policy (`--face-policy`), the one way a tool knows which
+    /// owners are on a first hop (observer §3.11).
+    FirstHopToken,
 }
 
 impl CheckId {
     /// Every check id, in the order the doctor reports them.
-    pub const ALL: [CheckId; 34] = [
+    pub const ALL: [CheckId; 35] = [
         CheckId::SplitBrain,
         CheckId::BindingUnsatisfied,
         CheckId::ContractDrift,
@@ -210,6 +218,7 @@ impl CheckId {
         CheckId::TimingDeclaration,
         CheckId::ArbitrationDeclaration,
         CheckId::CatalogMissing,
+        CheckId::FirstHopToken,
     ];
 
     /// The wire token, exactly as it serializes.
@@ -249,6 +258,7 @@ impl CheckId {
             CheckId::TimingDeclaration => "timing-declaration",
             CheckId::ArbitrationDeclaration => "arbitration-declaration",
             CheckId::CatalogMissing => "catalog-missing",
+            CheckId::FirstHopToken => "first-hop-token",
         }
     }
 
@@ -295,6 +305,7 @@ impl CheckId {
             CheckId::TimingDeclaration => "timing.v1 §2.2",
             CheckId::ArbitrationDeclaration => "arbitration.v1 §2.14",
             CheckId::CatalogMissing => "§8.6",
+            CheckId::FirstHopToken => "§8.1",
         }
     }
 
@@ -422,6 +433,11 @@ impl CheckId {
             CheckId::CatalogMissing => {
                 "does a running instance list a revision the deployment's catalog lacks, or name \
                  a catalog that no catalog given is or succeeds?"
+            }
+            CheckId::FirstHopToken => {
+                "does a device a face policy lists on a device face hold an interface token or a \
+                 contract queryable, beyond the instance token alone an owner on a first hop \
+                 holds?"
             }
         }
     }
@@ -1124,6 +1140,7 @@ mod check_id_tests {
                 "timing-declaration",
                 "arbitration-declaration",
                 "catalog-missing",
+                "first-hop-token",
             ]
         );
     }

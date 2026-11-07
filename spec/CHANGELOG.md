@@ -188,6 +188,7 @@ interface refused. The reference runs it with H2 and H3, not yet.
   costs about 760 B with today's JSON, and about 110 B once C5 lands.
 - **`RULES.md`** lists 246 rules: 0.95's 239, these four and observer
   0.26's three.
+
 ## 0.95 — 2026-11-02: zk2py round 101's findings answered (#609, #985)
 
 zk2py's round 101 read C4c, core 0.94 and observer 0.24, cold, and ran

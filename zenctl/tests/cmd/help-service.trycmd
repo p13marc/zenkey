@@ -38,6 +38,9 @@ Options:
       --system <SYSTEM>
           Only this system's services (`zk2/<system>/*`)
 
+      --face-policy <FILE>
+          A `link.v2` face policy whose device faces (`attach = "device"`) list owners on a first hop (link.v2 §2.5): each device's instance token follows its link, so its absence reads `link_closed`, never down (observer §3.11). A policy the linter refuses, or one with no device face, is refused (exit 2)
+
       --namespace <NS>
           The deployment namespace: the session is opened in it.
           
@@ -104,6 +107,9 @@ Arguments:
           The service address, `<system>/<service>`
 
 Options:
+      --face-policy <FILE>
+          A `link.v2` face policy whose device faces (`attach = "device"`) list owners on a first hop (link.v2 §2.5): each device's instance token follows its link, so its absence reads `link_closed`, never down (observer §3.11). A policy the linter refuses, or one with no device face, is refused (exit 2)
+
       --namespace <NS>
           The deployment namespace: the session is opened in it.
           

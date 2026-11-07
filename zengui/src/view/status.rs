@@ -78,15 +78,21 @@ pub fn presence_text(p: Option<&crate::presence_link::PresenceUpdate>) -> (Strin
     let Some(p) = p else {
         return ("presence: not read".to_string(), false);
     };
-    let (mut up, mut down, mut unobservable) = (0usize, 0usize, 0usize);
+    let (mut up, mut down, mut unobservable, mut closed) = (0usize, 0usize, 0usize, 0usize);
     for (_, a) in p.presence.addresses() {
         match a.status {
             AddressStatus::Up => up += 1,
             AddressStatus::Down => down += 1,
             AddressStatus::Unobservable => unobservable += 1,
+            // A first-hop device's link closed: never down (observer
+            // §3.11, #982 H3), counted on its own when there is one.
+            AddressStatus::LinkClosed => closed += 1,
         }
     }
-    let counts = format!("{up} up · {down} down · {unobservable} unobservable");
+    let mut counts = format!("{up} up · {down} down · {unobservable} unobservable");
+    if closed > 0 {
+        counts.push_str(&format!(" · {closed} link closed"));
+    }
     match p.presence.basis() {
         PresenceBasis::Unseeded => ("presence: not seeded yet".to_string(), false),
         // Why, when the seed says: a barrier that does not stand is worth a

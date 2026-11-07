@@ -523,6 +523,7 @@ the deployment's own consumers do.
 zenctl namespace list -c tcp/127.0.0.1:7447          # which namespaces hold zk2 services (no --namespace)
 zenctl service list --namespace acme [--system host-a]   # instances, tokens beside descriptors; the tokenless set
 zenctl service show host-a/tc --namespace acme       # one service's descriptor (exit 2 when nothing shows)
+zenctl service list --namespace acme --face-policy lab.face.toml   # a first hop's devices: up, link_closed, never down
 zenctl iface list --namespace acme                   # every interface provided or required, and by whom
 zenctl iface show tc.netif.v1 --namespace acme       # providers, consumers, exposure, each revision's contract
 zenctl iface show tc.netif.v1@4f53 --contracts .history   # one revision, held offline: never retrieved
@@ -763,7 +764,7 @@ origin) is gone with the registry it read.
 
 ## `doctor` — a deployment against the core
 
-zk2's doctor (#612, FJ6) asks thirty-four questions of a deployment, each worded
+zk2's doctor (#612, FJ6) asks thirty-five questions of a deployment, each worded
 so that its finding is the *yes*, and answers each in the judgement shape: a
 finding, clean with the evidence that makes it clean, unobservable with what
 stood in the way, or not asked. The deployment is read through a session in
@@ -806,6 +807,7 @@ none.
 | `timing-declaration` | does a contract an owner implements declare timing.v1 values a reader cannot judge: an invalid one, a deadline below its period, or timing keys on a resource that is not a stream or on a requirement? (warning) | timing.v1 §2.2 |
 | `arbitration-declaration` | does a running consumer hold a role carrying `arbitration.policy` whose declaration is invalid over every revision of the required interface in hand (error: its consumer cannot start on it), or whose binding has a wildcard or a shadowed entry, a priority nobody chose (warning)? | arbitration.v1 §2.14 |
 | `catalog-missing` | does a running instance list a revision the deployment's catalog lacks (the one its descriptor names, or every `--catalog` where it names none), or name a catalog no `--catalog` is or succeeds? (warning; asked only with `doctor --catalog <file>`, since a catalog is provisioned, never served) | §8.6 |
+| `first-hop-token` | does a device a `link.v2` face policy lists on a device face hold an interface token or a contract queryable, beyond the instance token alone an owner on a first hop holds? (warning; asked only with `doctor --face-policy <file>`, since only the deployment knows which owners are on a first hop) | §8.1 |
 
 ```
 $ zenctl doctor --namespace acme -c tcp/127.0.0.1:7447

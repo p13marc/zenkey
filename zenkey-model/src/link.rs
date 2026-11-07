@@ -1328,9 +1328,15 @@ impl FacePolicy {
         })
     }
 
-    /// The face that attaches the device at `address`, when one does.
+    /// The face that attaches the device at `address`, when one does. A
+    /// device sits on one face only (`device_listed`, v2 §2.1): a policy
+    /// the linter accepted never lists it twice.
     #[must_use]
     pub fn device_face(&self, address: &str) -> Option<&str> {
+        debug_assert!(
+            self.devices().filter(|(_, d)| *d == address).count() <= 1,
+            "{address} on more than one device face: the linter's device_listed refuses it"
+        );
         self.devices()
             .find(|(_, d)| *d == address)
             .map(|(name, _)| name)
@@ -1368,7 +1374,9 @@ pub struct Owner<'a> {
     /// `<system>/<service>`.
     pub address: String,
     /// The key the deployment's `implements` names it by: a listed
-    /// service's name, or a device's address.
+    /// service by its bare name (`radio-a`, on the policy's `system`), a
+    /// device by its address (`lab/radio-a`), since a device may sit on
+    /// any system (v2 §2.5).
     pub key: &'a str,
     /// The face that attaches it, for a device.
     pub device_face: Option<&'a str>,

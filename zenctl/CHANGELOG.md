@@ -6,6 +6,17 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — the tools for a first hop (#982 H3)
+
+Observer 0.26 §3.11: a tool that knows an owner is on a first hop reports
+its link closed, never down. A `link.v2` face policy's device faces say
+which owners are.
+
+| Before | Now | Notes |
+|---|---|---|
+| `service list`, `service show`: no device known | `--face-policy FILE`: each device of a device face in scope, its face and its link, `up`, `link_closed` (a complete read shows none of its instance tokens) or `unobservable`, never `down`; JSON `first_hop` beside `services` (an array) and in `service show` (an object), each also an ndjson row tagged `first_hop` | a policy the linter refuses, or one with no device face, is refused, exit 2; `service show` of a device whose link is closed still exits 2, its note saying why |
+| `doctor`: thirty-four checks | thirty-five: `first-hop-token` (warning: a device on a device face holding an interface token, or whose own session answers a contract key its descriptor names), asked only with `doctor --face-policy` | §8.1; a device face's carve denies both on ingress, so behind it the clean pole is what reached the reader, and says so |
+
 ## Unreleased (`main`, zk2) — a device face, an owner on a first hop (#982)
 
 Core 0.96 lets an owner on a first hop hold its instance token alone, and

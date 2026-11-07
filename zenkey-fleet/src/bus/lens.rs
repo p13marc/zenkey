@@ -18,6 +18,16 @@
 //!   and never inside the drain, whose broadcast would overflow while it
 //!   waited (#338).
 //!
+//! **A descriptor kept across a token's return** (observer §3.11's MAY;
+//! #982 H3). An instance that leaves takes its descriptor with it, and the
+//! feed keeps it, by address and instance id
+//! ([`crate::model::catalog::KeptDescriptors`]): when the same instance's
+//! token returns — a first-hop owner's link opening again, several times a
+//! day over a radio — the kept descriptor is its read again, and no GET
+//! crosses the hop. A new instance id is described as any, and a full
+//! re-read's descriptors replace what is kept. What the owner put while its
+//! token was gone is lost to the feed until its next full read.
+//!
 //! The two never interleave: each holds the feed's read for its whole run.
 //! [`LensFeed::generation`] moves whenever either swaps the catalog or the
 //! store's answers change, which is what an
@@ -40,7 +50,7 @@ use zenoh::Session;
 use crate::Result;
 use crate::bus::contracts::BundleStore;
 use crate::bus::presence::{Scope, describe_each, observe};
-use crate::model::catalog::{Catalog, Observed};
+use crate::model::catalog::{Catalog, KeptDescriptors, Observed};
 use crate::report::{PresenceTransition, Unresolved};
 
 /// How long a feed waits between two background re-reads, however often it
@@ -71,6 +81,14 @@ async fn read_observed(
     Ok(observed)
 }
 
+/// What a [`LensFeed`] holds under its lock: the read, and the descriptors
+/// kept of the instances that left it (observer §3.11's MAY).
+#[derive(Default)]
+struct FeedRead {
+    observed: Option<Observed>,
+    kept: KeptDescriptors,
+}
+
 /// A lens's presence read kept current: following presence, and re-read in
 /// the background when nudged.
 #[derive(Clone)]
@@ -79,9 +97,13 @@ pub struct LensFeed {
     store: BundleStore,
     timeout: Duration,
     current: Arc<ArcSwapOption<Catalog>>,
-    /// The read the catalog is built from, held for the whole of a patch or
-    /// a re-read so the two never interleave.
-    observed: Arc<tokio::sync::Mutex<Option<Observed>>>,
+    /// The read the catalog is built from, and the descriptors kept of the
+    /// instances that left it, held for the whole of a patch or a re-read
+    /// so the two never interleave.
+    observed: Arc<tokio::sync::Mutex<FeedRead>>,
+    /// Descriptor GETs the feed made following presence, one per instance
+    /// that appeared undescribed; a re-read's are not counted.
+    described: Arc<AtomicU64>,
     /// Catalog swaps since the feed opened.
     swaps: Arc<AtomicU64>,
     refreshing: Arc<AtomicBool>,
@@ -108,7 +130,11 @@ impl LensFeed {
             store: store.clone(),
             timeout,
             current: Arc::new(ArcSwapOption::new(catalog)),
-            observed: Arc::new(tokio::sync::Mutex::new(observed)),
+            observed: Arc::new(tokio::sync::Mutex::new(FeedRead {
+                observed,
+                kept: KeptDescriptors::default(),
+            })),
+            described: Arc::new(AtomicU64::new(0)),
             swaps: Arc::new(AtomicU64::new(0)),
             refreshing: Arc::new(AtomicBool::new(false)),
             last: Arc::new(std::sync::Mutex::new(tokio::time::Instant::now())),
@@ -138,6 +164,21 @@ impl LensFeed {
         self.swaps.load(Ordering::Acquire) + self.store.generation()
     }
 
+    /// How many descriptor GETs following presence made: one per instance
+    /// that appeared and was neither described nor kept. A re-read's are
+    /// not counted.
+    pub fn descriptors_read(&self) -> u64 {
+        self.described.load(Ordering::Acquire)
+    }
+
+    /// How many times an instance token's return reused the descriptor the
+    /// instance took with it (observer §3.11's MAY; #982 H3): each a
+    /// descriptor GET not made across the hop. Waits for a patch or a
+    /// re-read in flight.
+    pub async fn descriptors_kept(&self) -> u64 {
+        self.observed.lock().await.kept.reused()
+    }
+
     /// Fold presence moves into the feed's read — the transitions a
     /// [`crate::PresenceFeed`] hands out, a seed's included — describe every
     /// instance that now holds its instance token and was never described
@@ -147,22 +188,28 @@ impl LensFeed {
     ///
     /// An instance that appears resolves at once, its tokenless interfaces
     /// (U22) among them, rather than after the next re-read; one that leaves
-    /// takes its instance token and its descriptor with it. A feed whose
+    /// takes its instance token and its descriptor with it, and the feed
+    /// keeps that descriptor: the same instance's token returning reads it
+    /// again, with no GET (observer §3.11's MAY; #982 H3). A feed whose
     /// first read failed starts a read from these moves alone, marked
     /// possibly incomplete (§8.1): what presence has not moved is not in it.
     /// Waits for a background re-read in flight, and the re-read for it.
     pub async fn on_presence(&self, moved: &[PresenceTransition]) -> bool {
         let mut guard = self.observed.lock().await;
-        let observed = guard.get_or_insert_with(|| {
+        let FeedRead { observed, kept } = &mut *guard;
+        let observed = observed.get_or_insert_with(|| {
             let mut o = Observed::from_keys(Scope::all().selector(), &[], false);
             o.descriptors = Some(Default::default());
             o
         });
-        if !observed.follow(moved) {
+        let (changed, _reused) = observed.follow_keeping(moved, kept);
+        if !changed {
             return false;
         }
         let owed = observed.undescribed();
         if !owed.is_empty() {
+            self.described
+                .fetch_add(owed.len() as u64, Ordering::AcqRel);
             let found = describe_each(&self.session, owed, self.timeout).await;
             let mut wanted = Vec::new();
             for ((addr, instance), read) in found {
@@ -213,7 +260,8 @@ impl LensFeed {
             let mut guard = feed.observed.lock().await;
             if let Ok(o) = read_observed(&feed.session, &feed.store, feed.timeout).await {
                 feed.swap(Catalog::new(&o));
-                *guard = Some(o);
+                guard.kept.forget_described(&o);
+                guard.observed = Some(o);
             }
             drop(guard);
             feed.refreshing.store(false, Ordering::Release);
