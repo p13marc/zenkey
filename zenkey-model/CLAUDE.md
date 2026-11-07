@@ -297,9 +297,18 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   `complete`), `Entry`, `Tombstone`, `Confirmation` and `Time` (t32·ms16);
   `wire::Form::Snapshot` is defined, a put's (`Reading::Snapshot`, asof in the
   seq's place, the body unread), `Refusal::KeyKind { form, kind }` off a
-  `state`/`@state` key; zenkey's and the fleet's readers refuse one as a
-  reserved form until E2. `tests/conformance.rs`'s `snapshot_bodies` runs
-  `snapshot/bodies.json`.
+  `state`/`@state` key. `tests/conformance.rs`'s `snapshot_bodies` runs
+  `snapshot/bodies.json`. E2 (the readers): `Page::members(key)` (each
+  entry as the per-key reply it stands for, `Member::payload` the bytes its
+  mutation put and `attachment` a tombstone's delete, `member_key`),
+  `Heard`/`hear` (one GET's snapshots by key, tag, run, asof, time and coll,
+  the pages held, `complete`), `coll_of`/`collection_of` (a resource's index
+  among its kind token's, canonical order), `snapshot_prefix` and
+  `is_member`; `seed::apply_snapshot` (the omission rule over a complete
+  snapshot, `HeldMember`), which no reader calls before E3; and
+  `seed_snapshot` runs E3's draft `seed/snapshot.json` (42 cases, merge,
+  pages, the omission rule), cherry-picked; size helpers saturate
+  (`saturating`), and `read_body` never pre-allocates from a count.
   `telemetry.v2` (#983 T1, text 0.1, draft since T4): `telemetry::PROFILE_V2`/`uses_v2`, `SERIES`,
   `VOCABULARY_V2` (W105 reads a later major's own vocabulary, `contract::vocabulary`);
   `Measure::Counter { value, width }` (`Measure::counter` for v1's 64 bits), `pair`'s serial window

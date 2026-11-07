@@ -34,6 +34,9 @@
 use thiserror::Error;
 
 use crate::chunk::is_plain_chunk;
+use crate::contract::{Contract, Resource};
+use crate::grammar::{KindToken, ZkKey, parse};
+use crate::template::{Segment, Template};
 use crate::wire::{self, Envelope, Form, Header, Run, Seq, Stamp, Tag};
 
 /// The greatest integer the body holds: 2^32 − 1, in at most 5 bytes.
@@ -65,7 +68,8 @@ impl Time {
         let s = u32::try_from(since / 1000)
             .ok()
             .filter(|&s| s != u32::MAX)?;
-        let ms = u16::try_from(since % 1000).expect("below 1000");
+        // From 0 to 999: `since` is not negative here.
+        let ms = (since % 1000) as u16;
         Some(Time::Known { s, ms })
     }
 
@@ -297,6 +301,13 @@ fn length(n: usize) -> Result<u32, BodyRefusal> {
     u32::try_from(n).map_err(|_| BodyRefusal::Leb128)
 }
 
+/// A length or a count as an integer for its size alone, 2^32 − 1 above
+/// it: LEB128 takes 5 bytes there either way, and a writer refuses such a
+/// length ([`length`]) before any size is relied on.
+fn saturating(n: usize) -> u32 {
+    u32::try_from(n).unwrap_or(u32::MAX)
+}
+
 /// Whether an id is empty, or plain chunks joined by `/`.
 fn id_valid(id: &[u8]) -> bool {
     id.is_empty() || std::str::from_utf8(id).is_ok_and(|s| s.split('/').all(is_plain_chunk))
@@ -375,13 +386,13 @@ impl Entry {
 
     /// Its bytes in a body, computed without writing it.
     fn size(&self) -> usize {
-        integer_bytes(self.id.len() as u32)
+        integer_bytes(saturating(self.id.len()))
             + self.id.len()
             + 1
             + self.run.map_or(0, Run::width_bytes)
             + 3
             + 6 * usize::from(matches!(self.confirmation, Confirmation::At(_)))
-            + integer_bytes(self.record.len() as u32)
+            + integer_bytes(saturating(self.record.len()))
             + self.record.len()
     }
 }
@@ -399,7 +410,7 @@ impl Tombstone {
     }
 
     fn size(&self) -> usize {
-        integer_bytes(self.id.len() as u32)
+        integer_bytes(saturating(self.id.len()))
             + self.id.len()
             + 1
             + self.run.map_or(0, Run::width_bytes)
@@ -540,6 +551,10 @@ impl Page {
         let page = r.integer()?;
         let coll = r.integer()?;
         let live_count = r.integer()?;
+        // Never `with_capacity` from a count: it comes from the wire, up to
+        // 2^32 − 1, and only the entries that follow it bound it. The
+        // vectors grow with the entries read, so a short body is refused
+        // before it holds more than its bytes.
         let mut live: Vec<Entry> = Vec::new();
         for _ in 0..live_count {
             let id = r.id()?;
@@ -682,9 +697,9 @@ fn page_size(
         + 6
         + integer_bytes(index.saturating_mul(2))
         + integer_bytes(coll)
-        + integer_bytes(live as u32)
+        + integer_bytes(saturating(live))
         + live_bytes
-        + integer_bytes(tombs as u32)
+        + integer_bytes(saturating(tombs))
         + tomb_bytes
 }
 
@@ -830,6 +845,258 @@ impl Snapshot {
     }
 }
 
+/// A member's key in a page heard on `key`: `key`, then `/` and the id;
+/// `key` itself for the empty id (core §7.5).
+#[must_use]
+pub fn member_key(key: &str, id: &str) -> String {
+    if id.is_empty() {
+        key.to_owned()
+    } else {
+        format!("{key}/{id}")
+    }
+}
+
+/// One entry of a page as the per-key reply it stands for (core 0.97
+/// §4.2's "what a profile reads", read by #977's E2): on its member's key,
+/// with its stamp, a live entry the put of its record and a tombstone the
+/// delete. A reader that reads per-key replies reads these the same way:
+/// [`Member::payload`] is the bytes the mutation put, and
+/// [`Member::attachment`] the delete's.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Member {
+    /// The page's key, then `/` and the id ([`member_key`]).
+    pub key: String,
+    /// Its own run, else the page's, and its seq.
+    pub stamp: Stamp,
+    /// CH's tag: the page's, the collection's type's, as the mutation's.
+    pub tag: Tag,
+    /// A live entry's confirmation; a tombstone's is
+    /// [`Confirmation::None`].
+    pub confirmation: Confirmation,
+    /// A live entry's record; `None` for a tombstone.
+    pub record: Option<Vec<u8>>,
+}
+
+impl Member {
+    /// Whether it is a tombstone: a delete within the window (S3).
+    #[must_use]
+    pub const fn is_tombstone(&self) -> bool {
+        self.record.is_none()
+    }
+
+    /// A live entry's put, as the owner's per-key reply carries it:
+    /// `CH · run · seq · record`, CH a mutation's with the page's tag and
+    /// the width its run takes. `None` for a tombstone.
+    #[must_use]
+    pub fn payload(&self) -> Option<Vec<u8>> {
+        let record = self.record.as_deref()?;
+        Some(Envelope::mutation(self.tag, self.stamp, record).write())
+    }
+
+    /// A tombstone's delete, as the owner's `reply_del` carries it in its
+    /// attachment: `CH · run · seq`. `None` for a live entry.
+    #[must_use]
+    pub fn attachment(&self) -> Option<Vec<u8>> {
+        self.is_tombstone()
+            .then(|| wire::DeleteStamp { stamp: self.stamp }.write())
+    }
+}
+
+impl Page {
+    /// Its entries as the per-key replies they stand for, live entries and
+    /// tombstones together in the byte order of their ids, each on its
+    /// member's key below `key`, the key the page was heard on.
+    #[must_use]
+    pub fn members(&self, key: &str) -> Vec<Member> {
+        let stamp = |run: Option<Run>, seq| Stamp {
+            run: run.unwrap_or(self.run),
+            seq,
+        };
+        let mut out: Vec<Member> = self
+            .live
+            .iter()
+            .map(|e| Member {
+                key: member_key(key, &e.id),
+                stamp: stamp(e.run, e.seq),
+                tag: self.tag,
+                confirmation: e.confirmation,
+                record: Some(e.record.clone()),
+            })
+            .chain(self.tombs.iter().map(|t| Member {
+                key: member_key(key, &t.id),
+                stamp: stamp(t.run, t.seq),
+                tag: self.tag,
+                confirmation: Confirmation::None,
+                record: None,
+            }))
+            .collect();
+        out.sort_by(|a, b| a.key.as_bytes().cmp(b.key.as_bytes()));
+        out
+    }
+}
+
+/// One snapshot as a reader holds it, from the pages it heard (core §7.5,
+/// "Complete"): the pages of one key, CH's tag, run, asof, time and coll,
+/// and which indices it holds.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Heard {
+    /// The key its pages were heard on: the snapshot key of a collection
+    /// read, a member's key of a member read.
+    pub key: String,
+    pub tag: Tag,
+    pub run: Run,
+    pub asof: Seq,
+    pub time: Time,
+    pub coll: u32,
+    /// The indices held, each once however often it was heard.
+    pub pages: std::collections::BTreeSet<u32>,
+    /// The indices held whose more bit is 0.
+    pub last: std::collections::BTreeSet<u32>,
+}
+
+impl Heard {
+    /// The snapshot `page`, heard on `key`, is a page of, holding none of
+    /// its pages yet.
+    #[must_use]
+    pub fn of(key: &str, page: &Page) -> Heard {
+        Heard {
+            key: key.to_owned(),
+            tag: page.tag,
+            run: page.run,
+            asof: page.asof,
+            time: page.time,
+            coll: page.coll,
+            pages: std::collections::BTreeSet::new(),
+            last: std::collections::BTreeSet::new(),
+        }
+    }
+
+    /// Whether `page`, heard on `key`, is one of its pages: one key, CH's
+    /// tag, run (its width included), asof, time and coll.
+    #[must_use]
+    pub fn holds(&self, key: &str, page: &Page) -> bool {
+        self.key == key
+            && (self.tag, self.run, self.asof, self.time, self.coll)
+                == (page.tag, page.run, page.asof, page.time, page.coll)
+    }
+
+    /// Holds `page`, one of its pages; whether it held none of its index
+    /// before.
+    pub fn add(&mut self, page: &Page) -> bool {
+        if !page.more {
+            self.last.insert(page.index);
+        }
+        self.pages.insert(page.index)
+    }
+
+    /// Whether it is complete (core §7.5): one page of each index from 0
+    /// to a page whose more bit is 0, and no other, so that it holds every
+    /// entry the snapshot has.
+    #[must_use]
+    pub fn complete(&self) -> bool {
+        let Some(&last) = self.last.first() else {
+            return false;
+        };
+        self.last.len() == 1
+            && self.pages.last() == Some(&last)
+            && u64::try_from(self.pages.len()).is_ok_and(|n| n == u64::from(last) + 1)
+    }
+}
+
+/// Adds `page`, heard on `key`, to the snapshot of `heard` it is a page of,
+/// or to a new one at the end: one GET's snapshots, in the order of their
+/// first page. Returns that snapshot's place, and whether this page made it
+/// complete: complete now, and not before.
+pub fn hear(heard: &mut Vec<Heard>, key: &str, page: &Page) -> (usize, bool) {
+    let at = match heard.iter().position(|h| h.holds(key, page)) {
+        Some(at) => at,
+        None => {
+            heard.push(Heard::of(key, page));
+            heard.len() - 1
+        }
+    };
+    let h = &mut heard[at];
+    let was = h.complete();
+    h.add(page);
+    (at, !was && h.complete())
+}
+
+/// The collection's index of `resource`, a `state` or `@state` resource of
+/// `contract`: its place, from 0, among the contract's resources of its
+/// kind token, in the canonical form's order (core §7.5, §9.5), the order
+/// [`Contract::resources`] keeps. `None` for any other kind, and for a
+/// resource the contract does not hold.
+#[must_use]
+pub fn coll_of(contract: &Contract, resource: &Resource) -> Option<u32> {
+    if !matches!(resource.token, KindToken::State | KindToken::ExplicitState) {
+        return None;
+    }
+    let at = contract
+        .resources
+        .iter()
+        .filter(|r| r.token == resource.token)
+        .position(|r| r.template == resource.template)?;
+    u32::try_from(at).ok()
+}
+
+/// The resource a snapshot's coll names, heard on a key whose kind token
+/// is `kind` (`state` or `@state`): [`coll_of`]'s inverse. `None` when the
+/// contract has no such collection, which a reader without the contract
+/// cannot tell either (core §7.5, "Why no contract").
+#[must_use]
+pub fn collection_of(contract: &Contract, kind: KindToken, coll: u32) -> Option<&Resource> {
+    if !matches!(kind, KindToken::State | KindToken::ExplicitState) {
+        return None;
+    }
+    contract
+        .resources
+        .iter()
+        .filter(|r| r.token == kind)
+        .nth(usize::try_from(coll).ok()?)
+}
+
+/// A collection's snapshot key below its kind token (core 0.97 §4.2,
+/// "Answering a state GET", E3's text): its template's chunks before its
+/// first parameter, the whole template when it has none. `None` for a
+/// template whose first chunk is a parameter, which has no snapshot key.
+#[must_use]
+pub fn snapshot_prefix(template: &Template) -> Option<Vec<&str>> {
+    let prefix: Vec<&str> = template
+        .segments()
+        .iter()
+        .map_while(|s| match s {
+            Segment::Literal(l) => Some(l.as_str()),
+            Segment::Param(_) | Segment::Rest(_) => None,
+        })
+        .collect();
+    (!prefix.is_empty()).then_some(prefix)
+}
+
+/// Whether `key` is a member's key of `resource`'s collection: a zk2 data
+/// key of the resource's kind token whose resource chunks its template
+/// matches, each parameter one chunk. A key with a namespace in front is
+/// read from its first `zk2` chunk from which the grammar parses a data
+/// key, as [`wire::enveloped_kind`] reads one. The address and interface
+/// are not read: the caller asks of keys at or under one page's key.
+#[must_use]
+pub fn is_member(resource: &Resource, key: &str) -> bool {
+    let mut rest = Some(key);
+    while let Some(k) = rest {
+        if k.starts_with("zk2/")
+            && let Ok(ZkKey::Data {
+                kind,
+                resource: chunks,
+                ..
+            }) = parse(k)
+        {
+            let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
+            return kind == resource.token && resource.template.matches(&refs).is_some();
+        }
+        rest = k.split_once('/').map(|(_, r)| r);
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -881,6 +1148,196 @@ mod tests {
         assert_eq!(Time::Known { s: 3600, ms: 250 }.unix_ms(epoch), Some(t));
         assert_eq!(Time::from_unix_ms(t - 3_600_251, epoch), None);
         assert_eq!(Time::Unknown.unix_ms(epoch), None);
+    }
+
+    /// A page's entries are the per-key replies they stand for: a live
+    /// entry the bytes its mutation put, which §7.5's parse reads back to
+    /// its stamp and record, a tombstone a delete's attachment; an entry's
+    /// own run beside the header's.
+    #[test]
+    fn a_pages_entries_are_their_members_replies() {
+        let page = Page {
+            tag: Tag::new(3).unwrap(),
+            run: Run::U16(5),
+            asof: Seq::new(9).unwrap(),
+            time: Time::Unknown,
+            index: 0,
+            more: false,
+            coll: 1,
+            live: vec![
+                Entry {
+                    id: "a".into(),
+                    run: Some(Run::U32(7)),
+                    seq: Seq::new(2).unwrap(),
+                    confirmation: Confirmation::AtTime,
+                    record: b"r".to_vec(),
+                },
+                Entry {
+                    id: "c".into(),
+                    run: None,
+                    seq: Seq::new(4).unwrap(),
+                    confirmation: Confirmation::None,
+                    record: Vec::new(),
+                },
+            ],
+            tombs: vec![Tombstone {
+                id: "b".into(),
+                run: None,
+                seq: Seq::new(3).unwrap(),
+            }],
+        };
+        let m = page.members("zk2/h/s/i.v1/state/x");
+        let keys: Vec<&str> = m.iter().map(|m| m.key.as_str()).collect();
+        assert_eq!(
+            keys,
+            [
+                "zk2/h/s/i.v1/state/x/a",
+                "zk2/h/s/i.v1/state/x/b",
+                "zk2/h/s/i.v1/state/x/c"
+            ]
+        );
+        let bytes = m[0].payload().unwrap();
+        let put = Envelope::parse(&bytes).unwrap();
+        assert_eq!(
+            (put.form, put.tag, put.record),
+            (Form::Mutation, page.tag, &b"r"[..])
+        );
+        assert_eq!(put.stamp.run, Run::U32(7), "its own run");
+        assert!(m[1].is_tombstone() && m[1].payload().is_none());
+        let del = wire::DeleteStamp::parse(&m[1].attachment().unwrap()).unwrap();
+        assert_eq!(
+            del.stamp,
+            Stamp {
+                run: Run::U16(5),
+                seq: Seq::new(3).unwrap()
+            }
+        );
+        assert_eq!(m[2].attachment(), None);
+        assert_eq!(member_key("k", ""), "k");
+    }
+
+    /// Pages are held by snapshot, and one is complete at one page of each
+    /// index to a last, and no other: out of order, twice, a page lost, two
+    /// last pages, or two times apart.
+    #[test]
+    fn a_snapshot_is_complete_at_every_index_to_its_last() {
+        let page = |index, more| Page {
+            tag: Tag::NONE,
+            run: Run::U16(1),
+            asof: Seq::new(9).unwrap(),
+            time: Time::Known { s: 1, ms: 2 },
+            index,
+            more,
+            coll: 0,
+            live: Vec::new(),
+            tombs: Vec::new(),
+        };
+        let mut heard = Vec::new();
+        assert_eq!(hear(&mut heard, "k", &page(2, false)), (0, false));
+        assert_eq!(hear(&mut heard, "k", &page(0, true)), (0, false));
+        assert_eq!(hear(&mut heard, "k", &page(0, true)), (0, false), "twice");
+        assert_eq!(
+            hear(&mut heard, "k", &page(1, true)),
+            (0, true),
+            "complete now"
+        );
+        assert_eq!(
+            hear(&mut heard, "k", &page(1, true)),
+            (0, false),
+            "and not newly"
+        );
+        assert!(heard[0].complete());
+        let mut other = page(0, false);
+        other.time = Time::Unknown;
+        assert_eq!(
+            hear(&mut heard, "k", &other),
+            (1, true),
+            "another time, another snapshot"
+        );
+        assert_eq!(
+            hear(&mut heard, "j", &page(0, false)),
+            (2, true),
+            "another key"
+        );
+        let mut lost = Vec::new();
+        hear(&mut lost, "k", &page(0, true));
+        hear(&mut lost, "k", &page(2, false));
+        assert!(!lost[0].complete(), "page 1 lost");
+        let mut two = Vec::new();
+        hear(&mut two, "k", &page(0, false));
+        hear(&mut two, "k", &page(1, false));
+        assert!(!two[0].complete(), "two last pages");
+    }
+
+    /// A collection's index is its place among its kind token's resources
+    /// in canonical order; its snapshot key the template's chunks before its
+    /// first parameter; and its members the keys its template matches.
+    #[test]
+    fn a_collections_index_snapshot_key_and_members() {
+        let l = crate::contract::load_str(
+            r#"[interface]
+name = "c"
+major = 1
+minor = 0
+
+[resources."b/{x}"]
+kind = "state"
+type = { raw = "text/plain" }
+params = { x = "string" }
+cardinality = 4
+
+[resources.a]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources."{y}/z"]
+kind = "state"
+explicit = true
+type = { raw = "text/plain" }
+params = { y = "string" }
+cardinality = 4
+
+[resources.s]
+kind = "stream"
+type = { raw = "text/plain" }
+"#,
+            std::path::Path::new("."),
+            None,
+        );
+        let c = l.contract.unwrap_or_else(|| panic!("{}", l.report));
+        let by = |t: &str| {
+            c.resources
+                .iter()
+                .find(|r| r.template.as_str() == t)
+                .unwrap()
+        };
+        assert_eq!(coll_of(&c, by("a")), Some(0));
+        assert_eq!(coll_of(&c, by("b/{x}")), Some(1));
+        assert_eq!(coll_of(&c, by("{y}/z")), Some(0), "@state counts apart");
+        assert_eq!(coll_of(&c, by("s")), None, "a stream is no collection");
+        let named = |k, i| collection_of(&c, k, i).map(|r| r.template.as_str());
+        assert_eq!(named(KindToken::State, 1), Some("b/{x}"));
+        assert_eq!(named(KindToken::ExplicitState, 0), Some("{y}/z"));
+        assert_eq!(named(KindToken::State, 2), None);
+        assert_eq!(named(KindToken::Stream, 0), None);
+        assert_eq!(snapshot_prefix(&by("b/{x}").template), Some(vec!["b"]));
+        assert_eq!(snapshot_prefix(&by("a").template), Some(vec!["a"]));
+        assert_eq!(snapshot_prefix(&by("{y}/z").template), None);
+        assert!(is_member(by("b/{x}"), "zk2/h/s/c.v1/state/b/one"));
+        assert!(
+            is_member(by("b/{x}"), "prod/zk2/h/s/c.v1/state/b/one"),
+            "namespaced"
+        );
+        assert!(
+            !is_member(by("b/{x}"), "zk2/h/s/c.v1/state/b"),
+            "the snapshot key"
+        );
+        assert!(!is_member(by("b/{x}"), "zk2/h/s/c.v1/state/b/one/two"));
+        assert!(
+            !is_member(by("b/{x}"), "zk2/h/s/c.v1/@state/b/one"),
+            "another kind"
+        );
+        assert!(is_member(by("a"), "zk2/h/s/c.v1/state/a"));
     }
 
     #[test]
