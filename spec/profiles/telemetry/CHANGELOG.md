@@ -7,6 +7,54 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `telemetry.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## 0.10 — 2026-11-07: §2.6 states a CBOR sample's indefinite lengths and its one data item, which 0.9 dropped (#609, #985)
+
+zk2py's round 104 read core 0.99 cold, with the four profile texts that
+follow it. Its F-500 names this text, an ambiguity and no blocker.
+
+**Answered: F-500, §2.6's CBOR reading.** 0.8 read "a map as the
+envelope's are read (core §5.2)", then named three readings after a
+colon. Core §5.2's CBOR edges, which that citation reached, said two
+things more:
+- "the bytes hold one data item and nothing after it";
+- "Indefinite lengths are accepted."
+
+0.9 restated the colon's three readings alone. It said nothing of bytes
+after the data item, and stated an indefinite length only for a bignum's
+byte string. "Anything else does not decode" could then refuse an
+indefinite-length map, or leave it to RFC 8949, which accepts it.
+
+**Corrected: 0.9's "no rule changed".** Read whole, 0.8's citation
+carried both readings for a map, and so for every Point. 0.9 dropped
+them, so it changed a rule in the text. The reference did not change:
+`zenkey_model::telemetry::decode::cbor` reads one data item and nothing
+after it, and accepts every indefinite length. It never used the
+envelope's decoder.
+
+**Stated: §2.6, "CBOR".** Indefinite lengths are accepted for every data
+item (RFC 8949 §3.2.2): a map, an array, a byte string or a text string.
+A sample's bytes hold one data item and nothing after it. Both are
+stated for every data item, where 0.8's citation reached a map alone.
+That is what the reference and zk2py read.
+
+**The evidence.** `samples.json` gains three cases, 140 in all, and its
+description names both readings:
+- a Point in indefinite-length maps, its type a text string in two
+  chunks: it conforms, as the same Point written definite does;
+- a counter with a byte after its data item: `undecodable`;
+- an indefinite-length array in a gauge: it decodes, and is
+  `wrong_type`.
+
+**Deliberately not changed.**
+- **No keyword.** The bullet's MUST is unchanged.
+- **Written against core 0.35**, still: the readings are stated here,
+  and need no core.
+- **`telemetry.v2` restates text 0.7,** which carried the citation. It
+  stays correct, as 0.9 said.
+- **The black boxes** cannot put these bytes: the owner example's
+  `telemetry raw` encodes its JSON again, and `zenctl pub` refuses a
+  zk2 service's key. The reference was read from its decoder.
+
 ## 0.9 — 2026-11-07: editorial: §2.6 reads a CBOR map in its own words, no rule changed (#985)
 
 Core 0.99 is #985's C4d, and removes the bare wire: a call with no form,

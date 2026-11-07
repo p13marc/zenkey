@@ -495,7 +495,7 @@ fn config_v2_validation() {
         } else {
             v2::validate_control(&i, control_op(op), &facts, &payload)
         };
-        let got = match result {
+        let got = match super::under_encoding(case, result) {
             Ok(()) => json!({"accepted": true}),
             Err(r) => json!({
                 "refused": {

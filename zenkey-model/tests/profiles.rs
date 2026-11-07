@@ -1230,6 +1230,27 @@ fn config_schema(doc: &Value, name: &Value) -> Schema {
         .expect("a schema")
 }
 
+/// A case's `encoding`, the query's: under any other than `zenoh/bytes` it
+/// carries no request form (core §5.1, "The request"), so the runtime
+/// refuses it `invalid_request` before the handler reads a byte. Only an
+/// operation not exposed, `unavailable`, comes before it (§5.1, "The order
+/// of refusals"). A case with no `encoding` is under `zenoh/bytes`.
+fn under_encoding(case: &Value, r: Result<(), Refusal>) -> Result<(), Refusal> {
+    let foreign = case["encoding"]
+        .as_str()
+        .is_some_and(|e| e != "zenoh/bytes");
+    match r {
+        Err(r) if r.code == config::Code::Unavailable => Err(r),
+        _ if foreign => Err(Refusal {
+            code: config::Code::InvalidRequest,
+            app: None,
+            field: None,
+            message: "a query under another Encoding carries no request form".into(),
+        }),
+        r => r,
+    }
+}
+
 fn refusal_json(r: &Refusal) -> Value {
     let mut o =
         json!({"code": r.code.as_str(), "field": r.field.as_ref().map(config::Field::as_str)});
@@ -1316,7 +1337,7 @@ fn config_validation() {
                 };
                 config::validate_control_json(op, &facts, &case["request"])
             };
-            match r {
+            match under_encoding(case, r) {
                 Ok(()) => json!({"accepted": true}),
                 Err(r) => refusal_json(&r),
             }

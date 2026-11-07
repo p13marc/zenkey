@@ -7,6 +7,99 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `config.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## config.v2 0.4 — 2026-11-07: a query under another `Encoding` in §2.5, and a refused re-mint (#609, #985)
+
+zk2py's round 104 read core 0.99 cold, with the four profile texts that
+follow it. Two of its findings name this text, neither a blocker.
+
+**Answered: F-501, minor: §2.5's refusals before the rows.** §2.5 named
+`fanout_forbidden`, `unavailable`, then a request that does not parse.
+Core 0.99 refuses a query under another `Encoding` with
+`invalid_request`, its bytes never read (core §5.1, "The request").
+§2.5 now names it, after `unavailable` and before the parse. That is
+where the reference refuses it (`zenkey`'s operation server).
+- **`v2/validation.json`** gains two cases, 67 in all. A case may give
+  the query's `encoding`, and its description says what one means.
+- **A set's request form under `application/json`,** with an act in
+  flight, is `invalid_request`, before row 1.
+- **`persist` with no persisted layer** under `application/json` is
+  `unavailable`, cause `config`. An operation not exposed comes first.
+
+**Answered: F-499, a gap: a re-mint refused after its step 1.**
+`config.v1` 0.13 §2.12 says what stands (below). §2.12 here says the
+change stays ended. The record moves only by the read-back of a device
+left part returned.
+
+**Restates `config.v1` text 0.13,** where it said 0.12.
+
+**Deliberately not changed.**
+- **No keyword.** §2.5's refusal is the core's, and §2.12 restates
+  `config.v1`'s.
+- **Written against core 0.99,** where it said 0.94: §2.5 names a
+  refusal core 0.99 made.
+
+## 0.13 — 2026-11-07: a query under another `Encoding` in §2.5, and a re-mint refused after its step 1 (#609, #985)
+
+zk2py's round 104 read core 0.99 cold, with the four profile texts that
+follow it. Two of its findings name this text, neither a blocker.
+
+**Answered: F-501, minor: §2.5's core refusals.** The list named a
+request that does not decode as `SetRequest`. Its last item now names
+three refusals, each `invalid_request` (core §5.1, "The request"):
+- a query under another `Encoding`;
+- a request core §7.5's parse refuses;
+- one that does not decode as `SetRequest`.
+
+0.12's entry said the owner refuses as it did since core 0.94. That held
+of the error form, not of every request. Core 0.94 let an owner read a
+`SetRequest`'s JSON under `application/json`, the bare wire's MAY. Since
+core 0.99 such a query is refused. The rule is the core's, and 0.12 did
+not name it.
+- **`validation.json`** gains two cases, 116 in all. A case may give
+  the query's `encoding`, and its description says what one means.
+- **A set under `application/json`,** its `confirm_s` 0 and an act in
+  flight, is `invalid_request` with no field. The `Encoding` comes
+  before the request's type and row 1.
+- **`persist` with no persisted layer** under `application/json` is
+  `unavailable`, cause `config`. An operation not exposed comes first.
+
+**Answered: F-499, a gap: §2.12, a re-mint refused after its step 1.**
+§2.12 named the reference's four refusals. Two can come after step 1
+has ended the pending change and published its event: a parameter whose
+startup value is unknown, and the device's refusal to return. §2.12 did
+not say what then stands. It now says:
+- **The change stays ended,** and its event stands. A late `confirm` of
+  it is `not_found`.
+- **A device that refuses to return** is read as one that refuses an
+  apply (§2.9). One that returns whole or not at all moved nothing, so
+  the revision stays.
+- **One left part returned** is read back, and the read-back is the
+  truth, as after a failed undo (§2.11). The revision moves by one.
+- **Each step ends before the next starts.** The re-mint waits for step
+  1's undo, as a `cancel`'s reply does.
+
+**The reference reads it so.** `zenkey::config_v1` and `zenkey::config_v2`
+drive the cancel to its end before they ask the device to return, and
+"a cancel made before a refusal stays made". A refused return leaves the
+view, the record and the revision as they were.
+`zenkey/tests/profile_telemetry_v2.rs` refuses one, and the instance
+runs on at its runtime value. Their `Device::restore_startup` returns no
+read-back, so a device there returns whole or not at all. The owner
+example has no command that refuses the return. So this was read from
+the code, not run.
+
+**zk2py's mend** keeps the ending, as the text now says. Its `config.v1`
+owner refuses a re-mint whose step 1 undo its device leaves in flight.
+The text has the re-mint wait for that undo, as the reference does.
+
+**Deliberately not changed.**
+- **No keyword.** §2.5's refusal is the core's, and §2.12's sentences
+  state what the steps already did.
+- **No fixture for §2.12.** `lifecycle.json` restarts a process and has
+  no re-mint, as 0.11 said.
+- **Written against core 0.99,** where it said 0.96: §2.5 names a
+  refusal core 0.99 made.
+
 ## config.v2 0.3 — 2026-11-07: editorial: Appendix A reads `config.v1`'s error as it is sent, no rule changed (#985)
 
 Core 0.99 is #985's C4d, and removes the bare wire, a call with no form.
