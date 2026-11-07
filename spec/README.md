@@ -98,6 +98,9 @@ section number alone is the core's.
 - **Face**: a router's link to a part of the network. A deployment marks
   one constrained, and gives its maximum outage
   ([§8.5](core.md#85-constrained-faces)).
+- **First hop**: the constrained face between an owner and its router.
+  An owner on one holds its instance token alone
+  ([§8.1](core.md#81-tokens)).
 - **Watch session**: a reader's session that holds its liveliness
   subscribers and makes no read
   ([observer §3.7](observer.md#37-the-watch-session)).

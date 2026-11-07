@@ -72,7 +72,16 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   `frame_unknown`, `keyframe_unreachable`, `catalog_missing` and
   warnings `not_packed`, `timed_downsampled`, `frame_unlisted` (read
   across the policy's faces), `horizon_under_face`, `block_over_batch`,
-  `keep_alive_not_suppressed`; a v1 policy's plan is unchanged),
+  `keep_alive_not_suppressed`; a v1 policy's plan is unchanged; and
+  link.v2 0.7, #982 H1: `Attach::Device { devices }` (`attach =
+  "device"`, a v2 policy's only), `device_listed`, `FacePolicy::owners`
+  (each listed service and device as an `Owner`, a device keyed in
+  `implements` by its address and read on every face but for
+  downsampling on its own), `presence_required` (`archive.v1`, or
+  `Deployment::governed`), `epoch_on_device` (`Res::epoch`),
+  `AttachPlan::Device`, `zk_carve()` (`zk`, `zk:instance:egress`,
+  `zk:instance:ingress`; `OWN_PAIRS`, `ZK_CARVED`, `ZK_INSTANCE`), and
+  `check_block(face, device, block)` reading the carve on a device face),
   `health.v1`'s §5 clock question (`health::clock_ahead`, text 0.9, #978 F6: over `Heard`'s
   `Heartbeat` (time known), `HeartbeatHeld`, `StatusPut`, a fault; yes on
   a fault no `Heartbeat` followed, no when the last heartbeat is

@@ -259,7 +259,7 @@
         "ground",
         "local"
       ],
-      "note": "the RF router of Appendix B over radio.v1: link.v1's plan for the face, with its reply timeout, and the router's transport, binding and catalog (§2.18); `ground` narrowed off nothing, `local` off the face's `unixsock-stream` (§2.4)",
+      "note": "the RF router of Appendix B over radio.v1: link.v1's plan for the face, with its reply timeout, and the router's transport, binding and catalog (\u00a72.18); `ground` narrowed off nothing, `local` off the face's `unixsock-stream` (\u00a72.4)",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\ncatalog  = \"50a01c11\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n"
     },
     {
@@ -522,7 +522,7 @@
         "ground",
         "local"
       ],
-      "note": "the fork's router, its face on `unixsock-dgram`: `local` is narrowed to the fork's list less the face's, `unixsock-stream` among what it keeps (§2.4); the absent timeouts are zenoh's 10 s (§2.1)",
+      "note": "the fork's router, its face on `unixsock-dgram`: `local` is narrowed to the fork's list less the face's, `unixsock-stream` among what it keeps (\u00a72.4); the absent timeouts are zenoh's 10 s (\u00a72.1)",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zm-1.10.2-r1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-dgram\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n"
     },
     {
@@ -712,7 +712,7 @@
           "radio.v1"
         ]
       },
-      "note": "the SBD router of Appendix B: a face that exposes none, every push denied wholesale (link.v1 §2.7), and the transport of zenoh-modem's terminal",
+      "note": "the SBD router of Appendix B: a face that exposes none, every push denied wholesale (link.v1 \u00a72.7), and the transport of zenoh-modem's terminal",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 2\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 271\nopen_timeout_ms      = 1000000\naccept_timeout_ms    = 1000000\ninterests_timeout_ms = 1000000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"none\"\nmax_outage_s     = 86400\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 1000000\n"
     },
     {
@@ -740,7 +740,7 @@
           "radio.v1"
         ]
       },
-      "note": "a link.v2 policy with no `[transport]` has no plan: `transport_missing` refuses it (§2.1)",
+      "note": "a link.v2 policy with no `[transport]` has no plan: `transport_missing` refuses it (\u00a72.1)",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n"
     },
     {
@@ -1184,7 +1184,7 @@
           "probe.v1"
         ]
       },
-      "note": "probe.v1, a contract that lists link.v2, on an RF face listing `frames/link` at 60 s (§2.3, §2.7, §2.8, §2.16): the listed frame crosses whole and the unlisted `frames/detail` is denied by name (`frame_unlisted`); the timed `setpoint` is denied (`timed_downsampled`); `level` alone is downsampled; `status` crosses, and with it the heartbeat; `config`'s 232-byte put is above the 222-byte batch (`block_over_batch`); a frame a minute spares the uplink its keep-alives, every 60 s",
+      "note": "probe.v1, a contract that lists link.v2, on an RF face listing `frames/link` at 60 s (\u00a72.3, \u00a72.7, \u00a72.8, \u00a72.16): the listed frame crosses whole and the unlisted `frames/detail` is denied by name (`frame_unlisted`); the timed `setpoint` is denied (`timed_downsampled`); `level` alone is downsampled; `status` crosses, and with it the heartbeat; `config`'s 232-byte put is above the 222-byte batch (`block_over_batch`); a frame a minute spares the uplink its keep-alives, every 60 s",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"probe-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nhorizon_s        = 300\nframes           = { \"probe.v1/frames/link\" = { every_s = 60, keyframe_s = 900 } }\n"
     },
     {
@@ -1430,7 +1430,7 @@
           "probe.v1"
         ]
       },
-      "note": "the same face at a slower cadence (§2.7, §2.12, §2.16): `frames/link` every 300 s is above half its 300-s horizon (`interval_over_horizon`); the face affords 900-s horizons, and the frame's 300 s and the heartbeat's 600 s are below (`horizon_under_face`); its shortest cadence, 300 s, leaves keep-alives every 60 s (`keep_alive_not_suppressed`)",
+      "note": "the same face at a slower cadence (\u00a72.7, \u00a72.12, \u00a72.16): `frames/link` every 300 s is above half its 300-s horizon (`interval_over_horizon`); the face affords 900-s horizons, and the frame's 300 s and the heartbeat's 600 s are below (`horizon_under_face`); its shortest cadence, 300 s, leaves keep-alives every 60 s (`keep_alive_not_suppressed`)",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"probe-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nhorizon_s        = 900\nframes           = { \"probe.v1/frames/link\" = { every_s = 300 } }\n"
     },
     {
@@ -1458,7 +1458,7 @@
           "probe.v1"
         ]
       },
-      "note": "a `keyframe_s` the contract cannot reach, and an entry naming no frame resource (§2.7): `frames/link` keyframes at least every 15 records, at one frame a minute every 900 s at most, so an hour is `keyframe_unreachable`; `level` is no frame resource (`frame_unknown`); no plan",
+      "note": "a `keyframe_s` the contract cannot reach, and an entry naming no frame resource (\u00a72.7): `frames/link` keyframes at least every 15 records, at one frame a minute every 900 s at most, so an hour is `keyframe_unreachable`; `level` is no frame resource (`frame_unknown`); no plan",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"probe-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nframes           = { \"probe.v1/frames/link\" = { every_s = 60, keyframe_s = 3600 }, \"probe.v1/level\" = { every_s = 60 } }\n"
     },
     {
@@ -1861,7 +1861,7 @@
           "probe.v1"
         ]
       },
-      "note": "two faces, each listing one frame (§2.7): `frames/link` crosses `radio` and `frames/detail` crosses `sat`, so neither is `frame_unlisted`; each face denies the other's",
+      "note": "two faces, each listing one frame (\u00a72.7): `frames/link` crosses `radio` and `frames/detail` crosses `sat`, so neither is `frame_unlisted`; each face denies the other's",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"probe-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nframes           = { \"probe.v1/frames/link\" = { every_s = 60 } }\n\n[face.sat]\nfar              = \"ground-sat\"\nattach           = \"client\"\nselect           = { link_protocols = [\"serial\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nframes           = { \"probe.v1/frames/detail\" = { every_s = 60 } }\n"
     },
     {
@@ -2070,7 +2070,7 @@
           "probe.v1"
         ]
       },
-      "note": "a face with no `frames` keeps link.v1's rule (§2.7): both frame resources cross, and the plan lists no frames",
+      "note": "a face with no `frames` keeps link.v1's rule (\u00a72.7): both frame resources cross, and the plan lists no frames",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"probe-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n"
     },
     {
@@ -2245,7 +2245,7 @@
           "probe.v1"
         ]
       },
-      "note": "a link.v1 policy over probe.v1 derives link.v1's plan (§2.3): both frames cross, the timed `setpoint` is downsampled, and none of link.v2's warnings is weighed",
+      "note": "a link.v1 policy over probe.v1 derives link.v1's plan (\u00a72.3): both frames cross, the timed `setpoint` is downsampled, and none of link.v2's warnings is weighed",
       "policy": "system   = \"lab\"\nservices = [\"probe-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 60\nmax_outage_s = 3600\nbatch_bytes  = 222\nlink_bps     = 2400\nlease_ms     = 240000\n"
     },
     {
@@ -2293,7 +2293,7 @@
           ]
         }
       },
-      "note": "a revision that lists link.v2 and exposes a stream whose type is not packed is refused (`packed_required`, §2.17); its packed stream is not",
+      "note": "a revision that lists link.v2 and exposes a stream whose type is not packed is refused (`packed_required`, \u00a72.17); its packed stream is not",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"probe-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n"
     },
     {
@@ -2526,7 +2526,7 @@
           "probe.v1"
         ]
       },
-      "note": "given the far side's catalog, which lists probe.v1 at its fingerprint, the plan is derived (§2.18)",
+      "note": "given the far side's catalog, which lists probe.v1 at its fingerprint, the plan is derived (\u00a72.18)",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"probe-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nframes           = { \"probe.v1/frames/link\" = { every_s = 60 } }\n"
     },
     {
@@ -2559,7 +2559,7 @@
           "probe.v1"
         ]
       },
-      "note": "given a catalog that does not list probe.v1, whose resources cross, the plan is refused (`catalog_missing`, §2.18)",
+      "note": "given a catalog that does not list probe.v1, whose resources cross, the plan is refused (`catalog_missing`, \u00a72.18)",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"probe-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nframes           = { \"probe.v1/frames/link\" = { every_s = 60 } }\n"
     },
     {
@@ -2903,7 +2903,7 @@
           "health.v1"
         ]
       },
-      "note": "zenoh-modem's RF router (Appendix B, `examples/zk2/zenoh-modem/faces/`) over modem.v3, which lists link.v1: what it exposes is its nine frame resources, all packed, so none draws `not_packed` (§2.17); the face lists eight at 60 s, each crossing whole with no downsampling, and denies `frames/message` by name (`frame_unlisted`, §2.7); `frames/link`'s horizon is liveness evidence; one frame a minute replaces each keep-alive, so no `keep_alive_not_suppressed` (§2.16); the catalog the ground holds lists every crossing revision (§2.18)",
+      "note": "zenoh-modem's RF router (Appendix B, `examples/zk2/zenoh-modem/faces/`) over modem.v3, which lists link.v1: what it exposes is its nine frame resources, all packed, so none draws `not_packed` (\u00a72.17); the face lists eight at 60 s, each crossing whole with no downsampling, and denies `frames/message` by name (`frame_unlisted`, \u00a72.7); `frames/link`'s horizon is liveness evidence; one frame a minute replaces each keep-alive, so no `keep_alive_not_suppressed` (\u00a72.16); the catalog the ground holds lists every crossing revision (\u00a72.18)",
       "policy": "# zenoh-modem's RF node (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\nbinding  = \"zm-1.10.2-r1\"           # the zenoh fork zenoh-modem's routers run\ncatalog  = \"ab76ec37\"               # catalog.json, which the ground holds\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4            # a keep-alive every 60 s, which a frame a minute replaces\nwait_before_close_ms = 240000       # at least the lease\nsequence             = \"16bit\"\nbatch_bytes          = 222          # the radio's 220 B SDU and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.rf]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000            # 5 %\narq              = false            # no link ARQ on the radio (zenoh-modem's tracker)\nreply_timeout_ms = 15000            # 16 full batches take 11.8 s\nhorizon_s        = 120              # one frame a minute affords a 120 s horizon\n\n[face.rf.frames]\n\"modem.v3/frames/link\"   = { every_s = 60 }\n\"modem.v3/frames/sdu\"    = { every_s = 60 }\n\"modem.v3/frames/sched\"  = { every_s = 60 }\n\"modem.v3/frames/air\"    = { every_s = 60 }\n\"modem.v3/frames/layer\"  = { every_s = 60 }\n\"modem.v3/frames/if\"     = { every_s = 60 }\n\"modem.v3/frames/radio\"  = { every_s = 60 }\n\"modem.v3/frames/bearer\" = { every_s = 60 }\n"
     },
     {
@@ -3253,7 +3253,7 @@
           "health.v1"
         ]
       },
-      "note": "zenoh-modem's LoRa router at SF7 (Appendix B): the RF face's frames at 60 s, against a keep-alive interval of 30 s, so the uplink pays a keep-alive between two frames (`keep_alive_not_suppressed`, §2.16); `frames/message` is denied by name (`frame_unlisted`, §2.7)",
+      "note": "zenoh-modem's LoRa router at SF7 (Appendix B): the RF face's frames at 60 s, against a keep-alive interval of 30 s, so the uplink pays a keep-alive between two frames (`keep_alive_not_suppressed`, \u00a72.16); `frames/message` is denied by name (`frame_unlisted`, \u00a72.7)",
       "policy": "# zenoh-modem's LoRa node at SF7 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"ab76ec37\"\n\n[transport]\nlease_ms             = 120000\nkeep_alive           = 4\nwait_before_close_ms = 120000\nsequence             = \"16bit\"\nbatch_bytes          = 224          # the chip's 222 B frame and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 5469\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nhorizon_s        = 120\n\n[face.lora.frames]\n\"modem.v3/frames/link\"   = { every_s = 60 }\n\"modem.v3/frames/sdu\"    = { every_s = 60 }\n\"modem.v3/frames/sched\"  = { every_s = 60 }\n\"modem.v3/frames/air\"    = { every_s = 60 }\n\"modem.v3/frames/layer\"  = { every_s = 60 }\n\"modem.v3/frames/if\"     = { every_s = 60 }\n\"modem.v3/frames/radio\"  = { every_s = 60 }\n\"modem.v3/frames/bearer\" = { every_s = 60 }\n"
     },
     {
@@ -3597,7 +3597,7 @@
           "health.v1"
         ]
       },
-      "note": "zenoh-modem's LoRa router at SF9 (Appendix B): `frames/link` at 60 s and the group frames at 120 s, each listed at its own cadence (§2.3); the shortest, 60 s, is the keep-alive interval, so none is paid beside the data (§2.16); no frame is above the 117 B batch (link.v1 §2.8)",
+      "note": "zenoh-modem's LoRa router at SF9 (Appendix B): `frames/link` at 60 s and the group frames at 120 s, each listed at its own cadence (\u00a72.3); the shortest, 60 s, is the keep-alive interval, so none is paid beside the data (\u00a72.16); no frame is above the 117 B batch (link.v1 \u00a72.8)",
       "policy": "# zenoh-modem's LoRa node at SF9 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"ab76ec37\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 117          # the chip's 115 B frame and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 1758\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000            # 16 full batches take 8.5 s\nhorizon_s        = 120\n\n[face.lora.frames]\n\"modem.v3/frames/link\"   = { every_s = 60 }\n\"modem.v3/frames/sdu\"    = { every_s = 120 }\n\"modem.v3/frames/sched\"  = { every_s = 120 }\n\"modem.v3/frames/air\"    = { every_s = 120 }\n\"modem.v3/frames/layer\"  = { every_s = 120 }\n\"modem.v3/frames/if\"     = { every_s = 120 }\n\"modem.v3/frames/radio\"  = { every_s = 120 }\n\"modem.v3/frames/bearer\" = { every_s = 120 }\n"
     },
     {
@@ -3966,7 +3966,7 @@
           "health.v1"
         ]
       },
-      "note": "zenoh-modem's LoRa router at SF12 (Appendix B): every frame at 900 s, the group frames asked for a full record hourly, which their 15 records reach (`keyframe_s`, §2.7); `frames/link`'s 150 s horizon is below twice its cadence (`interval_over_horizon`) and below the face's 1,800 s (`horizon_under_face`, §2.12); a 270 s keep-alive interval is below the cadence (`keep_alive_not_suppressed`, §2.16)",
+      "note": "zenoh-modem's LoRa router at SF12 (Appendix B): every frame at 900 s, the group frames asked for a full record hourly, which their 15 records reach (`keyframe_s`, \u00a72.7); `frames/link`'s 150 s horizon is below twice its cadence (`interval_over_horizon`) and below the face's 1,800 s (`horizon_under_face`, \u00a72.12); a 270 s keep-alive interval is below the cadence (`keep_alive_not_suppressed`, \u00a72.16)",
       "policy": "# zenoh-modem's LoRa node at SF12 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"ab76ec37\"\n\n[transport]\nlease_ms             = 1080000\nkeep_alive           = 4\nwait_before_close_ms = 1080000\nsequence             = \"16bit\"\nbatch_bytes          = 224          # the fragment layer's 222 B SDU and 2 B of stream framing\nopen_timeout_ms      = 40000\naccept_timeout_ms    = 40000\ninterests_timeout_ms = 40000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 900\nmax_outage_s     = 3600\nlink_bps         = 293\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 120000\nhorizon_s        = 1800\n\n# A group frame keyframes at least every 15 records (modem.v3), 3.75 h at\n# one every 15 minutes; the face asks every 4, hourly. frames/link is a\n# full record every frame.\n[face.lora.frames]\n\"modem.v3/frames/link\"   = { every_s = 900 }\n\"modem.v3/frames/sdu\"    = { every_s = 900, keyframe_s = 3600 }\n\"modem.v3/frames/sched\"  = { every_s = 900, keyframe_s = 3600 }\n\"modem.v3/frames/air\"    = { every_s = 900, keyframe_s = 3600 }\n\"modem.v3/frames/layer\"  = { every_s = 900, keyframe_s = 3600 }\n\"modem.v3/frames/if\"     = { every_s = 900, keyframe_s = 3600 }\n\"modem.v3/frames/radio\"  = { every_s = 900, keyframe_s = 3600 }\n\"modem.v3/frames/bearer\" = { every_s = 900, keyframe_s = 3600 }\n"
     },
     {
@@ -4329,7 +4329,7 @@
           "health.v1"
         ]
       },
-      "note": "zenoh-modem's SBD router (Appendix B): the face exposes `frames/message` alone, at the keep-alive interval, so a message replaces a keep-alive (§2.16); the other eight frames are denied by name (`frame_unlisted`, §2.7); `frames/message` declares no horizon, so the plan lists no evidence, and liveness across the face is unobservable (link.v1 §2.12)",
+      "note": "zenoh-modem's SBD router (Appendix B): the face exposes `frames/message` alone, at the keep-alive interval, so a message replaces a keep-alive (\u00a72.16); the other eight frames are denied by name (`frame_unlisted`, \u00a72.7); `frames/message` declares no horizon, so the plan lists no evidence, and liveness across the face is unobservable (link.v1 \u00a72.12)",
       "policy": "# zenoh-modem's SBD terminal (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-71c0e2a9d4b3\"\nservices = [\"sat0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"ab76ec37\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 2\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 271          # a message's 270 B, as configs/zenohd-sat0.json5 ships it\nopen_timeout_ms      = 1000000\naccept_timeout_ms    = 1000000\ninterests_timeout_ms = 1000000\n\n[face.sbd]\nfar              = \"ground-gateway\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 1800\nmax_outage_s     = 86400\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 1000000\nhorizon_s        = 3600\n\n[face.sbd.frames]\n\"modem.v3/frames/message\" = { every_s = 1800 }\n"
     },
     {
@@ -4557,7 +4557,7 @@
           "probe.v1"
         ]
       },
-      "note": "probe.v1 on an RF face whose `frames` is empty (§2.1, §2.3, §2.7; 0.6, F-465): a face with `frames` that lists none, so no frame resource crosses it: `frames/link` and `frames/detail` are each denied by name and warned `frame_unlisted`, and the plan's `frames` is empty; with no frame crossing, the face's shortest cadence is the heartbeat's 300 s, above its 60-s keep-alive interval (`keep_alive_not_suppressed`)",
+      "note": "probe.v1 on an RF face whose `frames` is empty (\u00a72.1, \u00a72.3, \u00a72.7; 0.6, F-465): a face with `frames` that lists none, so no frame resource crosses it: `frames/link` and `frames/detail` are each denied by name and warned `frame_unlisted`, and the plan's `frames` is empty; with no frame crossing, the face's shortest cadence is the heartbeat's 300 s, above its 60-s keep-alive interval (`keep_alive_not_suppressed`)",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"probe-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nhorizon_s        = 300\nframes           = {}\n"
     },
     {
@@ -4812,7 +4812,7 @@
           ]
         }
       },
-      "note": "two revisions of probe.v1 read together (§2.3; 0.6, F-469): the contract's, every resource packed, and one, inline, in which `level` and `config` are raw. Each revision is judged alone: both draw `not_packed`, the raw revision's, and `config` still draws `block_over_batch`, its packed revision's 232-byte put being above the 222-byte batch",
+      "note": "two revisions of probe.v1 read together (\u00a72.3; 0.6, F-469): the contract's, every resource packed, and one, inline, in which `level` and `config` are raw. Each revision is judged alone: both draw `not_packed`, the raw revision's, and `config` still draws `block_over_batch`, its packed revision's 232-byte put being above the 222-byte batch",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"probe-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nhorizon_s        = 300\nframes           = { \"probe.v1/frames/link\" = { every_s = 60, keyframe_s = 900 } }\n"
     },
     {
@@ -4834,9 +4834,994 @@
           "probe.v1"
         ]
       },
-      "note": "a deployment that names no interfaces for the listed `probe-b` is refused (`service_unknown`, link.v1 §2.3; 0.6, F-468): the refusal lists its errors alone, without the policy's `no_arq` or any warning of the plan's",
+      "note": "a deployment that names no interfaces for the listed `probe-b` is refused (`service_unknown`, link.v1 \u00a72.3; 0.6, F-468): the refusal lists its errors alone, without the policy's `no_arq` or any warning of the plan's",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"probe-a\", \"probe-b\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nhorizon_s        = 300\nframes           = { \"probe.v1/frames/link\" = { every_s = 60, keyframe_s = 900 } }\n"
+    },
+    {
+      "contracts": [
+        "spec/profiles/link/conformance/contracts/probe.v1.toml"
+      ],
+      "expect": {
+        "binding": "zenoh-1.10.1",
+        "catalog": null,
+        "faces": [
+          {
+            "attach": {
+              "devices": [
+                "lab/probe-a"
+              ],
+              "shape": "device"
+            },
+            "deny": [
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "zk",
+                "key_exprs": [
+                  "zk2/*/*/@zk/alive/**",
+                  "zk2/*/*/@zk/member/**",
+                  "zk2/@zk/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress"
+                ],
+                "id": "zk:instance:egress",
+                "key_exprs": [
+                  "zk2/*/*/@zk/instance/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "ingress"
+                ],
+                "id": "zk:instance:ingress",
+                "key_exprs": [
+                  "zk2/*/*/@zk/instance/**"
+                ],
+                "messages": [
+                  "declare_subscriber",
+                  "query",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "adv",
+                "key_exprs": [
+                  "zk2/**/@adv/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "admin",
+                "key_exprs": [
+                  "@/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:probe.v1",
+                "key_exprs": [
+                  "zk2/*/*/probe.v1/stream/frames/detail/**",
+                  "zk2/*/*/probe.v1/stream/setpoint/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@stream",
+                "key_exprs": [
+                  "zk2/*/*/*/@stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@state",
+                "key_exprs": [
+                  "zk2/*/*/*/@state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events",
+                "key_exprs": [
+                  "zk2/*/*/*/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              }
+            ],
+            "downsampling": null,
+            "far": "probe-a",
+            "findings": [
+              {
+                "at": "probe.v1/state/config",
+                "code": "block_over_batch",
+                "face": "radio",
+                "severity": "warning"
+              },
+              {
+                "at": "probe.v1/stream/frames/detail",
+                "code": "frame_unlisted",
+                "face": "radio",
+                "severity": "warning"
+              },
+              {
+                "at": "probe.v1/stream/setpoint",
+                "code": "timed_downsampled",
+                "face": "radio",
+                "severity": "warning"
+              }
+            ],
+            "frames": [
+              {
+                "every_s": 60,
+                "keyframe_s": 900,
+                "resource": "probe.v1/stream/frames/link"
+              }
+            ],
+            "liveness": [
+              {
+                "evidence": [
+                  "freshness.v2/stream/heartbeat/probe.v1",
+                  "probe.v1/state/status",
+                  "probe.v1/stream/frames/link"
+                ],
+                "service": "lab/probe-a"
+              }
+            ],
+            "name": "radio",
+            "reply_timeout_ms": 15000,
+            "windows": [
+              {
+                "min_s": 3600,
+                "service": "lab/probe-a"
+              }
+            ]
+          }
+        ],
+        "transport": {
+          "accept_timeout_ms": 10000,
+          "batch_bytes": 222,
+          "interests_timeout_ms": 10000,
+          "keep_alive": 4,
+          "lease_ms": 240000,
+          "open_timeout_ms": 10000,
+          "sequence": "16bit",
+          "wait_before_close_ms": 240000
+        }
+      },
+      "implements": {
+        "lab/probe-a": [
+          "probe.v1"
+        ]
+      },
+      "note": "case 5's RF face as a device face, its one owner `lab/probe-a` a device on a first hop (\u00a72.5, \u00a72.6, \u00a72.8): `zk` is \u00a72.6's three denies, so the instance key crosses on the Own row's pairs alone; the device is listed, so the exposure denies, windows, liveness and warnings are case 5's; its own stream `level` has no downsampling rule on its own face, so there is none. Written by reading link.v2 0.7, not derived by the reference",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = []\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\n\n[face.radio]\nfar              = \"probe-a\"\nattach           = \"device\"\ndevices          = [\"lab/probe-a\"]\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nhorizon_s        = 300\nframes           = { \"probe.v1/frames/link\" = { every_s = 60, keyframe_s = 900 } }\n"
+    },
+    {
+      "contracts": [
+        "spec/profiles/link/conformance/contracts/probe.v1.toml"
+      ],
+      "expect": {
+        "binding": "zenoh-1.10.1",
+        "catalog": null,
+        "faces": [
+          {
+            "attach": {
+              "devices": [
+                "lab/probe-a"
+              ],
+              "shape": "device"
+            },
+            "deny": [
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "zk",
+                "key_exprs": [
+                  "zk2/*/*/@zk/alive/**",
+                  "zk2/*/*/@zk/member/**",
+                  "zk2/@zk/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress"
+                ],
+                "id": "zk:instance:egress",
+                "key_exprs": [
+                  "zk2/*/*/@zk/instance/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "ingress"
+                ],
+                "id": "zk:instance:ingress",
+                "key_exprs": [
+                  "zk2/*/*/@zk/instance/**"
+                ],
+                "messages": [
+                  "declare_subscriber",
+                  "query",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "adv",
+                "key_exprs": [
+                  "zk2/**/@adv/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "admin",
+                "key_exprs": [
+                  "@/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:probe.v1",
+                "key_exprs": [
+                  "zk2/*/*/probe.v1/stream/frames/detail/**",
+                  "zk2/*/*/probe.v1/stream/setpoint/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@stream",
+                "key_exprs": [
+                  "zk2/*/*/*/@stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@state",
+                "key_exprs": [
+                  "zk2/*/*/*/@state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events",
+                "key_exprs": [
+                  "zk2/*/*/*/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              }
+            ],
+            "downsampling": null,
+            "far": "probe-a",
+            "findings": [
+              {
+                "at": "probe.v1/state/config",
+                "code": "block_over_batch",
+                "face": "radio",
+                "severity": "warning"
+              },
+              {
+                "at": "probe.v1/stream/setpoint",
+                "code": "timed_downsampled",
+                "face": "radio",
+                "severity": "warning"
+              }
+            ],
+            "frames": [
+              {
+                "every_s": 60,
+                "resource": "probe.v1/stream/frames/link"
+              }
+            ],
+            "liveness": [
+              {
+                "evidence": [
+                  "freshness.v2/stream/heartbeat/probe.v1",
+                  "probe.v1/state/status",
+                  "probe.v1/stream/frames/link"
+                ],
+                "service": "lab/probe-a"
+              }
+            ],
+            "name": "radio",
+            "reply_timeout_ms": 15000,
+            "windows": [
+              {
+                "min_s": 3600,
+                "service": "lab/probe-a"
+              }
+            ]
+          },
+          {
+            "attach": {
+              "shape": "client"
+            },
+            "deny": [
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "zk",
+                "key_exprs": [
+                  "zk2/**/@zk/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "adv",
+                "key_exprs": [
+                  "zk2/**/@adv/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "admin",
+                "key_exprs": [
+                  "@/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:probe.v1",
+                "key_exprs": [
+                  "zk2/*/*/probe.v1/stream/frames/link/**",
+                  "zk2/*/*/probe.v1/stream/setpoint/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@stream",
+                "key_exprs": [
+                  "zk2/*/*/*/@stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@state",
+                "key_exprs": [
+                  "zk2/*/*/*/@state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events",
+                "key_exprs": [
+                  "zk2/*/*/*/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              }
+            ],
+            "downsampling": {
+              "flows": [
+                "egress"
+              ],
+              "id": "sat",
+              "link_protocols": [
+                "serial"
+              ],
+              "messages": [
+                "put"
+              ],
+              "rules": [
+                {
+                  "freq": 0.016666666666666666,
+                  "key_expr": "zk2/lab/probe-a/probe.v1/stream/level"
+                }
+              ]
+            },
+            "far": "ground-sat",
+            "findings": [
+              {
+                "at": "probe.v1/state/config",
+                "code": "block_over_batch",
+                "face": "sat",
+                "severity": "warning"
+              },
+              {
+                "at": "probe.v1/stream/setpoint",
+                "code": "timed_downsampled",
+                "face": "sat",
+                "severity": "warning"
+              }
+            ],
+            "frames": [
+              {
+                "every_s": 60,
+                "resource": "probe.v1/stream/frames/detail"
+              }
+            ],
+            "liveness": [
+              {
+                "evidence": [
+                  "freshness.v2/stream/heartbeat/probe.v1",
+                  "probe.v1/state/status"
+                ],
+                "service": "lab/probe-a"
+              }
+            ],
+            "name": "sat",
+            "reply_timeout_ms": 15000,
+            "windows": [
+              {
+                "min_s": 3600,
+                "service": "lab/probe-a"
+              }
+            ]
+          }
+        ],
+        "transport": {
+          "accept_timeout_ms": 10000,
+          "batch_bytes": 222,
+          "interests_timeout_ms": 10000,
+          "keep_alive": 4,
+          "lease_ms": 240000,
+          "open_timeout_ms": 10000,
+          "sequence": "16bit",
+          "wait_before_close_ms": 240000
+        }
+      },
+      "implements": {
+        "lab/probe-a": [
+          "probe.v1"
+        ]
+      },
+      "note": "case 8's two faces, `radio` a device face listing `lab/probe-a` (\u00a72.5, \u00a72.8): the device is listed on every face, so `sat`, a client face, keeps case 8's plan, `level` downsampled there and `frames/detail` crossing; on its own face the device's `level` has no rule, and `radio` keeps `zk` carved (\u00a72.6). Written by reading link.v2 0.7, not derived by the reference",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = []\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\n\n[face.radio]\nfar              = \"probe-a\"\nattach           = \"device\"\ndevices          = [\"lab/probe-a\"]\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nframes           = { \"probe.v1/frames/link\" = { every_s = 60 } }\n\n[face.sat]\nfar              = \"ground-sat\"\nattach           = \"client\"\nselect           = { link_protocols = [\"serial\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nframes           = { \"probe.v1/frames/detail\" = { every_s = 60 } }\n"
+    },
+    {
+      "contracts": [
+        "spec/profiles/link/conformance/contracts/probe.v1.toml"
+      ],
+      "expect": {
+        "refused": [
+          {
+            "at": "lab/probe-b",
+            "code": "service_unknown",
+            "face": null,
+            "severity": "error"
+          }
+        ]
+      },
+      "implements": {
+        "lab/probe-a": [
+          "probe.v1"
+        ]
+      },
+      "note": "a device the deployment names no interfaces for is `service_unknown`, at its address, as a listed service is (\u00a72.3). Written by reading link.v2 0.7",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = []\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\n\n[face.radio]\nfar              = \"probe-b\"\nattach           = \"device\"\ndevices          = [\"lab/probe-b\"]\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": {
+        "refused": [
+          {
+            "at": "archive.v1",
+            "code": "presence_required",
+            "face": "radio",
+            "severity": "error"
+          },
+          {
+            "at": "gov.v1",
+            "code": "presence_required",
+            "face": "radio",
+            "severity": "error"
+          }
+        ]
+      },
+      "implements": {
+        "lab/gov-a": [
+          "archive.v1",
+          "gov.v1"
+        ]
+      },
+      "interfaces": {
+        "archive.v1": {
+          "resources": [
+            {
+              "annotations": {},
+              "template": "records",
+              "token": "state"
+            }
+          ]
+        },
+        "gov.v1": {
+          "resources": [
+            {
+              "annotations": {
+                "link.exposure": "link"
+              },
+              "template": "mode",
+              "token": "state"
+            }
+          ],
+          "uses": [
+            "redundancy.v1"
+          ]
+        }
+      },
+      "note": "a device that implements `archive.v1`, and `gov.v1`, whose revision uses `redundancy.v1`: `presence_required` for each, on the device's face, and no plan (\u00a72.3, \u00a72.5; core \u00a78.1). Written by reading link.v2 0.7",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = []\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\n\n[face.radio]\nfar              = \"gov-a\"\nattach           = \"device\"\ndevices          = [\"lab/gov-a\"]\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": {
+        "binding": "zenoh-1.10.1",
+        "catalog": null,
+        "faces": [
+          {
+            "attach": {
+              "devices": [
+                "lab/tracker-a"
+              ],
+              "shape": "device"
+            },
+            "deny": [
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "zk",
+                "key_exprs": [
+                  "zk2/*/*/@zk/alive/**",
+                  "zk2/*/*/@zk/member/**",
+                  "zk2/@zk/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress"
+                ],
+                "id": "zk:instance:egress",
+                "key_exprs": [
+                  "zk2/*/*/@zk/instance/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "ingress"
+                ],
+                "id": "zk:instance:ingress",
+                "key_exprs": [
+                  "zk2/*/*/@zk/instance/**"
+                ],
+                "messages": [
+                  "declare_subscriber",
+                  "query",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "adv",
+                "key_exprs": [
+                  "zk2/**/@adv/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "admin",
+                "key_exprs": [
+                  "@/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream",
+                "key_exprs": [
+                  "zk2/*/*/*/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@stream",
+                "key_exprs": [
+                  "zk2/*/*/*/@stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "state",
+                "key_exprs": [
+                  "zk2/*/*/*/state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@state",
+                "key_exprs": [
+                  "zk2/*/*/*/@state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events",
+                "key_exprs": [
+                  "zk2/*/*/*/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              }
+            ],
+            "downsampling": null,
+            "far": "tracker-a",
+            "findings": [
+              {
+                "at": "tracker.v1/state/tracks/{track}",
+                "code": "epoch_on_device",
+                "face": "radio",
+                "severity": "warning"
+              }
+            ],
+            "liveness": [
+              {
+                "evidence": [],
+                "service": "lab/tracker-a"
+              }
+            ],
+            "name": "radio",
+            "reply_timeout_ms": 15000,
+            "windows": [
+              {
+                "min_s": 3600,
+                "service": "lab/tracker-a"
+              }
+            ]
+          }
+        ],
+        "transport": {
+          "accept_timeout_ms": 10000,
+          "batch_bytes": 222,
+          "interests_timeout_ms": 10000,
+          "keep_alive": 4,
+          "lease_ms": 240000,
+          "open_timeout_ms": 10000,
+          "sequence": "16bit",
+          "wait_before_close_ms": 240000
+        }
+      },
+      "implements": {
+        "lab/tracker-a": [
+          "tracker.v1"
+        ]
+      },
+      "interfaces": {
+        "tracker.v1": {
+          "resources": [
+            {
+              "annotations": {},
+              "epoch": "track",
+              "template": "tracks/{track}",
+              "token": "state"
+            }
+          ]
+        }
+      },
+      "note": "a device's interface whose template declares `epoch`: its member tokens cross the face at each transport and `zk` denies them, so `epoch_on_device` (\u00a72.5); its one state stays home, so every push is denied wholesale (link.v1 \u00a72.7), and as an owner of state it has a window (link.v1 \u00a72.11). Written by reading link.v2 0.7",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = []\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\n\n[face.radio]\nfar              = \"tracker-a\"\nattach           = \"device\"\ndevices          = [\"lab/tracker-a\"]\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n"
     }
   ],
-  "description": "link.v2's plan (v2.md §2.3, §2.4, §2.7, §2.8, §2.12, §2.16, §2.17, §2.18). Each case is a face policy, `policy`, and a deployment as link.v1's plan.json writes it (`implements`, `contracts` loaded from the repository's root, or `interfaces` inline). `expect` is `{refused}`, the findings that refuse it (a policy's linter's, warnings included, or a deployment's errors alone, link.v1 §2.3), or the plan: `binding`, `catalog` (null when the policy names none), `transport` (null for a link.v1 policy) and `faces`, each face as link.v1's plan.json writes it with `reply_timeout_ms` for a link.v2 face. A face's plan carries `frames` for a link.v2 face with `frames`: each listed frame that crosses, `{resource, every_s, keyframe_s}`, and none for an empty `frames` (§2.3). A case's own `catalog`, where it gives one, is the core §8.6 catalog the far side holds (§2.18); an inline revision has no fingerprint, so a case about the catalog loads contracts. An inline resource may state `type`, its type's kind: `packed` is packed, and any other or none is not (§2.17). `narrow` names principals: `expect.narrowed` gives, for each, the link protocols a subject bound to it is selected by (link.v1 §2.4 over the binding's list), null when no face excludes any."
+  "description": "link.v2's plan (v2.md \u00a72.3, \u00a72.4, \u00a72.7, \u00a72.8, \u00a72.12, \u00a72.16, \u00a72.17, \u00a72.18). Each case is a face policy, `policy`, and a deployment as link.v1's plan.json writes it (`implements`, `contracts` loaded from the repository's root, or `interfaces` inline). `expect` is `{refused}`, the findings that refuse it (a policy's linter's, warnings included, or a deployment's errors alone, link.v1 \u00a72.3), or the plan: `binding`, `catalog` (null when the policy names none), `transport` (null for a link.v1 policy) and `faces`, each face as link.v1's plan.json writes it with `reply_timeout_ms` for a link.v2 face. A face's plan carries `frames` for a link.v2 face with `frames`: each listed frame that crosses, `{resource, every_s, keyframe_s}`, and none for an empty `frames` (\u00a72.3). A case's own `catalog`, where it gives one, is the core \u00a78.6 catalog the far side holds (\u00a72.18); an inline revision has no fingerprint, so a case about the catalog loads contracts. An inline resource may state `type`, its type's kind: `packed` is packed, and any other or none is not (\u00a72.17). `narrow` names principals: `expect.narrowed` gives, for each, the link protocols a subject bound to it is selected by (link.v1 \u00a72.4 over the binding's list), null when no face excludes any. A device face (\u00a72.5) names its devices by address: `implements` maps a listed service's name, or a device's `<system>/<service>`, to its interfaces, and its plan's `attach` is `{shape: \"device\", devices}`. An inline interface may state `uses`, which a device's `presence_required` reads for `redundancy.v1`, and an inline resource `epoch`, the parameter its template declares as its epoch (`epoch_on_device`). The device cases, from case 22, were written by reading the text, not derived by the reference."
 }

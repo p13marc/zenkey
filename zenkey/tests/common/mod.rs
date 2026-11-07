@@ -153,7 +153,9 @@ where
 ///   zenoh's lease can tell (`spec/scenarios/budget.md` §2).
 /// - **Counting**: every byte it forwards toward the side that connected
 ///   is counted, so a test reads what crossed toward a far session
-///   (`spec/scenarios/constrained.md` §7).
+///   (`spec/scenarios/constrained.md` §7); and, on [`link_to`]'s, what the
+///   connecting side sends can be copied, so a test reads what a first-hop
+///   device declared toward its router (`constrained.md` §10).
 /// - **Losing** ([`lossy_link_to`]): on request, the next batch the
 ///   connecting side sends, or the next that holds a given text, is
 ///   dropped, once, and the link stays up: a frame a medium with no ARQ
@@ -166,6 +168,7 @@ pub struct Link {
     stalled: std::sync::Arc<std::sync::atomic::AtomicBool>,
     down: std::sync::Arc<std::sync::atomic::AtomicU64>,
     capture: Capture,
+    capture_up: Capture,
     loss: Loss,
     conns: std::sync::Arc<std::sync::Mutex<Vec<tokio::task::AbortHandle>>>,
     _accept: tokio::task::JoinHandle<()>,
@@ -214,6 +217,17 @@ impl Link {
     /// them.
     pub fn captured_down(&self) -> Vec<u8> {
         self.capture.lock().unwrap().take().unwrap_or_default()
+    }
+
+    /// Starts keeping a copy of the bytes the connecting side sends, from
+    /// now on, dropping what was kept. A [`lossy_link_to`] keeps none.
+    pub fn capture_up(&self) {
+        *self.capture_up.lock().unwrap() = Some(Vec::new());
+    }
+
+    /// The bytes kept since [`Link::capture_up`], which stops keeping them.
+    pub fn captured_up(&self) -> Vec<u8> {
+        self.capture_up.lock().unwrap().take().unwrap_or_default()
     }
 
     /// Drops the next batch the connecting side sends that holds `text`,
@@ -393,11 +407,16 @@ async fn link_with(upstream: &str, framed: bool) -> Link {
     let conns: std::sync::Arc<std::sync::Mutex<Vec<tokio::task::AbortHandle>>> = Default::default();
     let down = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     let capture = Capture::default();
+    let capture_up = Capture::default();
     let loss = Loss::default();
     let lossy = loss.clone();
     let tally = Tally {
         count: std::sync::Arc::clone(&down),
         capture: std::sync::Arc::clone(&capture),
+    };
+    let tally_up = Tally {
+        count: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        capture: std::sync::Arc::clone(&capture_up),
     };
     let (c, st, cs) = (
         std::sync::Arc::clone(&cut),
@@ -416,13 +435,14 @@ async fn link_with(upstream: &str, framed: bool) -> Link {
             let (up_rd, up_wr) = up.into_split();
             let (a, b) = (std::sync::Arc::clone(&st), std::sync::Arc::clone(&st));
             let counted = Some(tally.clone());
+            let counted_up = Some(tally_up.clone());
             let lossy = lossy.clone();
             let h = tokio::spawn(async move {
                 let up = async {
                     if framed {
                         pump_framed(down_rd, up_wr, a, lossy).await;
                     } else {
-                        pump(down_rd, up_wr, a, None).await;
+                        pump(down_rd, up_wr, a, counted_up).await;
                     }
                 };
                 tokio::join!(up, pump(up_rd, down_wr, b, counted));
@@ -436,6 +456,7 @@ async fn link_with(upstream: &str, framed: bool) -> Link {
         stalled,
         down,
         capture,
+        capture_up,
         loss,
         conns,
         _accept: accept,

@@ -3323,3 +3323,65 @@ fn the_help_documents_the_config_v2_surface() {
         assert!(owner::HELP.contains(piece), "--help names {piece:?}");
     }
 }
+
+/// `--first-hop` (#982 H2): an owner on a first hop holds its instance
+/// token alone (core §8.1), every interface in its descriptor marked
+/// `"token": false`, and no bundle (§8.4): its contracts are not retrieved
+/// from it. `--help` names the option.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_runs_on_a_first_hop() {
+    assert!(
+        owner::HELP.contains("--first-hop"),
+        "--help names --first-hop"
+    );
+    let (_r1, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let standard =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../spec/profiles/health/health.v1.toml");
+    let standard = standard.display().to_string();
+    let o = spawn_owner(&[
+        "--connect",
+        &ep,
+        "--health-status",
+        "OK:serving",
+        "--first-hop",
+        "ex/hop",
+        &standard,
+    ]);
+    assert_eq!(line(&o.lines).await, format!("connected {ep}"));
+    let ready = line(&o.lines).await;
+    let key = ready.strip_prefix("ready ").unwrap().to_owned();
+    let instance = key.rsplit('/').next().unwrap().parse().unwrap();
+    let addr = "ex/hop".parse().unwrap();
+    let d = loop {
+        match presence::descriptor(&tool, &addr, &instance, T)
+            .await
+            .unwrap()
+        {
+            presence::Found::Nothing => continue,
+            found => break found.into_descriptor().unwrap(),
+        }
+    };
+    assert!(!d.interfaces.is_empty());
+    assert!(
+        d.interfaces.iter().all(|e| !e.token),
+        "every interface tokenless: {:?}",
+        d.interfaces
+    );
+    assert_eq!(
+        presence::liveliness_keys(&tool, "zk2/ex/hop/@zk/**", T)
+            .await
+            .unwrap(),
+        [key],
+        "the instance token alone"
+    );
+    let health = zenkey::health::implementation();
+    let got = zenkey::retrieval::fetch_bundle(&tool, health.iface(), health.fingerprint(), T)
+        .await
+        .unwrap();
+    assert!(
+        matches!(got, zenkey::retrieval::Retrieved::Unavailable { .. }),
+        "no bundle held: {got:?}"
+    );
+    o.stop().await;
+}

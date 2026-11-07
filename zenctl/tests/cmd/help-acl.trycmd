@@ -89,7 +89,9 @@ examples/zk2/link/ holds one):
   services = ["radio-a"]                 # the services it carries
   [face.radio]
   far          = "ground"                # the far principal: its policy gets the denies
-  attach       = "client"                # or "south-region", with region = "…"
+  attach       = "client"                # or "south-region", with region = "…";
+                                         #   or link.v2's "device", with
+                                         #   devices = ["<system>/<service>", …]
   select       = { link_protocols = ["unixsock-stream"] }
   class        = "constrained"
   expose       = "link"                  # or "none": no push crosses

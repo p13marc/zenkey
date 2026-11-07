@@ -445,6 +445,23 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   (F-476). C4d, the bare wire's removal, is not in: `telemetry.v1` §2.6
   reads a CBOR map as §5.2's decoding reads one, and `config.v1` §2.5
   cites the envelope.
+  Core 0.96 and observer 0.26 (#982's H1) let an owner on a first hop
+  (its session its router's client across a constrained face) hold its
+  instance token alone: §8.1 SHOULD every interface tokenless, MUST NOT
+  `archive.v1` or a governed interface; §8.4 SHOULD NOT hold its bundles,
+  the deployment SHOULD hold them near (§8.2 step 3 declares none); §8.5's
+  MAY leaves its instance key out of the client shape's deny; observer
+  §3.6 a reader MUST find providers by instance tokens and descriptors and
+  MUST NOT conclude absence for want of an interface token, §3.11 a tool
+  that knows MUST NOT report it down from its token's absence (link
+  closed); `link.v2` 0.7's device face (`attach = "device"`, `devices`,
+  `device_listed`, `presence_required`, `epoch_on_device`, §2.6's carve
+  of `zk` into three denies, an instance key crossing on core §11.2's Own
+  pairs alone, §2.15 reading it), its `v2/plan.json` cases 22–26 and
+  `v2/lints.json` 40–57 written from the text and run unblessed;
+  `config.v1` 0.10's §2.1 excepts the first hop; `scenarios/constrained.md`
+  §10 runs in `zenkey/tests/constrained.rs` (`ServiceConfig::first_hop`,
+  the device's sessions by zid under the carve); 246 rules.
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`

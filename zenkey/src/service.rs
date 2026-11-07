@@ -15,8 +15,9 @@
 //!   2. every required resource exposed; every optional one exposed,
 //!      unavailable, or implied absent by a missing capability
 //!   3. the descriptor (checked, put, served) and one contract queryable
-//!      per implemented interface
-//!   4. the instance token, then the interface tokens
+//!      per implemented interface, none on a first hop
+//!   4. the instance token, then the interface tokens: on a first hop
+//!      none, every interface tokenless (core §8.1, #982)
 //!        │
 //!        ▼
 //!     Service ─ set_capabilities / new_epoch / new_run / declare_member / cycle_member
@@ -1203,10 +1204,19 @@ impl ServiceBuilder {
 
     /// Brings the service up in the order of §8.2. On any refusal, nothing
     /// alive is declared.
-    pub async fn start(self) -> Result<Service> {
+    pub async fn start(mut self) -> Result<Service> {
         // Before step 1 (hostid.v1 §2.7): a service whose minted system
         // could not be had declared nothing, and starts nothing (§2.6).
         let addr = self.address()?.clone();
+        // Core §8.1, "On a first hop" (#982 H2): an owner on a first hop
+        // implements neither archive.v1 nor a governed interface, refused
+        // at step 2, nothing declared; every interface it implements joins
+        // the tokenless set, so it holds its instance token alone.
+        if self.config.first_hop {
+            first_hop(&self.impls)?;
+            let all: Vec<IfaceId> = self.impls.iter().map(|s| s.imp.iface().clone()).collect();
+            self.config.tokenless.extend(all);
+        }
         // 2. A role refused at its declaration refuses the start, nothing
         // declared (desired.v1 §2.1, text 0.7, F-224).
         if let Some(why) = self.refused.first() {
@@ -1379,7 +1389,14 @@ impl ServiceBuilder {
         let (q, current) = svc.serve_descriptor(&svc.instance.clone(), run).await?;
         svc.served.set_current(current);
         svc.descriptor_q = Some(q);
-        for s in &svc.impls {
+        // Core §8.4: an owner on a first hop holds no bundle; the deployment
+        // holds them on the near side (§8.2 step 3).
+        let held: &[ImplState] = if svc.config.first_hop {
+            &[]
+        } else {
+            &svc.impls
+        };
+        for s in held {
             let key = contract_key(s.imp.iface(), s.imp.fingerprint().hex())?;
             let bytes = Arc::clone(s.imp.bundle_bytes());
             let reply_key = key.clone().into_keyexpr();
@@ -1417,6 +1434,30 @@ impl ServiceBuilder {
         svc.start_heartbeats().await?;
         Ok(svc)
     }
+}
+
+/// Core §8.1's first hop at step 2 (#982 H2): `archive.v1` and an
+/// interface whose contract uses `redundancy.v1` each need presence on
+/// their peers' side of the face, so an owner on a first hop implementing
+/// either is refused, nothing declared.
+fn first_hop(impls: &[ImplState]) -> Result<()> {
+    for s in impls {
+        let iface = s.imp.iface();
+        let why = if *iface == crate::archive::iface() {
+            Some("an archive is found by its interface token (§4.4)")
+        } else if zenkey_model::redundancy::is_governed(s.imp.contract()) {
+            Some("its contract uses redundancy.v1, whose election needs presence (§6)")
+        } else {
+            None
+        };
+        if let Some(why) = why {
+            return Err(Error::NotExposed(format!(
+                "{iface} is refused on a first hop: an owner on a first hop implements neither \
+                 archive.v1 nor a governed interface, and {why} (core §8.1, §8.2 step 2)"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// `arbitration.v1` §2.2 at start (#909): each role whose declaring

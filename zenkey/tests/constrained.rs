@@ -583,3 +583,335 @@ async fn s9_a_lost_declaration_is_declared_again_after_two_silent_horizons() {
     }
     puts.abort();
 }
+
+// --- §10: a first-hop device (#982 H2) ----------------------------------------------
+
+/// The device's session id: the router's block selects its sessions by it,
+/// standing in for the far principal's credential (`link.v2` §2.5).
+const DEVICE_ZID: &str = "f1f1f1f1f1f1f1f1";
+
+/// A device's session: a client of `endpoint` with the zid `zid`,
+/// retrying fast after losing it, as [`common::retrying_client`].
+async fn device_session(endpoint: &str, zid: &str) -> zenoh::Session {
+    let mut c = zenoh::Config::default();
+    for (k, v) in [
+        ("scouting/multicast/enabled", "false".to_owned()),
+        ("scouting/gossip/enabled", "false".to_owned()),
+        ("mode", "\"client\"".to_owned()),
+        ("id", format!("\"{zid}\"")),
+        ("connect/endpoints", format!("[\"{endpoint}\"]")),
+        (
+            "connect/retry",
+            "{ period_init_ms: 100, period_max_ms: 500, period_increase_factor: 1.5 }".to_owned(),
+        ),
+    ] {
+        c.insert_json5(k, &v).unwrap();
+    }
+    zenoh::open(c).await.expect("the device's session")
+}
+
+/// The near router's block for a device face (`link.v2` §2.5, §2.6), under
+/// `allow`: the device's sessions, by zid, meet §2.6's carve, or with
+/// `whole` `link.v1` §2.6's whole `zk`, the control.
+fn device_block(zid: &str, whole: bool) -> String {
+    use zenkey::model::link;
+    let denies = if whole {
+        vec![serde_json::json!({
+            "id": "zk", "flows": link::FLOWS, "messages": link::MESSAGES,
+            "key_exprs": [link::ZK_DENY],
+        })]
+    } else {
+        link::zk_carve()
+            .iter()
+            .map(|d| serde_json::to_value(d).unwrap())
+            .collect()
+    };
+    let rules: Vec<serde_json::Value> = denies
+        .into_iter()
+        .map(|mut d| {
+            d["permission"] = "deny".into();
+            d
+        })
+        .collect();
+    let ids: Vec<&serde_json::Value> = rules.iter().map(|r| &r["id"]).collect();
+    serde_json::json!({
+        "enabled": true,
+        "default_permission": "allow",
+        "rules": rules,
+        "subjects": [{"id": "device", "zids": [zid]}],
+        "policies": [{"rules": ids, "subjects": ["device"]}],
+    })
+    .to_string()
+}
+
+/// `link.v2`'s test contract, which uses `freshness.v2`.
+fn link_probe() -> zenkey::model::contract::Contract {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../spec/profiles/link/conformance/contracts/probe.v1.toml");
+    let l = zenkey::model::contract::load_path(&path);
+    l.contract.unwrap_or_else(|| panic!("{}", l.report))
+}
+
+/// The device: `link.v2`'s probe and `health.v1`, so `freshness.v2` too,
+/// each resource exposed, on `config`.
+async fn device(
+    session: &zenoh::Session,
+    config: zenkey::ServiceConfig,
+) -> zenkey::Result<zenkey::Service> {
+    let probe = link_probe();
+    let iface = probe.iface.clone();
+    let mut b = ServiceBuilder::new(session, config);
+    b.implement(zenkey::Implementation::new(probe))?;
+    for res in [
+        "stream/frames/link",
+        "stream/frames/detail",
+        "stream/setpoint",
+        "stream/level",
+        "state/status",
+        "state/config",
+    ] {
+        b.expose(&iface, res)?;
+    }
+    b.health()
+        .await?
+        .set_status(zenkey::health::Level::Ok, "serving")
+        .await?;
+    b.start().await
+}
+
+/// A near holder of `imp`'s bundle (core §8.4): a queryable on its contract
+/// key that answers the bundle's bytes.
+async fn hold(
+    session: &zenoh::Session,
+    imp: &zenkey::Implementation,
+) -> zenoh::query::Queryable<()> {
+    let key = zenkey::model::grammar::contract_key(imp.iface(), imp.fingerprint().hex())
+        .unwrap()
+        .into_keyexpr();
+    let reply = key.clone();
+    let bytes = std::sync::Arc::clone(imp.bundle_bytes());
+    session
+        .declare_queryable(key)
+        .complete(true)
+        .callback(move |q| {
+            use zenoh::Wait;
+            let _ = q.reply(reply.clone(), bytes.to_vec()).wait();
+        })
+        .await
+        .unwrap()
+}
+
+/// What a device declared toward its router, read from the bytes it sent:
+/// whether its instance key, an interface token or a contract key crossed.
+/// Each declaration carries its key as text (core Appendix B).
+fn declared(up: &[u8]) -> (bool, Vec<&'static str>, bool) {
+    let alive = ["probe.v1", "health.v1", "freshness.v2"]
+        .into_iter()
+        .filter(|i| carries(up, &format!("lab/probe-a/@zk/alive/{i}/")))
+        .collect();
+    (
+        carries(up, "lab/probe-a/@zk/instance/"),
+        alive,
+        carries(up, "@zk/contract/"),
+    )
+}
+
+/// §10: a device owner on a first hop holds its instance token alone (core
+/// §8.1, §8.2 step 3, §8.4), and the near side finds it by that token and
+/// its descriptor (observer §3.6), through a device face's carve (`link.v2`
+/// §2.6). Steps 1, 2, 3, 4, 5 and 6; what a tool reports of the closed link
+/// is the fleet's (H3).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s10_a_first_hop_device() {
+    use zenkey::consumer::Consumer;
+    let (_r1, ep) = common::router_with(
+        None,
+        &[("access_control", &device_block(DEVICE_ZID, false))],
+    )
+    .await;
+    let link = common::link_to(&ep).await;
+    let tool = client(&ep).await;
+    let holder = client(&ep).await;
+    let probe = zenkey::Implementation::new(link_probe());
+    let _held = hold(&holder, &probe).await;
+    let at = common::addr("lab/probe-a");
+
+    // 1. The device starts, configured for a first hop.
+    link.capture_up();
+    let session = device_session(link.endpoint(), DEVICE_ZID).await;
+    let svc = device(&session, config("lab/probe-a").first_hop())
+        .await
+        .expect("a first-hop device starts");
+    let key = svc.instance_key().unwrap().to_string();
+    eventually("the instance token is in", || async {
+        presence::liveliness_keys(&tool, "zk2/lab/probe-a/@zk/**", T)
+            .await
+            .unwrap()
+            == [key.clone()]
+    })
+    .await;
+    let d = presence::descriptor(&tool, &at, svc.instance(), T)
+        .await
+        .unwrap()
+        .into_descriptor()
+        .expect("the descriptor crosses");
+    let mut listed: Vec<(&str, bool)> = d
+        .interfaces
+        .iter()
+        .map(|e| (e.iface.as_str(), e.token))
+        .collect();
+    listed.sort_unstable();
+    assert_eq!(
+        listed,
+        [
+            ("freshness.v2", false),
+            ("health.v1", false),
+            ("probe.v1", false)
+        ],
+        "every interface listed, none with a token"
+    );
+    let consumer = Consumer::for_tool(
+        &tool,
+        Arc::new(link_probe()),
+        &["lab/probe-a"],
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        consumer.wait_for_provider(common::SETTLE).await.unwrap(),
+        Some(at.clone()),
+        "the consumer's wait ends on the instance token and the descriptor"
+    );
+    let got = zenkey::retrieval::fetch_bundle(&tool, probe.iface(), probe.fingerprint(), T)
+        .await
+        .unwrap();
+    assert!(
+        matches!(got, zenkey::retrieval::Retrieved::Bundle(..)),
+        "the bundle is held near: {got:?}"
+    );
+    assert_eq!(
+        declared(&link.captured_up()),
+        (true, Vec::new(), false),
+        "toward the router: the instance key, no interface token, no contract queryable"
+    );
+
+    // 2. A new transport: the same declarations again, and nothing more.
+    link.cut();
+    eventually("the token goes with the link", || async {
+        presence::liveliness_keys(&tool, "zk2/lab/probe-a/@zk/**", T)
+            .await
+            .unwrap()
+            .is_empty()
+    })
+    .await;
+    link.capture_up();
+    link.heal();
+    eventually("the token is back", || async {
+        presence::liveliness_keys(&tool, "zk2/lab/probe-a/@zk/**", T)
+            .await
+            .unwrap()
+            == [key.clone()]
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        declared(&link.captured_up()),
+        (true, Vec::new(), false),
+        "the new transport declares step 1's again"
+    );
+
+    // 3. A new run: the tool hears the descriptor that states it.
+    let puts = tool
+        .declare_subscriber(key.as_str())
+        .with(flume::unbounded::<Sample>())
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let run = svc.new_run();
+    let heard = tokio::time::timeout(common::SETTLE, async {
+        loop {
+            let s = puts.recv_async().await.unwrap();
+            let v: serde_json::Value =
+                serde_json::from_slice(&s.payload().to_bytes()).expect("a descriptor");
+            if v["run"] == run.hex() {
+                break v;
+            }
+        }
+    })
+    .await
+    .expect("the new run's descriptor crosses");
+    assert_eq!(heard["instance"], svc.instance().as_str());
+    drop(svc);
+    session.close().await.unwrap();
+
+    // 5. The control: a device at its defaults, under step 1's block. Every
+    // declaration crosses, and the face denies all but the instance token.
+    link.capture_up();
+    let session = device_session(link.endpoint(), DEVICE_ZID).await;
+    let svc = device(&session, config("lab/probe-a")).await.unwrap();
+    let key = svc.instance_key().unwrap().to_string();
+    eventually("the instance token alone is seen", || async {
+        presence::liveliness_keys(&tool, "zk2/lab/probe-a/@zk/**", T)
+            .await
+            .unwrap()
+            == [key.clone()]
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        declared(&link.captured_up()),
+        (true, vec!["probe.v1", "health.v1", "freshness.v2"], true),
+        "at its defaults every token and contract queryable crosses"
+    );
+    drop(svc);
+    session.close().await.unwrap();
+
+    // 6. A first-hop device that implements a governed interface does not
+    // start, and no instance token crosses (§8.1, §8.2 step 2).
+    link.capture_up();
+    let session = device_session(link.endpoint(), DEVICE_ZID).await;
+    let mut b = ServiceBuilder::new(&session, config("lab/probe-a").first_hop());
+    b.implement(imp("steer-governed.v1")).unwrap();
+    let Err(refused) = b.start().await else {
+        panic!("refused at step 2")
+    };
+    assert!(
+        refused.to_string().contains("first hop"),
+        "refused for the first hop: {refused}"
+    );
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!declared(&link.captured_up()).0, "no instance token");
+    session.close().await.unwrap();
+}
+
+/// §10 step 4, the control: a block that keeps `link.v1` §2.6's whole `zk`
+/// on the device's face. The near side lists no instance of it, its
+/// presence unobservable there, and still receives its heartbeats (R7).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s10_the_whole_zk_hides_a_first_hop_device() {
+    let (_r1, ep) =
+        common::router_with(None, &[("access_control", &device_block(DEVICE_ZID, true))]).await;
+    let link = common::link_to(&ep).await;
+    let tool = client(&ep).await;
+    let beats = tool
+        .declare_subscriber("zk2/lab/probe-a/freshness.v2/stream/heartbeat/**")
+        .with(flume::unbounded::<Sample>())
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let session = device_session(link.endpoint(), DEVICE_ZID).await;
+    let _svc = device(&session, config("lab/probe-a").first_hop())
+        .await
+        .unwrap();
+    tokio::time::timeout(common::SETTLE, beats.recv_async())
+        .await
+        .expect("a heartbeat crosses")
+        .unwrap();
+    assert!(
+        presence::liveliness_keys(&tool, "zk2/lab/probe-a/@zk/**", T)
+            .await
+            .unwrap()
+            .is_empty(),
+        "no instance of it is listed"
+    );
+}

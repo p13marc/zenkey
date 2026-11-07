@@ -5,7 +5,7 @@
 //! ```text
 //! cargo run -p zenkey --example owner -- [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
 //!     [--health] [--health-status <LEVEL>[:<reason>]] [--health-check <name>=<LEVEL>[:<detail>]]...
-//!     [--tokenless <iface>]... [--clock-reference <key>] [--clock-offset-ms <ms>]
+//!     [--tokenless <iface>]... [--first-hop] [--clock-reference <key>] [--clock-offset-ms <ms>]
 //!     [--cardinality <iface>:<resource>=<n>]...
 //!     [--config] [--config-v2] [--config-floor <s>] [--config-apply-after-ms <ms>]
 //!     [--config-no-persist]
@@ -160,7 +160,11 @@
 //!   offset clock is ahead (core §4.3, "A candidate's").
 //!
 //! `--tokenless <iface>` puts an interface in the deployment's tokenless
-//! set (core §8.1, U22): `health.v1`, for one.
+//! set (core §8.1, U22): `health.v1`, for one. `--first-hop` configures
+//! an owner on a first hop (core §8.1, §8.4; #982): every interface it
+//! implements in the tokenless set, so it holds its instance token alone,
+//! and no bundle held, its contract queryables left undeclared; one
+//! implementing `archive.v1` or a governed interface is refused at start.
 //!
 //! **`config.v1`** (`spec/profiles/config/v1.md`, #768) is implemented by
 //! the runtime ([`zenkey::config_v1`]) with `--config`, or when a contract
@@ -635,6 +639,8 @@ pub struct Options {
     pub health_checks: Vec<(String, Option<Level>, String)>,
     /// `--tokenless <iface>`: the deployment's tokenless set (core §8.1).
     pub tokenless: Vec<String>,
+    /// `--first-hop`: an owner on a first hop (core §8.1, §8.4; #982).
+    pub first_hop: bool,
     /// `--clock-reference <key>`: the clock guard's reference (core §4.3).
     pub clock_reference: Option<String>,
     /// `--clock-offset-ms <ms>`: this owner's clock, shifted.
@@ -797,7 +803,7 @@ implementing the given contracts, and runs until its standard input closes.
 
 usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
     [--health] [--health-status <LEVEL>[:<reason>]] [--health-check <name>=<LEVEL>[:<detail>]]...
-    [--tokenless <iface>]... [--clock-reference <key>] [--clock-offset-ms <ms>]
+    [--tokenless <iface>]... [--first-hop] [--clock-reference <key>] [--clock-offset-ms <ms>]
     [--cardinality <iface>:<resource>=<n>]...
     [--config] [--config-v2] [--config-floor <s>] [--config-apply-after-ms <ms>]
     [--config-no-persist]
@@ -814,6 +820,9 @@ usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
     [--arbitrate <entry>[,<entry>...]] [--arbitrate-no-watch] [--watch-connect <endpoint>]
     [--clock-bound-ms <ms>] [--commander] [--commander-lead-ms <ms>]
     <system>/<service>|@hostid.v1/<service> <contract.toml>...
+
+--first-hop: an owner on a first hop (core §8.1, §8.4): every interface it
+implements tokenless, its instance token alone held, and no bundle held.
 
 Standard output, first:
   listening tcp/127.0.0.1:<port>       a router on an ephemeral port (with --connect:
@@ -1341,7 +1350,7 @@ impl Options {
         let usage = || {
             "usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral] \
              [--health] [--health-status <LEVEL>[:<reason>]] \
-             [--health-check <name>=<LEVEL>[:<detail>]]... [--tokenless <iface>]... \
+             [--health-check <name>=<LEVEL>[:<detail>]]... [--tokenless <iface>]... [--first-hop] \
              [--clock-reference <key>] [--clock-offset-ms <ms>] \
              [--cardinality <iface>:<resource>=<n>]... \
              [--config] [--config-v2] [--config-floor <s>] [--config-apply-after-ms <ms>] \
@@ -1371,6 +1380,7 @@ impl Options {
             health_status: None,
             health_checks: Vec::new(),
             tokenless: Vec::new(),
+            first_hop: false,
             clock_reference: None,
             clock_offset_ms: 0,
             cardinality: Vec::new(),
@@ -1466,6 +1476,10 @@ impl Options {
                     };
                     o.health = true;
                     o.health_checks.push(check);
+                    rest = tail;
+                }
+                [flag, tail @ ..] if flag == "--first-hop" => {
+                    o.first_hop = true;
                     rest = tail;
                 }
                 [flag, value, tail @ ..] if flag == "--tokenless" => {
@@ -1863,6 +1877,9 @@ pub async fn run_with(
     let mut config = ServiceConfig::at(address);
     for t in &opts.tokenless {
         config = config.tokenless(t.parse()?);
+    }
+    if opts.first_hop {
+        config = config.first_hop();
     }
     config.clock_reference = opts.clock_reference.clone();
     let mut imps = Vec::new();

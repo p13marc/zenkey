@@ -681,3 +681,134 @@ async fn a_watch_sessions_wire_keys_are_inside_a_tools_presence_grant() {
     }
     session.close().await.expect("close");
 }
+
+/// The RF medium's policy (`examples/zk2/link/media/rf.face.toml`) with
+/// `lab/radio-a` attached as a device on a first hop (link.v2 §2.5,
+/// #982): the face's far principal is the radio's own, `radio-a`.
+fn device_policy() -> String {
+    let rf = media_policy("rf");
+    let text = rf
+        .replace("services = [\"radio-a\"]", "services = []")
+        .replace(
+            "far              = \"ground\"\nattach           = \"client\"\n",
+            "far              = \"radio-a\"\nattach           = \"device\"\ndevices          = [\"lab/radio-a\"]\n",
+        );
+    assert_ne!(text, rf, "the edit applies");
+    text
+}
+
+fn device_plan(default_permission: AclPermission) -> AclPlan {
+    let dir = root().join("examples/zk2/link");
+    let (set, problems) = ContractSet::load_path(&dir.join("radio.v1.toml"));
+    assert!(problems.is_empty(), "{problems:?}");
+    let enrollment: Enrollment =
+        toml::from_str(&std::fs::read_to_string(dir.join("radio.enrollment.toml")).unwrap())
+            .unwrap();
+    plan_acl(
+        &enrollment,
+        &set,
+        &AclOptions {
+            namespace: String::new(),
+            default_permission,
+            face_policy: Some(link::parse(&device_policy())),
+            catalog: None,
+        },
+    )
+    .expect("a device face plans")
+}
+
+/// A device face (link.v2 §2.5, §2.6; #982): the far principal's policy
+/// carries the carve in place of `zk`, so the device's instance token and
+/// its descriptor's queryable cross by its Own grant and nothing else of
+/// `@zk` does; the block passes its own checks in both postures, `check
+/// face` reading the carve there, and whole `zk` beside it; and the far
+/// end's block names the device whose session runs it.
+#[test]
+fn a_device_face_lets_the_instance_subtree_cross_by_its_own_grant() {
+    use zenkey_fleet::report::{AclDecision, AclMessage};
+    let policy = device_policy();
+    for posture in [AclPermission::Deny, AclPermission::Allow] {
+        let plan = device_plan(posture);
+        let ids: Vec<&str> = plan.faces[0].deny.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(
+            &ids[..3],
+            ["zk", "zk:instance:egress", "zk:instance:ingress"],
+            "{posture:?}"
+        );
+        assert!(
+            matches!(&plan.faces[0].attach, link::AttachPlan::Device { devices } if devices == &["lab/radio-a"])
+        );
+        // No downsampling on the device's own face (link.v2 §2.8).
+        assert!(plan.downsampling.is_empty(), "{posture:?}");
+        let explain =
+            |key: &str, m: AclMessage| zenkey_fleet::explain_acl(&plan, "radio-a", key, m).unwrap();
+        // Under allow, the default lets across what no deny includes.
+        let crosses =
+            |d: AclDecision| matches!(d, AclDecision::Allowed | AclDecision::AllowedByDefault);
+        let instance = "zk2/lab/radio-a/@zk/instance/0123456789abcdef";
+        for m in [
+            AclMessage::LivelinessToken,
+            AclMessage::DeclareQueryable,
+            AclMessage::Reply,
+        ] {
+            assert!(
+                crosses(explain(instance, m).ingress.decision),
+                "{posture:?}: the device's {m:?} on its instance key crosses"
+            );
+        }
+        assert!(
+            crosses(explain(instance, AclMessage::Query).egress.decision),
+            "{posture:?}: a near reader's GET of the descriptor crosses"
+        );
+        for (key, m) in [
+            (
+                "zk2/lab/radio-a/@zk/alive/radio.v1",
+                AclMessage::LivelinessToken,
+            ),
+            (
+                "zk2/@zk/contract/radio.v1/abc",
+                AclMessage::DeclareQueryable,
+            ),
+        ] {
+            assert_eq!(
+                explain(key, m).ingress.decision,
+                AclDecision::Denied,
+                "{posture:?}: {key} stays denied"
+            );
+        }
+        assert_eq!(
+            explain(instance, AclMessage::LivelinessToken)
+                .egress
+                .decision,
+            AclDecision::Denied,
+            "{posture:?}: no near token reaches the device"
+        );
+        assert_eq!(
+            self_check(&plan, &policy),
+            (Vec::new(), 0),
+            "{posture:?}: the block passes its own checks"
+        );
+        let far = zenkey_fleet::acl_far_json5(&plan).expect("the far end's block");
+        assert!(
+            far.contains("each device's session config")
+                && far.contains("face radio (far radio-a, devices lab/radio-a)"),
+            "{far}"
+        );
+        zenoh::Config::from_json5(&format!("{{\n{far}}}")).expect("zenoh reads the far block");
+    }
+    // The control (link.v2 §2.6): the whole `zk` on a device face passes
+    // `check face` too, and the near side then finds no device.
+    let plan = device_plan(AclPermission::Deny);
+    let block = acl_plan_json5(&plan);
+    let whole = block.replace(
+        "\"zk2/*/*/@zk/alive/**\", \"zk2/*/*/@zk/member/**\", \"zk2/@zk/**\"",
+        "\"zk2/**/@zk/**\"",
+    );
+    assert_ne!(whole, block, "the edit applies");
+    let (found, _) = check_block(&whole, &plan, &policy, &Default::default());
+    assert!(
+        found.iter().all(|f| f.code != link::Code::ZkNotDenied),
+        "{found:?}"
+    );
+    pinned("link-v2.device.json5", &plan);
+}

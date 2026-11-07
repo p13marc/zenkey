@@ -148,7 +148,7 @@ impl Render for AclPlan {
                     AttachPlan::SouthRegion { region, .. } => {
                         Some(format!("the far router {} in region {region:?}", f.far))
                     }
-                    AttachPlan::Client => None,
+                    AttachPlan::Client | AttachPlan::Device { .. } => None,
                 })
                 .collect();
             t.blank()
@@ -437,6 +437,7 @@ fn attach_word(a: &AttachPlan) -> String {
     match a {
         AttachPlan::Client => "client".to_owned(),
         AttachPlan::SouthRegion { region, .. } => format!("south-region {region:?}"),
+        AttachPlan::Device { devices } => format!("device {}", devices.join(", ")),
     }
 }
 

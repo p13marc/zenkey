@@ -7,6 +7,86 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.7 — 2026-11-02: a device face, its instance subtree carved from `zk` (#982 H1)
+
+Core 0.96 defines an owner on a first hop, and lets it hold its instance
+token alone. The near side can find it by that token only where the face
+lets the token cross, and `link.v1` §2.6 denies the whole of `@zk`. This
+version is #982's H1 for the face: a face kind for such owners, and its
+plan's carve.
+
+**Added: §2.1, `attach = "device"` and `devices`.** A device face lists
+its devices by address, `<system>/<service>`. `devices` is required with
+`device` and refused with any other `attach`, as `region` is refused
+with `device`. An empty list, an entry of other than two plain chunks
+and a repeat are each `bad_value`, once. A device listed among
+`services` or on another face is `device_listed`, an error.
+`[F: v2/lints.json]`
+
+**Added: §2.5, the device face.** Its far side is its devices' sessions,
+each a client of the near router. The devices are listed: every rule of
+`link.v1` that reads the listed services reads them, on every face, but
+downsampling on their own face (§2.8). A generator MUST refuse a device
+that implements `archive.v1` or a governed interface
+(`presence_required`), and the plan warns of a device's `epoch` template
+(`epoch_on_device`). Backhaul faces keep the whole `zk`.
+`[F: v2/plan.json]` `[Sc: core constrained.md §10]`
+
+**Added: §2.6, the carve.** On a device face, a generator MUST derive
+three denies in place of `zk`.
+- `zk` keeps the nine messages and both flows over interface tokens,
+  member tokens and contract keys.
+- `zk:instance:egress` and `zk:instance:ingress` deny the instance keys
+  on the eleven pairs outside core §11.2's Own row.
+- So an instance key crosses on the Own row's seven pairs alone: a
+  device's token, its descriptor's queryable, puts and replies, and a
+  near reader's GET and subscription.
+- Whose instance keys is the grants' to decide: deny works by inclusion,
+  and no set of denies holds every address but a device's.
+- A generator MUST NOT carve `zk` on any other face, and a deployment
+  MUST NOT carve it but as a device face's plan does.
+  `[F: v2/plan.json, v2/lints.json]`
+
+**Added: §2.8, a device's stream on its own face.** A generator MUST
+NOT emit a downsampling rule for it: its puts arrive over that face, and
+an egress rule there spares nothing. Its timed and templated streams are
+still denied, the denies being per interface. `[F: v2/plan.json]`
+
+**Added: §2.15, `zk_not_denied` on a device face.** The check reads the
+carve's four key expressions, each on the pairs the carve denies it on.
+A whole `zk` passes, and the carve on any other face is
+`zk_not_denied`. `[F: v2/lints.json]`
+
+**Changed: wording that states no rule.** The head says what a device
+face is. §0 lists §2.5, §2.6 and §2.15 among the numbers this text adds
+to, and names a device face and its devices. §2.3 gives a device face's
+`attach`, and names its devices' interfaces in the deployment. §2.12: a
+device's instance token is no liveness evidence. §2.18: the far end's
+block is each device's. §2.20: the near side waits for a device's
+replies. §5 and Appendix A have a row each.
+
+**The fixtures.** `v2/plan.json`'s cases 22 to 26 and `v2/lints.json`'s
+40 to 57 are the device face's. Each was written by reading this text,
+not derived by the reference, which does not know `attach = "device"`
+yet. Its `zenctl acl gen --face-policy` refuses case 22's policy:
+`bad_value` at `attach`, and `unknown_field` at `devices`.
+- A plan case's `implements` keys a device by its address, an inline
+  interface's `uses` names `redundancy.v1` for `presence_required`, and an
+  inline resource's `epoch` is new.
+- A lint case may carry `link.v1`'s `block`.
+
+**Deliberately not changed.**
+- **One `far` per face.** A face's devices share its far principal.
+  Devices that present distinct principals need faces of their own, each
+  on link protocols of its own (`link.v1` §2.14).
+- **The exposure denies** stay per interface, so a device's interface
+  crosses as a listed service's does.
+- **Member tokens** still cross and are denied: their owner holds them
+  (core §8.1), and the plan warns.
+- **The status stays `draft`,** used by zenoh-modem's
+  `sx1262_config.v1`.
+- **It restates `link.v1` text 0.16 still.**
+
 ## link.v2 draft — 2026-11-02: used by zenoh-modem (#985, G4)
 
 The text's status moves from `experimental` to `draft`, the status of a
