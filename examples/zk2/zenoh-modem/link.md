@@ -4,8 +4,9 @@
 > policies, in [`faces/`](faces/) (#988 L5).** One router per medium, as that profile requires
 > (its §2.16): zenoh reads the lease, the keep-alives, the batch, `wait_before_close` and the
 > timeouts once per router, for every link it holds. Each policy names the zenoh its router runs,
-> `zm-1.10.2-r1`, and the catalog the ground holds, [`catalog.json`](catalog.json)'s `e3a529fe`
-> (`modem.v3` 3.3 at index 8, #991, after `sx1262_config.v1` at index 7, #985 G4).
+> `zm-1.10.2-r1`, and the catalog the ground holds, [`catalog.json`](catalog.json)'s `0ff6bf6d`
+> (`freshness.v2` at index 9, #1080, after `modem.v3` 3.3 at index 8, #991, and
+> `sx1262_config.v1` at index 7, #985 G4).
 > [`faces/zenoh-modem.enrollment.toml`](faces/zenoh-modem.enrollment.toml) gives the routers'
 > principals, and `link.v2`'s `conformance/v2/plan.json` holds each face's plan (its Appendix B).
 >
