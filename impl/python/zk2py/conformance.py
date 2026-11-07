@@ -4000,7 +4000,7 @@ def family_readings(root: Path) -> list[Result]:
         + _mend_after_round93_readings(root) + _round94_readings(root) + _mend_after_round94_readings(root) \
         + _round95_readings(root) + _round96_readings(root) + _round96_k1_readings(root) + _round97_readings(root) \
         + _round98_readings(root) + _round99_readings(root) + _round100_readings(root) \
-        + _round101_readings(root) + _round102_readings(root)
+        + _round101_readings(root) + _round102_readings(root) + _round103_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -4948,6 +4948,180 @@ def _round101_readings(root: Path) -> list[tuple[str, Any, Any]]:
                         "n, and before the write of n + 1.",
                         "so it orders a mark of seq 0 before the write of seq 1, and not against the write of seq 0.")
                 + missing(ops, "The second instance's reply carries its own descriptor's run, and seq 0."), []))
+    return out
+
+
+def _round103_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.97 (#977 E1, form 7, a collection's snapshot) and 0.98 (F-492),
+    read at main 2688123d (#609, round 103): each entry, what each says
+    changed and did not, the snapshot's sizes by zk2py's own writer, its
+    collection index for zenoh-modem's endpoints, zk2py's echo tool on a
+    snapshot, and F-495 and F-496. The fixtures themselves are the envelope
+    and snapshot families'. Round 102's F-480 to F-494 are re-keyed to their
+    answers in place (:func:`_config_v2_readings`, :func:`_core096_readings`,
+    :func:`_modem33_readings`)."""
+    import re
+
+    from . import echo_tool, snapshot, zk2c
+    from .contract import load_contract
+
+    spec = root.parent
+    repo = spec.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, obs, glossary = flat("core.md"), flat("observer.md"), flat("README.md")
+    log = flat("CHANGELOG.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.97 and 0.98 or later, each with its entry (#977 E1, F-492); observer.md stays text 0.26",
+         [core_v >= (0, 98)] + entry("CHANGELOG.md", "0.97", "a collection's snapshot defined")
+         + entry("CHANGELOG.md", "0.98", "the rule index reads a subject's own role")
+         + missing(obs, "| **Text version** | 0.26") + missing(log, "`observer.md` stays text 0.26"),
+         [True]),
+    ]
+    # 0.97's evidence, as its entry counts it.
+    vec = _load_json(root / "envelope" / "vectors.json")
+    car = _load_json(root / "envelope" / "carries.json")
+    bod = _load_json(root / "snapshot" / "bodies.json")
+    refused = lambda cases: sum(1 for c in cases if "refused" in c["expect"])  # noqa: E731
+    form7 = [c for c in vec["cases"] if c["hex"] and int(c["hex"][:2], 16) >> 5 == 7]
+    out.append(("core 0.97's entry: vectors.json 22 headers and 159 cases; carries.json 28 reads; snapshot/bodies.json "
+                "39 writes, 12 refused, 109 reads, 79 refused, and 13 snapshots paged, 2 refused; of vectors.json's "
+                "cases, 18 are a snapshot's CH, 11 on a put, of which 7 parse",
+                missing(log, "22 headers and 159 cases, 12 of them new", "28 reads, 12 new",
+                        "39 writes, 12 of them refused, 109 reads, 79 refused, and 13 snapshots paged, 2 refused")
+                + [len(vec["headers"]), len(vec["cases"]), len(car["reads"]), len(bod["writes"]),
+                   refused(bod["writes"]), len(bod["reads"]), refused(bod["reads"]), len(bod["pages"]),
+                   refused(bod["pages"]), len(form7), sum(1 for c in form7 if c["sample"] == "put"),
+                   sum(1 for c in form7 if c["sample"] == "put" and "refused" not in c["expect"])],
+                [22, 159, 28, 39, 12, 109, 79, 13, 2, 18, 11, 7]))
+    out.append(("core 0.97 §7.5: the snapshot's four static rules as the text states them, §12's static acts, "
+                "form 4 the one reserved, and no rule adopting a snapshot",
+                missing(core, "An implementation MUST refuse a body for the first of these that applies, reading its "
+                              "fields in order, naming the refusal:",
+                        "An implementation MUST NOT write a page that this reading refuses.",
+                        "Every page an implementation accepts MUST write back to the same bytes.",
+                        "An implementation that cuts a snapshot into pages MUST cut it so.",
+                        "So are reading or writing a snapshot's page, and cutting a snapshot into pages (§7.5).",
+                        "No rule at this version has an owner write one, or a reader read one (§4.2).",
+                        "a reserved form, 4 (`form`);",
+                        "**Only a GET's reply carries a snapshot.** No owner puts one on its key.")
+                + missing(glossary, "**Snapshot**: one collection's state in a GET's reply, in pages"), []))
+    rules = (spec / "RULES.md").read_text(encoding="utf-8")
+    counted = {n: int(c) for n, c in re.findall(r"^\| \[([^\]]+)\]\(#[^)]*\) \| (\d+)", rules, re.M)}
+    once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
+    out.append(("core 0.97's and 0.98's entries: RULES.md lists 250 rules, the static rules 67 with §7.5's four, the "
+                "owner 76",
+                missing(log, "`RULES.md` lists 250 rules, 4 more", "The owner class counts 76 where it counted 78")
+                + [int(once.group(1)) if once else None, counted.get("Implementation: the static rules"),
+                   counted.get("Owner")], [250, 67, 76]))
+    # §7.5's "Sizes", by zk2py's own writer.
+    base = {"tag": 0, "run_width": 16, "run": 1, "asof": 9, "time": {"s": 3600, "ms": 250}, "index": 0,
+            "more": False, "coll": 0, "live": [], "tombs": []}
+
+    def size(**kw: Any) -> int:
+        return len(snapshot.write_page({**base, **kw}))
+
+    def live(**kw: Any) -> dict[str, Any]:
+        return {"id": "abc", "run_width": None, "run": None, "seq": 1, "confirmation": "none", "record": "00" * 100,
+                **kw}
+
+    tomb = {"id": "abc", "run_width": None, "run": None, "seq": 1}
+    empty = size()
+    sizes = [empty, size(run_width=32), size(live=[live()]) - empty - 3 - 100, size(tombs=[tomb]) - empty - 3,
+             size(live=[live(run_width=16, run=7)]) - size(live=[live()]),
+             size(live=[live(run_width=32, run=7)]) - size(live=[live()]),
+             size(live=[live(confirmation="conf", conf={"s": 1, "ms": 0})]) - size(live=[live()]),
+             size(live=[live(confirmation="time")]) - size(live=[live()]),
+             snapshot.leb128_size(63 * 2 + 1), snapshot.leb128_size(64 * 2)]
+    out.append(("core 0.97 §7.5 \"Sizes\": a page with no entry 16 bytes, 18 with a 32-bit run; a live entry 6 over its "
+                "id and record, a tombstone 5 over its id; an own run 2 or 4, a conf 6, confirmation 1 nothing; the "
+                "page integer one byte to page 63 (zk2py's writer)",
+                missing(core, "A snapshot's page** with no entry is 16 bytes, or 18 with a 32-bit run",
+                        "A live entry adds 6 bytes over its id and its record, while each is below 128 bytes. A "
+                        "tombstone adds 5 bytes over its id. An entry's own run adds 2 or 4, and its confirmation's "
+                        "time 6.")
+                + missing(log, "The integer stays one byte to page 63.") + sizes,
+                [16, 18, 6, 5, 2, 4, 6, 0, 1, 2]))
+    # The paging rule read twice, by writing and by arithmetic.
+    cc = snapshot.cross_check(300, seed=97)
+    out.append(("core 0.97 §7.5 \"Pages\": zk2py's two readings of the paging rule, one writing each candidate page and "
+                "one summing §7.5's sizes, agree on 300 random snapshots, each page read back, written back and "
+                "the pages complete to the snapshot",
+                [cc["snapshots"], cc["failed"], cc["over_64_pages"] > 0, cc["single_over"] > 0], [300, 0, True, True]))
+    # F-495: the endpoints' collection index at modem.v3 3.3.
+    readme = flat("conformance/snapshot/README.md")
+    modem = load_contract(repo / "examples" / "zk2" / "zenoh-modem" / "modem.v3.toml")
+    states = [r["template"] for r in modem.canonical["resources"] if r["kind"] == "state"]
+    history = repo / "examples" / "zk2" / ".history" / "modem.v3"
+    earlier = {}
+    for b in sorted(history.glob("*.bundle.json")):
+        doc = json.loads(b.read_text(encoding="utf-8"))
+        st = [r["template"] for r in (doc.get("contract") or doc)["resources"] if r["kind"] == "state"]
+        earlier[b.name[:8]] = st.index("sdu/endpoint/{endpoint}")
+    notes = [c["note"] for c in bod["writes"] if "collection 4 of modem.v3's state" in c["note"]]
+    out.append(("F-495 (open): snapshot/README.md and bodies.json say sdu/endpoint/{endpoint} is \"collection 4 of "
+                "modem.v3's state, in the canonical form's order\"; at modem.v3 3.3 (71f55126, catalog index 8) it is "
+                "11 of 14, the seven packed states before it; 4 is 3.0 to 3.2's, of 7; oper is 2 in each",
+                missing(readme, "`sdu/endpoint/{endpoint}` is collection 4 of modem.v3's state, in the canonical "
+                                "form's order.")
+                + [modem.fingerprint[7:15], len(states), states.index("sdu/endpoint/{endpoint}"),
+                   states.index("oper"), sorted(earlier.items()), len(notes)],
+                ["71f55126", 14, 11, 2, [("69081ed3", 4), ("71f55126", 11), ("9a3e2859", 4), ("a584f236", 4)], 1]))
+    # F-497: the collection's index under two revisions a deployment runs at
+    # once. modem.v3 3.2 (a584f236, catalog index 6) and 3.3 (71f55126,
+    # index 8): 3.3 adds seven state resources that sort before sdu/.
+    def state_of(prefix: str) -> list[str]:
+        b = next(history.glob(f"{prefix}*.bundle.json"))
+        doc = json.loads(b.read_text(encoding="utf-8"))
+        return [r["template"] for r in (doc.get("contract") or doc)["resources"] if r["kind"] == "state"]
+
+    s32, s33 = state_of("a584f236"), state_of("71f55126")
+    endpoint = next(r for r in modem.canonical["resources"] if r["template"] == "sdu/endpoint/{endpoint}")
+    out.append(("F-497 (open): core §7.5 \"The collection's index … A reader with the contract maps it to a "
+                "template\" names no revision, and a snapshot's CH tag is its collection's type's: modem.v3 3.2's "
+                "index 4 is sdu/endpoint/{endpoint}, 3.3's is packed/identity, and 3.3's endpoints are 11, past 3.2's "
+                "7; both JSON collections' tag is 0",
+                missing(core, "A reader with the contract maps it to a template.",
+                        "A snapshot's is its collection's type's, as a mutation's is.")
+                + [s32[4], s33[4], s33.index("sdu/endpoint/{endpoint}"), len(s32), endpoint["type"]["kind"]],
+                ["sdu/endpoint/{endpoint}", "packed/identity", 11, 7, "jsonschema"]))
+    # F-496: Appendix E's snapshot/ row and the paging refusals.
+    out.append(("F-496 (open): core Appendix E's snapshot/ row gives pages as \"its pages' bytes and sizes\", with no "
+                "writer's refusal; bodies.json's pages holds 2 refused, and its README says \"or the writer's "
+                "refusal\", as conformance/README.md's row does",
+                missing(core, "A snapshot and a page size → its pages' bytes and sizes (`pages`).")
+                + ["A snapshot and a page size → its pages' bytes and sizes, or the writer's refusal" in core,
+                   "A snapshot and a page size → its pages' bytes and sizes, or the writer's refusal (`pages`)"
+                   in flat("conformance/snapshot/README.md"),
+                   "A snapshot and a page size → its pages, as the paging rule cuts them, or the writer's refusal "
+                   "(`pages`)" in flat("conformance/README.md"), refused(bod["pages"])],
+                [False, True, True, 2]))
+    # zk2py's echo tool on a snapshot: its page shown, never decoded nor sniffed.
+    page = next(c for c in bod["reads"] if "zenoh-modem's sdu/endpoint" in c["note"])
+    raw = bytes.fromhex(page["hex"])
+    key = "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint"
+    row = echo_tool.row_of(key, False, len(raw), zk2c.ENCODING, raw, None, None)
+    bad = echo_tool.row_of(key, False, 6, zk2c.ENCODING, bytes.fromhex("e00001000009"), None, None)
+    snap = row.get("snapshot") or {}
+    out.append(("core 0.97 §7.5 in zk2py's echo tool: a snapshot's page read without the contract, its members' keys "
+                "the reply's key and each id, never decoded as the resource's type nor sniffed; a body the reading "
+                "refuses named",
+                [snap.get("form"), snap.get("asof"), (snap.get("page") or {}).get("coll"),
+                 (snap.get("page") or {}).get("members"), row["sniffed"], row["undecodable"],
+                 ((bad.get("snapshot") or {}).get("says") or "").split(" (")[0].split(": ")[-1], bad["sniffed"]],
+                ["snapshot", page["expect"]["asof"], 4,
+                 [snapshot.member_key(key, e["id"]) for e in page["expect"]["live"] + page["expect"]["tombs"]],
+                 None, None, "the snapshot's body is refused", None]))
     return out
 
 

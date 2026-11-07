@@ -247,6 +247,31 @@ def heartbeat_of(key: str, read: Any, size: int, held: "Held | None") -> dict[st
     return out
 
 
+def snapshot_of(key: str, read: Any, size: int) -> dict[str, Any]:
+    """A snapshot's row member (core §7.5, 0.97): a snapshot carries "a body
+    there instead, never a record of the resource's type", and "A snapshot's
+    is read without the contract". So the tool reads the page with §7.5's
+    reading, and shows its run, asof, index, collection and entries, each
+    member's key the reply's key and its id; a body the reading refuses is
+    named. The body is never decoded as the resource's type, nor sniffed.
+    How a tool shows a snapshot is E2's (core 0.97's entry); zk2py shows it
+    as it shows a heartbeat it cannot read whole (observer §7.3)."""
+    from . import snapshot
+
+    out: dict[str, Any] = {"form": "snapshot", "run": read.stamp.run_hex(), "asof": read.stamp.seq, "bytes": size,
+                           "page": None}
+    try:
+        page = snapshot.read_body(read.record or b"", read.stamp.width, read.stamp.run)
+    except snapshot.Refused as e:
+        out["says"] = f"undecodable: the snapshot's body is refused ({e.token}, core §7.5)"
+        return out
+    page["members"] = [snapshot.member_key(key, e["id"]) for e in page["live"] + page["tombs"]]
+    out["page"] = page
+    out["says"] = ("a snapshot's page, read without the contract: its entries' records are never decoded as the "
+                   "resource's type, nor sniffed (core §7.5)")
+    return out
+
+
 def _held_type(c: Any, r: dict[str, Any]) -> dict[str, Any]:
     """``declared_type`` for a key whose contract the tool holds."""
     t = r["type"]
@@ -299,9 +324,13 @@ def row_of(key: str, delete: bool, size: int, encoding: str, payload: bytes | No
         reader = held.frame_reader(key, *found)
     elif found is not None and found[1]["type"]["kind"] == "packed":
         rec = found[0].schemas.packed_record(found[1]["type"])
+    snap = None
     if read is not None and not delete and payload is not None and read.form == "heartbeat":
         # observer §7.3 (0.20): never read as a record, never sniffed
         beat = heartbeat_of(key, read, size, held)
+    elif read is not None and not delete and payload is not None and read.form == "snapshot":
+        # core §7.5 (0.97): a body, never a record of the resource's type
+        snap = snapshot_of(key, read, size)
     elif reader is not None and not delete and payload is not None and read is not None:
         # observer §7.6 (0.21): a frame key's frames through one reader, in
         # arrival order; a mutation or a refused body undecodable, named
@@ -342,6 +371,8 @@ def row_of(key: str, delete: bool, size: int, encoding: str, payload: bytes | No
         row["heartbeat"] = beat
     if framed is not None:
         row["frame"] = framed
+    if snap is not None:
+        row["snapshot"] = snap
     return row
 
 

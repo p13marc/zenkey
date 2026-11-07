@@ -710,7 +710,8 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "snapshot.write_back (snapshot family: every accepted read written back) (round 103, core 0.97)"),
     ("static", "core §7.5", "An implementation that cuts a snapshot into pages MUST cut it so", MET,
      "snapshot.cut, greedy by each candidate page's bytes, and cut_by_arithmetic by §7.5's sizes, agreeing "
-     "(snapshot family: bodies.json's 13 snapshots, 2 refused) (round 103, core 0.97)"),
+     "(snapshot family: bodies.json's 13 snapshots, 2 refused; readings: snapshot.cross_check, 300 random "
+     "snapshots) (round 103, core 0.97)"),
     # core 0.83 (#981 K1): §7.7's frames. The owner's and the reader's rules
     # were n/a at round 96; observer 0.21 and core 0.87 (#981 K2, K3) bring
     # zk2py's reader and owner (round 97).

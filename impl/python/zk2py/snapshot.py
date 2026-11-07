@@ -505,3 +505,90 @@ def complete(pages: list[dict[str, Any]]) -> dict[str, Any] | None:
     snap["live"] = [e for p in got for e in p["live"]]
     snap["tombs"] = [e for p in got for e in p["tombs"]]
     return snap
+
+
+# -- a second reading of the paging rule, cross-checked -----------------------
+
+_CHUNK = "abcdefghijklmnopqrstuvwxyz0123456789"
+_INNER = _CHUNK + "._-"
+
+
+def _random_id(rng: Any) -> str:
+    chunks = []
+    for _ in range(rng.choice((1, 1, 1, 2, 3))):
+        n = rng.choice((1, 1, 2, 3, 8, 20))
+        c = rng.choice(_CHUNK)
+        if n > 1:
+            c += "".join(rng.choice(_INNER) for _ in range(n - 2)) + rng.choice(_CHUNK)
+        chunks.append(c)
+    return "/".join(chunks)
+
+
+def random_snapshot(rng: Any) -> dict[str, Any]:
+    """A snapshot §7.5's reading accepts, drawn from ``rng``: either run
+    width, ids of one to three plain chunks (the empty id now and then),
+    live entries and tombstones interleaved, own runs of either width,
+    every confirmation, records from 0 to 300 bytes, and up to 300 entries,
+    so that counts and lengths cross 128 and indices 64."""
+    width = rng.choice((16, 32))
+    run = rng.randrange(2**width)
+    n = rng.choice((0, 1, 3, 20, 130, 300))
+    ids = sorted({_random_id(rng) for _ in range(n)} | ({""} if rng.random() < 0.1 else set()),
+                 key=lambda x: x.encode("ascii"))
+    horizon = rng.random() < 0.6
+
+    def stamp() -> dict[str, Any]:
+        if rng.random() < 0.8:
+            return {"run_width": None, "run": None}
+        w = rng.choice((16, 32))
+        r = rng.randrange(2**w)
+        while (w, r) == (width, run):
+            r = rng.randrange(2**w)
+        return {"run_width": w, "run": r}
+
+    def when() -> dict[str, int] | None:
+        return None if rng.random() < 0.1 else {"s": rng.randrange(UNKNOWN_T32), "ms": rng.randrange(1000)}
+
+    live, tombs = [], []
+    for i in ids:
+        if i and rng.random() < 0.2:
+            tombs.append({"id": i, **stamp(), "seq": rng.randrange(SEQ_MAX + 1)})
+            continue
+        conf = rng.choice(("time", "conf")) if horizon else "none"
+        e: dict[str, Any] = {"id": i, **stamp(), "seq": rng.randrange(SEQ_MAX + 1), "confirmation": conf}
+        if conf == "conf":
+            e["conf"] = when()
+        e["record"] = rng.randbytes(rng.choice((0, 1, 9, 110, 127, 128, 300))).hex()
+        live.append(e)
+    return {"tag": rng.randrange(16), "run_width": width, "run": run, "asof": rng.randrange(SEQ_MAX + 1),
+            "time": when(), "coll": rng.choice((0, 4, 127, 128, U32_MAX)), "live": live, "tombs": tombs}
+
+
+def cross_check(count: int, seed: int = 103) -> dict[str, int]:
+    """:func:`cut` beside :func:`cut_by_arithmetic` on ``count`` random
+    snapshots, each under a random page size: the same pages, each page's
+    size as measured, each page read back and written back to its bytes, and
+    the pages complete to the snapshot's entries. Returns the counts, and
+    each disagreement as ``failed``."""
+    import random
+
+    rng = random.Random(seed)
+    out = {"snapshots": 0, "pages": 0, "failed": 0, "over_64_pages": 0, "single_over": 0}
+    for _ in range(count):
+        snap = random_snapshot(rng)
+        size = rng.choice((1, 16, 40, 64, 220, 1024, 4096, rng.randrange(1, 3000)))
+        cut_pages = cut(snap, size)
+        arith = cut_by_arithmetic(snap, size)
+        read = [read_page(p) for p in cut_pages]
+        held = [len(p["live"]) + len(p["tombs"]) for p in read]
+        whole = complete(list(reversed(read)))
+        ok = (arith == list(zip(held, [len(p) for p in cut_pages]))
+              and all(write_back(r) == p for r, p in zip(read, cut_pages))
+              and whole is not None and whole["live"] == snap["live"] and whole["tombs"] == snap["tombs"]
+              and all(len(p) <= size or h <= 1 for p, h in zip(cut_pages, held)))
+        out["snapshots"] += 1
+        out["pages"] += len(cut_pages)
+        out["failed"] += not ok
+        out["over_64_pages"] += len(cut_pages) > 64
+        out["single_over"] += sum(1 for p, h in zip(cut_pages, held) if len(p) > size and h == 1)
+    return out
