@@ -1118,7 +1118,7 @@ async fn s9_state_counter_seeded() {
     let replies = rs
         .get(&key)
         .target(QueryTarget::All)
-        .consolidation(ConsolidationMode::Latest)
+        .consolidation(ConsolidationMode::None)
         .timeout(common::T)
         .with(flume::unbounded::<Reply>())
         .await

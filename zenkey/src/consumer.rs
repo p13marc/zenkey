@@ -419,6 +419,9 @@ pub struct Confirmation {
 struct Followed {
     layout: zenkey_model::heartbeat::Layout,
     index: usize,
+    /// Whether it is a per-key resource (core §4.2): only then is a
+    /// `reply_del` on its member an owner's answer (#977's E4).
+    per_key: bool,
 }
 
 impl Consumer {
@@ -812,7 +815,11 @@ impl Consumer {
         }
         let layout = zenkey_model::heartbeat::Layout::of(&self.contract);
         let index = layout.index_of(&format!("{}/{}", r.token, r.template))?;
-        Some(Followed { layout, index })
+        Some(Followed {
+            layout,
+            index,
+            per_key: zenkey_model::collection::per_key(&self.contract, r),
+        })
     }
 
     async fn subscribe_inner<C, T, F>(
@@ -1417,6 +1424,7 @@ impl Consumer {
                 // it stands for, and the page held toward its snapshot.
                 let mut completed = None;
                 let mut entries = BTreeMap::new();
+                let from_page = crate::inband::is_snapshot(&sample);
                 let reads = match crate::inband::read(sample) {
                     crate::inband::Read::Snapshot { sample, page } => match page {
                         // A page whose body is refused lost its entries: the
@@ -1467,6 +1475,20 @@ impl Consumer {
                     }
                     if let Err(why) = crate::inband::admit(&read, layout.as_deref()) {
                         undecodable.insert(key, why);
+                        continue;
+                    }
+                    // A `reply_del` where the owner answers by snapshot is
+                    // no owner's answer (core S2, S3; #977's E4): counted
+                    // undecodable, never merged as a deletion. A snapshot's
+                    // tombstone is no `reply_del` here.
+                    if !from_page
+                        && read.sample().kind() == zenoh::sample::SampleKind::Delete
+                        && collection::stray_reply_del(&self.contract, &key)
+                    {
+                        undecodable.insert(
+                            key,
+                            crate::inband::Undecodable::Envelope(collection::STRAY_REPLY_DEL),
+                        );
                         continue;
                     }
                     // One value per key: a key answered twice (a page
@@ -2116,6 +2138,11 @@ async fn reread(
         // A snapshot's page: its entries, each the per-key reply it stands
         // for; a page whose body is refused leaves the answer incomplete.
         let mut entries = BTreeMap::new();
+        // A `reply_del` of a collection its owner answers by snapshot is no
+        // owner's answer (core S2, S3; #977's E4), and replaces nothing.
+        if sample.kind() == zenoh::sample::SampleKind::Delete && !f.per_key {
+            continue;
+        }
         let reads = match crate::inband::read(sample) {
             crate::inband::Read::Snapshot { sample, page } => match page {
                 Err(_) => {

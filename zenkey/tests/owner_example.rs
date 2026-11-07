@@ -134,7 +134,7 @@ async fn the_owner_example_as_a_client_of_a_separate_router() {
     });
     assert_eq!(line(&lines).await, format!("connected {ep}"));
 
-    // The moment the interface token appears: the state, with All + Latest.
+    // The moment the interface token appears: the state, with All + None (S4).
     let state_key = "zk2/ex/owner/interop.v1/state/status";
     let (instance, stamp) = loop {
         let s = tokio::time::timeout(SETTLE, tokens.recv_async())
@@ -150,7 +150,7 @@ async fn the_owner_example_as_a_client_of_a_separate_router() {
                 state_key,
                 b"",
                 QueryTarget::All,
-                ConsolidationMode::Latest,
+                ConsolidationMode::None,
             )
             .await;
             let values: Vec<_> = replies.iter().filter_map(|r| r.result().ok()).collect();
@@ -401,7 +401,7 @@ impl Running {
     }
 }
 
-/// The payloads of a state GET (All + Latest).
+/// The payloads of a state GET (All + None, S4).
 async fn state(tool: &zenoh::Session, key: &str) -> Vec<Vec<u8>> {
     get(tool, key, b"", QueryTarget::All, ConsolidationMode::None)
         .await
@@ -3175,7 +3175,7 @@ async fn the_owner_example_implements_config_v2() {
             let rx = tool
                 .get("zk2/ex/rf/rfcfg.v1/state/config")
                 .target(QueryTarget::All)
-                .consolidation(ConsolidationMode::Latest)
+                .consolidation(ConsolidationMode::None)
                 .timeout(T)
                 .with(flume::unbounded::<Reply>())
                 .await

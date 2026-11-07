@@ -536,7 +536,7 @@ async fn s2_a_reply_del_carries_the_delete_envelope() {
     );
 }
 
-/// §3 (step 2): the consumer's GET (`All` + `Latest`, set explicitly by
+/// §3 (step 2): the consumer's GET (`All` + `None`, set explicitly by
 /// `Consumer::get`) is answered by the owner alone, under its in-band
 /// stamp. Step 1, the storage finding read from the routers' admin space,
 /// is a tool's (`zenctl doctor`, #612).
@@ -1170,8 +1170,9 @@ async fn s7_late_joiners_across_runs() {
 /// consumer's S4 GET stays open after the owner answered it. While it is
 /// open, the owner restarts under a new run and writes rev 11, which the
 /// subscription hears. Then the holder lets the query go, and the GET
-/// ends. Its reply of rev 10 comes after rev 11's live sample: `Latest`
-/// delivers at the GET's end (core §4.1). The consumer accepts it, another
+/// ends. Its answer of rev 10, read when the GET ends, comes after rev 11's
+/// live sample (core §4.3's residual risk "Inside a seed"). The consumer
+/// accepts it, another
 /// run's, and a tool keeps it, the later arrival: both hold rev 10 until
 /// rev 12.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1777,7 +1778,9 @@ async fn s14_a_collection_read_pages_and_member_reads() {
     assert!(!none[0].1.more);
 
     // Step 4, the control: `Latest` keeps one reply per key, and the four
-    // pages share theirs.
+    // pages share theirs. The one state GET under `Latest` left (#977's
+    // E4): the scenario's control, which shows what `None` prevents (core
+    // §4.2, "Why `None`"); no reader GETs so.
     let latest = raw_get_under(&tool, &format!("{PLANS}/**"), ConsolidationMode::Latest).await;
     assert_eq!(pages_of(&latest).len(), 1, "one page of the four");
 }

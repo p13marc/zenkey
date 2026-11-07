@@ -7,7 +7,7 @@
 //! | S1 every put and delete carries its in-band stamp (§7.5's envelope), and on §4.3's table a Zenoh timestamp the owner set | [`StateWriter`], [`Minter`] |
 //! | S2 a GET answered per collection (#977's E3): a collection read with its snapshot, a member read with each member's, a concrete key at no member with a snapshot of no entry, a per-key resource with a reply per key (the bytes put, a `reply_del`'s attachment the delete's envelope, the mutation's Zenoh timestamp where it had one); asof the [`Minter`]'s low-water mark, pages at `ServiceConfig::snapshot_page_bytes`, a live entry's confirmation from its bit | the state server (`Store::answer`) |
 //! | S3 the tombstone window, 60 s unless configured | [`DEFAULT_WINDOW`], `ServiceConfig::tombstone_window_s` |
-//! | S4 a consumer's GET: the owner's keys, target `All`, consolidation `None`, a collection read where it asks every member; a snapshot's page read as its entries' per-key replies, merged per key, and the omission rule over a complete snapshot (#977's E3) | [`crate::consumer::Consumer::get`], [`StateAnswer::snapshots`], [`StateAnswer::omitted`] |
+//! | S4 a consumer's GET: the owner's keys, target `All`, consolidation `None`, a collection read where it asks every member; a snapshot's page read as its entries' per-key replies, merged per key, and the omission rule over a complete snapshot (#977's E3); a `reply_del` on a member of a collection, which its owner answers by snapshot, counted undecodable, `form`, never merged (#977's E4) | [`crate::consumer::Consumer::get`], [`StateAnswer::snapshots`], [`StateAnswer::omitted`] |
 //! | S6 current is the owner's answer; silence is no verdict | [`StateGet`] |
 //! | S7 a run never reused, a seq never wrapped within it; §4.3's table's timestamps, ahead: the guard holds a state write that carries a Zenoh timestamp | [`Minter`], [`crate::run`], the clock guard (`ServiceConfig::clock_reference`) |
 //! | a re-put is a mutation (0.21); `freshness.v1` §2.4, §2.10 | [`StateWriter`]'s refresher |
@@ -1131,8 +1131,9 @@ impl Store {
     /// A snapshot is under `minter`'s run and asof ([`Minter::as_of`]), at
     /// a time minted as it is built. Each live entry of a collection with a
     /// horizon carries its confirmation: 1 while its bit is set, else 2 with
-    /// its last confirmation (`freshness.v2` §2.4). A key of no collection
-    /// is answered per key, as before #977.
+    /// its last confirmation (`freshness.v2` §2.4). A key under `root` that
+    /// is no exposed collection's member is not answered: S2 answers a GET
+    /// per collection, and its old per-key reply went with #977's E4.
     pub(crate) fn answer(&self, q: &Query, minter: &Minter, root: &str) {
         {
             let mut asked = self.asked.lock().expect("not poisoned");
@@ -1166,13 +1167,13 @@ impl Store {
                 .strip_prefix(root)
                 .is_some_and(|r| r.starts_with('/'))
         };
-        // Per key: a per-key resource's members, and a key of no collection.
+        // Per key: a per-key resource's members alone (#977's E4).
         for (key, e) in map.iter() {
             if !under_root(key) || !qk.intersects(key) {
                 continue;
             }
             let of = collections.iter().find(|c| c.holds(key.as_str()));
-            if of.is_some_and(|c| !c.per_key) {
+            if !of.is_some_and(|c| c.per_key) {
                 continue;
             }
             let _ = match &e.value {
@@ -2012,7 +2013,10 @@ pub struct StateAnswer {
     /// Each key answered with an envelope refused, or a packed record its
     /// layout refused (core §7.5, §7.6): undecodable, with the refusal,
     /// and left out of [`StateAnswer::current`]. A snapshot's page whose
-    /// body is refused is undecodable on the page's key.
+    /// body is refused is undecodable on the page's key, and a stray
+    /// `reply_del`, on a member of a collection its owner answers by
+    /// snapshot, as its form, `form`
+    /// ([`zenkey_model::collection::STRAY_REPLY_DEL`]; #977's E4).
     pub undecodable: BTreeMap<String, crate::inband::Undecodable>,
     /// Each snapshot of the resource's collection the GET's pages made
     /// (core §7.5; #977's E2), in the order of its first page: the key it

@@ -110,7 +110,7 @@
 #[cfg(feature = "zenoh")]
 pub mod alarms;
 #[cfg(feature = "zenoh")]
-mod answer;
+pub mod answer;
 #[cfg(feature = "zenoh")]
 pub mod arbitration;
 #[cfg(feature = "zenoh")]

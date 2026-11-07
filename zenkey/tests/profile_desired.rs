@@ -165,7 +165,7 @@ async fn get(s: &zenoh::Session, key: &str) -> Vec<Sample> {
     let rx = s
         .get(key)
         .target(QueryTarget::All)
-        .consolidation(ConsolidationMode::Latest)
+        .consolidation(ConsolidationMode::None)
         .timeout(T)
         .with(flume::unbounded::<Reply>())
         .await
@@ -185,7 +185,7 @@ async fn get_raw(s: &zenoh::Session, key: &str) -> Vec<Sample> {
     let rx = s
         .get(key)
         .target(QueryTarget::All)
-        .consolidation(ConsolidationMode::Latest)
+        .consolidation(ConsolidationMode::None)
         .timeout(T)
         .with(flume::unbounded::<Reply>())
         .await

@@ -312,7 +312,7 @@ async fn s12_the_checks_reads_beside_a_router_declaring() {
         let replies = reader
             .get(plan_key)
             .target(zenoh::query::QueryTarget::All)
-            .consolidation(zenoh::query::ConsolidationMode::Latest)
+            .consolidation(zenoh::query::ConsolidationMode::None)
             .timeout(BOUND)
             .await
             .expect("a GET");

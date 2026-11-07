@@ -454,7 +454,7 @@ async fn get_record(s: &zenoh::Session, address: &str) -> Option<(Stamp, Vec<u8>
     let rx = s
         .get(format!("zk2/{address}/{IFACE}/state/config"))
         .target(QueryTarget::All)
-        .consolidation(ConsolidationMode::Latest)
+        .consolidation(ConsolidationMode::None)
         .timeout(T)
         .with(flume::unbounded::<Reply>())
         .await

@@ -15,7 +15,7 @@
 //! the owner starts, and records each delivery's arrival, key, kind and
 //! payload. C calls through a [`Client`] with the call metadata
 //! `{"actor": "ops", "request_id": …}` (core O7) and a 2 s timeout, and
-//! GETs as core S4 says (target `All`, consolidation `Latest`).
+//! GETs as core S4 says (target `All`, consolidation `None`).
 //!
 //! Each section runs on a router of its own, so the sections run at once.
 //! §10's 300 s are the owner's clock moved
@@ -322,7 +322,7 @@ async fn get(s: &zenoh::Session, key: &str) -> Option<Json> {
     let rx = s
         .get(key)
         .target(QueryTarget::All)
-        .consolidation(ConsolidationMode::Latest)
+        .consolidation(ConsolidationMode::None)
         .timeout(T)
         .with(flume::unbounded::<Reply>())
         .await

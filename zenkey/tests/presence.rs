@@ -178,7 +178,7 @@ async fn s1_bring_up_order_and_tokens() {
                 let state = tool
                     .get(&pose_key)
                     .target(zenoh::query::QueryTarget::All)
-                    .consolidation(zenoh::query::ConsolidationMode::Latest)
+                    .consolidation(zenoh::query::ConsolidationMode::None)
                     .timeout(T)
                     .await
                     .unwrap();
