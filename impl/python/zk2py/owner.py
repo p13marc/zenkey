@@ -534,7 +534,8 @@ class Owner:
                  tombstone_s: float = TOMBSTONE_WINDOW_S, before_tokens: Any = None,
                  params: dict[str, dict[str, str]] | None = None, standby: set[str] | None = None,
                  lease_ms: int | None = None, namespace: str | None = None,
-                 interface_tokens_after_s: float | None = 0.0, run_record: Any = None):
+                 interface_tokens_after_s: float | None = 0.0, run_record: Any = None,
+                 first_hop: bool = False):
         """A router listening on ``port`` (a free loopback port by default),
         or, with ``connect``, a client of that router endpoint.
         - ``bindings``: a role's configured providers (R1); a role left out
@@ -679,6 +680,14 @@ class Owner:
         self.hold_s = hold_s
         self.auth = auth
         self.tokenless = set(tokenless or ())
+        #: core 0.96 §8.1, §8.4 "On a first hop" (round 102): every interface
+        #: it implements in its tokenless set (the SHOULD), its instance token
+        #: alone, and no bundle held (§8.4's SHOULD NOT; §8.2's step 3 declares
+        #: no contract queryable). archive.v1 and a governed interface are
+        #: refused by step 2, as in any tokenless set (the MUST NOT).
+        self.first_hop = first_hop
+        if first_hop:
+            self.tokenless |= {c.interface for c in self.contracts}
         self.router_connect = router_connect
         self.hostid = hostid
         self.hostid_ephemeral = hostid_ephemeral
@@ -1360,7 +1369,7 @@ class Owner:
                 lambda q, key=key, instance=instance: q.reply(key, self._docs.get(instance, doc),
                                                               encoding="application/json")), complete=True))
             s.put(key, doc, encoding="application/json", timestamp=self.mint())
-            if bundles:
+            if bundles and not self.first_hop:
                 for c in self.contracts:
                     ckey = f"zk2/@zk/contract/{c.interface}/{c.fingerprint.removeprefix('sha256:')}"
                     data = bundle.build(c)

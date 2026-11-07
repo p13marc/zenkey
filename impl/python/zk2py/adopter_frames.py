@@ -1,7 +1,10 @@
 """The adopters' frames, written and read by zk2py (#983's last "Done when"
-item; #609, round 99): ``modem.v3`` revision 3.2's nine frame resources
-(``examples/zk2/zenoh-modem/modem.v3.toml``, over
-``schemas/modem-frames.json``) and W2's ``gendev.v1`` 1.1 ``frames/sample``
+item; #609, round 99): ``modem.v3``'s frame resources
+(``examples/zk2/zenoh-modem/modem.v3.toml``), revision 3.2's nine over
+``schemas/modem-frames.json``, deprecated since 3.3, and 3.3's three,
+``frames/fast``, ``frames/slow`` and ``frames/paid``, over one record of all
+73 readings, ``schemas/modem-readings.json`` (#991; round 102), and W2's
+``gendev.v1`` 1.1 ``frames/sample``
 (``docs/zk2/measurements/wire-baseline/contracts/gendev.v1.toml``, the one
 file of ``docs/`` the coordinator opened to zk2py, read as contract TOML; its
 schema files beside it are loaded by zk2py's contract reader, not read here).

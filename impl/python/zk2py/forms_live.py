@@ -645,12 +645,33 @@ def steps_5_to_7(ck: Checks, caller: str, ep: str, cli: Any, ops: dict[str, Any]
                     ck.check(st, "a caller that does not reports the transport's, and calls set once: it is not "
                                  "idempotent", res.silent and hits["set"] == 1 and [x["kind"] for x in shown] == [
                                      "transport"], {"hits": hits["set"], "shown": shown})
+            # core 0.95 (F-473's answer, round 102): ping answered by an
+            # envelope with no message, which §5.2's decoding refuses: a
+            # malformed error, the transport's to both callers, after which
+            # the idempotent ping is called again, then silence.
+            mode["ping"] = (b'{"code":"busy"}', "application/json")
+            for read_bare in (True, False):
+                hits["ping"] = 0
+                res = live.call(cli, "zk2/h9/tc/tc.v1/@op/ping", b"ping", op=ops["tc/ping"], timeout=1.5,
+                                attempts=2, idempotent=True, read_bare=read_bare)
+                shown = [live.show_reply(r) for r in res.replies]
+                ck.check(st, f"ping answered {{\"code\":\"busy\"}} under application/json, a caller that "
+                             f"{'reads' if read_bare else 'does not read'} the bare wire: the transport's, ping "
+                             "called twice, then silence (core 0.95 §5.2)",
+                         res.silent and hits["ping"] == 2 and all(x["kind"] == "transport" for x in shown),
+                         {"hits": hits["ping"], "shown": shown})
         else:
             hits["set"] = 0
             z = zenctl_call(ep, "h9/tc", "tc/set", json.dumps(JSON_OK), retries=1, timeout=2.0)
             ck.check(st, "zenctl call set answered by the bare wire's JSON envelope: busy (exit 1) if it reads the bare "
                          "wire, the transport's (exit 2) if not; set called once", z["exit"] in (1, 2)
                      and hits["set"] == 1, {"hits": hits["set"], **z})
+            mode["ping"] = (b'{"code":"busy"}', "application/json")
+            hits["ping"] = 0
+            z = zenctl_call(ep, "h9/tc", "tc/ping", "ping", retries=1, timeout=2.0)
+            ck.check(st, "zenctl call ping answered by an envelope with no message: malformed, the transport's: "
+                         "silence (exit 2), ping called twice (core 0.95 §5.2)",
+                     z["exit"] == 2 and hits["ping"] == 2, {"hits": hits["ping"], **z})
     finally:
         for e in ents:
             e.undeclare()

@@ -2599,6 +2599,16 @@
             "contract": "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
             "iface": "modem.v3",
             "index": 6
+          },
+          {
+            "contract": "sha256:dc7c01069bffc9dc5a966c93cfe2444eca0391e71f051bc9bf6d2b2b54d4317b",
+            "iface": "sx1262_config.v1",
+            "index": 7
+          },
+          {
+            "contract": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+            "iface": "modem.v3",
+            "index": 8
           }
         ],
         "epoch": 1767225600,
@@ -2615,6 +2625,14 @@
           {
             "entries": 6,
             "id": "36c25c0f"
+          },
+          {
+            "entries": 7,
+            "id": "ab76ec37"
+          },
+          {
+            "entries": 8,
+            "id": "8c808dff"
           }
         ]
       },
@@ -2625,1414 +2643,7 @@
       ],
       "expect": {
         "binding": "zm-1.10.2-r1",
-        "catalog": "ab76ec37",
-        "faces": [
-          {
-            "attach": {
-              "shape": "client"
-            },
-            "deny": [
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "zk",
-                "key_exprs": [
-                  "zk2/**/@zk/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber",
-                  "query",
-                  "declare_queryable",
-                  "reply",
-                  "liveliness_token",
-                  "declare_liveliness_subscriber",
-                  "liveliness_query"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "adv",
-                "key_exprs": [
-                  "zk2/**/@adv/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber",
-                  "query",
-                  "declare_queryable",
-                  "reply",
-                  "liveliness_token",
-                  "declare_liveliness_subscriber",
-                  "liveliness_query"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "admin",
-                "key_exprs": [
-                  "@/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber",
-                  "query",
-                  "declare_queryable",
-                  "reply",
-                  "liveliness_token",
-                  "declare_liveliness_subscriber",
-                  "liveliness_query"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "stream:config.v1",
-                "key_exprs": [
-                  "zk2/*/*/config.v1/stream/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "stream:freshness.v2",
-                "key_exprs": [
-                  "zk2/*/*/freshness.v2/stream/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "stream:health.v1",
-                "key_exprs": [
-                  "zk2/*/*/health.v1/stream/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "stream:modem.v3",
-                "key_exprs": [
-                  "zk2/*/*/modem.v3/stream/air/**",
-                  "zk2/*/*/modem.v3/stream/frames/message/**",
-                  "zk2/*/*/modem.v3/stream/if/**",
-                  "zk2/*/*/modem.v3/stream/layer/**",
-                  "zk2/*/*/modem.v3/stream/link/**",
-                  "zk2/*/*/modem.v3/stream/radio/**",
-                  "zk2/*/*/modem.v3/stream/sched/**",
-                  "zk2/*/*/modem.v3/stream/sdu/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "@stream",
-                "key_exprs": [
-                  "zk2/*/*/*/@stream/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "state",
-                "key_exprs": [
-                  "zk2/*/*/*/state/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "@state",
-                "key_exprs": [
-                  "zk2/*/*/*/@state/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "events",
-                "key_exprs": [
-                  "zk2/*/*/*/events/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              }
-            ],
-            "downsampling": null,
-            "far": "ground",
-            "findings": [
-              {
-                "at": "modem.v3/stream/frames/message",
-                "code": "frame_unlisted",
-                "face": "rf",
-                "severity": "warning"
-              }
-            ],
-            "frames": [
-              {
-                "every_s": 60,
-                "resource": "modem.v3/stream/frames/air"
-              },
-              {
-                "every_s": 60,
-                "resource": "modem.v3/stream/frames/bearer"
-              },
-              {
-                "every_s": 60,
-                "resource": "modem.v3/stream/frames/if"
-              },
-              {
-                "every_s": 60,
-                "resource": "modem.v3/stream/frames/layer"
-              },
-              {
-                "every_s": 60,
-                "resource": "modem.v3/stream/frames/link"
-              },
-              {
-                "every_s": 60,
-                "resource": "modem.v3/stream/frames/radio"
-              },
-              {
-                "every_s": 60,
-                "resource": "modem.v3/stream/frames/sched"
-              },
-              {
-                "every_s": 60,
-                "resource": "modem.v3/stream/frames/sdu"
-              }
-            ],
-            "liveness": [
-              {
-                "evidence": [
-                  "modem.v3/stream/frames/link"
-                ],
-                "service": "h-3fa9c2d41b7e/rf0"
-              }
-            ],
-            "name": "rf",
-            "reply_timeout_ms": 15000,
-            "windows": [
-              {
-                "min_s": 3600,
-                "service": "h-3fa9c2d41b7e/rf0"
-              }
-            ]
-          }
-        ],
-        "transport": {
-          "accept_timeout_ms": 10000,
-          "batch_bytes": 222,
-          "interests_timeout_ms": 10000,
-          "keep_alive": 4,
-          "lease_ms": 240000,
-          "open_timeout_ms": 10000,
-          "sequence": "16bit",
-          "wait_before_close_ms": 240000
-        }
-      },
-      "implements": {
-        "rf0": [
-          "modem.v3",
-          "config.v1",
-          "health.v1"
-        ]
-      },
-      "note": "zenoh-modem's RF router (Appendix B, `examples/zk2/zenoh-modem/faces/`) over modem.v3, which lists link.v1: what it exposes is its nine frame resources, all packed, so none draws `not_packed` (\u00a72.17); the face lists eight at 60 s, each crossing whole with no downsampling, and denies `frames/message` by name (`frame_unlisted`, \u00a72.7); `frames/link`'s horizon is liveness evidence; one frame a minute replaces each keep-alive, so no `keep_alive_not_suppressed` (\u00a72.16); the catalog the ground holds lists every crossing revision (\u00a72.18)",
-      "policy": "# zenoh-modem's RF node (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\nbinding  = \"zm-1.10.2-r1\"           # the zenoh fork zenoh-modem's routers run\ncatalog  = \"ab76ec37\"               # catalog.json, which the ground holds\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4            # a keep-alive every 60 s, which a frame a minute replaces\nwait_before_close_ms = 240000       # at least the lease\nsequence             = \"16bit\"\nbatch_bytes          = 222          # the radio's 220 B SDU and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.rf]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000            # 5 %\narq              = false            # no link ARQ on the radio (zenoh-modem's tracker)\nreply_timeout_ms = 15000            # 16 full batches take 11.8 s\nhorizon_s        = 120              # one frame a minute affords a 120 s horizon\n\n[face.rf.frames]\n\"modem.v3/frames/link\"   = { every_s = 60 }\n\"modem.v3/frames/sdu\"    = { every_s = 60 }\n\"modem.v3/frames/sched\"  = { every_s = 60 }\n\"modem.v3/frames/air\"    = { every_s = 60 }\n\"modem.v3/frames/layer\"  = { every_s = 60 }\n\"modem.v3/frames/if\"     = { every_s = 60 }\n\"modem.v3/frames/radio\"  = { every_s = 60 }\n\"modem.v3/frames/bearer\" = { every_s = 60 }\n"
-    },
-    {
-      "catalog": {
-        "entries": [
-          {
-            "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
-            "iface": "modem.v3",
-            "index": 0
-          },
-          {
-            "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1",
-            "iface": "config.v1",
-            "index": 1
-          },
-          {
-            "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df",
-            "iface": "health.v1",
-            "index": 2
-          },
-          {
-            "contract": "sha256:4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501",
-            "iface": "config.v1",
-            "index": 3
-          },
-          {
-            "contract": "sha256:60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f",
-            "iface": "health.v1",
-            "index": 4
-          },
-          {
-            "contract": "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
-            "iface": "modem.v3",
-            "index": 5
-          },
-          {
-            "contract": "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
-            "iface": "modem.v3",
-            "index": 6
-          }
-        ],
-        "epoch": 1767225600,
-        "format": "zk2-catalog/1",
-        "lineage": [
-          {
-            "entries": 3,
-            "id": "0a90fd61"
-          },
-          {
-            "entries": 5,
-            "id": "ea268fad"
-          },
-          {
-            "entries": 6,
-            "id": "36c25c0f"
-          }
-        ]
-      },
-      "contracts": [
-        "examples/zk2/zenoh-modem/modem.v3.toml",
-        "spec/profiles/config/config.v1.toml",
-        "spec/profiles/health/health.v1.toml"
-      ],
-      "expect": {
-        "binding": "zm-1.10.2-r1",
-        "catalog": "ab76ec37",
-        "faces": [
-          {
-            "attach": {
-              "shape": "client"
-            },
-            "deny": [
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "zk",
-                "key_exprs": [
-                  "zk2/**/@zk/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber",
-                  "query",
-                  "declare_queryable",
-                  "reply",
-                  "liveliness_token",
-                  "declare_liveliness_subscriber",
-                  "liveliness_query"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "adv",
-                "key_exprs": [
-                  "zk2/**/@adv/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber",
-                  "query",
-                  "declare_queryable",
-                  "reply",
-                  "liveliness_token",
-                  "declare_liveliness_subscriber",
-                  "liveliness_query"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "admin",
-                "key_exprs": [
-                  "@/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber",
-                  "query",
-                  "declare_queryable",
-                  "reply",
-                  "liveliness_token",
-                  "declare_liveliness_subscriber",
-                  "liveliness_query"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "stream:config.v1",
-                "key_exprs": [
-                  "zk2/*/*/config.v1/stream/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "stream:freshness.v2",
-                "key_exprs": [
-                  "zk2/*/*/freshness.v2/stream/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "stream:health.v1",
-                "key_exprs": [
-                  "zk2/*/*/health.v1/stream/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "stream:modem.v3",
-                "key_exprs": [
-                  "zk2/*/*/modem.v3/stream/air/**",
-                  "zk2/*/*/modem.v3/stream/frames/message/**",
-                  "zk2/*/*/modem.v3/stream/if/**",
-                  "zk2/*/*/modem.v3/stream/layer/**",
-                  "zk2/*/*/modem.v3/stream/link/**",
-                  "zk2/*/*/modem.v3/stream/radio/**",
-                  "zk2/*/*/modem.v3/stream/sched/**",
-                  "zk2/*/*/modem.v3/stream/sdu/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "@stream",
-                "key_exprs": [
-                  "zk2/*/*/*/@stream/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "state",
-                "key_exprs": [
-                  "zk2/*/*/*/state/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "@state",
-                "key_exprs": [
-                  "zk2/*/*/*/@state/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "events",
-                "key_exprs": [
-                  "zk2/*/*/*/events/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              }
-            ],
-            "downsampling": null,
-            "far": "ground",
-            "findings": [
-              {
-                "at": "modem.v3/stream/frames/message",
-                "code": "frame_unlisted",
-                "face": "lora",
-                "severity": "warning"
-              },
-              {
-                "at": "transport.keep_alive",
-                "code": "keep_alive_not_suppressed",
-                "face": "lora",
-                "severity": "warning"
-              }
-            ],
-            "frames": [
-              {
-                "every_s": 60,
-                "resource": "modem.v3/stream/frames/air"
-              },
-              {
-                "every_s": 60,
-                "resource": "modem.v3/stream/frames/bearer"
-              },
-              {
-                "every_s": 60,
-                "resource": "modem.v3/stream/frames/if"
-              },
-              {
-                "every_s": 60,
-                "resource": "modem.v3/stream/frames/layer"
-              },
-              {
-                "every_s": 60,
-                "resource": "modem.v3/stream/frames/link"
-              },
-              {
-                "every_s": 60,
-                "resource": "modem.v3/stream/frames/radio"
-              },
-              {
-                "every_s": 60,
-                "resource": "modem.v3/stream/frames/sched"
-              },
-              {
-                "every_s": 60,
-                "resource": "modem.v3/stream/frames/sdu"
-              }
-            ],
-            "liveness": [
-              {
-                "evidence": [
-                  "modem.v3/stream/frames/link"
-                ],
-                "service": "h-c2a95e41d7f0/lora0"
-              }
-            ],
-            "name": "lora",
-            "reply_timeout_ms": 15000,
-            "windows": [
-              {
-                "min_s": 3600,
-                "service": "h-c2a95e41d7f0/lora0"
-              }
-            ]
-          }
-        ],
-        "transport": {
-          "accept_timeout_ms": 10000,
-          "batch_bytes": 224,
-          "interests_timeout_ms": 10000,
-          "keep_alive": 4,
-          "lease_ms": 120000,
-          "open_timeout_ms": 10000,
-          "sequence": "16bit",
-          "wait_before_close_ms": 120000
-        }
-      },
-      "implements": {
-        "lora0": [
-          "modem.v3",
-          "config.v1",
-          "health.v1"
-        ]
-      },
-      "note": "zenoh-modem's LoRa router at SF7 (Appendix B): the RF face's frames at 60 s, against a keep-alive interval of 30 s, so the uplink pays a keep-alive between two frames (`keep_alive_not_suppressed`, \u00a72.16); `frames/message` is denied by name (`frame_unlisted`, \u00a72.7)",
-      "policy": "# zenoh-modem's LoRa node at SF7 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"ab76ec37\"\n\n[transport]\nlease_ms             = 120000\nkeep_alive           = 4\nwait_before_close_ms = 120000\nsequence             = \"16bit\"\nbatch_bytes          = 224          # the chip's 222 B frame and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 5469\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nhorizon_s        = 120\n\n[face.lora.frames]\n\"modem.v3/frames/link\"   = { every_s = 60 }\n\"modem.v3/frames/sdu\"    = { every_s = 60 }\n\"modem.v3/frames/sched\"  = { every_s = 60 }\n\"modem.v3/frames/air\"    = { every_s = 60 }\n\"modem.v3/frames/layer\"  = { every_s = 60 }\n\"modem.v3/frames/if\"     = { every_s = 60 }\n\"modem.v3/frames/radio\"  = { every_s = 60 }\n\"modem.v3/frames/bearer\" = { every_s = 60 }\n"
-    },
-    {
-      "catalog": {
-        "entries": [
-          {
-            "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
-            "iface": "modem.v3",
-            "index": 0
-          },
-          {
-            "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1",
-            "iface": "config.v1",
-            "index": 1
-          },
-          {
-            "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df",
-            "iface": "health.v1",
-            "index": 2
-          },
-          {
-            "contract": "sha256:4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501",
-            "iface": "config.v1",
-            "index": 3
-          },
-          {
-            "contract": "sha256:60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f",
-            "iface": "health.v1",
-            "index": 4
-          },
-          {
-            "contract": "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
-            "iface": "modem.v3",
-            "index": 5
-          },
-          {
-            "contract": "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
-            "iface": "modem.v3",
-            "index": 6
-          }
-        ],
-        "epoch": 1767225600,
-        "format": "zk2-catalog/1",
-        "lineage": [
-          {
-            "entries": 3,
-            "id": "0a90fd61"
-          },
-          {
-            "entries": 5,
-            "id": "ea268fad"
-          },
-          {
-            "entries": 6,
-            "id": "36c25c0f"
-          }
-        ]
-      },
-      "contracts": [
-        "examples/zk2/zenoh-modem/modem.v3.toml",
-        "spec/profiles/config/config.v1.toml",
-        "spec/profiles/health/health.v1.toml"
-      ],
-      "expect": {
-        "binding": "zm-1.10.2-r1",
-        "catalog": "ab76ec37",
-        "faces": [
-          {
-            "attach": {
-              "shape": "client"
-            },
-            "deny": [
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "zk",
-                "key_exprs": [
-                  "zk2/**/@zk/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber",
-                  "query",
-                  "declare_queryable",
-                  "reply",
-                  "liveliness_token",
-                  "declare_liveliness_subscriber",
-                  "liveliness_query"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "adv",
-                "key_exprs": [
-                  "zk2/**/@adv/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber",
-                  "query",
-                  "declare_queryable",
-                  "reply",
-                  "liveliness_token",
-                  "declare_liveliness_subscriber",
-                  "liveliness_query"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "admin",
-                "key_exprs": [
-                  "@/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber",
-                  "query",
-                  "declare_queryable",
-                  "reply",
-                  "liveliness_token",
-                  "declare_liveliness_subscriber",
-                  "liveliness_query"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "stream:config.v1",
-                "key_exprs": [
-                  "zk2/*/*/config.v1/stream/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "stream:freshness.v2",
-                "key_exprs": [
-                  "zk2/*/*/freshness.v2/stream/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "stream:health.v1",
-                "key_exprs": [
-                  "zk2/*/*/health.v1/stream/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "stream:modem.v3",
-                "key_exprs": [
-                  "zk2/*/*/modem.v3/stream/air/**",
-                  "zk2/*/*/modem.v3/stream/frames/message/**",
-                  "zk2/*/*/modem.v3/stream/if/**",
-                  "zk2/*/*/modem.v3/stream/layer/**",
-                  "zk2/*/*/modem.v3/stream/link/**",
-                  "zk2/*/*/modem.v3/stream/radio/**",
-                  "zk2/*/*/modem.v3/stream/sched/**",
-                  "zk2/*/*/modem.v3/stream/sdu/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "@stream",
-                "key_exprs": [
-                  "zk2/*/*/*/@stream/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "state",
-                "key_exprs": [
-                  "zk2/*/*/*/state/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "@state",
-                "key_exprs": [
-                  "zk2/*/*/*/@state/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "events",
-                "key_exprs": [
-                  "zk2/*/*/*/events/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              }
-            ],
-            "downsampling": null,
-            "far": "ground",
-            "findings": [
-              {
-                "at": "modem.v3/stream/frames/message",
-                "code": "frame_unlisted",
-                "face": "lora",
-                "severity": "warning"
-              }
-            ],
-            "frames": [
-              {
-                "every_s": 120,
-                "resource": "modem.v3/stream/frames/air"
-              },
-              {
-                "every_s": 120,
-                "resource": "modem.v3/stream/frames/bearer"
-              },
-              {
-                "every_s": 120,
-                "resource": "modem.v3/stream/frames/if"
-              },
-              {
-                "every_s": 120,
-                "resource": "modem.v3/stream/frames/layer"
-              },
-              {
-                "every_s": 60,
-                "resource": "modem.v3/stream/frames/link"
-              },
-              {
-                "every_s": 120,
-                "resource": "modem.v3/stream/frames/radio"
-              },
-              {
-                "every_s": 120,
-                "resource": "modem.v3/stream/frames/sched"
-              },
-              {
-                "every_s": 120,
-                "resource": "modem.v3/stream/frames/sdu"
-              }
-            ],
-            "liveness": [
-              {
-                "evidence": [
-                  "modem.v3/stream/frames/link"
-                ],
-                "service": "h-c2a95e41d7f0/lora0"
-              }
-            ],
-            "name": "lora",
-            "reply_timeout_ms": 15000,
-            "windows": [
-              {
-                "min_s": 3600,
-                "service": "h-c2a95e41d7f0/lora0"
-              }
-            ]
-          }
-        ],
-        "transport": {
-          "accept_timeout_ms": 10000,
-          "batch_bytes": 117,
-          "interests_timeout_ms": 10000,
-          "keep_alive": 4,
-          "lease_ms": 240000,
-          "open_timeout_ms": 10000,
-          "sequence": "16bit",
-          "wait_before_close_ms": 240000
-        }
-      },
-      "implements": {
-        "lora0": [
-          "modem.v3",
-          "config.v1",
-          "health.v1"
-        ]
-      },
-      "note": "zenoh-modem's LoRa router at SF9 (Appendix B): `frames/link` at 60 s and the group frames at 120 s, each listed at its own cadence (\u00a72.3); the shortest, 60 s, is the keep-alive interval, so none is paid beside the data (\u00a72.16); no frame is above the 117 B batch (link.v1 \u00a72.8)",
-      "policy": "# zenoh-modem's LoRa node at SF9 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"ab76ec37\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 117          # the chip's 115 B frame and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 1758\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000            # 16 full batches take 8.5 s\nhorizon_s        = 120\n\n[face.lora.frames]\n\"modem.v3/frames/link\"   = { every_s = 60 }\n\"modem.v3/frames/sdu\"    = { every_s = 120 }\n\"modem.v3/frames/sched\"  = { every_s = 120 }\n\"modem.v3/frames/air\"    = { every_s = 120 }\n\"modem.v3/frames/layer\"  = { every_s = 120 }\n\"modem.v3/frames/if\"     = { every_s = 120 }\n\"modem.v3/frames/radio\"  = { every_s = 120 }\n\"modem.v3/frames/bearer\" = { every_s = 120 }\n"
-    },
-    {
-      "catalog": {
-        "entries": [
-          {
-            "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
-            "iface": "modem.v3",
-            "index": 0
-          },
-          {
-            "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1",
-            "iface": "config.v1",
-            "index": 1
-          },
-          {
-            "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df",
-            "iface": "health.v1",
-            "index": 2
-          },
-          {
-            "contract": "sha256:4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501",
-            "iface": "config.v1",
-            "index": 3
-          },
-          {
-            "contract": "sha256:60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f",
-            "iface": "health.v1",
-            "index": 4
-          },
-          {
-            "contract": "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
-            "iface": "modem.v3",
-            "index": 5
-          },
-          {
-            "contract": "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
-            "iface": "modem.v3",
-            "index": 6
-          }
-        ],
-        "epoch": 1767225600,
-        "format": "zk2-catalog/1",
-        "lineage": [
-          {
-            "entries": 3,
-            "id": "0a90fd61"
-          },
-          {
-            "entries": 5,
-            "id": "ea268fad"
-          },
-          {
-            "entries": 6,
-            "id": "36c25c0f"
-          }
-        ]
-      },
-      "contracts": [
-        "examples/zk2/zenoh-modem/modem.v3.toml",
-        "spec/profiles/config/config.v1.toml",
-        "spec/profiles/health/health.v1.toml"
-      ],
-      "expect": {
-        "binding": "zm-1.10.2-r1",
-        "catalog": "ab76ec37",
-        "faces": [
-          {
-            "attach": {
-              "shape": "client"
-            },
-            "deny": [
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "zk",
-                "key_exprs": [
-                  "zk2/**/@zk/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber",
-                  "query",
-                  "declare_queryable",
-                  "reply",
-                  "liveliness_token",
-                  "declare_liveliness_subscriber",
-                  "liveliness_query"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "adv",
-                "key_exprs": [
-                  "zk2/**/@adv/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber",
-                  "query",
-                  "declare_queryable",
-                  "reply",
-                  "liveliness_token",
-                  "declare_liveliness_subscriber",
-                  "liveliness_query"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "admin",
-                "key_exprs": [
-                  "@/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber",
-                  "query",
-                  "declare_queryable",
-                  "reply",
-                  "liveliness_token",
-                  "declare_liveliness_subscriber",
-                  "liveliness_query"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "stream:config.v1",
-                "key_exprs": [
-                  "zk2/*/*/config.v1/stream/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "stream:freshness.v2",
-                "key_exprs": [
-                  "zk2/*/*/freshness.v2/stream/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "stream:health.v1",
-                "key_exprs": [
-                  "zk2/*/*/health.v1/stream/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "stream:modem.v3",
-                "key_exprs": [
-                  "zk2/*/*/modem.v3/stream/air/**",
-                  "zk2/*/*/modem.v3/stream/frames/message/**",
-                  "zk2/*/*/modem.v3/stream/if/**",
-                  "zk2/*/*/modem.v3/stream/layer/**",
-                  "zk2/*/*/modem.v3/stream/link/**",
-                  "zk2/*/*/modem.v3/stream/radio/**",
-                  "zk2/*/*/modem.v3/stream/sched/**",
-                  "zk2/*/*/modem.v3/stream/sdu/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "@stream",
-                "key_exprs": [
-                  "zk2/*/*/*/@stream/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "state",
-                "key_exprs": [
-                  "zk2/*/*/*/state/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "@state",
-                "key_exprs": [
-                  "zk2/*/*/*/@state/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "events",
-                "key_exprs": [
-                  "zk2/*/*/*/events/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              }
-            ],
-            "downsampling": null,
-            "far": "ground",
-            "findings": [
-              {
-                "at": "modem.v3/stream/frames/link",
-                "code": "horizon_under_face",
-                "face": "lora",
-                "severity": "warning"
-              },
-              {
-                "at": "modem.v3/stream/frames/link",
-                "code": "interval_over_horizon",
-                "face": "lora",
-                "severity": "warning"
-              },
-              {
-                "at": "modem.v3/stream/frames/message",
-                "code": "frame_unlisted",
-                "face": "lora",
-                "severity": "warning"
-              },
-              {
-                "at": "transport.keep_alive",
-                "code": "keep_alive_not_suppressed",
-                "face": "lora",
-                "severity": "warning"
-              }
-            ],
-            "frames": [
-              {
-                "every_s": 900,
-                "keyframe_s": 3600,
-                "resource": "modem.v3/stream/frames/air"
-              },
-              {
-                "every_s": 900,
-                "keyframe_s": 3600,
-                "resource": "modem.v3/stream/frames/bearer"
-              },
-              {
-                "every_s": 900,
-                "keyframe_s": 3600,
-                "resource": "modem.v3/stream/frames/if"
-              },
-              {
-                "every_s": 900,
-                "keyframe_s": 3600,
-                "resource": "modem.v3/stream/frames/layer"
-              },
-              {
-                "every_s": 900,
-                "resource": "modem.v3/stream/frames/link"
-              },
-              {
-                "every_s": 900,
-                "keyframe_s": 3600,
-                "resource": "modem.v3/stream/frames/radio"
-              },
-              {
-                "every_s": 900,
-                "keyframe_s": 3600,
-                "resource": "modem.v3/stream/frames/sched"
-              },
-              {
-                "every_s": 900,
-                "keyframe_s": 3600,
-                "resource": "modem.v3/stream/frames/sdu"
-              }
-            ],
-            "liveness": [
-              {
-                "evidence": [
-                  "modem.v3/stream/frames/link"
-                ],
-                "service": "h-c2a95e41d7f0/lora0"
-              }
-            ],
-            "name": "lora",
-            "reply_timeout_ms": 120000,
-            "windows": [
-              {
-                "min_s": 3600,
-                "service": "h-c2a95e41d7f0/lora0"
-              }
-            ]
-          }
-        ],
-        "transport": {
-          "accept_timeout_ms": 40000,
-          "batch_bytes": 224,
-          "interests_timeout_ms": 40000,
-          "keep_alive": 4,
-          "lease_ms": 1080000,
-          "open_timeout_ms": 40000,
-          "sequence": "16bit",
-          "wait_before_close_ms": 1080000
-        }
-      },
-      "implements": {
-        "lora0": [
-          "modem.v3",
-          "config.v1",
-          "health.v1"
-        ]
-      },
-      "note": "zenoh-modem's LoRa router at SF12 (Appendix B): every frame at 900 s, the group frames asked for a full record hourly, which their 15 records reach (`keyframe_s`, \u00a72.7); `frames/link`'s 150 s horizon is below twice its cadence (`interval_over_horizon`) and below the face's 1,800 s (`horizon_under_face`, \u00a72.12); a 270 s keep-alive interval is below the cadence (`keep_alive_not_suppressed`, \u00a72.16)",
-      "policy": "# zenoh-modem's LoRa node at SF12 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"ab76ec37\"\n\n[transport]\nlease_ms             = 1080000\nkeep_alive           = 4\nwait_before_close_ms = 1080000\nsequence             = \"16bit\"\nbatch_bytes          = 224          # the fragment layer's 222 B SDU and 2 B of stream framing\nopen_timeout_ms      = 40000\naccept_timeout_ms    = 40000\ninterests_timeout_ms = 40000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 900\nmax_outage_s     = 3600\nlink_bps         = 293\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 120000\nhorizon_s        = 1800\n\n# A group frame keyframes at least every 15 records (modem.v3), 3.75 h at\n# one every 15 minutes; the face asks every 4, hourly. frames/link is a\n# full record every frame.\n[face.lora.frames]\n\"modem.v3/frames/link\"   = { every_s = 900 }\n\"modem.v3/frames/sdu\"    = { every_s = 900, keyframe_s = 3600 }\n\"modem.v3/frames/sched\"  = { every_s = 900, keyframe_s = 3600 }\n\"modem.v3/frames/air\"    = { every_s = 900, keyframe_s = 3600 }\n\"modem.v3/frames/layer\"  = { every_s = 900, keyframe_s = 3600 }\n\"modem.v3/frames/if\"     = { every_s = 900, keyframe_s = 3600 }\n\"modem.v3/frames/radio\"  = { every_s = 900, keyframe_s = 3600 }\n\"modem.v3/frames/bearer\" = { every_s = 900, keyframe_s = 3600 }\n"
-    },
-    {
-      "catalog": {
-        "entries": [
-          {
-            "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
-            "iface": "modem.v3",
-            "index": 0
-          },
-          {
-            "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1",
-            "iface": "config.v1",
-            "index": 1
-          },
-          {
-            "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df",
-            "iface": "health.v1",
-            "index": 2
-          },
-          {
-            "contract": "sha256:4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501",
-            "iface": "config.v1",
-            "index": 3
-          },
-          {
-            "contract": "sha256:60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f",
-            "iface": "health.v1",
-            "index": 4
-          },
-          {
-            "contract": "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
-            "iface": "modem.v3",
-            "index": 5
-          },
-          {
-            "contract": "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
-            "iface": "modem.v3",
-            "index": 6
-          }
-        ],
-        "epoch": 1767225600,
-        "format": "zk2-catalog/1",
-        "lineage": [
-          {
-            "entries": 3,
-            "id": "0a90fd61"
-          },
-          {
-            "entries": 5,
-            "id": "ea268fad"
-          },
-          {
-            "entries": 6,
-            "id": "36c25c0f"
-          }
-        ]
-      },
-      "contracts": [
-        "examples/zk2/zenoh-modem/modem.v3.toml",
-        "spec/profiles/config/config.v1.toml",
-        "spec/profiles/health/health.v1.toml"
-      ],
-      "expect": {
-        "binding": "zm-1.10.2-r1",
-        "catalog": "ab76ec37",
+        "catalog": "e3a529fe",
         "faces": [
           {
             "attach": {
@@ -4160,6 +2771,1072 @@
                   "zk2/*/*/modem.v3/stream/frames/if/**",
                   "zk2/*/*/modem.v3/stream/frames/layer/**",
                   "zk2/*/*/modem.v3/stream/frames/link/**",
+                  "zk2/*/*/modem.v3/stream/frames/message/**",
+                  "zk2/*/*/modem.v3/stream/frames/paid/**",
+                  "zk2/*/*/modem.v3/stream/frames/radio/**",
+                  "zk2/*/*/modem.v3/stream/frames/sched/**",
+                  "zk2/*/*/modem.v3/stream/frames/sdu/**",
+                  "zk2/*/*/modem.v3/stream/frames/slow/**",
+                  "zk2/*/*/modem.v3/stream/if/**",
+                  "zk2/*/*/modem.v3/stream/layer/**",
+                  "zk2/*/*/modem.v3/stream/link/**",
+                  "zk2/*/*/modem.v3/stream/radio/**",
+                  "zk2/*/*/modem.v3/stream/sched/**",
+                  "zk2/*/*/modem.v3/stream/sdu/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@stream",
+                "key_exprs": [
+                  "zk2/*/*/*/@stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "state",
+                "key_exprs": [
+                  "zk2/*/*/*/state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@state",
+                "key_exprs": [
+                  "zk2/*/*/*/@state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events",
+                "key_exprs": [
+                  "zk2/*/*/*/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              }
+            ],
+            "downsampling": null,
+            "far": "ground",
+            "findings": [
+              {
+                "at": "modem.v3/stream/frames/paid",
+                "code": "frame_unlisted",
+                "face": "rf",
+                "severity": "warning"
+              },
+              {
+                "at": "modem.v3/stream/frames/slow",
+                "code": "frame_unlisted",
+                "face": "rf",
+                "severity": "warning"
+              }
+            ],
+            "frames": [
+              {
+                "every_s": 60,
+                "resource": "modem.v3/stream/frames/fast"
+              }
+            ],
+            "liveness": [
+              {
+                "evidence": [
+                  "modem.v3/stream/frames/fast"
+                ],
+                "service": "h-3fa9c2d41b7e/rf0"
+              }
+            ],
+            "name": "rf",
+            "reply_timeout_ms": 15000,
+            "windows": [
+              {
+                "min_s": 3600,
+                "service": "h-3fa9c2d41b7e/rf0"
+              }
+            ]
+          }
+        ],
+        "transport": {
+          "accept_timeout_ms": 10000,
+          "batch_bytes": 222,
+          "interests_timeout_ms": 10000,
+          "keep_alive": 4,
+          "lease_ms": 240000,
+          "open_timeout_ms": 10000,
+          "sequence": "16bit",
+          "wait_before_close_ms": 240000
+        }
+      },
+      "implements": {
+        "rf0": [
+          "modem.v3",
+          "config.v1",
+          "health.v1"
+        ]
+      },
+      "note": "zenoh-modem's RF router (Appendix B, `examples/zk2/zenoh-modem/faces/`) over modem.v3 3.3, which lists link.v1: what it exposes is its three frame resources over one record of all 73 readings, all packed, so none draws `not_packed` (§2.17); 3.2's nine are deprecated and `host`, so they are denied with the reading subtrees; the face lists `frames/fast` at 60 s, crossing whole with no downsampling, and denies `frames/slow` and `frames/paid` by name (`frame_unlisted`, §2.7); `frames/fast`'s 300 s horizon is liveness evidence; one frame a minute replaces each keep-alive, so no `keep_alive_not_suppressed` (§2.16); the catalog the ground holds lists every crossing revision (§2.18)",
+      "policy": "# zenoh-modem's RF node (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\nbinding  = \"zm-1.10.2-r1\"           # the zenoh fork zenoh-modem's routers run\ncatalog  = \"e3a529fe\"               # catalog.json, which the ground holds\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4            # a keep-alive every 60 s, which a frame a minute replaces\nwait_before_close_ms = 240000       # at least the lease\nsequence             = \"16bit\"\nbatch_bytes          = 222          # the radio's 220 B SDU and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.rf]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000            # 5 %\narq              = false            # no link ARQ on the radio (zenoh-modem's tracker)\nreply_timeout_ms = 15000            # 16 full batches take 11.8 s\nhorizon_s        = 120              # one frame a minute affords a 120 s horizon\n\n[face.rf.frames]\n\"modem.v3/frames/fast\" = { every_s = 60 }\n"
+    },
+    {
+      "catalog": {
+        "entries": [
+          {
+            "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+            "iface": "modem.v3",
+            "index": 0
+          },
+          {
+            "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1",
+            "iface": "config.v1",
+            "index": 1
+          },
+          {
+            "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df",
+            "iface": "health.v1",
+            "index": 2
+          },
+          {
+            "contract": "sha256:4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501",
+            "iface": "config.v1",
+            "index": 3
+          },
+          {
+            "contract": "sha256:60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f",
+            "iface": "health.v1",
+            "index": 4
+          },
+          {
+            "contract": "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+            "iface": "modem.v3",
+            "index": 5
+          },
+          {
+            "contract": "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+            "iface": "modem.v3",
+            "index": 6
+          },
+          {
+            "contract": "sha256:dc7c01069bffc9dc5a966c93cfe2444eca0391e71f051bc9bf6d2b2b54d4317b",
+            "iface": "sx1262_config.v1",
+            "index": 7
+          },
+          {
+            "contract": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+            "iface": "modem.v3",
+            "index": 8
+          }
+        ],
+        "epoch": 1767225600,
+        "format": "zk2-catalog/1",
+        "lineage": [
+          {
+            "entries": 3,
+            "id": "0a90fd61"
+          },
+          {
+            "entries": 5,
+            "id": "ea268fad"
+          },
+          {
+            "entries": 6,
+            "id": "36c25c0f"
+          },
+          {
+            "entries": 7,
+            "id": "ab76ec37"
+          },
+          {
+            "entries": 8,
+            "id": "8c808dff"
+          }
+        ]
+      },
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "expect": {
+        "binding": "zm-1.10.2-r1",
+        "catalog": "e3a529fe",
+        "faces": [
+          {
+            "attach": {
+              "shape": "client"
+            },
+            "deny": [
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "zk",
+                "key_exprs": [
+                  "zk2/**/@zk/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "adv",
+                "key_exprs": [
+                  "zk2/**/@adv/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "admin",
+                "key_exprs": [
+                  "@/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:config.v1",
+                "key_exprs": [
+                  "zk2/*/*/config.v1/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:freshness.v2",
+                "key_exprs": [
+                  "zk2/*/*/freshness.v2/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:health.v1",
+                "key_exprs": [
+                  "zk2/*/*/health.v1/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:modem.v3",
+                "key_exprs": [
+                  "zk2/*/*/modem.v3/stream/air/**",
+                  "zk2/*/*/modem.v3/stream/frames/air/**",
+                  "zk2/*/*/modem.v3/stream/frames/bearer/**",
+                  "zk2/*/*/modem.v3/stream/frames/if/**",
+                  "zk2/*/*/modem.v3/stream/frames/layer/**",
+                  "zk2/*/*/modem.v3/stream/frames/link/**",
+                  "zk2/*/*/modem.v3/stream/frames/message/**",
+                  "zk2/*/*/modem.v3/stream/frames/paid/**",
+                  "zk2/*/*/modem.v3/stream/frames/radio/**",
+                  "zk2/*/*/modem.v3/stream/frames/sched/**",
+                  "zk2/*/*/modem.v3/stream/frames/sdu/**",
+                  "zk2/*/*/modem.v3/stream/frames/slow/**",
+                  "zk2/*/*/modem.v3/stream/if/**",
+                  "zk2/*/*/modem.v3/stream/layer/**",
+                  "zk2/*/*/modem.v3/stream/link/**",
+                  "zk2/*/*/modem.v3/stream/radio/**",
+                  "zk2/*/*/modem.v3/stream/sched/**",
+                  "zk2/*/*/modem.v3/stream/sdu/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@stream",
+                "key_exprs": [
+                  "zk2/*/*/*/@stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "state",
+                "key_exprs": [
+                  "zk2/*/*/*/state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@state",
+                "key_exprs": [
+                  "zk2/*/*/*/@state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events",
+                "key_exprs": [
+                  "zk2/*/*/*/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              }
+            ],
+            "downsampling": null,
+            "far": "ground",
+            "findings": [
+              {
+                "at": "modem.v3/stream/frames/paid",
+                "code": "frame_unlisted",
+                "face": "lora",
+                "severity": "warning"
+              },
+              {
+                "at": "modem.v3/stream/frames/slow",
+                "code": "frame_unlisted",
+                "face": "lora",
+                "severity": "warning"
+              },
+              {
+                "at": "transport.keep_alive",
+                "code": "keep_alive_not_suppressed",
+                "face": "lora",
+                "severity": "warning"
+              }
+            ],
+            "frames": [
+              {
+                "every_s": 60,
+                "resource": "modem.v3/stream/frames/fast"
+              }
+            ],
+            "liveness": [
+              {
+                "evidence": [
+                  "modem.v3/stream/frames/fast"
+                ],
+                "service": "h-c2a95e41d7f0/lora0"
+              }
+            ],
+            "name": "lora",
+            "reply_timeout_ms": 15000,
+            "windows": [
+              {
+                "min_s": 3600,
+                "service": "h-c2a95e41d7f0/lora0"
+              }
+            ]
+          }
+        ],
+        "transport": {
+          "accept_timeout_ms": 10000,
+          "batch_bytes": 224,
+          "interests_timeout_ms": 10000,
+          "keep_alive": 4,
+          "lease_ms": 120000,
+          "open_timeout_ms": 10000,
+          "sequence": "16bit",
+          "wait_before_close_ms": 120000
+        }
+      },
+      "implements": {
+        "lora0": [
+          "modem.v3",
+          "config.v1",
+          "health.v1"
+        ]
+      },
+      "note": "zenoh-modem's LoRa router at SF7 (Appendix B): `frames/fast` at 60 s, against a keep-alive interval of 30 s, so the uplink pays a keep-alive between two frames (`keep_alive_not_suppressed`, §2.16); `frames/slow` and `frames/paid` are denied by name (`frame_unlisted`, §2.7)",
+      "policy": "# zenoh-modem's LoRa node at SF7 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"e3a529fe\"\n\n[transport]\nlease_ms             = 120000\nkeep_alive           = 4\nwait_before_close_ms = 120000\nsequence             = \"16bit\"\nbatch_bytes          = 224          # the chip's 222 B frame and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 5469\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nhorizon_s        = 120\n\n[face.lora.frames]\n\"modem.v3/frames/fast\" = { every_s = 60 }\n"
+    },
+    {
+      "catalog": {
+        "entries": [
+          {
+            "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+            "iface": "modem.v3",
+            "index": 0
+          },
+          {
+            "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1",
+            "iface": "config.v1",
+            "index": 1
+          },
+          {
+            "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df",
+            "iface": "health.v1",
+            "index": 2
+          },
+          {
+            "contract": "sha256:4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501",
+            "iface": "config.v1",
+            "index": 3
+          },
+          {
+            "contract": "sha256:60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f",
+            "iface": "health.v1",
+            "index": 4
+          },
+          {
+            "contract": "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+            "iface": "modem.v3",
+            "index": 5
+          },
+          {
+            "contract": "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+            "iface": "modem.v3",
+            "index": 6
+          },
+          {
+            "contract": "sha256:dc7c01069bffc9dc5a966c93cfe2444eca0391e71f051bc9bf6d2b2b54d4317b",
+            "iface": "sx1262_config.v1",
+            "index": 7
+          },
+          {
+            "contract": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+            "iface": "modem.v3",
+            "index": 8
+          }
+        ],
+        "epoch": 1767225600,
+        "format": "zk2-catalog/1",
+        "lineage": [
+          {
+            "entries": 3,
+            "id": "0a90fd61"
+          },
+          {
+            "entries": 5,
+            "id": "ea268fad"
+          },
+          {
+            "entries": 6,
+            "id": "36c25c0f"
+          },
+          {
+            "entries": 7,
+            "id": "ab76ec37"
+          },
+          {
+            "entries": 8,
+            "id": "8c808dff"
+          }
+        ]
+      },
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "expect": {
+        "binding": "zm-1.10.2-r1",
+        "catalog": "e3a529fe",
+        "faces": [
+          {
+            "attach": {
+              "shape": "client"
+            },
+            "deny": [
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "zk",
+                "key_exprs": [
+                  "zk2/**/@zk/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "adv",
+                "key_exprs": [
+                  "zk2/**/@adv/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "admin",
+                "key_exprs": [
+                  "@/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:config.v1",
+                "key_exprs": [
+                  "zk2/*/*/config.v1/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:freshness.v2",
+                "key_exprs": [
+                  "zk2/*/*/freshness.v2/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:health.v1",
+                "key_exprs": [
+                  "zk2/*/*/health.v1/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:modem.v3",
+                "key_exprs": [
+                  "zk2/*/*/modem.v3/stream/air/**",
+                  "zk2/*/*/modem.v3/stream/frames/air/**",
+                  "zk2/*/*/modem.v3/stream/frames/bearer/**",
+                  "zk2/*/*/modem.v3/stream/frames/if/**",
+                  "zk2/*/*/modem.v3/stream/frames/layer/**",
+                  "zk2/*/*/modem.v3/stream/frames/link/**",
+                  "zk2/*/*/modem.v3/stream/frames/message/**",
+                  "zk2/*/*/modem.v3/stream/frames/paid/**",
+                  "zk2/*/*/modem.v3/stream/frames/radio/**",
+                  "zk2/*/*/modem.v3/stream/frames/sched/**",
+                  "zk2/*/*/modem.v3/stream/frames/sdu/**",
+                  "zk2/*/*/modem.v3/stream/frames/slow/**",
+                  "zk2/*/*/modem.v3/stream/if/**",
+                  "zk2/*/*/modem.v3/stream/layer/**",
+                  "zk2/*/*/modem.v3/stream/link/**",
+                  "zk2/*/*/modem.v3/stream/radio/**",
+                  "zk2/*/*/modem.v3/stream/sched/**",
+                  "zk2/*/*/modem.v3/stream/sdu/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@stream",
+                "key_exprs": [
+                  "zk2/*/*/*/@stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "state",
+                "key_exprs": [
+                  "zk2/*/*/*/state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@state",
+                "key_exprs": [
+                  "zk2/*/*/*/@state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events",
+                "key_exprs": [
+                  "zk2/*/*/*/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              }
+            ],
+            "downsampling": null,
+            "far": "ground",
+            "findings": [
+              {
+                "at": "modem.v3/stream/frames/fast",
+                "code": "frame_over_batch",
+                "face": "lora",
+                "severity": "warning"
+              },
+              {
+                "at": "modem.v3/stream/frames/paid",
+                "code": "frame_unlisted",
+                "face": "lora",
+                "severity": "warning"
+              },
+              {
+                "at": "modem.v3/stream/frames/slow",
+                "code": "frame_unlisted",
+                "face": "lora",
+                "severity": "warning"
+              }
+            ],
+            "frames": [
+              {
+                "every_s": 120,
+                "keyframe_s": 900,
+                "resource": "modem.v3/stream/frames/fast"
+              }
+            ],
+            "liveness": [
+              {
+                "evidence": [
+                  "modem.v3/stream/frames/fast"
+                ],
+                "service": "h-c2a95e41d7f0/lora0"
+              }
+            ],
+            "name": "lora",
+            "reply_timeout_ms": 15000,
+            "windows": [
+              {
+                "min_s": 3600,
+                "service": "h-c2a95e41d7f0/lora0"
+              }
+            ]
+          }
+        ],
+        "transport": {
+          "accept_timeout_ms": 10000,
+          "batch_bytes": 117,
+          "interests_timeout_ms": 10000,
+          "keep_alive": 4,
+          "lease_ms": 480000,
+          "open_timeout_ms": 10000,
+          "sequence": "16bit",
+          "wait_before_close_ms": 480000
+        }
+      },
+      "implements": {
+        "lora0": [
+          "modem.v3",
+          "config.v1",
+          "health.v1"
+        ]
+      },
+      "note": "zenoh-modem's LoRa router at SF9 (Appendix B): `frames/fast` at 120 s, asked for a full record every 900 s, which its 15 records reach by a full record every seventh (`keyframe_s`, §2.7); 120 s is the keep-alive interval, so none is paid beside the data (§2.16); its largest frame, 216 B, a delta record that includes every field, is above the 117 B batch (`frame_over_batch`, link.v1 §2.8); `frames/slow` and `frames/paid` are denied by name (`frame_unlisted`, §2.7)",
+      "policy": "# zenoh-modem's LoRa node at SF9 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"e3a529fe\"\n\n[transport]\nlease_ms             = 480000\nkeep_alive           = 4\nwait_before_close_ms = 480000\nsequence             = \"16bit\"\nbatch_bytes          = 117          # the chip's 115 B frame and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 1758\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000            # 16 full batches take 8.5 s\nhorizon_s        = 120\n\n[face.lora.frames]\n\"modem.v3/frames/fast\" = { every_s = 120, keyframe_s = 900 }\n"
+    },
+    {
+      "catalog": {
+        "entries": [
+          {
+            "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+            "iface": "modem.v3",
+            "index": 0
+          },
+          {
+            "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1",
+            "iface": "config.v1",
+            "index": 1
+          },
+          {
+            "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df",
+            "iface": "health.v1",
+            "index": 2
+          },
+          {
+            "contract": "sha256:4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501",
+            "iface": "config.v1",
+            "index": 3
+          },
+          {
+            "contract": "sha256:60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f",
+            "iface": "health.v1",
+            "index": 4
+          },
+          {
+            "contract": "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+            "iface": "modem.v3",
+            "index": 5
+          },
+          {
+            "contract": "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+            "iface": "modem.v3",
+            "index": 6
+          },
+          {
+            "contract": "sha256:dc7c01069bffc9dc5a966c93cfe2444eca0391e71f051bc9bf6d2b2b54d4317b",
+            "iface": "sx1262_config.v1",
+            "index": 7
+          },
+          {
+            "contract": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+            "iface": "modem.v3",
+            "index": 8
+          }
+        ],
+        "epoch": 1767225600,
+        "format": "zk2-catalog/1",
+        "lineage": [
+          {
+            "entries": 3,
+            "id": "0a90fd61"
+          },
+          {
+            "entries": 5,
+            "id": "ea268fad"
+          },
+          {
+            "entries": 6,
+            "id": "36c25c0f"
+          },
+          {
+            "entries": 7,
+            "id": "ab76ec37"
+          },
+          {
+            "entries": 8,
+            "id": "8c808dff"
+          }
+        ]
+      },
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "expect": {
+        "binding": "zm-1.10.2-r1",
+        "catalog": "e3a529fe",
+        "faces": [
+          {
+            "attach": {
+              "shape": "client"
+            },
+            "deny": [
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "zk",
+                "key_exprs": [
+                  "zk2/**/@zk/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "adv",
+                "key_exprs": [
+                  "zk2/**/@adv/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "admin",
+                "key_exprs": [
+                  "@/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:config.v1",
+                "key_exprs": [
+                  "zk2/*/*/config.v1/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:freshness.v2",
+                "key_exprs": [
+                  "zk2/*/*/freshness.v2/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:health.v1",
+                "key_exprs": [
+                  "zk2/*/*/health.v1/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:modem.v3",
+                "key_exprs": [
+                  "zk2/*/*/modem.v3/stream/air/**",
+                  "zk2/*/*/modem.v3/stream/frames/air/**",
+                  "zk2/*/*/modem.v3/stream/frames/bearer/**",
+                  "zk2/*/*/modem.v3/stream/frames/fast/**",
+                  "zk2/*/*/modem.v3/stream/frames/if/**",
+                  "zk2/*/*/modem.v3/stream/frames/layer/**",
+                  "zk2/*/*/modem.v3/stream/frames/link/**",
+                  "zk2/*/*/modem.v3/stream/frames/message/**",
+                  "zk2/*/*/modem.v3/stream/frames/paid/**",
                   "zk2/*/*/modem.v3/stream/frames/radio/**",
                   "zk2/*/*/modem.v3/stream/frames/sched/**",
                   "zk2/*/*/modem.v3/stream/frames/sdu/**",
@@ -4238,52 +3915,367 @@
               }
             ],
             "downsampling": null,
+            "far": "ground",
+            "findings": [
+              {
+                "at": "modem.v3/stream/frames/fast",
+                "code": "frame_unlisted",
+                "face": "lora",
+                "severity": "warning"
+              },
+              {
+                "at": "modem.v3/stream/frames/paid",
+                "code": "frame_unlisted",
+                "face": "lora",
+                "severity": "warning"
+              }
+            ],
+            "frames": [
+              {
+                "every_s": 900,
+                "keyframe_s": 3600,
+                "resource": "modem.v3/stream/frames/slow"
+              }
+            ],
+            "liveness": [
+              {
+                "evidence": [
+                  "modem.v3/stream/frames/slow"
+                ],
+                "service": "h-c2a95e41d7f0/lora0"
+              }
+            ],
+            "name": "lora",
+            "reply_timeout_ms": 120000,
+            "windows": [
+              {
+                "min_s": 3600,
+                "service": "h-c2a95e41d7f0/lora0"
+              }
+            ]
+          }
+        ],
+        "transport": {
+          "accept_timeout_ms": 40000,
+          "batch_bytes": 224,
+          "interests_timeout_ms": 40000,
+          "keep_alive": 4,
+          "lease_ms": 3600000,
+          "open_timeout_ms": 40000,
+          "sequence": "16bit",
+          "wait_before_close_ms": 3600000
+        }
+      },
+      "implements": {
+        "lora0": [
+          "modem.v3",
+          "config.v1",
+          "health.v1"
+        ]
+      },
+      "note": "zenoh-modem's LoRa router at SF12 (Appendix B): `frames/slow` at 900 s, asked for a full record hourly, which its 4 records reach (`keyframe_s`, §2.7); its 1,800 s horizon is twice its cadence and the face's `horizon_s`, so it is liveness evidence with no `interval_over_horizon` or `horizon_under_face` (§2.12); the 900 s keep-alive interval is the cadence, so none is paid beside the data (§2.16); `frames/fast` and `frames/paid` are denied by name (`frame_unlisted`, §2.7)",
+      "policy": "# zenoh-modem's LoRa node at SF12 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"e3a529fe\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 4\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 224          # the fragment layer's 222 B SDU and 2 B of stream framing\nopen_timeout_ms      = 40000\naccept_timeout_ms    = 40000\ninterests_timeout_ms = 40000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 900\nmax_outage_s     = 3600\nlink_bps         = 293\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 120000\nhorizon_s        = 1800\n\n# frames/slow writes a full record at least every 4 (modem.v3), hourly at\n# one every 15 minutes, as the face asks.\n[face.lora.frames]\n\"modem.v3/frames/slow\" = { every_s = 900, keyframe_s = 3600 }\n"
+    },
+    {
+      "catalog": {
+        "entries": [
+          {
+            "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+            "iface": "modem.v3",
+            "index": 0
+          },
+          {
+            "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1",
+            "iface": "config.v1",
+            "index": 1
+          },
+          {
+            "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df",
+            "iface": "health.v1",
+            "index": 2
+          },
+          {
+            "contract": "sha256:4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501",
+            "iface": "config.v1",
+            "index": 3
+          },
+          {
+            "contract": "sha256:60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f",
+            "iface": "health.v1",
+            "index": 4
+          },
+          {
+            "contract": "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+            "iface": "modem.v3",
+            "index": 5
+          },
+          {
+            "contract": "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+            "iface": "modem.v3",
+            "index": 6
+          },
+          {
+            "contract": "sha256:dc7c01069bffc9dc5a966c93cfe2444eca0391e71f051bc9bf6d2b2b54d4317b",
+            "iface": "sx1262_config.v1",
+            "index": 7
+          },
+          {
+            "contract": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+            "iface": "modem.v3",
+            "index": 8
+          }
+        ],
+        "epoch": 1767225600,
+        "format": "zk2-catalog/1",
+        "lineage": [
+          {
+            "entries": 3,
+            "id": "0a90fd61"
+          },
+          {
+            "entries": 5,
+            "id": "ea268fad"
+          },
+          {
+            "entries": 6,
+            "id": "36c25c0f"
+          },
+          {
+            "entries": 7,
+            "id": "ab76ec37"
+          },
+          {
+            "entries": 8,
+            "id": "8c808dff"
+          }
+        ]
+      },
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "expect": {
+        "binding": "zm-1.10.2-r1",
+        "catalog": "e3a529fe",
+        "faces": [
+          {
+            "attach": {
+              "shape": "client"
+            },
+            "deny": [
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "zk",
+                "key_exprs": [
+                  "zk2/**/@zk/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "adv",
+                "key_exprs": [
+                  "zk2/**/@adv/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "admin",
+                "key_exprs": [
+                  "@/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:config.v1",
+                "key_exprs": [
+                  "zk2/*/*/config.v1/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:freshness.v2",
+                "key_exprs": [
+                  "zk2/*/*/freshness.v2/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:health.v1",
+                "key_exprs": [
+                  "zk2/*/*/health.v1/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:modem.v3",
+                "key_exprs": [
+                  "zk2/*/*/modem.v3/stream/air/**",
+                  "zk2/*/*/modem.v3/stream/frames/air/**",
+                  "zk2/*/*/modem.v3/stream/frames/bearer/**",
+                  "zk2/*/*/modem.v3/stream/frames/fast/**",
+                  "zk2/*/*/modem.v3/stream/frames/if/**",
+                  "zk2/*/*/modem.v3/stream/frames/layer/**",
+                  "zk2/*/*/modem.v3/stream/frames/link/**",
+                  "zk2/*/*/modem.v3/stream/frames/message/**",
+                  "zk2/*/*/modem.v3/stream/frames/radio/**",
+                  "zk2/*/*/modem.v3/stream/frames/sched/**",
+                  "zk2/*/*/modem.v3/stream/frames/sdu/**",
+                  "zk2/*/*/modem.v3/stream/frames/slow/**",
+                  "zk2/*/*/modem.v3/stream/if/**",
+                  "zk2/*/*/modem.v3/stream/layer/**",
+                  "zk2/*/*/modem.v3/stream/link/**",
+                  "zk2/*/*/modem.v3/stream/radio/**",
+                  "zk2/*/*/modem.v3/stream/sched/**",
+                  "zk2/*/*/modem.v3/stream/sdu/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@stream",
+                "key_exprs": [
+                  "zk2/*/*/*/@stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "state",
+                "key_exprs": [
+                  "zk2/*/*/*/state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@state",
+                "key_exprs": [
+                  "zk2/*/*/*/@state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events",
+                "key_exprs": [
+                  "zk2/*/*/*/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              }
+            ],
+            "downsampling": null,
             "far": "ground-gateway",
             "findings": [
               {
-                "at": "modem.v3/stream/frames/air",
+                "at": "modem.v3/stream/frames/fast",
                 "code": "frame_unlisted",
                 "face": "sbd",
                 "severity": "warning"
               },
               {
-                "at": "modem.v3/stream/frames/bearer",
-                "code": "frame_unlisted",
-                "face": "sbd",
-                "severity": "warning"
-              },
-              {
-                "at": "modem.v3/stream/frames/if",
-                "code": "frame_unlisted",
-                "face": "sbd",
-                "severity": "warning"
-              },
-              {
-                "at": "modem.v3/stream/frames/layer",
-                "code": "frame_unlisted",
-                "face": "sbd",
-                "severity": "warning"
-              },
-              {
-                "at": "modem.v3/stream/frames/link",
-                "code": "frame_unlisted",
-                "face": "sbd",
-                "severity": "warning"
-              },
-              {
-                "at": "modem.v3/stream/frames/radio",
-                "code": "frame_unlisted",
-                "face": "sbd",
-                "severity": "warning"
-              },
-              {
-                "at": "modem.v3/stream/frames/sched",
-                "code": "frame_unlisted",
-                "face": "sbd",
-                "severity": "warning"
-              },
-              {
-                "at": "modem.v3/stream/frames/sdu",
+                "at": "modem.v3/stream/frames/slow",
                 "code": "frame_unlisted",
                 "face": "sbd",
                 "severity": "warning"
@@ -4292,12 +4284,14 @@
             "frames": [
               {
                 "every_s": 1800,
-                "resource": "modem.v3/stream/frames/message"
+                "resource": "modem.v3/stream/frames/paid"
               }
             ],
             "liveness": [
               {
-                "evidence": [],
+                "evidence": [
+                  "modem.v3/stream/frames/paid"
+                ],
                 "service": "h-71c0e2a9d4b3/sat0"
               }
             ],
@@ -4329,8 +4323,8 @@
           "health.v1"
         ]
       },
-      "note": "zenoh-modem's SBD router (Appendix B): the face exposes `frames/message` alone, at the keep-alive interval, so a message replaces a keep-alive (\u00a72.16); the other eight frames are denied by name (`frame_unlisted`, \u00a72.7); `frames/message` declares no horizon, so the plan lists no evidence, and liveness across the face is unobservable (link.v1 \u00a72.12)",
-      "policy": "# zenoh-modem's SBD terminal (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-71c0e2a9d4b3\"\nservices = [\"sat0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"ab76ec37\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 2\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 271          # a message's 270 B, as configs/zenohd-sat0.json5 ships it\nopen_timeout_ms      = 1000000\naccept_timeout_ms    = 1000000\ninterests_timeout_ms = 1000000\n\n[face.sbd]\nfar              = \"ground-gateway\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 1800\nmax_outage_s     = 86400\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 1000000\nhorizon_s        = 3600\n\n[face.sbd.frames]\n\"modem.v3/frames/message\" = { every_s = 1800 }\n"
+      "note": "zenoh-modem's SBD router (Appendix B): the face exposes `frames/paid` alone, every frame a full record, at the keep-alive interval, so a message replaces a keep-alive (§2.16); `frames/fast` and `frames/slow` are denied by name (`frame_unlisted`, §2.7); `frames/paid`'s 3,600 s horizon is the face's `horizon_s`, so the plan lists it as evidence, and liveness across the face is observable (link.v1 §2.12)",
+      "policy": "# zenoh-modem's SBD terminal (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-71c0e2a9d4b3\"\nservices = [\"sat0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"e3a529fe\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 2\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 271          # a message's 270 B, as configs/zenohd-sat0.json5 ships it\nopen_timeout_ms      = 1000000\naccept_timeout_ms    = 1000000\ninterests_timeout_ms = 1000000\n\n[face.sbd]\nfar              = \"ground-gateway\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 1800\nmax_outage_s     = 86400\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 1000000\nhorizon_s        = 3600\n\n[face.sbd.frames]\n\"modem.v3/frames/paid\" = { every_s = 1800 }\n"
     },
     {
       "contracts": [

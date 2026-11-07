@@ -55,7 +55,7 @@ GROUND = REPO / "impl" / "python" / "interop" / "state" / "zk2py_ground.v1.toml"
 RELAY = REPO / "impl" / "python" / "interop" / "state" / "zk2py_relay.v1.toml"
 PACE = REPO / "impl" / "python" / "interop" / "timing" / "pace.v1.toml"
 IFACE = "zk2py_ground.v1"
-BLACKBOX = Path(os.environ.get("ZK2PY_BLACKBOX", "/srv/dev/targets/zenkey-tier/blackbox"))
+BLACKBOX = Path(os.environ.get("ZK2PY_BLACKBOX", "/srv/dev/scratch/zenkey/bin/current"))
 PAIRINGS = ("py-py", "rust-py", "py-rust")
 
 #: Each section a pairing cannot run, and why.

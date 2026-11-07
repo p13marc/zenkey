@@ -7,7 +7,7 @@ are 0.2's and 0.3's, reworded by #935's passes with no rule changed):
 Each section runs on in-process zenoh-python 1.10.1 routers, every listener
 on a free loopback port, with zk2py's parties and, where they can play
 them, the reference's black boxes (``owner`` and ``zenctl`` in
-``$ZK2PY_BLACKBOX``, by default ``/srv/dev/targets/zenkey-tier/blackbox``),
+``$ZK2PY_BLACKBOX``, by default ``/srv/dev/scratch/zenkey/bin/current``),
 run and never read:
 
 - ``grammar1``: ``grammar.md`` §1, "The guard" (core §1.3), steps 1 to 4
@@ -58,7 +58,7 @@ INTEROP = REPO / "impl" / "python" / "interop"
 GUARD = INTEROP / "grammar" / "zk2py_guard.v1.toml"
 FROZEN = INTEROP / "operations" / "zk2py_frozen.v1.toml"
 TC = INTEROP / "zk2py_tc.v1.toml"
-BLACKBOX = Path(os.environ.get("ZK2PY_BLACKBOX", "/srv/dev/targets/zenkey-tier/blackbox"))
+BLACKBOX = Path(os.environ.get("ZK2PY_BLACKBOX", "/srv/dev/scratch/zenkey/bin/current"))
 OWNER, ZENCTL = BLACKBOX / "owner", BLACKBOX / "zenctl"
 EVERY = ["@stream", "@state", "@op", "@adv", "@zk"]
 #: grammar.md §1's data resources, in the order the owner puts them

@@ -405,7 +405,7 @@ def _two_roots(old: Path, new: Path) -> list[Result]:
 def _walk_contracts(root: Path, ex: Path, history: Path, label: str, skip: tuple[str, ...] = ()) -> list[Result]:
     import re
 
-    from . import bundle
+    from . import bundle, config_v2
     from .contract import load_contract
     from .history import check_history
 
@@ -420,6 +420,12 @@ def _walk_contracts(root: Path, ex: Path, history: Path, label: str, skip: tuple
         out.append((rel, ok, "" if ok else "; ".join(f"{d.code} {d.message}" for d in c.diagnostics)))
         if not c.valid:
             continue
+        if config_v2.uses_config_v2(c):
+            # config.v2 §2.2 (round 102): "An implementation that lints a
+            # contract MUST report an invalid declaration or a finding as an
+            # error."
+            found = config_v2.lint(*config_v2.resolved(c))
+            out.append((f"{rel} (config.v2 §2.2's lint)", not found, "" if not found else str(found)))
         try:
             data = bundle.build(c)
         except NotImplementedError as e:
@@ -910,7 +916,8 @@ def _link_v2(path: Path) -> list[Result]:
         data = _load_json(f)
         if f.name == "lints.json":
             for c in data["cases"]:
-                out.append(_check(f"v2 lints: {c['note']}", link_v2.lint(c["policy"]), c["expect"]))
+                out.append(_check(f"v2 lints: {c['note']}", link_v2.lint(c["policy"], block=c.get("block")),
+                                  c["expect"]))
         elif f.name == "exposure.json":
             for c in data["cases"]:
                 out.append(_check(f"v2 exposure: {c['note']}", link_v2.exposure(c), c["expect"]))
@@ -1036,17 +1043,255 @@ def _telemetry_contracts(path: Path) -> list[Result]:
     return out
 
 
-def _config_v2_not_read(path: Path) -> list[Result]:
-    """``config.v2`` 0.1 (#985 G1, main b483902e): its fixtures under
-    ``conformance/v2/`` and the contract they load under ``contracts/``
-    (``rfcfg.v1``). Keyed as present and not read this round: round 101
-    reads core 0.94's flip (#985 C4c), and #985's later round reads
-    ``config.v2`` once its owner (G2) and its tools (G3) land. So each entry
-    is named, never failed as unknown, and never counted as read; zk2py
-    files no finding on it."""
-    print(f"NOTE config: {path.name}/ is config.v2 0.1's (#985 G1): present, not read this round", file=sys.stderr)
-    return [(f"{path.name}/ (config.v2 0.1, #985 G1): present, not read this round, for #985's round after G2 and G3",
-             True, "")]
+def _config_v2(path: Path) -> list[Result]:
+    """``config.v2`` 0.1's fixtures (``conformance/v2/``, #985 G1; round
+    102): ``derive.json`` (the declaration, the derived types and their
+    layouts, the contract's lint), ``records.json`` (writes, reads, two
+    revisions), ``validation.json`` (requests before any act, desired
+    documents), ``window.json`` (times rounded up), ``lifecycle.json`` (the
+    owner's puts, replies and events, step by step) and ``redaction.json``,
+    each through :mod:`zk2py.config_v2`. An unknown file fails."""
+    runs = {"derive.json": _config_v2_derive, "records.json": _config_v2_records,
+            "validation.json": _config_v2_validation, "window.json": _config_v2_window,
+            "lifecycle.json": _config_v2_lifecycle, "redaction.json": _config_v2_redaction}
+    out: list[Result] = []
+    for f in sorted(path.iterdir()):
+        if f.name == "README.md":
+            continue
+        run = runs.get(f.name)
+        if run is None:
+            out.append((f"v2/{f.name}", False, "an unknown fixture file: the runner does not read it"))
+            continue
+        out += run(f)
+    return out
+
+
+def _config_v2_layout(fixture: Path, data: dict[str, Any]):
+    from . import config_v2 as c2
+    from .contract import load_contract
+
+    k = load_contract(fixture.parent.parent / data["contract"], check_file_name=True)
+    return c2.Layout.of_contract(k)
+
+
+def _config_v2_derive(path: Path) -> list[Result]:
+    """§2.2 "Reading it" and "The contract's lint", §3: each case's groups
+    against ``schema`` (stem ``schema``) -> the declared groups, the derived
+    types and their layouts, or the reasons; each contract case -> its
+    findings in order."""
+    import copy
+
+    from . import config_v2 as c2
+    from .contract import load_contract
+
+    d = _load_json(path)
+    out: list[Result] = []
+    docs = c2.Docs([("schema", d["schema"])])
+    std = c2.standard_schema_id()
+    out.append(_check("v2 derive: the standard schema's id is config.v2.json's JCS bytes' (§3)",
+                      [d["standard_schema"]["file"], std], ["config.v2.json", d["standard_schema"]["id"]]))
+    k = load_contract(path.parent.parent / "contracts" / "rfcfg.v1.toml", check_file_name=True)
+    res, _, kd = c2.resolved(k)
+    groups = c2.read_groups(res["config"]["annotations"]["config.groups"], kd).expect().get("groups")
+    out.append(_check("v2 derive: contract_groups, the test contract's declared groups", groups,
+                      d["contract_groups"]))
+    for i, c in enumerate(d["cases"]):
+        decl = c2.read_groups(c["groups"], docs)
+        got = decl.expect()
+        if decl.valid:
+            der = c2.derive(decl)
+            got["derived"] = {n: {"fields": f} for n, f in der.items()}
+            got["layouts"] = c2.layouts(der)
+        out.append(_check(f"v2 derive #{i}: {c['note']}", got, c["expect"]))
+    for i, c in enumerate(d["contracts"]):
+        if "contract" in c:
+            kk = load_contract(path.parent.parent / c["contract"], check_file_name=True)
+            resources, uses, cd = c2.resolved(kk)
+        else:
+            base = copy.deepcopy(d["contracts_base"])
+            resources = base["resources"]
+            for t, r in (c.get("resources") or {}).items():
+                if r is None:
+                    resources.pop(t, None)
+                else:
+                    resources[t] = r
+            uses = c.get("uses", base["uses"])
+            pk = copy.deepcopy(d["contracts_packed"])
+            for n, t in (c.get("types") or {}).items():
+                pk["types"][n] = t
+            cd = c2.Docs([("rfcfg", pk)])
+        out.append(_check(f"v2 derive, contract #{i}: {c['note']}", c2.lint(resources, uses, cd, std),
+                          c["expect"]["findings"]))
+    return out
+
+
+def _config_v2_records(path: Path) -> list[Result]:
+    """§2.3, §3: the Record's layout; each write's fields, bits, bytes, put
+    and reply, read back to its state; each read, a state or the first
+    refusal; two revisions read by each other."""
+    from . import config_v2 as c2
+    from . import packed, zk2c
+
+    d = _load_json(path)
+    L = _config_v2_layout(path, d)
+    lo, hi = L.record.bit_bounds()
+    out = [_check("v2 records: the Record's tag, layout hash and bit bounds",
+                  {"tag": L.record.tag, "sha256": L.record.layout_sha256(), "min_bits": lo, "max_bits": hi},
+                  d["layout"])]
+    for i, w in enumerate(d["writes"]):
+        f = c2.state_fields(L, w["state"])
+        raw = L.record.write(f, w["epoch"])
+        st = w["stamp"]
+        s = zk2c.InBand(st["run_width"], st["run"], st["seq"])
+        got = {"fields": f, "bits": L.record.write_bits(f, w["epoch"]), "hex": raw.hex(), "bytes": len(raw),
+               "mutation": zk2c.mutation(s, raw, L.record.tag).hex(), "value": c2.value_form(L, s, raw).hex()}
+        back = c2.read_record(L, L.record.tag, raw, w["epoch"])
+        out.append(_check(f"v2 records, write #{i}: {w['note']}", [got, back], [w["expect"], w["state"]]))
+
+    def read(layout: Any, tag: int, hexed: str, epoch: int = 0) -> dict[str, Any]:
+        try:
+            return {"state": c2.read_record(layout, tag, bytes.fromhex(hexed), epoch)}
+        except (packed.Refused, c2.RecordRefused) as e:
+            return {"refused": e.token}
+
+    for i, r in enumerate(d["reads"]):
+        out.append(_check(f"v2 records, read #{i}: {r['note']}", read(L, r["tag"], r["hex"], r["epoch"]),
+                          r["expect"]))
+    g = d["growth"]
+    revs = {rev: c2.Layout.of(c2.Declaration.of_declared(items)) for rev, items in g["groups"].items()}
+    out.append(_check("v2 records, growth: the Record's tag is the earlier revision's (core §7.6, §3 \"Growth\")",
+                      revs["1.0"].record.tag == revs["1.1"].record.tag, True))
+    for r in g["records"]:
+        lr, lw = revs[r["read_by"]], revs[r["written_by"]]
+        got = [read(lr, lr.record.tag, r["hex"])]
+        want = [r["expect"]]
+        if r["read_by"] == r["written_by"] and "state" in r["expect"]:
+            got.append(c2.write_record(lw, r["expect"]["state"]).hex())
+            want.append(r["hex"])
+        out.append(_check(f"v2 records, growth: {r['written_by']}'s record read by {r['read_by']}", got, want))
+    for r in g["reads"]:
+        lr = revs[r["read_by"]]
+        out.append(_check(f"v2 records, growth read: {r['note']}", read(lr, lr.record.tag, r["hex"]), r["expect"]))
+    return out
+
+
+def _config_v2_validation(path: Path) -> list[Result]:
+    """§2.5, §2.10, §2.13, §2.18: each request against its state, accepted or
+    its refusal and error form; its fields written to its hex; each desired
+    document."""
+    from . import config_v2 as c2
+    from . import zk2c
+
+    d = _load_json(path)
+    L = _config_v2_layout(path, d)
+    st = d["stamp"]
+    s = zk2c.InBand(st["run_width"], st["run"], st["seq"])
+    out = [_check("v2 validation: Error's tag", L.error.tag, d["error_tag"])]
+    for i, c in enumerate(d["cases"]):
+        req, r = c2.check_request(L, c["op"], c.get("group"), bytes.fromhex(c["hex"]), c2.Facts.of(c["state"]))
+        got: list[Any] = [{"accepted": True} if r is None else
+                          {"refused": r.expect(), "reply_err": c2.error_form(L, s, r).hex()}]
+        want: list[Any] = [c["expect"]]
+        if c["fields"] is not None:
+            rec = L.set_type(c["group"]) if c["op"] == "set" else L.control
+            got += [req, zk2c.request(rec.write(c["fields"]), rec.tag).hex()]
+            want += [c["fields"], c["hex"]]
+        out.append(_check(f"v2 validation #{i} {c['op']}: {c['note']}", got, want))
+    for i, c in enumerate(d["desired"]):
+        r = c2.check_desired(L, c["document"], tuple(c["writable"]))
+        out.append(_check(f"v2 validation, desired #{i}: {c['note']}",
+                          {"accepted": True} if r is None else {"refused": r}, c["expect"]))
+    return out
+
+
+def _config_v2_window(path: Path) -> list[Result]:
+    """§2.8: the window, the deadline and apply_at rounded up, and their
+    codes under the epoch."""
+    from . import config_v2 as c2
+
+    out: list[Result] = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        dl = c2.deadline_ms(c["received"], c["confirm_s"], c["floor_s"])
+        got = {"window_s": c2.window_s(c["confirm_s"], c["floor_s"]), "deadline": dl,
+               "deadline_code": c2.time_code(dl, c["epoch"])}
+        if "device_apply_at" in c:
+            a = c2.round_up(c["device_apply_at"])
+            got.update(apply_at=a, apply_at_code=c2.time_code(a, c["epoch"]))
+        out.append(_check(f"v2 window #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _config_v2_lifecycle(path: Path) -> list[Result]:
+    """§2.3, §2.5 to §2.14, §2.17: each sequence on one :class:`Core`, its
+    start and each step's acts, puts, reply and events, byte for byte."""
+    from . import config_v2 as c2
+
+    d = _load_json(path)
+    L = _config_v2_layout(path, d)
+    out: list[Result] = []
+    for i, c in enumerate(d["cases"]):
+        core, results = c2.core_of_setup(L, c["setup"])
+        got, want = [c2.step_expect(L, core.start_step)], [c["start"]]
+        for s in c["steps"]:
+            g = c2.step_expect(L, c2.run_step(core, results, s))
+            got.append(g)
+            want.append(s["expect"])
+        out.append(_check(f"v2 lifecycle #{i}: {c['note']}", got, want))
+    return out
+
+
+def _config_v2_redaction(path: Path) -> list[Result]:
+    """§2.15: sim's part of the record, the reply, the event's edits and the
+    log line for each call on sim; and two PINs whose records are one."""
+    from . import config_v2 as c2
+    from . import zk2c
+
+    d = _load_json(path)
+    L = _config_v2_layout(path, d)
+    out: list[Result] = []
+    for i, c in enumerate(d["cases"]):
+        core, results = c2.core_of_setup(L, c["setup"])
+        for s in c["before"]:
+            c2.run_step(core, results, s)
+        step = c2.run_step(core, results, {"t": 10_000, "do": c["op"], "group": "sim", "hex": c["hex"],
+                                           "device": [{"refused": c["device_words"]}] if c["device_words"] else []})
+        v = c2.step_expect(L, step)
+        rec = v["reply"]["value"]["record"] if v["reply"] and "value" in v["reply"] else core.state()
+        got = {"sim": {k: x for k, x in c2.state_fields(L, rec).items() if k.startswith("sim__")},
+               "reply": v["reply"], "edits": v["events"][0]["event"]["edits"] if v["events"] else None,
+               "log": step.logged}
+        sensitive_in_log = any("1234" in line or "9999" in line for line in core.log)
+        out.append(_check(f"v2 redaction #{i}: {c['note']}", [got, sensitive_in_log], [c["expect"], False]))
+    puts = []
+    for p in d["same_bytes"]:
+        core, _ = c2.core_of_setup(L, d["cases"][0]["setup"])
+        rec = L.set_type("sim")
+        puts.append(core.set("sim", zk2c.request(rec.write(p["fields"]), rec.tag), 0).puts[0].payload.hex())
+    out.append(_check("v2 redaction, same_bytes: two PINs set, one record, byte for byte",
+                      puts, [p["hex"] for p in d["same_bytes"]]))
+    return out
+
+
+def _config_v2_contracts(path: Path) -> list[Result]:
+    """``conformance/contracts/`` (config.v2 0.1): ``rfcfg.v1``, the test
+    contract, loads with no finding (no W105: core Appendix D lists no
+    ``config`` vocabulary), lints clean under §2.2, and its packed file
+    ``rfcfg.json`` is strict JSON."""
+    from . import config_v2 as c2
+    from .contract import load_contract
+
+    out: list[Result] = []
+    for f in sorted(path.iterdir()):
+        if f.suffix == ".toml":
+            k = load_contract(f, check_file_name=True)
+            res, uses, docs = c2.resolved(k)
+            out.append(_check(f"contracts/{f.name}: loads with no finding, and config.v2's lint finds nothing "
+                              "(§2.2)", [k.valid, k.codes, c2.lint(res, uses, docs)], [True, [], []]))
+        elif f.suffix == ".json":
+            out.append(_check(f"contracts/{f.name}: strict JSON", isinstance(_load_json(f), dict), True))
+        else:
+            out.append((f"contracts/{f.name}", False, "an unknown file: the runner does not read it"))
+    return out
 
 
 def _alarms_keys(path: Path) -> list[Result]:
@@ -1638,7 +1883,7 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
                "codes.json": _health_codes, "clock.json": _health_clock},
     "config": {"validation.json": _config_validation, "window.json": _config_window,
                "lifecycle.json": _config_lifecycle, "desired.json": _config_desired,
-               "redaction.json": _config_redaction, "v2": _config_v2_not_read, "contracts": _config_v2_not_read},
+               "redaction.json": _config_redaction, "v2": _config_v2, "contracts": _config_v2_contracts},
     "link": {"exposure.json": _link_exposure, "plan.json": _link_plan, "lints.json": _link_lints, "v2": _link_v2,
              "contracts": _link_contracts},
     "alarms": {"keys.json": _alarms_keys, "documents.json": _alarms_documents,
@@ -3755,7 +4000,7 @@ def family_readings(root: Path) -> list[Result]:
         + _mend_after_round93_readings(root) + _round94_readings(root) + _mend_after_round94_readings(root) \
         + _round95_readings(root) + _round96_readings(root) + _round96_k1_readings(root) + _round97_readings(root) \
         + _round98_readings(root) + _round99_readings(root) + _round100_readings(root) \
-        + _round101_readings(root)
+        + _round101_readings(root) + _round102_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -4334,44 +4579,50 @@ annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "1" }
                  ["freshness.v2/stream/heartbeat/probe.v1", "probe.v1/state/status", "probe.v1/stream/frames/link"]]))
 
     # #983's last "Done when" item (main 2ed6d968, the coordinator's addition
-    # to round 99): modem.v3 3.2's frames and gendev.v1's frames/sample,
-    # written by zk2py's Framer and read back through its reader and R.
+    # to round 99): modem.v3's frames and gendev.v1's frames/sample, written
+    # by zk2py's Framer and read back through its reader and R. Since
+    # modem.v3 3.3 (#991, carried by round 102): 3.2's nine, deprecated, and
+    # 3.3's three over one record of all 73 readings.
     from . import adopter_frames
 
     rows = adopter_frames.run()
     sizes = {f"{x['interface']}/{x['resource']}": x for x in rows}
-    out.append(("#983 T4: modem.v3 3.2's nine frame resources and gendev.v1 1.1's frames/sample, each declared, "
-                "written by zk2py's Framer under a 32-bit run, read back envelope first, written again byte for byte, "
-                "and every series field of every record a sample of the value written, paired by seq; link.v1 "
-                "0.16 §2.8's largest frame measured at frame_facts' size, frames/link 22 B and frames/message 213 B "
-                "(keyframe_every 1) and frames/sample 100 B",
+    out.append(("#983 T4 at modem.v3 3.3 (#991): its twelve frame resources, 3.2's nine deprecated and frames/fast, "
+                "frames/slow and frames/paid, and gendev.v1 1.1's frames/sample, each declared, written by zk2py's "
+                "Framer under a 32-bit run, read back envelope first, written again byte for byte, and every series "
+                "field of every record a sample of the value written, paired by seq; link.v1 0.16 §2.8's largest "
+                "frame measured at frame_facts' size, frames/link 22 B, frames/message 213 B and frames/paid 207 B "
+                "(keyframe_every 1), frames/fast and frames/slow 216 B and frames/sample 100 B",
                 [len(rows), all(x["declared"] == "declared" and x["read_back"] and x["samples"]
                                 and x["follows"] == ["first", "continues"] for x in rows),
                  all(x["largest_frame_bytes"] == x["largest_bytes"] for x in rows),
                  [sizes.get(k, {}).get("largest_frame_bytes")
-                  for k in ("modem.v3/frames/link", "modem.v3/frames/message", "gendev.v1/frames/sample")]],
-                [10, True, True, [22, 213, 100]]))
+                  for k in ("modem.v3/frames/link", "modem.v3/frames/message", "modem.v3/frames/paid",
+                            "modem.v3/frames/fast", "modem.v3/frames/slow", "gendev.v1/frames/sample")]],
+                [13, True, True, [22, 213, 207, 216, 216, 100]]))
     # F-470 answered (link.v1 0.16 §2.8): "the largest frame holds records −
     # ⌊records / keyframe_every⌋ such delta records, and full records for
     # the rest". zk2py's writer never puts a frame above it, and puts it
     # where every field changes; examples/zk2/zenoh-modem/README.md states
-    # the group frames' new sizes.
+    # each frame's size, 3.3's three and 3.2's nine.
     readme = (spec.parent / "examples" / "zk2" / "zenoh-modem" / "README.md").read_text(encoding="utf-8")
     stated = {m.group(1): int(m.group(2)) for m in re.finditer(r"^\| `(frames/\w+)` \|.*\| (\d+) B \|$", readme, re.M)}
     out.append(("F-470 at link.v1 0.16: the largest frame holds records − ⌊records / keyframe_every⌋ delta records "
                 "that include every field; zk2py's writer puts no frame above it and reaches it where every field "
-                "changes (frames/layer 109 B, frames/sample 100 B); zenoh-modem's README states each modem.v3 size "
-                "zk2py measures",
+                "changes (frames/layer 109 B, frames/fast and frames/slow 216 B over a 207 B full record, "
+                "frames/sample 100 B); zenoh-modem's README states each modem.v3 size zk2py measures, 3.3's three "
+                "and 3.2's nine",
                 missing(flat("profiles/link/v1.md"), "so the largest frame holds `records` −")
                 + [all(x["delta_frame_bytes"] <= x["largest_bytes"] for x in rows),
                    {k: (x["full_frame_bytes"], x["largest_bytes"]) for k, x in sizes.items()
                     if x["full_frame_bytes"] != x["largest_bytes"]},
                    {k.split("/", 1)[1]: x["largest_bytes"] for k, x in sizes.items() if k.startswith("modem.v3/")}
-                   == stated],
+                   == stated, len(stated)],
                 [True, {"modem.v3/frames/air": (49, 50), "modem.v3/frames/bearer": (32, 33),
-                        "modem.v3/frames/if": (58, 60), "modem.v3/frames/layer": (106, 109),
-                        "modem.v3/frames/radio": (21, 22), "modem.v3/frames/sched": (32, 33),
-                        "modem.v3/frames/sdu": (51, 52), "gendev.v1/frames/sample": (97, 100)}, True]))
+                        "modem.v3/frames/fast": (207, 216), "modem.v3/frames/if": (58, 60),
+                        "modem.v3/frames/layer": (106, 109), "modem.v3/frames/radio": (21, 22),
+                        "modem.v3/frames/sched": (32, 33), "modem.v3/frames/sdu": (51, 52),
+                        "modem.v3/frames/slow": (207, 216), "gendev.v1/frames/sample": (97, 100)}, True, 12]))
 
     # Review-bot on round 98 (PR #1041): the meter accepts after the put.
     mf = spec / "profiles" / "telemetry" / "conformance" / "contracts" / "meterframe.v1.toml"
@@ -4551,12 +4802,14 @@ def _round101_readings(root: Path) -> list[tuple[str, Any, Any]]:
     core, obs, ops = flat("core.md"), flat("observer.md"), flat("scenarios/operations.md")
     m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
     core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    m = re.search(r"\| \*\*Text version\*\* \| (\d+)\.(\d+)", obs)
+    obs_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
     out: list[tuple[str, Any, Any]] = [
-        ("core 0.94 or later and observer 0.24, written against it, each with its entry (#985 C4c)",
-         [core_v >= (0, 94)] + entry("CHANGELOG.md", "0.94", "value and error forms")
-         + entry("observer-CHANGELOG.md", "0.24", "a call's forms read first")
-         + missing(obs, "| **Text version** | 0.24", "| **Written against** | core 0.94"),
-         [True]),
+        ("core 0.94 or later and observer 0.24 or later, each with its entry (#985 C4c); observer 0.25 is written "
+         "against core 0.95 (round 102)",
+         [core_v >= (0, 94), obs_v >= (0, 24)] + entry("CHANGELOG.md", "0.94", "value and error forms")
+         + entry("observer-CHANGELOG.md", "0.24", "a call's forms read first"),
+         [True, True]),
     ]
     # The evidence, as 0.94's entry counts it: calls.json new, the others'
     # cases unchanged since 0.92.
@@ -4624,8 +4877,11 @@ def _round101_readings(root: Path) -> list[tuple[str, Any, Any]]:
     rules = (spec / "RULES.md").read_text(encoding="utf-8")
     counted = {n: int(c) for n, c in re.findall(r"^\| \[([^\]]+)\]\(#[^)]*\) \| (\d+)", rules, re.M)}
     once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
-    out.append(("core 0.94's entry: RULES.md lists 239 rules, 7 more; the owner 73, the caller 18",
-                [int(once.group(1)) if once else None, counted.get("Owner"), counted.get("Caller")], [239, 73, 18]))
+    out.append(("core 0.94's entry: RULES.md lists 239 rules, 7 more; the owner 73, the caller 18 (core 0.96's "
+                "index lists more, round 102)",
+                missing(" ".join((spec / "CHANGELOG.md").read_text(encoding="utf-8").split()),
+                        "lists 239 rules")
+                + [(int(once.group(1)) if once else 0) >= 239, counted.get("Caller")], [True, 18]))
     # F-472: §5.2's Decoding MUST binds "a caller or a tool that reads the
     # bare wire", and RULES.md lists it under the caller alone, where the two
     # reading MUSTs of the same subject are under both.
@@ -4634,51 +4890,545 @@ def _round101_readings(root: Path) -> list[tuple[str, Any, Any]]:
     rows = classes._rules_md(spec)
     dec = sorted(r[0] for r in rows if r[1] == "core §5.2" and "**Decoding.**" in r[3])
     read = sorted(r[0] for r in rows if r[1] == "core §5.2" and "MUST read a `reply_err` under" in r[3])
-    out.append(("F-472 (open): §5.2's Decoding MUST, of \"A caller or a tool that reads the bare wire\", is listed "
-                "under the caller alone; the reading MUST beside it, of the same subject, under both; the observer "
-                "class counts 69",
+    out.append(("F-472 (round 101; answered by core 0.95's index, round 102): §5.2's Decoding MUST, of \"A caller or "
+                "a tool that reads the bare wire\", was listed under the caller alone; it is under both now, as the "
+                "reading MUST beside it, and the observer class counts 70",
                 missing(core, "**Decoding.** A caller or a tool that reads the bare wire decodes an envelope")
-                + [dec, read, counted.get("Observer: the tool role, and a reader")],
-                [["caller"], ["caller", "observer"], 69]))
+                + [dec, read, (counted.get("Observer: the tool role, and a reader") or 0) >= 70],
+                [["caller", "observer"], ["caller", "observer"], True]))
     # F-473: a bare-wire envelope its decoding refuses: "that envelope …
     # not as the transport's", or "A malformed error is the transport's
     # too". zk2py reads it as the transport's, its decoding's token named.
     bad = live.read_reply_error("application/json", b'{"code":"busy"}')
     good = live.read_reply_error("application/json", b'{"code":"busy","message":""}')
-    out.append(("F-473 (open): a bare-wire envelope its decoding refuses is that envelope by \"The bare wire\", the "
-                "transport's by \"A malformed error\"; zk2py reads it as the transport's (decode), a good one busy",
+    out.append(("F-473 (round 101; answered by core 0.95 §5.2, round 102): a bare-wire envelope its decoding refuses "
+                "is a malformed error, the transport's; zk2py reads it so (decode), a good one busy",
                 missing(core, "under one of the envelope's three encodings as that envelope (below), not as the "
-                              "transport's.", "**A malformed error** is the transport's too.")
+                              "transport's. One its decoding refuses (below, \"Decoding\") is a malformed error, the "
+                              "transport's, as an error form the parse refuses is.",
+                        "**A malformed error** is the transport's too.")
                 + [(bad.kind, bad.refusal), (good.kind, good.code, good.bare)],
                 [("transport", "decode"), ("error", "busy", True)]))
     # F-474: §9 step 4 puts "its state", and neither setup declares one.
     sec9 = ops[ops.index("## §9 A call's forms"):]
     setup = sec9[:sec9.index("**Steps.**")]
-    out.append(("F-474 (open): operations.md §9 step 4 puts h1/tc's state, and its setup and the common one declare "
-                "no state; zk2py's tc.v1 declares status",
-                missing(sec9, "`h1/tc` puts its state twice, and the caller calls `set`.")
-                + ["state" in setup, "state" in ops[:ops.index("## §1 ")],
+    out.append(("F-474 (round 101; answered by core 0.95's operations.md §9, round 102): step 4 puts h1/tc's "
+                "parameterless state status, which its setup now gives it, declared by tc.v1 or another interface; "
+                "zk2py's tc.v1 declares status",
+                missing(sec9, "`h1/tc` puts `status` twice, and the caller calls `set`.",
+                        "`h1/tc` exposes a parameterless state too, `status`, which step 4 puts.")
+                + ["status" in setup,
                    "[resources.status]" in (spec.parent / "impl" / "python" / "interop" / "operations"
                                             / "tc.v1.toml").read_text(encoding="utf-8")],
-                [False, False, True]))
+                [True, True]))
     # F-475: no text bounds a value reply by its Encoding; a bare JSON array
     # of 8 bytes or more parses as a value (vectors.json), so a reader that
     # takes no MAY hands its "record" on.
     arr = zk2c.parse(bytes.fromhex("5b312c322c332c345d"), "reply")
-    out.append(("F-475 (open): \"A caller reads a reply by §7.5's parse\", bounded by no Encoding; [1,2,3,4] under "
-                "application/json parses as a value, tag 11, record ']'; zk2py takes the MAY",
-                missing(core, "**Reading a value.** A caller reads a reply by §7.5's parse,")
+    out.append(("F-475 (round 101; answered by core 0.95 §5.1 and observer 0.25 §7.3, round 102): a caller reads a "
+                "reply under zenoh/bytes by §7.5's parse, and one under another Encoding is no value form; "
+                "[1,2,3,4] still parses as a value, tag 11, record ']', so only the Encoding tells them apart",
+                missing(core, "**Reading a value.** A caller reads a reply under `zenoh/bytes` by §7.5's parse,",
+                        "**Under another `Encoding`** a reply is no value form, so it is malformed too, unless the "
+                        "caller reads the bare wire (below).")
+                + missing(obs, "**Another `Encoding`.** A reply under any other `Encoding` is no value form, and is "
+                               "undecodable as a refused one is, unless the tool reads the bare wire")
                 + [(arr.form, arr.width, arr.tag, arr.record)],
                 [("value", 32, 11, b"]")]))
     # F-476: the as-of mark's seq is "the last it minted …, or 0 when it has
     # minted none", and a run's seqs count from 0, so a reply before the first
     # put and one after it carry one mark (forms_live §9 step 4, both owners).
-    out.append(("F-476 (open): the as-of mark's seq is the last minted, or 0 when none is, and a run's first put is seq "
-                "0: a reply before it and one after it carry one mark; operations.md §9 step 4 checks the first alone",
+    out.append(("F-476 (round 101; answered by core 0.95 §5.1, round 102): a reply before a run's first put and one "
+                "after it both carry seq 0; a caller orders a mark of seq 0 before the write of seq 1, and not "
+                "against the write of seq 0",
                 missing(core, "The seq is the last it minted for state and events under that run, or 0 when it has "
-                              "minted none.", "Within one run, it can order the reply against the state it holds, by "
-                                              "seq.")
+                              "minted none.",
+                        "**At or after.** A mark of seq n, once its run has minted n, is at or after the write of seq "
+                        "n, and before the write of n + 1.",
+                        "so it orders a mark of seq 0 before the write of seq 1, and not against the write of seq 0.")
                 + missing(ops, "The second instance's reply carries its own descriptor's run, and seq 0."), []))
+    return out
+
+
+def _round102_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.95 and observer 0.25 (round 101's F-472 to F-479 answered),
+    config.v2 0.1 and its status draft, and link.v2's status draft, read at
+    main ee5fb697 (#609, round 102): each entry, and what each says changed
+    and did not. Round 101's readings of F-472 to F-476 are re-keyed to their
+    answers in :func:`_round101_readings`; config.v2's own readings are the
+    config family's (``v2/``) and :func:`_config_v2_readings`."""
+    import re
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, obs = flat("core.md"), flat("observer.md")
+    v2, l2, idx = flat("profiles/config/v2.md"), flat("profiles/link/v2.md"), flat("profiles/README.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.95 or later and observer 0.25 or later, each with its entry (round 101 answered); config.v2 0.1 "
+         "and its draft entry; link.v2's draft entry",
+         [core_v >= (0, 95)] + entry("CHANGELOG.md", "0.95", "round 101")
+         + entry("observer-CHANGELOG.md", "0.25", "another `Encoding`")
+         + entry("profiles/config/CHANGELOG.md", "config.v2 0.1", "one packed record")
+         + entry("profiles/config/CHANGELOG.md", "config.v2 draft", "zenoh-modem")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 draft", "zenoh-modem"),
+         [True]),
+    ]
+    # "No rule": RULES.md as the entry counts it.
+    rules = (spec / "RULES.md").read_text(encoding="utf-8")
+    counted = {n: int(c) for n, c in re.findall(r"^\| \[([^\]]+)\]\(#[^)]*\) \| (\d+)", rules, re.M)}
+    once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
+    out.append(("core 0.95's entry: no rule; RULES.md lists 239 rules, the observer class 70 (F-472's index); "
+                "core 0.96's lists more",
+                missing(" ".join((spec / "CHANGELOG.md").read_text(encoding="utf-8").split()),
+                        "`RULES.md` lists 239 rules, the observer class 70")
+                + [(int(once.group(1)) if once else 0) >= 239], [True]))
+    # The statuses: config.v2 and link.v2 draft, each used by zenoh-modem,
+    # their texts unchanged at 0.1 and 0.6.
+    out.append(("config.v2 0.1 and link.v2 0.6 or later are draft, used by zenoh-modem, in the index's first table",
+                missing(v2, "| **Text version** | 0.1", "| **Status** | draft |",
+                        "| **Written against** | core 0.94")
+                + missing(l2, "| **Status** | draft |")
+                + missing(idx, "| [`config.v2`](config/v2.md) | 0.1 | draft | zenoh-modem | 0.94 |")
+                + [bool(re.search(r"\| \[`link\.v2`\]\(link/v2\.md\) \| 0\.\d+ \| draft \| zenoh-modem \|", idx))],
+                [True]))
+    return out + _config_v2_readings(root) + _core096_readings(root) + _modem33_readings(root)
+
+
+def _modem33_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """``modem.v3`` 3.3 (#991, PR #1059 at a680b029, carried by round 102),
+    read as an adopter's contract: link.v1 0.17, link.v2 0.8 and
+    telemetry.v2 0.3, each editorial, with its entry; the contract and its
+    one record of all 73 readings as its README and its header state them,
+    through zk2py's own loader, codec and envelope; the seven packed states;
+    catalog ``e3a529fe``; each of zenoh-modem's faces planned by zk2py as its
+    ``v2/plan.json`` case; F-493 and F-494. The frames themselves are
+    :func:`_round99_readings`' #983 T4 and F-470 rows."""
+    import math
+    import re
+    import tomllib
+
+    from . import adopter_frames as af, catalog, frame, link_v2, packed, zk2c
+    from .contract import load_contract
+
+    spec = root.parent
+    fm = spec.parent / "examples" / "zk2" / "zenoh-modem"
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    def text_version(rel: str) -> tuple[int, int]:
+        m = re.search(r"\| \*\*Text version\*\* \| (\d+)\.(\d+)", (spec / rel).read_text(encoding="utf-8"))
+        return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+    readme = " ".join((fm / "README.md").read_text(encoding="utf-8").split())
+    toml_text = (fm / "modem.v3.toml").read_text(encoding="utf-8")
+    #: the contract's comments, as one line of words
+    comments = " ".join(" ".join(ln.strip().lstrip("#").strip() for ln in toml_text.splitlines()
+                                 if ln.strip().startswith("#")).split())
+    t2_text = flat("profiles/telemetry/v2.md")
+    out: list[tuple[str, Any, Any]] = [
+        ("link.v1 0.17 or later, link.v2 0.8 or later and telemetry.v2 0.3 or later, each with its entry: "
+         "editorial, Appendix B reading modem.v3 3.3, no rule changed (#991)",
+         [text_version("profiles/link/v1.md") >= (0, 17), text_version("profiles/link/v2.md") >= (0, 8),
+          text_version("profiles/telemetry/v2.md") >= (0, 3)]
+         + entry("profiles/link/CHANGELOG.md", "0.17", "no rule changed")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 0.8", "no rule changed")
+         + entry("profiles/telemetry/CHANGELOG.md", "telemetry.v2 0.3", "no rule changed"),
+         [True, True, True]),
+    ]
+    # The contract, as its header counts it.
+    c = load_contract(fm / "modem.v3.toml", check_file_name=True)
+    head = tomllib.loads(toml_text)["interface"]
+    res = c.canonical["resources"] if c.canonical else []
+    by = {r["template"]: r for r in res}
+    kinds = {k: sum(1 for r in res if r["kind"] == k) for k in ("stream", "state", "event", "operation")}
+    out.append(("modem.v3 3.3 loads clean, fingerprint 71f55126, published in examples/zk2/.history: 105 resources "
+                "(85 streams, 14 states, 4 events, 2 operations), 99 of them optional, as its header says",
+                missing(comments, "Counts: 105 resources (85 streams, 14 states, 4 events, 2 "
+                        "operations); 99 of them optional.")
+                + [c.codes, (head["major"], head["minor"]), (c.fingerprint or "")[7:15],
+                   (spec.parent / "examples" / "zk2" / ".history" / "modem.v3"
+                    / f"{(c.fingerprint or '')[7:]}.bundle.json").is_file(),
+                   len(res), kinds, sum(1 for r in res if r.get("optional"))],
+                [[], (3, 3), "71f55126", True, 105, {"stream": 85, "state": 14, "event": 4, "operation": 2}, 99]))
+    frames = sorted(t for t, r in by.items() if r.get("frame") is not None)
+    nine = ["frames/air", "frames/bearer", "frames/if", "frames/layer", "frames/link", "frames/message",
+            "frames/radio", "frames/sched", "frames/sdu"]
+    three = ["frames/fast", "frames/slow", "frames/paid"]
+    # Against 3.2 (catalog index 6, a584f236): a review, which 3.3's own
+    # bundle in the history root accepts (core §9.7), as the examples family
+    # checks it against every published revision.
+    from . import bundle, compat
+
+    b32 = spec.parent / "examples" / "zk2" / ".history" / "modem.v3" \
+        / "a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404.bundle.json"
+    cand = compat.Revision(c.canonical, {a.id: a.data for a in c.schemas.artifacts()})
+    vs32, _ = compat.full_transitive([bundle.revision(bundle.verify(b32.read_bytes()))], cand,
+                                     compat.contract_compare)
+    out.append(("modem.v3 3.3 against 3.2 (a584f236): a review, the nine frames' link.exposure moved from link to "
+                "host (annotations_changed, core §9.8), and nothing else; deprecated added is compatible",
+                [vs32.cls, sorted(r.split(":")[0] for r in vs32.reasons),
+                 all("review annotations_changed" in r and "'link.exposure': 'link'" in r
+                     and "'link.exposure': 'host'" in r for r in vs32.reasons)],
+                [compat.REVIEW, nine, True]))
+    lays = {t: frame.layout_of(c, by[t]) for t in frames}
+    out.append(("modem.v3 3.3's frames: 3.2's nine deprecated since 3.3, replaced by frames/fast, frames/message by "
+                "frames/paid, and host; the "
+                "three over one record type, Readings, link, their horizons 300, 1,800 and 3,600 s and a full record "
+                "at least every 15, 4 and 1, each declaring 73 series; the twelve declare 369 series (telemetry.v2 "
+                "0.3 Appendix B)",
+                missing(t2_text, "Its twelve frame resources declare 369 series")
+                + [[t for t in frames if t not in three] == nine,
+                   {t: ((by[t].get("deprecated") or {}).get("since"),
+                        (by[t].get("deprecated") or {}).get("replaced_by"),
+                        by[t]["annotations"].get("link.exposure")) for t in nine}
+                   == {t: (3, "frames/paid" if t == "frames/message" else "frames/fast", "host") for t in nine},
+                   [(by[t]["type"]["name"], by[t]["annotations"].get("link.exposure"),
+                     by[t]["annotations"].get("freshness.ttl_s"), by[t].get("deprecated"),
+                     lays[t].decl.keyframe_every, len(by[t]["annotations"].get("telemetry.series") or {}))
+                    for t in three],
+                   sum(len(by[t]["annotations"].get("telemetry.series") or {}) for t in frames)],
+                [True, True, [("Readings", "link", 300, None, 15, 73), ("Readings", "link", 1800, None, 4, 73),
+                              ("Readings", "link", 3600, None, 1, 73)], 369]))
+    # Readings, as the README's "The ranges" and its frame sizes state it.
+    lo = lays["frames/fast"]
+    fields = lo.fields
+    gauges = [f for f in fields if f.type != "counter"]
+    counters = [f for f in fields if f.type == "counter"]
+    widths: dict[int, list[str]] = {}
+    for f in counters:
+        assert f.counter_width is not None
+        widths.setdefault(f.counter_width, []).append(f.name)
+    vals = {f.name: af._value(f, 0) for f in fields}
+    full = lo.write({"time": af.TIME, "records": [{"full": True, "values": vals, "absent": []}]})
+    delta = lo.write({"time": af.TIME, "records": [{"full": False, "values": vals, "absent": []}]})
+    out.append(("modem.v3 3.3's Readings: 73 optional fields, no marker, 1,542 bits with every reading present; the 22 "
+                "gauges 305 bits and the 51 counters 1,164, 5 at 24 bits, 37 at 20, the 7 kernel packet, error and "
+                "discard counters at 32 and the 2 octet counters at 40; a full record 199 B of body, 207 B of "
+                "payload with a 32-bit run and 205 B with a 16-bit run; a delta record of every reading 216 B "
+                "(zk2py's writer)",
+                missing(readme, "A full record with every reading present is 1,542 bits, 199 B of body: 207 B of "
+                        "payload after an envelope with a 32-bit run, 205 B with a 16-bit run.",
+                        "The 22 gauges take 305 bits.", "The counters take 1,164 bits.")
+                + [len(fields), all(f.optional for f in fields), packed.MARKER in lo.record.items,
+                   lo.record.bit_bounds()[1], (len(gauges), sum(f.width for f in gauges)),
+                   (len(counters), sum(f.width for f in counters)),
+                   {w: len(n) for w, n in sorted(widths.items())}, sorted(widths.get(32, [])),
+                   sorted(widths.get(40, [])), len(full), len(zk2c.write("frame", 32, 1, 0, lo.tag, full)),
+                   len(zk2c.write("frame", 16, 1, 0, lo.tag, full)),
+                   len(zk2c.write("frame", 32, 1, 0, lo.tag, delta))],
+                [73, True, False, 1542, (22, 305), (51, 1164), {20: 37, 24: 5, 32: 7, 40: 2},
+                 ["if_in_discards", "if_in_errors", "if_in_multicast_pkts", "if_in_pkts", "if_out_discards",
+                  "if_out_errors", "if_out_pkts"], ["if_in_octets", "if_out_octets"], 199, 207, 205, 216]))
+    # F-493: each width's serial window at the README's worst rate, beside
+    # telemetry.v2 0.3 Appendix B's "Each counter's width holds its worst
+    # rate … between two frames of the slowest cadence a face lists, 900 s".
+    worst = {24: 2734, 20: 300, 40: 1.25e9, 32: 14.88e6}  # the README's table, per second
+    windows = {"bytes": 2 ** 23 / worst[24], "airtime_ms": 2 ** 23 / 1000, "sdu_plane": 2 ** 19 / worst[20],
+               "octets": 2 ** 39 / worst[40], "kernel_packets": 2 ** 31 / worst[32]}
+    short = sorted(k for k, s in windows.items() if s < 900)
+    out.append(("F-493 (open): telemetry.v2 0.3 Appendix B says each counter's width holds its worst rate between two "
+                "frames 900 s apart; at the README's worst rates zk2py's windows for 3.3's widths are 51 min, 2.3 h "
+                "and 29 min, but 7.3 min for the 2 octet counters and 2.4 min for the 7 kernel packet counters: 9 of "
+                "51 below 900 s, which the README excepts (\"no shipped face carries\" a netdev) and Appendix B "
+                "does not",
+                missing(t2_text, "**Each counter's width** holds its worst rate within its serial window (§2.20). "
+                        "The rate is taken between two frames of the slowest cadence a face lists, 900 s.")
+                + missing(readme, "2,734 B/s", "1,000 ms/s", "300/s", "1.25 GB/s", "14.88 Mpps",
+                          "The kernel's are a netdev's, which no shipped face carries")
+                + [{k: math.floor(s / 6) / 10 for k, s in windows.items()}, short,
+                   sum(len(widths.get(w, [])) for w in (32, 40))],
+                [{"airtime_ms": 139.8, "bytes": 51.1, "kernel_packets": 2.4, "octets": 7.3, "sdu_plane": 29.1},
+                 ["kernel_packets", "octets"], 9]))
+    # The seven packed states, each record's longest as the README's table
+    # gives it, and F-494: their longest puts.
+    states = sorted(t for t in by if t.startswith("packed/"))
+    recs = {t: c.schemas.packed_record(by[t]["type"]) for t in states}
+    longest = {recs[t].name: recs[t].bit_bounds()[1] for t in states}
+    rec_bytes = sorted({(b + 7) // 8 for b in longest.values()})
+    puts16 = [6 + b for b in rec_bytes]
+    out.append(("modem.v3 3.3's packed states: the seven JSON states again under packed/, each optional, host, "
+                "ttl 60, its record ending with an extension marker, its longest record OperRecord 83 bits, "
+                "IdentityRecord 52, SecurityRecord 10, RadioRecord 9, LinkRecord 145, EndpointRecord 17, "
+                "DestinationRecord 158 (the README's table), 2 to 20 B (the contract's comment)",
+                missing(comments, "at a record's size: 2 to 20 B")
+                + [len(states), all(by[t]["kind"] == "state" and by[t].get("optional")
+                                    and by[t]["annotations"].get("freshness.ttl_s") == 60
+                                    and by[t]["annotations"].get("link.exposure") in (None, "host")
+                                    and recs[t].items[-1] == packed.MARKER for t in states),
+                   longest, (rec_bytes[0], rec_bytes[-1])],
+                [7, True, {"DestinationRecord": 158, "EndpointRecord": 17, "IdentityRecord": 52, "LinkRecord": 145,
+                           "OperRecord": 83, "RadioRecord": 9, "SecurityRecord": 10}, (2, 20)]))
+    out.append(("F-494 (open): the README says a packed state \"Put with a 16-bit run, each is 8 to 21 B\"; with core "
+                "§7.5's 6-byte envelope zk2py's longest puts are 8 to 26 B, DestinationRecord's 158 bits 20 B and "
+                "26 B put, LinkRecord's 145 bits 19 B and 25 B",
+                missing(readme, "Put with a 16-bit run, each is 8 to 21 B")
+                + [(puts16[0], puts16[-1]), len(zk2c.write("mutation", 16, 1, 0, 0, b"\x00" * 20))],
+                [(8, 26), 26]))
+    # Catalog e3a529fe, index 8.
+    cat_doc = _load_json(fm / "catalog.json")
+    prev = dict(cat_doc, entries=cat_doc["entries"][:-1], lineage=cat_doc["lineage"][:-1])
+    try:
+        catalog.succession(catalog.read(json.dumps(prev)), catalog.read((fm / "catalog.json").read_bytes()))
+        succeeds = True
+    except Exception as e:  # noqa: BLE001 - the refusal is the reading
+        succeeds = f"{type(e).__name__}: {e}"
+    out.append(("zenoh-modem's catalog.json is e3a529fe, its index 8 modem.v3 3.3's fingerprint; its lineage's last, "
+                "8c808dff, is the catalog of its first eight entries, which it succeeds (core §8.6)",
+                [catalog.catalog_id(cat_doc), cat_doc["entries"][-1], cat_doc["lineage"][-1],
+                 catalog.catalog_id(prev), succeeds],
+                ["e3a529fe", {"contract": c.fingerprint, "iface": "modem.v3", "index": 8},
+                 {"entries": 8, "id": "8c808dff"}, "8c808dff", True]))
+    # Each face file, planned by zk2py with catalog.json, is its plan.json case.
+    cases = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "plan.json")["cases"]
+    faces = {"zenohd-rf0": 14, "zenohd-lora0-sf7": 15, "zenohd-lora0-sf9": 16, "zenohd-lora0-sf12": 17,
+             "zenohd-sat0": 18}
+    planned: dict[str, Any] = {}
+    for name, i in faces.items():
+        case = cases[i]
+        text = (fm / "faces" / f"{name}.face.toml").read_text(encoding="utf-8")
+        got = link_v2.plan(text, case["implements"], _link_interfaces(case), cat_doc)
+        face = (got.get("faces") or [{}])[0]
+        planned[name] = [got == case["expect"], got.get("catalog"),
+                         [(f_["resource"].rsplit("/", 2)[-2] + "/" + f_["resource"].rsplit("/", 1)[-1], f_["every_s"],
+                           f_.get("keyframe_s")) for f_ in face.get("frames", [])],
+                         [e for x in face.get("liveness", []) for e in x["evidence"]
+                          if e.startswith("modem.v3/stream/frames/")],
+                         sorted(x["code"] for x in face.get("findings", []) if x["code"] != "frame_unlisted"),
+                         [x["code"] for x in link_v2.lint(text)]]
+    out.append(("zenoh-modem's five faces (link.v2 0.8 Appendix B), each planned by zk2py with catalog.json as its "
+                "v2/plan.json case 14 to 18: one frame each at its cadence, liveness evidence, the two others "
+                "frame_unlisted; SF7 keep_alive_not_suppressed, SF9 frame_over_batch (216 B over 117 B); no_arq but "
+                "on SBD",
+                planned,
+                {"zenohd-rf0": [True, "e3a529fe", [("frames/fast", 60, None)], ["modem.v3/stream/frames/fast"], [],
+                                ["no_arq"]],
+                 "zenohd-lora0-sf7": [True, "e3a529fe", [("frames/fast", 60, None)], ["modem.v3/stream/frames/fast"],
+                                      ["keep_alive_not_suppressed"], ["no_arq"]],
+                 "zenohd-lora0-sf9": [True, "e3a529fe", [("frames/fast", 120, 900)], ["modem.v3/stream/frames/fast"],
+                                      ["frame_over_batch"], ["no_arq"]],
+                 "zenohd-lora0-sf12": [True, "e3a529fe", [("frames/slow", 900, 3600)],
+                                       ["modem.v3/stream/frames/slow"], [], ["no_arq"]],
+                 "zenohd-sat0": [True, "e3a529fe", [("frames/paid", 1800, None)], ["modem.v3/stream/frames/paid"], [],
+                                 []]}))
+    return out
+
+
+def _core096_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.96, observer 0.26, link.v2 0.7 and config.v1 0.10 (#982 H1 and
+    H2, main 0676db19; #609, round 102): each entry, its count of rules, each
+    new rule as its text states it, and F-492 as zk2py reads it. The fixtures
+    are the link family's (``v2/plan.json`` 22 to 26, ``v2/lints.json`` 40 to
+    57); the live half is ``first_hop_live`` (``constrained.md`` §10)."""
+    import re
+
+    from . import classes
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, obs, l2 = flat("core.md"), flat("observer.md"), flat("profiles/link/v2.md")
+    cv1, scen = flat("profiles/config/v1.md"), flat("scenarios/constrained.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.96 or later, observer 0.26, link.v2 0.7 and config.v1 0.10, each with its entry (#982 H1)",
+         [core_v >= (0, 96)] + entry("CHANGELOG.md", "0.96", "first hop")
+         + entry("observer-CHANGELOG.md", "0.26", "first hop")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 0.7", "device face")
+         + entry("profiles/config/CHANGELOG.md", "0.10", "first hop")
+         + missing(obs, "| **Text version** | 0.26", "| **Written against** | core 0.96"),
+         [True]),
+    ]
+    rules = (spec / "RULES.md").read_text(encoding="utf-8")
+    counted = {n: int(c) for n, c in re.findall(r"^\| \[([^\]]+)\]\(#[^)]*\) \| (\d+)", rules, re.M)}
+    once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
+    out.append(("core 0.96's entry: RULES.md lists 246 rules, 0.95's 239, the core's four and observer 0.26's three",
+                missing(flat("CHANGELOG.md"), "lists 246 rules: 0.95's 239, these four and observer 0.26's three")
+                + [int(once.group(1)) if once else None], [246]))
+    out.append(("core 0.96 §8.1, §8.4, §8.5 and observer 0.26 §3.6, §3.11: the rules as their texts state them",
+                missing(core, "Such an owner SHOULD put every interface it implements in its tokenless set.",
+                        "Such an owner MUST NOT implement `archive.v1`, nor an interface whose contract uses "
+                        "`redundancy.v1`.", "An owner on a first hop (§8.1) SHOULD NOT hold its bundles",
+                        "A deployment with such an owner SHOULD hold each of its bundles on the near side")
+                + missing(obs, "A reader MUST find an interface's providers by instance tokens and their descriptors",
+                          "A reader MUST NOT conclude a provider absent for want of an interface token.",
+                          "A tool that knows an owner is on a first hop MUST NOT report it down from its instance "
+                          "token's absence")
+                + missing(l2, "a generator MUST derive three denies in place of `link.v1`'s `zk`",
+                          "A generator MUST NOT emit a downsampling rule for a device's stream on the face that lists "
+                          "the device.")
+                + missing(scen, "## §10 A first-hop device"), []))
+    # F-492: two rules the index lists under the owner, whose subjects are a
+    # deployment and a tool.
+    rows = classes._rules_md(spec)
+    dep = sorted(r[0] for r in rows if r[1] == "core §8.4" and "A deployment with such an owner" in r[3])
+    tool = sorted(r[0] for r in rows if r[1] == "observer §3.11" and "A tool that knows an owner" in r[3])
+    out.append(("F-492 (open): RULES.md lists core §8.4's \"A deployment with such an owner SHOULD\" and observer "
+                "§3.11's \"A tool that knows an owner … MUST NOT\" under the owner too; the owner class counts 78",
+                [dep, tool, counted.get("Owner")], [["deployment", "owner"], ["observer", "owner"], 78]))
+    out.append(("config.v1 0.10 §2.1: the SHOULD NOT on the tokenless set excepts a first hop; §2.12 still names the "
+                "reference's refusal of a re-mint (F-480)",
+                missing(cv1, "The reference refuses the re-mint (`zenkey::config_v1`)") + ["first hop" in cv1],
+                [True]))
+    return out
+
+
+def _config_v2_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """config.v2 0.1 read cold (#609, round 102): its entry's counts against
+    the fixtures, §3's sizes, zenoh-modem's ``sx1262_config.v1`` through
+    zk2py's own codec and owner against ``config.v2-binding.md`` §15, and
+    F-480 to F-491 as zk2py reads them. The fixtures themselves are the
+    config family's (``v2/``)."""
+    from . import config_v2 as c2
+    from .contract import load_contract
+
+    spec = root.parent
+    repo = spec.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    v2, v1t, log = flat("profiles/config/v2.md"), flat("profiles/config/v1.md"), flat("profiles/config/CHANGELOG.md")
+    scen = flat("profiles/config/scenarios-v2.md")
+    fx = spec / "profiles" / "config" / "conformance" / "v2"
+    der, rec = _load_json(fx / "derive.json"), _load_json(fx / "records.json")
+    val, win = _load_json(fx / "validation.json"), _load_json(fx / "window.json")
+    life, red = _load_json(fx / "lifecycle.json"), _load_json(fx / "redaction.json")
+    out: list[tuple[str, Any, Any]] = []
+    out.append(("config.v2 0.1's entry: derive.json 49 declarations and 33 contracts, records.json 16 writes, 28 "
+                "reads and 4 across two revisions, validation.json 65 requests and 18 documents, window.json 15, "
+                "lifecycle.json 17 sequences of 61 steps, redaction.json 7 and a pair",
+                [len(der["cases"]), len(der["contracts"]), len(rec["writes"]), len(rec["reads"]),
+                 len(rec["growth"]["records"]), len(val["cases"]), len(val["desired"]), len(win["cases"]),
+                 len(life["cases"]), sum(len(c["steps"]) for c in life["cases"]), len(red["cases"]),
+                 len(red["same_bytes"])],
+                [49, 33, 16, 28, 4, 65, 18, 15, 17, 61, 7, 2]))
+    # zenoh-modem's SX1262, §3's sizes and the binding's §15, through zk2py's
+    # own codec and owner.
+    k = load_contract(c2.SX1262, check_file_name=True)
+    rt = c2.sx1262_round_trip()
+    steps = rt["steps"]
+    out.append(("config.v2 §3 \"Sizes\" and config.v2-binding.md §7 and §15: sx1262_config.v1 lints clean; zk2py's "
+                "owner puts 30 B at start (a 24 B record), then 36, 50, 46 and 36 B; set/radio 16 B, confirm 8 B, "
+                "busy 7 B; §15's request and reply bytes, byte for byte; a retry is the first 50 B",
+                missing(v2, "a record is 30 bytes idle with a last change, and 44 with a reach change pending. Its put "
+                            "or reply adds a 6-byte envelope. A `set/radio` with a window, an expected revision and "
+                            "an idempotency key is 16 bytes, and a `confirm` 8. A refusal is 7 bytes")
+                + [k.codes, c2.lint(*c2.resolved(k)), rt["start"], [s_["puts"][0][1] if s_["puts"] else None
+                                                                    for s_ in steps],
+                   [s_["request"] for s_ in steps], steps[2]["reply"],
+                   rt["bytes"] == {"request2": "4cd5c6291100774000000067a5836140",
+                                   "reply2": "495a1700000300005a1700000001000e40001685e710a032584fd0192c2f480002"
+                                             "d0bce2082fc08ca2a0e0fd5ab355882a00",
+                                   "request5": "4800005a179c4200",
+                                   "reply5": "495a1700000500005a1700000002000e080002d0bce21027c08ca2a0e0fbfab8c5"
+                                             "222a00"},
+                   rt["retry2_same"], rt["reply2_is_put"], rt["tokens"]],
+                [[], [], {"record": 24, "put": 30}, [36, 50, None, 46, 36], [5, 16, 8, None, 8], ("error", 3, 7),
+                 True, True, True, {"last1": "0x5a179c41", "pending2": "0x5a179c42"}]))
+    # F-480: config.v1 §2.12 names the reference's refusal; the binding and
+    # the reference (#1064) restart the configuration.
+    binding = (repo / "examples" / "zk2" / "zenoh-modem" / "config.v2-binding.md").read_text(encoding="utf-8")
+    out.append(("F-480 (open): config.v1 §2.12 says the reference refuses the re-mint; config.v2-binding.md §8 says a "
+                "re-mint is a restart of the record (#1064), as the owner example's frame new-epoch measures",
+                missing(v1t, "The reference refuses the re-mint (`zenkey::config_v1`), the simplest owner that keeps "
+                             "the rule.")
+                + ["A re-mint is a restart too" in " ".join(binding.split())], [True]))
+    # F-481: a re-mint with a change pending.
+    out.append(("F-481 (open): config.v1 §2.12, \"no event is published for it\", beside §2.17, \"exactly one event "
+                "for each change, when the change ends\", whose rolled-back cases name no re-mint",
+                missing(v1t, "The new instance says nothing of the old one's pending change,** which it never knew: "
+                             "no event is published for it.",
+                        "`rolled-back`: undone, by `cancel`, at its deadline, or after its apply failed;"), []))
+    # F-482: the desired report beside the converging put.
+    out.append(("F-482 (open): scenarios-v2 §12 expected 1 reads one record with fraction_ppm 20000 and desired "
+                "converged, then the event; §2.18 says nothing of the order",
+                missing(scen, "S receives the record, `fraction_ppm` 20000, `desired` `converged`, `desired_revision` "
+                              "1, then one event, `applied`."), []))
+    # F-483: the escape outcome with a code.
+    esc = next(r for r in rec["reads"] if r["note"].startswith("an outcome this revision does not name"))
+    L = c2.Layout.of_contract(load_contract(c2.TEST_CONTRACT, check_file_name=True))
+    f = L.record.read(esc["tag"], bytes.fromhex(esc["hex"]), esc["epoch"])
+    out.append(("F-483 (open): §3 \"`desired_code` is present for `refused` and `failed` alone\", where records.json "
+                "reads the escape outcome with a code as a state, \"its code unjudged\"; zk2py reads the fixture",
+                missing(v2, "`desired_code` is present for `refused` and `failed` alone")
+                + [f.get("desired"), f.get("desired_code"), "state" in esc["expect"]], [None, "busy", True]))
+    # F-484: which of group_units' and group_sensitive's checks need a valid type.
+    cases = {c["note"]: c for c in der["cases"]}
+    every = cases["every check of one entry, each alone, in order"]
+    bad = cases["a bad type skips the checks that read it: group_units and group_sensitive need its fields"]
+    out.append(("F-484 (open): §2.2 \"Each needs a valid type to name its parameters\", where derive.json reports "
+                "units that are no table without one, and skips an empty unit without one",
+                missing(v2, "`group_units`, `group_sensitive`: that member is not as above. Each needs a valid type to "
+                            "name its parameters.")
+                + [every["groups"][0]["units"], [r["reason"] for r in every["expect"]["reasons"]][-2:],
+                   bad["groups"][0]["units"], [r["reason"] for r in bad["expect"]["reasons"]]],
+                [3, ["group_units", "group_sensitive"], {"pin": ""}, ["group_type"]]))
+    # F-486: §2.19's range.
+    out.append(("F-486 (open): §2.19 \"36 to 50 bytes with its envelope\", where the record at start is 30 B with its "
+                "envelope (24 B, binding §7, and the draft entry's \"24 at start\")",
+                missing(v2, "For zenoh-modem's SX1262 it is 36 to 50 bytes with its envelope")
+                + missing(log, "and 24 at start") + [rt["start"]["put"]], [30]))
+    # F-487: four hot groups, where there are three.
+    toml = (spec / "profiles" / "config" / "conformance" / "contracts" / "rfcfg.v1.toml").read_text(encoding="utf-8")
+    hot = [g for g in L.decl.groups if g.cls == "hot"]
+    out.append(("F-487 (open): rfcfg.v1.toml's comment and derive.json's first note say four hot groups; the contract "
+                "declares three (duty, sim, queue)",
+                ["Four hot groups" in toml, der["cases"][0]["note"].startswith("the test contract's six groups: four "
+                                                                               "hot"), [g.name for g in hot]],
+                [True, True, ["duty", "sim", "queue"]]))
+    # F-488: spreading_factor 7 to 9, beside the SF12 face.
+    sx = c2.Layout.of_contract(k)
+    sf = sx.decl.group("modulation").param("spreading_factor")
+    out.append(("F-488 (open): sx1262_config.v1's spreading_factor is 7 to 9, beside zenoh-modem's SF12 face and the "
+                "binding's \"At SF12\"; App. B's start check refuses a device whose schema differs",
+                [sf.minimum, sf.maximum, (repo / "examples" / "zk2" / "zenoh-modem" / "faces"
+                                          / "zenohd-lora0-sf12.face.toml").is_file(), "At SF12" in binding]
+                + missing(v2, "and refuses to start on a difference"), [7, 9, True, True]))
+    # F-489: §15 names no date.
+    out.append(("F-489 (open): config.v2-binding.md §15's steps are times of day with no date, and its bytes date them "
+                "2026-11-02 (zk2py's codec writes them so)",
+                ["12:01:00Z" in binding, "2026-11-02" in binding, rt["bytes"]["reply2"].startswith("495a17")],
+                [True, False, True]))
+    # F-490: §6's tolerance against §2.8's rounding.
+    out.append(("F-490 (open): scenarios-v2 §6 expected 3, \"81 s after step 1, ± 0.5 s\", where §2.8's rounding "
+                "puts the deadline 80.4 to 81.4 s after step 1, by step 1's phase in its second",
+                missing(scen, "S receives the `rolled-back` event 81 s after step 1, ± 0.5 s.")
+                + [sorted({c2.deadline_ms(t1 + 20_400, 60, 10) - t1 for t1 in range(0, 1000, 50)})[:1],
+                   sorted({c2.deadline_ms(t1 + 20_400, 60, 10) - t1 for t1 in range(0, 1000, 50)})[-1:]],
+                [[80_400], [81_350]]))
+    # F-491: the scenarios' intro changed after the draft entry.
+    out.append(("F-491 (open): the draft entry says the scenarios are as they were; scenarios-v2's intro names zenctl's "
+                "tests, a sentence no entry records",
+                missing(log, "and its fixtures and scenarios are as they were")
+                + missing(scen, "They are `zenctl`'s `config_v2_scenario_13_…` and `config_v2_scenario_14_…`."), []))
     return out
 
 

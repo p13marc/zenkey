@@ -81,8 +81,9 @@ PROFILES = {
     "freshness.v2": ("owner (heartbeats), consumer and tool (§2.5's rule, the re-read, the judgements)", ""),
     "health.v1": ("owner, tool (§2.11's reader and roll-ups)", ""),
     "config.v1": ("owner (the simulated device), caller, tool (§5's reader)", ""),
-    "config.v2": ("none yet", "text 0.1 (#985 G1) is present on main and not read by round 101: #985's later round "
-                              "reads it after its owner (G2) and tools (G3) land"),
+    "config.v2": ("owner (the simulated device), caller, tool (§5's reader), and the linter of §2.2 (round 102)",
+                  "§12's document reaches the owner directly, not through desired.v1's binding; no text, enum or "
+                  "fixed-point parameter (none at 0.1)"),
     "link.v1": ("tool (the generator and the checks)", ""),
     "link.v2": ("tool (the linter, the plan with 0.3's contract side and frames per face, the transport block and "
                 "its checks); a far side's caller, consumer and tool (0.4's §2.20, §2.21)",
@@ -272,6 +273,22 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "owner's encodings carry no suffix; envelope.PROTOBUF_ENCODING alone does"),
     ("owner", "core §7.4", "A generated `@stream` publisher SHOULD accept SHM buffers", NA,
      "zk2py generates no publisher"),
+    # core 0.96 (#982 H1), round 102: an owner on a first hop.
+    ("owner", "core §8.1", "Such an owner SHOULD put every interface it implements in its tokenless set", MET,
+     "owner.Owner(first_hop=True): every interface it implements tokenless, its instance token alone "
+     "(first_hop_live §10 steps 1 and 2) (round 102, core 0.96)"),
+    ("owner", "core §8.1", "Such an owner MUST NOT implement `archive.v1`, nor an interface whose contract uses", MET,
+     "owner.Owner._plan, step 2 over a first hop's tokenless set: archive.v1 and a governed interface refused, "
+     "nothing declared (first_hop_live §10 step 6) (round 102, core 0.96)"),
+    ("owner", "core §8.4", "An owner on a first hop (§8.1) SHOULD NOT hold its bundles", MET,
+     "owner.Owner(first_hop=True) declares no contract queryable; a near holder answers (first_hop_live §10 step 1) "
+     "(round 102, core 0.96)"),
+    ("owner", "core §8.4", "A deployment with such an owner SHOULD hold each of its bundles on the near side", NA,
+     "a deployment's rule, which the index lists under the owner too (F-492); first_hop_live's near holder plays "
+     "it (round 102)"),
+    ("owner", "observer §3.11", "A tool that knows an owner is on a first hop MUST NOT report it down", NA,
+     "a tool's rule, which the index lists under the owner too (F-492); the observer class's verdict holds it "
+     "(round 102)"),
     ("owner", "core §8.1", "Every instance MUST hold one, including pure consumers", MET,
      "owner.Owner._declare_instance (presence_scenarios §1)"),
     ("owner", "core §8.1", "An owner MUST hold one per interface of", MET,
@@ -417,8 +434,8 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "core §5.1", "Caller and tool: MUST NOT treat an empty", MET,
      "judgement, live.o3_verdict (observer_scenarios, operations.md §5)"),
     ("observer", "core §5.2", "It MUST refuse", MET,
-     "envelope.decode (errors family); at core 0.94 a caller's or a tool's that reads the bare wire, listed under "
-     "the caller alone (F-472)"),
+     "envelope.decode (errors family); a caller's or a tool's that reads the bare wire, listed under the caller "
+     "alone at core 0.94 (F-472) and under both since core 0.95's index (round 102)"),
     ("observer", "core §5.2", "A caller or a tool MUST read a `reply_err` under the `Encoding` `zenoh/bytes` by",
      MET, "live.read_reply_error, which live.o3_verdict and live.show_reply read through (forms_live §9 step 5) "
           "(round 101, core 0.94)"),
@@ -487,6 +504,17 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "presence.PresenceFollower (presence_scenarios §8)"),
     ("observer", "observer §3.6", "The reader SHOULD report what that read establishes", MET,
      "presence.PresenceFollower (presence_scenarios §8)"),
+    # observer 0.26 (#982 H1), round 102.
+    ("observer", "observer §3.6", "A reader MUST find an interface's providers by instance tokens and their "
+                                  "descriptors", MET,
+     "live.list_presence and live.get_descriptor, the tokenless set's providers (presence_scenarios §5), a "
+     "first hop's (first_hop_live §10 step 1) (round 102, observer 0.26)"),
+    ("observer", "observer §3.6", "A reader MUST NOT conclude a provider absent for want of an interface token", MET,
+     "live.shape_faults reads no missing interface token of an entry \"token\": false (first_hop_live §10 step "
+     "1); presence_scenarios §5 (round 102, observer 0.26)"),
+    ("observer", "observer §3.11", "A tool that knows an owner is on a first hop MUST NOT report it down", MET,
+     "first_hop.report: a device a link.v2 policy lists, its token absent from a complete read, is link_closed, "
+     "never down (first_hop_live §10 step 2) (round 102, observer 0.26)"),
     ("observer", "observer §3.7", "A reader SHOULD make every liveliness read it", MET,
      "live.list_presence refuses a session that held a subscriber (presence_scenarios §9)"),
     ("observer", "observer §3.7", "The reader SHOULD hold its liveliness subscribers on", MET,

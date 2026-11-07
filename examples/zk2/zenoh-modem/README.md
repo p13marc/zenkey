@@ -18,10 +18,16 @@ Its seam crates are on crates.io for out-of-tree backends.
 - One **service per device** (`rf0`, `sat0`, `wwan0`) on a **system that is the host id**.
 - [`modem.v3.toml`](modem.v3.toml) holds 86 resources, 80 of them optional with their v1 gates.
   Their payloads are in [`schemas/modem.json`](schemas/modem.json).
-- Since revision 3.2 (#983 T4), it also holds 9 frame resources (core §7.7), which carry the 73
-  readings in packed records ([`schemas/modem-frames.json`](schemas/modem-frames.json)) across the
-  radios, each field a [`telemetry.v2`](../../../spec/profiles/telemetry/v2.md) series. "Frames
-  (9)", below, lists them.
+- Since revision 3.2 (#983 T4), it also holds frame resources (core §7.7), which carry the 73
+  readings in packed records across the radios, each field a
+  [`telemetry.v2`](../../../spec/profiles/telemetry/v2.md) series. Since revision 3.3 (#991) three
+  of them carry all 73 in one record at zenoh-modem's own ranges
+  ([`schemas/modem-readings.json`](schemas/modem-readings.json)), one per horizon a medium can
+  carry, and 3.2's nine are deprecated. "Frames (12)", below, lists them, where each range comes
+  from, and what each face spends.
+- Since revision 3.3, the 7 states are also packed records, under `packed/`
+  ([`schemas/modem-states.json`](schemas/modem-states.json)), beside the JSON documents. "State",
+  below, says what each keeps.
 - The configuration plane's 8 gated entries are `config.v1`, bound in
   [`config.v1-binding.md`](config.v1-binding.md). That file also explains why the far side of a
   radio can arm a reach change today but never keep it, and gives the zk2 grants that fix it.
@@ -45,8 +51,8 @@ Its seam crates are on crates.io for out-of-tree backends.
   routers, the ground side, and what is still to decide.
 - [`catalog.json`](catalog.json) is the deployment catalog ([core §8.6](../../../spec/core.md#86-the-deployment-catalog)),
   provisioned to rf0's host and to the ground. It indexes `modem.v3`, `config.v1` and
-  `health.v1` at their current revisions (`modem.v3` 3.2 at index 6), and `sx1262_config.v1`
-  (index 7, catalog `8c808dff`, #985 G4), and dates times from 2026-01-01. A new revision goes in
+  `health.v1` at their current revisions (`modem.v3` 3.3 at index 8, catalog `e3a529fe`), and
+  `sx1262_config.v1` (index 7, #985 G4), and dates times from 2026-01-01. A new revision goes in
   with `zk2 catalog add`, which writes the catalog's successor.
 
 **The verdict.** Every v1 entry maps or is deleted for a stated reason, and the constrained-face
@@ -135,9 +141,9 @@ zk2/*/*/@zk/alive/config.v1/**                                     "which device
   - The capabilities that `sensor` listed per device are each device service's descriptor's.
   - Its `config_hash` belongs to `config.v1`.
 - **Exposure defaults to `host`.** Until revision 3.1, only the four v1 `link` streams carried
-  `link.exposure = "link"`. Since 3.2 they are `host` again, written out, and only the nine frame
-  resources are `link`: the four readings cross in `frames/link` ([link](link.md), the note at its
-  top).
+  `link.exposure = "link"`. Since 3.2 they are `host` again, written out, and only frame resources
+  are `link`: since 3.3, `frames/fast`, `frames/slow` and `frames/paid`, 3.2's nine being deprecated
+  and `host` ([link](link.md), the note at its top).
 
 ## Every v1 entry, mapped
 
@@ -146,7 +152,7 @@ Generated from `modem.toml` v2.14 against `modem.v3.toml`. The zk2 column is rel
 
 ### Telemetry (73) → `modem.v3` streams
 
-Key: `zk2/<host-id>/<device>/modem.v3/stream/<resource>`; every one keeps v1's `sampled` QoS (`priority = "data_low"`) and carries `telemetry.kind` (and `telemetry.unit` where v1 had one). The four v1 `link` streams are `host` since revision 3.2: their readings cross in `frames/link` (below).
+Key: `zk2/<host-id>/<device>/modem.v3/stream/<resource>`; every one keeps v1's `sampled` QoS (`priority = "data_low"`) and carries `telemetry.kind` (and `telemetry.unit` where v1 had one). The four v1 `link` streams are `host` since revision 3.2: their readings cross in a frame (below).
 
 | # | v1 `telemetry/modem/…` | Gate (`capability:`) | zk2 resource | Type · kind · unit |
 |---|---|---|---|---|
@@ -224,46 +230,134 @@ Key: `zk2/<host-id>/<device>/modem.v3/stream/<resource>`; every one keeps v1's `
 | 72 | `device/{device}/link/rx_quality` | `link_quality` | `link/rx_quality` | `Measure` · gauge · `%` |
 | 73 | `device/{device}/link/tx_quality` | `link_quality` | `link/tx_quality` | `Measure` · gauge · `%` |
 
-### Frames (9) → `modem.v3` frame resources, since revision 3.2
+### Frames (12) → `modem.v3` frame resources, since revisions 3.2 and 3.3
 
-No v1 entry: v1 had no frame. Since revision 3.2 (#983 T4, with #991), `modem.v3` lists
+No v1 entry: v1 had no frame. Since revision 3.2 (#983 T4), `modem.v3` lists
 [`telemetry.v2`](../../../spec/profiles/telemetry/v2.md) in place of `telemetry.v1`, and carries the
-73 readings above in packed records as well (core §7.6, §7.7), typed in
-[`schemas/modem-frames.json`](schemas/modem-frames.json). Each frame resource:
+73 readings above in packed records as well (core §7.6, §7.7). Since revision 3.3 (#991) they cross
+in three frame resources over one record, `Readings`
+([`schemas/modem-readings.json`](schemas/modem-readings.json)), at zenoh-modem's own ranges (below).
+Each of the three:
 - is a plain stream, `priority = "data"`, exposed `link`;
-- holds one record a frame, its time measured, so its cadence is its owner's configuration: rf0
-  every minute, LoRa SF9 every 2, SF12 every 15 (#991's per-medium table);
-- is optional, gated `config:frames.<name>`: a device publishes the frames its medium affords and
-  lists the others unavailable;
+- holds one record a frame, its time measured, so its cadence is its owner's configuration: a full
+  record, or a delta record of a bit per reading and then the readings that moved;
+- is optional, gated `config:device.frames.<name>`, a `[[device]]`'s `frames` table in
+  zenoh-modem's file: a device publishes the frame its face lists, at the face's cadence, and lists
+  the others unavailable;
 - declares `telemetry.series`, each field a mirror of its JSON stream, which lends the series its
   kind and unit. The series is the frame key and the field, never the mirrored stream
-  (`telemetry.v2` §2.17), and its epoch is the frame's run (§2.19).
+  (`telemetry.v2` §2.17), and its epoch is the frame's run (§2.19);
+- declares a horizon its medium can carry, so it is liveness evidence across its face (`link.v1`
+  §2.12, `link.v2` §2.12).
 
-Every field is optional, as `modem_device::Report` is all `Option`: absent is not zero. The
-ranges and widths are illustrative, and #991 fixes them. A payload below is the largest frame's,
-every field present, after an envelope with a 32-bit run (`link.v1` §2.8's `frame_over_batch`):
-where `keyframe_every` is above 1, its record may be a delta that includes every field, a bit per
-field longer than a full record (`link.v1` 0.16).
+| Frame resource | Horizon | Full record | Deadbands | Faces, at their cadence | Largest frame |
+|---|---:|---|---|---|---:|
+| `frames/fast` | 300 s | at least every 15 | RSSI and SNR (1 dB), the scheduler's queue (4) and lane backlog (1,024 B), the qdisc backlog (4,096 B, 4 packets), each in at least 1 record of 5 | RF and LoRa SF7, 60 s; LoRa SF9, 120 s, a full record every 15 minutes (`keyframe_s`) | 216 B |
+| `frames/slow` | 1,800 s | at least every 4 | the same, in at least 1 record of 4 | LoRa SF12, 900 s: a full record hourly | 216 B |
+| `frames/paid` | 3,600 s | every frame | none | SBD, 1,800 s: one paid message | 207 B |
 
-| Frame resource | Record type · fields | Frame | Payload |
+A full record with every reading present is 1,542 bits, 199 B of body: 207 B of payload after an
+envelope with a 32-bit run, 205 B with a 16-bit run. That is `frames/paid`'s largest frame
+(`link.v1` §2.8), a full record every frame. `frames/fast`'s and `frames/slow`'s may hold a delta
+record that includes every reading, a bit per reading longer (`link.v1` 0.16): 216 B, within RF's
+220 B batch and LoRa's 224 B, and above SF9's 117 B alone (`frame_over_batch`). A device writes a
+reading it lacks absent, one bit, so rf0's full record, 18 readings present, is 66 B of payload,
+and a delta 39 B.
+
+**3.2's nine, deprecated.** `frames/link`, the seven group frames (`sdu`, `sched`, `air`, `layer`,
+`if`, `radio`, `bearer`) and `frames/message`, typed in
+[`schemas/modem-frames.json`](schemas/modem-frames.json), stay until the next major, `deprecated` and
+`host` since 3.3:
+- their ranges and widths were illustrative, and a frame's record has no extension marker, so any
+  change to its layout is breaking (core §9.8: `bound_changed`, `width_changed`);
+- one frame per group spent about 15 B of envelope, time and put on each of eight frames a minute:
+  401 KB a day on RF with all 73 present, and 164 % and 241 % of LoRa's duty at SF9 and SF12
+  (below).
+
+An owner lists them unavailable, and no face lets them cross. Their largest frames, as `link.v1`
+0.16 §2.8 reads them (a 32-bit run, delta records where `keyframe_every` allows them), are 3.2's:
+
+| Frame resource | Record type · fields | Frame | Largest frame |
 |---|---|---|---:|
-| `frames/link` | `LinkReadings` · `sdu/dropped_total` (a 32-bit counter), `sched/queue_depth`, `air/duty_cycle_available`, `air/duty_cycle_wait_ms`: 63 bits, core §7.7's fixtures' `Link` | `keyframe_every = 1`; `freshness.ttl_s = 150` | 22 B |
+| `frames/link` | `LinkReadings` · the four link readings, 63 bits, core §7.7's fixtures' `Link` | `keyframe_every = 1`; `freshness.ttl_s = 150` | 22 B |
 | `frames/sdu` | `Sdu` · the 9 `sdu/` counters | `keyframe_every = 15` | 52 B |
-| `frames/sched` | `Sched` · the 6 `sched/` readings | `keyframe_every = 15`; deadbands on `queue_depth` (4) and `lane_backlog_bytes` (1,024 B) | 33 B |
+| `frames/sched` | `Sched` · the 6 `sched/` readings | `keyframe_every = 15` | 33 B |
 | `frames/air` | `Air` · the 10 `air/` readings | `keyframe_every = 15` | 50 B |
 | `frames/layer` | `Layer` · the 23 `layer/` readings | `keyframe_every = 15` | 109 B |
-| `frames/if` | `If` · the 11 `if/` readings, `in_octets` and `out_octets` at 40 bits | `keyframe_every = 15`; deadbands on `qdisc_backlog_bytes` (4,096 B) and `qdisc_backlog_pkts` (4) | 60 B |
-| `frames/radio` | `Radio` · the 6 `radio/` readings | `keyframe_every = 15`; deadbands on `rssi` and `snr` (1 dB) | 22 B |
-| `frames/bearer` | `Bearer` · the 8 `link/` readings: `frames/link` is the four link readings' | `keyframe_every = 15` | 33 B |
+| `frames/if` | `If` · the 11 `if/` readings | `keyframe_every = 15` | 60 B |
+| `frames/radio` | `Radio` · the 6 `radio/` readings | `keyframe_every = 15` | 22 B |
+| `frames/bearer` | `Bearer` · the 8 `link/` readings | `keyframe_every = 15` | 33 B |
 | `frames/message` | `Message` · all 73, counters at 24 bits | `keyframe_every = 1` | 213 B |
 
-A group frame's counters are 32 bits, a declared loss (`telemetry.v2` §2.20): a 32-bit counter
-reads in a window of 2^31 between two samples, so `if/in_octets` at 40 bits holds a 1 Gbit/s
-bearer's minute. `frames/message`'s 24-bit counters suit an SBD terminal's, not an IP modem's
-(#991 states each counter's worst rate). Each deadband allows 5 records omitted.
+#### The ranges, from zenoh-modem's code
+
+Every field is optional, as `modem_device::Report` is all `Option` (`modem-device/src/lib.rs:674`):
+absent is not zero. Where zenoh-modem's code bounds a reading, the range is the code's. Where it does
+not, the bound is physical, and *chosen*. `out_of_range` is reserved wherever a value past the bound
+can occur, and the owner then writes that name, never a clamped value (core §7.6). zenoh-modem was
+read at `d8c62df`.
+
+| Reading | Packed | Bits | From |
+|---|---|---:|---|
+| `sched/queue_depth` | int 0–1,022, `out_of_range` | 10 | code: the lanes' room, `DEFAULT_LANE_DEPTH` + 1 each (`modem-driver/src/sched.rs:49, 556`); *chosen*: 64 endpoints (the contract's cardinality) × 8 lanes × 2 = 1,024 |
+| `sched/lane_backlog_bytes` | int 0–1,048,574, `out_of_range` | 20 | code: what each lane's Zenoh wrote and the driver has not read (`lanes.rs:613`), about 4.6 KB under the shipped `so_sndbuf=1` (`TCP_FLOOR_BYTES`); *chosen*: four lanes at the kernel's default 212,992 B send buffer |
+| `sched/lane_backlog_drain_ms` | fixed 0–3,600,000 at 100, `out_of_range` | 16 | code: the backlog × `sdu_time` / batch (`modem-mgmt/src/telemetry.rs:112`); *chosen*: an hour, at 100 ms |
+| `layer/aead/send_key_id` | int 0–15 | 4 | code: `key_id` is 0–15 (`layer-aead/src/config.rs:58`), the header's nibble |
+| `air/duty_cycle_available` | int 0–1 | 1 | code: `DutyCycle::available`, a bool |
+| `air/duty_cycle_wait_ms` | fixed 0–3,600,000 at 100, `out_of_range` | 16 | code: the SX1262 waits within its duty period, EU868's 3,600 s (`DutyBudget::eu868`), SBD within `retry_max_ms`, 180 s by default; *chosen*: 100 ms. A `period_s` above an hour writes `out_of_range` |
+| `radio/signal_bars` | int 0–5 | 3 | code: `Report::signal_bars`, the terminal's own 0–5 (`AT+CSQF`) |
+| `if/qdisc_backlog_bytes` | int 0–16,777,214, `out_of_range` | 24 | code: the sum of the kernel's u32 backlogs (`netdev-modem/src/lib.rs:160`); *chosen*: 16 MiB, half fq_codel's default `memory_limit` |
+| `if/qdisc_backlog_pkts` | int 0–65,534, `out_of_range` | 16 | code: the sum of u32 `qlen`s; *chosen*: above fq_codel's default `limit` of 10,240 packets |
+| `radio/rssi` | fixed −160–0 at 0.5, `out_of_range` | 9 | code: the SX1262's −p/2 dBm, −127.5–0 at 0.5 (`sx1262-medium/src/chip.rs:400`), and ModemManager's double, unbounded (`mm-modem/src/lib.rs:284`); *chosen*: −160 dBm, below any receiver's floor |
+| `radio/rsrp` | fixed −156–−31 at 1, `out_of_range` | 7 | ModemManager's double, unbounded; *chosen*: 3GPP's reporting ranges, LTE −140–−44 (TS 36.133), NR −156–−31 (TS 38.133), at 1 dB |
+| `radio/rsrq` | fixed −43–20 at 0.5, `out_of_range` | 7 | ModemManager's double, unbounded; *chosen*: LTE −19.5–−3 (extended −34–2.5), NR −43–20, at 0.5 dB |
+| `radio/snr` | fixed −32–40 at 0.25, `out_of_range` | 9 | code: the SX1262's i8 / 4 dB, −32–31.75 at 0.25 (`chip.rs:401`), and ModemManager's double; *chosen*: NR's SINR, to 40 dB |
+| `radio/error_rate` | fixed 0–100 at 0.01 | 14 | ModemManager's percent, unbounded; *chosen*: 0–100 %, at 0.01, which holds GSM's RXQUAL classes (0.14 %, 0.28 %, …) |
+| `link/rx_rate`, `tx_rate`, `rx_max_rate`, `tx_max_rate` | fixed 0–10,000,000,000 at 100, `out_of_range` | 27 each | code: DLEP's 64-bit bit/s (`dlep-modem/src/session.rs:84`); *chosen*: 10 Gbit/s, at 100 bit/s, so a 9,600 or 4,800 bit/s radio reads exact |
+| `link/latency` | fixed 0–60,000,000 at 100, `out_of_range` | 20 | code: DLEP's 64-bit µs; *chosen*: 60 s, at 100 µs |
+| `link/resources`, `rx_quality`, `tx_quality` | int 0–100, `out_of_range` | 7 each | code: DLEP's one-octet percent, 0–100 (RFC 8175 §13.10–13.12; `session.rs:94`) |
+
+The 22 gauges take 305 bits. The 51 counters are each the code's u64 (`Report`, `Metrics`,
+`NetdevStats`, the layers' `Counter`s), carried modulo 2^w, a declared loss (`telemetry.v2`
+§2.20). Each width holds its counters' worst rate between two frames of the slowest cadence a face
+lists, 900 s, within the serial window 2^(w−1):
+
+| Counters | Width | Worst rate | Window |
+|---|---:|---|---:|
+| the 4 byte counters, `sdu/tx_bytes_total`, `sdu/rx_bytes_total`, `air/bytes_wasted_total` and `layer/compress/bytes_saved_total` | 24 | 2,734 B/s: the fastest SDU medium in the tree, an SX1262 at SF7 and 500 kHz, 21.9 kbit/s (`sx1262-medium/src/lib.rs:164`) | 51 min |
+| `air/airtime_ms_total` | 24 | 1,000 ms/s: occupancy cannot outrun the clock | 2.3 h |
+| the other 37 of the SDU plane and its layers: SDUs, batches, frames, tiles and refusals | 20 | 300/s: one a byte at RF's 2,400 bit/s, more than any SX1262 setting's frames | 29 min |
+| `if/in_octets` and `if/out_octets` | 40 | 1.25 GB/s: a 10 Gbit/s bearer | 7.3 min; 73 min at 1 Gbit/s |
+| the 7 kernel packet, error and discard counters | 32 | 14.88 Mpps: 10 GbE at its smallest frame | 2.4 min; 24 min at 1 GbE |
+
+The counters take 1,164 bits. A pair further apart than its window reads `wrap_or_decrease`, never a
+wrong rate (`telemetry.v2` §2.20). Across a 3,600 s outage at RF's rates every SDU-plane counter still
+reads. The kernel's are a netdev's, which no shipped face carries; `udp-medium` is test-only, and the
+simulated medium's `bitrate_bps` is a lab's to raise.
+
+#### What each face spends
+
+The wire model is the report's Appendix A (`docs/zk2/constrained-overhead-review.md`), read on each
+face's policy: a put on a scope its far reader declared, priority `data` (no QoS extension), a 16-bit
+run, the face's 16-bit sequence and batch, the lean stack (16 B a SDU), Semtech's time on air, and
+SF12's 51 B tiles. **All 73** is every reading present, 16 counters and 8 gauges moving every frame
+(the report's W1). **Its own** is the face's device, its readings as zenoh-modem's code fills them.
+
+| Face | Frame, cadence | All 73 | Its own | Against |
+|---|---|---:|---:|---|
+| RF, rf0 | `fast`, 60 s | 177 KB a day | 92 KB (18 readings) | 25.9 MB a day: 0.7 %. The report's model: 200 KB, with its 203 B keyframe |
+| LoRa SF7, lora0 | `fast`, 60 s | 302 s + 74 s of keep-alives = 376 s | 174 s + 74 s = 248 s (22 readings) | 864 s of air a day: 43 % and 29 % |
+| LoRa SF9 | `fast`, 120 s, full every 15 min | 534 s | 281 s | 62 % and 33 % |
+| LoRa SF12 | `slow`, 900 s, full hourly | 785 s | 434 s (28, the fragment layer's among them) | 91 % and 50 % |
+| SBD, sat0 | `paid`, 1,800 s | 48 messages up, each one frame of 229 B, and 48 keep-alives down | the same, each 94 B | 96 messages a day: as idle |
+
+The downlink's keep-alives are the ground's air: 148 s, 119 s and 142 s at SF7, SF9 and SF12. Under
+3.2's nine frames the same readings cost 401 KB a day on RF, and 736 s, 1,420 s and 2,081 s of air at
+SF7, SF9 and SF12. SF9's and SF12's faces now run a lease of four frame intervals, 480 s and 3,600 s,
+so their frames replace every uplink keep-alive ([link](link.md), the note at its top).
 
 The 73 JSON streams stay, at 5 s on the host bus, for host tools: one reading, two series, which
-a tool labels apart ("`sdu/dropped_total` (`frames/link`)").
+a tool labels apart ("`sdu/dropped_total` (`frames/fast`)").
 
 ### State (9)
 
@@ -279,6 +373,29 @@ a tool labels apart ("`sdu/dropped_total` (`frames/link`)").
 | 8 | `device/{device}/radio` | `registration` | `modem.v3/state/radio` | `RadioState`, `freshness.ttl_s = 60`, v1 `refreshed` QoS |
 | 9 | `config/{device}` | `config` | `config.v1/state/view` | the echo: v1 `transition` QoS = the zk2 state default ([binding](config.v1-binding.md) §7) |
 
+**Since revision 3.3, the 7 again, packed** (#991). A resource's type kind cannot change within the
+major (core §9.8, `type_kind_changed`), so the JSON states stay, and each has a packed twin under
+`packed/`, typed in [`schemas/modem-states.json`](schemas/modem-states.json): optional, with its
+twin's gate, `freshness.ttl_s = 60`, `host`, and confirmed by the same heartbeat, one more
+collection each (`freshness.v2` §2.4). A packed field holds an enum, a number, a bit or a time
+(core §7.6), so each record keeps what is not text, and the text stays in the JSON state:
+
+| Packed state | Record, bits | What it keeps | What stays JSON |
+|---|---|---|---|
+| `packed/oper` | `OperRecord`, 83 | `status` and `admin` (enums with an escape), `recoverable`, `last_change` (a time to the ms), `uptime_s`, `clock_synced` | `reason`, the device's words; `boot_id`, since the record's run tells driver starts apart |
+| `packed/identity` | `IdentityRecord`, 52 | the IMEI's 15 digits | the RFC 8348 names and revisions, all text |
+| `packed/security` | `SecurityRecord`, 10 | `provider` (`none`, `zenoh_modem_aead`, an escape), `scope`, each of the four guarantees as a bit, and whether a principal is named | the principal's name, the note |
+| `packed/radio` | `RadioRecord`, 9 | `registration`, `access_technology` (ModemManager's names, `-` as `_`, `5gnr` as `nr5g`) | nothing |
+| `packed/sdu/link` | `LinkRecord`, 145 | the capabilities, flattened, framing's ARQ as an enum and its attempts; how many lanes, and how many connected | each lane (`@op/sdu/lanes`'s), `ttl_s` (the contract's) |
+| `packed/sdu/endpoint/{endpoint}` | `EndpointRecord`, 17 | how many lanes reach the remote, and how many are connected | each lane's name |
+| `packed/destination/{destination}` | `DestinationRecord`, 158 | the eight DLEP metrics, at `Readings`' ranges | the addresses |
+
+Each record ends with an extension marker, so a later minor appends fields. Put with a 16-bit run,
+each is 8 to 21 B, against 111 to 585 B of JSON (`modem-contract/src/documents.rs`), so a GET across
+a face by grant (`link.v1` §2.9), and #977's snapshots, carry a record's size. None is exposed: a
+state exposed `link` crosses every face that exposes, since a `link.v2` face lists frames only, and
+its heartbeat with it every 30 s, which SBD's messages and LoRa's duty cannot afford.
+
 ### Events (5) → events, one key per occurrence
 
 | # | v1 `events/modem/…` | Gate | v1 rate | zk2 | Retention · bound |
@@ -288,6 +405,10 @@ a tool labels apart ("`sdu/dropped_total` (`frames/link`)").
 | 3 | `device/{device}/identity_change/{event_id}` | — | `rare` | `modem.v3/events/identity_change/<ulid>` | `7d` · 168 |
 | 4 | `device/{device}/config_change/{event_id}` | `config` | `burst(600/h)` | `config.v1/stream/changes/{occurrence}` | `7d` · 100,800 (worst case) |
 | 5 | `device/{device}/action/{event_id}` | `actions` | `burst(600/h)` | `modem.v3/events/action_event/<ulid>` | `1d` · 14,400 |
+
+Revision 3.3 changes none of them (#991). Each template is a literal, so a far reader subscribed to
+`…/events/<template>/*` declares `…/events/<template>`, and each put carries its ULID chunk alone:
+the shortest suffix core §8.5 allows (#980 C1b). None is exposed, so none crosses a face.
 
 ### Procedures (10)
 
@@ -357,8 +478,9 @@ v1's `[[deprecated]]` ledger retired the 1.x paths in 2.0 (#120). **None is carr
 - 8 → `config.v1`, all gated `config`, so 80 + 8 = v1's 88;
 - 3 deleted (`sensor`, `describe`, `introspect`).
 
-Plus 3 errors, 2 tokens and 26 retired paths. Nothing in `modem.toml` is left unmapped. The 9
-frame resources of revision 3.2 map no v1 entry: they carry the 73 readings again, packed.
+Plus 3 errors, 2 tokens and 26 retired paths. Nothing in `modem.toml` is left unmapped. The 12
+frame resources of revisions 3.2 and 3.3 map no v1 entry: they carry the 73 readings again, packed.
+Nor do 3.3's 7 packed states: they carry the 7 states again.
 
 ## Gaps found
 
@@ -379,11 +501,11 @@ Each gap gives what is missing, the evidence, and a proposed correction. "r3.2" 
      `modem.v3` declares none yet: adding it to `sdu/dropped_total` is a revision, review under
      core §9.8.
    - *Status since `modem.v3` 3.2 and the `link.v2` faces (#983 T4, #988 L5):* **closed on every
-     face.** No JSON stream crosses. Each counter crosses as a frame's field: `frames/link` and
-     the group frames over RF and LoRa, `frames/message` over SBD. Its epoch is the frame's run, in
-     band ([`telemetry.v2`](../../../spec/profiles/telemetry/v2.md) §2.19), at no byte, and
-     [`link.v2`](../../../spec/profiles/link/v2.md) §2.13 reads it so across a face. A decrease
-     within one run is not a reset there: at 32 bits, or 24 in `frames/message`, it is
+     face.** No JSON stream crosses. Each counter crosses as a frame's field: since 3.3 (#991),
+     `frames/fast` over RF, SF7 and SF9, `frames/slow` at SF12, `frames/paid` over SBD. Its epoch
+     is the frame's run, in band ([`telemetry.v2`](../../../spec/profiles/telemetry/v2.md) §2.19),
+     at no byte, and [`link.v2`](../../../spec/profiles/link/v2.md) §2.13 reads it so across a
+     face. A decrease within one run is not a reset there: at its width, 20 to 40 bits, it is
      `wrap_or_decrease` (§2.20). The JSON stream on the host bus reads as before, by presence.
 2. **Occurrence-keyed streams cannot state a rate, so their population bound is uncheckable.** v1's
    `rate = rare | low | burst(600/h)` is enforced by the publisher, which folds the excess into
@@ -486,9 +608,10 @@ Each gap gives what is missing, the evidence, and a proposed correction. "r3.2" 
       plus a `tcp` host-face subject. That contradicts zenoh-modem's "only shape"
       (`architecture.md:286-296`) whenever the host face is a distinct protocol. S14 runs it.
     - *Status since `modem.v3` 3.2:* **narrowed, still open.** `sdu/`, `sched/` and `air/` hold no
-      crossing resource now, so each is denied whole. Only `frames/` mixes, and every resource
-      under it crosses: a `host` resource a later minor added there would cross until the plan is
-      derived again.
+      crossing resource now, so each is denied whole. Only `frames/` mixes: since 3.3 it holds 3.2's
+      nine, deprecated and `host`, and the three that cross, each face listing one and denying the
+      others by name (`link.v2` §2.7). A resource a later minor added there would cross until the
+      plan is derived again.
 13. **§3.13's grants are written as allows, and allow rules are inert under `allow`.** A grant is
     the absence of a deny in the principal's policy, plus a deny on the enumerated complement.
     - *Evidence:*
@@ -503,13 +626,12 @@ Each gap gives what is missing, the evidence, and a proposed correction. "r3.2" 
     - *Evidence:* r3.2 l.307; `zenohd-sat0-gateway.json5:99-102`.
     - *Correction:* R7 reads "the freshness of whatever `link.v1` exposes". Over SBD, liveness
       across the face is unobservable by design.
-    - *Status since `modem.v3` 3.2 and the `link.v2` faces (#983 T4, #988 L5):* **closed for RF
-      and for LoRa at SF7 and SF9, open at SF12 and for SBD.** `frames/link` declares
-      `freshness.ttl_s = 150`, so it is liveness evidence across each of those faces (`link.v1`
-      §2.12), which carry it every minute. SF12's carries it every 15 minutes: a far reader finds
-      it stale between two frames (`interval_over_horizon`, `horizon_under_face`), and a horizon
-      that medium can carry is `modem.v3`'s to choose (#991). SBD now carries `frames/message`,
-      which declares no horizon, so liveness across it stays unobservable by design.
+    - *Status since `modem.v3` 3.3 and the `link.v2` faces (#991):* **closed on every face.** Each
+      face carries a frame whose horizon its cadence keeps, so each plan lists it as liveness
+      evidence (`link.v1` §2.12): `frames/fast`, 300 s, on RF and SF7 every minute and SF9 every
+      2; `frames/slow`, 1,800 s, at SF12 every 15 minutes; `frames/paid`, 3,600 s, over SBD every
+      30. Under 3.2, SF12's frames/link drew `interval_over_horizon` and `horizon_under_face`, and
+      SBD's frames/message declared no horizon.
 15. **The descriptor's ≤ 1 KB target fails for a union contract.** Listing unavailable optional
     resources one by one costs 4.5–5.4 KB per device (wwan0: 69 entries; rf0 and sat0: 57).
     - *Evidence:* r3.2 l.444-447, 458.
