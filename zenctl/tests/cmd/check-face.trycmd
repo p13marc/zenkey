@@ -335,7 +335,7 @@ transport (link.v2 §2.19), an omitted key read at zm-1.10.2-r1's default:
     transport.open_timeout_ms       planned 10000      runs 10000      far end 10000
     transport.accept_timeout_ms     planned 10000      runs 10000      far end 10000
     transport.interests_timeout_ms  planned 10000      runs 10000      far end 10000
-catalog: the far side holds e3a529fe, the policy names e3a529fe
+catalog: the far side holds 0ff6bf6d, the policy names 0ff6bf6d
 PASS
 judged against the config file tests/cmd/fixtures/link/router-zm-rf0.json5 read as data, in zenoh 1.10.1's shapes and zm-1.10.2-r1's link protocols: what a router runs is not observable on the bus, so a file that differs from what it was started with is invisible here (core §11.3, link.v1 §2.14)
 stock zenoh's loader refuses zm-1.10.2-r1's link protocols, so no zenoh loaded the file: whether the router's own loader accepts it is not checked (link.v2 §2.4)
