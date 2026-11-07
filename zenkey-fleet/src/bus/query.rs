@@ -592,6 +592,63 @@ impl<T> KeyMerge<T> {
     }
 }
 
+/// Whether a `reply_del` on `key` is a stray one, read with `revisions`
+/// (#977's E4; core S2, S3): every revision of the key's interface among
+/// them answers the key by snapshot
+/// ([`zenkey_model::collection::stray_reply_del`]), and at least one is
+/// held. With none of its interface, nothing is judged.
+pub(crate) fn is_stray(revisions: &[&zenkey_model::contract::Contract], key: &str) -> bool {
+    let Some(iface) = interface_of(key) else {
+        return false;
+    };
+    let mut of = revisions.iter().filter(|c| c.iface == iface).peekable();
+    of.peek().is_some() && of.all(|c| zenkey_model::collection::stray_reply_del(c, key))
+}
+
+/// A zk2 data key's interface, a namespace in front skipped.
+fn interface_of(key: &str) -> Option<zenkey_model::grammar::IfaceId> {
+    let mut rest = Some(key);
+    while let Some(k) = rest {
+        if k.starts_with("zk2/")
+            && let Ok(zenkey_model::grammar::ZkKey::Data { iface, .. }) =
+                zenkey_model::grammar::parse(k)
+        {
+            return Some(iface);
+        }
+        rest = k.split_once('/').map(|(_, r)| r);
+    }
+    None
+}
+
+/// A state GET's `replies`, as they came, each read as its `entries`
+/// ([`reply_samples`] or a dated form of it) and [`merged`], each stray
+/// `reply_del` ([`is_stray`]) taken out first, so that it moves nothing:
+/// no owner sends one (#977's E4). Only a reply is judged, never a
+/// snapshot's tombstone, which its entries read as a delete. Returns the
+/// merged samples, and the first stray of each key nothing else answered,
+/// which its reader counts undecodable as its form, `form`
+/// ([`zenkey_model::collection::STRAY_REPLY_DEL`]). The text names no
+/// reading for one; this is the reference's.
+pub(crate) fn merged_without_strays(
+    replies: impl IntoIterator<Item = zenoh::sample::Sample>,
+    revisions: &[&zenkey_model::contract::Contract],
+    entries: impl Fn(&zenoh::sample::Sample) -> Vec<zenoh::sample::Sample>,
+) -> (Vec<zenoh::sample::Sample>, Vec<zenoh::sample::Sample>) {
+    let (strays, rest): (Vec<_>, Vec<_>) = replies.into_iter().partition(|s| {
+        s.kind() == zenoh::sample::SampleKind::Delete && is_stray(revisions, s.key_expr().as_str())
+    });
+    let kept = merged(rest.iter().flat_map(&entries));
+    let answered: std::collections::BTreeSet<&str> =
+        kept.iter().map(|s| s.key_expr().as_str()).collect();
+    let mut seen = std::collections::BTreeSet::new();
+    let strays = strays
+        .into_iter()
+        .filter(|s| !answered.contains(s.key_expr().as_str()))
+        .filter(|s| seen.insert(s.key_expr().as_str().to_owned()))
+        .collect();
+    (kept, strays)
+}
+
 /// A state GET's samples, [`reply_samples`]' among them, merged per key
 /// ([`KeyMerge`]): one sample a key, the newer by its in-band stamp, else
 /// its Zenoh timestamp.

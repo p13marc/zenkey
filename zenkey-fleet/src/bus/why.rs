@@ -101,6 +101,10 @@ pub struct KeyReply {
     /// Its Zenoh timestamp, on a resource core §4.3's table lists the
     /// owner's.
     pub stamp: Option<Stamp>,
+    /// A stray `reply_del` (#977's E4): a deletion where the owner's
+    /// revision answers the key by snapshot (core S2, S3), so no owner's
+    /// answer, undecodable as its form, `form`.
+    pub stray: bool,
 }
 
 /// What the key answered, by how its kind is read.
@@ -261,7 +265,18 @@ pub async fn observe(
         return obs;
     };
     obs.answer = match kind {
-        KindToken::State | KindToken::ExplicitState => Some(state_answer(session, &key, t).await),
+        KindToken::State | KindToken::ExplicitState => {
+            // The revisions the owner's descriptors name, retrieved above:
+            // what judges a `reply_del` on the key (#977's E4).
+            let held: Vec<std::sync::Arc<zenkey_model::contract::Contract>> = obs
+                .contracts
+                .values()
+                .filter_map(|c| c.as_ref().ok()?.revision().map(|r| r.shared_contract()))
+                .collect();
+            let revisions: Vec<&zenkey_model::contract::Contract> =
+                held.iter().map(AsRef::as_ref).collect();
+            Some(state_answer(session, &key, t, &revisions).await)
+        }
         KindToken::Stream | KindToken::ExplicitStream => {
             Some(stream_answer(session, &key, spec.window).await)
         }
@@ -286,17 +301,23 @@ fn reply_of(sample: &zenoh::sample::Sample) -> KeyReply {
         encoding: (sample.kind() == SampleKind::Put).then(|| sample.encoding().to_string()),
         inband: crate::model::inband::read(sample.clone()).stamp(),
         stamp: sample.timestamp().map(crate::bus::consume::stamp),
+        stray: false,
     }
 }
 
 /// S4's GET on the owner's key: target `All`, consolidation `None`, both
 /// set explicitly (core 0.100, #977's E3). The owner answers a member read
 /// with the member's snapshot on its key, read as the reply its entry
-/// stands for; a snapshot of no entry brings none.
+/// stands for; a snapshot of no entry brings none. Two replies on the key,
+/// from two instances, merge by their stamps, never the first to arrive
+/// kept (core S4); a stray `reply_del`, read with `revisions`, moves
+/// nothing, and is the answer only where nothing else answered (#977's
+/// E4).
 async fn state_answer(
     session: &Session,
     key: &str,
     timeout: Duration,
+    revisions: &[&zenkey_model::contract::Contract],
 ) -> std::result::Result<KeyAnswer, String> {
     let replies = session
         .get(key)
@@ -305,21 +326,27 @@ async fn state_answer(
         .timeout(timeout)
         .await
         .map_err(|e| format!("GET {key}: {e}"))?;
-    let mut out = Vec::new();
+    let mut samples = Vec::new();
     let mut complete = true;
     while let Ok(reply) = replies.recv_async().await {
         match reply.result() {
-            Ok(sample) if sample.key_expr().as_str() == key => out.extend(
-                crate::bus::query::reply_samples(sample)
-                    .iter()
-                    .filter(|s| s.key_expr().as_str() == key)
-                    .map(reply_of),
-            ),
+            Ok(sample) if sample.key_expr().as_str() == key => samples.push(sample.clone()),
             // R6: a reply on a key this GET did not name is discarded.
             Ok(_) => {}
             Err(_) => complete = false,
         }
     }
+    let (kept, strays) = crate::bus::query::merged_without_strays(samples, revisions, |s| {
+        crate::bus::query::reply_samples(s)
+            .into_iter()
+            .filter(|e| e.key_expr().as_str() == key)
+            .collect()
+    });
+    let mut out: Vec<KeyReply> = kept.iter().map(reply_of).collect();
+    out.extend(strays.iter().map(|s| KeyReply {
+        stray: true,
+        ..reply_of(s)
+    }));
     Ok(KeyAnswer::State {
         replies: out,
         complete,

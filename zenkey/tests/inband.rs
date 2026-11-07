@@ -187,9 +187,10 @@ async fn value_order_orders_within_a_run_and_accepts_across_runs() {
     assert_eq!(accepted, ["a", "c", "d", "e", "f"]);
 }
 
-/// S4's GET: an enveloped reply's record and stamp, a `reply_del` whose
-/// attachment is a delete's envelope, and a refused envelope left out,
-/// undecodable.
+/// S4's GET: an enveloped reply's record and stamp, a deletion, the
+/// member's own snapshot with its tombstone's stamp (a `reply_del` on a
+/// collection's member is no owner's answer since #977's E4), and a
+/// refused envelope left out, undecodable.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_state_get_reads_enveloped_replies() {
     let (_r, ep) = router(None).await;
@@ -203,13 +204,8 @@ async fn a_state_get_reads_enveloped_replies() {
                 .encoding(Encoding::ZENOH_BYTES)
                 .wait()
                 .unwrap();
-            q.reply_del(vehicle(2))
-                .attachment(
-                    DeleteStamp {
-                        stamp: stamp(Run::U16(4), 11),
-                    }
-                    .write(),
-                )
+            q.reply(vehicle(2), tombstone(Run::U16(4), 11))
+                .encoding(Encoding::ZENOH_BYTES)
                 .wait()
                 .unwrap();
             q.reply(vehicle(3), vec![0x80, 0, 0])
@@ -247,13 +243,37 @@ async fn a_state_get_reads_enveloped_replies() {
     assert_eq!(
         answer.inband.get(&vehicle(2)),
         Some(&stamp(Run::U16(4), 11)),
-        "a reply_del's stamp, from its attachment"
+        "the tombstone's stamp"
     );
     assert_eq!(
         answer.undecodable.get(&vehicle(3)).map(|r| r.token()),
         Some("form"),
         "form 4, an event, is reserved"
     );
+}
+
+/// A member's own snapshot (core §4.2's member read): one page whose one
+/// entry, its id empty, is a tombstone at `seq` under `run`, as of `seq`.
+fn tombstone(run: Run, seq: u32) -> Vec<u8> {
+    use zenkey::model::collection::{Snapshot, Time, Tombstone};
+    let seq = zenkey::model::wire::Seq::new(seq).unwrap();
+    Snapshot {
+        tag: Tag::NONE,
+        run,
+        asof: seq,
+        time: Time::Unknown,
+        coll: 0,
+        live: Vec::new(),
+        tombs: vec![Tombstone {
+            id: String::new(),
+            run: None,
+            seq,
+        }],
+    }
+    .paginate(1024)
+    .unwrap()[0]
+        .write()
+        .unwrap()
 }
 
 /// A plan's record: the test contract's type is `text/plain`.
@@ -276,8 +296,8 @@ type Plans = zenkey::codec::Raw;
 
 /// The typed GET keeps what orders each key (core §4.3's consumer rule, a
 /// late joiner's seed replies included): `typed::get_answer` holds each
-/// key's in-band stamp beside its decoded record, a `reply_del`'s from its
-/// attachment, and the keys whose envelope was refused; `typed::get` is
+/// key's in-band stamp beside its decoded record, a tombstone's from its
+/// entry, and the keys whose envelope was refused; `typed::get` is
 /// the same answer's keys alone.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_typed_get_keeps_each_keys_in_band_stamp() {
@@ -293,13 +313,8 @@ async fn a_typed_get_keeps_each_keys_in_band_stamp() {
                 .encoding(Encoding::ZENOH_BYTES)
                 .wait()
                 .unwrap();
-            q.reply_del(vehicle(2))
-                .attachment(
-                    DeleteStamp {
-                        stamp: stamp(Run::U32(0xdead_beef), 11),
-                    }
-                    .write(),
-                )
+            q.reply(vehicle(2), tombstone(Run::U32(0xdead_beef), 11))
+                .encoding(Encoding::ZENOH_BYTES)
                 .wait()
                 .unwrap();
             q.reply(vehicle(3), vec![0x80, 0, 0])

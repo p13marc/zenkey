@@ -223,9 +223,38 @@ pub async fn get(
             out.complete = false;
             continue;
         };
-        samples.extend(crate::bus::query::reply_samples_aged(sample, epochs));
+        samples.push(sample.clone());
     }
-    for sample in &crate::bus::query::merged(samples) {
+    // A `reply_del` of the view or the status, which its owner answers by
+    // snapshot, is no owner's answer: undecodable, `form` (#977's E4).
+    let config = zenkey::config_v1::implementation().shared_contract();
+    let (samples, strays) = crate::bus::query::merged_without_strays(samples, &[&*config], |s| {
+        crate::bus::query::reply_samples_aged(s, epochs)
+    });
+    let refused = zenkey_model::collection::STRAY_REPLY_DEL.reason();
+    for sample in &strays {
+        let Some((addr, resource)) = config_key(sample.key_expr().as_str(), KindToken::State)
+        else {
+            continue;
+        };
+        let docs = out.services.entry(addr).or_default();
+        match resource.as_slice() {
+            [v] if v == cm::VIEW => {
+                docs.view = Some(Replied {
+                    value: Some(Err(refused.clone())),
+                    stamp: None,
+                });
+            }
+            [s] if s == cm::STATUS => {
+                docs.status = Some(Replied {
+                    value: Some(Err(refused.clone())),
+                    stamp: None,
+                });
+            }
+            _ => {}
+        }
+    }
+    for sample in &samples {
         let key = sample.key_expr().as_str();
         if key.contains('*') {
             continue;
@@ -657,12 +686,21 @@ pub async fn get_records(
                 out.complete = false;
                 continue;
             };
-            samples.extend(crate::bus::query::reply_samples_at(
-                sample,
-                Some(target.epoch),
-            ));
+            samples.push(sample.clone());
         }
-        for sample in &crate::bus::query::merged(samples) {
+        // A `reply_del` of the record, which its owner answers by snapshot,
+        // is no owner's answer: undecodable, `form` (#977's E4).
+        let (samples, strays) =
+            crate::bus::query::merged_without_strays(samples, &[&*target.contract], |s| {
+                crate::bus::query::reply_samples_at(s, Some(target.epoch))
+            });
+        if strays.iter().any(|s| s.key_expr().as_str() == key) {
+            out.services.entry(addr.clone()).or_default().record = Some(Replied {
+                value: Some(Err(zenkey_model::collection::STRAY_REPLY_DEL.reason())),
+                stamp: None,
+            });
+        }
+        for sample in &samples {
             if sample.key_expr().as_str() != key {
                 continue;
             }

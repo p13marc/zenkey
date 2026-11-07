@@ -366,11 +366,26 @@ pub async fn get(
             continue;
         }
         // A snapshot's page is its entries (core §4.2; #977's E3).
-        samples.extend(crate::bus::query::reply_samples_aged(sample, epochs));
+        samples.push(sample.clone());
     }
     // One reply a key, the newer by its stamp (S4): the envelopes are
-    // filed by key.
-    for sample in crate::bus::query::merged(samples) {
+    // filed by key. A `reply_del` of an alarm, which its owner answers by
+    // snapshot, is no owner's answer: a reply undecodable, `form`, never a
+    // deletion (#977's E4).
+    let alarms = zenkey::alarms::implementation().shared_contract();
+    let (samples, strays) = crate::bus::query::merged_without_strays(samples, &[&*alarms], |s| {
+        crate::bus::query::reply_samples_aged(s, epochs)
+    });
+    for sample in strays {
+        let (mut reply, _) = sample_of(&sample, AlarmVia::Get);
+        reply.delete = false;
+        out.envelopes.insert(
+            reply.key.clone(),
+            Err(zenkey_model::collection::STRAY_REPLY_DEL),
+        );
+        out.replies.push(reply);
+    }
+    for sample in samples {
         let (reply, envelope) = sample_of(&sample, AlarmVia::Get);
         if let Some(e) = envelope {
             out.envelopes.insert(reply.key.clone(), e);

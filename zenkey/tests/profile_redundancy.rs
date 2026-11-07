@@ -1718,17 +1718,18 @@ impl Follower {
         }
     }
 
-    /// Its seed (core §4.2): S4's GET, `All` + `Latest`, each reply taken
-    /// as a sample.
-    async fn seed(&self) -> Option<(String, String)> {
+    /// Its seed (core §4.2): S4's GET, `All` + `None`, each reply taken
+    /// as a sample: under `None` both holders' replies arrive (#977's E4),
+    /// each with the id that stamped it.
+    async fn seed(&self) -> Vec<(String, String)> {
         let replies = self.sessions[1]
             .get(format!("zk2/{LEDGER}/ledger.v1/state/balance"))
             .target(QueryTarget::All)
-            .consolidation(ConsolidationMode::Latest)
+            .consolidation(ConsolidationMode::None)
             .timeout(T)
             .await
             .unwrap();
-        let mut got = None;
+        let mut got = Vec::new();
         while let Ok(r) = replies.recv_async().await {
             if let Ok(s) = r.result() {
                 let payload = String::from_utf8_lossy(&common::record(s)).into_owned();
@@ -1736,7 +1737,7 @@ impl Follower {
                     .timestamp()
                     .map(|t| t.get_id().to_string())
                     .unwrap_or_default();
-                got = Some((by, payload.clone()));
+                got.push((by, payload.clone()));
                 Self::take(
                     &self.holders,
                     &self.values,
@@ -1809,12 +1810,16 @@ async fn s9_a_consumer_following_the_incumbent_during_a_split() {
                 Follower::incumbent(&next.holders) == Some(a_zid.clone())
             })
             .await;
-            let seeded = next.seed().await;
-            if let Some((by, _)) = &seeded {
-                if *by == b_zid {
-                    assert!(next.values.lock().unwrap().is_empty(), "never B's seed");
+            // Under `None` each holder's reply arrives: A's is taken, B's
+            // never.
+            for (by, payload) in next.seed().await {
+                if by == b_zid {
+                    assert!(
+                        !next.values.lock().unwrap().contains(&payload),
+                        "never B's seed"
+                    );
                 } else {
-                    assert_eq!(*by, a_zid);
+                    assert_eq!(by, a_zid);
                 }
             }
             k2 = Some(next);

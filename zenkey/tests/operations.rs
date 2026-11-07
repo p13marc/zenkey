@@ -457,7 +457,8 @@ async fn s1_at_most_once_while_one_instance_serves() {
         "400 executions, one per side, and no more"
     );
 
-    // Both replies of one call with `None`; one per key under `Latest`.
+    // Both replies of one call with `None`; one per key under `Latest`. A
+    // call, not a state GET: `Latest` here is O6's control (#977's E4).
     let key = "zk2/h1/tc/tc.v1/@op/interfaces/eth0/set";
     let req = br#"{"up": true}"#;
     let none = raw_get(
@@ -1114,6 +1115,7 @@ async fn s6_many_replies() {
         )
     };
     assert_eq!(values(&all(ConsolidationMode::None).await), 17);
+    // A call, not a state GET: `Latest` and `Auto` are O6's control.
     for mode in [ConsolidationMode::Latest, ConsolidationMode::Auto] {
         let kept = values(&all(mode).await);
         assert!(kept < 10, "{mode:?} kept {kept} of 17 replies");

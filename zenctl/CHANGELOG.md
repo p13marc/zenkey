@@ -6,6 +6,20 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — the old read path removed (#977 E4)
+
+An owner answers a collection's member by snapshot, one it deleted within
+the window as a tombstone (core S2, S3), and sends a `reply_del` only for
+a per-key resource's member: a state §4.3's table lists. A `reply_del`
+anywhere else is no owner's answer. The text names no reading for one;
+the reference counts it undecodable as its form, `form`.
+
+| Before | Now | Notes |
+|---|---|---|
+| `get state`, `health`, `config`, `alarms`, `doctor`, `check conform`: a `reply_del` on a member of a collection read as the key's deletion | undecodable, `zk2c envelope refused: form`, never a deletion; a per-key resource's (`freshness.v1`, `desired.v1`, a metric, `redundancy.v1`) and an archive's stay deletions | `get state` with the revision held, the others with their profile's contract |
+| `why` on a state key answered with such a `reply_del`: "the key is retired" | the cause: a `reply_del` where the owner answers by snapshot, no owner's answer | the revision the owner's descriptor names judges it; two replies of the key merge by their stamps |
+| `record --on`'s preamble: such a `reply_del` hid an older value of its key | ignored, where `--contracts` holds the key's interface | |
+
 ## Unreleased (`main`, zk2) — the revision of a key by catalog and tag, a packed record never sniffed (#990 V2)
 
 Observer 0.29 §7.3 and §7.5. With no descriptor naming the owner's

@@ -925,6 +925,17 @@ impl<'o> Ladder<'o> {
                 format!("the read could not be put on the bus: {e}"),
             ),
             Some(Ok(KeyAnswer::State { replies, complete })) => match replies.first() {
+                Some(r) if r.stray => WhyRung::cause(
+                    RungId::Answer,
+                    section,
+                    format!(
+                        "the key is answered with a `reply_del`, {}, where its owner's revision \
+                         answers it by snapshot (core S2, S3): no owner's answer, undecodable \
+                         ({})",
+                        self.stamp_words(r),
+                        zenkey_model::collection::STRAY_REPLY_DEL.reason()
+                    ),
+                ),
                 Some(r) if r.bytes.is_some() => {
                     self.value = self.render(r);
                     WhyRung::healthy(
@@ -1040,6 +1051,7 @@ impl<'o> Ladder<'o> {
                         encoding: lk.encoding.as_ref().map(ToString::to_string),
                         inband: lk.inband,
                         stamp: lk.timestamp.as_ref().map(crate::bus::consume::stamp),
+                        stray: false,
                     };
                     let what = if lk.value.is_some() {
                         "value"
@@ -1360,6 +1372,7 @@ mod tests {
                 time: "2026-10-09T10:00:00.000000000Z".into(),
                 clock: clock.into(),
             }),
+            stray: false,
         }
     }
 
@@ -1602,6 +1615,23 @@ mod tests {
         );
         let cause = stopped(&judge(&o), RungId::Answer, 1);
         assert!(cause.contains("the key's deletion"), "{cause}");
+
+        // #977's E4: a `reply_del` where the owner answers by snapshot is
+        // no owner's answer, and says so, undecodable as `form`.
+        let mut stray = value(b"", "ab");
+        stray.bytes = None;
+        stray.stray = true;
+        let o = key_obs(
+            STATUS,
+            presence(Some(descriptor(json!([]), "ab")), true),
+            Some(KeyAnswer::State {
+                replies: vec![stray],
+                complete: true,
+            }),
+        );
+        let cause = stopped(&judge(&o), RungId::Answer, 1);
+        assert!(cause.contains("no owner's answer"), "{cause}");
+        assert!(cause.contains("refused: form"), "{cause}");
 
         let mut o = key_obs(
             STATUS,

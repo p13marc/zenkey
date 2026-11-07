@@ -605,9 +605,40 @@ pub async fn get(
             out.complete = false;
             continue;
         };
-        samples.extend(crate::bus::query::reply_samples_aged(sample, epochs));
+        samples.push(sample.clone());
     }
-    for sample in &crate::bus::query::merged(samples) {
+    // A `reply_del` of the status or a check, which its owner answers by
+    // snapshot, is no owner's answer: undecodable, `form` (#977's E4).
+    let health = zenkey::health::implementation().shared_contract();
+    let (samples, strays) = crate::bus::query::merged_without_strays(samples, &[&*health], |s| {
+        crate::bus::query::reply_samples_aged(s, epochs)
+    });
+    for sample in &strays {
+        let Some((addr, resource)) = health_key(sample.key_expr().as_str(), KindToken::State)
+        else {
+            continue;
+        };
+        let got = out.services.entry(addr).or_default();
+        match resource.as_slice() {
+            [s] if s == hm::STATUS => {
+                got.status = Some(Replied {
+                    value: Some(StatusValue::undecodable()),
+                    stamp: None,
+                });
+            }
+            [c, name] if c == "checks" => {
+                got.checks.insert(
+                    name.clone(),
+                    Replied {
+                        value: Some(CheckValue::undecodable()),
+                        stamp: None,
+                    },
+                );
+            }
+            _ => {}
+        }
+    }
+    for sample in &samples {
         let key = sample.key_expr().as_str();
         if key.contains('*') {
             continue;

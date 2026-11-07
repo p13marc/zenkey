@@ -197,7 +197,9 @@ async fn a_paged_snapshot_is_read_whole_under_none() {
     assert!(h.complete(), "both pages, its last one's more bit 0");
     assert!(answer.complete);
     assert_eq!(answer.current.len(), 1, "page 0's entry");
-    // The control: `Latest` keeps one reply on the key.
+    // The control: `Latest` keeps one reply on the key. A state GET under
+    // `Latest` only as "Why `None`"'s control (core §4.2; #977's E4): no
+    // reader GETs so.
     let rx = reader
         .get(format!("{}/**", owner::plans(ADDRESS)))
         .consolidation(zenoh::query::ConsolidationMode::Latest)
@@ -321,11 +323,14 @@ async fn an_archive_aligns_from_a_paged_snapshot() {
 /// review-bot on #1078): under `None` both replies on a key arrive, and the
 /// consumer keeps one value per key by §4.3's consumer rule, whichever
 /// arrives first. A stamped reply is kept over an unstamped one; within one
-/// run a `reply_del` with a higher seq replaces the put, and a put with a
-/// lower seq never replaces the delete.
+/// run a tombstone with a higher seq, `x`'s own snapshot, replaces the put,
+/// and a put with a lower seq never replaces the delete. (A `reply_del`
+/// would be no owner's answer here: `x` is a collection's member, #977's
+/// E4.)
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn two_instances_per_key_replies_keep_one_value_per_key() {
-    use zenkey::model::wire::{DeleteStamp, Envelope, Seq, Stamp, Tag};
+    use zenkey::model::collection::Tombstone;
+    use zenkey::model::wire::{Envelope, Seq, Stamp, Tag};
     let (_r, ep) = router(None).await;
     let first = client(&ep).await;
     let second = client(&ep).await;
@@ -359,12 +364,26 @@ async fn two_instances_per_key_replies_keep_one_value_per_key() {
         .await
         .unwrap();
     let (x2, y2) = (x.clone(), y.clone());
+    let deleted = Snapshot {
+        tombs: vec![Tombstone {
+            id: String::new(),
+            run: None,
+            seq: Seq::new(6).unwrap(),
+        }],
+        asof: Seq::new(6).unwrap(),
+        ..owner::member_snapshot("")
+    }
+    .paginate(1024)
+    .unwrap()[0]
+        .write()
+        .unwrap();
     let _q2 = second
         .declare_queryable(format!("zk2/{ADDRESS}/mission_plan.v1/state/**"))
         .callback(move |q| {
-            // `x`, deleted at seq 6; `y`, a plain reply with neither stamp.
-            q.reply_del(x2.clone())
-                .attachment(DeleteStamp { stamp: at(6) }.write())
+            // `x`, deleted at seq 6, its own snapshot's tombstone; `y`, a
+            // plain reply with neither stamp.
+            q.reply(x2.clone(), deleted.clone())
+                .encoding(Encoding::ZENOH_BYTES)
                 .wait()
                 .unwrap();
             q.reply(y2.clone(), b"plain".to_vec())
@@ -488,5 +507,98 @@ async fn a_failed_descriptor_read_drops_nothing() {
     assert!(
         c.current.iter().any(|x| x.key() == stale),
         "the stale entry still merges: {c:?}"
+    );
+}
+
+/// #977's E4: an owner answers a collection's member by snapshot, a member
+/// deleted within the window as a tombstone (core S2, S3), so a
+/// `reply_del` on one is no owner's answer. Beside the collection's
+/// snapshot, a `reply_del` for `vehicle-05` (run 5, seq 8): the consumer's
+/// GET counts it undecodable, as its form, `form`, and never merges it as
+/// a deletion; an archive aligning from the owner records nothing for it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_reply_del_on_a_collections_member_is_undecodable() {
+    use zenkey::model::wire::{DeleteStamp, Seq, Stamp};
+    let (_r, ep) = router(None).await;
+    let raw = client(&ep).await;
+    let s = client(&ep).await;
+    let reader = client(&ep).await;
+    let stray = owner::member(ADDRESS, "vehicle-05");
+    let pages: Vec<Vec<u8>> = owner::snapshot()
+        .paginate(owner::PAGE_BYTES)
+        .unwrap()
+        .iter()
+        .map(|p| p.write().unwrap())
+        .collect();
+    let attachment = DeleteStamp {
+        stamp: Stamp {
+            run: RUN,
+            seq: Seq::new(8).unwrap(),
+        },
+    }
+    .write();
+    let (plans, k) = (owner::plans(ADDRESS), stray.clone());
+    let _q = raw
+        .declare_queryable(format!("zk2/{ADDRESS}/mission_plan.v1/state/**"))
+        .callback(move |q| {
+            for b in &pages {
+                q.reply(plans.clone(), b.clone())
+                    .encoding(Encoding::ZENOH_BYTES)
+                    .wait()
+                    .unwrap();
+            }
+            q.reply_del(k.clone())
+                .attachment(attachment.clone())
+                .wait()
+                .unwrap();
+        })
+        .await
+        .unwrap();
+    let consumer = tool(&reader);
+    let a = eventually_some("the owner answers", || async {
+        let a = consumer.get_answer(PLANS, None, T).await.unwrap();
+        a.undecodable.contains_key(&stray).then_some(a)
+    })
+    .await;
+    assert_eq!(a.undecodable[&stray].token(), "form", "{a:?}");
+    assert!(a.current.iter().all(|c| c.key() != stray), "{a:?}");
+    assert_eq!(a.current.len(), 3, "the snapshot's three entries");
+
+    let _token = raw
+        .liveliness()
+        .declare_token(format!("zk2/{ADDRESS}/@zk/instance/00000000000000aa"))
+        .await
+        .unwrap();
+    let archive = Archive::start(
+        &s,
+        ArchiveConfig {
+            service: config("vehicle-01/archive"),
+            records: vec![Recorded {
+                owner: common::addr(ADDRESS),
+                selector: format!("{}/**", owner::plans(ADDRESS)),
+                implementation: imp("mission_plan.v1"),
+            }],
+            peers: Vec::new(),
+            unconfirmed_horizon: None,
+            watch: None,
+        },
+    )
+    .await
+    .unwrap();
+    let at = common::addr("vehicle-01/archive");
+    let one = owner::member(ADDRESS, "vehicle-01");
+    eventually_some("the entries are recorded", || async {
+        archive.align(T).await.unwrap();
+        zenkey::archive::last_known(&reader, &at, &one, T)
+            .await
+            .unwrap()
+    })
+    .await;
+    assert!(
+        zenkey::archive::last_known(&reader, &at, &stray, T)
+            .await
+            .unwrap()
+            .is_none(),
+        "a stray reply_del is not aligned from"
     );
 }

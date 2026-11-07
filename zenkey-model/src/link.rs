@@ -2680,7 +2680,8 @@ impl Res {
 /// `annotations`, in a revision whose `uses` lists the profiles `uses`
 /// says, is a state whose deletes only a tombstone proves (v2 §2.11, 0.9):
 ///
-/// - a per-key resource (core §4.2): a state that declares
+/// - a per-key resource (core §4.2,
+///   [`crate::collection::per_key_in`]): a state that declares
 ///   `freshness.ttl_s` above 0, of a revision that does not use
 ///   `freshness.v2`; one whose annotations hold `desired.target_param`; a
 ///   metric resource of `telemetry.v1` or `telemetry.v2` (a key of its
@@ -2698,22 +2699,9 @@ pub fn tombstone_only(
     annotations: &BTreeMap<String, Value>,
     uses: impl Fn(&str) -> bool,
 ) -> bool {
-    if !is_state(token) {
-        return false;
-    }
-    let horizon = freshness::horizon(Kind::State, annotations).ttl().is_some()
-        && !uses(freshness::PROFILE_V2);
-    let desired = annotations.contains_key(crate::desired::TARGET_PARAM);
-    let metric = (uses(crate::telemetry::PROFILE) || uses(crate::telemetry::PROFILE_V2))
-        && crate::telemetry::VOCABULARY
-            .iter()
-            .any(|k| annotations.contains_key(&format!("telemetry.{k}")));
-    let governed = uses(crate::redundancy::PROFILE);
-    horizon
-        || desired
-        || metric
-        || governed
-        || crate::collection::snapshot_prefix(template).is_none()
+    is_state(token)
+        && (crate::collection::per_key_in(token, annotations, uses)
+            || crate::collection::snapshot_prefix(template).is_none())
 }
 
 /// What the plan needs of the deployment (§2.3): the interfaces each listed
