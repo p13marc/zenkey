@@ -271,12 +271,24 @@ def run(kind: str) -> list[tuple[str, str, bool, Any]]:
         n0 = proxy.transports()
         proxy.refusing = True
         proxy.cut()
-        time.sleep(2.0)
+        # The link is closed for the near side once R1 has dropped the
+        # device's transport, and with it its token: wait for that, bounded,
+        # rather than a fixed 2 s, which R1 sometimes outlasts (round 102's
+        # re-run on the rebased branch: the token seen at 2.0 s, gone a GET
+        # later).
+        t_cut, gone_s = time.monotonic(), None
+        while time.monotonic() - t_cut < 10.0:
+            seen = live.list_presence(tool, "zk2/lab/probe-a/@zk/**")
+            if seen.complete and not seen.instances:
+                gone_s = round(time.monotonic() - t_cut, 1)
+                break
+            time.sleep(0.2)
         rep2 = first_hop.report(tool, "lab/probe-a", policy)
         plain = first_hop.report(tool, "lab/probe-a", first_hop.FacePolicy())
         check("§10 step 2", "while the link is closed, the tool reports the device's link closed, never down "
                             "(observer §3.11); a tool that does not know the face reads the complete read's absence",
-              rep2["state"] == "link_closed" and plain["state"] == "absent", {"knowing": rep2, "not": plain})
+              rep2["state"] == "link_closed" and plain["state"] == "absent",
+              {"knowing": rep2, "not": plain, "token_gone_after_s": gone_s})
         proxy.refusing = False
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline and proxy.transports() <= n0:
