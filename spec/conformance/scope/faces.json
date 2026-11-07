@@ -1,0 +1,519 @@
+{
+  "description": "observer §7.5, a tool's scope across a constrained face. Computed by a reading of the text (Python, standard library) over the authoring contracts and the face policies, checked by a second reading over link.v2's `plan.json` (cases 14, 17 and 18, each policy read equal to its file) and the published bundles, never blessed. Each case: `contracts`, the contracts in hand; `across`, the addresses read; `policy` and `face`, the face policy and its face, or null; `reads`, `samples` for a subscription or `state` for a GET; `typed`, the selectors given, or null for the tool's own. Keys are base-relative. The plan is derived as link.v2 §2.3 says, each service the policy lists taken to implement every contract in hand. `expect`: `selectors`, the selectors the tool declares, sorted by their bytes; or `refused`, the selectors given that meet none of its scopes; or `plan_refused`, the codes of the plan's errors, where the tool has no scope. With no selector given they are the scopes: each resource's, its exact key or its template with each parameter `*` (an event's ULID `*` too), and the heartbeat `…/freshness.v2/stream/heartbeat/<iface>` of each interface whose contract uses freshness.v2 and has a collection. With a face, a subscription's scopes are what crosses (link.v1 §2.7, §2.9; link.v2 §2.7), and a GET's every state resource. Given selectors, each declares the scopes it includes, and itself where it meets a scope it does not include.",
+  "cases": [
+    {
+      "note": "rf0 with no face policy: every resource of the three contracts, and the three heartbeats",
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "across": [
+        "h-3fa9c2d41b7e/rf0"
+      ],
+      "policy": null,
+      "face": null,
+      "reads": "samples",
+      "typed": null,
+      "expect": {
+        "selectors": [
+          "zk2/h-3fa9c2d41b7e/rf0/config.v1/events/change/*",
+          "zk2/h-3fa9c2d41b7e/rf0/config.v1/state/status",
+          "zk2/h-3fa9c2d41b7e/rf0/config.v1/state/view",
+          "zk2/h-3fa9c2d41b7e/rf0/freshness.v2/stream/heartbeat/config.v1",
+          "zk2/h-3fa9c2d41b7e/rf0/freshness.v2/stream/heartbeat/health.v1",
+          "zk2/h-3fa9c2d41b7e/rf0/freshness.v2/stream/heartbeat/modem.v3",
+          "zk2/h-3fa9c2d41b7e/rf0/health.v1/state/checks/*",
+          "zk2/h-3fa9c2d41b7e/rf0/health.v1/state/status",
+          "zk2/h-3fa9c2d41b7e/rf0/health.v1/stream/faults",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/action_event/*",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/device_fault/*",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/identity_change/*",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/*",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/destination/*",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/identity",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/oper",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/destination/*",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/identity",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/oper",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/radio",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/sdu/endpoint/*",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/sdu/link",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/security",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/radio",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint/*",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/link",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/security",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/airtime_ms_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/bytes_wasted_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/cad_deferrals_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/cad_forced_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/duty_cycle_available",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/duty_cycle_wait_ms",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/retransmits_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/rx_errors_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/rx_frames_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/tx_frames_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/air",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/bearer",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/if",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/layer",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/link",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/message",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/paid",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/radio",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/sched",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/sdu",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/slow",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/if/in_discards",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/if/in_errors",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/if/in_multicast_pkts",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/if/in_octets",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/if/in_pkts",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/if/out_discards",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/if/out_errors",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/if/out_octets",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/if/out_pkts",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/if/qdisc_backlog_bytes",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/if/qdisc_backlog_pkts",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/layer/address/foreign_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/layer/address/unknown_source_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/layer/aead/auth_failures_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/layer/aead/replays_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/layer/aead/send_key_id",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/layer/aead/unknown_key_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/layer/compress/bytes_saved_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/layer/compress/compressed_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/layer/compress/dictionary_mismatch_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/layer/compress/malformed_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/layer/compress/stored_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/layer/fec/late_repair_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/layer/fec/malformed_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/layer/fec/repair_frames_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/layer/fec/repaired_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/layer/fec/unrecoverable_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/layer/fec/unused_repair_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/layer/fragment/fragments_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/layer/fragment/malformed_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/layer/fragment/oversize_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/layer/fragment/rcs_failures_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/layer/fragment/reassembled_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/layer/fragment/timeouts_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/link/latency",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/link/resources",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/link/rx_max_rate",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/link/rx_quality",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/link/rx_rate",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/link/tx_max_rate",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/link/tx_quality",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/link/tx_rate",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/radio/error_rate",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/radio/rsrp",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/radio/rsrq",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/radio/rssi",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/radio/signal_bars",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/radio/snr",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sched/dropped_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sched/lane_backlog_bytes",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sched/lane_backlog_drain_ms",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sched/peerless_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sched/queue_depth",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sched/stale_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sdu/dropped_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sdu/rx_bytes_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sdu/rx_oversize_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sdu/rx_sdus_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sdu/rx_unroutable_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sdu/tx_bytes_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sdu/tx_failed_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sdu/tx_oversize_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sdu/tx_sdus_total"
+        ]
+      }
+    },
+    {
+      "note": "rf0 through its face: frames/fast alone crosses; no collection crosses, so no heartbeat does",
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "across": [
+        "h-3fa9c2d41b7e/rf0"
+      ],
+      "policy": "examples/zk2/zenoh-modem/faces/zenohd-rf0.face.toml",
+      "face": "rf",
+      "reads": "samples",
+      "typed": null,
+      "expect": {
+        "selectors": [
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast"
+        ]
+      }
+    },
+    {
+      "note": "lora0 at SF12 through its face: frames/slow alone",
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "across": [
+        "h-c2a95e41d7f0/lora0"
+      ],
+      "policy": "examples/zk2/zenoh-modem/faces/zenohd-lora0-sf12.face.toml",
+      "face": "lora",
+      "reads": "samples",
+      "typed": null,
+      "expect": {
+        "selectors": [
+          "zk2/h-c2a95e41d7f0/lora0/modem.v3/stream/frames/slow"
+        ]
+      }
+    },
+    {
+      "note": "sat0 through its SBD face: frames/paid alone",
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "across": [
+        "h-71c0e2a9d4b3/sat0"
+      ],
+      "policy": "examples/zk2/zenoh-modem/faces/zenohd-sat0.face.toml",
+      "face": "sbd",
+      "reads": "samples",
+      "typed": null,
+      "expect": {
+        "selectors": [
+          "zk2/h-71c0e2a9d4b3/sat0/modem.v3/stream/frames/paid"
+        ]
+      }
+    },
+    {
+      "note": "rf0 through its face, to GET: every state resource, a request crossing by grant",
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "across": [
+        "h-3fa9c2d41b7e/rf0"
+      ],
+      "policy": "examples/zk2/zenoh-modem/faces/zenohd-rf0.face.toml",
+      "face": "rf",
+      "reads": "state",
+      "typed": null,
+      "expect": {
+        "selectors": [
+          "zk2/h-3fa9c2d41b7e/rf0/config.v1/state/status",
+          "zk2/h-3fa9c2d41b7e/rf0/config.v1/state/view",
+          "zk2/h-3fa9c2d41b7e/rf0/health.v1/state/checks/*",
+          "zk2/h-3fa9c2d41b7e/rf0/health.v1/state/status",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/destination/*",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/identity",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/oper",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/destination/*",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/identity",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/oper",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/radio",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/sdu/endpoint/*",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/sdu/link",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/security",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/radio",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint/*",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/link",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/security"
+        ]
+      }
+    },
+    {
+      "note": "rf0 with no face policy, to GET: the same states",
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "across": [
+        "h-3fa9c2d41b7e/rf0"
+      ],
+      "policy": null,
+      "face": null,
+      "reads": "state",
+      "typed": null,
+      "expect": {
+        "selectors": [
+          "zk2/h-3fa9c2d41b7e/rf0/config.v1/state/status",
+          "zk2/h-3fa9c2d41b7e/rf0/config.v1/state/view",
+          "zk2/h-3fa9c2d41b7e/rf0/health.v1/state/checks/*",
+          "zk2/h-3fa9c2d41b7e/rf0/health.v1/state/status",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/destination/*",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/identity",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/oper",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/destination/*",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/identity",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/oper",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/radio",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/sdu/endpoint/*",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/sdu/link",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/security",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/radio",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint/*",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/link",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/security"
+        ]
+      }
+    },
+    {
+      "note": "a selector given that includes the face's one scope: narrowed to it",
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "across": [
+        "h-3fa9c2d41b7e/rf0"
+      ],
+      "policy": "examples/zk2/zenoh-modem/faces/zenohd-rf0.face.toml",
+      "face": "rf",
+      "reads": "samples",
+      "typed": [
+        "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/**"
+      ],
+      "expect": {
+        "selectors": [
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast"
+        ]
+      }
+    },
+    {
+      "note": "a selector given over the frames: narrowed to the one that crosses",
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "across": [
+        "h-3fa9c2d41b7e/rf0"
+      ],
+      "policy": "examples/zk2/zenoh-modem/faces/zenohd-rf0.face.toml",
+      "face": "rf",
+      "reads": "samples",
+      "typed": [
+        "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/*"
+      ],
+      "expect": {
+        "selectors": [
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast"
+        ]
+      }
+    },
+    {
+      "note": "a selector given over streams the plan keeps off the face: refused, never dropped",
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "across": [
+        "h-3fa9c2d41b7e/rf0"
+      ],
+      "policy": "examples/zk2/zenoh-modem/faces/zenohd-rf0.face.toml",
+      "face": "rf",
+      "reads": "samples",
+      "typed": [
+        "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/**"
+      ],
+      "expect": {
+        "refused": [
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/**"
+        ]
+      }
+    },
+    {
+      "note": "a state given to subscribe across rf0: its pushes never cross",
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "across": [
+        "h-3fa9c2d41b7e/rf0"
+      ],
+      "policy": "examples/zk2/zenoh-modem/faces/zenohd-rf0.face.toml",
+      "face": "rf",
+      "reads": "samples",
+      "typed": [
+        "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/oper"
+      ],
+      "expect": {
+        "refused": [
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/oper"
+        ]
+      }
+    },
+    {
+      "note": "the heartbeat given across rf0: it crosses where a collection does, and none does",
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "across": [
+        "h-3fa9c2d41b7e/rf0"
+      ],
+      "policy": "examples/zk2/zenoh-modem/faces/zenohd-rf0.face.toml",
+      "face": "rf",
+      "reads": "samples",
+      "typed": [
+        "zk2/h-3fa9c2d41b7e/rf0/freshness.v2/stream/heartbeat/modem.v3"
+      ],
+      "expect": {
+        "refused": [
+          "zk2/h-3fa9c2d41b7e/rf0/freshness.v2/stream/heartbeat/modem.v3"
+        ]
+      }
+    },
+    {
+      "note": "frames/fast given across lora0 at SF12, whose face lists frames/slow",
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "across": [
+        "h-c2a95e41d7f0/lora0"
+      ],
+      "policy": "examples/zk2/zenoh-modem/faces/zenohd-lora0-sf12.face.toml",
+      "face": "lora",
+      "reads": "samples",
+      "typed": [
+        "zk2/h-c2a95e41d7f0/lora0/modem.v3/stream/frames/fast"
+      ],
+      "expect": {
+        "refused": [
+          "zk2/h-c2a95e41d7f0/lora0/modem.v3/stream/frames/fast"
+        ]
+      }
+    },
+    {
+      "note": "two selectors given, one within the scope and one outside it: the one outside is refused",
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "across": [
+        "h-3fa9c2d41b7e/rf0"
+      ],
+      "policy": "examples/zk2/zenoh-modem/faces/zenohd-rf0.face.toml",
+      "face": "rf",
+      "reads": "samples",
+      "typed": [
+        "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast",
+        "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/**"
+      ],
+      "expect": {
+        "refused": [
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/**"
+        ]
+      }
+    },
+    {
+      "note": "the same streams given with no face policy: narrowed to the ten under air/",
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "across": [
+        "h-3fa9c2d41b7e/rf0"
+      ],
+      "policy": null,
+      "face": null,
+      "reads": "samples",
+      "typed": [
+        "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/**"
+      ],
+      "expect": {
+        "selectors": [
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/airtime_ms_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/bytes_wasted_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/cad_deferrals_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/cad_forced_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/duty_cycle_available",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/duty_cycle_wait_ms",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/retransmits_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/rx_errors_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/rx_frames_total",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/air/tx_frames_total"
+        ]
+      }
+    },
+    {
+      "note": "the heartbeat given with no face policy: its scope",
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "across": [
+        "h-3fa9c2d41b7e/rf0"
+      ],
+      "policy": null,
+      "face": null,
+      "reads": "samples",
+      "typed": [
+        "zk2/h-3fa9c2d41b7e/rf0/freshness.v2/stream/heartbeat/modem.v3"
+      ],
+      "expect": {
+        "selectors": [
+          "zk2/h-3fa9c2d41b7e/rf0/freshness.v2/stream/heartbeat/modem.v3"
+        ]
+      }
+    },
+    {
+      "note": "a member's key given to GET: it meets a template's scope and does not include it, so it stays as given",
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "across": [
+        "h-3fa9c2d41b7e/rf0"
+      ],
+      "policy": "examples/zk2/zenoh-modem/faces/zenohd-rf0.face.toml",
+      "face": "rf",
+      "reads": "state",
+      "typed": [
+        "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint/e1"
+      ],
+      "expect": {
+        "selectors": [
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint/e1"
+        ]
+      }
+    },
+    {
+      "note": "a face policy whose face lists a frame of no contract in hand: the plan is refused, so there is no scope",
+      "contracts": [
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "across": [
+        "h-3fa9c2d41b7e/rf0"
+      ],
+      "policy": "examples/zk2/zenoh-modem/faces/zenohd-rf0.face.toml",
+      "face": "rf",
+      "reads": "samples",
+      "typed": null,
+      "expect": {
+        "plan_refused": [
+          "frame_unknown"
+        ]
+      }
+    }
+  ]
+}
