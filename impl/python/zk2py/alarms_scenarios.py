@@ -850,9 +850,11 @@ def section6(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         rep = g.readings.get(k)
         age = None
         if rep is not None:
-            gets = [x for x in rep.observations if isinstance(x, fr.Get)]
-            age = gets[0].reply.stamp_age_ns / fr.NS if gets and gets[0].reply and gets[0].reply.stamp_age_ns else None
-        report.check(sec, f"2. G's reply holds A firing under a stamp more than {h.ttl_s}.5 s old",
+            # core 0.100: a snapshot's entry, aged by its confirmation
+            # (freshness.v2 0.7 §2.6)
+            gets = [x for x in rep.observations if isinstance(x, fr.Snapshot)]
+            age = gets[0].age_ns / fr.NS if gets and gets[0].age_ns else None
+        report.check(sec, f"2. G's answer holds A firing, its entry's confirmation more than {h.ttl_s}.5 s old",
                      g.documents.get(k) is not None and g.documents[k].firing and age is not None
                      and age > h.ttl_s + 0.5, f"age {age}")  # type: ignore[union-attr]
         g1, g4 = g.answers(h).get(k, (None, None))
@@ -951,8 +953,11 @@ def section8(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         # The archive's form of the owner's alarms (core §4.4: `*` kept).
         st = live.get_state(bus.t_session, al.archive_form("lab/archive", f"zk2/{ADDRESS}/{al.PROFILE}/state/alarms/*"))
         arch_doc = next((al.decode(r.payload) for r in st.replies if not r.deleted), None)
-        stamp = next((r.stamp for r in st.replies if not r.deleted), None)
-        report.check(sec, "3. the archive's form of the owner's alarms holds A, firing, with its stamp (core S6)",
+        # core 0.100: the archive aligned from the owner's snapshot, keeping
+        # "the put the entry stands for" (§4.4): its stamp is in band
+        stamp = next((r.inband for r in st.replies if not r.deleted), None)
+        report.check(sec, "3. the archive's form of the owner's alarms holds A, firing, with its stamp (core S6), in "
+                          "band: the put its snapshot's entry stands for (core §4.4)",
                      arch_doc is not None and arch_doc.firing and stamp is not None, f"{arch_doc}, {stamp}")
 
         def step3(name: str, t: al.AlarmsReader, scope: al.ScopeRead) -> None:

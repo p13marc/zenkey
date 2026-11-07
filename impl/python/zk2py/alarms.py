@@ -587,7 +587,10 @@ def judge(r: Reading, question: str = Q_FIRING, horizon: fr.Horizon = HORIZON) -
     # (§2.15) left it out (step 5)" (0.5, F-136).
     left_out = r.left_out and r.held_whole
     lost = any(isinstance(o, fr.Subscription) and not o.complete for o in obs)
-    reseeded = any(isinstance(o, fr.Get) and o.reply is not None for o in obs)
+    # core 0.100: a snapshot's entry, live or a tombstone, answers the key as
+    # a reply or a reply_del does ("What a profile reads")
+    reseeded = any((isinstance(o, fr.Get) and o.reply is not None)
+                   or (isinstance(o, fr.Snapshot) and o.entry is not None) for o in obs)
     if lost and not reseeded and not left_out:
         return Answer(UNOBSERVABLE, "incomplete", "a delivery was lost, and no GET answered the key since")
     # 5. The latest sample. "A sample the reader holds, a delete included,

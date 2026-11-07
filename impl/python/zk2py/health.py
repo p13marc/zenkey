@@ -639,8 +639,10 @@ def read_near(tool: Any, address: str, *, subscriber: fr.Subscriber | None = Non
         mine = [x for x in st.replies if x.key == status_key]
         if mine:
             x = mine[-1]
-            got = (fr.GetReading("delete", x.stamp_ns, x.stamp_id, x.stamp) if x.deleted
-                   else fr.GetReading("put", x.stamp_ns, x.stamp_id, x.stamp, x.payload))
+            # core 0.100: the status, a freshness.v2 state, is a snapshot's
+            # entry, aged by its confirmation (freshness.v2 0.7 §2.6) from
+            # epoch 0: this reader holds no catalog
+            got = fr.reading_of(x, 0, bool(st.complete_for(status_key)) or x.snapshot_key is None)
             arrivals.append((sd.Mark(x.inband, sd.Stamp.of(x.stamp)), x.deleted, x.payload))
         else:
             got = fr.GetReading(None)

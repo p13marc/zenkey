@@ -542,12 +542,10 @@ def _step3(report: Report, sec: str, f: Fleet, tool: Any, helper: Any, answer: l
 
 
 def _quiet(*owners: Fleet) -> Any:
-    """Stop the owners answering state GETs while a test's session plays
-    them, and return what restores them. zk2py's owner holds each query and
-    drops it unanswered; the owner example cannot be held, so its
-    queryables are left alone and its answer told apart by the Player's
-    replies alone being played: for it the test asks through the Player's
-    own key expression only when the owner's answer is the one it plays."""
+    """Stop zk2py's owners answering state GETs while a test's session plays
+    them, and return what restores them: each query dropped unanswered. The
+    owner example cannot be held, so its steps 3 and 7 are played once it is
+    closed (:func:`_steps`)."""
     restore = []
     for o in owners:
         if o.impl == "zk2py":

@@ -2584,13 +2584,13 @@ class Owner:
                            and self._resource_key(k)[1] is col.resource]  # type: ignore[index]
                 if col.key is not None and asked.includes(zenoh.KeyExpr(col.key + "/**")):
                     header = header or self._snapshot_header()
-                    entries = [(k[len(col.key) + 1:] if k != col.key else "", h) for k, h in members]
+                    entries = [(k[len(col.key) + 1:] if k != col.key else "", k, h) for k, h in members]
                     out.append(("snapshot", col.key, self._pages(col, header, entries)))
                     continue
                 reached = [(k, h) for k, h in members if asked.intersects(zenoh.KeyExpr(k))]
                 for k, h in sorted(reached, key=lambda x: x[0].encode()):
                     header = header or self._snapshot_header()
-                    out.append(("snapshot", k, self._pages(col, header, [("", h)])))
+                    out.append(("snapshot", k, self._pages(col, header, [("", k, h)])))
                 if concrete and not reached and col.member(sel) and self._winner(col, sel):
                     header = header or self._snapshot_header()
                     out.append(("snapshot", sel, self._pages(col, header, [])))
@@ -2657,13 +2657,13 @@ class Owner:
         e["record"] = h.payload.hex()
         return False, e
 
-    def _pages(self, col: Collection, header: dict[str, Any], members: list[tuple[str, _Held]]) -> list[bytes]:
+    def _pages(self, col: Collection, header: dict[str, Any], members: list[tuple[str, str, _Held]]) -> list[bytes]:
         """The snapshot's pages, cut "by §7.5's paging rule, under its page
-        size" (:func:`zk2py.snapshot.cut`)."""
+        size" (:func:`zk2py.snapshot.cut`): each member its id, its key and
+        what the owner holds of it."""
         snap: dict[str, Any] = {"tag": col.tag, **header, "coll": col.index, "live": [], "tombs": []}
-        for entry_id, h in members:
-            key = col.key + ("/" + entry_id if entry_id else "") if col.key is not None else None
-            got = self._entry(col, header, entry_id, key or "", h)
+        for entry_id, key, h in members:
+            got = self._entry(col, header, entry_id, key, h)
             if got is None:
                 continue
             tomb, e = got

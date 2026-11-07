@@ -345,12 +345,12 @@ def section2(report: Report) -> None:
         puts = _puts(s.of(o.status_key))
         rd = info_g.get("status_reading")
         report.check(sec, "step 1: past the horizon S and G both judge healthy, ok; S has received no put of the "
-                          "status since step 1's; G's reply is stamped with its last confirmation (freshness.v2 §2.4)",
+                          "status since step 1's; G's entry carries its confirmation (core 0.100, freshness.v2 0.7 §2.4)",
                      a_s.expect() == a_g.expect() == {"verdict": "healthy", "reason": "ok", "level": "ok"}
-                     and len(puts) == 1 and rd is not None and rd.stamp_ns is not None
-                     and (time.time_ns() - rd.stamp_ns) / fr.NS < 31,
+                     and len(puts) == 1 and rd is not None and rd.confirmed_ns is not None
+                     and (time.time_ns() - rd.confirmed_ns) / fr.NS < 31,
                      f"S {_answer(a_s)}, G {_answer(a_g)}, {len(puts)} puts, reply aged "
-                     f"{None if rd is None or not rd.stamp_ns else round((time.time_ns() - rd.stamp_ns) / fr.NS, 2)} s")
+                     f"{None if rd is None or not rd.confirmed_ns else round((time.time_ns() - rd.confirmed_ns) / fr.NS, 2)} s")
         # step 2: the owner stops vouching (zk2py: its writer closed, its bit clear)
         o.owner.close_writer(o.status_key)
         t2 = time.monotonic_ns()
@@ -365,10 +365,10 @@ def section2(report: Report) -> None:
         a_s, a_g = h.judge(r_s), h.judge(r_g)
         pres = info_s["presence"]
         reading = info_g.get("status_reading")
-        age = (time.time_ns() - reading.stamp_ns) / fr.NS if reading is not None and reading.stamp_ns else None
+        age = (time.time_ns() - reading.confirmed_ns) / fr.NS if reading is not None and reading.confirmed_ns else None
         report.check(sec, "step 3: the owner's instance and interface tokens are present; 65 s after the last "
                           "heartbeat that vouched for the status S judges stale, beyond_horizon, and G stale, "
-                          "beyond_horizon, its reply's stamp more than 60.5 s old; neither unhealthy, FAILED or OK "
+                          "beyond_horizon, its entry's confirmation more than 60.5 s old; neither unhealthy, FAILED or OK "
                           "as current",
                      len(pres.instances) == 1 and len(pres.alive) >= 1
                      and a_s.expect() == a_g.expect() == {"verdict": "stale", "reason": "beyond_horizon", "level": None}
