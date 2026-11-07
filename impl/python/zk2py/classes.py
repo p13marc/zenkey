@@ -397,8 +397,8 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "live.read_reply_error: one the parse refuses and one under another Encoding the transport's, silence, an "
      "idempotent call retried; §5.1's MAY reads the bare wire's three envelope encodings, a malformed one the "
      "transport's (forms_live §9 steps 5 to 7) (round 101, core 0.94)"),
-    ("caller", "core §5.2", "It MUST refuse", MET,
-     "envelope.decode, the bare wire's envelope (errors family: cases.json) (core 0.94)"),
+    # core 0.99 (#985 C4d, round 104): §5.2's Decoding MUST removed with the
+    # bare wire, under the caller and the observer.
     ("caller", "core §8.1", "Every instance MUST hold one, including pure consumers", MET,
      "a zk2py service that calls is an owner.Owner, which holds one (presence_scenarios §1; F-361)"),
     ("caller", "core §8.1", "A caller, a consumer or a tool across a constrained face whose face policy states a reply timeout", MET,
@@ -431,9 +431,7 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "state_pairings §7, §10, §13) (round 93, core 0.73)"),
     ("observer", "core §5.1", "Caller and tool: MUST NOT treat an empty", MET,
      "judgement, live.o3_verdict (observer_scenarios, operations.md §5)"),
-    ("observer", "core §5.2", "It MUST refuse", MET,
-     "envelope.decode (errors family); a caller's or a tool's that reads the bare wire, listed under the caller "
-     "alone at core 0.94 (F-472) and under both since core 0.95's index (round 102)"),
+    # core 0.99 (round 104): §5.2's Decoding MUST removed (F-472's row).
     ("observer", "core §5.2", "A caller or a tool MUST read a `reply_err` under the `Encoding` `zenoh/bytes` by",
      MET, "live.read_reply_error, which live.o3_verdict and live.show_reply read through (forms_live §9 step 5) "
           "(round 101, core 0.94)"),
