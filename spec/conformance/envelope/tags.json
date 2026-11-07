@@ -1,0 +1,633 @@
+{
+  "description": "observer §7.3 (CH's tag) and §7.5 (the revision of a key): which revision a tool reads a sample with where no descriptor names the owner's, and what it shows of a record whose type it does not hold. Written by hand from the text, checked by a second, independent reading over the bundles, never blessed. `history` is the directory of every revision a case can hold, each a bundle named by its fingerprint: zenoh-modem's four published revisions of modem.v3, at indices 0, 5, 6 and 8 of its catalog. `catalogs` maps a catalog's id to its file, or to its document, each a predecessor of e3a529fe in its lineage, so a reader checks each id. Each case: `key`, base-relative; `sample`, `put` where it is absent, or `reply` for a call's value; `ch`, the sample's header byte (core §7.5), its form, run width and tag; `size`, the bytes after the seq, a record's or a body's (the bytes themselves are not given: no case decodes); `held`, the revisions of the key's interface the tool holds; `catalog`, the id of the catalog it was given, or null. A heartbeat's key names the interface it covers, and its revisions are those of that interface whose contracts use freshness.v2 (`uses`), its tag the low four bits of the fingerprint's last byte. `expect`, for a put: `revision`, the fingerprint the tool reads the sample with, `step`, the step that chose it (1, 2 or 3), and `by`, `deployment` for step 1 or `tag` for steps 2 and 3; with `refused: tag` where CH's tag is not the chosen resource's type's (a packed type's own, 0 for any other kind, a frame form's for a frame). Or `revision: null` with `none`, the step that left none (`not_held`, `no_resource`, `not_listed`, `tag`), or `ambiguous`, the fingerprints left, sorted; and `shows`, what the tool shows: `{packed: {tag, size}}` for a record under a tag other than 0, `sniffed` for one under tag 0, `envelope` for a frame or a heartbeat. For a reply, `shows` alone: §7.5's steps read puts. Two revisions read a sample alike when each gives its key the same packed layout form, the same frame form, the same collections, or a type of another kind with the same kind and name on the same encoding.",
+  "history": "examples/zk2/.history/modem.v3",
+  "catalogs": {
+    "e3a529fe": "examples/zk2/zenoh-modem/catalog.json",
+    "ab76ec37": {
+      "entries": [
+        {
+          "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+          "iface": "modem.v3",
+          "index": 0
+        },
+        {
+          "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1",
+          "iface": "config.v1",
+          "index": 1
+        },
+        {
+          "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df",
+          "iface": "health.v1",
+          "index": 2
+        },
+        {
+          "contract": "sha256:4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501",
+          "iface": "config.v1",
+          "index": 3
+        },
+        {
+          "contract": "sha256:60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f",
+          "iface": "health.v1",
+          "index": 4
+        },
+        {
+          "contract": "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+          "iface": "modem.v3",
+          "index": 5
+        },
+        {
+          "contract": "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+          "iface": "modem.v3",
+          "index": 6
+        }
+      ],
+      "epoch": 1767225600,
+      "format": "zk2-catalog/1",
+      "lineage": [
+        {
+          "entries": 3,
+          "id": "0a90fd61"
+        },
+        {
+          "entries": 5,
+          "id": "ea268fad"
+        },
+        {
+          "entries": 6,
+          "id": "36c25c0f"
+        }
+      ]
+    },
+    "0a90fd61": {
+      "entries": [
+        {
+          "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+          "iface": "modem.v3",
+          "index": 0
+        },
+        {
+          "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1",
+          "iface": "config.v1",
+          "index": 1
+        },
+        {
+          "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df",
+          "iface": "health.v1",
+          "index": 2
+        }
+      ],
+      "epoch": 1767225600,
+      "format": "zk2-catalog/1"
+    }
+  },
+  "cases": [
+    {
+      "note": "a packed state only the latest revision declares, all four held and listed: step 1 leaves it",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/oper",
+      "ch": "0x04",
+      "size": 9,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": "e3a529fe",
+      "expect": {
+        "revision": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+        "step": 1,
+        "by": "deployment"
+      }
+    },
+    {
+      "note": "the same with no catalog: step 1 needs none where one revision gives the key a resource",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/oper",
+      "ch": "0x04",
+      "size": 9,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": null,
+      "expect": {
+        "revision": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+        "step": 1,
+        "by": "deployment"
+      }
+    },
+    {
+      "note": "the same under tag 9: the revision step 1 leaves is read, and OperRecord's tag is 4 (observer §7.3, not its type's tag)",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/oper",
+      "ch": "0x09",
+      "size": 9,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": "e3a529fe",
+      "expect": {
+        "revision": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+        "step": 1,
+        "by": "deployment",
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "a JSON state, one revision held and no catalog: the one held, as before",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/oper",
+      "ch": "0x00",
+      "size": 41,
+      "held": [
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": null,
+      "expect": {
+        "revision": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+        "step": 1,
+        "by": "deployment"
+      }
+    },
+    {
+      "note": "a JSON state under tag 5, one revision held: a record of a type of another kind is its type's under tag 0 alone",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/oper",
+      "ch": "0x05",
+      "size": 41,
+      "held": [
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": null,
+      "expect": {
+        "revision": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+        "step": 1,
+        "by": "deployment",
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "a catalog listing one revision of modem.v3, all four held: that one is the deployment's word (core §4.2)",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/oper",
+      "ch": "0x00",
+      "size": 41,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": "0a90fd61",
+      "expect": {
+        "revision": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "step": 1,
+        "by": "deployment"
+      }
+    },
+    {
+      "note": "a frame resource only the latest revision declares, no catalog",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast",
+      "ch": "0xa7",
+      "size": 98,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": null,
+      "expect": {
+        "revision": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+        "step": 1,
+        "by": "deployment"
+      }
+    },
+    {
+      "note": "a JSON state every revision declares as jsonschema Oper on json: the catalog's latest, index 8, by tag",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/oper",
+      "ch": "0x00",
+      "size": 41,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": "e3a529fe",
+      "expect": {
+        "revision": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+        "step": 3,
+        "by": "tag"
+      }
+    },
+    {
+      "note": "the same through a catalog that lists three of them: its latest, index 6",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/oper",
+      "ch": "0x00",
+      "size": 41,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": "ab76ec37",
+      "expect": {
+        "revision": "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "step": 3,
+        "by": "tag"
+      }
+    },
+    {
+      "note": "an event every revision declares alike, its ULID stripped: index 8, by tag",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/01j9zk6q6x5m2f4a8c0d3e7b9h",
+      "ch": "0x00",
+      "size": 57,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": "e3a529fe",
+      "expect": {
+        "revision": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+        "step": 3,
+        "by": "tag"
+      }
+    },
+    {
+      "note": "frames/link, which two revisions declare with one frame form, tag 5: index 8, by tag",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/link",
+      "ch": "0xa5",
+      "size": 14,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": "e3a529fe",
+      "expect": {
+        "revision": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+        "step": 3,
+        "by": "tag"
+      }
+    },
+    {
+      "note": "modem.v3's heartbeat under tag 15: three revisions use freshness.v2, and only index 8's fingerprint ends in 0xcf",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/freshness.v2/stream/heartbeat/modem.v3",
+      "ch": "0xcf",
+      "size": 76,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": "e3a529fe",
+      "expect": {
+        "revision": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+        "step": 2,
+        "by": "tag"
+      }
+    },
+    {
+      "note": "the same with a 32-bit run: the width bit changes nothing",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/freshness.v2/stream/heartbeat/modem.v3",
+      "ch": "0xdf",
+      "size": 76,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": "e3a529fe",
+      "expect": {
+        "revision": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+        "step": 2,
+        "by": "tag"
+      }
+    },
+    {
+      "note": "modem.v3's heartbeat under tag 4: index 6's fingerprint ends in 0x04",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/freshness.v2/stream/heartbeat/modem.v3",
+      "ch": "0xc4",
+      "size": 38,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": "e3a529fe",
+      "expect": {
+        "revision": "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "step": 2,
+        "by": "tag"
+      }
+    },
+    {
+      "note": "modem.v3's heartbeat under tag 6 with no catalog: the tag needs none",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/freshness.v2/stream/heartbeat/modem.v3",
+      "ch": "0xc6",
+      "size": 38,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": null,
+      "expect": {
+        "revision": "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "step": 2,
+        "by": "tag"
+      }
+    },
+    {
+      "note": "a JSON state under tag 5, all four held: none carries it, and a record under a tag other than 0 is a packed one, never sniffed",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/oper",
+      "ch": "0x05",
+      "size": 12,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": "e3a529fe",
+      "expect": {
+        "revision": null,
+        "none": "tag",
+        "shows": {
+          "packed": {
+            "tag": 5,
+            "size": 12
+          }
+        }
+      }
+    },
+    {
+      "note": "frames/link under tag 9: neither revision that declares it has that frame form's tag",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/link",
+      "ch": "0xa9",
+      "size": 14,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": "e3a529fe",
+      "expect": {
+        "revision": null,
+        "none": "tag",
+        "shows": "envelope"
+      }
+    },
+    {
+      "note": "modem.v3's heartbeat under tag 3, index 0's: that revision uses freshness.v1, so it is none of the heartbeat's revisions",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/freshness.v2/stream/heartbeat/modem.v3",
+      "ch": "0xc3",
+      "size": 38,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": "e3a529fe",
+      "expect": {
+        "revision": null,
+        "none": "tag",
+        "shows": "envelope"
+      }
+    },
+    {
+      "note": "modem.v3's heartbeat under tag 15 through a catalog without index 8: the two it lists carry 4 and 6",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/freshness.v2/stream/heartbeat/modem.v3",
+      "ch": "0xcf",
+      "size": 76,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": "ab76ec37",
+      "expect": {
+        "revision": null,
+        "none": "tag",
+        "shows": "envelope"
+      }
+    },
+    {
+      "note": "the packed state through a catalog without the revision that declares it",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/oper",
+      "ch": "0x04",
+      "size": 9,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": "ab76ec37",
+      "expect": {
+        "revision": null,
+        "none": "not_listed",
+        "shows": {
+          "packed": {
+            "tag": 4,
+            "size": 9
+          }
+        }
+      }
+    },
+    {
+      "note": "a JSON state whose one revision held the catalog does not list",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/oper",
+      "ch": "0x00",
+      "size": 41,
+      "held": [
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": "0a90fd61",
+      "expect": {
+        "revision": null,
+        "none": "not_listed",
+        "shows": "sniffed"
+      }
+    },
+    {
+      "note": "frames/fast with only the three revisions before it held",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast",
+      "ch": "0xa7",
+      "size": 98,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404"
+      ],
+      "catalog": "e3a529fe",
+      "expect": {
+        "revision": null,
+        "none": "no_resource",
+        "shows": "envelope"
+      }
+    },
+    {
+      "note": "modem.v3's heartbeat, only index 0 held: it uses freshness.v1",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/freshness.v2/stream/heartbeat/modem.v3",
+      "ch": "0xcf",
+      "size": 76,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953"
+      ],
+      "catalog": null,
+      "expect": {
+        "revision": null,
+        "none": "no_resource",
+        "shows": "envelope"
+      }
+    },
+    {
+      "note": "the packed state with no revision of modem.v3 in hand: shown as a packed record by its tag and size",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/oper",
+      "ch": "0x04",
+      "size": 9,
+      "held": [],
+      "catalog": null,
+      "expect": {
+        "revision": null,
+        "none": "not_held",
+        "shows": {
+          "packed": {
+            "tag": 4,
+            "size": 9
+          }
+        }
+      }
+    },
+    {
+      "note": "the same with a 32-bit run, CH 0x14",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/oper",
+      "ch": "0x14",
+      "size": 9,
+      "held": [],
+      "catalog": null,
+      "expect": {
+        "revision": null,
+        "none": "not_held",
+        "shows": {
+          "packed": {
+            "tag": 4,
+            "size": 9
+          }
+        }
+      }
+    },
+    {
+      "note": "a JSON state with no revision in hand: tag 0 is sniffed, as before",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/oper",
+      "ch": "0x00",
+      "size": 41,
+      "held": [],
+      "catalog": null,
+      "expect": {
+        "revision": null,
+        "none": "not_held",
+        "shows": "sniffed"
+      }
+    },
+    {
+      "note": "a frame with no revision in hand: shown by its envelope (observer §7.6)",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast",
+      "ch": "0xa7",
+      "size": 98,
+      "held": [],
+      "catalog": null,
+      "expect": {
+        "revision": null,
+        "none": "not_held",
+        "shows": "envelope"
+      }
+    },
+    {
+      "note": "a JSON state, all four held and no catalog: nothing orders them",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/oper",
+      "ch": "0x00",
+      "size": 41,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": null,
+      "expect": {
+        "revision": null,
+        "ambiguous": [
+          "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+          "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+          "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+          "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404"
+        ],
+        "shows": "sniffed"
+      }
+    },
+    {
+      "note": "frames/link, all four held and no catalog: the two that declare it",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/link",
+      "ch": "0xa5",
+      "size": 14,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": null,
+      "expect": {
+        "revision": null,
+        "ambiguous": [
+          "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+          "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404"
+        ],
+        "shows": "envelope"
+      }
+    },
+    {
+      "note": "a reply's value under tag 3, the operation's contract not in hand: a packed record, never sniffed",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/@op/sdu/lanes",
+      "sample": "reply",
+      "ch": "0x43",
+      "size": 6,
+      "held": [],
+      "catalog": null,
+      "expect": {
+        "shows": {
+          "packed": {
+            "tag": 3,
+            "size": 6
+          }
+        }
+      }
+    },
+    {
+      "note": "a reply's value under tag 0, the operation's contract not in hand: sniffed",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/@op/sdu/lanes",
+      "sample": "reply",
+      "ch": "0x40",
+      "size": 31,
+      "held": [],
+      "catalog": null,
+      "expect": {
+        "shows": "sniffed"
+      }
+    }
+  ]
+}

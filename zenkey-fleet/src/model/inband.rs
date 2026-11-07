@@ -386,6 +386,28 @@ pub fn heartbeat_value(
 pub const HEARTBEAT_AS_RECORD: &str =
     "a zk2c heartbeat's body where a record of the resource's type was read";
 
+/// What a tool shows of a sample whose type it does not hold (observer
+/// §7.3, §7.6; #990 V2b), by its CH: a frame, a heartbeat and a snapshot's
+/// page by their envelope; a record under a tag other than 0 as a packed
+/// record, since only the packed kind defines a tag, never sniffed; any
+/// other record sniffed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unheld {
+    Packed(wire::Tag),
+    Sniffed,
+    Envelope,
+}
+
+impl Unheld {
+    pub fn of(form: wire::Form, tag: wire::Tag) -> Unheld {
+        match form {
+            wire::Form::Frame | wire::Form::Heartbeat | wire::Form::Snapshot => Unheld::Envelope,
+            _ if tag != wire::Tag::NONE => Unheld::Packed(tag),
+            _ => Unheld::Sniffed,
+        }
+    }
+}
+
 /// A heartbeat rendered with no revision of what it covers in hand: its
 /// form, its covered interface and its size, the structural ladder never
 /// run over its body.
@@ -703,20 +725,27 @@ pub fn structural_text(key: &str, encoding: Option<&str>, bytes: &[u8]) -> Strin
         }
         Payload::Frame { body, stamp, .. } => crate::model::frame::unread_text(stamp, body.len()),
         Payload::Snapshot { body, header, tag } => snapshot_text(header, tag, body),
+        // A record under a tag other than 0 is a packed record, never
+        // sniffed (observer §7.3).
+        Payload::Record { record, tag, .. } if tag != wire::Tag::NONE => {
+            structural::packed_text(tag, record.len())
+        }
         Payload::Plain(b) | Payload::Record { record: b, .. } => structural::structural(b),
     }
 }
 
 /// [`structural::structural_value`] over a put's bytes, its envelope
-/// stripped first; `None` for a refused envelope.
+/// stripped first; `None` for a refused envelope, and for a record under a
+/// tag other than 0, a packed record no sniff reads (observer §7.3).
 pub fn structural_value(
     key: &str,
     encoding: Option<&str>,
     bytes: &[u8],
 ) -> Option<serde_json::Value> {
-    payload(key, encoding, bytes)
-        .bytes()
-        .and_then(structural::structural_value)
+    match payload(key, encoding, bytes) {
+        Payload::Record { tag, .. } if tag != wire::Tag::NONE => None,
+        p => p.bytes().and_then(structural::structural_value),
+    }
 }
 
 /// Whether core §4.3's table lists `r`, a resource of `contract`: one whose

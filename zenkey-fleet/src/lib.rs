@@ -412,6 +412,9 @@ pub use model::deployment::{
 };
 // The owners a tool is told are on a first hop (observer §3.11, #982 H3):
 // a face policy's devices, reported link closed, never down.
+// A raw observer's scope across a constrained face (observer §7.5, #990
+// V1): the contracts in hand, and a face policy's plan where given.
+pub use model::face_scope::FaceScope;
 pub use model::first_hop::FirstHop;
 pub use model::presence_live::{
     DEFAULT_MAX_GONE, LiveAddress, LiveInstance, LivePresence, PresenceBasis, PresenceIgnored,

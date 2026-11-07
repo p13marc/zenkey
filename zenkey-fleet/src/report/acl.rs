@@ -1280,6 +1280,7 @@ history   = true
             reply_timeout_ms: None,
             frames: None,
             findings: vec![],
+            crossing: Default::default(),
         }];
         plan.downsampling = vec![Downsampling {
             id: "rf".into(),

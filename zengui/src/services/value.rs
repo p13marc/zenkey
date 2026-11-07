@@ -583,7 +583,15 @@ mod tests {
                 .rendering
                 .rendered
         };
-        let held = value(&inputs(Arc::clone(&loaded.catalogs)));
+        // The catalog given must list the revision held (observer §7.5's
+        // step 1, #990 V2): the modem's, with packed.v1 appended, its epoch
+        // kept.
+        let mut listing = loaded.catalogs.held()[0].successor();
+        listing
+            .push(rev.iface().clone(), rev.fingerprint().clone())
+            .unwrap();
+        let listing = Arc::new(zenkey_fleet::Catalogs::new(vec![listing]));
+        let held = value(&inputs(listing));
         let zenkey_fleet::report::Rendered::Value { value: v, .. } = &held else {
             panic!("{held:?}")
         };

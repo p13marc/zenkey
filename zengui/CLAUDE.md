@@ -9,7 +9,8 @@ Claude Code loads this file when working in `zengui/`; the root `CLAUDE.md` is t
   *any* Zenoh bus, and zk2 awareness lights up only when a key resolves —
   `keyfacts.rs` is the single seam where that happens (the fleet's
   `IdentityCache` over the lens, read as fourteen `Rung`s, from `resolved`
-  to the rung where resolution stopped), and `scope.rs` the single place
+  to the rung where resolution stopped; #990 V2's `none_left` badged by
+  the rung it stopped short of), and `scope.rs` the single place
   selectors are built (zenkey-model's kind selectors + `with_namespace`,
   never `format!`). Note `**` never crosses a verbatim chunk (core §1.3),
   so the raw scope cannot pull an explicit `@stream` *and* cannot see `@op`

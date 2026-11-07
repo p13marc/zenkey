@@ -2976,6 +2976,33 @@ pub struct FacePlan {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frames: Option<Vec<ListedFrame>>,
     pub findings: Vec<Finding>,
+    /// What crosses the face, by name (§0): each resource of a listed
+    /// interface whose pushes cross, overlapped ones set aside, and each
+    /// crossing heartbeat as `freshness.v2/stream/heartbeat/<iface>`
+    /// (§2.9). A tool's scope across the face is read from it (observer
+    /// §7.5). No router block carries it, so it is never serialized.
+    #[serde(skip)]
+    pub crossing: BTreeSet<String>,
+}
+
+impl FacePlan {
+    /// Whether resource `token`/`template` of `iface` crosses the face.
+    #[must_use]
+    pub fn crosses(&self, iface: &str, token: KindToken, template: &Template) -> bool {
+        self.crossing
+            .contains(&format!("{iface}/{}/{}", token.as_str(), template.as_str()))
+    }
+
+    /// Whether the heartbeat covering `iface` crosses the face (§2.9).
+    #[must_use]
+    pub fn heartbeat_crosses(&self, iface: &str) -> bool {
+        self.crossing.contains(&heartbeat_name(iface))
+    }
+}
+
+/// A heartbeat's name in a plan, `freshness.v2/stream/heartbeat/<iface>`.
+fn heartbeat_name(iface: &str) -> String {
+    format!("{}/stream/heartbeat/{iface}", freshness::PROFILE_V2)
 }
 
 /// A listed frame that crosses, as the plan carries it (v2 §2.18).
@@ -3409,6 +3436,23 @@ fn plan_face(
             }
         }
     }
+    // What crosses, by name: a tool's scope across the face (observer
+    // §7.5).
+    let mut crossing: BTreeSet<String> = listed
+        .iter()
+        .flat_map(|iface| {
+            resources_of(iface)
+                .iter()
+                .filter(|r| crosses(iface, r))
+                .map(|r| res_name(iface, r))
+        })
+        .collect();
+    crossing.extend(
+        heartbeat_crosses
+            .iter()
+            .filter(|(_, c)| **c)
+            .map(|(i, _)| heartbeat_name(i)),
+    );
     // What else link.v2 weighs of each crossing resource (v2 §2.3, §2.16).
     if v2 {
         for iface in listed {
@@ -3446,7 +3490,7 @@ fn plan_face(
                 findings.push(Finding::new(
                     Code::HorizonUnderFace,
                     Some(name),
-                    format!("{}/stream/heartbeat/{iface}", freshness::PROFILE_V2),
+                    heartbeat_name(iface),
                 ));
             }
         }
@@ -3500,7 +3544,7 @@ fn plan_face(
             ifaces
                 .iter()
                 .filter(|i| heartbeat_crosses.get(i.as_str()) == Some(&true))
-                .map(|i| format!("{}/stream/heartbeat/{i}", freshness::PROFILE_V2)),
+                .map(|i| heartbeat_name(i)),
         );
         evidence.sort();
         evidence.dedup();
@@ -3531,6 +3575,7 @@ fn plan_face(
         reply_timeout_ms: face.reply_timeout_ms,
         frames: face.frames.as_ref().map(|_| listed_frames),
         findings,
+        crossing,
     };
     (plan, facts)
 }

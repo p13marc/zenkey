@@ -1966,6 +1966,7 @@ pub fn rate_report() -> RateReport {
                     ]
                     .into(),
                     unresolved: None,
+                    chosen: None,
                 },
                 count: 50,
                 bytes: 2_250,
@@ -1982,6 +1983,7 @@ pub fn rate_report() -> RateReport {
                     unresolved: Some(Unresolved::NotZk2 {
                         detail: "it does not start with zk2/".into(),
                     }),
+                    chosen: None,
                 },
                 count: 20,
                 bytes: 80,
@@ -3270,6 +3272,7 @@ fn state_identity(address: &str, resource: &str, values: &[(&str, &str)]) -> Key
             .map(|(k, v)| ((*k).to_owned(), vec![(*v).to_owned()]))
             .collect(),
         unresolved: None,
+        chosen: None,
     }
 }
 

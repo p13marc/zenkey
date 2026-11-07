@@ -339,7 +339,52 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   through `zenkey::redeclare::Redeclaring` (`Monitor::redeclared`,
   `redeclare_failed`), `tests/redeclare.rs` is `constrained.md` §9 step 2
   through a lossy relay, and #1047's `unwatch` returning while a re-declare
-  waits behind a stalled relay (no QoS, blocking puts).
+  waits behind a stalled relay (no QoS, blocking puts). The scope itself
+  is `model::face_scope::FaceScope` since #990 V1 (observer 0.29 §7.5,
+  moved from zenctl, for zengui and zenwatch at V7): each address's
+  resources of the contracts in hand (a template's parameters and an
+  event's ULID `*`) and each interface's `freshness.v2` heartbeat where
+  its contract uses it and has a collection (a `freshness.v2` contract
+  adds none of its own), each with its horizon
+  (`link::redeclare_horizon`, `redeclare_heartbeat_horizon`, the shortest
+  across revisions); given a `Face` (a policy and a face's name), the
+  far side and the face's plan, derived as a generator does with each
+  owner the policy lists implementing every interface in hand, the
+  scopes then what `FacePlan::crossing` names (`Reads::Samples`) or every
+  state resource (`Reads::State`, a GET crossing by grant); refused
+  (`Refusal`) with no address, no contract, the far side's refusal, the
+  plan's errors (`Plan`, no scope) or nothing in it. `narrow` keeps each
+  scope a selector given includes and the selector itself where it only
+  meets one, and names the rest in `Narrowed::unmet`, never dropping one.
+  `tests/face_scope.rs` runs `spec/conformance/scope/faces.json` whole
+  (17 cases over zenoh-modem's rf0, lora0 and sat0 faces).
+  The revision of a key with no descriptor naming the owner's (#990 V2a,
+  observer 0.29 §7.5) is `model::choice::choose`: over every revision of
+  the key's interface held (`Target::Data`, `Collection` for a snapshot's
+  page, `Heartbeat` for the revisions that use `freshness.v2` and have a
+  collection), step 1 those giving the key a resource and listed by a
+  catalog given (`Catalogs::lists`), step 2 those whose tag is CH's
+  (`Heard::Put`: a packed type's own, 0 for any other kind, a frame form's,
+  a heartbeat revision's fingerprint nibble), step 3 the catalog's latest
+  (`Catalogs::order`, one index across the held catalogs) of several that
+  read the sample alike (one layout or frame form, one heartbeat's
+  collections, one kind and name on one `encoding`); `Heard::Snapshot`
+  stops at step 1, `Heard::Nothing` (a key's identity alone, a delete)
+  takes any step 1 leaves (`Step::Any`). The lens calls it on its offline
+  path (`Lens::resolve_heard`, `check_read` reading the payload first),
+  a heartbeat with `Target::Heartbeat`; `KeyIdentity::chosen`
+  (`ChosenByTag`, `{by: "tag", step}`) says steps 2 and 3, and
+  `Unresolved::NoneLeft { step: NoneStep, held }` none left (one revision
+  held with no resource stays `NoResource`). V2b, observer §7.3: a record
+  under a CH tag other than 0 whose type is not held is a packed record,
+  `<packed record, tag t, n bytes>` (`structural::packed_text`,
+  `packed_rendering`; `inband::Unheld::of(form, tag)`: packed, sniffed or
+  its envelope), in the lens, `render`'s fallback and `render_detail`;
+  and a type of any other kind under a tag other than 0 is refused
+  (`render::tag_refused`, in `decode_under` and `render_resource`).
+  `tests/choice.rs` runs `spec/conformance/envelope/tags.json` whole (31
+  cases; its `e3a529fe` read through `catalog.json`'s lineage, the file
+  `0ff6bf6d` since #1080) and the lens end to end.
   A call's forms alone (#985 C4b; C4d, core 0.99, removed the bare
   wire): `model::render`'s `read` reads a `response` or `summary` under
   `zenoh/bytes` as the value form (`Payload::Record`, or `Refused`, never

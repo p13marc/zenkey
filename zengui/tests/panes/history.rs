@@ -374,6 +374,7 @@ fn the_history_pane_compares_against_a_v2_snapshot_row() {
             },
             values: Default::default(),
             unresolved: None,
+            chosen: None,
         },
         delete: false,
         // {"name":"eth0","index":2,"is_up":true}

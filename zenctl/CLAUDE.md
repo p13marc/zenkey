@@ -167,7 +167,27 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   and under `watchdog` and `record --on` a rule reading presence or the
   doctor refused, through the fleet's `watchdog_across`,
   `TriggerSpec::across_face` and `run_field_over`; `live_zk2.rs`'s
-  `constrained_s7_a_tools_scope_across_a_face`; #988 L4: `--face-policy F
+  `constrained_s7_a_tools_scope_across_a_face`; since #990 V1 (observer
+  0.29 §7.5) the scope is the fleet's `zenkey_fleet::FaceScope`
+  (`model::face_scope`, `cmd::zk2::FaceScope` its CLI wrapper): each
+  interface in hand whose contract uses `freshness.v2` and has a
+  collection adds its heartbeat's exact key, a `freshness.v2` contract
+  none of its own, and with `--face-policy F --face N` the scopes are the
+  face's plan (`link::plan`, each listed service implementing every
+  contract in hand, `FacePlan::crossing`): crossing resources and
+  heartbeats to subscribe, every state resource for `snapshot`'s GET; a
+  refused plan, or one letting nothing cross, exit 2, and every typed or
+  rule selector meeting no scope named, exit 2, never dropped
+  (`spec/conformance/scope/faces.json` in the fleet's
+  `tests/face_scope.rs`); and #990 V2 (observer 0.29 §7.3, §7.5): with no
+  descriptor naming the owner's revision, each key's revision is the
+  fleet's `model::choice` (the revisions held giving the key a resource,
+  those `--catalog` lists, then CH's tag, then the catalog's latest of
+  those reading it alike), `identity.chosen` and `echo`'s table line
+  `revision <fp> by tag (step N, observer §7.5)` saying steps 2 and 3,
+  `none_left` naming the step that left none, and a record under a tag
+  other than 0 with no type held shown `<packed record, tag t, n bytes>`,
+  never sniffed; #988 L4: `--face-policy F
   --face NAME` in `AcrossFaceArgs` (`zk2::far_side`, a `link.v2` face, exit
   2 otherwise), `FaceScope::deployment` → `Deployment::across` (the face's
   `reply_timeout_ms` the default `--timeout` below a flag or context, every

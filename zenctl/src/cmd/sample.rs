@@ -484,6 +484,7 @@ mod tests {
             group: KeyGroup::NotZk2,
             values: Default::default(),
             unresolved: None,
+            chosen: None,
         }
     }
 
@@ -531,6 +532,7 @@ mod tests {
             },
             values: Default::default(),
             unresolved: None,
+            chosen: None,
         };
         let key = "prod/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0";
         let l = SampleLine {
@@ -632,6 +634,7 @@ mod tests {
             },
             values: Default::default(),
             unresolved: None,
+            chosen: None,
         };
         assert_eq!(Line::member_of(&on("@op")), Member::Response);
         assert_eq!(Line::member_of(&on("state")), Member::Type);

@@ -97,6 +97,17 @@ impl Rung {
                 Unresolved::NoResource { .. } => Rung::NoResource,
                 Unresolved::NoMember { .. } => Rung::NoMember,
                 Unresolved::DecodeNotAsked => Rung::DecodeNotAsked,
+                // Across a face or a replay, no revision held is left to
+                // read the key (observer §7.5), badged by the rung it
+                // stopped short of: none held (no presence was read, so
+                // nothing named one), no resource for the key, or none the
+                // catalog and CH's tag leave named.
+                Unresolved::NoneLeft { step, .. } => match step {
+                    zenkey_fleet::report::NoneStep::NotHeld => Rung::PresenceNotRead,
+                    zenkey_fleet::report::NoneStep::NoResource => Rung::NoResource,
+                    zenkey_fleet::report::NoneStep::NotListed
+                    | zenkey_fleet::report::NoneStep::Tag => Rung::NoRevision,
+                },
             },
             None => match identity.group {
                 KeyGroup::Control { .. } => Rung::Control,
@@ -202,6 +213,7 @@ mod tests {
             group,
             values: BTreeMap::new(),
             unresolved,
+            chosen: None,
         }
     }
 

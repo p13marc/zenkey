@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Text version** | 0.28 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.29 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
 | **Written against** | core 0.100 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
@@ -1110,10 +1110,12 @@ This is core §7.1's and §7.2's tool half; type identity and the sample's
   (proto2 and proto3), `jsonschema` (core §7.3's subset) and `packed`
   (core §7.6), and a `raw` type by its media type only. The
   sample's `Encoding` says which of the type's wires it travels on. A
-  payload whose declared type the tool does not hold is sniffed (§8.1).
-  That is a foreign key's, or a zk2 key's whose contract is not in hand
-  or is unavailable (§2). The tool says which, naming where it stopped
-  resolving the key. A reserved kind (`flatbuffer`, `ros2msg`, `cdr`),
+  payload whose declared type the tool does not hold is sniffed (§8.1),
+  unless its CH carries a tag other than 0 (below). That is a foreign
+  key's, or a zk2 key's whose contract is not in hand or is unavailable
+  (§2), or whose revision a tool across a face cannot choose (§7.5). The
+  tool says which, naming where it stopped resolving the key. A reserved
+  kind (`flatbuffer`, `ros2msg`, `cdr`),
   which a contract declares as `raw` with a media type, tools MAY decode
   through a plugin.
   `[Sc: types.md §2]`
@@ -1166,7 +1168,8 @@ This is core §7.1's and §7.2's tool half; type identity and the sample's
     (core §5.1).
 - **Decode order** for a tool: a payload whose declared type the tool
   holds is decoded by that type, on the wire its sample's `Encoding`
-  names (below). Any other payload is sniffed.
+  names (below). Any other payload is sniffed, unless its CH carries a
+  tag other than 0.
   - **A type's wires.** A JSON Schema type travels as JSON or CBOR, and a
     raw family as one of its subtypes (core §7.1, §7.2). So a state
     declared `cbor` whose sample's `Encoding` is JSON is read as JSON.
@@ -1180,6 +1183,21 @@ This is core §7.1's and §7.2's tool half; type identity and the sample's
     its envelope's CH carried (core §7.6). One its layout refuses is
     undecodable, and the tool names the refusal. One that came in no
     envelope has no tag, so it is undecodable too.
+  - **CH's tag.** Only the packed kind defines a tag (core §7.5). So a
+    record whose CH carries a tag other than 0 is a packed record,
+    whatever a contract in hand declares. That holds of a record in an
+    envelope and in a call's form alike.
+    - **Not its type's tag.** A tool MUST NOT decode a record as its
+      declared type under a tag that is not that type's: a packed type's
+      own (core §7.6), and 0 for a type of any other kind. The record is
+      undecodable, and the tool names the refusal, `tag`.
+      `[F: envelope/tags.json]`
+    - **No type held.** A tool that holds no type for a record whose tag
+      is not 0 MUST NOT sniff it. It shows it as a packed record, by its
+      tag and the record's size in bytes. `[F: envelope/tags.json]`
+    - **Tag 0** is sniffed, as any payload whose type the tool does not
+      hold is. A record of any other kind carries 0, and so does one
+      packed type in 16.
   - **A frame** (core §7.7) is read with its frame resource's
     declaration, never as one record of its type: §7.6.
   - **A packed record's `time` fields** are read under the deployment
@@ -1216,25 +1234,55 @@ This is core §7.4's tool half; SHM's facts and the deployment's
     An unlimited limit admits any pool, and a limit the tool cannot read
     leaves the check unobservable.
 
-### 7.5 Subscribing across a face
+### 7.5 Reading across a face
 
-This is core §8.5's "Keys across the face", for a tool.
+This is core §8.5's "Keys across the face", for a tool, and how a tool
+reads what crosses with no descriptor beside it.
 
-- A tool across a constrained face SHOULD subscribe as core §8.5 says, by
-  the scopes the contracts in hand give for the addresses it reads.
-  - **The scopes.** Each concrete resource is its exact key, and each
-    template its key with every parameter a wildcard. An event's ULID
-    chunk is a wildcard too.
-  - **Why the contracts.** No descriptor crosses the face, so the tool
-    takes the deployment's word for the addresses and their contracts, as
-    a binding does (core R7).
-  - **Why not an ambient selector.** `zk2/**` declares the prefix `zk2`
-    alone. Each put toward the tool then carries its key's text after
-    `zk2` (core Appendix B).
-  - **What it costs.** Each scope is one declaration, made again at every
-    reconnect.
+**The scope.** A tool across a constrained face SHOULD subscribe as core
+§8.5 says, by the scopes the contracts in hand give for the addresses it
+reads. `[Sc: constrained.md §7]` `[F: scope/faces.json]`
+- **A scope** is a resource's exact key where the resource is concrete,
+  and its key with every parameter a wildcard where it is a template. An
+  event's ULID chunk is a wildcard too.
+- **The heartbeat.** An interface in hand whose contract uses
+  `freshness.v2` and has a collection (core §7.5) has a heartbeat. Its
+  scope is the heartbeat's exact key under each address,
+  `…/freshness.v2/stream/heartbeat/<iface>`. A `freshness.v2` contract
+  in hand adds no scope of its own.
+- **Without a face policy** the scopes are those of every resource of the
+  contracts in hand, and of each heartbeat.
+- **With a face policy and its face** (`link.v2` §2.1), the scopes are
+  what the face's plan lets cross (`link.v2` §2.3). The tool derives the
+  plan from the policy and the contracts in hand, as a generator does,
+  each service the policy lists taken to implement them all:
+  - to subscribe, each resource that crosses the face, and each heartbeat
+    that crosses it (`link.v1` §2.7, §2.9; `link.v2` §2.7). On a face
+    that lists its frames, those are the frames it lists;
+  - to GET, each state resource. A request crosses by grant, never by
+    exposure (`link.v1` §2.9).
 
-`[Sc: constrained.md §7]`
+  A tool given the face SHOULD NOT declare a scope for a resource the
+  plan keeps off it. `[F: scope/faces.json]` Where the profile refuses
+  the policy or the plan, the tool has no scope, and names the findings.
+- **A selector given.** A tool that reads across a face by its scopes
+  declares, of each selector it was given, each scope the selector
+  includes, and the selector itself where it meets a scope it does not
+  include. A tool MUST NOT drop silently a selector it was given that
+  meets none of its scopes: it refuses it, and says why.
+  `[F: scope/faces.json]`
+- **Why the contracts.** No descriptor crosses the face, so the tool
+  takes the deployment's word for the addresses and their contracts, as
+  a binding does (core R7).
+- **Why not an ambient selector.** `zk2/**` declares the prefix `zk2`
+  alone. Each put toward the tool then carries its key's text after
+  `zk2` (core Appendix B).
+- **What a scope costs.** Each is one declaration across the face, made
+  again at every reconnect. Where the medium repairs no lost frame, one
+  with a horizon is declared again after two horizons of silence too
+  (below). Nothing of a resource the plan keeps off the face crosses to
+  end that silence, so its scope would be declared again for as long as
+  the tool reads.
 
 **Declaring again after silence** is core §8.5's, for a tool.
 - A tool across a constrained face whose medium repairs no lost frame
@@ -1243,7 +1291,8 @@ This is core §8.5's "Keys across the face", for a tool.
   says. `[Sc: constrained.md §9]`
   - **Its horizon** comes from the contracts in hand, as its scope does:
     the shortest horizon of the resources the scope reads that have one.
-    A scope with none is never declared again.
+    A heartbeat's is the shortest of the collections it covers (core
+    §8.5). A scope with none is never declared again.
   - **What the face says.** The face policy gives the medium's `arq`
     (`link.v2` §2.1). A tool given none takes the medium for one that
     repairs.
@@ -1255,6 +1304,60 @@ This is core §8.5's "Keys across the face", for a tool.
   the face's `reply_timeout_ms` for each reply it asks for. Its session
   runs the face's `[transport]`, so that both ends run one lease
   (`link.v2` §2.16).
+
+**The revision of a key.** No descriptor crosses a face, so there the
+revision a sample's owner writes under is the deployment's word (core
+§4.2, §8.6). A tool that reads a mutation, a frame or a heartbeat with
+no descriptor naming the owner's revision MUST read it with the
+revision chosen in this order. `[F: envelope/tags.json]`
+1. **The deployment's word.** Of the revisions of the key's interface
+   that the tool holds, those that give the key a resource, and of
+   those, where the tool was given a catalog, the ones it lists (core
+   §8.6). One left is the deployment's word for the owner's revision
+   (core §4.2). The tool reads the sample with it, its tag checked as
+   §7.3 says.
+2. **The tag.** Of several left, those whose tag is CH's: the type's for
+   a mutation (§7.3), the frame form's for a frame (core §7.7), and the
+   revision's own for a heartbeat (core §7.5). One left is the revision.
+3. **The latest.** Where several are still left, the tool was given a
+   catalog, and they read the sample alike, the revision is the one the
+   catalog lists last, at its highest index. They read it alike when
+   each gives it the same form:
+   - a packed type's layout form (core §7.6);
+   - a frame resource's frame form (core §7.7);
+   - a heartbeat's collections (core §7.5);
+   - for a type of any other kind, the same kind and name (core §7.1),
+     on the same `encoding` (core §7.2).
+
+- **A heartbeat's** key names the interface it covers. Its revisions are
+  those of that interface whose contracts use `freshness.v2`, and its
+  resource in each is that revision's collections.
+- **What the tool says.** It names how it chose. A revision that steps 2
+  and 3 chose is chosen by tag: the tool's reading of CH, never the
+  deployment's word. It maps no snapshot's index, which the owner's
+  revision alone maps (core §4.2).
+- **None left.** The tool names which step left none, and reads the
+  sample as one whose type it does not hold (§7.3):
+  - it holds no revision of the interface (`not_held`);
+  - none it holds gives the key a resource (`no_resource`);
+  - the catalog lists none of those that do (`not_listed`);
+  - none of several carries CH's tag (`tag`).
+- **Ambiguous.** Several are left that step 3 does not choose among:
+  they read the sample differently, or no catalog orders them. The tool
+  names them, and reads the sample as one whose type it does not hold.
+- **Why the latest.** A later minor grows a packed type behind its
+  marker, and keeps its layout form, so it reads an earlier writer's
+  record (core §7.6). Within a major, each revision is checked against
+  every other in both directions (core §9.8). One deployment can run two
+  minors side by side (core R4). A bundle states no minor, so the
+  catalog's order is the only one a tool across a face holds (core
+  §9.8).
+- **Why the tag.** It is what the sample's own bytes say of its
+  revision. A packed type's tag and a frame's check their form, and a
+  heartbeat's its revision. Another form or revision still matches it 1
+  time in 16 (core §7.5, §7.6).
+- **A delete** carries no record, so no step reads a tag for it. Its key
+  is read with any of the revisions step 1 leaves.
 
 ### 7.6 Frames
 
@@ -1413,6 +1516,8 @@ tooling guide's rules that carry evidence were promoted with text 0.1.
 | `conformance/keys.json` | §8.1 |
 | `conformance/heartbeat/bodies.json` | §7.3, a heartbeat's body |
 | `conformance/envelope/carries.json` | §7.3, the envelope first |
+| `conformance/envelope/tags.json` | §7.3, CH's tag; §7.5, the revision of a key |
+| `conformance/scope/faces.json` | §7.5, the scope |
 | `conformance/envelope/vectors.json`, `calls.json`, `conformance/errors/forms.json` | §7.3, a call's forms first |
 | `conformance/frame/apply.json` | §7.6 |
 | `scenarios/presence.md` §4, §6–§10 | §1, §2, §3 |

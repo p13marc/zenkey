@@ -244,6 +244,7 @@ mod tests {
                 group: KeyGroup::NotZk2,
                 values: Default::default(),
                 unresolved: None,
+                chosen: None,
             },
             delete: false,
             bytes: Some(base64::engine::general_purpose::STANDARD.encode(body)),

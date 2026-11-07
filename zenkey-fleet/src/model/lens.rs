@@ -38,13 +38,14 @@ use zenkey_model::grammar::{Addr, IfaceId, ZkKey};
 use zenkey_model::template::{Bindings, resolve};
 
 use crate::model::catalog::{Catalog, ContractSet, ContractState, Contracts, Revision, zid_value};
+use crate::model::choice::{Choice, Heard, Target};
 use crate::model::deployment::{Catalogs, Epoch, Stated};
 use crate::model::inband;
 use crate::model::render::Member;
 use crate::model::structural::{structural, structural_value};
 use crate::report::{
-    Conformance, KeyGroup, KeyIdentity, LensPresence, LensScope, PayloadRendering, Provenance,
-    QosAxes, QosMismatch, Rendered, ResolvedResource, Unresolved,
+    ChosenByTag, Conformance, KeyGroup, KeyIdentity, LensPresence, LensScope, PayloadRendering,
+    Provenance, QosAxes, QosMismatch, Rendered, ResolvedResource, Unresolved,
 };
 
 /// What a raw observer resolves wire keys with.
@@ -96,6 +97,15 @@ impl Resolved {
 pub struct Resolution {
     pub identity: KeyIdentity,
     pub resolved: Option<Resolved>,
+}
+
+/// What [`Lens::resolve_with`] resolves a key for: a sample on a data key,
+/// what its CH says beside it, or a snapshot's page at a collection's
+/// index.
+#[derive(Debug, Clone, Copy)]
+enum Mode {
+    Data(Heard),
+    Snapshot(u32),
 }
 
 /// One payload through the lens: the key's identity, what the payload
@@ -224,9 +234,19 @@ impl<'a> Lens<'a> {
         crate::model::namespace::strip(self.namespace, wire)
     }
 
-    /// Rungs 1–6 for one wire key.
+    /// Rungs 1–6 for one wire key, its identity alone: where no descriptor
+    /// names the owner's revision, any revision step 1 leaves (observer
+    /// §7.5), since no record is read.
     pub fn resolve(&self, wire: &str) -> Resolution {
-        self.resolve_with(wire, |candidates, kind, chunks| {
+        self.resolve_heard(wire, Heard::Nothing)
+    }
+
+    /// Rungs 1–6 for one wire key whose sample's CH says `heard`: where no
+    /// descriptor names the owner's revision, the revision of the key is
+    /// chosen as observer §7.5 says ([`crate::model::choice`]), by tag
+    /// where several are left.
+    pub fn resolve_heard(&self, wire: &str, heard: Heard) -> Resolution {
+        self.resolve_with(wire, Mode::Data(heard), |candidates, kind, chunks| {
             let refs: Vec<&str> = template_chunks(kind, chunks)
                 .iter()
                 .map(String::as_str)
@@ -242,8 +262,12 @@ impl<'a> Lens<'a> {
     /// read's snapshot key names no member, and a member read's page rides
     /// its member's key, whose values the template gives. A coll the
     /// revision has no collection at is `NoResource`.
+    ///
+    /// Where no descriptor names the owner's revision, the revisions held
+    /// and the catalog given must leave one: steps 2 and 3 map no
+    /// snapshot's index (observer §7.5, core §4.2).
     pub fn resolve_snapshot(&self, wire: &str, coll: u32) -> Resolution {
-        self.resolve_with(wire, |candidates, kind, chunks| {
+        self.resolve_with(wire, Mode::Snapshot(coll), |candidates, kind, chunks| {
             let i = usize::try_from(coll).ok()?;
             let (_, r) = candidates.get(i)?;
             if !matches!(
@@ -266,6 +290,7 @@ impl<'a> Lens<'a> {
     fn resolve_with(
         &self,
         wire: &str,
+        mode: Mode,
         pick: impl FnOnce(
             &[(usize, &Resource)],
             zenkey_model::grammar::KindToken,
@@ -277,6 +302,7 @@ impl<'a> Lens<'a> {
                 group,
                 values: Bindings::new(),
                 unresolved: Some(why),
+                chosen: None,
             },
             resolved: None,
         };
@@ -305,6 +331,7 @@ impl<'a> Lens<'a> {
                         },
                         values: Bindings::new(),
                         unresolved: None,
+                        chosen: None,
                     },
                     resolved: None,
                 };
@@ -324,7 +351,17 @@ impl<'a> Lens<'a> {
             token: kind.as_str().to_owned(),
             resource,
         };
-        let revision = match self.revision_of(&addr, &iface) {
+        let (target, heard) = match mode {
+            Mode::Data(heard) => (
+                Target::Data {
+                    kind,
+                    chunks: &chunks,
+                },
+                heard,
+            ),
+            Mode::Snapshot(coll) => (Target::Collection { kind, coll }, Heard::Snapshot),
+        };
+        let (revision, chosen) = match self.revision_of(&addr, &iface, target, heard) {
             Ok(r) => r,
             Err(why) => return stop(group(None), why),
         };
@@ -350,6 +387,7 @@ impl<'a> Lens<'a> {
                 group: group(Some(name)),
                 values: values.clone(),
                 unresolved: None,
+                chosen,
             },
             resolved: Some(Resolved {
                 key: rel.to_owned(),
@@ -362,8 +400,18 @@ impl<'a> Lens<'a> {
         }
     }
 
-    /// Rungs 3–5: the revision `addr`'s descriptors name for `iface`, held.
-    fn revision_of(&self, addr: &Addr, iface: &IfaceId) -> Result<Arc<Revision>, Unresolved> {
+    /// Rungs 3–5: the revision `addr`'s descriptors name for `iface`, held;
+    /// with no presence read and revisions held offline (across a face, a
+    /// capture read offline), the revision of the key observer §7.5
+    /// chooses for `target` from what CH says (`heard`), and how, where it
+    /// was by tag.
+    fn revision_of(
+        &self,
+        addr: &Addr,
+        iface: &IfaceId,
+        target: Target<'_>,
+        heard: Heard,
+    ) -> Result<(Arc<Revision>, Option<ChosenByTag>), Unresolved> {
         let fp = match self.catalog {
             Some(catalog) => {
                 let fps = catalog.revisions_of(addr, iface);
@@ -382,21 +430,16 @@ impl<'a> Lens<'a> {
                 let Some(set) = self.offline else {
                     return Err(Unresolved::PresenceNotRead);
                 };
-                let revs: Vec<&Arc<Revision>> = set.of_iface(iface).collect();
-                return match revs.as_slice() {
-                    [] => Err(Unresolved::PresenceNotRead),
-                    [one] => Ok(Arc::clone(one)),
-                    several => Err(Unresolved::Ambiguous {
-                        fingerprints: several
-                            .iter()
-                            .map(|r| r.fingerprint().to_string())
-                            .collect(),
-                    }),
+                let held: Vec<Arc<Revision>> = set.of_iface(iface).cloned().collect();
+                let choice = crate::model::choice::choose(&held, target, self.deployment, heard);
+                return match choice {
+                    Choice::Chosen { revision, step } => Ok((revision, step.said())),
+                    other => Err(other.unresolved().expect("no revision chosen")),
                 };
             }
         };
         match self.contracts.state(iface, &fp) {
-            Some(ContractState::Held(revision)) => Ok(revision),
+            Some(ContractState::Held(revision)) => Ok((revision, None)),
             None => Err(Unresolved::ContractNotHeld {
                 fingerprint: fp.to_string(),
             }),
@@ -476,7 +519,6 @@ impl<'a> Lens<'a> {
         attachment: Option<&[u8]>,
         readers: Option<&mut crate::model::frame::Readers>,
     ) -> Checked {
-        let resolution = self.resolve(wire);
         let key = self.relative(wire).unwrap_or(wire);
         // The envelope first (core §7.5, observer §7.3): its record is the
         // payload every rung below reads, on its contract's `encoding`; a
@@ -486,6 +528,20 @@ impl<'a> Lens<'a> {
             _ => inband::Payload::Plain(bytes),
         };
         let tag = payload.tag();
+        // Where no descriptor names the owner's revision, CH's tag chooses
+        // among those held (observer §7.5).
+        let heard = match payload {
+            inband::Payload::Record { tag, .. } => Heard::Put {
+                form: zenkey_model::wire::Form::Mutation,
+                tag,
+            },
+            inband::Payload::Frame { tag, .. } => Heard::Put {
+                form: zenkey_model::wire::Form::Frame,
+                tag,
+            },
+            _ => Heard::Nothing,
+        };
+        let resolution = self.resolve_heard(wire, heard);
         // Core §7.7: a frame resource's put is a frame, applied by the
         // key's reader; a frame elsewhere, and a mutation on a frame
         // resource, have no reading.
@@ -540,12 +596,14 @@ impl<'a> Lens<'a> {
             // A heartbeat (core §7.5's form 6): read with the revision of
             // the interface it covers, never as a record.
             inband::Payload::Heartbeat { body, stamp, tag } => {
-                let (rendering, conformance) =
+                let (rendering, conformance, chosen) =
                     self.heartbeat(wire, key, &resolution, body, stamp, tag);
+                let mut identity = resolution.identity;
+                identity.chosen = identity.chosen.or(chosen);
                 return Checked {
                     rendering,
                     conformance,
-                    identity: resolution.identity,
+                    identity,
                 };
             }
         };
@@ -574,7 +632,7 @@ impl<'a> Lens<'a> {
                     reason: why.words(),
                 };
                 Checked {
-                    rendering: structural_rendering(key, why, bytes),
+                    rendering: unheld_rendering(key, why, tag, bytes),
                     conformance,
                     identity: resolution.identity,
                 }
@@ -647,7 +705,7 @@ impl<'a> Lens<'a> {
         body: &[u8],
         stamp: zenkey_model::wire::Stamp,
         tag: zenkey_model::wire::Tag,
-    ) -> (PayloadRendering, Conformance) {
+    ) -> (PayloadRendering, Conformance, Option<ChosenByTag>) {
         let Some((addr, iface)) = self
             .relative(wire)
             .and_then(zenkey_model::heartbeat::covered)
@@ -666,6 +724,7 @@ impl<'a> Lens<'a> {
                         },
                     },
                     Conformance::Undecodable { declared, reason },
+                    None,
                 );
             }
             let why = resolution
@@ -677,18 +736,29 @@ impl<'a> Lens<'a> {
             return (
                 inband::heartbeat_rendering(key, why, body.len()),
                 Conformance::NotChecked { reason },
+                None,
             );
         };
-        match self.revision_of(&addr, &iface) {
-            Ok(rev) => {
+        // Its revisions, with no descriptor, are those of the covered
+        // interface that use freshness.v2, and its tag is the revision's
+        // own (observer §7.5).
+        let heard = Heard::Put {
+            form: zenkey_model::wire::Form::Heartbeat,
+            tag,
+        };
+        match self.revision_of(&addr, &iface, Target::Heartbeat, heard) {
+            Ok((rev, chosen)) => {
                 let layout = zenkey_model::heartbeat::Layout::of(rev.contract());
-                inband::heartbeat_check(key, &layout, stamp, tag, body)
+                let (rendering, conformance) =
+                    inband::heartbeat_check(key, &layout, stamp, tag, body);
+                (rendering, conformance, chosen)
             }
             Err(why) => {
                 let reason = why.words();
                 (
                     inband::heartbeat_rendering(key, why, body.len()),
                     Conformance::NotChecked { reason },
+                    None,
                 )
             }
         }
@@ -1007,7 +1077,7 @@ fn check_resolved(
         };
         let reason = why.words();
         return (
-            structural_rendering(&r.key, why, bytes),
+            unheld_rendering(&r.key, why, tag, bytes),
             Conformance::NotChecked { reason },
         );
     };
@@ -1264,6 +1334,24 @@ fn telemetry_conformance(
         _ => Conformance::Invalid {
             violations: words.collect(),
         },
+    }
+}
+
+/// A record whose type the tool does not hold (observer §7.3): one under a
+/// tag other than 0 is a packed record, shown by its tag and size and never
+/// sniffed; any other falls to the structural ladder.
+fn unheld_rendering(
+    key: &str,
+    why: Unresolved,
+    tag: Option<zenkey_model::wire::Tag>,
+    bytes: &[u8],
+) -> PayloadRendering {
+    let form = zenkey_model::wire::Form::Mutation;
+    match tag.map(|t| inband::Unheld::of(form, t)) {
+        Some(inband::Unheld::Packed(t)) => {
+            crate::model::structural::packed_rendering(key, why, t, bytes.len())
+        }
+        _ => structural_rendering(key, why, bytes),
     }
 }
 

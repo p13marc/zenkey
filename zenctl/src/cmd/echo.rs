@@ -286,6 +286,14 @@ fn human(
                 p.out
                     .push(format!("  attachment: {}", crate::render::payload_text(a)));
             }
+            // A revision CH's tag chose, across a face: the tool's reading,
+            // never the deployment's word (observer §7.5).
+            if let (Some(c), Some(r)) = (&line.identity.chosen, &rendering.resource) {
+                p.out.push(format!(
+                    "  revision {} by tag (step {}, observer §7.5)",
+                    r.fingerprint, c.step
+                ));
+            }
             if let Conformance::Invalid { violations } = conformance {
                 p.err
                     .extend(violations.iter().map(|v| format!("  invalid: {v}")));
@@ -632,6 +640,7 @@ prod/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0
             },
             values: Default::default(),
             unresolved: None,
+            chosen: None,
         });
         let sample = row.to_line();
 

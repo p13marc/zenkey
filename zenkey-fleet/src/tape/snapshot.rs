@@ -380,6 +380,7 @@ mod tests {
                 },
                 values: Default::default(),
                 unresolved: Some(crate::report::Unresolved::PresenceNotRead),
+                chosen: None,
             },
             delete: false,
             bytes: Some("e30=".into()),
