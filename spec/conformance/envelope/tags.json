@@ -1,8 +1,80 @@
 {
-  "description": "observer §7.3 (CH's tag) and §7.5 (the revision of a key): which revision a tool reads a sample with where no descriptor names the owner's, and what it shows of a record whose type it does not hold. Written by hand from the text, checked by a second, independent reading over the bundles, never blessed. `history` is the directory of every revision a case can hold, each a bundle named by its fingerprint: zenoh-modem's four published revisions of modem.v3, at indices 0, 5, 6 and 8 of its catalog. `catalogs` maps a catalog's id to its file, or to its document, each a predecessor of e3a529fe in its lineage, so a reader checks each id. Each case: `key`, base-relative; `sample`, `put` where it is absent, or `reply` for a call's value; `ch`, the sample's header byte (core §7.5), its form, run width and tag; `size`, the bytes after the seq, a record's or a body's (the bytes themselves are not given: no case decodes); `held`, the revisions of the key's interface the tool holds; `catalog`, the id of the catalog it was given, or null. A heartbeat's key names the interface it covers, and its revisions are those of that interface whose contracts use freshness.v2 (`uses`), its tag the low four bits of the fingerprint's last byte. `expect`, for a put: `revision`, the fingerprint the tool reads the sample with, `step`, the step that chose it (1, 2 or 3), and `by`, `deployment` for step 1 or `tag` for steps 2 and 3; with `refused: tag` where CH's tag is not the chosen resource's type's (a packed type's own, 0 for any other kind, a frame form's for a frame). Or `revision: null` with `none`, the step that left none (`not_held`, `no_resource`, `not_listed`, `tag`), or `ambiguous`, the fingerprints left, sorted; and `shows`, what the tool shows: `{packed: {tag, size}}` for a record under a tag other than 0, `sniffed` for one under tag 0, `envelope` for a frame or a heartbeat. For a reply, `shows` alone: §7.5's steps read puts. Two revisions read a sample alike when each gives its key the same packed layout form, the same frame form, the same collections, or a type of another kind with the same kind and name on the same encoding.",
+  "description": "observer §7.3 (CH's tag) and §7.5 (the revision of a key): which revision a tool reads a sample with where no descriptor names the owner's, and what it shows of a record whose type it does not hold. Written by hand from the text, checked by a second, independent reading over the bundles, never blessed. `history` is the directory of every revision a case can hold, each a bundle named by its fingerprint: zenoh-modem's four published revisions of modem.v3, at indices 0, 5, 6 and 8 of its catalog. `catalogs` maps a catalog's id to its document, so a reader checks each id: e3a529fe, zenoh-modem's catalog of nine entries, which `examples/zk2/zenoh-modem/catalog.json`'s 0ff6bf6d succeeds, and two of its predecessors in its lineage. Each case: `key`, base-relative; `sample`, `put` where it is absent, or `reply` for a call's value; `ch`, the sample's header byte (core §7.5), its form, run width and tag; `size`, the bytes after the seq, a record's or a body's (the bytes themselves are not given: no case decodes); `held`, the revisions of the key's interface the tool holds; `catalog`, the id of the catalog it was given, or null. A heartbeat's key names the interface it covers, and its revisions are those of that interface whose contracts use freshness.v2 (`uses`), its tag the low four bits of the fingerprint's last byte. `expect`, for a put: `revision`, the fingerprint the tool reads the sample with, `step`, the step that chose it (1, 2 or 3), and `by`, `deployment` for step 1 or `tag` for steps 2 and 3; with `refused: tag` where CH's tag is not the chosen resource's type's (a packed type's own, 0 for any other kind, a frame form's for a frame). Or `revision: null` with `none`, the step that left none (`not_held`, `no_resource`, `not_listed`, `tag`), or `ambiguous`, the fingerprints left, sorted; and `shows`, what the tool shows: `{packed: {tag, size}}` for a record under a tag other than 0, `sniffed` for one under tag 0, `envelope` for a frame or a heartbeat. For a reply, `shows` alone: §7.5's steps read puts. Two revisions read a sample alike when each gives its key the same packed layout form, the same frame form, the same collections, or a type of another kind with the same kind and name on the same encoding.",
   "history": "examples/zk2/.history/modem.v3",
   "catalogs": {
-    "e3a529fe": "examples/zk2/zenoh-modem/catalog.json",
+    "e3a529fe": {
+      "entries": [
+        {
+          "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+          "iface": "modem.v3",
+          "index": 0
+        },
+        {
+          "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1",
+          "iface": "config.v1",
+          "index": 1
+        },
+        {
+          "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df",
+          "iface": "health.v1",
+          "index": 2
+        },
+        {
+          "contract": "sha256:4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501",
+          "iface": "config.v1",
+          "index": 3
+        },
+        {
+          "contract": "sha256:60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f",
+          "iface": "health.v1",
+          "index": 4
+        },
+        {
+          "contract": "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+          "iface": "modem.v3",
+          "index": 5
+        },
+        {
+          "contract": "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+          "iface": "modem.v3",
+          "index": 6
+        },
+        {
+          "contract": "sha256:dc7c01069bffc9dc5a966c93cfe2444eca0391e71f051bc9bf6d2b2b54d4317b",
+          "iface": "sx1262_config.v1",
+          "index": 7
+        },
+        {
+          "contract": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+          "iface": "modem.v3",
+          "index": 8
+        }
+      ],
+      "epoch": 1767225600,
+      "format": "zk2-catalog/1",
+      "lineage": [
+        {
+          "entries": 3,
+          "id": "0a90fd61"
+        },
+        {
+          "entries": 5,
+          "id": "ea268fad"
+        },
+        {
+          "entries": 6,
+          "id": "36c25c0f"
+        },
+        {
+          "entries": 7,
+          "id": "ab76ec37"
+        },
+        {
+          "entries": 8,
+          "id": "8c808dff"
+        }
+      ]
+    },
     "ab76ec37": {
       "entries": [
         {

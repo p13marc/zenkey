@@ -13,6 +13,53 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.30 — 2026-11-07: across a face, a refused selector refuses the read, and a device face's plan (#990, #609)
+
+zk2py round 106 read 0.29 cold, and filed F-509 to F-511. None was a
+blocker. This version answers them. Core 0.101 answers round 105 and
+#977's E4 beside it ([`CHANGELOG.md`](CHANGELOG.md)).
+
+**Answered: zk2py rounds 105 and 106's F-509 to F-511.**
+- **F-510, an ambiguity: §7.5's "it refuses it".** A tool given a
+  selector that meets none of its scopes refuses the read. It declares
+  none of the selectors, and names each such selector and why. The MUST
+  NOT's sentence says so, its subject and its evidence unchanged.
+  `scope/faces.json`'s case 12 expected so already, and its description
+  now says it.
+  - **The reference** reads so: `zenctl`'s raw observers exit 2 before
+    they declare anything, naming every such selector
+    (`FaceScope::narrow`'s `unmet`).
+  - **Why the read.** A tool that declared the rest would read less than
+    it was asked, and say so only on its standard error.
+- **F-511, a gap: a device face's owners.** The plan takes each service
+  the policy lists, and each device of its faces (`link.v2` §2.5), to
+  implement every contract in hand. Read as 0.29 wrote it, a device was
+  `service_unknown`, so a tool across a device face had no scope.
+  - **The reference** plans so already: `link::FacePolicy::owners` lists
+    the devices, and `zenctl` across `link.v2`'s `plan.json` case 22
+    declares that case's five crossing scopes.
+  - **No fixture case.** `faces.json`'s cases are zenoh-modem's faces,
+    and none is a device face.
+- **F-509, minor: `envelope/tags.json`'s `e3a529fe`.** It mapped the id
+  to `examples/zk2/zenoh-modem/catalog.json`, which is `0ff6bf6d` since
+  #1080. It now maps it to its document, as `ab76ec37` and `0a90fd61` are,
+  so the fixture no longer moves with the example. The description says
+  that `0ff6bf6d` succeeds it.
+  - **The other fix** was to say that a file may be a successor read
+    through its lineage, as `zenkey-fleet/tests/choice.rs` reads one.
+    Its document needs no reader to know the lineage rule.
+
+**Deliberately not changed.**
+- **No new rule.** §7.5's MUST NOT is reworded, not widened: what it
+  reads as a refusal is what `zenctl` and case 12 did. The plan is
+  `link.v2` §2.3's, unchanged.
+- **The cases.** `faces.json`'s 17 and `tags.json`'s 31 expect what they
+  did.
+- **`RULES.md`** counts 268 rules with core 0.101's, 83 of them the
+  observer's.
+- **The header** is still written against core 0.100: nothing here reads
+  0.101.
+
 ## 0.29 — 2026-11-07: across a face, the face's plan for a scope and CH's tag for a revision; a packed record never sniffed (#990 V1, V2)
 
 #990's black-box run read zenoh-modem's RF face with `zenctl`. Its scope
