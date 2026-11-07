@@ -503,7 +503,7 @@ pub fn replies(sample: &Sample, page: &Page) -> Vec<Sample> {
 }
 
 /// [`replies`] for a reader that ages what it reads (`freshness.v2` §2.6,
-/// text 0.6; #977's E3): a live entry with a confirmation whose time is
+/// text 0.7; #977's E3): a live entry with a confirmation whose time is
 /// known (1 at the snapshot's time, 2 at its conf; core §7.5) carries it
 /// as its Zenoh timestamp, counted from the deployment epoch `epoch` in
 /// seconds, so the reader ages it as it aged a reply from its stamp. Its id

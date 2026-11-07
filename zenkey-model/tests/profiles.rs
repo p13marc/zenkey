@@ -913,7 +913,7 @@ fn clock_trust(o: &Value) -> ClockTrust {
 fn observation(o: &Value) -> Observation {
     match o["via"].as_str().expect("via") {
         "archive" => Observation::Archived,
-        // freshness.v2 0.6 §2.6: a snapshot's entry, judged as a reply.
+        // freshness.v2 0.7 §2.6: a snapshot's entry, judged as a reply.
         "snapshot" => {
             let entry = match &o["entry"] {
                 Value::Null => freshness::Entry::Omitted,
@@ -971,7 +971,7 @@ fn observation(o: &Value) -> Observation {
 /// `freshness/conformance/judgements.json`: a horizon and the observations
 /// of one member → the combined verdict and its reason class
 /// (freshness.v1 §2.3, §2.5–§2.8), a snapshot's entry as `freshness.v2`
-/// §2.6 reads it (text 0.6).
+/// §2.6 reads it (text 0.7).
 #[test]
 fn freshness_judgements() {
     let path = profiles().join("freshness/conformance/judgements.json");

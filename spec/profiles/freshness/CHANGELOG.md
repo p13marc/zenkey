@@ -7,11 +7,11 @@ entry here ([`../README.md`](../README.md)).
 
 ## `v2.md` 0.7 — 2026-11-07: a GET reader ages a snapshot's entry (#977)
 
-Core 0.99 (#977's E3) answers a state GET by snapshot, one collection per
+Core 0.100 (#977's E3) answers a state GET by snapshot, one collection per
 reply, in place of a reply per key. A member of this text then carries
 its confirmation in band, in its entry, where its reply carried the
 26-byte Zenoh timestamp of its last confirmation. Core §4.3's table drops
-its row. This text, written against core 0.99, follows.
+its row. This text, written against core 0.100, follows.
 
 **Changed: §2.4's "Its stamps".**
 - **Before:** a GET reply carries the member's last confirmation as its

@@ -660,7 +660,7 @@ async fn s3_a_get_readers_age_from_the_confirmation_stamp() {
     );
     assert!(heard.inband.is_some(), "the in-band stamp");
     until(t0, Duration::from_secs(3)).await;
-    // v2 0.6 §2.6 (#977's E3): the owner answers by snapshot, the entry
+    // v2 0.7 §2.6 (#977's E3): the owner answers by snapshot, the entry
     // vouched for at the snapshot's time (confirmation 1), which the
     // consumer stamps it with, on the owner's clock named by its address.
     let answer = c.get_answer(STATUS, None, T).await.unwrap();

@@ -521,7 +521,7 @@ async fn a_snapshot_takes_the_owners_state_with_its_holders() {
     let good = row("/default/eth0");
     assert_eq!(good.conformance, Conformance::Valid);
     // tc.netif.v1 uses freshness.v2: its state is read by snapshot (core
-    // 0.99, #977's E3), whose entry carries no Zenoh timestamp to attribute.
+    // 0.100, #977's E3), whose entry carries no Zenoh timestamp to attribute.
     assert!(
         good.stamper.is_none(),
         "a snapshot's entry, stamped in band alone: {good:?}"

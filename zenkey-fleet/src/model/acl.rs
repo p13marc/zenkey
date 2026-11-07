@@ -24,7 +24,7 @@
 //!    far consumer under `deny` hears no confirmation, and every member it
 //!    follows reads stale. The owner serves it beside the interface, a
 //!    surface of its own for the fan-in and the allow posture's complement.
-//!    Since core 0.99 (#977's E3), a state template a binding leaves
+//!    Since core 0.100 (#977's E3), a state template a binding leaves
 //!    unbound is granted by its collection read, `<snapshot key>/**`: an
 //!    owner answers it with the collection's snapshot on the snapshot key,
 //!    which the template's selector does not include.
@@ -896,7 +896,7 @@ fn compile_binding(
                 if spec.history && has_history(r) {
                     push_unique(&mut h.history, canon(format!("{pattern}/@adv/**")));
                 }
-                // §11.1 Consume (core 0.99, #977's E3): a state template
+                // §11.1 Consume (core 0.100, #977's E3): a state template
                 // the binding leaves unbound is read whole, by a collection
                 // read, and its snapshot rides its snapshot key: the grant
                 // covers `<snapshot key>/**`, which includes both, and the
@@ -1136,7 +1136,7 @@ fn surfaces_of(addr: &str, implements: &[(IfaceId, Option<Vec<Resource>>)]) -> O
             if has_history(r) {
                 push_unique(&mut out, canon(format!("{pattern}/@adv/**")));
             }
-            // Core §11.1 (0.99, #977's E3): a templated state's snapshot
+            // Core §11.1 (0.100, #977's E3): a templated state's snapshot
             // rides its snapshot key, which its members' pattern does not
             // include: its surface is `<snapshot key>/**`.
             let pattern = match r.token {

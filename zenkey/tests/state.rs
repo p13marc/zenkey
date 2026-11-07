@@ -258,7 +258,7 @@ async fn capture(s: &zenoh::Session, selector: &str) -> (zenoh::pubsub::Subscrib
     (sub, raw)
 }
 
-/// A raw GET of `selector`, `All` + `None` as S4 asks (core 0.99): each
+/// A raw GET of `selector`, `All` + `None` as S4 asks (core 0.100): each
 /// reply as it arrived, a snapshot's page as the per-key replies its
 /// entries stand for ([`zenkey::inband::replies`]; #977's E3).
 async fn raw_get(s: &zenoh::Session, selector: &str) -> Vec<Sample> {
@@ -787,7 +787,7 @@ async fn s5_alignment_after_reconnect() {
     }
 }
 
-/// §6 step 1 (core 0.99, #977's E3): a delete during an outage reaches the
+/// §6 step 1 (core 0.100, #977's E3): a delete during an outage reaches the
 /// archive after the heal whatever the window. Within it, the owner's
 /// snapshot answers the plan's key with its tombstone, and the archive holds
 /// the deletion; beyond it, with a snapshot of no entry, positive evidence
@@ -1503,7 +1503,7 @@ async fn state_and_events_carry_their_attachments() {
         "{got:?}"
     );
 
-    // S2 (core 0.99, #977's E3): the owner answers its member read by
+    // S2 (core 0.100, #977's E3): the owner answers its member read by
     // snapshot, whose entry is the record alone: a snapshot carries no
     // attachment (core §7.5), so the GET's reader gets the value without it.
     let replies = raw_get(&tool, "zk2/h1/notes/notes.v1/state/last").await;
@@ -1662,7 +1662,7 @@ async fn the_session_posture_is_read_from_its_config() {
     assert!(stamps(&by_mode), "stated for its mode");
 
     // A stamping session: the put carries the owner's timestamp. Its GET is
-    // answered by snapshot, which carries none (core 0.99, #977's E3): S2's
+    // answered by snapshot, which carries none (core 0.100, #977's E3): S2's
     // stamp rules bind a per-key resource's replies alone.
     let (mgr, w) = fleet_mgr(&on, None, &["vehicle-01"]).await;
     let tool = client(&ep).await;

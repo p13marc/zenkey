@@ -951,7 +951,7 @@ async fn a_seeded_watch_seeds_from_a_zk2_owner() {
         (&SampleKind::Put, &Some(put0.stamp)),
         "the current value, with its in-band stamp (S2)"
     );
-    // Read by snapshot (core 0.99, #977's E3): its entry carries no Zenoh
+    // Read by snapshot (core 0.100, #977's E3): its entry carries no Zenoh
     // timestamp; its confirmation rides in band.
     assert_eq!(
         confirmed, &None,

@@ -290,7 +290,7 @@ fn reply_of(sample: &zenoh::sample::Sample) -> KeyReply {
 }
 
 /// S4's GET on the owner's key: target `All`, consolidation `None`, both
-/// set explicitly (core 0.99, #977's E3). The owner answers a member read
+/// set explicitly (core 0.100, #977's E3). The owner answers a member read
 /// with the member's snapshot on its key, read as the reply its entry
 /// stands for; a snapshot of no entry brings none.
 async fn state_answer(

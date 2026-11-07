@@ -1343,7 +1343,7 @@ impl AlarmBook {
         // attributed. A freshness.v2 owner's put carries none, so a
         // subscription's delivery arrives under a router's stamp or none;
         // a GET's reply carries its last confirmation, the owner's. Since
-        // core 0.99 (#977's E3) that is a snapshot's confirmation, stamped
+        // core 0.100 (#977's E3) that is a snapshot's confirmation, stamped
         // on the owner's clock named by its address, which no zid is: no
         // instance's, so unattributed.
         let by_heartbeat = self.confirms_by_heartbeat(&e.owner);

@@ -354,7 +354,7 @@ pub enum Observation {
 }
 
 /// What a GET reader read of one member from its collection's snapshot
-/// (`freshness.v2` §2.6, text 0.6; core §4.2).
+/// (`freshness.v2` §2.6, text 0.7; core §4.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Entry {
     /// The snapshot lists the member neither live nor as a tombstone.
@@ -1010,7 +1010,7 @@ impl<T: Arrival> View<T> {
     }
 
     /// A GET's snapshot vouched for `key`'s live value at `at` (v2 §2.6,
-    /// text 0.6; core §7.5's confirmation): kept as a heartbeat's would be,
+    /// text 0.7; core §7.5's confirmation): kept as a heartbeat's would be,
     /// when it is later than what the view held. A deleted member, or one
     /// the view does not hold, is left as it is.
     pub fn confirm(&mut self, key: &str, at: T) {

@@ -2018,7 +2018,7 @@ impl Subscription {
                 asked,
                 now,
             );
-            // freshness.v2 §2.6 (text 0.6): an entry's confirmation, aged
+            // freshness.v2 §2.6 (text 0.7): an entry's confirmation, aged
             // from when the owner built its snapshot.
             for (k, _) in &live {
                 if let Some(at) = answer

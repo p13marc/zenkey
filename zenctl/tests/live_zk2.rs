@@ -1863,7 +1863,7 @@ async fn get_state_reads_the_owner_then_an_archive_and_never_confuses_them() {
     assert_eq!(row["state"], "value");
     assert_eq!(row["payload"]["declared"], "json:NetworkInterface");
     assert_eq!(row["payload"]["value"], value);
-    // A `freshness.v2` collection is read by snapshot (core 0.99, #977's
+    // A `freshness.v2` collection is read by snapshot (core 0.100, #977's
     // E3): its entry carries no Zenoh timestamp, and its confirmation is
     // its last confirmation, on the owner's clock named by its address.
     assert!(
@@ -2597,7 +2597,7 @@ async fn gen_brings_up_a_visible_owner_that_watch_and_get_state_read() {
     exits(&run, 0);
     let row = &run.json()["rows"][0];
     assert_eq!(row["inband"]["run"], stated.as_str(), "{run}");
-    // Read by snapshot (core 0.99, #977's E3): its entry carries no Zenoh
+    // Read by snapshot (core 0.100, #977's E3): its entry carries no Zenoh
     // timestamp, the mock's session's or another; its confirmation is the
     // owner's clock named by its address.
     assert!(

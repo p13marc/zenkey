@@ -6,9 +6,10 @@ deliberately did not, and why.
 ## 0.100 — 2026-11-07: state GETs answered by snapshot (#977)
 
 Epic #975, zk2c, makes the wire bandwidth-first. 0.97 defined form 7,
-the snapshot, and no rule adopted it. This version is #977's E3, the
-flip: an owner answers a state GET with one snapshot per collection,
-in pages, where it answered a reply per key. Every reply carries its key
+the snapshot, and no rule adopted it. This version, 0.100 after 0.99's
+bare wire removed (#985's C4d), is #977's E3, the flip: an owner answers
+a state GET with one snapshot per collection, in pages, where it
+answered a reply per key. Every reply carries its key
 as text through each router, and its replier's id, about 120 bytes over
 each member's value. A reader now gets those bytes once per page.
 
@@ -157,7 +158,7 @@ blocker.
   their profiles.
 - **No section number** and no fingerprint moves.
 
-**The figures.** `RULES.md` lists 263 rules, 13 more. S2's rules
+**The figures.** `RULES.md` lists 262 rules, 13 more than 0.99's. S2's rules
 become three, one fewer. §4.2 adds seven owner rules, and S4 and the
 seed five for a late joiner, F-497's among them. Observer §4.1 adds one
 for a tool, and §12 one.

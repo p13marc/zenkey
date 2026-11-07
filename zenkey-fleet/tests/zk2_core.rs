@@ -936,7 +936,7 @@ async fn a_state_read_keeps_its_bytes_and_a_raw_get_reads_a_tombstone() {
     assert_eq!(bytes_of(&last).as_deref(), Some(&body[..]), "{last:?}");
 
     // The tombstone: a raw GET within the window, a member read, is answered
-    // by the member's snapshot (core 0.99, #977's E3), whose tombstone reads
+    // by the member's snapshot (core 0.100, #977's E3), whose tombstone reads
     // as a delete, its kind kept, never a value.
     writer.delete().await.expect("a delete");
     let answers = loop {

@@ -306,13 +306,13 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   among its kind token's, canonical order), `snapshot_prefix` and
   `is_member`; `seed::apply_snapshot` (the omission rule over a complete
   snapshot, `HeldMember`); size helpers saturate (`saturating`), and
-  `read_body` never pre-allocates from a count. E3 (core 0.99, the flip):
+  `read_body` never pre-allocates from a count. E3 (core 0.100, the flip):
   `collection_at` (the collection a snapshot's index names, read with the
   owner's revision, `None` where the reply's key is neither its snapshot
   key nor a member's: no omission, F-497), `omit` (the omission rule over a
   complete snapshot through it), `collection_read` (a selector over every
   member as `<snapshot key>/**`); `freshness::Entry`/`Observation::of_entry`
-  (a snapshot's entry aged as a reply, v2 0.6 §2.6) and `View::confirm`;
+  (a snapshot's entry aged as a reply, v2 0.7 §2.6) and `View::confirm`;
   `link::tombstone_only`/`Res::tombstone_only` (link.v2 0.9 §2.11's floor:
   a per-key resource or a template with a leading parameter, any revision's);
   `seed_snapshot` runs `seed/snapshot.json` (45 cases, a case's

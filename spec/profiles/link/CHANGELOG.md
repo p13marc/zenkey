@@ -9,12 +9,12 @@ headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 
 ## link.v2 0.9 — 2026-11-07: §2.11, windows floored only where a tombstone alone proves a delete (#977 E5)
 
-Core 0.99 (#977's E3) answers a state GET by snapshot. A complete
+Core 0.100 (#977's E3) answers a state GET by snapshot. A complete
 snapshot omits a member deleted beyond the window, and a concrete member
 read with no member draws a snapshot of no entry. So a late joiner across
 a face learns of such a delete without a raised window. `link.v1` §2.11
 floors every listed owner of state at the face's outage, for want of
-that. This text, written against core 0.99, narrows the floor.
+that. This text, written against core 0.100, narrows the floor.
 
 **Added: §2.11, which replaces `link.v1` §2.11 for a link.v2 policy.**
 - **The rule.** A deployment MUST configure each listed service that

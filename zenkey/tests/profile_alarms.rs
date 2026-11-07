@@ -483,7 +483,7 @@ async fn s1_raise() {
         put.inband.map(Mark::InBand),
         "under the put's in-band stamp (core S2)"
     );
-    // freshness.v2 0.6 §2.6 (#977's E3): the snapshot's entry carries its
+    // freshness.v2 0.7 §2.6 (#977's E3): the snapshot's entry carries its
     // confirmation, which the consumer stamps on the owner's clock, named
     // by its address: a snapshot carries no zid.
     assert_eq!(

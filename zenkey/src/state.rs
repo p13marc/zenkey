@@ -2021,7 +2021,7 @@ pub struct StateAnswer {
     /// member's key. Empty when no page answered.
     pub snapshots: Vec<zenkey_model::collection::Heard>,
     /// Each key answered by a snapshot's live entry, with its
-    /// confirmation (`freshness.v2` §2.6, text 0.6): what a GET reader ages
+    /// confirmation (`freshness.v2` §2.6, text 0.7): what a GET reader ages
     /// it from. A key answered per key has none.
     pub confirmations: BTreeMap<String, Confirmed>,
     /// The keys each complete snapshot's omission rule dropped (core

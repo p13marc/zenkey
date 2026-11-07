@@ -199,7 +199,7 @@ pub async fn get_state_answer_in(
         .map(crate::report::CollectionSnapshot::from)
         .collect();
     let inband_of = |key: &str| inband.get(key).copied().map(InbandStamp::from);
-    // freshness.v2 §2.6 (text 0.6): a snapshot's live entry carries its
+    // freshness.v2 §2.6 (text 0.7): a snapshot's live entry carries its
     // member's confirmation, 1 at the snapshot's time, 2 at its last
     // confirmation, both on the owner's clock from the deployment epoch.
     let confirmations = got.confirmations;

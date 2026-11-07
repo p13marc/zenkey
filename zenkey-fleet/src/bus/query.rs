@@ -3,7 +3,7 @@
 //!
 //! Two disciplines, one `session.get`: the fan-in's (target `All`,
 //! consolidation `None`, every reply attributed by its key) and spec §4.2's
-//! state GET (target `All`, consolidation `None` since core 0.99, S4),
+//! state GET (target `All`, consolidation `None` since core 0.100, S4),
 //! which a late joiner seeds from (0.26; #614, FL4), each snapshot's page
 //! read as its entries (`reply_samples`; #977's E3).
 
@@ -384,7 +384,7 @@ pub(crate) async fn disciplined_get(
 }
 
 /// **The** state GET of this crate: spec §4.2's S4, target `All` and
-/// consolidation **`None`**, both set explicitly (core 0.99, #977's E3) —
+/// consolidation **`None`**, both set explicitly (core 0.100, #977's E3) —
 /// the GET a late joiner seeds from after its subscription is declared
 /// (0.26).
 ///
@@ -420,7 +420,7 @@ pub(crate) fn reply_samples(sample: &zenoh::sample::Sample) -> Vec<zenoh::sample
 }
 
 /// [`reply_samples`] for a reader that ages what it reads (`freshness.v2`
-/// §2.6, text 0.6): a live entry with a confirmation whose time is known (1
+/// §2.6, text 0.7): a live entry with a confirmation whose time is known (1
 /// at the snapshot's time, 2 at its conf; core §7.5) carries it as its
 /// Zenoh timestamp, counted from the deployment epoch, the catalog's when
 /// the reader holds one ([`zenkey_model::catalog::EPOCH_WITHOUT_CATALOG`]
