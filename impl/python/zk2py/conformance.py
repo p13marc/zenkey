@@ -916,7 +916,8 @@ def _link_v2(path: Path) -> list[Result]:
         data = _load_json(f)
         if f.name == "lints.json":
             for c in data["cases"]:
-                out.append(_check(f"v2 lints: {c['note']}", link_v2.lint(c["policy"]), c["expect"]))
+                out.append(_check(f"v2 lints: {c['note']}", link_v2.lint(c["policy"], block=c.get("block")),
+                                  c["expect"]))
         elif f.name == "exposure.json":
             for c in data["cases"]:
                 out.append(_check(f"v2 exposure: {c['note']}", link_v2.exposure(c), c["expect"]))
@@ -4870,8 +4871,11 @@ def _round101_readings(root: Path) -> list[tuple[str, Any, Any]]:
     rules = (spec / "RULES.md").read_text(encoding="utf-8")
     counted = {n: int(c) for n, c in re.findall(r"^\| \[([^\]]+)\]\(#[^)]*\) \| (\d+)", rules, re.M)}
     once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
-    out.append(("core 0.94's entry: RULES.md lists 239 rules, 7 more; the owner 73, the caller 18",
-                [int(once.group(1)) if once else None, counted.get("Owner"), counted.get("Caller")], [239, 73, 18]))
+    out.append(("core 0.94's entry: RULES.md lists 239 rules, 7 more; the owner 73, the caller 18 (core 0.96's "
+                "index lists more, round 102)",
+                missing(" ".join((spec / "CHANGELOG.md").read_text(encoding="utf-8").split()),
+                        "lists 239 rules")
+                + [(int(once.group(1)) if once else 0) >= 239, counted.get("Caller")], [True, 18]))
     # F-472: §5.2's Decoding MUST binds "a caller or a tool that reads the
     # bare wire", and RULES.md lists it under the caller alone, where the two
     # reading MUSTs of the same subject are under both.
@@ -4884,8 +4888,8 @@ def _round101_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "a tool that reads the bare wire\", was listed under the caller alone; it is under both now, as the "
                 "reading MUST beside it, and the observer class counts 70",
                 missing(core, "**Decoding.** A caller or a tool that reads the bare wire decodes an envelope")
-                + [dec, read, counted.get("Observer: the tool role, and a reader")],
-                [["caller", "observer"], ["caller", "observer"], 70]))
+                + [dec, read, (counted.get("Observer: the tool role, and a reader") or 0) >= 70],
+                [["caller", "observer"], ["caller", "observer"], True]))
     # F-473: a bare-wire envelope its decoding refuses: "that envelope …
     # not as the transport's", or "A malformed error is the transport's
     # too". zk2py reads it as the transport's, its decoding's token named.
@@ -4965,32 +4969,102 @@ def _round102_readings(root: Path) -> list[tuple[str, Any, Any]]:
     m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
     core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
     out: list[tuple[str, Any, Any]] = [
-        ("core 0.95 or later and observer 0.25, written against it, each with its entry (round 101 answered); "
-         "config.v2 0.1 and its draft entry; link.v2's draft entry",
+        ("core 0.95 or later and observer 0.25 or later, each with its entry (round 101 answered); config.v2 0.1 "
+         "and its draft entry; link.v2's draft entry",
          [core_v >= (0, 95)] + entry("CHANGELOG.md", "0.95", "round 101")
          + entry("observer-CHANGELOG.md", "0.25", "another `Encoding`")
          + entry("profiles/config/CHANGELOG.md", "config.v2 0.1", "one packed record")
          + entry("profiles/config/CHANGELOG.md", "config.v2 draft", "zenoh-modem")
-         + entry("profiles/link/CHANGELOG.md", "link.v2 draft", "zenoh-modem")
-         + missing(obs, "| **Text version** | 0.25", "| **Written against** | core 0.95"),
+         + entry("profiles/link/CHANGELOG.md", "link.v2 draft", "zenoh-modem"),
          [True]),
     ]
     # "No rule": RULES.md as the entry counts it.
     rules = (spec / "RULES.md").read_text(encoding="utf-8")
     counted = {n: int(c) for n, c in re.findall(r"^\| \[([^\]]+)\]\(#[^)]*\) \| (\d+)", rules, re.M)}
     once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
-    out.append(("core 0.95's entry: no rule; RULES.md lists 239 rules, the observer class 70 (F-472's index)",
-                [int(once.group(1)) if once else None, counted.get("Observer: the tool role, and a reader")],
-                [239, 70]))
+    out.append(("core 0.95's entry: no rule; RULES.md lists 239 rules, the observer class 70 (F-472's index); "
+                "core 0.96's lists more",
+                missing(" ".join((spec / "CHANGELOG.md").read_text(encoding="utf-8").split()),
+                        "`RULES.md` lists 239 rules, the observer class 70")
+                + [(int(once.group(1)) if once else 0) >= 239], [True]))
     # The statuses: config.v2 and link.v2 draft, each used by zenoh-modem,
     # their texts unchanged at 0.1 and 0.6.
-    out.append(("config.v2 0.1 and link.v2 0.6 are draft, used by zenoh-modem, in the index's first table",
+    out.append(("config.v2 0.1 and link.v2 0.6 or later are draft, used by zenoh-modem, in the index's first table",
                 missing(v2, "| **Text version** | 0.1", "| **Status** | draft |",
                         "| **Written against** | core 0.94")
-                + missing(l2, "| **Text version** | 0.6", "| **Status** | draft |")
-                + missing(idx, "| [`config.v2`](config/v2.md) | 0.1 | draft | zenoh-modem | 0.94 |",
-                          "| [`link.v2`](link/v2.md) | 0.6 | draft | zenoh-modem | 0.91 |"), []))
-    return out + _config_v2_readings(root)
+                + missing(l2, "| **Status** | draft |")
+                + missing(idx, "| [`config.v2`](config/v2.md) | 0.1 | draft | zenoh-modem | 0.94 |")
+                + [bool(re.search(r"\| \[`link\.v2`\]\(link/v2\.md\) \| 0\.\d+ \| draft \| zenoh-modem \|", idx))],
+                [True]))
+    return out + _config_v2_readings(root) + _core096_readings(root)
+
+
+def _core096_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.96, observer 0.26, link.v2 0.7 and config.v1 0.10 (#982 H1 and
+    H2, main 0676db19; #609, round 102): each entry, its count of rules, each
+    new rule as its text states it, and F-492 as zk2py reads it. The fixtures
+    are the link family's (``v2/plan.json`` 22 to 26, ``v2/lints.json`` 40 to
+    57); the live half is ``first_hop_live`` (``constrained.md`` §10)."""
+    import re
+
+    from . import classes
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    core, obs, l2 = flat("core.md"), flat("observer.md"), flat("profiles/link/v2.md")
+    cv1, scen = flat("profiles/config/v1.md"), flat("scenarios/constrained.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.96 or later, observer 0.26, link.v2 0.7 and config.v1 0.10, each with its entry (#982 H1)",
+         [core_v >= (0, 96)] + entry("CHANGELOG.md", "0.96", "first hop")
+         + entry("observer-CHANGELOG.md", "0.26", "first hop")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 0.7", "device face")
+         + entry("profiles/config/CHANGELOG.md", "0.10", "first hop")
+         + missing(obs, "| **Text version** | 0.26", "| **Written against** | core 0.96"),
+         [True]),
+    ]
+    rules = (spec / "RULES.md").read_text(encoding="utf-8")
+    counted = {n: int(c) for n, c in re.findall(r"^\| \[([^\]]+)\]\(#[^)]*\) \| (\d+)", rules, re.M)}
+    once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
+    out.append(("core 0.96's entry: RULES.md lists 246 rules, 0.95's 239, the core's four and observer 0.26's three",
+                missing(flat("CHANGELOG.md"), "lists 246 rules: 0.95's 239, these four and observer 0.26's three")
+                + [int(once.group(1)) if once else None], [246]))
+    out.append(("core 0.96 §8.1, §8.4, §8.5 and observer 0.26 §3.6, §3.11: the rules as their texts state them",
+                missing(core, "Such an owner SHOULD put every interface it implements in its tokenless set.",
+                        "Such an owner MUST NOT implement `archive.v1`, nor an interface whose contract uses "
+                        "`redundancy.v1`.", "An owner on a first hop (§8.1) SHOULD NOT hold its bundles",
+                        "A deployment with such an owner SHOULD hold each of its bundles on the near side")
+                + missing(obs, "A reader MUST find an interface's providers by instance tokens and their descriptors",
+                          "A reader MUST NOT conclude a provider absent for want of an interface token.",
+                          "A tool that knows an owner is on a first hop MUST NOT report it down from its instance "
+                          "token's absence")
+                + missing(l2, "a generator MUST derive three denies in place of `link.v1`'s `zk`",
+                          "A generator MUST NOT emit a downsampling rule for a device's stream on the face that lists "
+                          "the device.")
+                + missing(scen, "## §10 A first-hop device"), []))
+    # F-492: two rules the index lists under the owner, whose subjects are a
+    # deployment and a tool.
+    rows = classes._rules_md(spec)
+    dep = sorted(r[0] for r in rows if r[1] == "core §8.4" and "A deployment with such an owner" in r[3])
+    tool = sorted(r[0] for r in rows if r[1] == "observer §3.11" and "A tool that knows an owner" in r[3])
+    out.append(("F-492 (open): RULES.md lists core §8.4's \"A deployment with such an owner SHOULD\" and observer "
+                "§3.11's \"A tool that knows an owner … MUST NOT\" under the owner too; the owner class counts 78",
+                [dep, tool, counted.get("Owner")], [["deployment", "owner"], ["observer", "owner"], 78]))
+    out.append(("config.v1 0.10 §2.1: the SHOULD NOT on the tokenless set excepts a first hop; §2.12 still names the "
+                "reference's refusal of a re-mint (F-480)",
+                missing(cv1, "The reference refuses the re-mint (`zenkey::config_v1`)") + ["first hop" in cv1],
+                [True]))
+    return out
 
 
 def _config_v2_readings(root: Path) -> list[tuple[str, Any, Any]]:

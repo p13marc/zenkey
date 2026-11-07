@@ -55,6 +55,21 @@ PUSH = ["put", "delete", "declare_subscriber"]
 FLOWS = ["egress", "ingress"]
 #: §2.7: the exposure denies "per kind token K, in the order".
 KIND_TOKENS = ["stream", "@stream", "state", "@state", "events"]
+#: link.v2 0.7 §2.6: a device face's carve, in place of ``zk``, in this
+#: order, before ``adv`` (#609, round 102).
+OWN_PAIRS = {("ingress", "put"), ("ingress", "delete"), ("ingress", "declare_queryable"), ("ingress", "reply"),
+             ("ingress", "liveliness_token"), ("egress", "query"), ("egress", "declare_subscriber")}
+INSTANCE_KEY = "zk2/*/*/@zk/instance/**"
+DEVICE_ZK = [
+    {"id": "zk", "flows": ["egress", "ingress"], "messages": None,
+     "key_exprs": ["zk2/*/*/@zk/alive/**", "zk2/*/*/@zk/member/**", "zk2/@zk/**"]},
+    {"id": "zk:instance:egress", "flows": ["egress"],
+     "messages": ["put", "delete", "declare_queryable", "reply", "liveliness_token", "declare_liveliness_subscriber",
+                  "liveliness_query"], "key_exprs": [INSTANCE_KEY]},
+    {"id": "zk:instance:ingress", "flows": ["ingress"],
+     "messages": ["declare_subscriber", "query", "declare_liveliness_subscriber", "liveliness_query"],
+     "key_exprs": [INSTANCE_KEY]},
+]
 #: §2.1: zenoh 1.10.1's link protocol names, "§2.1's closed list", in its
 #: order (§2.4: a narrowed subject names them "in that list's order").
 LINK_PROTOCOL_ORDER = ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "unixsock-stream", "vsock", "ws"]
@@ -702,8 +717,10 @@ def _heartbeat_denies(deny: list[dict[str, Any]], beats: dict[str, bool], listed
             keys = [f"{root}/**"] if not any(c for _, _, c in items) else carve(root, items)[0]
             if keys:
                 mine.append({"id": f"{k}:{i}", "flows": list(FLOWS), "messages": list(PUSH), "key_exprs": keys})
-    # the stream denies keep their place: after zk, adv and admin
-    return others[:3] + mine + others[3:]
+    # the stream denies keep their place: after zk (a device face's three,
+    # link.v2 0.7 §2.6), adv and admin
+    head = next((n for n, d in enumerate(others) if d["id"] == "admin"), 2) + 1
+    return others[:head] + mine + others[head:]
 
 
 def _with_heartbeats(listed: list[str], interfaces: dict[str, Any],
@@ -734,7 +751,14 @@ def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
     denies of what link.v1 lets cross (§2.7's unlisted frames, §2.8's timed
     streams), a listed frame's cadence in place of its interval (§2.8), and
     its own warnings and members (§2.3)."""
-    listed = sorted({i for s in policy.services for i in implements[s]}, key=_bytes)
+    # link.v2 0.7 §2.5: "Every rule of link.v1 that reads the listed services
+    # reads each device beside them, by its address ... on every face of the
+    # policy. The one exception is downsampling, on the device's own face."
+    devices = list(getattr(v2, "devices_all", []) or [])
+    own = set(getattr(v2, "own_devices", []) or [])
+    owners = [(f"{policy.system}/{s}", implements[s]) for s in policy.services] + \
+        [(a, implements[a]) for a in devices]
+    listed = sorted({i for _, ifs in owners for i in ifs}, key=_bytes)
     res = {i: merge_revisions(i, revisions_of(interfaces[i])) for i in listed}
     named = set(listed)
     listed = _with_heartbeats(listed, interfaces, res)
@@ -756,6 +780,11 @@ def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
     overlapped: set[str] = set()
     deny = [{"id": i, "flows": list(FLOWS), "messages": list(MESSAGES), "key_exprs": [k]}
             for i, k in (("zk", "zk2/**/@zk/**"), ("adv", "zk2/**/@adv/**"), ("admin", "@/**"))]
+    if face.attach == "device":
+        # link.v2 0.7 §2.6: "On a device face, a generator MUST derive three
+        # denies in place of link.v1's zk, in this order, before adv".
+        deny = [{**d, "messages": list(d["messages"] or MESSAGES), "flows": list(d["flows"]),
+                 "key_exprs": list(d["key_exprs"])} for d in DEVICE_ZK] + deny[1:]
     for k in KIND_TOKENS:
         any_cross = any(crosses[(r.iface, r.token, r.template)] for i in listed for r in res[i] if r.token == k)
         if expose != "link" or not any_cross:
@@ -810,23 +839,26 @@ def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
                             warnings.append(finding("history_on_frame", face.name, r.name, "warning"))
                     elif h.horizon == "within" and h.ttl_s < 2 * (face.interval_s or 0):
                         warnings.append(finding("interval_over_horizon", face.name, r.name, "warning"))
-        for s in policy.services:
-            for i in implements[s]:
+        for addr, ifs in owners:
+            if addr in own:
+                # link.v2 0.7 §2.8: "A generator MUST NOT emit a downsampling
+                # rule for a device's stream on the face that lists the device."
+                continue
+            for i in ifs:
                 for r in res[i]:
                     # §2.8 (0.11): "A generator MUST NOT emit a downsampling
                     # rule for a heartbeat's key": none is a resource here.
                     # (0.13): "A generator MUST NOT emit a downsampling rule
                     # for a frame resource's key (core §7.7)."
                     if r.token in ("stream", "@stream") and crossing_res(r) and r.frame is None:
-                        rules.append({"key_expr": f"zk2/{policy.system}/{s}/{i}/{r.token}/{r.template}",
+                        rules.append({"key_expr": f"zk2/{addr}/{i}/{r.token}/{r.template}",
                                       "freq": 1 / face.interval_s})
     rules.sort(key=lambda x: _bytes(x["key_expr"]))
     downsampling = None if not rules else {"id": face.name, "link_protocols": list(face.link_protocols),
                                            "flows": ["egress"], "messages": ["put"], "rules": rules}
     windows, liveness = [], []
-    for s in policy.services:
-        addr = f"{policy.system}/{s}"
-        mine = [r for i in implements[s] for r in res[i]]
+    for addr, ifs in owners:
+        mine = [r for i in ifs for r in res[i]]
         if any(r.token in ("state", "@state") for r in mine):
             windows.append({"service": addr, "min_s": face.max_outage_s})
         evidence = {r.name for r in mine if r.token in ("stream", "@stream", "state", "@state")
@@ -834,11 +866,13 @@ def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
         # §2.12 (0.11): "The plan lists freshness.v2/stream/heartbeat/<iface>
         # for each listed service implementing an interface whose heartbeat
         # crosses."
-        evidence |= {f"{HEARTBEAT_IFACE}/stream/heartbeat/{i}" for i in implements[s] if beats.get(i)}
+        evidence |= {f"{HEARTBEAT_IFACE}/stream/heartbeat/{i}" for i in ifs if beats.get(i)}
         evidence = sorted(evidence, key=_bytes)
         liveness.append({"service": addr, "evidence": evidence})
     if face.attach == "client":
         attach: dict[str, Any] = {"shape": "client"}
+    elif face.attach == "device":
+        attach = {"shape": "device", "devices": sorted(own, key=_bytes)}
     else:
         attach = {"shape": "south-region", "region": face.region,
                   "gateway": {"south": [{"filters": [{"modes": ["peer", "client"]}]},
@@ -881,7 +915,7 @@ def _concrete(text: str) -> bool:
     return not any(c in ("*", "**") or "$*" in c for c in text.split("/"))
 
 
-def check_block(block: dict[str, Any], policy: Policy | None = None) -> list[dict[str, Any]]:
+def check_block(block: dict[str, Any], policy: Policy | None = None, device: bool = False) -> list[dict[str, Any]]:
     """§2.15: a router's block for one face against the face it guards:
     ``zk_not_denied`` (over ``deny``, "one subject's", lints.json),
     ``wildcard_downsampling`` and ``intersecting_downsampling``; and, given
@@ -908,7 +942,27 @@ def check_block(block: dict[str, Any], policy: Policy | None = None) -> list[dic
 
     # "for one of the 18 pairs of the nine messages and both flows, no deny
     # of the block … includes the namespace's zk2/**/@zk/**".
-    if target is None or not all(denied(m, fl) for m in MESSAGES for fl in FLOWS):
+    if device:
+        # link.v2 0.7 §2.15: "On a device face the check reads four key
+        # expressions in place of zk2/**/@zk/**, each with the namespace": the
+        # three on each of the 18 pairs, the instance keys on the eleven
+        # pairs outside core §11.2's Own row.
+        def under(k: str) -> Any:
+            return _keyexpr(f"{ns}/{k}" if ns else k)
+
+        def denied_ke(m: str, fl: str, tgt: Any) -> bool:
+            return any(m in d.get("messages", []) and fl in rule_flows(d)
+                       and any((ke := _keyexpr(k)) is not None and ke.includes(tgt) for k in d.get("key_exprs", []))
+                       for d in block.get("deny", []))
+
+        targets = [under(k) for k in ("zk2/@zk/**", "zk2/*/*/@zk/alive/**", "zk2/*/*/@zk/member/**")]
+        inst = under(INSTANCE_KEY)
+        ok = all(t is not None for t in [*targets, inst]) \
+            and all(denied_ke(m, fl, t) for t in targets for m in MESSAGES for fl in FLOWS) \
+            and all(denied_ke(m, fl, inst) for m in MESSAGES for fl in FLOWS if (fl, m) not in OWN_PAIRS)
+        if not ok:
+            out.append(finding("zk_not_denied", face, "@zk"))
+    elif target is None or not all(denied(m, fl) for m in MESSAGES for fl in FLOWS):
         out.append(finding("zk_not_denied", face, "@zk"))
     rules = block.get("downsampling", [])
     kes = [_keyexpr(r.get("key_expr")) for r in rules]

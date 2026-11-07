@@ -273,6 +273,22 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "owner's encodings carry no suffix; envelope.PROTOBUF_ENCODING alone does"),
     ("owner", "core §7.4", "A generated `@stream` publisher SHOULD accept SHM buffers", NA,
      "zk2py generates no publisher"),
+    # core 0.96 (#982 H1), round 102: an owner on a first hop.
+    ("owner", "core §8.1", "Such an owner SHOULD put every interface it implements in its tokenless set", MET,
+     "owner.Owner(first_hop=True): every interface it implements tokenless, its instance token alone "
+     "(first_hop_live §10 steps 1 and 2) (round 102, core 0.96)"),
+    ("owner", "core §8.1", "Such an owner MUST NOT implement `archive.v1`, nor an interface whose contract uses", MET,
+     "owner.Owner._plan, step 2 over a first hop's tokenless set: archive.v1 and a governed interface refused, "
+     "nothing declared (first_hop_live §10 step 6) (round 102, core 0.96)"),
+    ("owner", "core §8.4", "An owner on a first hop (§8.1) SHOULD NOT hold its bundles", MET,
+     "owner.Owner(first_hop=True) declares no contract queryable; a near holder answers (first_hop_live §10 step 1) "
+     "(round 102, core 0.96)"),
+    ("owner", "core §8.4", "A deployment with such an owner SHOULD hold each of its bundles on the near side", NA,
+     "a deployment's rule, which the index lists under the owner too (F-492); first_hop_live's near holder plays "
+     "it (round 102)"),
+    ("owner", "observer §3.11", "A tool that knows an owner is on a first hop MUST NOT report it down", NA,
+     "a tool's rule, which the index lists under the owner too (F-492); the observer class's verdict holds it "
+     "(round 102)"),
     ("owner", "core §8.1", "Every instance MUST hold one, including pure consumers", MET,
      "owner.Owner._declare_instance (presence_scenarios §1)"),
     ("owner", "core §8.1", "An owner MUST hold one per interface of", MET,
@@ -488,6 +504,17 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "presence.PresenceFollower (presence_scenarios §8)"),
     ("observer", "observer §3.6", "The reader SHOULD report what that read establishes", MET,
      "presence.PresenceFollower (presence_scenarios §8)"),
+    # observer 0.26 (#982 H1), round 102.
+    ("observer", "observer §3.6", "A reader MUST find an interface's providers by instance tokens and their "
+                                  "descriptors", MET,
+     "live.list_presence and live.get_descriptor, the tokenless set's providers (presence_scenarios §5), a "
+     "first hop's (first_hop_live §10 step 1) (round 102, observer 0.26)"),
+    ("observer", "observer §3.6", "A reader MUST NOT conclude a provider absent for want of an interface token", MET,
+     "live.shape_faults reads no missing interface token of an entry \"token\": false (first_hop_live §10 step "
+     "1); presence_scenarios §5 (round 102, observer 0.26)"),
+    ("observer", "observer §3.11", "A tool that knows an owner is on a first hop MUST NOT report it down", MET,
+     "first_hop.report: a device a link.v2 policy lists, its token absent from a complete read, is link_closed, "
+     "never down (first_hop_live §10 step 2) (round 102, observer 0.26)"),
     ("observer", "observer §3.7", "A reader SHOULD make every liveliness read it", MET,
      "live.list_presence refuses a session that held a subscriber (presence_scenarios §9)"),
     ("observer", "observer §3.7", "The reader SHOULD hold its liveliness subscribers on", MET,

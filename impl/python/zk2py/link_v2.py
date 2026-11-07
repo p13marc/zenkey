@@ -79,7 +79,7 @@ DEFAULTS = {
                      "interests_timeout_ms": 10_000},
 }
 FACE_KEYS = ("far", "attach", "region", "select", "class", "expose", "interval_s", "max_outage_s", "link_bps",
-             "loss_ppm", "arq", "reply_timeout_ms", "frames", "horizon_s")
+             "loss_ppm", "arq", "reply_timeout_ms", "frames", "horizon_s", "devices")
 #: §2.1 (0.3): an entry of ``frames``'s own keys.
 FRAME_KEYS = ("every_s", "keyframe_s")
 MOVED = ("lease_ms", "batch_bytes")
@@ -103,6 +103,9 @@ class FaceV2:
     frames: dict[str, dict[str, int]] | None = None
     #: §2.12 (0.3): the shortest horizon the face affords, or None.
     horizon_s: int | None = None
+    #: §2.5 (0.7): a device face's devices, ``<system>/<service>``; None on
+    #: any other face.
+    devices: list[str] | None = None
 
 
 @dataclass
@@ -184,6 +187,7 @@ def parse_policy(text: str) -> tuple[PolicyV2 | None, list[dict[str, Any]]]:
             if f is not None:
                 faces.append(f)
     out += link.far_of_two_faces(doc.get("face"))
+    out += _device_listed(doc)
     names = sorted(good)
     for i, a in enumerate(names):
         for b in names[i + 1:]:
@@ -196,6 +200,27 @@ def parse_policy(text: str) -> tuple[PolicyV2 | None, list[dict[str, Any]]]:
     full = {k: transport[k] for k in TRANSPORT} if transport is not None else None
     return PolicyV2(system, list(services), binding, catalog, full,
                     sorted(faces, key=lambda f: link._bytes(f.face.name)), out), out
+
+
+def _device_listed(doc: dict[str, Any]) -> list[dict[str, Any]]:
+    """§2.1 (0.7): ``device_listed``, "A device the policy lists elsewhere:
+    among services, as <system>/<service>, or in another face's devices.
+    Each face listing it has the finding. at is devices." Read over the
+    device faces whose ``devices`` is a list of strings."""
+    faces = doc.get("face") if isinstance(doc.get("face"), dict) else {}
+    system, services = doc.get("system"), doc.get("services")
+    as_service = {f"{system}/{x}" for x in services} if isinstance(services, list) and isinstance(system, str) \
+        and all(isinstance(x, str) for x in services) else set()
+    lists: dict[str, set[str]] = {}
+    for name, body in faces.items():
+        if isinstance(body, dict) and body.get("attach") == "device" and isinstance(body.get("devices"), list):
+            lists[name] = {d for d in body["devices"] if isinstance(d, str)}
+    out = []
+    for name, devs in lists.items():
+        others = set().union(*(v for k, v in lists.items() if k != name)) if len(lists) > 1 else set()
+        if devs & (as_service | others):
+            out.append(link.finding("device_listed", name, "devices"))
+    return out
 
 
 def _transport(doc: dict[str, Any], out: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -255,14 +280,29 @@ def _face(name: str, body: dict[str, Any], protocols_of: list[str] | None, trans
         bad("attach", "missing_field")
     elif attach == "router":
         bad("attach", "router_attach")
-    elif attach not in ("client", "south-region"):
+    elif attach not in ("client", "south-region", "device"):
         bad("attach")
     if "region" in body and (type(region) is not str or not 1 <= len(link._bytes(region)) <= 32):
         bad("region")
     elif attach == "south-region" and "region" not in body:
         bad("region", "missing_field")
-    elif attach == "client" and "region" in body:
+    elif attach in ("client", "device") and "region" in body:
+        # 0.7: "region with "device", as with "client"" is bad_value
         bad("region")
+    # §2.1 (0.7): "devices with any attach but "device" is bad_value ... Each
+    # is checked against attach only when attach is client, south-region or
+    # device"; "devices is one value": empty, an entry not two plain chunks,
+    # a wildcard, a repeat, each bad_value once.
+    devices = body.get("devices")
+    if attach == "device" and "devices" not in body:
+        bad("devices", "missing_field")
+    elif "devices" in body and attach in ("client", "south-region"):
+        bad("devices")
+    elif "devices" in body and attach == "device" and (
+            type(devices) is not list or not devices or len(set(map(str, devices))) != len(devices)
+            or any(type(d) is not str or len(d.split("/")) != 2 or not all(is_plain_chunk(c) for c in d.split("/"))
+                   for d in devices)):
+        bad("devices")
     protocols: list[str] | None = None
     if "select" not in body:
         bad("select", "missing_field")
@@ -346,7 +386,7 @@ def _face(name: str, body: dict[str, Any], protocols_of: list[str] | None, trans
         return None, protocols
     f = link.Face(name, far, attach, region, protocols or [], expose, interval if expose == "link" else None,
                   body["max_outage_s"], t["batch_bytes"], bps, t["lease_ms"])
-    return FaceV2(f, loss, body["arq"], rt, frames, horizon), protocols
+    return FaceV2(f, loss, body["arq"], rt, frames, horizon, list(devices) if attach == "device" else None), protocols
 
 
 def _frames(body: dict[str, Any], expose: Any, bad: Any) -> dict[str, dict[str, int]] | None:
@@ -421,8 +461,12 @@ class FaceReading:
     :attr:`beats`) for the policy's own checks (§2.7's ``frame_unlisted`` and
     ``keyframe_unreachable``, §2.18's ``catalog_missing``)."""
 
-    def __init__(self, f: FaceV2, transport: dict[str, Any]) -> None:
+    def __init__(self, f: FaceV2, transport: dict[str, Any], devices_all: list[str] | None = None) -> None:
         self.f, self.transport = f, transport
+        #: §2.5 (0.7): every device of the policy, listed on every face, and
+        #: this face's own, whose streams it does not downsample (§2.8)
+        self.devices_all = list(devices_all or [])
+        self.own_devices = list(f.devices or [])
         self.crossed: dict[str, link.Resource] = {}
         self.beats: dict[str, bool] = {}
         self.res: dict[str, list[link.Resource]] = {}
@@ -579,11 +623,23 @@ def plan(policy_text: str, implements: dict[str, list[str]], interfaces: dict[st
     if policy is None:
         return {"refused": findings}
     errors = []
-    for s in policy.services:
+    devices = sorted({d for f in policy.faces for d in (f.devices or [])}, key=link._bytes)
+    for s in [*policy.services, *devices]:
+        # §2.3 (0.7): "A device it names none for is service_unknown, at the
+        # device's address."
         if not implements.get(s):
             errors.append(link.finding("service_unknown", None, s))
             continue
         errors += [link.finding("contract_unknown", None, i) for i in implements[s] if i not in interfaces]
+    for f in policy.faces:
+        for d in f.devices or []:
+            for i in implements.get(d) or []:
+                # §2.5 (0.7): "A generator MUST refuse a device that implements
+                # archive.v1, or an interface a revision given of which uses
+                # redundancy.v1 (presence_required)".
+                if i == "archive.v1" or (i in interfaces and any("redundancy.v1" in u
+                                                                 for u in link.uses_of(interfaces[i]))):
+                    errors.append(link.finding("presence_required", f.face.name, i))
     if errors:
         # §2.3 (0.6, F-468): "A refusal lists the deployment's errors alone,
         # as link.v1 §2.3 says: no warning of the policy's or the plan's
@@ -595,13 +651,27 @@ def plan(policy_text: str, implements: dict[str, list[str]], interfaces: dict[st
         # takes none of this section."
         return {"binding": policy.binding, "catalog": None, "transport": None,
                 "faces": [link.plan_face(v1, f.face, implements, interfaces) for f in policy.faces]}
-    listed = sorted({i for s in policy.services for i in implements[s]}, key=link._bytes)
+    listed = sorted({i for s in [*policy.services, *devices] for i in implements[s]}, key=link._bytes)
     errors = packed_required(interfaces, listed)
-    readings = [FaceReading(f, policy.transport) for f in policy.faces]
+    readings = [FaceReading(f, policy.transport, devices) for f in policy.faces]
     faces = []
     for f, rd in zip(policy.faces, readings):
         fp = link.plan_face(v1, f.face, implements, interfaces, rd)
         fp["reply_timeout_ms"] = f.reply_timeout_ms
+        if f.devices:
+            # §2.5 (0.7): "The plan warns of each template of a device's
+            # interface that declares epoch (epoch_on_device)."
+            more = []
+            for i in sorted({i for d in f.devices for i in implements[d]}, key=link._bytes):
+                seen: set[str] = set()
+                for rev in link.revisions_of(interfaces[i]):
+                    for r in rev:
+                        name = f"{i}/{r['token']}/{r['template']}"
+                        if r.get("epoch") and name not in seen:
+                            seen.add(name)
+                            more.append(link.finding("epoch_on_device", f.face.name, name, "warning"))
+            if more:
+                fp["findings"] = link.sort_findings(fp["findings"] + more)
         faces.append(fp)
     errors += _face_errors(policy, readings, listed, faces)
     if catalog_doc is not None:
@@ -759,6 +829,13 @@ def check_transport(policy_text: str, router: dict[str, Any], peer: dict[str, An
     return {"emit": emit(policy), "findings": link.sort_findings(out)}
 
 
-def lint(policy_text: str) -> list[dict[str, Any]]:
-    """``lints.json``'s reading: every finding of the policy."""
-    return parse_policy(policy_text)[1]
+def lint(policy_text: str, block: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """``lints.json``'s reading: every finding of the policy; with
+    ``block`` (0.7), ``link.v1``'s block check, ``zk_not_denied`` on a device
+    face read as §2.15 says."""
+    policy, out = parse_policy(policy_text)
+    if block is None or policy is None:
+        return out
+    face = next((f for f in policy.faces if f.face.name == block.get("face")), None)
+    device = face is not None and face.face.attach == "device"
+    return link.sort_findings(list(out) + link.check_block(block, policy.as_v1(), device=device))
