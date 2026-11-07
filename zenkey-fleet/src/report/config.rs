@@ -21,8 +21,10 @@
 //! **The reply unions as the text names them** (§3). A `set` is answered
 //! `applied` (the read-back after the apply) or `pending` (a reach group's
 //! `{token, apply_at, deadline}`, before the apply); a control operation
-//! `view` or `status`. A refusal is the core's envelope, its `app` detail a
-//! [`ConfigError`]; a call that drew nothing is silence, attributed through
+//! `view` or `status`. A refusal is the core's error, in its error form
+//! (core §7.5), its `app` detail a [`ConfigError`]; a reply error that is
+//! no error form, an earlier core's envelope among them, is the
+//! transport's; a call that drew nothing is silence, attributed through
 //! presence, never a failure.
 //!
 //! **A sensitive value is never shown** (§2.15). The request carries it
@@ -45,7 +47,7 @@ use zenkey_model::config::{
 
 use super::asked::{Asked, u64_is_zero};
 use super::health::ClockGround;
-use super::operation::{MalformedReply, SilenceView};
+use super::operation::SilenceView;
 use super::state::{InbandStamp, Stamp};
 
 /// Which profile a reading or an act is of (#985 G3): `config.v1`'s
@@ -465,16 +467,15 @@ pub enum ConfigTyping {
     Spelling,
 }
 
-/// A refusal, as the core's envelope carries it (§2.5): its code, the
-/// message for a person, `unavailable`'s cause, and `app`'s detail, decoded
-/// as its profile's type.
+/// A refusal, as the core's error form carries it (§2.5, core §7.5): its
+/// code, the message for a person, `unavailable`'s cause, and `app`'s
+/// detail, decoded as its profile's type.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ConfigRefusal {
     pub code: String,
-    /// For a person, never parsed (core §5.2). Absent when an error form
+    /// For a person, never parsed (core §5.2). Absent when the error form
     /// carried none (core §7.5), as a `config.v2` owner refuses a change
-    /// that carries a sensitive value (v2 §2.5, §2.15); the bare wire's
-    /// envelope always carries one.
+    /// that carries a sensitive value (v2 §2.5, §2.15).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -485,7 +486,7 @@ pub struct ConfigRefusal {
     /// Why an `app` detail is not its profile's type.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail_undecodable: Option<String>,
-    /// The error form's as-of mark (core §5.2); absent on the bare wire.
+    /// The error form's as-of mark (core §5.2).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mark: Option<InbandStamp>,
 }
@@ -562,14 +563,13 @@ pub enum ConfigActAnswer {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mark: Option<InbandStamp>,
     },
-    /// The core's envelope: an answer, and the owner's refusal.
+    /// The core's error form: an answer, and the owner's refusal.
     Refused { refusal: ConfigRefusal },
-    /// A `reply_err` claiming an envelope encoding that does not decode.
-    Malformed { malformed: MalformedReply },
-    /// A value reply that is not the operation's reply type.
+    /// A value reply that is not the operation's reply type, a malformed
+    /// one included (core §5.1).
     Undecodable { reason: String, size: usize },
-    /// No value and no envelope: silence, never a verdict (core O5). A `set`
-    /// that drew nothing started nothing a tool can name (§5).
+    /// No value and no owner's error: silence, never a verdict (core O5). A
+    /// `set` that drew nothing started nothing a tool can name (§5).
     Silent { silence: SilenceView },
 }
 
@@ -615,8 +615,8 @@ pub struct ConfigActReport {
 
 impl ConfigActReport {
     /// The act's exit code (`crate::exit`'s acts): 0 the owner answered with
-    /// its reply type, 1 a refusal, a malformed envelope or a reply that is
-    /// not the type (the act failed), 2 silence — unestablished, never a
+    /// its reply type, 1 a refusal or a reply that is not the type (the act
+    /// failed), 2 silence — unestablished, never a
     /// failure (core O5).
     pub fn exit_code(&self) -> i32 {
         match &self.answer {
@@ -625,9 +625,7 @@ impl ConfigActReport {
             | ConfigActAnswer::View { .. }
             | ConfigActAnswer::Status { .. }
             | ConfigActAnswer::Record { .. } => 0,
-            ConfigActAnswer::Refused { .. }
-            | ConfigActAnswer::Malformed { .. }
-            | ConfigActAnswer::Undecodable { .. } => 1,
+            ConfigActAnswer::Refused { .. } | ConfigActAnswer::Undecodable { .. } => 1,
             ConfigActAnswer::Silent { .. } => 2,
         }
     }

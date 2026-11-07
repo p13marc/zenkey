@@ -49,10 +49,11 @@ use std::time::{Duration, Instant, SystemTime};
 use common::{SETTLE, T, client, config, eventually, router, router_with};
 use serde_json::{Value as Json, json};
 use sim::{SimDevice, UndoFailure};
+use zenkey::call::Refusal;
 use zenkey::config_v1::{self, ConfigStatus, ConfigView, Configuration, DesiredConfig, Startup};
 use zenkey::consumer::Consumer;
 use zenkey::model::config::{ConfigChangeEvent, Outcome as Ending, Source, Time, Value};
-use zenkey::model::envelope::{Detail, Envelope};
+use zenkey::model::envelope::Detail;
 use zenkey::model::freshness::Verdict;
 use zenkey::model::grammar::{ZkKey, parse};
 use zenkey::model::template::Bindings;
@@ -309,7 +310,7 @@ fn value(o: &Outcome) -> Json {
 }
 
 /// The refusal replied; anything else fails the test.
-fn refusal(o: &Outcome) -> &Envelope {
+fn refusal(o: &Outcome) -> &Refusal {
     match o {
         Outcome::Refused(e) => e,
         other => panic!("a refusal, not {other:?}"),
@@ -1394,11 +1395,14 @@ async fn s10_an_idempotent_retry() {
     // whatever comes back is discarded.
     let step1 = Instant::now();
     let key = "zk2/lab/rf0/config.v1/@op/set/radio";
+    // The request form (core §5.1): CH `0x40`, JSON Schema's tag 0, then
+    // the record, under `zenoh/bytes`.
+    let form = [&[0x40][..], &serde_json::to_vec(&body).unwrap()].concat();
     drop(
         bus.c
             .get(key)
-            .payload(serde_json::to_vec(&body).unwrap())
-            .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
+            .payload(form)
+            .encoding(zenoh::bytes::Encoding::ZENOH_BYTES)
             .attachment(CallMetadata::new("ops", "r1").to_bytes())
             .target(QueryTarget::BestMatching)
             .timeout(CALL)

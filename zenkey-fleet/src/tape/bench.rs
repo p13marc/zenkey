@@ -11,9 +11,10 @@
 //! is attributed by the key it went on (O3), as `Fleet` attributes them.
 //!
 //! **The populations stay apart** (the tooling guide's O6): values per
-//! replier, envelopes as a refusal population of their own (unattributed:
-//! a `reply_err` carries no key, §5.1), malformed envelopes, the
-//! transport's own errors, calls that drew nothing at all (silence, never
+//! replier, owners' errors as a refusal population of their own
+//! (unattributed: a `reply_err` carries no key, §5.1), the transport's own
+//! errors, an earlier core's envelope among them, calls that drew nothing
+//! at all (silence, never
 //! averaged in: O5), replies R6 discards, and calls that panicked here.
 //!
 //! **A benchmark repeats a call**, so an operation that is not `idempotent`
@@ -42,7 +43,8 @@ use crate::{Error, Result};
 pub struct BenchSpec<'a> {
     pub revision: &'a Revision,
     pub plan: &'a CallPlan,
-    /// The request, encoded as the operation's `request` type.
+    /// The request's record, encoded as the operation's `request` type:
+    /// each call writes it in the request form.
     pub request: Vec<u8>,
     /// Calls to make.
     pub calls: usize,
@@ -63,18 +65,16 @@ type Timed = (Duration, Reply);
 struct CallOutcome {
     /// Value replies: `(address, key, latency)`.
     values: Vec<(String, String, Duration)>,
-    /// Owners' errors, from either wire: `(code, latency)`.
+    /// Owners' errors, in their error form: `(code, latency)`.
     refusals: Vec<(String, Duration)>,
-    malformed: u64,
     transport: u64,
     discarded: u64,
 }
 
 /// Sorts one call's replies into their populations: a value reply by the
 /// key it went on, when that key is concrete and a member of the operation
-/// called (O3, R6), in either wire; an error reply by its `Encoding`
-/// (§5.2): an owner's error from its form or the bare wire's envelope, a
-/// malformed envelope, or the transport's.
+/// called (O3, R6), malformed or not; an error reply by its `Encoding`
+/// (§5.2): an owner's error in its form, or the transport's.
 fn classify(revision: &Revision, plan: &CallPlan, replies: Vec<Timed>) -> CallOutcome {
     let mut out = CallOutcome::default();
     for (at, reply) in replies {
@@ -87,8 +87,7 @@ fn classify(revision: &Revision, plan: &CallPlan, replies: Vec<Timed>) -> CallOu
                 }
             }
             Err(e) => match zenkey::client::classify(&e) {
-                zenkey::client::ErrorReply::Refused(r) => out.refusals.push((r.envelope.code, at)),
-                zenkey::client::ErrorReply::Malformed(_) => out.malformed += 1,
+                zenkey::client::ErrorReply::Refused(r) => out.refusals.push((r.code, at)),
                 zenkey::client::ErrorReply::Transport(_) => out.transport += 1,
             },
         }
@@ -211,7 +210,6 @@ struct Query {
     session: Session,
     selectors: Vec<OwnedKeyExpr>,
     target: QueryTarget,
-    encoding: zenoh::bytes::Encoding,
     priority: zenoh::qos::Priority,
     request: ZBytes,
     timeout: Duration,
@@ -228,7 +226,7 @@ impl Query {
             self.session
                 .get(ke.clone())
                 .payload(self.request.clone())
-                .encoding(self.encoding.clone())
+                .encoding(zenoh::bytes::Encoding::ZENOH_BYTES)
                 .target(self.target)
                 .consolidation(ConsolidationMode::None)
                 .timeout(self.timeout)
@@ -279,6 +277,12 @@ pub async fn run_bench(session: &Session, spec: BenchSpec<'_>) -> Result<BenchRe
         force,
     } = spec;
     check_bench(revision, plan, calls, force)?;
+    // The request form (core §5.1, "The forms"): CH and the record, under
+    // `zenoh/bytes`, as every caller writes it; an owner refuses any other
+    // `invalid_request`.
+    let request = zenkey_model::forms::Forms::of(revision.contract(), &plan.operation)
+        .map_err(|e| Error::unaskable(format!("{} {}", revision.iface(), plan.name), e))?
+        .request(&request);
     let keys = selectors(session, revision, plan)?;
     let fanout = plan.is_fanout();
     let query = Query {
@@ -289,11 +293,6 @@ pub async fn run_bench(session: &Session, spec: BenchSpec<'_>) -> Result<BenchRe
         } else {
             QueryTarget::BestMatching
         },
-        encoding: zenkey::writer::wire_encoding(
-            &plan.operation.request,
-            plan.operation.encoding,
-            &plan.values,
-        ),
         priority: zenkey::qos::priority(plan.operation.priority),
         request: ZBytes::from(request),
         timeout,
@@ -307,7 +306,7 @@ pub async fn run_bench(session: &Session, spec: BenchSpec<'_>) -> Result<BenchRe
     let mut refusal_times = Vec::new();
     let mut without_value: BTreeMap<String, u64> = held.iter().map(|a| (a.clone(), 0)).collect();
     let (mut completed, mut silent, mut panicked) = (0usize, 0u64, 0u64);
-    let (mut malformed, mut transport, mut discarded) = (0u64, 0u64, 0u64);
+    let (mut transport, mut discarded) = (0u64, 0u64);
     let mut fatal = None;
     let mut issued = 0usize;
     while issued < calls && fatal.is_none() {
@@ -332,7 +331,7 @@ pub async fn run_bench(session: &Session, spec: BenchSpec<'_>) -> Result<BenchRe
             };
             completed += 1;
             let o = classify(revision, plan, replies);
-            if o.values.is_empty() && o.refusals.is_empty() && o.malformed == 0 {
+            if o.values.is_empty() && o.refusals.is_empty() {
                 silent += 1;
             }
             let heard: BTreeSet<&str> = o.values.iter().map(|(a, _, _)| a.as_str()).collect();
@@ -351,7 +350,6 @@ pub async fn run_bench(session: &Session, spec: BenchSpec<'_>) -> Result<BenchRe
                 *codes.entry(code).or_default() += 1;
                 refusal_times.push(at);
             }
-            malformed += o.malformed;
             transport += o.transport;
             discarded += o.discarded;
         }
@@ -407,7 +405,6 @@ pub async fn run_bench(session: &Session, spec: BenchSpec<'_>) -> Result<BenchRe
             codes,
             latency: latency(refusal_times),
         },
-        malformed,
         transport,
         silent,
         discarded,

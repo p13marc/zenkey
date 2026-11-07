@@ -25,12 +25,14 @@
 //! descriptor's spelling of a run ([`Run::hex`]), and which samples carry
 //! an envelope.
 //!
-//! **A call's forms** (core 0.92 §7.5, adopted by no rule yet: C4c is the
-//! flip): a request ([`Request`], [`read_query`]), a value
-//! ([`Envelope::value`], [`read_reply`]) and an error
-//! ([`crate::envelope::ErrorForm`], [`read_reply_err`]). A value's and an
-//! error's stamp is the replying instance's as-of mark (§5.1); a request
-//! carries none. Each travels under `zenoh/bytes` ([`ENCODING`]).
+//! **A call's forms** (core 0.92 §7.5, adopted by core 0.94, #985's C4c,
+//! the only wire of a call since core 0.99's C4d): a request ([`Request`],
+//! [`read_query`]), a value ([`Envelope::value`], [`read_reply`],
+//! [`read_value`]) and an error ([`crate::envelope::ErrorForm`],
+//! [`read_reply_err`]). A value's and an error's stamp is the replying
+//! instance's as-of mark (§5.1); a request carries none. Each travels under
+//! `zenoh/bytes` ([`ENCODING`]), and under any other `Encoding` a call's
+//! sample carries no form.
 //!
 //! **Parsing reads no contract,** as parsing a key does (§1.1): it knows
 //! the sample ([`SampleKind`]) and nothing more: a put ([`Envelope::parse`]),
@@ -52,9 +54,8 @@
 //! token `spec/conformance/envelope/` pins ([`Refusal::token`]). Every
 //! envelope and form accepted writes back to its bytes.
 //!
-//! Not [`crate::envelope`]'s [`Envelope`](crate::envelope::Envelope), the
-//! error envelope of a failed call (§5.2), which its error form carries in
-//! bytes.
+//! Not the error envelope of an earlier core's call (§5.2 before 0.99),
+//! which travelled with no form and which nothing here reads.
 //!
 //! **Reading** (observer §7.3, "the envelope first"): a reader tells a
 //! sample that carries an envelope by its key and its Encoding alone
@@ -67,7 +68,7 @@
 
 use thiserror::Error;
 
-use crate::envelope::{Cause, Code, ErrorForm};
+use crate::envelope::{Cause, Code, ErrorForm, FormRefusal};
 use crate::grammar::{KindToken, ZkKey, parse};
 
 /// A form: CH's three high bits. This version defines a mutation, a
@@ -861,20 +862,21 @@ pub const ENCODING: &str = "zenoh/bytes";
 
 /// A call's reply payload read by its `Encoding` (observer §7.3, "A call's
 /// forms first"): under `zenoh/bytes` ([`ENCODING`], exactly) as the value
-/// form ([`read_reply`]), [`Reading::Enveloped`] or [`Reading::Refused`];
-/// under any other as the bare wire's record (core §5.1, "The bare wire"),
-/// [`Reading::Plain`], which the reply's type reads on that `Encoding`. A
-/// value refused is undecodable, never read as a bare record, and an
-/// answer all the same: it came on the call's key (§5.1, "Retries").
-#[must_use]
-pub fn read_value<'a>(encoding: &str, payload: &'a [u8]) -> Reading<'a> {
+/// form ([`read_reply`]). A reply refused, by its bytes or by another
+/// `Encoding`, is malformed, undecodable and never read as a record with
+/// no form, and an answer all the same: it came on the call's key (core
+/// §5.1, "Reading a value", "Retries").
+///
+/// # Errors
+///
+/// [`FormRefusal::Encoding`] under any other `Encoding`, a schema suffix
+/// included (core 0.99 removed the bare wire, #985's C4d), else
+/// [`read_reply`]'s refusal.
+pub fn read_value<'a>(encoding: &str, payload: &'a [u8]) -> Result<Envelope<'a>, FormRefusal> {
     if encoding != ENCODING {
-        return Reading::Plain;
+        return Err(FormRefusal::Encoding(encoding.to_owned()));
     }
-    match read_reply(payload) {
-        Ok(e) => Reading::Enveloped(e),
-        Err(r) => Reading::Refused(r),
-    }
+    read_reply(payload).map_err(FormRefusal::Form)
 }
 
 /// Whether `key` is a zk2 data key whose kind is a stream, state or an
@@ -926,9 +928,7 @@ pub fn carries(key: &str, encoding: &str) -> bool {
     encoding == ENCODING && enveloped_key(key)
 }
 
-/// What a put's payload reads as ([`read_put`]), or a call's reply
-/// ([`read_value`]): a reply reads as [`Reading::Plain`] on the bare wire,
-/// [`Reading::Enveloped`] in the value form, or [`Reading::Refused`].
+/// What a put's payload reads as ([`read_put`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reading<'a> {
     /// The sample carries no envelope ([`carries`]): its payload is read as
@@ -1244,9 +1244,9 @@ mod tests {
     }
 
     /// A call's reply by its `Encoding` (observer §7.3, "A call's forms
-    /// first"; core §5.1, "The bare wire"): under `zenoh/bytes` the value
-    /// form, refused by its bytes alone, and under any other the bare
-    /// wire's record, however its bytes would parse.
+    /// first"; core §5.1, "Reading a value"): under `zenoh/bytes` the
+    /// value form, refused by its bytes alone, and under any other no
+    /// form, however its bytes would parse.
     #[test]
     fn a_reply_is_a_value_form_under_zenoh_bytes_alone() {
         let stamp = Stamp {
@@ -1254,9 +1254,7 @@ mod tests {
             seq: Seq::new(7).unwrap(),
         };
         let bytes = Envelope::value(Tag::NONE, stamp, br#"{"up":true}"#).write();
-        let Reading::Enveloped(v) = read_value(ENCODING, &bytes) else {
-            panic!("a value")
-        };
+        let v = read_value(ENCODING, &bytes).expect("a value");
         assert_eq!(
             (v.form, v.stamp, v.record),
             (Form::Value, stamp, &br#"{"up":true}"#[..])
@@ -1264,15 +1262,17 @@ mod tests {
         // `{` is 0x7b, form 3: an error, which a reply does not carry.
         assert_eq!(
             read_value(ENCODING, br#"{"up":true}"#),
-            Reading::Refused(Refusal::WrongSample {
+            Err(FormRefusal::Form(Refusal::WrongSample {
                 form: Form::Error,
                 sample: SampleKind::Reply
-            })
+            }))
         );
-        // The same bytes on another Encoding, a schema suffix included, are
-        // a bare record.
+        // The same bytes on another Encoding, a schema suffix included,
+        // carry no form.
         for other in ["application/json", "zenoh/bytes;x", "zenoh/string"] {
-            assert_eq!(read_value(other, &bytes), Reading::Plain, "{other}");
+            let r = read_value(other, &bytes);
+            assert_eq!(r, Err(FormRefusal::Encoding(other.to_owned())), "{other}");
+            assert_eq!(r.unwrap_err().token(), "encoding");
         }
     }
 }

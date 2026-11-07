@@ -601,47 +601,6 @@ fn descriptor_schema_is_current() {
     }
 }
 
-/// `spec/conformance/errors/`: an envelope and its Zenoh encoding → the
-/// decoded envelope or a refusal tag. These expectations are written by an
-/// independent encoder, so they are checked, never blessed; each accepted
-/// envelope also round-trips through `envelope::encode`.
-#[test]
-fn error_envelopes() {
-    use zenkey_model::envelope::{Detail, decode, encode};
-    let doc = read_json(&spec().join("conformance/errors/cases.json"));
-    for case in doc["cases"].as_array().expect("cases") {
-        let name = case["name"].as_str().unwrap();
-        let enc = case["encoding"].as_str().unwrap();
-        let bytes: Vec<u8> = match (case.get("text"), case.get("hex")) {
-            (Some(t), _) => t.as_str().unwrap().as_bytes().to_vec(),
-            (None, Some(h)) => {
-                let h = h.as_str().unwrap();
-                (0..h.len())
-                    .step_by(2)
-                    .map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap())
-                    .collect()
-            }
-            _ => panic!("{name}: no input"),
-        };
-        let got = match decode(enc, &bytes) {
-            Ok(e) => {
-                let detail = match &e.detail {
-                    None => Value::Null,
-                    Some(Detail::Value(v)) => v.clone(),
-                    Some(Detail::Bytes(b)) => json!({
-                        "bytes_hex": b.iter().map(|x| format!("{x:02x}")).collect::<String>()
-                    }),
-                };
-                let again = encode(&e, enc).map(|b| decode(enc, &b));
-                assert_eq!(again, Some(Ok(e.clone())), "{name}: round trip");
-                json!({"code": e.code, "message": e.message, "cause": e.cause, "detail": detail})
-            }
-            Err(err) => json!({"refused": err.tag()}),
-        };
-        assert_eq!(case["expect"], got, "error envelope {name}");
-    }
-}
-
 /// `spec/conformance/sets/`: a directory of contracts → the codes of the
 /// set checks over all of them (E035, E036). Written by hand, checked.
 #[test]

@@ -9,12 +9,13 @@
 //! it turns what came back into an [`OperationReport`], rendering every
 //! payload through the revision in hand ([`crate::model::render`]).
 //!
-//! **Both wires** (#980's C4b): the runtime reads each reply by its
+//! **The forms** (#985's C4b to C4d): the runtime reads each reply by its
 //! `Encoding`, a value form's record and an error form's fields under
-//! `zenoh/bytes` and the bare wire's under any other (core §5.1, §5.2).
-//! The report carries a form's as-of mark beside its value or error
-//! (observer §7.3, "A call's forms first"), and a transport error with its
-//! `Encoding` and bytes.
+//! `zenoh/bytes` alone (core §5.1, §5.2). A value under any other
+//! `Encoding` is malformed, an answer rendered undecodable, and an error
+//! the transport's. The report carries a form's as-of mark beside its
+//! value or error (observer §7.3, "A call's forms first"), and a transport
+//! error with its `Encoding` and bytes.
 //!
 //! **Silence is attributed through presence** (O5). For one address the
 //! runtime reads it ([`zenkey::Client::attribute`]); for a fan-out or a
@@ -36,7 +37,7 @@ use crate::model::deployment::Epoch;
 use crate::model::render::{Member, render_detail, render_with_in};
 use crate::model::target::{CallPlan, request_epoch_assumed};
 use crate::report::{
-    CallMode, EnvelopeView, MalformedReply, OperationAnswer, OperationReport, PayloadRendering,
+    CallMode, EnvelopeView, OperationAnswer, OperationReport, PayloadRendering,
     PresenceAttribution, ReplierView, RepliesView, SelectionPresence, SilenceView,
 };
 use crate::{Error, Result};
@@ -154,7 +155,7 @@ pub async fn call(session: &Session, c: OperationCall<'_>) -> Result<OperationRe
     })
 }
 
-/// A one-reply call's outcome (O5): four cases, kept apart.
+/// A one-reply call's outcome (O5): three cases, kept apart.
 fn one_reply(
     revision: &Revision,
     r: &Resource,
@@ -168,9 +169,6 @@ fn one_reply(
         },
         zenkey::call::Outcome::Refused(refusal) => OperationAnswer::Refused {
             envelope: envelope_view(revision, r, &refusal, epoch),
-        },
-        zenkey::call::Outcome::Malformed(m) => OperationAnswer::Malformed {
-            malformed: malformed(&m),
         },
         zenkey::call::Outcome::NoAnswer(s) => OperationAnswer::Silent {
             silence: SilenceView {
@@ -214,9 +212,9 @@ fn reply(
     )
 }
 
-/// An owner's error, from either wire: its fields, its detail rendered
-/// through the operation's `error` type (an error form's by CH's tag), and
-/// an error form's as-of mark.
+/// An owner's error in its error form: its fields, its detail rendered
+/// through the operation's `error` type by CH's tag, and the form's as-of
+/// mark.
 fn envelope_view(
     revision: &Revision,
     r: &Resource,
@@ -233,13 +231,6 @@ fn envelope_view(
             .as_ref()
             .map(|d| render_detail(revision, r, d, tag, epoch)),
         mark: refusal.mark().map(Into::into),
-    }
-}
-
-fn malformed(m: &zenkey::call::Malformed) -> MalformedReply {
-    MalformedReply {
-        encoding: m.encoding.clone(),
-        error: m.error.to_string(),
     }
 }
 
@@ -281,7 +272,6 @@ fn replies_view(
             .iter()
             .map(|e| envelope_view(revision, r, e, epoch))
             .collect(),
-        malformed: replies.malformed.iter().map(malformed).collect(),
         transport: replies.transport.iter().map(ToString::to_string).collect(),
         discarded: replies.discarded,
         presence,

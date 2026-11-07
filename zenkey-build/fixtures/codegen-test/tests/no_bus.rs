@@ -152,7 +152,7 @@ async fn handlers_are_driven_without_a_bus() {
         .await
         .expect_err("an optional operation answers unavailable by default");
     assert_eq!(e.code(), "unavailable");
-    assert_eq!(e.envelope().cause.as_deref(), Some("build"));
+    assert_eq!(e.cause(), Some("build"));
     let o = nav_v2::types::Origin {
         latitude_deg: 48.0,
         longitude_deg: 2.0,

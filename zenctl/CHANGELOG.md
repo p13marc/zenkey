@@ -6,6 +6,22 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a call in its forms alone, the bare wire removed (#985 C4d)
+
+Core 0.99 removes the bare wire: a call with no form, its error in a
+JSON, CBOR or protobuf envelope. Every call has been written in the
+forms since core 0.94, and is read in them alone now.
+
+| Before | Now | Notes |
+|---|---|---|
+| `call`: an owner's envelope under `application/json`, `application/cbor` or `application/protobuf;zk2.core.v1.Error`: `"answer": "refused"`, its `envelope` with no `mark`, exit 1 | the transport's: `"answer": "silent"`, `silence.transport` its `Encoding` and bytes (`application/json: {"code":"busy","message":""}`), exit 2, an idempotent operation retried after it (`--retries`) | core §5.2: an owner from before core 0.94 answers so |
+| `call`: a value under an `Encoding` other than `zenoh/bytes` decoded as its type, the bare wire's record | `"answer": "value"`, its `reply` `"as": "undecodable"`, `"reason": "no call form under <Encoding>: only zenoh/bytes carries one (core §5.1)"`, no `mark` | core §5.1: malformed, an answer all the same, exit 0 as before |
+| `call`: `"answer": "malformed"`, `{"malformed": {"encoding", "error"}}`, and a fan-out's `replies.malformed` (an array, always present) | gone: no reply has read so since core 0.95, and the decoder that made one is removed | a script reading `replies.malformed` reads nothing now |
+| `config set\|confirm\|cancel\|extend\|persist`: `"answer": "malformed"` | gone, as for `call` | |
+| `bench call`: `"malformed"` (a count) and the notes' "N malformed envelope(s)" | gone: a reply error that is no error form counts in `transport` | |
+| `bench call`: each request sent bare, under its type's `Encoding` (C4c's entry below said otherwise) | in the request form, `CH · record` under `zenoh/bytes`, as `call` writes it | core §5.1: an owner refuses a bare request now, so a bench sent bare measured refusals |
+| `serve`'s mock owner, and every owner of the reference: a request under another `Encoding` read as a bare request | refused `invalid_request`, before any handler runs, so `serve` logs no such call | core §5.1, "The request" |
+
 ## Unreleased (`main`, zk2) — state read in snapshots (#977 E2)
 
 Core 0.97 §7.5 defines form 7, a collection's snapshot, a GET reply's
@@ -127,7 +143,6 @@ owner answers in a form yet, so nothing that read before reads differently.
 | a `reply_err` under `zenoh/bytes`: the transport's | the error form, an owner's error (exit 1): its code, cause and message, its detail decoded as the `error` type on the contract's `encoding`, and the envelope's `mark`; the table adds `as of run r, seq s` | an error form may carry no message: `message` is then `""`, and the table shows the code alone |
 | a router's `Timeout`: `zenoh/bytes: Timeout` | `zenoh/bytes: Timeout (no error form: sample_kind)`: still the transport's, still silence (exit 2), retried when idempotent | any `zenoh/bytes` reply error the form's parse refuses is the transport's, its refusal named; non-UTF-8 bytes are shown as `0x` and hex |
 | `bench call`: refusals by the envelope's code | by the code of either wire's error; a form the parse refuses counted as the transport's | |
-
 
 ## Unreleased (`main`, zk2) — the far side of a face: its timeout, its transport, declaring again (#988, L4)
 

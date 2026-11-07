@@ -236,7 +236,7 @@ async fn a_thruster_serves_publishes_and_is_consumed_and_called() {
             .iter()
             .any(|m| m.as_ref().and_then(|m| m.request_id.as_deref()) == Some("r-1"))
     );
-    // A handler's refusal is the error envelope (O3).
+    // A handler's refusal is the error form (O3).
     let refused = thruster_v1::Api::arm(&tool, &at, thruster_v1::types::ArmRequest::default())
         .await
         .unwrap();

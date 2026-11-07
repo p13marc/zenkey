@@ -12,14 +12,14 @@
 //!   request as `CH · record` under `zenoh/bytes`, CH's width bit 0 and its
 //!   tag the `request` type's; the record is what the caller hands in,
 //!   already encoded as that type.
-//! - **O3, both wires** (#980's C4b): every reply is read by its `Encoding`
-//!   alone, without the contract. Under `zenoh/bytes` a value is §7.5's
-//!   value form ([`Answer::form`], its as-of mark [`Answer::mark`]) and an
-//!   error its error form; under the three envelope encodings an error is
-//!   the bare wire's envelope, and a value under any other `Encoding` a
-//!   bare record (core §5.1, "The bare wire"). An error reply the form's
-//!   parse refuses, or under any other `Encoding`, is the transport's, and
-//!   silence (§5.2): [`classify`].
+//! - **O3, the forms** (#985's C4b to C4d): every reply is read by its
+//!   `Encoding` alone, without the contract. Under `zenoh/bytes` a value
+//!   is §7.5's value form ([`Answer::form`], its as-of mark
+//!   [`Answer::mark`]) and an error its error form. A value the form's
+//!   parse refuses, or under any other `Encoding`, is malformed and an
+//!   answer all the same; an error reply so is the transport's, and
+//!   silence (§5.1, §5.2): [`classify`]. Core 0.99 removed the bare wire,
+//!   so an earlier core's envelope reads as the transport's.
 //! - **O4:** only an `idempotent` operation is retried, and only after
 //!   silence. A refusal is an answer.
 //! - **O5:** silence is never a verdict. [`Outcome::NoAnswer`] carries what
@@ -40,19 +40,19 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use zenkey_model::authoring::Encoding as WireEncoding;
 use zenkey_model::contract::{Body, Contract, Fanout, Operation, Replies as RepliesKind, Resource};
-use zenkey_model::envelope::{self, ErrorReading};
+use zenkey_model::envelope::{self, ErrorReading, FormRefusal};
 use zenkey_model::forms::Forms;
 use zenkey_model::grammar::{Addr, IfaceId, Key, KindToken, ZkKey, data_key};
 use zenkey_model::slug::chunk_slug;
 use zenkey_model::template::{Bindings, Segment};
-use zenkey_model::wire::{self, Reading, Stamp, Tag};
+use zenkey_model::wire::{self, Stamp, Tag};
 use zenoh::bytes::{Encoding, ZBytes};
 use zenoh::key_expr::OwnedKeyExpr;
 use zenoh::query::{ConsolidationMode, QueryTarget, Reply, ReplyError};
 use zenoh::sample::Sample;
 
 use crate::call::Replier as ReplierOf;
-pub use crate::call::{Attribution, ErrorMark, Malformed, Refusal, Silence, Transport};
+pub use crate::call::{Attribution, ErrorMark, Refusal, Silence, Transport};
 use crate::consumer::{Presence, Provider};
 use crate::error::{Error, Result, zenoh};
 use crate::operation::{CallMetadata, SUMMARY, decode_value, find_resource, operation, values_of};
@@ -66,17 +66,18 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 /// observer §7.3, "A call's forms first").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplyForm {
-    /// The bare wire (core §5.1): a reply under an `Encoding` other than
-    /// `zenoh/bytes`, its payload the record, read on that `Encoding`.
-    Bare,
     /// §7.5's value form: CH's tag (the `response` type's, or the `summary`
     /// type's on a summary reply) and the replying instance's as-of mark,
     /// its record after them.
     Value { tag: Tag, stamp: Stamp },
-    /// Under `zenoh/bytes`, bytes the form's parse refuses: undecodable,
-    /// never read as a bare record, and an answer all the same, since it
-    /// came on the call's key (§5.1, "Retries").
+    /// Under `zenoh/bytes`, bytes the form's parse refuses: malformed,
+    /// undecodable, never read as a record with no form, and an answer all
+    /// the same, since it came on the call's key (§5.1, "Retries").
     Refused(wire::Refusal),
+    /// Under an `Encoding` other than `zenoh/bytes`, which carries no form
+    /// (§5.1, "Reading a value"): malformed and undecodable as a refused
+    /// one is, whatever its bytes, and an answer all the same.
+    NoForm,
 }
 
 /// A value reply, attributed to the service whose key carried it (O3).
@@ -97,12 +98,12 @@ impl Answer {
     pub fn new(replier: Addr, sample: Sample, contract: Option<WireEncoding>) -> Self {
         let form =
             match wire::read_value(&sample.encoding().to_string(), &sample.payload().to_bytes()) {
-                Reading::Enveloped(e) => ReplyForm::Value {
+                Ok(e) => ReplyForm::Value {
                     tag: e.tag,
                     stamp: e.stamp,
                 },
-                Reading::Refused(r) => ReplyForm::Refused(r),
-                _ => ReplyForm::Bare,
+                Err(FormRefusal::Form(r)) => ReplyForm::Refused(r),
+                Err(FormRefusal::Encoding(_)) => ReplyForm::NoForm,
             };
         Self {
             replier,
@@ -125,8 +126,8 @@ impl Answer {
         self.sample.payload()
     }
 
-    /// How the reply came: on the bare wire, in the value form, or in bytes
-    /// the form's parse refuses.
+    /// How the reply came: in the value form, in bytes the form's parse
+    /// refuses, or under another `Encoding`.
     #[must_use]
     pub fn form(&self) -> ReplyForm {
         self.form
@@ -153,78 +154,52 @@ impl Answer {
         }
     }
 
-    /// The record its type reads: a value form's, after CH and the mark, or
-    /// a bare reply's payload. A value form refused has none: why is the
-    /// refusal.
-    pub fn record(&self) -> std::result::Result<Vec<u8>, wire::Refusal> {
+    /// The record its type reads: a value form's, after CH and the mark,
+    /// read on the contract's `encoding` (observer §7.3: `zenoh/bytes`
+    /// picks no wire). A malformed reply has none: why is the refusal, its
+    /// parse's or its `Encoding`'s.
+    pub fn record(&self) -> std::result::Result<Vec<u8>, FormRefusal> {
         let bytes = self.sample.payload().to_bytes();
         match self.form {
-            ReplyForm::Bare => Ok(bytes.into_owned()),
             ReplyForm::Value { stamp, .. } => Ok(bytes[stamp.envelope_bytes()..].to_vec()),
-            ReplyForm::Refused(r) => Err(r),
+            ReplyForm::Refused(r) => Err(FormRefusal::Form(r)),
+            ReplyForm::NoForm => Err(FormRefusal::Encoding(self.sample.encoding().to_string())),
         }
     }
 
-    /// The `Encoding` [`Answer::record`] is read on: a bare reply's own;
-    /// `None` for a form's, whose type is read on the contract's `encoding`
-    /// (observer §7.3: `zenoh/bytes` picks no wire).
-    #[must_use]
-    pub fn record_encoding(&self) -> Option<String> {
-        match self.form {
-            ReplyForm::Bare => Some(self.sample.encoding().to_string()),
-            _ => None,
-        }
-    }
-
-    /// The record, decoded as a JSON Schema value: on a bare reply's
-    /// `Encoding` when it says JSON or CBOR, else the operation's
-    /// `encoding` (§7.2). A value form refused does not decode.
+    /// The record, decoded as a JSON Schema value on the operation's
+    /// `encoding` (§7.2). A malformed reply does not decode.
     pub fn value<T: DeserializeOwned>(&self) -> Result<T> {
         let record = self
             .record()
             .map_err(|r| Error::Contract(format!("the reply is no value form: {}", r.reason())))?;
-        let encoding = match self.form {
-            ReplyForm::Bare => Some(self.sample.encoding()),
-            _ => None,
-        };
-        decode_value(&record, encoding, self.wire).map_err(Error::Contract)
+        decode_value(&record, self.wire).map_err(Error::Contract)
     }
 }
 
 /// What an error reply is (§5.2), by its `Encoding` alone: an owner's
-/// error from either wire, or the transport's own error.
+/// error in its form, or the transport's own error.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ErrorReply {
-    /// The error form under `zenoh/bytes`, or the bare wire's envelope.
+    /// The error form under `zenoh/bytes`.
     Refused(Refusal),
-    /// No reply is classified so since core 0.95: a bare wire's envelope
-    /// its decoding refuses is the transport's (zk2py round 101's F-473).
-    /// C4d removes it with the bare wire.
-    Malformed(Malformed),
     /// A querier's or a router's own `Timeout`, a `zenoh/bytes` error the
-    /// form's parse refuses, one under an `Encoding` that carries none, or
-    /// the bare wire's envelope its decoding refuses: a malformed error.
+    /// form's parse refuses, or one under an `Encoding` that carries none,
+    /// an earlier core's envelope among them: a malformed error.
     Transport(Transport),
 }
 
 /// Classifies an error reply by its `Encoding` alone (core §5.2, "Reading
-/// an error", with the bare wire beside it, §5.1):
-/// [`zenkey_model::envelope::read_error`]'s reading, kept. A malformed
-/// error is the transport's, on either wire (§5.2, "Transport errors"):
-/// an error form the parse refuses, and an envelope its decoding refuses,
-/// which a caller reads as silence and retries after (core 0.95, F-473).
+/// an error"): [`zenkey_model::envelope::read_error`]'s reading, kept. A
+/// malformed error is the transport's (§5.2, "Transport errors"): an error
+/// form the parse refuses, and a reply error under another `Encoding`,
+/// which a caller reads as silence and retries after.
 #[must_use]
 pub fn classify(e: &ReplyError) -> ErrorReply {
     let encoding = e.encoding().to_string();
     let bytes = e.payload().to_bytes();
     match envelope::read_error(&encoding, &bytes) {
         ErrorReading::Form(f) => ErrorReply::Refused(Refusal::of_form(&f)),
-        ErrorReading::Envelope(Ok(env)) => ErrorReply::Refused(Refusal::of_envelope(env)),
-        ErrorReading::Envelope(Err(_)) => ErrorReply::Transport(Transport {
-            payload: bytes.into_owned(),
-            encoding,
-            refusal: None,
-        }),
         ErrorReading::Transport(refusal) => ErrorReply::Transport(Transport {
             payload: bytes.into_owned(),
             encoding,
@@ -249,11 +224,8 @@ pub enum ReplyKind {
     Value,
     /// A summary (O6).
     Summary,
-    /// An owner's error, from either wire: a refusal, which carries no
-    /// key (O3).
+    /// An owner's error in its form: a refusal, which carries no key (O3).
     Refusal,
-    /// An envelope encoding whose bytes are no envelope.
-    Malformed,
     /// The transport's own error reply, such as a timeout.
     Transport,
     /// A value on a key that is not concrete (R6), or not a member of the
@@ -282,9 +254,9 @@ impl crate::call::Replies<Answer, Answer> {
     }
 
     /// Files one reply to a call of `r`, an operation of `iface`: a value
-    /// or summary under the replier its key names (O3, O6), in either wire,
-    /// an owner's error as a refusal, anything else apart. Returns what it
-    /// was.
+    /// or summary under the replier its key names (O3, O6), malformed or
+    /// not, an owner's error as a refusal, anything else apart. Returns
+    /// what it was.
     pub fn push(&mut self, reply: Reply, iface: &IfaceId, r: &Resource) -> ReplyKind {
         let wire = match &r.body {
             Body::Operation(op) => op.encoding,
@@ -329,10 +301,6 @@ impl crate::call::Replies<Answer, Answer> {
                 ErrorReply::Refused(refusal) => {
                     self.refusals.push(refusal);
                     ReplyKind::Refusal
-                }
-                ErrorReply::Malformed(m) => {
-                    self.malformed.push(m);
-                    ReplyKind::Malformed
                 }
                 ErrorReply::Transport(t) => {
                     self.transport.push(t);
@@ -598,7 +566,7 @@ impl Client {
     /// Calls a one-reply operation at `addr` (O1): `request` is already
     /// encoded as the request type, its record, which the call writes in
     /// the request form (core §5.1). Returns on the first value or owner's
-    /// error, from either wire; after silence, the transport's own error
+    /// error; after silence, the transport's own error
     /// replies included, an idempotent operation is retried (O4) and the
     /// silence is attributed through presence (O5).
     pub async fn call(
@@ -643,7 +611,6 @@ impl Client {
                     Ok(_) => {}
                     Err(e) => match classify(&e) {
                         ErrorReply::Refused(refusal) => return Ok(Outcome::Refused(refusal)),
-                        ErrorReply::Malformed(m) => return Ok(Outcome::Malformed(m)),
                         ErrorReply::Transport(t) => transport = Some(t),
                     },
                 }
@@ -962,8 +929,8 @@ impl Fleet {
     }
 
     /// [`Fleet::call`], with when each reply arrived (#698): a bench's
-    /// per-reply latency, attributed by key (O3), with refusals, malformed
-    /// and transport replies timed apart. The replies are drained as they
+    /// per-reply latency, attributed by key (O3), with refusals and
+    /// transport replies timed apart. The replies are drained as they
     /// arrive, query by query.
     pub async fn call_timed(
         &self,

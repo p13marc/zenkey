@@ -3,8 +3,9 @@
 //! wrong number" is not an abstract rule.
 //!
 //! The populations stay apart in every medium: the latency rows are value
-//! replies by the key they went on (O3); refusals, malformed envelopes, the
-//! transport's errors, silent calls, R6's discards and panicked calls are
+//! replies by the key they went on (O3); refusals, the transport's errors
+//! (an earlier core's envelope among them), silent calls, R6's discards and
+//! panicked calls are
 //! counted beside them and never averaged in (the tooling guide's O6), and
 //! each token holder is tallied against the calls it sent no value in.
 
@@ -120,7 +121,6 @@ impl Render for BenchReport {
         }
         let apart = [
             ("refusal(s)", self.refusals.count),
-            ("malformed envelope(s)", self.malformed),
             ("transport error(s)", self.transport),
             ("silent call(s)", self.silent),
             ("discarded value(s) (R6)", self.discarded),

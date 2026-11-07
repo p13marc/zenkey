@@ -1375,8 +1375,8 @@ pub fn attribution_sentence(a: PresenceAttribution) -> &'static str {
     }
 }
 
-/// One line for the send log: what a call got back, in O5's four words —
-/// a value, a refusal, a malformed envelope, silence — or a fan-out's tally.
+/// One line for the send log: what a call got back, in O5's three words —
+/// a value, a refusal, silence — or a fan-out's tally.
 pub fn call_summary(report: &OperationReport) -> String {
     let head = format!(
         "called {} {} at {}",
@@ -1395,9 +1395,6 @@ pub fn call_summary(report: &OperationReport) -> String {
                 .map(|c| format!(" ({c})"))
                 .unwrap_or_default()
         ),
-        OperationAnswer::Malformed { malformed } => {
-            format!("{head} → a malformed envelope ({})", malformed.encoding)
-        }
         OperationAnswer::Silent { .. } => format!(
             "{head} → silent within {}s — a non-verdict",
             report.timeout_s
@@ -1497,7 +1494,7 @@ fn mark_words(m: &InbandStamp) -> String {
 
 fn replies_view<'a>(r: &RepliesView, timeout_s: f64, sp: Spacing) -> Element<'a, Message> {
     let mut col = Column::new().spacing(sp.sm);
-    if r.repliers.is_empty() && r.refusals.is_empty() && r.malformed.is_empty() {
+    if r.repliers.is_empty() && r.refusals.is_empty() {
         col = col.push(kit::empty(
             kit::EmptyKind::Silent,
             "No replies",
@@ -1544,12 +1541,6 @@ fn replies_view<'a>(r: &RepliesView, timeout_s: f64, sp: Spacing) -> Element<'a,
             "refusals are unattributed: an error reply carries no key (spec §5.1)",
         ));
     }
-    for m in &r.malformed {
-        col = col.push(kit::status_chip(
-            Tone::Caution,
-            format!("malformed envelope ({}): {}", m.encoding, m.error),
-        ));
-    }
     if r.discarded > 0 {
         col = col.push(kit::muted(format!(
             "{} discarded: on a key not concrete, or not this operation's (R6)",
@@ -1574,8 +1565,8 @@ fn replies_view<'a>(r: &RepliesView, timeout_s: f64, sp: Spacing) -> Element<'a,
     col.into()
 }
 
-/// The call's answer — a value, an envelope, a malformed envelope, silence,
-/// or a fan-out's replies — each its own rendering (O5).
+/// The call's answer — a value, an envelope, silence, or a fan-out's
+/// replies — each its own rendering (O5).
 fn outcome_view<'a>(
     outcome: &'a Result<OperationReport, crate::services::ServiceError>,
     sp: Spacing,
@@ -1608,13 +1599,6 @@ fn outcome_view<'a>(
             }
         }
         OperationAnswer::Refused { envelope } => envelope_card(envelope, sp),
-        OperationAnswer::Malformed { malformed } => kit::card(
-            column![
-                kit::status_chip(Tone::Caution, "malformed envelope — a broken server"),
-                kit::muted(format!("{}: {}", malformed.encoding, malformed.error)),
-            ]
-            .spacing(sp.xs),
-        ),
         // Silence is not an error (O5): no failure chip, no danger edge —
         // a non-verdict, with what presence said of the service.
         OperationAnswer::Silent { silence } => kit::empty(

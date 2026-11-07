@@ -74,7 +74,7 @@ use zenkey_model::config::{self as model, Act, DeviceResult, Restore, Source, Ti
 use zenkey_model::descriptor::Cause;
 use zenkey_model::grammar::IfaceId;
 use zenkey_model::template::Bindings;
-use zenkey_model::wire::{Request, Run, Seq, Stamp, Tag};
+use zenkey_model::wire::{Run, Seq, Stamp};
 
 pub use crate::config_v1::{Device, UndoFailed, Values};
 pub use zenkey_model::config::v2::{Interface, State};
@@ -405,10 +405,8 @@ struct Inner {
     /// config.v1's schema of the groups, the allowlist's `writable` set:
     /// what the device's words are redacted by.
     schema: Schema,
-    /// Each settable group's `Set<T>` tag, and `Control`'s: a request on
-    /// the bare wire is given CH again (core §5.1, "The bare wire").
-    set_tags: BTreeMap<String, Tag>,
-    control_tag: Tag,
+    /// Each settable group, served at `set/<group>`.
+    settable: Vec<String>,
     device: Arc<dyn Device>,
     minter: Arc<Minter>,
     core: tokio::sync::Mutex<Core>,
@@ -425,11 +423,6 @@ struct Inner {
     /// The service's close: a document fed through `desired.v1` stops
     /// waiting at it.
     closed: tokio::sync::watch::Receiver<bool>,
-}
-
-/// A layout's tag, for CH.
-fn tag_of(layout: &zenkey_model::packed::Layout) -> Tag {
-    Tag::new(layout.tag()).expect("a layout's tag is four bits")
 }
 
 impl Configuration {
@@ -514,13 +507,12 @@ impl Configuration {
                  Appendix B)"
             )));
         }
-        let set_tags: BTreeMap<String, Tag> = interface
+        let settable: Vec<String> = interface
             .groups
             .iter()
-            .filter(|g| g.settable())
-            .filter_map(|g| Some((g.name.clone(), tag_of(interface.derived.set(&g.name)?.1))))
+            .filter(|g| g.settable() && interface.derived.set(&g.name).is_some())
+            .map(|g| g.name.clone())
             .collect();
-        let control_tag = tag_of(interface.derived.control());
         let none = Bindings::new();
         let record = b.declare_state_writer(&iface, RECORD, &none).await?;
         let change = b.event_writer(&iface, CHANGE, &none)?;
@@ -559,8 +551,7 @@ impl Configuration {
             fed: AtomicBool::new(false),
             interface,
             schema,
-            set_tags,
-            control_tag,
+            settable,
             device,
             minter,
             core: tokio::sync::Mutex::new(Core {
@@ -585,7 +576,7 @@ impl Configuration {
         inner.flush().await;
 
         let mut servers: Vec<OperationServer> = Vec::new();
-        for group in inner.set_tags.keys() {
+        for group in &inner.settable {
             let i = Arc::clone(&inner);
             let g = group.clone();
             servers.push(
@@ -1063,19 +1054,17 @@ impl Inner {
     }
 
     /// A call's request as the model reads it, CH and the record: the
-    /// query's payload in the request form, or a bare request's record
-    /// under the type's tag (core §5.1, "The bare wire").
-    fn payload(call: &Call, tag: Tag) -> Vec<u8> {
-        match (call.request_tag(), call.payload()) {
-            (Some(_), Some(p)) => p.to_bytes().into_owned(),
-            _ => Request::new(tag, call.record()).write(),
-        }
+    /// query's payload, in the request form, since the runtime refused any
+    /// other before the handler ran (core §5.1, "The request").
+    fn payload(call: &Call) -> Vec<u8> {
+        call.payload()
+            .map(|p| p.to_bytes().into_owned())
+            .unwrap_or_default()
     }
 
     /// `@op/set/<group>` (§2.5).
     async fn on_set(&self, group: &str, call: Call) -> std::result::Result<(), OpError> {
-        let tag = self.set_tags.get(group).copied().unwrap_or(Tag::NONE);
-        let payload = Self::payload(&call, tag);
+        let payload = Self::payload(&call);
         let who = crate::config_v1::claimed(&call);
         let logged = match self.interface.decode_set(group, &payload) {
             Some(Ok((_, fields))) => self.interface.log_set(group, &fields).to_string(),
@@ -1106,7 +1095,7 @@ impl Inner {
         op: model::ControlOp,
         call: Call,
     ) -> std::result::Result<(), OpError> {
-        let payload = Self::payload(&call, self.control_tag);
+        let payload = Self::payload(&call);
         let who = crate::config_v1::claimed(&call);
         tracing::info!(
             service = %self.service, instance = self.instance(),
@@ -1143,7 +1132,7 @@ impl Inner {
                 format!("the persisted layer cannot be written now: {why} (config.v2 §2.13)"),
             ));
         }
-        let payload = Self::payload(&call, self.control_tag);
+        let payload = Self::payload(&call);
         tracing::info!(
             service = %self.service, instance = self.instance(),
             token = self.interface.decode_control(&payload).map(|c| c.token).unwrap_or_default(),

@@ -1181,12 +1181,6 @@ fn landed<'a>(r: &'a ConfigActReport, act: &Act, sp: Spacing) -> Element<'a, Mes
             }
             c.into()
         }
-        ConfigActAnswer::Malformed { malformed } => column![
-            kit::status_chip(Tone::Caution, "malformed envelope — a broken owner"),
-            kit::muted(format!("{}: {}", malformed.encoding, malformed.error)),
-        ]
-        .spacing(sp.xs)
-        .into(),
         ConfigActAnswer::Undecodable { reason, size } => column![
             kit::status_chip(Tone::Caution, "not the operation's reply type"),
             kit::muted(format!("{} — {reason}", kit::plural(*size, "byte"))),

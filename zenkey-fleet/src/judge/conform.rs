@@ -2936,14 +2936,6 @@ fn config_refusal_case(p: &ConfigProbe, present: bool, granted: bool) -> Conform
                  against a revision no owner holds, so it changed nothing)"
             ),
         ),
-        ConfigActAnswer::Malformed { malformed } => ConformCase::failed(
-            C,
-            s,
-            format!(
-                "a reply_err claims {} and is no envelope: {} (core §5.2)",
-                malformed.encoding, malformed.error
-            ),
-        ),
         ConfigActAnswer::Undecodable { reason, .. } => ConformCase::failed(
             C,
             s,
@@ -3097,14 +3089,6 @@ fn config_dry_run_case(p: &ConfigProbe, present: bool, granted: bool) -> Conform
             s,
             "answered a control operation's reply: a set answers applied or pending (config.v1 \
              §3)",
-        ),
-        ConfigActAnswer::Malformed { malformed } => ConformCase::failed(
-            C,
-            s,
-            format!(
-                "a reply_err claims {} and is no envelope: {} (core §5.2)",
-                malformed.encoding, malformed.error
-            ),
         ),
         ConfigActAnswer::Undecodable { reason, .. } => ConformCase::failed(
             C,
@@ -3933,29 +3917,11 @@ fn operation(
                     .unwrap_or_default()
             ),
         ),
-        OperationAnswer::Malformed { malformed } => ConformCase::failed(
-            C,
-            name,
-            format!(
-                "a reply_err claims {} and is no envelope: {} (§5.2)",
-                malformed.encoding, malformed.error
-            ),
-        ),
         OperationAnswer::Silent { silence } => silent(matches!(
             silence.presence,
             PresenceAttribution::Present | PresenceAttribution::InstanceOnly
         )),
         OperationAnswer::Replies { replies } => {
-            if let Some(m) = replies.malformed.first() {
-                return ConformCase::failed(
-                    C,
-                    name,
-                    format!(
-                        "a reply_err claims {} and is no envelope: {} (§5.2)",
-                        m.encoding, m.error
-                    ),
-                );
-            }
             if let Some(p) = replies
                 .repliers
                 .iter()
@@ -4036,9 +4002,6 @@ fn fanout_refused_as(
                 seen.selector, seen.values
             ),
         );
-    }
-    if let Some(m) = seen.malformed.first() {
-        return ConformCase::failed(c, name, format!("a refusal is no envelope: {m} (§5.2)"));
     }
     let other: Vec<&String> = seen
         .codes
@@ -4351,14 +4314,21 @@ mod tests {
         }
     }
 
+    /// A value reply in the value form (core §5.1), `body` its record.
     fn value(op: &str, body: &[u8]) -> OperationReport {
+        use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
         let rev = revision();
         let key = format!("zk2/lab/m/m.v1/{op}");
+        let stamp = Stamp {
+            run: Run::U16(1),
+            seq: Seq::new(0).expect("a seq"),
+        };
+        let form = Envelope::value(Tag::NONE, stamp, body).write();
         report(
             op,
             OperationAnswer::Value {
-                reply: render_with(&rev, &key, Member::Response, Some("application/json"), body),
-                mark: None,
+                reply: render_with(&rev, &key, Member::Response, Some("zenoh/bytes"), &form),
+                mark: Some(stamp.into()),
             },
         )
     }
@@ -4373,7 +4343,15 @@ mod tests {
     fn summary_replies(summaries: usize) -> OperationReport {
         let rev = revision();
         let key = "zk2/lab/m/m.v1/@op/list";
-        let r = |m| render_with(&rev, key, m, Some("application/json"), br#"{"ok":true}"#);
+        let form = {
+            use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
+            let stamp = Stamp {
+                run: Run::U16(1),
+                seq: Seq::new(0).expect("a seq"),
+            };
+            Envelope::value(Tag::NONE, stamp, br#"{"ok":true}"#).write()
+        };
+        let r = |m| render_with(&rev, key, m, Some("zenoh/bytes"), &form);
         report(
             "@op/list",
             OperationAnswer::Replies {
@@ -4389,7 +4367,6 @@ mod tests {
                         possibly_partial: Some(summaries != 1),
                     }],
                     refusals: vec![],
-                    malformed: vec![],
                     transport: vec![],
                     discarded: 0,
                     presence: SelectionPresence {

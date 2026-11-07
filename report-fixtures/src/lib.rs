@@ -1727,9 +1727,9 @@ pub fn field_report() -> FieldReport {
 /// A zk2 fan-out benched (#612, FJ8a): latency per replier key, and every
 /// non-answer counted apart from it, each count non-zero so none can hide
 /// in another — averaging a non-answer into a latency figure is how a
-/// benchmark lies. Refusals, malformed envelopes, the transport's errors,
-/// silent calls, R6's discards and a call that panicked inside the tool
-/// (#329) are seven populations; a holder that sent no value in every call
+/// benchmark lies. Refusals, the transport's errors, silent calls, R6's
+/// discards and a call that panicked inside the tool (#329) are six
+/// populations; a holder that sent no value in every call
 /// is the attribution silence gets.
 pub fn bench_report() -> BenchReport {
     let latency = |min_ms, p50_ms, p95_ms, p99_ms, max_ms| Latency {
@@ -1773,7 +1773,6 @@ pub fn bench_report() -> BenchReport {
             codes: [("busy".to_owned(), 2)].into(),
             latency: Some(latency(0.4, 0.5, 0.6, 0.6, 0.6)),
         },
-        malformed: 1,
         transport: 3,
         silent: 1,
         discarded: 4,

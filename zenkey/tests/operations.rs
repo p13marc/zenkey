@@ -558,7 +558,7 @@ async fn s2_fan_out() {
         ["busy"],
         "a refusal, unattributed: it carries no key"
     );
-    assert!(replies.malformed.is_empty() && replies.discarded == 0);
+    assert!(replies.discarded == 0);
     // Who sent no value is read from presence: refused or silent, alike.
     let answered: BTreeSet<Addr> = replies.repliers.iter().map(|r| r.addr.clone()).collect();
     let present = fleet.present(T).await.unwrap();
@@ -1577,25 +1577,26 @@ async fn a_fan_out_is_timed_reply_by_reply_and_a_tool_can_file_its_own() {
         mine.push(reply, &contract.iface, &r);
     }
     assert_eq!(mine.repliers.len(), 2);
-    assert!(mine.refusals.is_empty() && mine.malformed.is_empty());
+    assert!(mine.refusals.is_empty());
 }
 
-/// #980's C4b: a caller reads both wires by each reply's `Encoding` alone
-/// (core §5.1, "The bare wire"; §5.2, "Reading an error" and "Transport
+/// #985's C4b to C4d: a caller reads each reply by its `Encoding` alone
+/// (core §5.1, "Reading a value"; §5.2, "Reading an error" and "Transport
 /// errors"), against `common::forms_owner`, an owner answering in §7.5's
-/// forms as C4c's will. A value form's record decodes, typed or not, with
-/// its as-of mark beside it; an error form is an owner's error, its detail
-/// the `error` type's own JSON and its mark beside it; the bare wire's
-/// envelope is still an owner's error, with no mark; a value under
-/// `zenoh/bytes` that is no form is an answer, undecodable and never
-/// sniffed; a router's `Timeout`, an error form the parse refuses and an
-/// error form's bytes under another `Encoding` are the transport's,
-/// silence an idempotent call is retried after (O4); and a many-reply call
-/// keeps each form's mark.
+/// forms. A value form's record decodes, typed or not, with its as-of mark
+/// beside it; an error form is an owner's error, its detail the `error`
+/// type's own JSON and its mark beside it; a value under `zenoh/bytes`
+/// that is no form, and one under another `Encoding`, are answers,
+/// malformed, undecodable and never sniffed; a router's `Timeout`, an
+/// error form the parse refuses, an error form's bytes under another
+/// `Encoding` and an earlier core's envelope are the transport's, silence
+/// an idempotent call is retried after (O4); and a many-reply call keeps
+/// each form's mark.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_caller_reads_the_forms_and_the_bare_wire_alike() {
-    use common::forms_owner::{self, BUSY, BUSY_WITH_CAUSE, mark};
+async fn a_caller_reads_the_forms_alone() {
+    use common::forms_owner::{self, BUSY, BUSY_WITH_CAUSE, ENVELOPE, mark};
     use zenkey::client::ReplyForm;
+    use zenkey::model::envelope::FormRefusal;
     use zenkey::model::wire::{Form, Refusal, SampleKind, Tag};
 
     let (_r, ep) = router(None).await;
@@ -1666,11 +1667,20 @@ async fn a_caller_reads_the_forms_and_the_bare_wire_alike() {
         Some(Ok(json!({"kind": "kernel"})))
     );
 
-    // The bare wire's envelope: an owner's error still, with no mark.
+    // An earlier core's envelope: the transport's, never `busy`. `set` is
+    // not idempotent, so it is called once.
     let out = set("eth1").await;
-    let r = out.refusal().expect("the bare wire's busy");
-    assert_eq!((r.code.as_str(), r.message.as_str()), ("busy", ""));
-    assert_eq!((r.form, r.mark()), (None, None));
+    let s = out.silence().expect("the transport's, never busy");
+    assert_eq!(s.attempts, 1);
+    let t = s.transport.as_ref().expect("its error");
+    assert_eq!(
+        (t.encoding.as_str(), t.payload.as_slice(), t.refusal),
+        ("application/json", ENVELOPE, None)
+    );
+    assert_eq!(
+        t.to_string(),
+        r#"application/json: {"code":"busy","message":""}"#
+    );
 
     // A value under `zenoh/bytes` that is no form: an answer, never sniffed.
     let out = set("eth2").await;
@@ -1682,10 +1692,13 @@ async fn a_caller_reads_the_forms_and_the_bare_wire_alike() {
         sample: SampleKind::Reply,
     };
     assert_eq!(a.form(), ReplyForm::Refused(refusal));
-    assert_eq!((a.mark(), a.record()), (None, Err(refusal)));
+    assert_eq!(
+        (a.mark(), a.record()),
+        (None, Err(FormRefusal::Form(refusal)))
+    );
     assert!(
         a.value::<SetResponse>().is_err(),
-        "never read as a bare record"
+        "never read as a record with no form"
     );
     let typed = zenkey::typed::call::<Json<SetRequest>, Json<SetResponse>>(
         &c,
@@ -1697,6 +1710,36 @@ async fn a_caller_reads_the_forms_and_the_bare_wire_alike() {
     .await;
     assert!(
         matches!(&typed, Err(zenkey::Error::Payload(e)) if e.contains("sample_kind")),
+        "{typed:?}"
+    );
+
+    // A value under another `Encoding`: no form, whatever its bytes. An
+    // answer all the same, never read as the record it would parse as.
+    let out = set("eth4").await;
+    let Outcome::Value(a) = &out else {
+        panic!("an answer all the same: {out:?}")
+    };
+    assert_eq!(a.form(), ReplyForm::NoForm);
+    let r = a.record().expect_err("no record");
+    assert_eq!(
+        (a.mark(), &r, r.token()),
+        (
+            None,
+            &FormRefusal::Encoding("application/json".to_owned()),
+            "encoding"
+        )
+    );
+    assert!(a.value::<SetResponse>().is_err(), "never read as JSON");
+    let typed = zenkey::typed::call::<Json<SetRequest>, Json<SetResponse>>(
+        &c,
+        &f1,
+        SET,
+        &member("eth4"),
+        SetRequest { up: true },
+    )
+    .await;
+    assert!(
+        matches!(&typed, Err(zenkey::Error::Payload(e)) if e.contains("no call form under application/json")),
         "{typed:?}"
     );
 
@@ -1839,10 +1882,13 @@ enum PingAnswer {
     BusyUnderString,
     Busy,
     Frozen,
-    /// The bare wire's JSON envelope with no `message`, which its decoding
-    /// refuses (`decode`): the transport's (core 0.95, F-473).
-    MalformedEnvelope,
+    /// An earlier core's JSON envelope under `application/json` (§9 step
+    /// 7): the transport's (core 0.99).
+    Envelope,
 }
+
+/// The JSON error envelope an earlier core had an owner write (§9 step 7).
+const ENVELOPE: &[u8] = br#"{"code":"busy","message":""}"#;
 
 /// §9: every query arrives under `zenoh/bytes` as `CH · record`, every
 /// value and error in its form under `zenoh/bytes`, each CH holding its
@@ -1851,9 +1897,9 @@ enum PingAnswer {
 /// is the run and the last seq minted, a reply minting none, a new
 /// instance's its own run and seq 0; a reply error that is no error form,
 /// or under another `Encoding`, is the transport's, silence an idempotent
-/// call is retried after; a frozen server is silence; the bare wire's
-/// envelope is read as `busy`, and one its decoding refuses as the
-/// transport's.
+/// call is retried after; a frozen server is silence; an earlier core's
+/// envelope is the transport's, never `busy`; and a request under another
+/// `Encoding` is `invalid_request`, before any handler runs (core 0.99).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s9_a_calls_forms() {
     use zenkey::model::wire::Run;
@@ -2279,8 +2325,8 @@ async fn s9_a_calls_forms() {
                     held.lock().unwrap().push(q);
                     Ok(())
                 }
-                PingAnswer::MalformedEnvelope => q
-                    .reply_err(br#"{"code":"busy"}"#.to_vec())
+                PingAnswer::Envelope => q
+                    .reply_err(ENVELOPE.to_vec())
                     .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
                     .wait(),
             };
@@ -2341,14 +2387,19 @@ async fn s9_a_calls_forms() {
     }
     assert_eq!(pings.load(Ordering::SeqCst) - before, 2);
 
-    // 7. The bare wire: `set` answered with the JSON envelope.
-    let _bare = test
+    // 7. An earlier core's envelope: `set` answered with the JSON error
+    // envelope under `application/json`, then `ping` the same way. Each is
+    // the transport's: `set` is called once, `ping` twice.
+    let sets = Arc::new(AtomicU64::new(0));
+    let s7 = Arc::clone(&sets);
+    let _envelope = test
         .declare_queryable("zk2/h3/tc/tc.v1/@op/interfaces/eth0/set")
         .complete(true)
-        .callback(|q| {
+        .callback(move |q| {
             use zenoh::Wait;
+            s7.fetch_add(1, Ordering::SeqCst);
             let _ = q
-                .reply_err(br#"{"code":"busy","message":""}"#.to_vec())
+                .reply_err(ENVELOPE.to_vec())
                 .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
                 .wait();
         })
@@ -2356,6 +2407,7 @@ async fn s9_a_calls_forms() {
         .unwrap();
     let h3 = Client::new(&tool, tc_contract(), &["h3/tc"])
         .unwrap()
+        .with_timeout(Duration::from_millis(500))
         .with_retries(1);
     let out = h3
         .call_value(
@@ -2366,12 +2418,17 @@ async fn s9_a_calls_forms() {
         )
         .await
         .unwrap();
-    let r = out.refusal().expect("busy, read on the bare wire");
-    assert_eq!((r.code.as_str(), r.form), ("busy", None));
-    // An envelope its decoding refuses is a malformed error, the
-    // transport's (core 0.95, zk2py round 101's F-473): silence, after
-    // which the idempotent `ping` is called again.
-    *mode.lock().unwrap() = PingAnswer::MalformedEnvelope;
+    let silence = out
+        .silence()
+        .unwrap_or_else(|| panic!("an envelope: silence, never busy, not {out:?}"));
+    assert_eq!(silence.attempts, 1, "set is not idempotent: called once");
+    let t = silence.transport.as_ref().expect("the transport's error");
+    assert_eq!(
+        (t.encoding.as_str(), t.payload.as_slice(), t.refusal),
+        ("application/json", ENVELOPE, None)
+    );
+    assert_eq!(sets.load(Ordering::SeqCst), 1);
+    *mode.lock().unwrap() = PingAnswer::Envelope;
     let before = pings.load(Ordering::SeqCst);
     let out = ping
         .call_value(&h2, DIAGNOSTICS, &Bindings::new(), &json!({}))
@@ -2379,10 +2436,37 @@ async fn s9_a_calls_forms() {
         .unwrap();
     let silence = out
         .silence()
-        .unwrap_or_else(|| panic!("a malformed envelope: silence, not {out:?}"));
+        .unwrap_or_else(|| panic!("an envelope: silence, never busy, not {out:?}"));
     assert_eq!(silence.attempts, 2, "called twice");
     let t = silence.transport.as_ref().expect("the transport's error");
-    assert_eq!((t.encoding.as_str(), t.refusal), ("application/json", None));
+    assert_eq!(
+        (t.encoding.as_str(), t.payload.as_slice(), t.refusal),
+        ("application/json", ENVELOPE, None)
+    );
     assert_eq!(pings.load(Ordering::SeqCst) - before, 2);
+
+    // 8. A request under another `Encoding`: step 1's request form, `0x40`
+    // then the record, sent to h1/tc's `set` under `application/json`.
+    let before = log.lock().unwrap().len();
+    let mut form = vec![0x40];
+    form.extend_from_slice(br#"{"up":true}"#);
+    let replies: Vec<Reply> = {
+        let rx = test
+            .get("zk2/h1/tc/tc.v1/@op/interfaces/eth0/set")
+            .payload(form)
+            .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
+            .target(QueryTarget::BestMatching)
+            .consolidation(ConsolidationMode::None)
+            .timeout(T)
+            .await
+            .unwrap();
+        let mut out = Vec::new();
+        while let Ok(r) = rx.recv_async().await {
+            out.push(r);
+        }
+        out
+    };
+    assert_eq!(refusal_codes(&replies), ["invalid_request"]);
+    assert_eq!(log.lock().unwrap().len(), before, "no handler ran");
     drop((servers2, frozen));
 }

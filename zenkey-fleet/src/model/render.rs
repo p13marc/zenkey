@@ -24,9 +24,10 @@ use std::str::FromStr;
 
 use zenkey_model::canonical::Fingerprint;
 use zenkey_model::decode::{self, Rendered as Decoded};
+use zenkey_model::envelope::FormRefusal;
 use zenkey_model::grammar::{IfaceId, ZkKey};
 use zenkey_model::template::resolve;
-use zenkey_model::wire::{self, Reading};
+use zenkey_model::wire;
 
 use crate::model::catalog::{Catalog, ContractState, Contracts, Revision};
 use crate::model::deployment::Epoch;
@@ -77,11 +78,9 @@ pub fn render(
     encoding: Option<&str>,
     bytes: &[u8],
 ) -> PayloadRendering {
-    let Read {
-        payload,
-        request_tag,
-    } = read(key, member, encoding, bytes);
-    let fallback = |why| fallback_rendering(key, why, payload, bytes.len());
+    let read = read(key, member, encoding, bytes);
+    let payload = read.payload;
+    let fallback = |why| fallback_rendering(key, why, &read, bytes.len());
     let (addr, iface) = match zenkey_model::grammar::parse(key) {
         Ok(ZkKey::Data { addr, iface, .. }) => (addr, iface),
         Ok(_) => {
@@ -112,7 +111,7 @@ pub fn render(
             key,
             member,
             payload.encoding(encoding),
-            (payload, request_tag),
+            read,
             bytes.len(),
             Epoch::Assumed,
         ),
@@ -157,16 +156,13 @@ pub fn render_with_in(
     bytes: &[u8],
     epoch: Epoch,
 ) -> PayloadRendering {
-    let Read {
-        payload,
-        request_tag,
-    } = read(key, member, encoding, bytes);
+    let read = read(key, member, encoding, bytes);
     render_read(
         revision,
         key,
         member,
-        payload.encoding(encoding),
-        (payload, request_tag),
+        read.payload.encoding(encoding),
+        read,
         bytes.len(),
         epoch,
     )
@@ -191,7 +187,7 @@ pub fn render_record(
         key,
         Member::Type,
         None,
-        (payload, None),
+        Read::of(payload),
         record.len(),
         epoch,
     )
@@ -216,7 +212,7 @@ pub fn render_frame(
         key,
         Member::Type,
         None,
-        (payload, None),
+        Read::of(payload),
         body.len(),
         epoch,
     )
@@ -225,55 +221,93 @@ pub fn render_frame(
 /// A payload of `member` on `key`, its envelope read: a type member's
 /// (core §7.5); a reply's, the `response` or the `summary`, as the value
 /// form under `zenoh/bytes`; and a query's, the `request`, as the request
-/// form under `zenoh/bytes`; either a bare record under any other
-/// `Encoding` (observer §7.3, "A call's forms first"; core §5.1, "The bare
-/// wire"). An attachment carries none.
+/// form under `zenoh/bytes`. Under any other `Encoding` a call's sample
+/// carries no form, and is undecodable whatever its bytes (observer §7.3,
+/// "A call's forms first"; core §5.1, since 0.99 removed the bare wire).
+/// An attachment carries none.
 fn read<'a>(key: &str, member: Member, encoding: Option<&str>, bytes: &'a [u8]) -> Read<'a> {
     let payload = match (member, encoding) {
         (Member::Type, _) => inband::payload(key, encoding, bytes),
         (Member::Request, Some(wire::ENCODING)) => match wire::read_query(bytes) {
             Ok(r) => {
                 return Read {
-                    payload: Payload::Plain(r.record),
                     request_tag: Some(r.tag),
+                    ..Read::of(Payload::Plain(r.record))
                 };
             }
             Err(r) => Payload::Refused(r),
         },
+        (Member::Request, Some(e)) => return Read::no_form(bytes, e),
         (Member::Response | Member::Summary, Some(e)) => match wire::read_value(e, bytes) {
-            Reading::Enveloped(v) => Payload::Record {
+            Ok(v) => Payload::Record {
                 record: v.record,
                 stamp: v.stamp,
                 tag: v.tag,
             },
-            Reading::Refused(r) => Payload::Refused(r),
-            _ => Payload::Plain(bytes),
+            Err(FormRefusal::Form(r)) => Payload::Refused(r),
+            Err(FormRefusal::Encoding(_)) => return Read::no_form(bytes, e),
         },
         _ => Payload::Plain(bytes),
     };
-    Read {
-        payload,
-        request_tag: None,
-    }
+    Read::of(payload)
 }
 
-/// A payload read ([`read`]), and a request form's CH tag: a request
+/// A payload read ([`read`]); a request form's CH tag, since a request
 /// carries no run, so its record is plain bytes beside the tag a packed
-/// `request` type is decoded by (core §5.1, §7.6).
+/// `request` type is decoded by (core §5.1, §7.6); and, for a call's
+/// sample under an `Encoding` other than `zenoh/bytes`, that `Encoding`:
+/// no form, so no record.
 struct Read<'a> {
     payload: Payload<'a>,
     request_tag: Option<wire::Tag>,
+    no_form: Option<String>,
+}
+
+impl<'a> Read<'a> {
+    fn of(payload: Payload<'a>) -> Self {
+        Read {
+            payload,
+            request_tag: None,
+            no_form: None,
+        }
+    }
+
+    /// A call's sample under `encoding`, which carries no form.
+    fn no_form(bytes: &'a [u8], encoding: &str) -> Self {
+        Read {
+            no_form: Some(encoding.to_owned()),
+            ..Read::of(Payload::Plain(bytes))
+        }
+    }
+}
+
+/// Why a call's sample under `encoding` has no reading (core §5.1): only
+/// `zenoh/bytes` carries a call's forms.
+fn no_form_reason(encoding: &str) -> String {
+    FormRefusal::Encoding(encoding.to_owned()).reason()
 }
 
 /// What a payload that resolved no type renders as: the structural ladder
-/// over its bytes (an envelope's record), a refused envelope undecodable.
+/// over its bytes (an envelope's record), a refused envelope undecodable,
+/// and a call's sample with no form undecodable.
 fn fallback_rendering(
     key: &str,
     why: Unresolved,
-    payload: Payload<'_>,
+    read: &Read<'_>,
     size: usize,
 ) -> PayloadRendering {
-    match payload {
+    if let Some(encoding) = &read.no_form {
+        return PayloadRendering {
+            key: key.to_owned(),
+            size,
+            resource: None,
+            rendered: Rendered::Undecodable {
+                declared: inband::ENVELOPE.to_owned(),
+                reason: no_form_reason(encoding),
+            },
+        };
+    }
+    match read.payload {
         Payload::Refused(refusal) => inband::refused_rendering(key, size, None, None, refusal),
         Payload::Heartbeat { body, .. } => inband::heartbeat_rendering(key, why, body.len()),
         Payload::Frame { body, stamp, .. } => {
@@ -301,12 +335,13 @@ fn render_read(
     key: &str,
     member: Member,
     encoding: Option<&str>,
-    (payload, request_tag): (Payload<'_>, Option<wire::Tag>),
+    read: Read<'_>,
     size: usize,
     epoch: Epoch,
 ) -> PayloadRendering {
     let fingerprint = revision.fingerprint().to_string();
-    let fallback = |why| fallback_rendering(key, why, payload, size);
+    let fallback = |why| fallback_rendering(key, why, &read, size);
+    let (payload, request_tag) = (read.payload, read.request_tag);
     let (iface, kind, chunks) = match zenkey_model::grammar::parse(key) {
         Ok(ZkKey::Data {
             iface,
@@ -361,6 +396,19 @@ fn render_read(
         member: member.as_str().to_owned(),
         values,
     };
+    // A call's sample under another `Encoding`: no form, its type declared
+    // and nothing read (core §5.1, observer §7.3).
+    if let Some(encoding) = &read.no_form {
+        return PayloadRendering {
+            key: key.to_owned(),
+            size,
+            resource: Some(resource),
+            rendered: Rendered::Undecodable {
+                declared: decode::declared(ty),
+                reason: no_form_reason(encoding),
+            },
+        };
+    }
     // Core §7.7: a frame resource's put is a frame, read alone here, as a
     // reader's first (observer §7.6); a frame anywhere else, and a
     // mutation on a frame resource, have no reading.
@@ -571,8 +619,20 @@ pub fn render_resource(
     };
     // A request under `zenoh/bytes` is §7.5's request form: its record is
     // read, a packed one by CH's tag (core §5.1, §7.6), and one the parse
-    // refuses is undecodable, never sniffed (observer §7.3).
+    // refuses is undecodable, never sniffed (observer §7.3). Under another
+    // `Encoding` it carries no form, and is undecodable too.
     let (record, tag) = match (member, encoding) {
+        (Member::Request, Some(e)) if e != wire::ENCODING => {
+            return PayloadRendering {
+                key: key.to_owned(),
+                size: bytes.len(),
+                resource: Some(resolved),
+                rendered: Rendered::Undecodable {
+                    declared: decode::declared(ty),
+                    reason: no_form_reason(e),
+                },
+            };
+        }
         (Member::Request, Some(wire::ENCODING)) => match wire::read_query(bytes) {
             Ok(r) => (r.record, Some(r.tag)),
             Err(refusal) => {
@@ -696,15 +756,13 @@ fn rendered(ty: &serde_json::Value, d: Decoded, epoch_assumed: Option<i64>) -> R
 }
 
 /// An `app` error's detail (§5.2), rendered through operation `r`'s
-/// declared `error` type. From an error form (`form` its CH tag): the
-/// type's own bytes, decoded as the type says on `r`'s own `encoding`, a
-/// packed one under that tag and its `time` fields under `epoch` (§8.6), a
-/// raw one shown as its media type. From the bare wire's envelope (`form`
-/// `None`): a JSON or CBOR envelope's value as carried, a protobuf
-/// envelope's bytes decoded as the message, a raw type's base64 text shown
-/// as its media type. An operation that declares no `error` type has no
-/// detail to send, and one that arrives anyway is rendered structurally,
-/// saying so.
+/// declared `error` type: the type's own bytes, decoded as the type says
+/// on `r`'s own `encoding`, a packed one under the error form's CH tag
+/// (`form`) and its `time` fields under `epoch` (§8.6), a raw one shown as
+/// its media type. A refusal made before any wire (`form` `None`, a test's
+/// double) shows a value as its handler gave it. An operation that
+/// declares no `error` type has no detail to send, and one that arrives
+/// anyway is rendered structurally, saying so.
 pub fn render_detail(
     revision: &Revision,
     r: &zenkey_model::contract::Resource,
@@ -720,19 +778,11 @@ pub fn render_detail(
         Member::Error.as_str(),
     );
     match (ty, detail) {
-        (Some(ty), Detail::Bytes(bytes)) if form.is_some() => {
+        (Some(ty), Detail::Bytes(bytes)) => {
             let wire = own_encoding(r, Member::Error, ty);
             let (decoded, assumed) = decode_under(revision.bundle(), ty, wire, bytes, form, epoch);
             rendered(ty, decoded, assumed)
         }
-        (Some(ty), Detail::Bytes(bytes)) => rendered(
-            ty,
-            decode::decode(revision.bundle(), ty, Some("application/protobuf"), bytes),
-            None,
-        ),
-        (Some(ty), Detail::Value(_)) if ty["kind"] == "raw" => Rendered::Opaque {
-            media_type: decode::declared(ty),
-        },
         (Some(ty), Detail::Value(value)) => Rendered::Value {
             declared: decode::declared(ty),
             value: value.clone(),
@@ -895,7 +945,8 @@ mod tests {
     /// A request under `zenoh/bytes` is core §7.5's request form: its
     /// record decoded as the `request` type, on the contract's `encoding`,
     /// and one the parse refuses undecodable, never sniffed (core §5.1,
-    /// observer §7.3); under another `Encoding`, the bare wire's record.
+    /// observer §7.3); under another `Encoding` it carries no form, and is
+    /// undecodable whatever its bytes (core 0.99). So is a reply.
     #[test]
     fn a_request_is_read_in_its_form() {
         let rev = revision(
@@ -915,22 +966,39 @@ mod tests {
             epoch_assumed: None,
         };
         let form = [&[0x40][..], br#"{"up":true}"#].concat();
-        for (encoding, bytes) in [
-            (Some("zenoh/bytes"), form.as_slice()),
-            (Some("application/json"), &br#"{"up":true}"#[..]),
-        ] {
-            let r = render_with(&rev, key, Member::Request, encoding, bytes);
-            assert_eq!(r.rendered, want, "{encoding:?}");
+        let r = render_with(&rev, key, Member::Request, Some("zenoh/bytes"), &form);
+        assert_eq!(r.rendered, want);
+        let r = render_resource(
+            &rev,
+            &rev.contract().resources[0],
+            key,
+            Member::Request,
+            zenkey_model::template::Bindings::new(),
+            Some("zenoh/bytes"),
+            &form,
+        );
+        assert_eq!(r.rendered, want, "the mock's log");
+        // Under another `Encoding`, a form's bytes or a record alone: no
+        // form, the type declared and nothing read.
+        let no_form = Rendered::Undecodable {
+            declared: "json:Status".into(),
+            reason: no_form_reason("application/json"),
+        };
+        for bytes in [form.as_slice(), br#"{"up":true}"#] {
+            for member in [Member::Request, Member::Response] {
+                let r = render_with(&rev, key, member, Some("application/json"), bytes);
+                assert_eq!(r.rendered, no_form, "{member:?}");
+            }
             let r = render_resource(
                 &rev,
                 &rev.contract().resources[0],
                 key,
                 Member::Request,
                 zenkey_model::template::Bindings::new(),
-                encoding,
+                Some("application/json"),
                 bytes,
             );
-            assert_eq!(r.rendered, want, "{encoding:?}: the mock's log");
+            assert_eq!(r.rendered, no_form, "the mock's log");
         }
         // An error's CH on a query: `sample_kind`, never the JSON after it.
         let wrong = [&[0x60][..], br#"{"up":true}"#].concat();

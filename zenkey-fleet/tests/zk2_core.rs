@@ -976,16 +976,17 @@ async fn a_state_read_keeps_its_bytes_and_a_raw_get_reads_a_tombstone() {
     drop(writer);
 }
 
-/// #980's C4b: `call_operation` reads an owner answering in §7.5's forms
-/// and the bare wire alike, by each reply's `Encoding` (core §5.1, §5.2;
-/// observer §7.3, "A call's forms first"): a value form's record rendered
-/// as its type with its as-of mark, an error form's code and message with
-/// its detail rendered as the `error` type and its mark, the bare wire's
-/// envelope with none, a value under `zenoh/bytes` that is no form
-/// undecodable with its refusal named, a router's `Timeout` silence with
-/// its `Encoding` and bytes, and each many-reply form's mark.
+/// #985's C4b to C4d: `call_operation` reads an owner answering in §7.5's
+/// forms by each reply's `Encoding` alone (core §5.1, §5.2; observer
+/// §7.3, "A call's forms first"): a value form's record rendered as its
+/// type with its as-of mark, an error form's code and message with its
+/// detail rendered as the `error` type and its mark, a value that is no
+/// form, under `zenoh/bytes` or another `Encoding`, undecodable with why,
+/// and an earlier core's envelope and a router's `Timeout` silence with
+/// their `Encoding` and bytes, never `busy`; and each many-reply form's
+/// mark.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_call_is_read_from_its_form_or_the_bare_wire() {
+async fn a_call_is_read_from_its_form_alone() {
     use zenkey_fleet::report::{InbandStamp, OperationAnswer, OperationReport};
     use zenkey_fleet::{OperationCall, ResolvedTarget, call_operation, plan_call};
 
@@ -1070,11 +1071,14 @@ async fn a_call_is_read_from_its_form_or_the_bare_wire() {
         })
     );
 
-    // The bare wire's envelope: no mark.
-    let bare = json(&set("eth1").await);
+    // An earlier core's envelope: the transport's, silence, never `busy`.
+    // `set` is not idempotent: one attempt.
+    let envelope = json(&set("eth1").await);
+    assert_eq!(envelope["answer"], "silent", "{envelope}");
+    assert_eq!(envelope["silence"]["attempts"], 1);
     assert_eq!(
-        bare["envelope"],
-        serde_json::json!({"code": "busy", "message": ""})
+        envelope["silence"]["transport"],
+        r#"application/json: {"code":"busy","message":""}"#
     );
 
     // A value under `zenoh/bytes` that is no form: undecodable, never sniffed.
@@ -1085,6 +1089,18 @@ async fn a_call_is_read_from_its_form_or_the_bare_wire() {
     assert!(
         matches!(&reply.rendered, Rendered::Undecodable { reason, .. }
             if reason == "zk2c envelope refused: sample_kind"),
+        "{reply:?}"
+    );
+
+    // A value under another `Encoding`: no form, undecodable, never read as
+    // the JSON it holds.
+    let r = set("eth4").await;
+    let OperationAnswer::Value { reply, mark: None } = &r.answer else {
+        panic!("{r:?}")
+    };
+    assert!(
+        matches!(&reply.rendered, Rendered::Undecodable { declared, reason }
+            if declared == "json:SetResponse" && reason.starts_with("no call form under application/json")),
         "{reply:?}"
     );
 

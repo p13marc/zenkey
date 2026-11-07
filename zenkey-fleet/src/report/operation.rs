@@ -2,10 +2,13 @@
 //! `Client` (one address) or `Fleet` (a fan-out).
 //!
 //! The answer keeps O5's cases apart in every medium: a value, an owner's
-//! error, a malformed envelope and silence are four tags, never one field
-//! read four ways. A value or an error that came in its form carries the
-//! replying instance's as-of mark, `mark` (core §5.1, observer §7.3); one
-//! on the bare wire carries none (#980's C4b). Silence carries what presence said of the service, worded as
+//! error and silence are three tags, never one field read three ways. A
+//! value or an error that came in its form carries the replying instance's
+//! as-of mark, `mark` (core §5.1, observer §7.3); a malformed value
+//! carries none. Core 0.99 removed the bare wire (#985's C4d), and with it
+//! the `malformed` answer, an envelope its decoding refused: a reply error
+//! that is no error form is the transport's, and silence. Silence carries
+//! what presence said of the service, worded as
 //! what this reader could see (§8.1, 0.8). A many-reply or fan-out call
 //! keeps every reply attributed by its key (O3, O6); its envelopes are
 //! unattributed, because a `reply_err` carries no key (§5.1,
@@ -71,30 +74,29 @@ pub enum CallMode {
 #[serde(tag = "answer", rename_all = "snake_case")]
 pub enum OperationAnswer {
     /// A value reply on the call's own key (O3), rendered through the
-    /// contract's `response` type: a value form's record, or a bare reply.
+    /// contract's `response` type: a value form's record, or undecodable
+    /// when malformed, refused by the form's parse or under another
+    /// `Encoding` (core §5.1).
     Value {
         reply: PayloadRendering,
         /// The value form's as-of mark (core §5.1): the run as the
-        /// replier's descriptor spells it, and the seq. Absent on the bare
-        /// wire, and for bytes the form's parse refused.
+        /// replier's descriptor spells it, and the seq. Absent for a
+        /// malformed reply.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mark: Option<InbandStamp>,
     },
-    /// A `reply_err` carrying an owner's error (O3, §5.2), in its form or
-    /// the bare wire's envelope: an answer.
+    /// A `reply_err` carrying an owner's error in its error form (O3,
+    /// §5.2): an answer.
     Refused { envelope: EnvelopeView },
-    /// A `reply_err` claiming an envelope encoding that does not decode: a
-    /// broken server, not a silent one (§5.2).
-    Malformed { malformed: MalformedReply },
-    /// No value and no envelope: silence, never a verdict (O5).
+    /// No value and no owner's error: silence, never a verdict (O5).
     Silent { silence: SilenceView },
     /// A many-reply call or a fan-out: every reply, attributed (O3, O6).
     Replies { replies: RepliesView },
 }
 
-/// An owner's error (§5.2), read without the contract from its error form
-/// or the bare wire's envelope, its detail rendered through the
-/// operation's `error` type when there is one.
+/// An owner's error (§5.2), read without the contract from its error form,
+/// its detail rendered through the operation's `error` type when there is
+/// one.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct EnvelopeView {
     /// `invalid_request`, `not_found`, `unavailable`, `forbidden`,
@@ -109,19 +111,10 @@ pub struct EnvelopeView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<Rendered>,
     /// The error form's as-of mark (core §5.1). It attributes nothing: a
-    /// `reply_err` carries no key. Absent on the bare wire.
+    /// `reply_err` carries no key. Absent only for a refusal made before
+    /// any wire.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mark: Option<InbandStamp>,
-}
-
-/// A reply that claims one of the bare wire's envelope encodings and is not
-/// an envelope.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct MalformedReply {
-    /// The reply's `Encoding`.
-    pub encoding: String,
-    /// Why it did not decode (§5.2's refusals).
-    pub error: String,
 }
 
 /// A call that got no answer (O5).
@@ -171,7 +164,6 @@ pub struct RepliesView {
     pub repliers: Vec<ReplierView>,
     /// Owners' errors, unattributed: a `reply_err` carries no key (§5.1).
     pub refusals: Vec<EnvelopeView>,
-    pub malformed: Vec<MalformedReply>,
     /// The transport's error replies, such as a timeout.
     pub transport: Vec<String>,
     /// Value replies discarded: on a key that is not concrete (R6), or not
@@ -198,8 +190,9 @@ pub struct ReplierView {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub summaries: Vec<PayloadRendering>,
     /// The as-of mark of each reply, then of each summary, in their order
-    /// (core §5.1): `null` for one on the bare wire or refused by the
-    /// form's parse. Absent when none came in the value form. Two runs on
+    /// (core §5.1): `null` for a malformed one, refused by the form's
+    /// parse or under another `Encoding`. Absent when none came in the
+    /// value form. Two runs on
     /// one key are two instances.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub marks: Vec<Option<InbandStamp>>,
@@ -231,20 +224,17 @@ pub struct SelectionPresence {
 
 impl OperationReport {
     /// The exit code `call` keeps from v1's `service call`: 0 a value and
-    /// no error reply, 1 an owner's error or a malformed envelope (the
-    /// finding), 2 silence — never a verdict (O5).
+    /// no owner's error, 1 an owner's error (the finding), 2 silence —
+    /// never a verdict (O5).
     pub fn exit_code(&self) -> i32 {
         match &self.answer {
             OperationAnswer::Value { .. } => 0,
-            OperationAnswer::Refused { .. } | OperationAnswer::Malformed { .. } => 1,
+            OperationAnswer::Refused { .. } => 1,
             OperationAnswer::Silent { .. } => 2,
             OperationAnswer::Replies { replies } => {
-                if replies.repliers.is_empty()
-                    && replies.refusals.is_empty()
-                    && replies.malformed.is_empty()
-                {
+                if replies.repliers.is_empty() && replies.refusals.is_empty() {
                     2
-                } else if !replies.refusals.is_empty() || !replies.malformed.is_empty() {
+                } else if !replies.refusals.is_empty() {
                     1
                 } else {
                     0
@@ -400,22 +390,6 @@ mod tests {
             silent["silence"],
             json!({"attempts": 1, "transport": "zenoh/string: Timeout", "presence": "no_token_visible"})
         );
-
-        let malformed = serde_json::to_value(report(
-            OperationAnswer::Malformed {
-                malformed: MalformedReply {
-                    encoding: "application/json".into(),
-                    error: "decode".into(),
-                },
-            },
-            CallMode::Concrete,
-        ))
-        .unwrap();
-        assert_eq!(malformed["answer"], "malformed");
-        assert_eq!(
-            malformed["malformed"],
-            json!({"encoding": "application/json", "error": "decode"})
-        );
     }
 
     /// A fan-out: repliers by key, envelopes unattributed, the unheard
@@ -443,7 +417,6 @@ mod tests {
                         detail: None,
                         mark: None,
                     }],
-                    malformed: vec![],
                     transport: vec![],
                     discarded: 0,
                     presence: SelectionPresence {
@@ -466,8 +439,9 @@ mod tests {
         assert!(replies["repliers"][0].get("summaries").is_none());
         assert!(
             replies["repliers"][0].get("marks").is_none(),
-            "the bare wire"
+            "no value form"
         );
+        assert!(replies.get("malformed").is_none(), "core 0.99");
         assert_eq!(
             replies["refusals"],
             json!([{"code": "busy", "message": "later"}])
@@ -480,10 +454,10 @@ mod tests {
                 "unheard": ["h3/tc"],
             })
         );
-        assert_eq!(r.exit_code(), 1, "an envelope is the finding");
+        assert_eq!(r.exit_code(), 1, "an owner's error is the finding");
     }
 
-    /// v1's mapping, kept: a value 0, an envelope 1, silence 2.
+    /// v1's mapping, kept: a value 0, an owner's error 1, silence 2.
     #[test]
     fn the_exit_code_keeps_silence_apart() {
         let silent = OperationAnswer::Silent {
@@ -499,7 +473,6 @@ mod tests {
                 summary_declared: true,
                 repliers: vec![],
                 refusals: vec![],
-                malformed: vec![],
                 transport: vec!["zenoh/string: Timeout".into()],
                 discarded: 3,
                 presence: SelectionPresence {

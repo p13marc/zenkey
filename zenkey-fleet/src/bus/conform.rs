@@ -272,12 +272,10 @@ pub struct FanoutSeen {
     pub selector: String,
     /// Value replies: the operation ran for a call it forbids.
     pub values: usize,
-    /// The codes of the owners' errors, from either wire (§5.2).
+    /// The codes of the owners' errors, in their error form (§5.2).
     pub codes: Vec<String>,
-    /// Replies that claim one of the bare wire's envelope encodings and do
-    /// not decode.
-    pub malformed: Vec<String>,
-    /// The transport's error replies, a timeout among them.
+    /// The transport's error replies, a timeout and any reply error under
+    /// another `Encoding` among them (§5.2).
     pub transport: Vec<String>,
 }
 
@@ -1079,7 +1077,7 @@ async fn call(
 
 /// A call over the template's wildcard (O2): target `All`, consolidation
 /// `None`, every reply kept apart — a value (the operation ran), an
-/// owner's error from either wire (§5.2, the runtime's
+/// owner's error in its error form (§5.2, the runtime's
 /// [`zenkey::client::classify`]), the transport's own error. Its request is
 /// `record` in the request form, as every caller writes it (core §5.1),
 /// under `zenoh/bytes`.
@@ -1126,11 +1124,8 @@ async fn fanout_probe(
         match reply.result() {
             Ok(_) => seen.values += 1,
             Err(e) => match zenkey::client::classify(e) {
-                zenkey::client::ErrorReply::Refused(r) => seen.codes.push(r.envelope.code),
+                zenkey::client::ErrorReply::Refused(r) => seen.codes.push(r.code),
                 zenkey::client::ErrorReply::Transport(t) => seen.transport.push(t.to_string()),
-                zenkey::client::ErrorReply::Malformed(m) => {
-                    seen.malformed.push(format!("{}: {}", m.encoding, m.error));
-                }
             },
         }
     }
