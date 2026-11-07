@@ -1343,7 +1343,690 @@
       "kind": "state",
       "note": "never stale, nothing observed: no value, no verdict (§2.3; 0.2)",
       "observations": []
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "within_horizon",
+        "verdict": "fresh"
+      },
+      "kind": "state",
+      "note": "a snapshot's entry vouched for at the snapshot's time, 3 s ago: fresh (v2 §2.6)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "complete": true,
+          "entry": {
+            "age_s": 3,
+            "confirmation": "time",
+            "kind": "live"
+          },
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 2
+      },
+      "expect": {
+        "reason": "within_horizon",
+        "verdict": "fresh"
+      },
+      "kind": "state",
+      "note": "freshness.v2 scenarios §3 step 1: vouched for at the snapshot's time, ttl 2: fresh (v2 §2.6)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "complete": true,
+          "entry": {
+            "age_s": 0.1,
+            "confirmation": "time",
+            "kind": "live"
+          },
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 2
+      },
+      "expect": {
+        "reason": "beyond_horizon",
+        "verdict": "stale"
+      },
+      "kind": "state",
+      "note": "freshness.v2 scenarios §3 step 2: the bit cleared, its conf 3.5 s old at ttl 2: stale (v2 §2.6)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "complete": true,
+          "entry": {
+            "age_s": 3.5,
+            "confirmation": "conf",
+            "kind": "live"
+          },
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "beyond_horizon",
+        "verdict": "stale"
+      },
+      "kind": "state",
+      "note": "an entry's conf 61 s old at ttl 60, δ 0.5: stale (v2 §2.6)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "complete": true,
+          "entry": {
+            "age_s": 61,
+            "confirmation": "conf",
+            "kind": "live"
+          },
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "within_horizon",
+        "verdict": "fresh"
+      },
+      "kind": "state",
+      "note": "an entry's conf exactly ttl − δ old: fresh (v2 §2.6, v1 §2.6's band)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "complete": true,
+          "entry": {
+            "age_s": 59.5,
+            "confirmation": "conf",
+            "kind": "live"
+          },
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "near_horizon",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "an entry's conf exactly ttl old: within δ of the horizon, unobservable (v2 §2.6)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "complete": true,
+          "entry": {
+            "age_s": 60,
+            "confirmation": "conf",
+            "kind": "live"
+          },
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "beyond_horizon",
+        "verdict": "stale"
+      },
+      "kind": "state",
+      "note": "an entry's conf a nanosecond past ttl + δ: stale (v2 §2.6)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "complete": true,
+          "entry": {
+            "age_s": 60.500000001,
+            "confirmation": "conf",
+            "kind": "live"
+          },
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "clock_disagrees",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "the snapshot's time ahead of the reader's clock by more than δ: the clocks disagree, unobservable (v2 §2.6)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "complete": true,
+          "entry": {
+            "age_s": -0.6,
+            "confirmation": "time",
+            "kind": "live"
+          },
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "within_horizon",
+        "verdict": "fresh"
+      },
+      "kind": "state",
+      "note": "the snapshot's time ahead by less than δ: fresh (v2 §2.6)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "complete": true,
+          "entry": {
+            "age_s": -0.4,
+            "confirmation": "time",
+            "kind": "live"
+          },
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "no_stamp",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "vouched for at a snapshot's time that is unknown: no stamp, unobservable (v2 §2.6)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "complete": true,
+          "entry": {
+            "age_s": null,
+            "confirmation": "time",
+            "kind": "live"
+          },
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "no_stamp",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "an entry's conf unknown: no stamp, unobservable (v2 §2.6)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "complete": true,
+          "entry": {
+            "age_s": null,
+            "confirmation": "conf",
+            "kind": "live"
+          },
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "no_stamp",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "confirmation 0 on a member with a horizon breaks core S2: no stamp, unobservable (v2 §2.6)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "complete": true,
+          "entry": {
+            "confirmation": "none",
+            "kind": "live"
+          },
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "no_stamp",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "confirmation 0 and a clock not trusted: no stamp comes first in the order (v2 §2.6)",
+      "observations": [
+        {
+          "clock": {
+            "trusted": false
+          },
+          "complete": true,
+          "entry": {
+            "confirmation": "none",
+            "kind": "live"
+          },
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "clock_untrusted",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "a confirmed entry, the owner's clock not trusted: unobservable (v2 §2.6, v1 §2.6)",
+      "observations": [
+        {
+          "clock": {
+            "trusted": false
+          },
+          "complete": true,
+          "entry": {
+            "age_s": 3,
+            "confirmation": "time",
+            "kind": "live"
+          },
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "deleted",
+        "verdict": "not_asked"
+      },
+      "kind": "state",
+      "note": "a tombstone is a reply_del: deleted, not this profile's (v2 §2.6)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "complete": true,
+          "entry": {
+            "kind": "tombstone"
+          },
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "deleted",
+        "verdict": "not_asked"
+      },
+      "kind": "state",
+      "note": "a tombstone needs no clock: deleted (v2 §2.6)",
+      "observations": [
+        {
+          "clock": {
+            "trusted": false
+          },
+          "complete": true,
+          "entry": {
+            "kind": "tombstone"
+          },
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "deleted",
+        "verdict": "not_asked"
+      },
+      "kind": "state",
+      "note": "a member a complete snapshot omits has no value, by core §4.2's omission rule: deleted (v2 §2.6)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "complete": true,
+          "entry": null,
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "silent",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "a member an incomplete snapshot omits is one the read did not reach: silent, unobservable (v2 §2.6)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "complete": false,
+          "entry": null,
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 0
+      },
+      "expect": {
+        "reason": "never_stale",
+        "verdict": "fresh"
+      },
+      "kind": "state",
+      "note": "ttl 0: any live entry is fresh, with no confirmation and no trusted clock (v2 §2.6, v1 §2.3)",
+      "observations": [
+        {
+          "clock": {
+            "trusted": false
+          },
+          "complete": true,
+          "entry": {
+            "confirmation": "none",
+            "kind": "live"
+          },
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 0
+      },
+      "expect": {
+        "reason": "deleted",
+        "verdict": "not_asked"
+      },
+      "kind": "state",
+      "note": "ttl 0: a member a complete snapshot omits is deleted (v2 §2.6)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "complete": true,
+          "entry": null,
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 0
+      },
+      "expect": {
+        "reason": "silent",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "ttl 0: a member an incomplete snapshot omits: silent (v2 §2.6)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "complete": false,
+          "entry": null,
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 0
+      },
+      "expect": {
+        "reason": "deleted",
+        "verdict": "not_asked"
+      },
+      "kind": "state",
+      "note": "ttl 0: a tombstone is deleted (v2 §2.6)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "complete": true,
+          "entry": {
+            "kind": "tombstone"
+          },
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {},
+      "expect": {
+        "reason": "no_horizon",
+        "verdict": "not_asked"
+      },
+      "kind": "state",
+      "note": "no horizon: not asked, whatever a snapshot says (v1 §2.3)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "complete": true,
+          "entry": {
+            "confirmation": "none",
+            "kind": "live"
+          },
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": -5
+      },
+      "expect": {
+        "reason": "not_a_horizon",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "a value that is no horizon: unobservable, whatever the entry (v1 §2.1)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "complete": true,
+          "entry": {
+            "age_s": 3,
+            "confirmation": "time",
+            "kind": "live"
+          },
+          "via": "snapshot"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "within_horizon",
+        "verdict": "fresh"
+      },
+      "kind": "state",
+      "note": "a stale entry and a fresh delivery: fresh, since one observation is (v1 §2.7)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "complete": true,
+          "entry": {
+            "age_s": 90,
+            "confirmation": "conf",
+            "kind": "live"
+          },
+          "via": "snapshot"
+        },
+        {
+          "complete": true,
+          "last": {
+            "age_s": 1,
+            "kind": "put"
+          },
+          "listened_s": 120,
+          "via": "subscription"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "silent",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "an incomplete snapshot's omission and an archive's answer: unobservable before not asked (v1 §2.7)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "complete": false,
+          "entry": null,
+          "via": "snapshot"
+        },
+        {
+          "via": "archive"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "deleted",
+        "verdict": "not_asked"
+      },
+      "kind": "state",
+      "note": "a complete snapshot's omission and a delete heard live: deleted, the first one's reason (v1 §2.7)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "complete": true,
+          "entry": null,
+          "via": "snapshot"
+        },
+        {
+          "complete": true,
+          "last": {
+            "age_s": 5,
+            "kind": "delete"
+          },
+          "listened_s": 120,
+          "via": "subscription"
+        }
+      ]
     }
   ],
-  "description": "freshness.v1 §2.3, §2.5–§2.8: a resource's kind and merged annotations (read as horizons.json reads them), and the observations a reader made of one member -> the combined verdict. Each observation is judged in §2.7's order, then combined: fresh if any is fresh, else stale if any is, else unobservable if any is (the first one's reason), else not_asked (the first one's reason); with no observation at all, §2.7's steps 1, 2 and 4 still answer (no horizon: not_asked, no_horizon; an event or operation: not_asked, kind; no horizon in the value: unobservable, not_a_horizon), and a member with a horizon is unobservable, no_observation (0.2). Observations: {\"via\": \"subscription\", \"listened_s\": seconds since the subscription was declared, \"complete\": false when it lost deliveries, \"last\": null or {\"kind\": \"put\" | \"delete\", \"age_s\": seconds since that delivery, on the subscriber's monotonic clock}}; {\"via\": \"get\", \"reply\": null (no reply for the member) or {\"kind\": \"delete\"} or {\"kind\": \"put\", \"stamp_age_s\": the reader's clock minus the stamp's time, negative when the stamp is ahead, or null when the reply has no stamp}, \"clock\": {\"trusted\": false} or {\"trusted\": true, \"delta_s\": the delta the clocks are trusted to}}; {\"via\": \"archive\"}. expect.verdict is fresh, stale, unobservable or not_asked (a premise that does not hold, an event or a deleted member, is not_asked), and expect.reason its class: within_horizon, never_stale, beyond_horizon, no_delivery, not_a_horizon, listened_too_short, incomplete, silent, no_stamp, clock_untrusted, clock_disagrees, near_horizon, no_observation, no_horizon, kind, last_known, deleted. Seconds are compared exactly, to the nanosecond."
+  "description": "freshness.v1 §2.3, §2.5–§2.8: a resource's kind and merged annotations (read as horizons.json reads them), and the observations a reader made of one member -> the combined verdict. Each observation is judged in §2.7's order, then combined: fresh if any is fresh, else stale if any is, else unobservable if any is (the first one's reason), else not_asked (the first one's reason); with no observation at all, §2.7's steps 1, 2 and 4 still answer (no horizon: not_asked, no_horizon; an event or operation: not_asked, kind; no horizon in the value: unobservable, not_a_horizon), and a member with a horizon is unobservable, no_observation (0.2). Observations: {\"via\": \"subscription\", \"listened_s\": seconds since the subscription was declared, \"complete\": false when it lost deliveries, \"last\": null or {\"kind\": \"put\" | \"delete\", \"age_s\": seconds since that delivery, on the subscriber's monotonic clock}}; {\"via\": \"get\", \"reply\": null (no reply for the member) or {\"kind\": \"delete\"} or {\"kind\": \"put\", \"stamp_age_s\": the reader's clock minus the stamp's time, negative when the stamp is ahead, or null when the reply has no stamp}, \"clock\": {\"trusted\": false} or {\"trusted\": true, \"delta_s\": the delta the clocks are trusted to}}; {\"via\": \"archive\"}; {\"via\": \"snapshot\", \"complete\": whether the reader holds the member's collection's snapshot complete, \"entry\": null (the snapshot lists the member neither live nor as a tombstone) or {\"kind\": \"tombstone\"} or {\"kind\": \"live\", \"confirmation\": \"none\" (0) | \"time\" (1, vouched for at the snapshot's time) | \"conf\" (2, its last confirmation), \"age_s\": the reader's clock minus that confirmation's time, negative when it is ahead, or null when the time is unknown; absent for none}, \"clock\": as a get's, the owner's clock} (freshness.v2 0.6 §2.6): an entry is judged as a reply, its confirmation's time as the stamp; no entry is deleted from a complete snapshot and silent from an incomplete one; confirmation none, or an unknown time, is no stamp. expect.verdict is fresh, stale, unobservable or not_asked (a premise that does not hold, an event or a deleted member, is not_asked), and expect.reason its class: within_horizon, never_stale, beyond_horizon, no_delivery, not_a_horizon, listened_too_short, incomplete, silent, no_stamp, clock_untrusted, clock_disagrees, near_horizon, no_observation, no_horizon, kind, last_known, deleted. Seconds are compared exactly, to the nanosecond."
 }
