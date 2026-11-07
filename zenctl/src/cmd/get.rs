@@ -559,7 +559,14 @@ mod tests {
             kind: Some(SampleKind::Put),
             answer: Answer::Value(zenoh::bytes::ZBytes::from(bytes.clone())),
         };
-        let held = zenkey_fleet::Catalogs::new(vec![catalog]);
+        // The catalog given must list the revision held (observer §7.5's
+        // step 1, #990 V2): the modem's, with packed.v1 appended, its epoch
+        // kept.
+        let mut listing = catalog.successor();
+        listing
+            .push(rev.iface().clone(), rev.fingerprint().clone())
+            .unwrap();
+        let held = zenkey_fleet::Catalogs::new(vec![listing]);
         let lens = Lens::new("prod", None, &set).offline(&set).catalogs(&held);
         let r = row(&a, &lens, false, false);
         assert_eq!(r["value"]["at"], at, "under the catalog's epoch: {r}");

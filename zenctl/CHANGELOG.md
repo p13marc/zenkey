@@ -6,6 +6,28 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — the revision of a key by catalog and tag, a packed record never sniffed (#990 V2)
+
+Observer 0.29 §7.3 and §7.5. With no descriptor naming the owner's
+revision (`--across-face`, a capture read with `--contracts`), a key's
+revision is the deployment's word, then CH's tag: of the revisions held
+that give the key a resource, the ones `--catalog` lists; then those whose
+tag is CH's; then, with a catalog, the latest of those that read the
+sample alike. A key's identity alone, and a delete, read with any
+revision the first step leaves. `#990`'s black box read every sample
+`ambiguous` given modem.v3's four revisions; it reads them now.
+
+| Before | Now | Notes |
+|---|---|---|
+| `echo`, `rate`, `field`, `timeline`, `snapshot`, `get`, `record --on`, `watchdog` across a face or offline: an interface with several revisions in `--contracts`, every sample `"unresolved": {"reason": "ambiguous"}` | the revision chosen as above; one chosen by CH's tag carries `identity.chosen`, `{"by": "tag", "step": 2}` or `3`, and `echo`'s table a line `  revision <fp> by tag (step N, observer §7.5)` | absent where a descriptor or the first step chose; a snapshot's page is mapped by the first step alone |
+| — | none left: `"unresolved": {"reason": "none_left", "step": "not_held" \| "no_resource" \| "not_listed" \| "tag", "held": [...]}`; several the third step does not choose: `ambiguous`, as before, its words now naming why | one revision held with no resource for the key stays `no_resource` |
+| across a face or offline, `--catalog` beside `--contracts`: read for the epoch alone | also step 1's filter: a revision held that no catalog given lists reads no key, `none_left` step `not_listed` | give the deployment's catalog, or a successor of it, that lists the revisions in hand |
+| offline, an interface none of `--contracts` holds: `presence_not_read` | `none_left`, step `not_held` | no presence read and no `--contracts` at all stays `presence_not_read` |
+| a record under a CH tag other than 0 whose type is not held: sniffed (JSON, CBOR, text: a packed record read as `"E4A#\u0010\u0000"`) | `"as": "structural"`, no `value`, its text `<packed record, tag t, n bytes>`; a reply's value and an error's detail alike | only the packed kind defines a tag; a record under tag 0 is sniffed as before |
+| a record of a type that is not packed under a tag other than 0: decoded as its type | `"as": "undecodable"`, its reason `refused, tag: CH carries tag t, and a record of a <kind> type carries tag 0 …` | observer §7.3's "Not its type's tag"; a packed type's own layout refuses another tag, as before |
+
+No exit code changed.
+
 ## Unreleased (`main`, zk2) — across a face, the face's plan for a scope (#990 V1)
 
 Observer 0.29 §7.5: a tool's scope across a constrained face adds each

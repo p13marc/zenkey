@@ -437,6 +437,7 @@ mod tests {
                 },
                 values: Default::default(),
                 unresolved: None,
+                chosen: None,
             },
             delete: true,
             bytes: None,

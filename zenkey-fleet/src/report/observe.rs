@@ -38,6 +38,29 @@ pub struct KeyIdentity {
     /// absent on a key resolved through its contract.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unresolved: Option<Unresolved>,
+    /// How the revision was chosen where no descriptor names the owner's
+    /// and CH's tag chose it (observer §7.5's steps 2 and 3, across a face
+    /// or a capture read offline): the tool's reading of CH, never the
+    /// deployment's word. Absent where a descriptor named it, or the
+    /// revisions held and the catalog given left one (step 1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chosen: Option<ChosenByTag>,
+}
+
+/// A revision chosen by tag (observer §7.5): `by` is always `tag`, `step`
+/// 2 (one left carries CH's tag) or 3 (several that read the sample alike,
+/// the catalog's latest).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChosenByTag {
+    pub by: ByTag,
+    pub step: u8,
+}
+
+/// The one way a [`ChosenByTag`] was chosen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ByTag {
+    Tag,
 }
 
 impl KeyIdentity {
@@ -404,6 +427,7 @@ mod tests {
             },
             values: [("iface".to_owned(), vec!["eth0".to_owned()])].into(),
             unresolved: None,
+            chosen: None,
         };
         let v = serde_json::to_value(&resolved).unwrap();
         assert_eq!(
@@ -419,6 +443,18 @@ mod tests {
         );
         assert_eq!(serde_json::from_value::<KeyIdentity>(v).unwrap(), resolved);
 
+        // A revision CH's tag chose, across a face (observer §7.5; #990 V2).
+        let by_tag = KeyIdentity {
+            chosen: Some(ChosenByTag {
+                by: ByTag::Tag,
+                step: 3,
+            }),
+            ..resolved.clone()
+        };
+        let v = serde_json::to_value(&by_tag).unwrap();
+        assert_eq!(v["chosen"], json!({"by": "tag", "step": 3}));
+        assert_eq!(serde_json::from_value::<KeyIdentity>(v).unwrap(), by_tag);
+
         let short = KeyIdentity {
             group: KeyGroup::Resource {
                 address: "host-a/tc".into(),
@@ -428,6 +464,7 @@ mod tests {
             },
             values: BTreeMap::new(),
             unresolved: Some(Unresolved::NoProvider),
+            chosen: None,
         };
         let v = serde_json::to_value(&short).unwrap();
         assert_eq!(v["unresolved"], json!({"reason": "no_provider"}));
@@ -440,6 +477,7 @@ mod tests {
             unresolved: Some(Unresolved::NotInNamespace {
                 namespace: "prod".into(),
             }),
+            chosen: None,
         };
         assert_eq!(
             serde_json::to_value(&foreign).unwrap(),

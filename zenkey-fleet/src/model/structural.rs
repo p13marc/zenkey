@@ -11,7 +11,37 @@
 //! paths keep resolving until FJ9 retires that module.
 //!
 //! Nothing here knows a key, a registry or a contract: a caller that has one
-//! decodes through it first, and reaches for this only when it has not.
+//! decodes through it first, and reaches for this only when it has not. A
+//! record under a CH tag other than 0 never reaches it: it is a packed
+//! record, shown by [`packed_text`] (observer §7.3, #990 V2b).
+
+/// A packed record whose type the tool does not hold, as a person reads it
+/// (observer §7.3): only the packed kind defines a tag, so a record whose
+/// CH carries a tag other than 0 is a packed record, shown by its tag and
+/// its size and never sniffed, `<packed record, tag t, n bytes>`.
+pub fn packed_text(tag: zenkey_model::wire::Tag, size: usize) -> String {
+    format!("<packed record, tag {}, {size} bytes>", tag.get())
+}
+
+/// [`packed_text`] as a rendering: structural, with no value, and why no
+/// type read it.
+pub fn packed_rendering(
+    key: &str,
+    why: crate::report::Unresolved,
+    tag: zenkey_model::wire::Tag,
+    size: usize,
+) -> crate::report::PayloadRendering {
+    crate::report::PayloadRendering {
+        key: key.to_owned(),
+        size,
+        resource: None,
+        rendered: crate::report::Rendered::Structural {
+            why,
+            value: None,
+            text: packed_text(tag, size),
+        },
+    }
+}
 
 /// How many bytes an *observation* path will structurally decode.
 ///

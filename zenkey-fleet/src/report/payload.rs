@@ -124,9 +124,22 @@ pub enum Unresolved {
     /// A provider is present, and no descriptor named its revision: a
     /// token's fingerprint prefix is not enough to retrieve a bundle.
     NoRevision,
-    /// The provider's instances name more than one revision, and a data key
-    /// carries no instance: decoding with either could mislead.
+    /// More than one revision could have written the key, and nothing
+    /// chooses one: the provider's instances name several and a data key
+    /// carries no instance; or, with no descriptor naming the owner's
+    /// revision (across a face, a capture read offline), several revisions
+    /// held are left that read the sample differently, or no catalog
+    /// orders them (observer §7.5). Decoding with either could mislead.
     Ambiguous { fingerprints: Vec<String> },
+    /// With no descriptor naming the owner's revision (across a face, a
+    /// capture read offline), no revision held is left to read the key
+    /// with (observer §7.5): `step` names the step that left none, and
+    /// `held` the revisions of the interface held, sorted.
+    NoneLeft {
+        step: NoneStep,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        held: Vec<String>,
+    },
     /// The revision was not looked for, or not yet.
     ContractNotHeld { fingerprint: String },
     /// Retrieval found no valid bundle (§8.4).
@@ -144,6 +157,33 @@ pub enum Unresolved {
     /// The decode was not asked (`--no-decode`): the bytes are rendered
     /// structurally on purpose, and no verdict is claimed about them (O4).
     DecodeNotAsked,
+}
+
+/// The step of the revision of a key that left no revision held
+/// (observer §7.5), as a tool names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NoneStep {
+    /// The tool holds no revision of the key's interface.
+    NotHeld,
+    /// None of the revisions held gives the key a resource.
+    NoResource,
+    /// The catalog given lists none of those that do.
+    NotListed,
+    /// None of several left carries CH's tag.
+    Tag,
+}
+
+impl NoneStep {
+    /// Its token, as `spec/conformance/envelope/tags.json` spells it.
+    pub fn token(self) -> &'static str {
+        match self {
+            NoneStep::NotHeld => "not_held",
+            NoneStep::NoResource => "no_resource",
+            NoneStep::NotListed => "not_listed",
+            NoneStep::Tag => "tag",
+        }
+    }
 }
 
 impl Unresolved {
@@ -175,9 +215,30 @@ impl Unresolved {
             Unresolved::NoProvider => "no provider of this address in presence".into(),
             Unresolved::NoRevision => "no descriptor named the provider's revision".into(),
             Unresolved::Ambiguous { fingerprints } => format!(
-                "the provider names {} revisions and a data key names no instance",
+                "{} revisions could have written it and nothing chooses one: a data key names \
+                 no instance, and across a face neither CH's tag nor a catalog does (observer \
+                 §7.5)",
                 fingerprints.len()
             ),
+            Unresolved::NoneLeft { step, held } => match step {
+                NoneStep::NotHeld => {
+                    "no revision of its interface is held, and no descriptor names one".into()
+                }
+                NoneStep::NoResource => format!(
+                    "none of the {} revisions held gives the key a resource",
+                    held.len()
+                ),
+                NoneStep::NotListed => {
+                    "the catalog given lists none of the revisions held that give the key a \
+                     resource (observer §7.5)"
+                        .into()
+                }
+                NoneStep::Tag => {
+                    "none of the revisions held that give the key a resource carries CH's tag \
+                     (observer §7.5)"
+                        .into()
+                }
+            },
             Unresolved::ContractNotHeld { fingerprint } => {
                 format!("contract {} not held", short(fingerprint))
             }
@@ -245,6 +306,39 @@ mod tests {
                 "value": {"rx_bps": 1, "tx_bps": 2},
             })
         );
+    }
+
+    /// Across a face, no revision left (observer §7.5; #990 V2): the step
+    /// that left none by its token, and the revisions held.
+    #[test]
+    fn none_left_json_shape_is_pinned() {
+        let why = Unresolved::NoneLeft {
+            step: NoneStep::Tag,
+            held: vec![format!("sha256:{}", "ab".repeat(32))],
+        };
+        let v = serde_json::to_value(&why).expect("serialize");
+        assert_eq!(
+            v,
+            json!({"reason": "none_left", "step": "tag",
+                   "held": [format!("sha256:{}", "ab".repeat(32))]})
+        );
+        assert_eq!(serde_json::from_value::<Unresolved>(v).unwrap(), why);
+        let none = Unresolved::NoneLeft {
+            step: NoneStep::NotHeld,
+            held: vec![],
+        };
+        assert_eq!(
+            serde_json::to_value(&none).unwrap(),
+            json!({"reason": "none_left", "step": "not_held"})
+        );
+        for s in [
+            NoneStep::NotHeld,
+            NoneStep::NoResource,
+            NoneStep::NotListed,
+            NoneStep::Tag,
+        ] {
+            assert_eq!(serde_json::to_value(s).unwrap(), json!(s.token()));
+        }
     }
 
     /// The honest poles: opaque and undecodable say what was declared, and

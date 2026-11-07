@@ -45,6 +45,7 @@ fn a_rate_row_keeps_its_latency_populations_apart() {
         group: KeyGroup::NotZk2,
         values: Default::default(),
         unresolved: Some(Unresolved::NotZk2 { detail: "x".into() }),
+        chosen: None,
     };
     let quiet = RateRow {
         key: "v1/h-a/telemetry/p/m".into(),

@@ -4,6 +4,17 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — a packed record never sniffed, the revision of a key in a replay (#990 V2)
+
+Observer 0.29 §7.3 and §7.5, through the fleet's lens.
+
+| Before | Now | Notes |
+|---|---|---|
+| a record under a CH tag other than 0 whose type is not held: sniffed as JSON, CBOR or text | `<packed record, tag t, n bytes>`, no value | only the packed kind defines a tag |
+| a record of a type that is not packed under a tag other than 0: decoded | undecodable, `refused, tag` | |
+| a replay with several revisions of an interface in its contracts: every key `ambiguous`; a catalog given beside them read for the epoch alone | the revision of the key by step: the one held that gives the key a resource, then CH's tag (a replay's lens holds no catalog, so step 3 never chooses; a live window's offline lens takes the Settings' catalogs, and one that lists no revision held reads the key `not_listed`) | a key read with no record takes any the first step leaves |
+| — | `none_left` is badged by the rung it stopped short of: `not_held` as presence not read, as before, `no_resource` as no resource, `not_listed` and `tag` as no revision | `Rung::ALL` stays fourteen |
+
 ## Unreleased (`main`, zk2) — a call in its forms alone, the bare wire removed (#985 C4d)
 
 Core 0.99 removes the bare wire: a call with no form, its error in a

@@ -179,7 +179,15 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   refused plan, or one letting nothing cross, exit 2, and every typed or
   rule selector meeting no scope named, exit 2, never dropped
   (`spec/conformance/scope/faces.json` in the fleet's
-  `tests/face_scope.rs`); #988 L4: `--face-policy F
+  `tests/face_scope.rs`); and #990 V2 (observer 0.29 §7.3, §7.5): with no
+  descriptor naming the owner's revision, each key's revision is the
+  fleet's `model::choice` (the revisions held giving the key a resource,
+  those `--catalog` lists, then CH's tag, then the catalog's latest of
+  those reading it alike), `identity.chosen` and `echo`'s table line
+  `revision <fp> by tag (step N, observer §7.5)` saying steps 2 and 3,
+  `none_left` naming the step that left none, and a record under a tag
+  other than 0 with no type held shown `<packed record, tag t, n bytes>`,
+  never sniffed; #988 L4: `--face-policy F
   --face NAME` in `AcrossFaceArgs` (`zk2::far_side`, a `link.v2` face, exit
   2 otherwise), `FaceScope::deployment` → `Deployment::across` (the face's
   `reply_timeout_ms` the default `--timeout` below a flag or context, every

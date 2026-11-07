@@ -217,6 +217,26 @@ impl Catalogs {
     }
 }
 
+impl Catalogs {
+    /// Whether a held catalog lists the revision: across a face, step 1's
+    /// filter of the revision of a key (observer §7.5).
+    pub fn lists(&self, iface: &IfaceId, contract: &Fingerprint) -> bool {
+        self.held
+            .iter()
+            .any(|c| c.index_of(iface, contract).is_some())
+    }
+
+    /// The revision's index, the order step 3 reads (observer §7.5): the
+    /// one every held catalog that lists it gives, since a successor keeps
+    /// its predecessor's indices (core §8.6). `None` where none lists it,
+    /// or two give it different indices, which orders nothing.
+    pub fn order(&self, iface: &IfaceId, contract: &Fingerprint) -> Option<u16> {
+        let mut at = self.held.iter().filter_map(|c| c.index_of(iface, contract));
+        let first = at.next()?;
+        at.all(|i| i == first).then_some(first)
+    }
+}
+
 /// Whether a running revision is in the catalog it is judged against.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Lack {

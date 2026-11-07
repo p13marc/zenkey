@@ -35,7 +35,9 @@
 //! link closed, never down ([`first_hop`], observer §3.11, #982 H3). A
 //! raw observer's scope across a constrained face is read from the
 //! contracts in hand and, given a face policy, the face's plan
-//! ([`face_scope`], observer §7.5, #990 V1).
+//! ([`face_scope`], observer §7.5, #990 V1); with no descriptor in hand,
+//! the revision of a key is the deployment's word, then CH's tag
+//! ([`choice`], #990 V2a).
 //!
 //! The rest is generation-neutral: a stream of samples becomes rates and
 //! latencies ([`stats`]) or a tree ([`tree`]), two payloads become a diff
@@ -74,6 +76,7 @@ pub mod arbitration;
 pub mod attach;
 pub mod bounded;
 pub mod catalog;
+pub mod choice;
 pub mod compat;
 pub mod config;
 pub mod deployment;

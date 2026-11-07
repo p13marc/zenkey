@@ -323,7 +323,27 @@ fn fallback_rendering(
                 text: inband::snapshot_text(header, tag, body),
             },
         },
-        Payload::Plain(b) | Payload::Record { record: b, .. } => structural_rendering(key, why, b),
+        // Only the packed kind defines a tag: a record under another tag is
+        // a packed record, never sniffed (observer §7.3).
+        Payload::Record { record, tag, .. } => unheld_rendering(key, why, Some(tag), record),
+        Payload::Plain(b) => unheld_rendering(key, why, read.request_tag, b),
+    }
+}
+
+/// A record whose type the tool does not hold, under CH's `tag` where it
+/// came in a form (observer §7.3): a packed record by its tag and size
+/// under a tag other than 0, else the structural ladder.
+fn unheld_rendering(
+    key: &str,
+    why: Unresolved,
+    tag: Option<wire::Tag>,
+    bytes: &[u8],
+) -> PayloadRendering {
+    match tag.map(|t| inband::Unheld::of(wire::Form::Mutation, t)) {
+        Some(inband::Unheld::Packed(t)) => {
+            crate::model::structural::packed_rendering(key, why, t, bytes.len())
+        }
+        _ => structural_rendering(key, why, bytes),
     }
 }
 
@@ -647,6 +667,17 @@ pub fn render_resource(
         },
         _ => (bytes, None),
     };
+    if let Some(reason) = tag_refused(ty, tag) {
+        return PayloadRendering {
+            key: key.to_owned(),
+            size: record.len(),
+            resource: Some(resolved),
+            rendered: Rendered::Undecodable {
+                declared: decode::declared(ty),
+                reason,
+            },
+        };
+    }
     let encoding = encoding
         .filter(|e| *e != "zenoh/bytes")
         .or_else(|| own_encoding(r, member, ty));
@@ -713,6 +744,16 @@ pub(crate) fn decode_under(
     tag: Option<zenkey_model::wire::Tag>,
     epoch: Epoch,
 ) -> (Decoded, Option<i64>) {
+    if let Some(reason) = tag_refused(ty, tag) {
+        return (
+            Decoded::Undecodable {
+                declared: decode::declared(ty),
+                size: bytes.len(),
+                reason,
+            },
+            None,
+        );
+    }
     let bare = decode::Context { tag, epoch: None };
     if let Some(reason) = epoch.refusal()
         && decode::epoch_assumed(bundle, ty, bare).is_some()
@@ -736,6 +777,26 @@ pub(crate) fn decode_under(
         decode::decode_in(bundle, ty, encoding, bytes, cx),
         decode::epoch_assumed(bundle, ty, cx),
     )
+}
+
+/// Observer §7.3's "Not its type's tag" for a type of any kind but packed,
+/// whose layout checks its own tag (core §7.6): only the packed kind
+/// defines a tag, so a record of any other type is its type's under tag 0
+/// alone, and one under another tag is refused, `tag`, never decoded.
+pub(crate) fn tag_refused(
+    ty: &serde_json::Value,
+    tag: Option<zenkey_model::wire::Tag>,
+) -> Option<String> {
+    let t = tag.filter(|t| *t != zenkey_model::wire::Tag::NONE)?;
+    if ty["kind"] == "packed" {
+        return None;
+    }
+    Some(format!(
+        "refused, tag: CH carries tag {}, and a record of a {} type carries tag 0, since \
+         only the packed kind defines a tag (observer §7.3)",
+        t.get(),
+        ty["kind"].as_str().unwrap_or("non-packed")
+    ))
 }
 
 /// The model's decode, as the report spells it, with the epoch a packed
@@ -799,10 +860,19 @@ pub fn render_detail(
                     value: Some(v.clone()),
                     text: serde_json::to_string(v).unwrap_or_default(),
                 },
-                Detail::Bytes(b) => Rendered::Structural {
-                    why,
-                    value: structural_value(b),
-                    text: structural(b),
+                Detail::Bytes(b) => match form.filter(|t| *t != zenkey_model::wire::Tag::NONE) {
+                    // A detail under a tag other than 0 is a packed record
+                    // (observer §7.3), never sniffed.
+                    Some(t) => Rendered::Structural {
+                        why,
+                        value: None,
+                        text: crate::model::structural::packed_text(t, b.len()),
+                    },
+                    None => Rendered::Structural {
+                        why,
+                        value: structural_value(b),
+                        text: structural(b),
+                    },
                 },
             }
         }
