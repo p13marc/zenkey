@@ -448,8 +448,9 @@ subscription (`zenkey-fleet/tests/seeding.rs`,
 
 **Setup.** As above. The owner holds 32 plans, put under one run, each a
 record of 110 bytes: `plans/v00` to `plans/v30`, and `plans/vehicle-01`,
-the consumer's. Its pages then hold 8 entries each, at most 975 bytes. A tool T, a late joiner, subscribes
-to `plans/*` before each GET. For steps 3, 5 and 7, a session of the
+the consumer's. Its pages then hold 8 entries each, at most 975 bytes
+under a 16-bit run and 977 under a 32-bit run. A tool T, a late joiner,
+subscribes to `plans/*` before each GET. For steps 3, 5 and 7, a session of the
 test's own plays the owner, writing the snapshots it is given, as §10's
 does.
 
@@ -506,3 +507,33 @@ does.
 steps 3 and 5 to 7 through the fleet's seeded subscription
 (`zenkey-fleet/tests/seeding.rs`). `conformance/seed/snapshot.json` states
 the merge, pages and the omission rule as a pure fixture.*
+
+## §15 A `reply_del` where the owner answers by snapshot (§4.2)
+
+**Setup.** As §14: the owner holds the 32 plans, and T reads its state.
+For step 1, a session of the test's own plays the owner, as in §14.
+
+**Steps.**
+1. **A stray `reply_del`.** T GETs `plans/**`. The owner's answer holds
+   the collection's snapshot, complete, and a `reply_del` on `plans/v03`
+   under the owner's run, which no owner sends.
+2. **An owner on an earlier revision.** The owner also serves `status`, a
+   state with `freshness.ttl_s` 60, under a revision whose contract uses
+   `freshness.v1`, which its descriptor names. T holds that revision, and
+   a later one of the same interface whose contract uses `freshness.v2`
+   instead. The owner deletes `status`, and within W T GETs its
+   interface's `state/**`.
+
+**Expected.**
+1. T holds the snapshot complete and the 32 plans, `plans/v03` among
+   them. It counts the `reply_del` undecodable, refused as `form`, and
+   merges no deletion of `plans/v03` (core §4.2).
+2. By the descriptor's revision, `status` is a per-key resource. Its owner
+   answers it with a `reply_del` within W (core S2, S3), and T merges it as
+   a deletion. Read by the later revision, which T holds too, it would be
+   a stray `reply_del` (core §4.2).
+
+*The reference runs step 1 as
+`a_reply_del_on_a_collections_member_is_undecodable` in
+`zenkey/tests/snapshot.rs`, on a snapshot of three plans. Step 2 is
+written ahead of the reference.*

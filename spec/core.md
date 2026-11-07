@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.101** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.102** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -1060,7 +1060,7 @@ from S4's GET and follows a subscription.
   - A live put or delete newer than a reply replaces it, and a reply newer
     than a live sample replaces that.
   - A `reply_del` is a deletion with its stamps (S3), merged as a live
-    delete is.
+    delete is. A stray one is not (below).
   - Two samples with one in-band stamp are the same mutation, kept once.
   - **Across two runs**, nothing orders the values (§4.3). A consumer
     orders by §4.3's consumer rule from its first value on, its seed's
@@ -1126,16 +1126,32 @@ from S4's GET and follows a subscription.
 - **A snapshot heard on a subscription** is no owner's answer (§7.5). A
   consumer or a tool MUST NOT merge a snapshot heard on a subscription,
   nor count it toward a complete snapshot. `[F: seed/snapshot.json]`
+- **A stray `reply_del`** is no owner's answer either. It is a
+  `reply_del` on a member of a collection that its owner answers by
+  snapshot, as the owner's revision says (below). Such an owner deletes a
+  member with a tombstone (S3). A consumer or a tool MUST NOT merge a
+  stray `reply_del` as a deletion. It counts it undecodable, refused as
+  `form`: a delete is no form that owner answers the member in (§7.5).
+  `[Sc: state.md §15]`
+  - **An archive** aligning from the owner drops no key for one (§4.4).
+    A peer archive answers per key, so its `reply_del` still counts.
 - **The owner's revision maps the index.** A late joiner MUST map a
   snapshot's collection index with the revision of the interface that the
   owner's descriptor names (§3.3), never with another revision it holds.
-  A snapshot names no revision: its tag is its collection's type's (§7.5).
-  `[F: seed/snapshot.json]`
+  The owner's descriptor is that of the instance whose `run` is the
+  snapshot's run (§3.3). A snapshot names no revision: its tag is its
+  collection's type's (§7.5). `[F: seed/snapshot.json]`
   - **Why.** A minor revision can add a resource that sorts before a
     collection, and so move its index. `modem.v3` 3.3's seven `packed/`
     states make `sdu/endpoint/{endpoint}` collection 11. In 3.0 to 3.2 it
     is 4, and 3.3's 4 is `packed/identity`. One deployment can run both
     revisions (R4).
+  - **Two instances** can run two revisions, each answering under its own
+    run (§4.3). So each snapshot is mapped with the revision of the
+    instance that wrote it.
+  - **No descriptor states the run.** Where the owner's descriptors reach
+    the reader and none states the snapshot's run, the late joiner applies
+    no omission rule over that snapshot. Its entries still merge.
   - **Where no descriptor reaches the reader**, as across a constrained
     face (§8.5), the owner's revision is the deployment's word, as the
     catalog the owner writes under is (§8.6, R7). Where that catalog lists
@@ -1146,6 +1162,18 @@ from S4's GET and follows a subscription.
     member's key, the late joiner applies no omission rule over that
     snapshot. Its entries still merge, on their keys.
     `[F: seed/snapshot.json]`
+  - **It says which resources are per key, too.** Whether a member's
+    resource is a per-key resource (above) is read from the owner's
+    revision: the one its descriptor names for the run of the sample's
+    stamp, or the deployment's word. A reader that holds another revision
+    reads it from the owner's, never from its own alone.
+    `[Sc: state.md §15]`
+    - **Why.** An owner on an earlier revision can answer per key a
+      member that a later revision answers by snapshot. `health.v1`'s
+      revision 1.0 confirms its status by `freshness.v1`, so §4.3's table
+      lists it. Its real `reply_del` is then no stray.
+    - **Without the owner's revision**, a reader cannot tell a stray
+      `reply_del` from an owner's, and merges it as a deletion.
 - **Without the contract**, or without the owner's revision, a reader
   cannot map a collection's index to its template, so it applies no
   omission rule: [`observer.md`](observer.md) §4.1.
@@ -1299,10 +1327,11 @@ time a profile reads (the table below).
     - **A collection's times** are minted so too, though no sample
       carries them as a Zenoh timestamp. They are a snapshot's time and
       a member's last confirmation, for a collection with a horizon
-      (§4.2). An owner mints a last confirmation at each mutation of such
-      a member, a delete among them, and as it writes each heartbeat that
-      vouches for it (§7.5). It mints a snapshot's time as it builds the
-      snapshot. `[Sc: profiles/freshness/scenarios-v2.md §3]`
+      (§4.2). An owner mints a last confirmation at each put of such a
+      member, and as it writes each heartbeat that vouches for it (§7.5).
+      A delete's would be carried by nothing: a tombstone has no
+      confirmation. It mints a snapshot's time as it builds the snapshot.
+      `[Sc: profiles/freshness/scenarios-v2.md §3]`
       - A snapshot carries each as a time: the timestamp's instant, to the
         millisecond, counted from the deployment epoch (§7.6). A heartbeat
         carries its own so.
@@ -5453,7 +5482,7 @@ section each was written against, whose pointer leads on.
 | `conformance/frame/` | §7.7 |
 | `conformance/catalog/` | §8.6 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
-| `scenarios/state.md` | §4; §1 in-band stamps through a router that stamps nothing and one that stamps, and §8.2's session posture; §7 runs, a record's and a random draw's, the run before the seq wraps, and a consumer's and a tool's late joiner across two runs, after their seed and inside it; §9 an archive within a run and across two; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node; §13 a stream key's seq wrapping, and kept across a takeover; §14 a collection's snapshot in pages, a member read, a page lost, `Latest`'s control, a delete beyond the window and two instances answering |
+| `scenarios/state.md` | §4; §1 in-band stamps through a router that stamps nothing and one that stamps, and §8.2's session posture; §7 runs, a record's and a random draw's, the run before the seq wraps, and a consumer's and a tool's late joiner across two runs, after their seed and inside it; §9 an archive within a run and across two; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node; §13 a stream key's seq wrapping, and kept across a takeover; §14 a collection's snapshot in pages, a member read, a page lost, `Latest`'s control, a delete beyond the window and two instances answering; §15 a stray `reply_del`, and an owner on an earlier revision whose state is per key |
 | `scenarios/operations.md` | §5, §6; §9 a call's forms for each kind of type, the as-of mark, an owner's error beside a router's `Timeout`, a querier's and a malformed one, an earlier version's envelope read as the transport's, and a request under another `Encoding` refused |
 | `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip; §7–§9 what a complete presence read is: a session cut off, before a read or while it runs, a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict; §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout; a watch session in no namespace on the wire keys, a round trip through a watch session cut off, and a move unconfirming what a reader holds; a reopen telling every token, the round trip after it waiting for them, and one round trip and one read at a time; step 10's counts, the reader's own sessions'; what a black box is judged on there, at what period its output is sampled, and one that prints nothing while its link is cut; Appendix B |
 | `scenarios/bindings.md` | §3.2; §6 a binding's order kept by the descriptor |
