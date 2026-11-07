@@ -63,10 +63,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::SystemTime;
 
 use zenkey_fleet::{
-    AddressWatch, CondState, LivePresence, PresenceBasis, PresenceChange, PresenceSource,
-    PresenceTransition, ResolvedTarget as Target, presence_observer,
+    AddressWatch, CondState, LivePresence, ObservedPresence, PresenceBasis, PresenceChange,
+    PresenceSource, PresenceTransition, ResolvedTarget as Target, presence_observer,
 };
-use zenkey_model::grammar::{Addr, InstanceId, alive_key, member_key};
+use zenkey_model::grammar::{Addr, IfaceId, InstanceId, alive_key, member_key};
 use zenoh::key_expr::KeyExpr;
 
 use crate::engine::RuleNotice;
@@ -196,6 +196,55 @@ impl PresenceRules {
     /// The rules' names.
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.rules.iter().map(|r| r.name.as_str())
+    }
+
+    /// Every rule of the interface form whose selector names one interface
+    /// (`…/@zk/alive/<iface>/…`): its name, its addresses and the interface.
+    /// What [`PresenceRules::refuse_tokenless`] reads.
+    pub fn named_interfaces(&self) -> Vec<(&str, &Target, IfaceId)> {
+        self.rules
+            .iter()
+            .filter(|r| r.form == Form::Interface)
+            .filter_map(|r| {
+                let sel = r.keyexpr.as_ref()?.as_str();
+                let relative = zenkey_fleet::strip_namespace(&self.namespace, sel)?;
+                let iface = relative.split('/').nth(5)?.parse::<IfaceId>().ok()?;
+                Some((r.name.as_str(), &r.target, iface))
+            })
+            .collect()
+    }
+
+    /// Refuse, by name, a rule of the interface form whose interface an
+    /// instance it reaches marks `"token": false` (#982 H3; core §8.1,
+    /// observer §3.6): that provider holds no interface token, a first-hop
+    /// owner none at all, so the rule would never see it held nor gone.
+    /// `observed` is a presence read with descriptors; `None` when no such
+    /// instance is in it. The refusal names what to write instead,
+    /// `instance-gone`, which reads the instance token the provider holds.
+    pub fn refuse_tokenless(&self, observed: &ObservedPresence) -> Option<String> {
+        for (name, target, iface) in self.named_interfaces() {
+            let tokenless = observed
+                .descriptors
+                .iter()
+                .flatten()
+                .filter(|((addr, _), _)| target.matches(addr))
+                .filter_map(|((addr, _), read)| Some((addr, read.descriptor()?)))
+                .find(|(_, d)| {
+                    d.interfaces
+                        .iter()
+                        .any(|e| e.iface == iface.to_string() && !e.token)
+                });
+            if let Some((addr, _)) = tokenless {
+                return Some(format!(
+                    "rule {name:?} (liveliness-gone on {iface}'s interface tokens): {addr}'s \
+                     descriptor marks {iface} \"token\": false, so it holds no interface token \
+                     of it — an owner on a first hop holds none at all (core §8.1) — and the \
+                     rule would never see it held nor gone. A provider is found by its \
+                     instance token (observer §3.6): write `instance-gone {addr}`"
+                ));
+            }
+        }
+        None
     }
 
     /// Track every rule's pattern on the projection, before it is seeded.

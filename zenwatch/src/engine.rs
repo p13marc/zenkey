@@ -579,6 +579,20 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
     let mut presence_rules = PresenceRules::new(e.rules, namespace);
     let mut presence_monitor: Option<Monitor> = None;
     let mut presence_feed: Option<PresenceFeed> = None;
+    // A rule on a tokenless interface's tokens is refused by name (#982
+    // H3; core §8.1, observer §3.6): its providers hold none, so it would
+    // never fire. Asked of the instances present at start, by one presence
+    // read with descriptors of the scope the rules cover.
+    let named = presence_rules.named_interfaces();
+    if !named.is_empty() {
+        let scope = zenkey_fleet::covering_scope(named.iter().map(|(_, t, _)| *t));
+        if let Ok(observed) =
+            zenkey_fleet::observe_presence(&e.bus.session, &scope, e.timeout).await
+            && let Some(why) = presence_rules.refuse_tokenless(&observed)
+        {
+            return Err(unaskable!("{why}"));
+        }
+    }
     if !presence_rules.is_empty() {
         let scope = PresenceScope::all();
         // Its liveliness subscribers on the deployment's watch session, in
