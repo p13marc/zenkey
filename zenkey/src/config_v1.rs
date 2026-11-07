@@ -121,8 +121,10 @@ use crate::writer::EventWriter;
 /// `spec/profiles/.history/config.v1/` (§3), byte for byte: it uses
 /// `freshness.v2`, so its owner's heartbeat confirms the view and the
 /// status.
+/// The crate reads it through `bundles/`, a link to that file, so its
+/// package carries the bytes (#929).
 pub const BUNDLE: &[u8] = include_bytes!(
-    "../../spec/profiles/.history/config.v1/4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501.bundle.json"
+    "../bundles/config.v1/4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501.bundle.json"
 );
 
 /// Its fingerprint (§3).

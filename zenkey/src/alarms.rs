@@ -109,8 +109,10 @@ use crate::writer::Writer;
 /// The standard contract's bundle, revision 1.1 as published in
 /// `spec/profiles/.history/alarms.v1/` (§3), byte for byte: it uses
 /// `freshness.v2`, so its owner's heartbeat confirms each firing alarm.
+/// The crate reads it through `bundles/`, a link to that file, so its
+/// package carries the bytes (#929).
 pub const BUNDLE: &[u8] = include_bytes!(
-    "../../spec/profiles/.history/alarms.v1/e2b48d58709a99de7b71065b09c4c042a9fcb25a3cb3e6a395f8f8bc74787eed.bundle.json"
+    "../bundles/alarms.v1/e2b48d58709a99de7b71065b09c4c042a9fcb25a3cb3e6a395f8f8bc74787eed.bundle.json"
 );
 
 /// Its fingerprint (§3).
