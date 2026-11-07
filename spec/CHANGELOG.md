@@ -126,10 +126,40 @@ blocker.
 - **F-496, minor: Appendix E's `snapshot/` row** names the paging cases'
   refusal, as the fixtures' README does.
 
+**Answered: zk2py round 104's F-498 and F-502.** Round 104 read core 0.99
+(#985's C4d) cold. Two of its five findings name the core, neither a
+blocker.
+- **F-498, a gap: a fixture with no rule.** E2 (#1078, c6f64924)
+  cherry-picked `seed/snapshot.json` onto `main` ahead of its rule, at
+  core 0.99. It had 42 cases, and no entry or row of Appendix E named it.
+  §4.2 here states what it pins:
+  - the snapshot key;
+  - a page's entries, merged as the page arrives;
+  - when a snapshot is complete (§7.5);
+  - the omission rule, its two guards and "heard after the GET";
+  - a snapshot heard on a subscription;
+  - a reader without the contract.
+
+  Appendix C and Appendix E name the file. E2's 42 cases stand
+  unchanged, and F-497's three make 45.
+- **F-502, minor: §5.1's order of refusals.** "The request" names three
+  refusals since 0.99: a query under another `Encoding`, a request the
+  parse refuses, and one whose record does not decode. "The order of
+  refusals" placed only the last, after the three refusals of the key.
+  It now places all three there. That is where the reference refuses
+  them: `zenkey`'s operation server reads the request after the key's
+  refusals. So a wildcard call under `application/json` to an operation
+  that forbids fan-out is `fanout_forbidden`. Round 104 saw both owners
+  answer so. No rule changed, and no fixture. `scenarios/operations.md`
+  §9 adds the step, step 9, which the text cites, and `zenkey`'s
+  `operations.rs` runs it, with an unexposed operation called under
+  `application/json` answered `unavailable`.
+
 **The evidence.**
-- **`seed/snapshot.json`,** new: 45 cases. A reader's collections and
-  what it holds, then the GET's pages, per-key replies and live samples,
-  give what it holds and each snapshot's completeness and omissions.
+- **`seed/snapshot.json`:** 45 cases, E2's 42 and F-497's three. A
+  reader's collections and what it holds, then the GET's pages, per-key
+  replies and live samples, give what it holds and each snapshot's
+  completeness and omissions.
   Written by an independent reading of the text, and checked by a second
   that parses each page's bytes itself. They agree on 70,000 random cases
   too. Checked, never blessed.

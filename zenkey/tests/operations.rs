@@ -311,6 +311,29 @@ async fn raw_get_with(
     out
 }
 
+/// A call under `application/json`, raw: the bytes of the request form,
+/// `0x40` then `payload`, under an `Encoding` that carries no form (core
+/// §5.1, "The request"), `All` + `None`.
+async fn foreign_get(s: &zenoh::Session, sel: &str, payload: &[u8]) -> Vec<Reply> {
+    let mut request = vec![0x40];
+    request.extend_from_slice(payload);
+    let rx = s
+        .get(sel)
+        .payload(request)
+        .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
+        .target(QueryTarget::All)
+        .consolidation(ConsolidationMode::None)
+        .timeout(T)
+        .with(flume::unbounded::<Reply>())
+        .await
+        .unwrap();
+    let mut out = Vec::new();
+    while let Ok(r) = rx.recv_async().await {
+        out.push(r);
+    }
+    out
+}
+
 /// A fan-out, raw: `All` + `None` (O2).
 async fn fan(s: &zenoh::Session, sel: &str, payload: &[u8]) -> Vec<Reply> {
     raw_get(s, sel, payload, QueryTarget::All, ConsolidationMode::None).await
@@ -702,6 +725,13 @@ async fn s3_replies_and_errors() {
         (env.code.as_str(), env.cause.as_deref()),
         ("unavailable", Some("capability"))
     );
+    // Under `application/json` too (core §5.1, "The order of refusals";
+    // zk2py round 104's F-502): the operation is unavailable before its
+    // request is read, whatever the query's `Encoding`.
+    let calls = count(&seen.set);
+    let foreign = foreign_get(&tool, "zk2/h1/tc/tc.v1/@op/offload", br#"{"up":true}"#).await;
+    assert_eq!(refusal_codes(&foreign), ["unavailable"]);
+    assert_eq!(count(&seen.set), calls, "no handler ran");
 
     // 6. `app`, with the declared error type's value inline.
     let app = c
@@ -2467,6 +2497,19 @@ async fn s9_a_calls_forms() {
         out
     };
     assert_eq!(refusal_codes(&replies), ["invalid_request"]);
+    assert_eq!(log.lock().unwrap().len(), before, "no handler ran");
+
+    // 9. A wildcard call under `application/json` to `set`, which forbids
+    // fan-out: the key's refusals come first (core §5.1, "The order of
+    // refusals"; zk2py round 104's F-502), so `fanout_forbidden`, never
+    // `invalid_request`, and no handler runs.
+    let replies = foreign_get(
+        &test,
+        "zk2/h1/tc/tc.v1/@op/interfaces/*/set",
+        br#"{"up":true}"#,
+    )
+    .await;
+    assert_eq!(refusal_codes(&replies), ["fanout_forbidden"]);
     assert_eq!(log.lock().unwrap().len(), before, "no handler ran");
     drop((servers2, frozen));
 }

@@ -1519,9 +1519,11 @@ SHOULD NOT repeat a template parameter (W102). `[F: contracts/w102-repeat]`
   3. a key that names no member (below): `invalid_request`.
 
   So a wildcard call to an operation that forbids fan-out is
-  `fanout_forbidden`, whatever its other chunks hold. A request that does
-  not decode is refused after these, by the server's decode (below).
-  `[Sc: operations.md §2]`
+  `fanout_forbidden`, whatever its other chunks hold and whatever the
+  query's `Encoding`. The request is read after these ("The request",
+  below). A query under another `Encoding`, a request the parse refuses,
+  and one that does not decode are refused then, with `invalid_request`.
+  `[Sc: operations.md §2, §9]`
 - **A key that names no member.** A concrete call whose resource chunks
   resolve to no member of the operation's template, because a parameter
   chunk is not a canonical slug (§1.4, §2.2), is refused with
