@@ -5,7 +5,7 @@ entry naming its text. Each entry records what changed, what deliberately
 did not, and why. A breaking change is a new major, a new file, never an
 entry here ([`../README.md`](../README.md)).
 
-## `v2.md` 0.7 — 2026-11-07: a heartbeat's time from the catalog's epoch (#1080)
+## `v2.md` 0.6 — 2026-11-07: a heartbeat's time from the catalog's epoch (#1080)
 
 #1080 found the reference's heartbeat writing its time in Unix seconds
 beside frames that count from the catalog's epoch. A zenoh-modem owner's

@@ -8,7 +8,7 @@ sitting.
 
 ## Unreleased (`main`, zk2) — a heartbeat's time from the catalog's epoch (#1080)
 
-`freshness.v2` 0.7 §2.4: an owner's heartbeat counts its time from the
+`freshness.v2` 0.6 §2.4: an owner's heartbeat counts its time from the
 deployment epoch, the catalog's, as its frames and packed records do.
 
 | Before | Now | Notes |
