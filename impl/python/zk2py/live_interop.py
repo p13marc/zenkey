@@ -261,6 +261,24 @@ def _describe(r) -> str:
                      for a in r.attempts)
 
 
+def implemented(by_iface: dict[str, Any]) -> dict[str, Any]:
+    """The interfaces an owner of ``by_iface`` implements: those, and
+    freshness.v2 §3's standard contract beside any whose contract uses
+    ``freshness.v2`` and has a collection ("An owner also implements the
+    standard contract (§3), so its descriptor lists the interface
+    freshness.v2"; its interface token "is held as any interface's"). The
+    round 102 mend: the checks below listed the contracts alone, from before
+    the profiles moved onto freshness.v2 (#978 F5)."""
+    from . import freshness_v2, heartbeat
+
+    out = dict(by_iface)
+    if any(freshness_v2.uses_v2(c.canonical) and heartbeat.layout_of(c.canonical, c.fingerprint).collections
+           for c in by_iface.values()):
+        std = freshness_v2.standard_contract()
+        out[std.interface] = std
+    return out
+
+
 def run_one(report: Report, exe: Path, service: str, paths: list[Path], scale: int) -> None:
     import zenoh
 
@@ -304,7 +322,8 @@ def _checks(report: Report, run: str, session, endpoint: str, owner: Owner, syst
     from .descriptor import check_descriptor
 
     # -- presence, acted on as seen (§8.1, §8.2) --------------------------
-    expected_alive = {(i, c.fingerprint.removeprefix("sha256:")[:16]) for i, c in by_iface.items()}
+    every = implemented(by_iface)
+    expected_alive = {(i, c.fingerprint.removeprefix("sha256:")[:16]) for i, c in every.items()}
     selector = f"zk2/{system}/{svc}/@zk/**"
     deadline = time.monotonic() + PRESENCE_WAIT_S
     pres = live.list_presence(session, selector)
@@ -335,8 +354,9 @@ def _checks(report: Report, run: str, session, endpoint: str, owner: Owner, syst
     report.check(run, "the `ready` line names the instance token seen on the bus",
                  ready == instance_key, f"ready={ready!r}")
     got_alive = {(a["iface"], a["fp16"]) for a in pres.alive}
-    report.check(run, "one interface token per interface, <fp16> from zk2py's fingerprint",
-                 got_alive == expected_alive and len(pres.alive) == len(by_iface)
+    report.check(run, "one interface token per interface, freshness.v2's beside a contract that uses it (freshness.v2 "
+                      "§3), <fp16> from zk2py's fingerprint",
+                 got_alive == expected_alive and len(pres.alive) == len(every)
                  and all(a["instance"] == instance for a in pres.alive),
                  f"seen {sorted(got_alive)}, expected {sorted(expected_alive)}")
     report.check(run, "every token under the service is a zk2 control key", not pres.other,
@@ -366,8 +386,9 @@ def _checks(report: Report, run: str, session, endpoint: str, owner: Owner, syst
     report.check(run, "descriptor service and instance", doc.get("service") == f"{system}/{svc}"
                  and doc.get("instance") == instance, f"{doc.get('service')}, {doc.get('instance')}")
     listed = {e["iface"]: e for e in doc.get("interfaces", [])}
-    report.check(run, "the descriptor lists exactly the implemented interfaces",
-                 set(listed) == set(by_iface), f"{sorted(listed)}")
+    report.check(run, "the descriptor lists exactly the implemented interfaces, freshness.v2 among them beside a "
+                      "contract that uses it (freshness.v2 §1, §3)",
+                 set(listed) == set(every), f"{sorted(listed)}")
     for iface, c in sorted(by_iface.items()):
         e = listed.get(iface, {})
         report.check(run, f"{iface}: the descriptor's fingerprint is zk2py's",
@@ -547,7 +568,9 @@ def run_rust_behind_r1(report: Report, exe: Path) -> None:
             selector = f"zk2/{system}/{svc}/@zk/**"
             deadline = time.monotonic() + PRESENCE_WAIT_S
             pres = live.list_presence(tool, selector)
-            n = len(paths)
+            # freshness.v2's interface token beside the contracts that use it
+            # (freshness.v2 §3; the round 102 mend)
+            n = len(implemented(by_iface))
             while time.monotonic() < deadline and not (pres.instances and len(pres.alive) == n):
                 time.sleep(0.05)
                 pres = live.list_presence(tool, selector)
@@ -563,17 +586,22 @@ def run_rust_behind_r1(report: Report, exe: Path) -> None:
             zid = doc.get("meta", {}).get("zid")
             st = live.get_state(tool, f"zk2/{system}/{svc}/zk2py_echo.v1/state/health")
             who = [live.attribute_stamp(r.stamp_id, doc) for r in st.replies]
-            report.check(run, "state.md §1 through R1: the value held from the start is attributed to the owner "
-                              "by meta.zid (§3.3, 0.10), and that zid is not R1's",
-                         [r.payload for r in st.replies] == [b"ok"] and who == ["owner"] and zid != r1_zid,
+            # Core §4.3's table (0.73) and §8.2's session posture: a state off
+            # the table carries no Zenoh timestamp, so the value held from the
+            # start is unstamped, never attributed (the round 102 mend: the
+            # owner example of ee5fb697 puts it so; round 101's still stamped).
+            report.check(run, "state.md §1 through R1: the value held from the start, off core §4.3's table, carries "
+                              "no Zenoh timestamp (core §8.2), and the descriptor's meta.zid is not R1's",
+                         [r.payload for r in st.replies] == [b"ok"] and who == ["unstamped"] and zid != r1_zid,
                          f"{[(r.payload, r.stamp_id) for r in st.replies]} {who}, meta.zid {zid}, R1 {r1_zid}")
             # observer §4.4 (0.11): "A tool MUST compare two zids by value". The same
-            # zid in capitals, padded to 32 digits, is another text.
+            # zid in capitals, padded to 32 digits, is another text: a stamp of
+            # the owner's session's id is attributed by it all the same.
             respelled = str(zid).upper().rjust(32, "0")
-            again = [live.attribute_stamp(r.stamp_id, {"meta": {"zid": respelled}}) for r in st.replies]
+            again = live.attribute_stamp(str(zid), {"meta": {"zid": respelled}})
             report.check(run, "by value, not text: meta.zid respelled in capitals and padded to 32 digits still "
-                              "attributes the stamp to the owner (§3.3, 0.11)",
-                         again == ["owner"] and respelled != zid, f"{respelled} → {again}")
+                              "attributes a stamp of the owner's session's id to the owner (§3.3, 0.11)",
+                         again == "owner" and respelled != zid, f"{respelled} → {again}")
             base = f"zk2/{system}/{svc}/zk2py_tc.v1/@op"
             diag = live.call(tool, f"{base}/diagnostics", b"x")
             report.check(run, "a parameterless operation answers through R1 (O3)",
@@ -2471,6 +2499,10 @@ def run_python_health(report: Report, exe: Path, consume: Path) -> None:
         # -- lab/svc: bring-up, read by T -----------------------------------
         run = "health.v1 0.2: the owner example's health (lab/svc), read by zk2py"
         s = fr.Subscriber(s_sess, "zk2/lab/svc/health.v1/**")
+        # health.v1 0.9 is on freshness.v2: S follows the heartbeat covering
+        # health.v1 (the round 102 mend; the checks below were 0.2's,
+        # freshness.v1's re-puts)
+        s.follow("lab/svc", contract.canonical, contract.fingerprint)
         subs.append(s)
         at_token: list[Any] = []
         appeared: queue.Queue = queue.Queue()
@@ -2502,9 +2534,10 @@ def run_python_health(report: Report, exe: Path, consume: Path) -> None:
                      and first[0]["reason"] == "serving", str(first))
         doc, raw = _doc(t_sess, ready)
         entry = next((e for e in doc.get("interfaces") or [] if e.get("iface") == "health.v1"), {})
-        report.check(run, "its descriptor lists health.v1 in interfaces, its profiles list freshness.v1 and not "
-                          "health.v1 (core §3.3, §10, 0.23), and it has no D code against the standard contract",
-                     entry.get("token") is True and doc.get("profiles") == ["freshness.v1"]
+        report.check(run, "its descriptor lists health.v1 in interfaces, its profiles list freshness.v2 and not "
+                          "health.v1 (core §3.3, §10; health.v1 0.9 uses freshness.v2), and it has no D code against "
+                          "the standard contract",
+                     entry.get("token") is True and doc.get("profiles") == ["freshness.v2"]
                      and check_descriptor(raw, [contract]) == [],
                      f"entry {entry}, profiles {doc.get('profiles')}")
         fp = live.fingerprint_of(doc, "health.v1")
@@ -2603,8 +2636,9 @@ def run_python_health(report: Report, exe: Path, consume: Path) -> None:
                      line is not None and line.startswith("refused status BOGUS"), repr(line))
 
         # -- lab/ahead: clock ahead, the [moved clock] tier -------------------
-        run = "health.v1 0.2: the owner example 2 s ahead (lab/ahead), [moved clock]"
+        run = "health.v1 0.9: the owner example 2 s ahead (lab/ahead), [moved clock]"
         sa = fr.Subscriber(s_sess, "zk2/lab/ahead/health.v1/**")
+        sa.follow("lab/ahead", contract.canonical, contract.fingerprint)
         subs.append(sa)
         time.sleep(0.3)
         ahead = Owner(exe, "lab/ahead", [], connect=ep,
@@ -2645,20 +2679,28 @@ def run_python_health(report: Report, exe: Path, consume: Path) -> None:
                      f"R1 {r1_zid}, after {(t_fault - t_beat) / 1e9:.2f} s")
         # lab/svc goes on confirming for 35 s, then stops.
         _sleep_until(t_fault + 35 * fr.NS)
-        reputs = [x for x in s.of(sk) if x.kind == "put" and x.arrival_ns > t_all]
-        gaps = [(b.arrival_ns - a_.arrival_ns) / 1e9 for a_, b in zip(reputs, reputs[1:])]
-        same = len({x.payload for x in reputs[-2:]}) == 1 if len(reputs) >= 2 else False
-        report.check(health_svc := "health.v1 0.2: the owner example's re-puts (lab/svc)",
-                     "its status is re-put unchanged, since_ns included, no two puts more than 30 s apart "
-                     "(§2.3, freshness.v1 §2.4)",
-                     len(reputs) >= 2 and max(gaps) <= 30.2 and same,
-                     f"{len(reputs)} puts since the drive, gaps {[round(g, 2) for g in gaps]} s")
+        # health.v1 0.9 (freshness.v2 §2.4): the status is never put again
+        # unchanged; its heartbeat vouches for it, at least every 30 s. The
+        # round 102 mend: 0.2's check asked for freshness.v1's re-puts.
+        drive_end = max((x.arrival_ns for x in s.of(sk) if x.kind == "put" and not x.confirmation), default=t_all)
+        reputs = [x for x in s.of(sk) if x.kind == "put" and not x.confirmation and x.arrival_ns > drive_end]
+        beats_svc = [t for t, a_ in s.beats.get(("lab/svc", "health.v1"), []) if t > drive_end
+                     and sk in (((a_.get("read") or {}).get("sections") or {}).get("state/status") or {}).get(
+                         "confirmed", [])]
+        arrivals = [drive_end] + beats_svc
+        gaps = [(b - a_) / 1e9 for a_, b in zip(arrivals, arrivals[1:])]
+        report.check(health_svc := "health.v1 0.9: the owner example's confirmations (lab/svc)",
+                     "after the drive its status is never put again unchanged, and its heartbeat vouches for it "
+                     "at least every 30 s (§2.3, freshness.v2 §2.4)",
+                     not reputs and bool(beats_svc) and max(gaps) <= 30.5,
+                     f"{len(reputs)} puts after the drive's last, {len(beats_svc)} heartbeats vouching, gaps "
+                     f"{[round(g, 2) for g in gaps]} s")
         line = rust.command("confirm off")
         t_off = time.monotonic_ns()
         report.check(health_svc, "`confirm off` is answered with its status line", line is not None
                      and line.startswith("health status=OK"), repr(line))
         _sleep_until(t_fault + 65 * fr.NS)
-        puts_after = [x for x in sa.of(ask) if x.kind == "put" and x.arrival_ns > t_fault]
+        puts_after = [x for x in sa.of(ask) if x.kind == "put" and not x.confirmation and x.arrival_ns > t_fault]
         afaults = [x for x in sa.of(afk) if (h.decode_fault(x.payload) or {}).get("code") == "clock_ahead"]
         gap = (afaults[1].arrival_ns - afaults[0].arrival_ns) / 1e9 if len(afaults) > 1 else None
         pres = live.list_presence(t_sess, "zk2/lab/ahead/@zk/**")
@@ -2666,16 +2708,22 @@ def run_python_health(report: Report, exe: Path, consume: Path) -> None:
         a = h.judge(rd)
         conf = [x.arrival_ns for x in sa.of(ask) if x.kind == "put"]
         q = h.clock_from(sa, "lab/ahead")
-        report.check(run, "step 2: no status put after the fault; the fault again within 31 s; its tokens present; "
-                          "at 65 s S judges the status stale, never FAILED, and the clock question answers yes",
+        held_beats = [a_ for t, a_ in sa.beats.get(("lab/ahead", "health.v1"), []) if t > t_fault and "read" in a_]
+        report.check(run, "step 2 (health.v1 0.9, scenarios §4): no status put after the fault; the fault again "
+                          "within 31 s; its tokens present; every heartbeat since vouches for the status, its time "
+                          "unknown; at 65 s S judges healthy, ok, the heartbeats confirming it, and the clock question "
+                          "answers yes",
                      not puts_after and gap is not None and gap <= 31 and len(pres.instances) == 1
-                     and a.verdict == "stale" and a.level is None and q == "yes",
+                     and bool(held_beats) and all(a_.get("time") is None for a_ in held_beats)
+                     and a.expect() == {"verdict": "healthy", "reason": "ok", "level": "ok"} and q == "yes",
                      f"{len(puts_after)} puts after, fault gap {gap}, tokens {len(pres.instances)}, {a.expect()}, "
                      f"clock ahead {q}")
         line = ahead.command("clock-offset 0")
         t_fix = time.monotonic_ns()
         _sleep_until(t_fix + 35 * fr.NS)
-        reput = [x for x in sa.of(ask) if x.kind == "put" and x.arrival_ns > t_fix]
+        reput = [x for x in sa.of(ask) if x.kind == "put" and not x.confirmation and x.arrival_ns > t_fix]
+        known = [t for t, a_ in sa.beats.get(("lab/ahead", "health.v1"), []) if t > t_fix and "read" in a_
+                 and a_.get("time") is not None]
         after = [x for x in sa.of(afk) if x.arrival_ns > t_fix + fr.NS
                  and (h.decode_fault(x.payload) or {}).get("code") == "clock_ahead"]
         rd, _ = h.read_near(t_sess, "lab/ahead", subscriber=sa, trust=word, get=False)
@@ -2683,13 +2731,14 @@ def run_python_health(report: Report, exe: Path, consume: Path) -> None:
         conf = [x.arrival_ns for x in sa.of(ask) if x.kind == "put"]
         allf = [x.arrival_ns for x in sa.of(afk) if (h.decode_fault(x.payload) or {}).get("code") == "clock_ahead"]
         q = h.clock_from(sa, "lab/ahead")
-        report.check(run, "step 3: `clock-offset 0`: the status re-put within a few seconds, no clock_ahead after, "
-                          "S judges healthy, ok, and the clock question answers no",
-                     line == "clock-offset 0" and bool(reput) and (reput[0].arrival_ns - t_fix) <= 5 * fr.NS
+        report.check(run, "step 3 (health.v1 0.9, scenarios §4): `clock-offset 0`: a heartbeat whose time is known "
+                          "within 30 s, no status put, no clock_ahead after; S judges healthy, ok, and the clock "
+                          "question answers no",
+                     line == "clock-offset 0" and bool(known) and (known[0] - t_fix) <= 30.5 * fr.NS and not reput
                      and not after and a.expect() == {"verdict": "healthy", "reason": "ok", "level": "ok"} and q == "no",
-                     f"line {line!r}; re-put after "
-                     f"{(reput[0].arrival_ns - t_fix) / 1e9 if reput else None} s; {len(after)} faults after; "
-                     f"{a.expect()}; clock ahead {q}")
+                     f"line {line!r}; first known-time heartbeat after "
+                     f"{(known[0] - t_fix) / 1e9 if known else None} s; {len(reput)} status puts; {len(after)} faults "
+                     f"after; {a.expect()}; clock ahead {q}")
         # lab/svc, 65 s after `confirm off`.
         _sleep_until(t_off + 65 * fr.NS)
         rd, _ = h.read_near(t_sess, "lab/svc", subscriber=s, trust=word, get=False)
@@ -2705,7 +2754,7 @@ def run_python_health(report: Report, exe: Path, consume: Path) -> None:
             rusts.remove(o)
 
         # -- §4 step 4 under drop_future_timestamp ---------------------------
-        run = "health.v1 0.2: the owner example 2 s ahead under drop_future_timestamp, [moved clock]"
+        run = "health.v1 0.9: the owner example 2 s ahead under drop_future_timestamp, [moved clock]"
         r2, ep2, _ = _r1(drop_future=True)
         s2_sess, g2_sess = live.open_client(ep2), live.open_client(ep2)
         try:
@@ -2729,10 +2778,16 @@ def run_python_health(report: Report, exe: Path, consume: Path) -> None:
             st = live.get_state(g2_sess, "zk2/lab/ahead/health.v1/state/status")
             gets = [(x.stamp_id, h.decode_status(x.payload)) for x in st.replies]
             owner_d = live._zid_value((doc_d.get("meta") or {}).get("zid"))
-            report.check(run, "step 4: S receives neither the fault nor any status put; G's reply holds the status "
-                              "under the owner's stamp (a router never drops or re-stamps a reply, core §4.1)",
+            # health.v1 0.9 scenarios §4 step 4: "The status put carries no
+            # Zenoh timestamp of the owner's (freshness.v2 §2.4), so R1 stamps
+            # it itself, and S receives it" (the round 102 mend; 0.2 had S
+            # receive none).
+            report.check(run, "step 4 (health.v1 0.9): S receives no fault, R1 dropped it, and the status put, which "
+                              "carries no Zenoh timestamp of the owner's; G's reply holds the status under the owner's "
+                              "stamp (a router never drops or re-stamps a reply, core §4.1)",
                          ready_d is not None and not s2.of("zk2/lab/ahead/health.v1/stream/faults")
-                         and not s2.of("zk2/lab/ahead/health.v1/state/status") and len(gets) == 1
+                         and len([x for x in s2.of("zk2/lab/ahead/health.v1/state/status") if x.kind == "put"]) >= 1
+                         and len(gets) == 1
                          and live._zid_value(gets[0][0]) == owner_d and gets[0][1]["level"] == h.OK,
                          f"faults {len(s2.of('zk2/lab/ahead/health.v1/stream/faults'))}, status puts "
                          f"{len(s2.of('zk2/lab/ahead/health.v1/state/status'))}; GET {gets}, owner {owner_d}")
@@ -2745,7 +2800,7 @@ def run_python_health(report: Report, exe: Path, consume: Path) -> None:
             r2.close()
 
         # -- the reverse: zk2py's health owner, read by the Rust consumer ------
-        run = "health.v1 0.2: zk2py's health owner (lab/py), read by the Rust consume example"
+        run = "health.v1 0.9: zk2py's health owner (lab/py), read by the Rust consume example"
         if consume.is_file():
             py = h.HealthOwner("lab", "py", connect=ep, level=h.DEGRADED, reason="upstream lost")
             py.start()
@@ -2757,8 +2812,17 @@ def run_python_health(report: Report, exe: Path, consume: Path) -> None:
                                    capture_output=True, text=True, timeout=60)
                 lines = p.stdout.splitlines()
                 prefix = held.payload[:4 + held.payload[3]].decode("utf-8")
-                ok = (len(lines) >= 2 and lines[0] == "present lab/py"
-                      and lines[1].startswith(f"state {py.status_key} {held.stamp} " + prefix))
+                # freshness.v2 §2.4: the put carries no Zenoh timestamp, and a
+                # GET's reply carries the last confirmation, which a
+                # heartbeat moves: the reply's stamp is zk2py's session's (its
+                # id), whatever its time (the round 102 mend; 0.2's check
+                # compared the put's stamp)
+                zid = str(py.owner.session.zid()) if py.owner.session is not None else "?"
+                parts = lines[1].split(" ", 3) if len(lines) >= 2 else []
+                ok = (len(lines) >= 2 and lines[0] == "present lab/py" and len(parts) == 4
+                      and parts[1] == py.status_key
+                      and live._zid_value(parts[2].split("/")[-1]) == live._zid_value(zid)
+                      and parts[3].startswith(prefix))
                 report.check(run, "it finds zk2py's owner present and reads its status, the protobuf bytes of "
                                   "FAILED \"check disk: full\" (raised by the check, §2.2) under zk2py's stamp; it "
                                   "then stops, as health.v1 has no operation for it to call",
@@ -3197,9 +3261,10 @@ def run_python_config(report: Report, exe: Path) -> None:
         doc, raw = _doc(t_sess, ready)
         entry = next((e for e in doc.get("interfaces") or [] if e.get("iface") == "config.v1"), {})
         report.check(run, "its descriptor lists config.v1 with the standard contract's fingerprint and its token, its "
-                          "profiles freshness.v1 alone (§1, core §3.3), and it has no D code against the contract",
+                          "profiles freshness.v2 alone (§1, core §3.3; config.v1 0.9's contract uses freshness.v2, the "
+                          "round 102 mend), and it has no D code against the contract",
                      entry.get("contract") == contract.fingerprint and entry.get("token") is True
-                     and doc.get("profiles") == ["freshness.v1"] and check_descriptor(raw, [contract]) == [],
+                     and doc.get("profiles") == ["freshness.v2"] and check_descriptor(raw, [contract]) == [],
                      f"entry {entry}, profiles {doc.get('profiles')}")
         fp = live.fingerprint_of(doc, "config.v1")
         got = live.retrieve_bundle(t_sess, "config.v1", fp) if fp else None

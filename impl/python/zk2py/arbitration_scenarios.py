@@ -59,7 +59,7 @@ REPO = Path(__file__).resolve().parents[3]
 DIR = REPO / "impl" / "python" / "interop" / "arbitration"
 STEER, RUDDER = DIR / "steer.v1.toml", DIR / "rudder.v1.toml"
 GOVERNED = DIR / "steer-governed.v1.toml"
-BLACKBOX = Path(os.environ.get("ZK2PY_BLACKBOX", "/srv/dev/targets/zenkey-tier/blackbox"))
+BLACKBOX = Path(os.environ.get("ZK2PY_BLACKBOX", "/srv/dev/scratch/zenkey/bin/current"))
 OWNER = BLACKBOX / "owner"
 #: §10's tools: zk2py's, and the reference's when its black box is here
 TOOLS = ("zk2py", "zenctl") if os.access(BLACKBOX / "zenctl", os.X_OK) else ("zk2py",)
