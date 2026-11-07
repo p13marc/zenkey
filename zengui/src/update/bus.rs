@@ -418,6 +418,7 @@ pub(crate) fn update(
             Task::batch([
                 schedule_validation(dep, work, &tick),
                 schedule_budget(dep, obs, work),
+                hear_runs(dep, &tick),
             ])
         }
         BusMsg::VerdictsChecked(batch) => {
@@ -498,6 +499,23 @@ fn schedule_validation(dep: &Deployment, work: &Workspace, tick: &BusTick) -> Ta
     // Through the lens (#614, FL6a): session-free, so a check needs no
     // session of its own — only what the lens resolves with.
     services::value::validate(dep.lens_inputs(), batch)
+}
+
+/// The runs this tick's live puts state in band, handed to the lens feed
+/// (#1074; observer §3.11's MAY): a descriptor it kept across a token's
+/// return is by instance and run, so a put under another run reads it
+/// again, off the update thread. Nothing while the feed keeps none
+/// (`LensFeed::runs_in`).
+fn hear_runs(dep: &Deployment, tick: &BusTick) -> Task<Message> {
+    let Some(feed) = dep.lens_feed.as_ref() else {
+        return Task::none();
+    };
+    let heard = feed.0.runs_in(dep.namespace(), &tick.samples);
+    if heard.is_empty() {
+        return Task::none();
+    }
+    let feed = feed.0.clone();
+    Task::future(async move { feed.on_runs(&heard).await }).discard()
 }
 
 /// Every this-many ticks (~4 s), judge the budgets again (#221; zk2's since

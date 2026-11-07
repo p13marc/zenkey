@@ -436,8 +436,15 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   on it; `Catalog::first_hop`/`service_given` fill the listings'
   `first_hop` (`FirstHopSighting`); `LensFeed` keeps the descriptor an
   instance takes with it and reads it again at its token's return, no GET
-  (`KeptDescriptors`, bounded at 1,024; `Observed::follow_keeping`;
-  `descriptors_read`/`descriptors_kept`), a re-read's replacing it; the
+  (`KeptDescriptors`, bounded at 1,024 by keep order; `Observed::follow_keeping`;
+  `descriptors_read`/`descriptors_kept`), a re-read's replacing it, and by
+  (instance, run) since #1074: a live put's in-band run is read against
+  it (`Observed::heard_run`; `LensFeed::runs_in` over a tick's samples,
+  filtered by `KeptDescriptors::addresses` without the lock, then
+  `on_runs`, which zengui's tick calls), a kept descriptor stating another
+  run forgotten so the return GETs, a reused one on trust
+  (`KeptDescriptors::on_trust`) until a put states another run, then read
+  again once (`outrun`), a silent GET leaving it held; the
   doctor's `first-hop-token` (35 checks, a warning, `DoctorSpec::first_hop`,
   not asked without one): an interface token, or a contract key a device's
   own session answers (`HeldBundles`, replier zid against `meta.zid`).

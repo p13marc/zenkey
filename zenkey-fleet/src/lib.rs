@@ -582,6 +582,7 @@ const _: () = {
     fn lens_feed_futures_are_send(feed: &crate::LensFeed, moved: &[crate::PresenceTransition]) {
         fn is_send<T: Send>(_: &T) {}
         is_send(&feed.on_presence(moved));
+        is_send(&feed.on_runs(&[]));
     }
 
     /// The zk2 futures (#612, FJ3): a presence read holds a session and a

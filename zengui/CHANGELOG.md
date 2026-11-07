@@ -4,6 +4,12 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — a descriptor kept is by instance and run (#1074)
+
+| Before | Now | Notes |
+|---|---|---|
+| a first-hop device's descriptor, kept across its token's return, read again only at the next full read | read again at the first live put stating another run than the one kept, one descriptor GET; a put under the run kept reads nothing | observer §3.11's MAY; core §4.3: a run moves within an instance with no token moving, and its descriptor put does not cross a closed link |
+
 ## Unreleased (`main`, zk2) — a `config.v2` refusal in its own words (#609, F-485)
 
 zk2py's round 102 read the Config tool's engine cold.
