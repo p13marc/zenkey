@@ -64,9 +64,10 @@ T being `zenctl alarms` and, in §8, the watchdog's `alert-firing`).
 1. G's GET ends at its final reply with no value (core S2).
 2. S receives one put on `…/state/alarms/a659f813308ad1da`, stamped in
    band by the owner (core S1): A firing, `timestamp` within 1 s of the
-   step, no `observed_at_ms`. S reads it **raised**. G's reply holds the
-   same document under the same in-band stamp, and its last confirmation
-   (core S2), and G judges **yes**, `firing`.
+   step, no `observed_at_ms`. S reads it **raised**. G's answer for A is a
+   snapshot under the run the owner's descriptor states (core §3.3). Its
+   entry holds the same document under the same in-band stamp, with its
+   confirmation (core §4.2), and G judges **yes**, `firing`.
 3. Nothing changes: the owner puts nothing, or the same document, which S
    reads **confirmed**. No second key appears: the key is the document's,
    whatever the order of its labels (§2.2).
@@ -102,9 +103,9 @@ T being `zenctl alarms` and, in §8, the watchdog's `alert-firing`).
 1. S receives a put of A with `state: resolved`, a new `timestamp`, no
    `observed_at_ms`, then a delete of the key, within 60 s of the put and,
    for the reference, within 1 s. S reads **resolved**, then **retired**.
-2. G's reply holds a `reply_del` for the key, with the delete's in-band
-   stamp and its last confirmation, the timestamp the owner minted at the
-   delete (core S2, S3). G judges **no**, `deleted`.
+2. G's answer lists the key as a tombstone, with the delete's in-band
+   stamp, and no time: a tombstone has no confirmation (core S3, §7.5). G
+   judges **no**, `deleted`.
 3. G's GET draws nothing for the key.
 
 ## §4 Re-raise (§2.5)
@@ -135,10 +136,11 @@ holds two more documents, written by a test before the restart:
 **Expected.**
 1. S receives no delete and no resolved put (§2.9).
 2. Nothing.
-3. G's GET at the token holds A firing, unchanged, `timestamp` *t₀* kept,
-   and B, unchanged, each under the new instance's stamp id, and a
-   `reply_del` of R's key and of P's key, stamped in band by it, each
-   under the timestamp it minted at the delete. The owner put them
+3. G's GET at the token is answered by snapshots under the new
+   instance's run, the one its descriptor states (core §3.3). They list A
+   firing, unchanged, `timestamp` *t₀* kept, and B, unchanged, each put
+   again under that run, and a tombstone of R's key and of P's key, each
+   deleted under that run. The owner put them
    before its new instance token (a SHOULD) and before it answered a GET
    with them (a MUST), which a GET made the moment the token appears
    observes, as core §8.2 observes "before the tokens". S
@@ -152,8 +154,9 @@ holds two more documents, written by a test before the restart:
    - B: a put, unchanged, which S reads **confirmed**; then, at its first
      evaluation, a resolved put and a delete, which S reads **resolved**,
      then **retired**.
-4. G's reply holds A, stamped by the new instance, whose `meta.zid` is the
-   stamp's id; G judges A **yes**, `firing`, never `previous_instance`.
+4. G's answer for A is a snapshot under the new instance's run, which
+   its descriptor states as `run` (§2.14 step 5). G judges A **yes**,
+   `firing`, never `previous_instance`.
 
 ## §6 A hung owner goes stale (§2.7, §2.14)
 

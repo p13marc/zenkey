@@ -4,6 +4,60 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.14 — 2026-11-07: a GET's alarm attributed by its snapshot's run (#977, #609)
+
+Core 0.100 (#977's E3) answers a state GET by snapshot. A snapshot's
+entry carries no Zenoh timestamp, so §2.14 step 5's `meta.zid` reads none
+of a GET's alarms. zk2py round 105 filed it as F-503, a gap. This version
+answers it, written against core 0.100.
+
+**Changed: §2.14 step 5, "A GET's entry".** A GET's entry is attributed
+by the run of the snapshot that lists it: the run its instance wrote under
+as it answered. Under a run that no present descriptor of the owner
+states as `run`, it is **not asked**, `previous_instance`: an earlier
+instance answered. With no `run` stated, it is unattributable, and the
+reader goes on to step 6.
+- **0.13 said** that a GET's reply carries the alarm's last confirmation,
+  stamped by its owner, and is read by `meta.zid`. Since 0.100 a
+  confirmation is a time in the snapshot, which names no zid.
+- **Not the entry's own run,** as F-503 proposed. An entry keeps the run
+  of its member's last mutation, which can be one its own instance wrote
+  under before it took a new run (core §4.3, §7.5). §2.9 puts each alarm
+  again at a new instance only, so a firing alarm would read
+  `previous_instance` for as long as it fired unchanged. The snapshot's
+  run is the answering instance's, as the reply's zid was.
+- **A subscription's delivery** stays unattributable, and a per-key
+  reply, revision 1.0's, is read by `meta.zid` as before.
+
+**Changed, no rule: §2.9.** A restarted owner's GET answers list each
+alarm under its own run, and a tombstone for each key it deleted. A GET's
+answer now tells apart a re-mint that keeps its session, since a new
+instance takes a new run.
+
+**Changed: the scenarios §1, §3 and §5 (F-503).** Their GET rows read
+snapshots:
+- **§1, Expected 2:** G's answer for A is a snapshot under the run the
+  owner's descriptor states, its entry under the put's in-band stamp,
+  with its confirmation.
+- **§3, Expected 2:** a tombstone, with the delete's in-band stamp and no
+  time. It said "the timestamp the owner minted at the delete", which no
+  answer carries since 0.100 (core 0.101's F-506).
+- **§5, Expected 3 and 4:** snapshots under the new instance's run, the
+  one its descriptor states, A and B put again under it and R's and P's
+  keys deleted under it; G judges A firing, never `previous_instance`.
+
+**The reference** reads every GET entry as unattributable: the fleet's
+`AlarmBook::reading` names the snapshot's clock by the owner's address,
+which is no zid. Its tests assert the rows above but the snapshot's run.
+Attributing by that run, and asserting it, is its code half (#977).
+
+**Deliberately not changed.**
+- **No owner rule.** §2.9's re-put at a new instance stands, and no
+  re-put is asked at a new run within an instance.
+- **`conclusions.json`.** Its `previous_instance` is an input, the
+  attribution's result, so no case moves.
+- **The header** is written against core 0.100.
+
 ## 0.13 — 2026-11-02: the scenarios' stamps read in band (#978)
 
 zk2py's round 97 read 0.11 cold, and filed F-459 against its scenarios.
