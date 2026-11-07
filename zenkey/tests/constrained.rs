@@ -884,6 +884,49 @@ async fn s10_a_first_hop_device() {
     session.close().await.unwrap();
 }
 
+/// What `start` refuses of a first-hop owner implementing `imps`, nothing
+/// exposed.
+async fn first_hop_refusal(session: &zenoh::Session, imps: Vec<zenkey::Implementation>) -> String {
+    let mut b = ServiceBuilder::new(session, config("lab/probe-a").first_hop());
+    for i in imps {
+        b.implement(i).unwrap();
+    }
+    match b.start().await {
+        Err(refused) => refused.to_string(),
+        Ok(_) => panic!("started: refused at step 2"),
+    }
+}
+
+/// Core §8.1 on a first hop refuses first (#982 H2; review-bot on #1068):
+/// `archive.v1` or a governed interface is refused before any other check
+/// of §8.2 step 2, so the refusal names the first hop. Nothing is exposed
+/// here, which exposure would refuse, and `archive.v1` would join the
+/// tokenless set, which the archive's own check would refuse.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s10_a_first_hop_refuses_before_any_other_step_2_check() {
+    let (_r1, ep) = router(None).await;
+    let session = client(&ep).await;
+    let governed =
+        first_hop_refusal(&session, vec![imp("ping.v1"), imp("steer-governed.v1")]).await;
+    // `steer-governed.v1.toml` is steer.v1 at minor 1, governed: the
+    // refusal names the interface, never the file.
+    assert!(
+        governed.contains("steer.v1 is refused on a first hop")
+            && governed.contains("redundancy.v1"),
+        "the first hop's refusal, before exposure's: {governed}"
+    );
+    let archive = first_hop_refusal(
+        &session,
+        vec![zenkey::Implementation::new(zenkey::archive::contract())],
+    )
+    .await;
+    assert!(
+        archive.contains("archive.v1 is refused on a first hop"),
+        "the first hop's refusal, before exposure's and the tokenless set's: {archive}"
+    );
+    assert!(!archive.contains("never tokenless"), "{archive}");
+}
+
 /// §10 step 4, the control: a block that keeps `link.v1` §2.6's whole `zk`
 /// on the device's face. The near side lists no instance of it, its
 /// presence unobservable there, and still receives its heartbeats (R7).
