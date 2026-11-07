@@ -191,13 +191,16 @@ fn config_key(key: &str, kind: KindToken) -> Option<(Addr, Vec<String>)> {
 }
 
 /// One GET (core S4): target `All`, consolidation `None`, a snapshot's page
-/// read as its entries, each reply filed
-/// by the owner its key names. A reply on a key that is not a `config.v1`
-/// state key, or on a wildcard key, is no member and is left out (R6).
+/// read as its entries, each entry's confirmation dated under its owner's
+/// epoch (`epochs`), every reply merged per key by its stamp, never the
+/// last to arrive (`bus::query::merged`), and filed by the owner its key
+/// names. A reply on a key that is not a `config.v1` state key, or on a
+/// wildcard key, is no member and is left out (R6).
 pub async fn get(
     session: &Session,
     selector: &str,
     timeout: Duration,
+    epochs: &crate::bus::query::EntryEpochs,
 ) -> Result<ConfigGet, String> {
     let replies = session
         .get(selector)
@@ -212,19 +215,17 @@ pub async fn get(
         complete: true,
         services: BTreeMap::new(),
     };
-    // A snapshot's page is its entries (core §4.2; #977's E3).
+    // A snapshot's page is its entries (core §4.2; #977's E3), dated under
+    // its owner's epoch, and every reply merged per key by its stamp (S4).
     let mut samples = Vec::new();
     while let Ok(reply) = replies.recv_async().await {
         let Ok(sample) = reply.result() else {
             out.complete = false;
             continue;
         };
-        samples.extend(crate::bus::query::reply_samples_aged(
-            sample,
-            zenkey_model::catalog::EPOCH_WITHOUT_CATALOG,
-        ));
+        samples.extend(crate::bus::query::reply_samples_aged(sample, epochs));
     }
-    for sample in &samples {
+    for sample in &crate::bus::query::merged(samples) {
         let key = sample.key_expr().as_str();
         if key.contains('*') {
             continue;
@@ -452,7 +453,11 @@ pub async fn observe(
     let get = match &v2 {
         None => {
             let selector = ConfigTarget::One(address.clone()).state_selector(spec.status_only);
-            get(session, &selector, t).await
+            let epochs = crate::bus::query::EntryEpochs::of_presence(
+                &spec.catalogs,
+                presence.as_ref().and_then(|p| p.as_ref().ok()),
+            );
+            get(session, &selector, t, &epochs).await
         }
         Some(Ok(target)) => get_records(session, &[(address.clone(), target.clone())], t).await,
         Some(Err(u)) => Err(u.why.clone()),
@@ -612,9 +617,10 @@ pub async fn find_v2(
 }
 
 /// One S4 GET per `config.v2` owner of its record (v2 §2.3): target
-/// `All`, consolidation `None`, a snapshot's entry as its reply, each read by its owner's contract
-/// under CH's tag. A reply on another key, or a wildcard key, is no member
-/// (R6). The GETs run at once.
+/// `All`, consolidation `None`, a snapshot's entry as its reply, dated
+/// under the target's epoch and merged per key by its stamp, each read by
+/// its owner's contract under CH's tag. A reply on another key, or a
+/// wildcard key, is no member (R6). The GETs run at once.
 pub async fn get_records(
     session: &Session,
     owners: &[(Addr, V2Target)],
@@ -643,19 +649,20 @@ pub async fn get_records(
         services: BTreeMap::new(),
     };
     for (addr, target, key, replies) in asks {
-        // A snapshot's entry stands for its reply (core §4.2; #977's E3).
+        // A snapshot's entry stands for its reply (core §4.2; #977's E3),
+        // dated under the target's epoch, every reply merged per key (S4).
         let mut samples = Vec::new();
         while let Ok(reply) = replies.recv_async().await {
             let Ok(sample) = reply.result() else {
                 out.complete = false;
                 continue;
             };
-            samples.extend(crate::bus::query::reply_samples_aged(
+            samples.extend(crate::bus::query::reply_samples_at(
                 sample,
-                zenkey_model::catalog::EPOCH_WITHOUT_CATALOG,
+                Some(target.epoch),
             ));
         }
-        for sample in &samples {
+        for sample in &crate::bus::query::merged(samples) {
             if sample.key_expr().as_str() != key {
                 continue;
             }

@@ -340,8 +340,8 @@ pub struct SeedRead {
     pub discarded: u64,
     /// What each key answered under a zk2c envelope said (core §7.5): its
     /// in-band stamp, what orders it, or why the envelope was refused, its
-    /// reply then undecodable, never read as a document. `S4`'s `Latest`
-    /// answers a key once.
+    /// reply then undecodable, never read as a document. The GET's replies
+    /// are merged per key by their stamps (S4), so a key answers once.
     pub envelopes: BTreeMap<String, Result<zenkey_model::wire::Stamp, zenkey_model::wire::Refusal>>,
 }
 

@@ -676,16 +676,20 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
         // During the grace: the first health reading, and the descriptors
         // hostid-duplicate counts (hostid.v1 §2.12): every instance on a
         // system in the minted shape, the only systems a minting can name.
+        // During the grace no descriptor is in hand yet: the catalogs given
+        // date an entry, the deployment's word.
+        let epochs = crate::bus::query::EntryEpochs::of_catalogs(&spec.catalogs);
+        let epochs = &epochs;
         let first = async {
             if spec.asks(CheckId::HealthInconsistent) {
-                Some(crate::bus::health::get(s, &health, t).await)
+                Some(crate::bus::health::get(s, &health, t, epochs).await)
             } else {
                 None
             }
         };
         let first_config = async {
             if spec.asks(CheckId::ConfigProjection) {
-                Some(crate::bus::config::get(s, &config, t).await)
+                Some(crate::bus::config::get(s, &config, t, epochs).await)
             } else {
                 None
             }
@@ -782,23 +786,27 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
         }
         (contracts, out)
     };
+    // Each owner's entries dated under the catalog its descriptor names,
+    // read through the catalogs given (core §8.6).
+    let epochs = crate::bus::query::EntryEpochs::observed(&spec.catalogs, observed);
+    let epochs = &epochs;
     let second = async {
         if spec.asks_health() {
-            Some(crate::bus::health::get(s, &health, t).await)
+            Some(crate::bus::health::get(s, &health, t, epochs).await)
         } else {
             None
         }
     };
     let second_config = async {
         if spec.asks_config() {
-            Some(crate::bus::config::get(s, &config, t).await)
+            Some(crate::bus::config::get(s, &config, t, epochs).await)
         } else {
             None
         }
     };
     let alarms = async {
         if spec.asks_alarms() {
-            Some(crate::bus::alarms::get(s, crate::model::alarms::ALL, t).await)
+            Some(crate::bus::alarms::get(s, crate::model::alarms::ALL, t, epochs).await)
         } else {
             None
         }

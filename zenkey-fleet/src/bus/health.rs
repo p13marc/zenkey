@@ -500,12 +500,21 @@ pub async fn observe(
         ),
     };
     let selector = target.state_selector();
+    // A reading holds no catalog (`HealthSpec` names none): an owner's
+    // entries are dated under the catalog its descriptor names only where
+    // that is none, 0, and an owner naming one goes undated; with no
+    // descriptor in hand, 0 is the deployment's word.
+    let epochs = crate::bus::query::EntryEpochs::of_presence(
+        &crate::model::deployment::Catalogs::default(),
+        presence.as_ref().and_then(|p| p.as_ref().ok()),
+    );
+    let epochs = &epochs;
     // Across a face no presence is read, so the first reading's GET,
     // answered by the owner after the subscription, is the round trip the
     // window opens on (#819 TG, as zk2py round 49's F-159 found of
     // `telemetry`); without a face, the presence read above was.
     let across = if spec.face.is_some() {
-        Some(get(session, &selector, t).await)
+        Some(get(session, &selector, t, epochs).await)
     } else {
         None
     };
@@ -520,14 +529,14 @@ pub async fn observe(
     let opened = Instant::now();
     let first = match across {
         Some(first) => first,
-        None => get(session, &selector, t).await,
+        None => get(session, &selector, t, epochs).await,
     };
     let wait = match spec.window {
         Some(w) => (opened + w).saturating_duration_since(Instant::now()),
         None => spec.grace,
     };
     tokio::time::sleep(wait).await;
-    let second = get(session, &selector, t).await;
+    let second = get(session, &selector, t, epochs).await;
     let window = window.map(|w| {
         w.map(|w| {
             let mut addrs: BTreeSet<Addr> = BTreeSet::new();
@@ -562,14 +571,17 @@ pub async fn observe(
 }
 
 /// One reading's GET (core S4): target `All`, consolidation `None`, a
-/// snapshot's page read as its entries, every reply grouped by the owner
-/// its key names. A reply on a key that is not a
+/// snapshot's page read as its entries, each entry's confirmation dated
+/// under its owner's epoch (`epochs`), every reply merged per key by its
+/// stamp, never the last to arrive, and grouped by the owner its key
+/// names. A reply on a key that is not a
 /// `health.v1` state key, or on a wildcard key, is not a member and is left
 /// out (R6).
 pub async fn get(
     session: &Session,
     selector: &str,
     timeout: Duration,
+    epochs: &crate::bus::query::EntryEpochs,
 ) -> Result<HealthGet, String> {
     let replies = session
         .get(selector)
@@ -585,19 +597,17 @@ pub async fn get(
         services: BTreeMap::new(),
     };
     // A snapshot's page is its entries, a live entry's confirmation its
-    // stamp (core §4.2, `freshness.v2` §2.6; #977's E3).
+    // stamp under its owner's epoch (core §4.2, `freshness.v2` §2.6;
+    // #977's E3), every reply merged per key by its stamp (S4).
     let mut samples = Vec::new();
     while let Ok(reply) = replies.recv_async().await {
         let Ok(sample) = reply.result() else {
             out.complete = false;
             continue;
         };
-        samples.extend(crate::bus::query::reply_samples_aged(
-            sample,
-            zenkey_model::catalog::EPOCH_WITHOUT_CATALOG,
-        ));
+        samples.extend(crate::bus::query::reply_samples_aged(sample, epochs));
     }
-    for sample in &samples {
+    for sample in &crate::bus::query::merged(samples) {
         let key = sample.key_expr().as_str();
         if key.contains('*') {
             continue;

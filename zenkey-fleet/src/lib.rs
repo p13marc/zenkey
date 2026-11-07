@@ -263,8 +263,8 @@ pub use bus::monitor::{
     StampProvenance, StreamItem, WatchId,
 };
 pub use bus::query::{
-    Answer, DEFAULT_MAX_REPLIES, FleetAnswer, GetOpts, RepeatingQuery, declare_repeating,
-    declare_repeating_any, fleet_get,
+    Answer, DEFAULT_MAX_REPLIES, EntryEpochs, FleetAnswer, GetOpts, RepeatingQuery,
+    declare_repeating, declare_repeating_any, fleet_get,
 };
 pub use bus::scout::{ScoutStream, scout};
 pub use bus::seed::{SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};

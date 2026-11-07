@@ -237,9 +237,15 @@ pub fn state_projection(namespace: &str, selector: &str) -> Option<String> {
 /// The owners' current state under `selector` (S4): target `All`,
 /// consolidation `None`, each reply on a concrete key (R6), a snapshot's
 /// page read as its entries (core §4.2; #977's E3), merged per key by the
-/// tool's merge (observer §4.1). A deletion within an owner's window is not
-/// a value, and is left out. Returns the values, in the order their keys
-/// first arrived, and the error replies counted.
+/// tool's merge (observer §4.1, `bus::query::KeyMerge`). A deletion within
+/// an owner's window is not a value: it orders the key's later replies,
+/// and keeps no row. Returns the values, in the order their keys first
+/// arrived, and the error replies counted.
+///
+/// **The bound** is `max_replies` replies, as [`TriggerSpec::max_replies`]
+/// says, a snapshot's page counted one reply however many entries it
+/// holds: past it a reply is drained, counted with the errors (the
+/// header's `incomplete`), and not merged.
 async fn state_get(
     session: &Session,
     selector: &str,
@@ -254,9 +260,9 @@ async fn state_get(
         .await
         .map_err(|e| Error::bus("state preamble", selector, e))?;
     let mut errors = 0u64;
-    let mut order: Vec<String> = Vec::new();
-    let mut held: std::collections::BTreeMap<String, (SampleView, zenkey_model::seed::Held)> =
-        std::collections::BTreeMap::new();
+    let mut kept = 0usize;
+    // A deletion's item is `None`: it holds the key's mark, no row.
+    let mut merge: crate::bus::query::KeyMerge<Option<SampleView>> = Default::default();
     while let Ok(reply) = replies.recv_async().await {
         let s = match reply.into_result() {
             Ok(s) if !s.key_expr().is_wild() => s,
@@ -266,32 +272,20 @@ async fn state_get(
                 continue;
             }
         };
+        if kept >= max_replies {
+            errors += 1;
+            continue;
+        }
+        kept += 1;
         for s in crate::bus::query::reply_samples(&s) {
             let view = SampleView::of(&s);
             let mark = view.mark();
-            let was = held.get(&view.key).map(|(_, h)| *h);
-            let kind = zenkey_model::seed::Order::of_key(&view.key);
-            if !zenkey_model::seed::admits_mark_in(kind, was.unwrap_or_default(), mark) {
-                continue;
-            }
-            if was.is_none() {
-                if order.len() >= max_replies {
-                    errors += 1;
-                    continue;
-                }
-                order.push(view.key.clone());
-            }
-            let after = was.unwrap_or_default().after_mark(mark);
-            held.insert(view.key.clone(), (view, after));
+            let key = view.key.clone();
+            let item = (view.kind == SampleKind::Put).then_some(view);
+            merge.offer(&key, mark, item);
         }
     }
-    let values = order
-        .iter()
-        .filter_map(|k| held.remove(k))
-        .map(|(v, _)| v)
-        .filter(|v| v.kind == SampleKind::Put)
-        .collect();
-    Ok((values, errors))
+    Ok((merge.into_items().into_iter().flatten().collect(), errors))
 }
 
 /// The watch set: every selector asked for, minus any that another one in
