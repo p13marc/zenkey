@@ -25921,3 +25921,165 @@ base) and 4b802646.
   - F-495 to F-502.
 
   F-365 stays open as #965's.
+
+## At core 0.100 (#977 E3)
+
+Round 105 read core 0.100 (the flip: state GETs answered by snapshot,
+readers under `None`), observer 0.28, freshness.v2 0.6 and 0.7, link.v2
+0.9, and round 104's answers (config.v1 0.13, config.v2 0.4, telemetry.v1
+0.10), at main 324c6d4f. It read cold core §4.2, §4.3 and §4.4 whole,
+§7.5's snapshot and paging, observer 0.28's entry, freshness.v2 0.6 and
+0.7, and link.v2 §2.11. zk2py diffed `spec/` and `examples/zk2/` between
+3c1d33cf and 324c6d4f: no rule changed beyond what the changelogs state.
+zenoh-modem's `catalog.json` appending `freshness.v2` (#1080, 0ff6bf6d) is
+an example's change, in no changelog (F-505).
+
+**The answers hold.**
+- **F-495, F-496, F-497** (core 0.100): the notes say 4 in 3.0 to 3.2 and
+  11 in 3.3; Appendix E names the writer's refusal; §4.2 maps the index by
+  the revision the owner's descriptor names, and `seed/snapshot.json`'s
+  three new cases read so.
+- **F-498:** §4.2 states every rule the fixture pins, and zk2py's
+  `seed_snapshot`, re-keyed to it, reads 45 cases of 45.
+- **F-499** (config.v1 0.13): zk2py's re-mint now orders its refusals as
+  §2.12 says and waits for step 1's undo (`config_remint_live`).
+- **F-500** (telemetry.v1 0.10): `samples.json`'s three new cases pass.
+- **F-501** (config.v1 0.13, config.v2 0.4): the validation fixtures'
+  `encoding` member is read, and both new cases in each pass.
+- **F-502** (core 0.100): §5.1 places all three request refusals after
+  the key's.
+
+### F-503 · gap · alarms.v1 §2.14 step 5 attributes a GET's reply by a Zenoh timestamp that a snapshot's entry does not carry
+
+> alarms.v1 0.13 §2.14 step 5: "a put whose stamp's id is not the present
+> descriptor's `meta.zid` … **not asked**, `previous_instance`. … A GET's
+> reply carries the alarm's last confirmation, which its owner stamps
+> (`freshness.v2` §2.4), and is read as above". freshness.v2 0.7 §2.4: "A
+> GET answers its members by snapshot (core S2), each live entry with its
+> **confirmation** (core §7.5)." Core 0.100's entry: "`desired.v1`,
+> `alarms.v1`, `health.v1`, `config.v1` and `config.v2` read an entry as a
+> reply, through "What a profile reads". … Its text, its scenario §9,
+> `telemetry.v1`'s scenario §9 and `alarms.v1`'s scenario §3 are left for
+> their profiles."
+
+- **The gap.** An alarm's state is a `freshness.v2` collection. Since
+  core 0.100 it is answered by snapshot. An entry carries its in-band stamp
+  and its confirmation, and no Zenoh timestamp. So step 5 can never read
+  `previous_instance` from a GET: every entry is unattributable, and the
+  reader goes on to step 6.
+- **The evidence expects the stamp.** Core 0.100's entry names alarms'
+  scenario §3 alone. These rows expect it too, and no owner can meet them:
+  - alarms scenarios §1 step 2 ("and its last confirmation (core S2)");
+  - alarms §3 step 2 ("the timestamp the owner minted at the delete": a
+    tombstone has no time, §7.5);
+  - alarms §5 steps 3 and 4 ("whose `meta.zid` is the stamp's id");
+  - health.v1 scenarios §1 step 1 ("stamped by the owner's session") and
+    §4 step 4 ("under the owner's stamp").
+- **What the in band can carry.** An entry's run against the run the
+  descriptor states (core §3.3) tells a previous instance's value from
+  the present one's.
+- **What zk2py does:** it reads each such entry as unattributable, and its
+  scenarios check the in-band run against the descriptor's.
+- **Fix:** alarms.v1 §2.14 step 5: "A GET's entry (core §4.2) carries no
+  Zenoh timestamp. It is attributed by its run: an entry under a run other
+  than the descriptor's `run` is `previous_instance`." Re-key the scenario
+  rows above the same way.
+- **Changes:** whether a GET reader can read `previous_instance` at all.
+
+### F-504 · minor · state.md §14's "at most 975 bytes" is a 16-bit run's figure
+
+> state.md §14, Setup: "each a record of 110 bytes: `plans/v00` to
+> `plans/v30`, and `plans/vehicle-01`, the consumer's. Its pages then hold
+> 8 entries each, at most 975 bytes."
+
+- **The error.** The setup leaves the run's width unsaid. Under a 32-bit
+  run, which an owner with no run record draws (core §4.3), the header is
+  2 bytes longer. Then the page holding `plans/vehicle-01` is 977 bytes.
+  The owner example draws 32-bit runs by default.
+- **What zk2py does:** its §14 owner keeps a run record, so 16-bit runs,
+  and its pages are 970, 970, 970 and 975 bytes.
+- **Fix:** "at most 975 bytes under a 16-bit run, 977 under a 32-bit run".
+- **Changes:** a figure.
+
+### F-505 · minor · link.v2's `v2/plan.json` cases 14 to 18 carry a catalog zenoh-modem's faces no longer name
+
+> examples/zk2/zenoh-modem/link.md: "the catalog the ground holds,
+> `catalog.json`'s `0ff6bf6d` … `link.v2`'s `conformance/v2/plan.json`
+> holds each face's plan (its Appendix B)." `faces/zenohd-rf0.face.toml`:
+> `catalog = "0ff6bf6d"`. `v2/plan.json` case 14's policy: `catalog =
+> "e3a529fe"`.
+
+- **The error.** #1080 appended `freshness.v2` to `catalog.json` and moved
+  the five face files to 0ff6bf6d. The cases still hold the old policies and
+  catalog. Planned with today's `catalog.json`, each face's plan is the
+  case's but for `catalog`.
+- **What zk2py does:** its reading checks each plan against the case but
+  for the catalog.
+- **Fix:** move cases 14 to 18 to 0ff6bf6d and today's `catalog.json`, or
+  say in `link.md` that they hold the plans at e3a529fe.
+- **Changes:** fixtures, no rule.
+
+### F-506 · minor · core §4.3 "Minting" mints a last confirmation at a delete, which no answer carries
+
+> Core §4.3, "Minting": "An owner mints a last confirmation at each
+> mutation of such a member, a delete among them, and as it writes each
+> heartbeat that vouches for it (§7.5)." §7.5: "**0, none:** the
+> collection has no horizon. A tombstone's is 0." freshness.v2 §2.4: "The
+> times are minted at each mutation of the member … Only a snapshot
+> carries them".
+
+- **The error.** "A delete among them" came from F-460's answer, when a
+  `reply_del` carried that timestamp (core 0.89). Since 0.100 a deleted
+  member is a tombstone, confirmation 0, with no `conf`. No answer carries
+  the time minted at a delete.
+- **What zk2py does:** it still mints one, which nothing reads.
+- **Fix:** "at each put of such a member", or say that a delete's minted
+  time is carried by nothing.
+- **Changes:** wording.
+
+### F-507 · gap · core §4.2: which descriptor maps a snapshot when two instances answer
+
+> Core §4.2: "A late joiner MUST map a snapshot's collection index with the
+> revision of the interface that the owner's descriptor names (§3.3)".
+> §4.3: "**Where two instances answer**, both answers arrive: a snapshot or
+> a reply of each one's run." §3.3: "`run` is the run the instance writes
+> under now".
+
+- **The gap.** "The owner's descriptor" is one, but two instances of a
+  service each have one. They can run two revisions (R4). The text does
+  not say which maps which snapshot.
+- **What zk2py does:** its reader maps each snapshot by the descriptor
+  whose `run` is the snapshot's (`seed_snapshot.ByDescriptor`). Where none
+  states it, it applies no omission rule.
+- **Fix:** "the descriptor of the instance whose `run` is the snapshot's
+  (§3.3)".
+- **Changes:** which revision a reader maps with during a rolling upgrade.
+
+### F-508 · minor · `seed/snapshot.json`'s description matches a member "each parameter one chunk"
+
+> `seed/snapshot.json`: "A member matches its template under the snapshot
+> key, each parameter one chunk." Core §2.2: "a rest parameter takes one
+> or more chunks, and no chunk is left over."
+
+- **The error.** The description's reading drops a rest parameter's
+  members of two chunks or more from a collection. Core §4.2's omission
+  rule reaches every "member of the collection at K or under it". No case
+  has a rest template, so no case is wrong.
+- **What zk2py does:** it matches by core §2.2's template matching.
+- **Fix:** "each parameter one chunk, a rest parameter one or more".
+- **Changes:** the description.
+
+### Counts at core 0.100 (#977 E3)
+
+508 entries.
+- **New: F-503 to F-508:**
+  - two gaps: F-503 and F-507;
+  - four minor errors: F-504, F-505, F-506 and F-508.
+  None is a blocker.
+- **Answered this round:** F-495 to F-502.
+- **Open:**
+  - F-436 (not re-run);
+  - F-437 to F-441;
+  - F-503 to F-508.
+
+  F-365 stays open as #965's.

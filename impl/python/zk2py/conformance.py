@@ -4748,21 +4748,9 @@ def _round100_readings(root: Path) -> list[tuple[str, Any, Any]]:
                         "a packed type with no CH to carry its tag: an explicit stream's type, or an attachment")
                 + [op.codes, op.fingerprint],
                 [[], exp["ok-packed-operation"]["fingerprint"]]))
-    # F-471: §5.2's Encoding named no packed kind at 0.92 and 0.93, where
-    # E044 let an operation's error and response be packed and every failed
-    # call still answered in the envelope. Core 0.94 answers it (round 101):
-    # every call travels in the forms, a packed record alike, and the
-    # envelope's kinds are the bare wire's, which no owner writes.
-    s52 = core[core.index("### 5.2 Errors"):core.index("## 6. Ownership and serving")]
-    by = {r["template"]: r for r in op.canonical["resources"]}
-    # Core 0.99 (#985 C4d, round 104) removes the envelope, its kinds with it.
-    out.append(("F-471 (round 100; answered by core 0.94, round 101): the envelope's kinds named a JSON Schema, a "
-                "protobuf and a raw type and no packed one, and were the bare wire's alone; core 0.99 removes the "
-                "envelope and its kinds (round 104), and ok-packed-operation's two packed operations still load",
-                [q for q in ("**a JSON Schema type:**", "**a protobuf type:**", "**a raw type:**",
-                             "**The envelope, on the bare wire.**", "**a packed type") if q in s52]
-                + [sorted(t for t in ("calibrate", "scan") if t in by)],
-                [["calibrate", "scan"]]))
+    # F-471 (round 100): its weak row, which accepted the old quotes' absence
+    # and little else, is gone (review-bot on round 104); "F-471 answered"
+    # below checks zk2py's own bytes for ok-packed-operation's calibrate.
     # Round 99's answers, as the texts now read, and zk2py's reading.
     out.append(("F-465 answered (link.v2 0.6 §2.3, §2.7): an empty frames lists no frame, every exposed frame denied "
                 "by name; F-466 (link.v1 0.16 §2.7, §2.9): an implied freshness.v2 is listed for stream alone; "
@@ -4807,7 +4795,7 @@ def _round101_readings(root: Path) -> list[tuple[str, Any, Any]]:
     scenarios through the forms."""
     import re
 
-    from . import calls, zk2c
+    from . import calls, live, zk2c
     from .contract import load_contract
 
     spec = root.parent
@@ -4929,12 +4917,21 @@ def _round101_readings(root: Path) -> list[tuple[str, Any, Any]]:
     # Core 0.99 (round 104) removes the bare-wire bullet that F-473's answer
     # was: every reply_err under another Encoding is the transport's, an
     # envelope included (_round104_readings reads zk2py so).
-    out.append(("F-473 (round 101; answered by core 0.95 §5.2, round 102): a bare-wire envelope its decoding refused "
-                "was a malformed error, the transport's; core 0.99 removes the bare-wire bullet, and a malformed "
-                "error is the transport's still (round 104)",
-                [q for q in ("under one of the envelope's three encodings as that envelope (below), not as the "
-                             "transport's.",) if q in core]
-                + missing(core, "**A malformed error** is the transport's too."), []))
+    # Re-keyed to behaviour (review-bot on round 104): zk2py's caller reads an
+    # earlier core's envelope, a malformed form and a router's Timeout as the
+    # transport's, each refusal named, and an owner's error form as an error.
+    env = json.dumps({"code": "busy"}).encode()
+    form = calls.error(calls.Operation.of(load_contract(root / "contracts" / "ok-packed-operation.toml"),
+                                          "calibrate"), zk2c.InBand(16, 1, 7), "busy")
+    kinds = [(r.kind, r.refusal) for r in (live.read_reply_error("application/json", env),
+                                          live.read_reply_error(zk2c.ENCODING, form[:3]),
+                                          live.read_reply_error(zk2c.ENCODING, b"Timeout"),
+                                          live.read_reply_error(zk2c.ENCODING, form))]
+    out.append(("F-473 (round 101; answered by core 0.95 §5.2, round 102; the bare-wire bullet removed by core 0.99): "
+                "zk2py's caller reads an earlier core's envelope under application/json, a cut error form and a "
+                "router's Timeout as the transport's, each refusal named, and an owner's error form as an error",
+                missing(core, "**A malformed error** is the transport's too.") + kinds,
+                [("transport", "encoding"), ("transport", "short"), ("transport", "sample_kind"), ("error", None)]))
     # F-474: §9 step 4 puts "its state", and neither setup declares one.
     sec9 = ops[ops.index("## §9 A call's forms"):]
     setup = sec9[:sec9.index("**Steps.**")]
@@ -5254,6 +5251,8 @@ def _round104_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 [True, True, [True, False, False, False]]))
     out += _round104_texts(root)
     out += _mend_after_round103()
+    out += _mend_after_round104(root)
+    out += _round105_readings(root)
     return out
 
 
@@ -5419,6 +5418,139 @@ def _round104_texts(root: Path) -> list[tuple[str, Any, Any]]:
                         "(§2.11), as a `cancel`'s reply does (§2.10). A re-mint asked while an act is in flight is "
                         "refused before step 1."), []))
     return out
+
+
+def _round105_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.100 (#977 E3), observer 0.28, freshness.v2 0.6 and 0.7 and
+    link.v2 0.9, read cold (#609, round 105): each version and its entry,
+    and the texts F-503 to F-508 quote, so that an answer moves them. The
+    rules' evidence is the seed, snapshot, heartbeat, freshness and link
+    families', and the live runners' (``snapshot_live``, ``state_pairings``,
+    ``heartbeat_epoch_live``, ``freshness_v2_scenarios``)."""
+    import re
+
+    from . import snapshot
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def header(rel: str) -> tuple[str | None, str | None]:
+        t = flat(rel)
+        v = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+)", t)
+        w = re.search(r"\| \*\*Written against\*\* \| core (\d+\.\d+)", t)
+        return (v.group(1) if v else None, w.group(1) if w else None)
+
+    core, obs = flat("core.md"), flat("observer.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = f"{m.group(1)}.{m.group(2)}" if m else None
+    al, alsc, st = flat("profiles/alarms/v1.md"), flat("profiles/alarms/scenarios.md"), flat("scenarios/state.md")
+    fv2 = flat("profiles/freshness/v2.md")
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.100 or later, observer 0.28 against it, freshness.v2 0.7 and link.v2 0.9 against core 0.100 or later",
+         [_at_least(core_v, "0.100"), _at_least(header("observer.md")[0], "0.28"),
+          _at_least(header("observer.md")[1], "0.100"), _at_least(header("profiles/freshness/v2.md")[0], "0.7"),
+          _at_least(header("profiles/link/v2.md")[0], "0.9"), _at_least(header("profiles/link/v2.md")[1], "0.100")],
+         [True] * 6),
+    ]
+    out.append(("F-503 (open): alarms.v1 §2.14 step 5 attributes a GET's reply by the Zenoh timestamp its owner sets, and "
+                "its scenarios §1, §3 and §5, and health.v1's §1 and §4, expect one; core 0.100 answers an alarm's state (a freshness.v2 "
+                "collection) by snapshot, whose entries carry none, and its entry names alarms' scenario §3 alone",
+                missing(al, "A GET's reply carries the alarm's last confirmation, which its owner stamps "
+                            "(`freshness.v2` §2.4), and is read as above;",
+                        "a put whose stamp's id is not the present descriptor's `meta.zid`")
+                + missing(alsc, "G's reply holds the same document under the same in-band stamp, and its last "
+                                "confirmation (core S2)",
+                          "stamp and its last confirmation, the timestamp the owner minted at the delete",
+                          "G's reply holds A, stamped by the new instance, whose `meta.zid` is the stamp's id")
+                + missing(flat("profiles/health/scenarios.md"),
+                          "stamped by the owner's session. It was put before the tokens (§2.3).",
+                          "status, under the owner's stamp, since a router never drops or")
+                + missing(fv2, "A GET answers its members by snapshot (core S2), each live entry with its "
+                               "**confirmation** (core §7.5)."), []))
+    out.append(("F-504 (open): state.md §14's setup gives pages of 8 entries \"at most 975 bytes\", a 16-bit run's "
+                "figure: under a 32-bit run the page holding plans/vehicle-01 is 977 (zk2py's writer)",
+                missing(st, "Its pages then hold 8 entries each, at most 975 bytes.")
+                + [len(snapshot.write_page({"tag": 0, "run_width": w, "run": 1, "asof": 40, "time": {"s": 1, "ms": 0},
+                                            "index": 3, "more": False, "coll": 1, "tombs": [],
+                                            "live": [{"id": i, "run_width": None, "run": None, "seq": 30,
+                                                      "confirmation": "none", "record": "00" * 110}
+                                                     for i in ["v24", "v25", "v26", "v27", "v28", "v29", "v30",
+                                                               "vehicle-01"]]}))
+                   for w in (16, 32)], [975, 977]))
+    l2 = (spec / "profiles" / "link" / "conformance" / "v2" / "plan.json").read_text(encoding="utf-8")
+    out.append(("F-505 (open): link.v2's v2/plan.json cases 14 to 18 carry face policies naming catalog e3a529fe, and "
+                "that catalog, where zenoh-modem's faces name 0ff6bf6d since #1080, and link.md says plan.json holds "
+                "each face's plan",
+                [r'catalog  = \"e3a529fe\"' in l2,
+                 'catalog  = "0ff6bf6d"' in (spec.parent / "examples" / "zk2" / "zenoh-modem" / "faces" /
+                                            "zenohd-rf0.face.toml").read_text(encoding="utf-8")]
+                + missing(" ".join((spec.parent / "examples" / "zk2" / "zenoh-modem" / "link.md")
+                                   .read_text(encoding="utf-8").split()),
+                          "`link.v2`'s `conformance/v2/plan.json` holds each face's plan"),
+                [True, True]))
+    out.append(("F-506 (open): core §4.3 \"Minting\" and freshness.v2 §2.4 mint a last confirmation at a delete, which "
+                "no answer carries since core 0.100: a tombstone's confirmation is 0, with no conf (§7.5)",
+                missing(core, "An owner mints a last confirmation at each mutation of such a member, a delete among "
+                              "them", "A tombstone's is 0.")
+                + missing(fv2, "The times** are minted at each mutation of the member"), []))
+    out.append(("F-507 (open): core §4.2 maps a snapshot's index by \"the owner's descriptor\", and §4.3's two "
+                "instances answer one GET, each its run; no text says which descriptor maps which snapshot (zk2py: "
+                "the one whose run is the snapshot's, §3.3)",
+                missing(core, "the revision of the interface that the owner's descriptor names (§3.3)",
+                        "**Where two instances answer**, both answers arrive: a snapshot or a reply of each one's "
+                        "run.")
+                + [q for q in ("the descriptor whose `run`",) if q in core], []))
+    sfx = _load_json(root / "seed" / "snapshot.json")
+    out.append(("F-508 (open): seed/snapshot.json's description matches a member \"each parameter one chunk\", where "
+                "core §2.2's rest parameter takes one or more; no case has a rest template",
+                ["each parameter one chunk" in sfx["description"],
+                 any("..." in x["template"] for c in sfx["cases"] for x in c.get("collections", [])
+                     + [y for r in (c.get("revisions") or {}).values() for y in r])]
+                + missing(core, "a rest parameter takes one or more chunks"), [True, False]))
+    _ = obs
+    return out
+
+
+def _mend_after_round104(root: Path) -> list[tuple[str, Any, Any]]:
+    """review-bot's notes on round 104 (#1083), the parts a reading shows.
+    config.v1's re-mint rollback (``config.py``'s ``Core.remint``) restores a
+    shallow copy of the core's members, so :meth:`zk2py.config.Core.restart`
+    must replace each member it changes, never mutate one: each mutable
+    member is a new object after the restart, the persisted layer, the
+    events' instants and the log alone shared, and a rollback after the new
+    instance changed its members gives back the old ones' values whole. The
+    re-mint's order and its wait are ``config_remint_live``'s, live."""
+    import copy
+
+    from . import config
+
+    schema = _load_json(root.parent / "profiles" / "config" / "conformance" / "lifecycle.json")["schemas"]["rf"]
+    g = schema[0]["name"]
+    p0 = schema[0]["parameters"][0]["name"]
+    core = config.Core(service="lab/rf0", instance="i1", schema=schema,
+                       startup={g: {p0: {"value": 1, "source": "file"}}}, floor_s=10)
+    core.revision, core.minted = 3, 2
+    core.last_change = {"token": "i1-2", "groups": [g], "sensitive": False}
+    core.running[(g, p0)] = config.Param(2, "runtime")
+    shared = {"overlay", "events_at", "log", "startup_file", "schema", "device"}
+    before = {k: v for k, v in core.__dict__.items() if k not in shared}
+    # the unknown value is a sentinel, kept as itself by the copy
+    want = copy.deepcopy(before, {id(config.UNKNOWN): config.UNKNOWN})
+    back = core.remint("i2")
+    kept = sorted(k for k, v in before.items() if isinstance(v, (dict, list, set)) and getattr(core, k) is v)
+    core.running[(g, p0)] = config.Param(9, "runtime")
+    core.keys["k"] = "a key of the new instance"
+    core.revision = 7
+    back()
+    after = {k: v for k, v in core.__dict__.items() if k not in shared}
+    return [("the mend after round 104, 2: config.v1's re-mint rollback: Core.restart replaces every mutable member it "
+             "changes (none of the old instance's is mutated), so the shallow copy it restores gives back the old "
+             "instance's members whole, after the new one changed its own",
+             [kept, after == want, core.instance, core.revision, core.running[(g, p0)].value],
+             [[], True, "i1", 3, 2])]
 
 
 def _mend_after_round103() -> list[tuple[str, Any, Any]]:
@@ -5724,7 +5856,7 @@ def _modem33_readings(root: Path) -> list[tuple[str, Any, Any]]:
         got = link_v2.plan(text, case["implements"], _link_interfaces(case), cat_doc)
         face = (got.get("faces") or [{}])[0]
         # Since #1080 the faces name 0ff6bf6d and plan.json's cases still
-        # carry e3a529fe (F-503): the plans agree but for the catalog.
+        # carry e3a529fe (F-505): the plans agree but for the catalog.
         same = {k: v for k, v in got.items() if k != "catalog"} == \
             {k: v for k, v in case["expect"].items() if k != "catalog"}
         planned[name] = [same, case["expect"].get("catalog"), got.get("catalog"),
@@ -5735,7 +5867,7 @@ def _modem33_readings(root: Path) -> list[tuple[str, Any, Any]]:
                          sorted(x["code"] for x in face.get("findings", []) if x["code"] != "frame_unlisted"),
                          [x["code"] for x in link_v2.lint(text)]]
     out.append(("zenoh-modem's five faces (link.v2 0.8 Appendix B), each planned by zk2py with catalog.json as its "
-                "v2/plan.json case 14 to 18, but for the catalog (F-503: the cases carry e3a529fe, the faces "
+                "v2/plan.json case 14 to 18, but for the catalog (F-505: the cases carry e3a529fe, the faces "
                 "0ff6bf6d since #1080): one frame each at its cadence, liveness evidence, the two others "
                 "frame_unlisted; SF7 keep_alive_not_suppressed, SF9 frame_over_batch (216 B over 117 B); no_arq but "
                 "on SBD",
