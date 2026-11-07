@@ -505,7 +505,10 @@ fn schedule_validation(dep: &Deployment, work: &Workspace, tick: &BusTick) -> Ta
 /// (#1074; observer §3.11's MAY): a descriptor it kept across a token's
 /// return is by instance and run, so a put under another run reads it
 /// again, off the update thread. Nothing while the feed keeps none
-/// (`LensFeed::runs_in`).
+/// (`LensFeed::runs_in`), and nothing for a run already read (#1079): a
+/// tick that hears a run whose descriptor GET is out, or answered silent,
+/// spawns no call, and a call spawned holds the feed's read across no GET,
+/// so none queues behind another.
 fn hear_runs(dep: &Deployment, tick: &BusTick) -> Task<Message> {
     let Some(feed) = dep.lens_feed.as_ref() else {
         return Task::none();
