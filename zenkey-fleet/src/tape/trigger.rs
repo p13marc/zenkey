@@ -239,8 +239,10 @@ pub fn state_projection(namespace: &str, selector: &str) -> Option<String> {
 /// page read as its entries (core §4.2; #977's E3), merged per key by the
 /// tool's merge (observer §4.1, `bus::query::KeyMerge`). A deletion within
 /// an owner's window is not a value: it orders the key's later replies,
-/// and keeps no row. Returns the values, in the order their keys first
-/// arrived, and the error replies counted.
+/// and keeps no row. A stray `reply_del`, on a member of a collection
+/// every revision of its interface in `contracts` answers by snapshot, is
+/// no owner's answer, and orders nothing (#977's E4). Returns the values,
+/// in the order their keys first arrived, and the error replies counted.
 ///
 /// **The bound** is `max_replies` replies, as [`TriggerSpec::max_replies`]
 /// says, a snapshot's page counted one reply however many entries it
@@ -251,7 +253,10 @@ async fn state_get(
     selector: &str,
     timeout: Duration,
     max_replies: usize,
+    contracts: &ContractSet,
 ) -> Result<(Vec<SampleView>, u64)> {
+    let held: Vec<&zenkey_model::contract::Contract> =
+        contracts.iter().map(|r| r.contract()).collect();
     let replies = session
         .get(selector)
         .target(QueryTarget::All)
@@ -277,6 +282,13 @@ async fn state_get(
             continue;
         }
         kept += 1;
+        // A stray `reply_del`, judged on the reply, never on a snapshot's
+        // tombstone, which its entries read as a delete.
+        if s.kind() == SampleKind::Delete
+            && crate::bus::query::is_stray(&held, s.key_expr().as_str())
+        {
+            continue;
+        }
         for s in crate::bus::query::reply_samples(&s) {
             let view = SampleView::of(&s);
             let mark = view.mark();
@@ -632,7 +644,14 @@ where
         let gets = futures_util::future::join_all(selectors.iter().map(|selector| async move {
             (
                 selector.clone(),
-                state_get(session, selector, spec.timeout, spec.max_replies).await,
+                state_get(
+                    session,
+                    selector,
+                    spec.timeout,
+                    spec.max_replies,
+                    &spec.contracts,
+                )
+                .await,
             )
         }))
         .await;

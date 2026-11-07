@@ -108,17 +108,21 @@ pub fn start_presence(
 /// The seed is what makes an observation honest on arrival: current state comes
 /// before live traffic, through the same merge discipline as everything else,
 /// so an empty pane means "nothing is there" rather than "nothing has happened
-/// since you looked".
+/// since you looked". It reads with the contracts in hand, `store` (those
+/// given offline and those retrieved by fingerprint), so a complete
+/// snapshot's omission rule drops a key its owner deleted beyond its window
+/// (core §4.2; #977's E4).
 pub fn subtree(
     monitor: Arc<Monitor>,
     path: String,
     selector: String,
     policy: zenkey_fleet::SeedPolicy,
+    store: zenkey_fleet::BundleStore,
 ) -> Task<Message> {
     Task::perform(
         async move {
             monitor
-                .watch_seeded(&selector, policy)
+                .watch_seeded_with(&selector, policy, &store)
                 .await
                 .map_err(ServiceError::of)
         },
@@ -143,6 +147,7 @@ pub fn scope(
     monitor: Arc<Monitor>,
     selectors: Vec<String>,
     policy: zenkey_fleet::SeedPolicy,
+    store: zenkey_fleet::BundleStore,
 ) -> Task<Message> {
     Task::perform(
         async move {
@@ -160,7 +165,7 @@ pub fn scope(
                 } else {
                     policy
                 };
-                match monitor.watch_seeded(sel, policy).await {
+                match monitor.watch_seeded_with(sel, policy, &store).await {
                     Ok(id) => ids.push(id),
                     Err(e) => tracing::warn!("scope watch {sel}: {e}"),
                 }

@@ -26,6 +26,14 @@ JSON, CBOR or protobuf envelope.
 | Send: a value under an `Encoding` other than `zenoh/bytes` decoded as its type | undecodable, "no call form under …", no mark | core §5.1: an answer all the same |
 | Send and the Config tool: a "malformed envelope" card | gone: no reply has read so since core 0.95 | |
 
+## Unreleased (`main`, zk2) — the omission rule in the tree's seed (#977 E4)
+
+| Before | Now | Notes |
+|---|---|---|
+| a watched subtree's or scope's seed, by snapshot, dropped nothing: a key its owner deleted beyond its window stood, possibly stale | read with the contracts in hand (`--contracts` and those retrieved), a complete snapshot drops each key it omits that the tree holds no newer, as a deletion; a value under the snapshot's run above its asof, or under another run heard after the GET, stands | core §4.2's omission rule, the owner's revision mapping the index (F-497); with no contract for the interface, nothing drops, as before |
+| a snapshot with a page lost seeded what arrived | the same, then the subtree is read again once, and that snapshot, complete, applies the rule | core §4.2's SHOULD |
+| a `reply_del` on a collection's member deleted the key | neither shown nor merged where the contract in hand answers the key by snapshot | core S2, S3: no owner sends one |
+
 ## Unreleased (`main`, zk2) — state read in snapshots (#977 E2)
 
 | Before | Now | Notes |

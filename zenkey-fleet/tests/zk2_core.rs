@@ -1198,3 +1198,95 @@ async fn a_state_gets_replies_merge_per_key_whatever_arrives_last() {
         "the newer, not the last"
     );
 }
+
+/// #977's E4: an alarms reader reads a snapshot's tombstone as a deletion
+/// with its stamp, and a `reply_del` on an alarm, which its owner answers
+/// by snapshot, as no owner's answer: a reply undecodable, `form`, never a
+/// deletion.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_tombstone_is_a_deletion_and_a_stray_reply_del_is_undecodable() {
+    use zenkey_model::collection::{Snapshot, Time, Tombstone};
+    use zenkey_model::wire::{DeleteStamp, Run, Seq, Stamp, Tag};
+    let (_router, ep) = router(None).await;
+    let (owner, tool) = (client(&ep).await, client(&ep).await);
+    let tomb = "zk2/lab/al/alarms.v1/state/alarms/0000000000000001";
+    let stray = "zk2/lab/al/alarms.v1/state/alarms/0000000000000002";
+    let seq = |n| Seq::new(n).expect("a seq");
+    let page = Snapshot {
+        tag: Tag::NONE,
+        run: Run::U16(5),
+        asof: seq(3),
+        time: Time::Unknown,
+        coll: 0,
+        live: Vec::new(),
+        tombs: vec![Tombstone {
+            id: String::new(),
+            run: None,
+            seq: seq(3),
+        }],
+    }
+    .paginate(1024)
+    .expect("a page")[0]
+        .write()
+        .expect("written");
+    let attachment = DeleteStamp {
+        stamp: Stamp {
+            run: Run::U16(5),
+            seq: seq(4),
+        },
+    }
+    .write();
+    let _q = owner
+        .declare_queryable("zk2/lab/al/alarms.v1/state/**")
+        .callback(move |q| {
+            let (page, attachment) = (page.clone(), attachment.clone());
+            tokio::spawn(async move {
+                q.reply(tomb, page)
+                    .encoding(zenoh::bytes::Encoding::ZENOH_BYTES)
+                    .await
+                    .expect("a page");
+                q.reply_del(stray)
+                    .attachment(attachment)
+                    .await
+                    .expect("a reply_del");
+            });
+        })
+        .await
+        .expect("a queryable");
+    eventually("the owner answers", || async {
+        let rx = tool
+            .get("zk2/lab/al/alarms.v1/state/alarms/*")
+            .consolidation(zenoh::query::ConsolidationMode::None)
+            .timeout(std::time::Duration::from_secs(2))
+            .await
+            .expect("a GET");
+        let mut n = 0;
+        while let Ok(r) = rx.recv_async().await {
+            n += usize::from(r.result().is_ok());
+        }
+        n == 2
+    })
+    .await;
+    let r = zenkey_fleet::get_alarms(
+        &tool,
+        "zk2/lab/al/alarms.v1/state/alarms/*",
+        std::time::Duration::from_secs(2),
+        &zenkey_fleet::EntryEpochs::default(),
+    )
+    .await
+    .expect("a GET");
+    let by = |k: &str| r.replies.iter().find(|s| s.key == k).expect("a reply");
+    assert!(by(tomb).delete, "a tombstone is a deletion");
+    assert_eq!(
+        r.envelopes.get(tomb),
+        Some(&Ok(Stamp {
+            run: Run::U16(5),
+            seq: seq(3)
+        }))
+    );
+    assert!(!by(stray).delete, "a stray reply_del is no deletion");
+    assert_eq!(
+        r.envelopes.get(stray).map(|e| e.map_err(|r| r.token())),
+        Some(Err("form"))
+    );
+}

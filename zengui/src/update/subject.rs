@@ -481,5 +481,5 @@ fn toggle_watch(dep: &Deployment, obs: &mut Observation, path: String) -> Task<M
         timeout: dep.timeout(),
         ..Default::default()
     };
-    services::watch::subtree(monitor, path, selector, policy)
+    services::watch::subtree(monitor, path, selector, policy, dep.store.clone())
 }

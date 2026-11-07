@@ -1095,6 +1095,7 @@ impl Monitor {
     ///   caches of the advanced publishers present (spec §2.5). The watch
     ///   holds no contract, so it maps no snapshot's index and applies no
     ///   omission rule (observer §4.1, "Without the contract");
+    ///   [`Monitor::watch_seeded_with`] does;
     /// - one per-key merge by the owner's in-band stamp spans seed *and*
     ///   live samples for the watch's whole life (observer §4.1: a tool
     ///   keeps core §4.2's merge for as long as it follows; by seq within a
@@ -1123,6 +1124,32 @@ impl Monitor {
         &self,
         selector: &str,
         policy: crate::bus::seed::SeedPolicy,
+    ) -> Result<WatchId> {
+        self.watch_seeded_in(selector, policy, None).await
+    }
+
+    /// [`Monitor::watch_seeded`] for a tool that holds contracts (#977's
+    /// E4): `contracts`, those given offline and those retrieved by
+    /// fingerprint, as [`crate::seed_subscribe_with`] reads with them. Its
+    /// state leg applies the omission rule over each complete snapshot
+    /// with the revision its owner runs, a key it drops ingested as a
+    /// deletion with no stamp, drops a stray `reply_del`, and reads a
+    /// snapshot it holds incomplete again once.
+    pub async fn watch_seeded_with(
+        &self,
+        selector: &str,
+        policy: crate::bus::seed::SeedPolicy,
+        contracts: &crate::bus::contracts::BundleStore,
+    ) -> Result<WatchId> {
+        self.watch_seeded_in(selector, policy, Some(contracts.clone()))
+            .await
+    }
+
+    async fn watch_seeded_in(
+        &self,
+        selector: &str,
+        policy: crate::bus::seed::SeedPolicy,
+        contracts: Option<crate::bus::contracts::BundleStore>,
     ) -> Result<WatchId> {
         use crate::bus::seed::{Merge, run_legs, view_of};
 
@@ -1172,9 +1199,16 @@ impl Monitor {
             let core = Arc::clone(&self.core);
             let selector = selector.to_string();
             tokio::spawn(async move {
-                let coverage = run_legs(&session, &selector, policy, &merge, |view| {
-                    core.ingest(view, None);
-                })
+                let coverage = run_legs(
+                    &session,
+                    &selector,
+                    policy,
+                    &merge,
+                    contracts.as_ref(),
+                    |view| {
+                        core.ingest(view, None);
+                    },
+                )
                 .await;
                 // Seeded keys should be visible on the very tick that
                 // announces the boundary, not one tick later.

@@ -1,8 +1,11 @@
 //! A late joiner's seed — core §4.2 (0.26) — proven against real zenoh
 //! (#614, FL4; issue #42 before it, which proved v1's seed). The
 //! subscription first, then the legs: S4's state GET (target `All`,
-//! consolidation `Latest`) and the `@adv` history; replies and live
-//! samples merged per key by the owner's stamp.
+//! consolidation `None`, core 0.100) and the `@adv` history; replies and
+//! live samples merged per key by the owner's stamp. With the contract in
+//! hand (`seed_subscribe_with`; #977's E4) the seed applies the omission
+//! rule: `s10_a_late_joiners_seed` is `spec/scenarios/state.md` §10, and
+//! the `s14_*` cases its §14 steps 3 and 5 to 7.
 //!
 //! Self-contained two-peer sessions, no router, except where a zk2 owner
 //! is brought up through the runtime (a router and client sessions, as the
@@ -502,22 +505,16 @@ async fn dropping_a_monitor_aborts_its_seed_tasks() {
 
 /// An owner the test plays (`spec/scenarios/state.md` §10): its state
 /// queryable over `zk2/ground/<service>/mission_plan.v1/state/**` hands
-/// every GET to the test, which answers when it chooses, with the stamps it
-/// mints — one timestamp id, the owner session's zid, as §4.3 has it.
+/// every GET to the test, which answers when it chooses: with snapshots,
+/// and its puts in their zk2c envelopes, as an owner writes them (core
+/// §4.3, §7.5; #977's E4).
 struct HeldOwner {
     session: zenoh::Session,
     service: &'static str,
     queries: tokio::sync::mpsc::UnboundedReceiver<zenoh::query::Query>,
     _queryable: zenoh::query::Queryable<()>,
     _ready: zenoh::query::Queryable<()>,
-    base: u64,
-    id: TimestampId,
 }
-
-/// `mission_plan.v1.Plan`'s predefined Encoding (core §7.2): a put of
-/// a plan under zenoh's default, `zenoh/bytes`, would carry a zk2c
-/// envelope (§7.5) and read as a refused one, never merged.
-const PLAN: zenoh::bytes::Encoding = zenoh::bytes::Encoding::APPLICATION_PROTOBUF;
 
 impl HeldOwner {
     /// Declares the queryable, then a ready-probe after it, and waits until
@@ -567,14 +564,7 @@ impl HeldOwner {
             queries,
             _queryable: queryable,
             _ready: ready,
-            base: owner.new_timestamp().get_time().as_u64(),
-            id: TimestampId::from(owner.zid()),
         }
-    }
-
-    /// Tn: the owner's n-th stamp, in order.
-    fn stamp(&self, n: u64) -> Timestamp {
-        Timestamp::new(NTP64(self.base + n), self.id)
     }
 
     fn key(&self, plan: &str) -> String {
@@ -586,15 +576,6 @@ impl HeldOwner {
 
     fn selector(&self) -> String {
         self.key("*")
-    }
-
-    async fn put(&self, plan: &str, value: &str, n: u64) {
-        self.session
-            .put(self.key(plan), value.to_owned())
-            .encoding(PLAN)
-            .timestamp(self.stamp(n))
-            .await
-            .expect("the owner's put");
     }
 
     /// Waits until a subscription on the plans reaches the owner.
@@ -628,67 +609,65 @@ impl HeldOwner {
 }
 
 /// What a late joiner holds of one key: its last admitted sample's kind,
-/// payload and stamp, and how many samples were admitted for it.
+/// record and in-band seq, and how many samples were admitted for it.
 #[derive(Debug, PartialEq)]
 struct Held {
     kind: SampleKind,
     value: String,
-    stamp: Option<Timestamp>,
+    seq: Option<u32>,
     admitted: usize,
 }
 
-/// `spec/scenarios/state.md` §10: a late joiner's seed (core §4.2, 0.26).
+/// `spec/scenarios/state.md` §10: a late joiner's seed (core §4.2, 0.100).
 ///
-/// The late joiner subscribes, then GETs, through the fleet's seeded
-/// subscription. The owner holds the GET: it puts `plans/d` (T3), makes its
-/// answer (`plans/a` v1 at T1, a `reply_del` for `plans/b` at T2, `plans/d`
-/// at T3), puts `plans/a` v2 (T4) and `plans/c` (T5), then answers. The
-/// late joiner holds a = v2 (the stale reply lost to the newer put and was
-/// counted), b deleted at T2 (the `reply_del` merged as a deletion), c (the
-/// put the answer lacks, kept by the subscription), and d once (one
-/// mutation, two paths); its state leg ran to its final reply. The control
-/// — GET, then subscribe — loses `plans/c`.
+/// The late joiner subscribes, then GETs `plans/**`, through the fleet's
+/// seeded subscription with the contract in hand (#977's E4). The owner
+/// holds the GET: it puts `plans/d` (seq 3), makes its answer, a snapshot
+/// as of seq 3 (`a` v1 at seq 1, a tombstone `b` at seq 2, `d` at seq 3),
+/// puts `plans/a` v2 (seq 4) and `plans/c` (seq 5), then answers. The late
+/// joiner holds a = v2 (the stale entry lost to the newer put and was
+/// counted), b deleted at seq 2 (the tombstone merged as a deletion), c
+/// (the put the snapshot lacks, which the omission rule keeps, above
+/// asof), and d once (one mutation, two paths); the snapshot complete at
+/// its one page, and the state leg ran to its final reply. The control —
+/// GET, then subscribe — loses `plans/c`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn s10_a_late_joiners_seed() {
+    use zenkey_model::collection::{Snapshot, Time, Tombstone};
+    use zenkey_model::wire::Seq;
     let (owner, joiner) = timestamping_pair().await;
     let mut o = HeldOwner::new(&owner, &joiner, "fleet-mgr").await;
+    let store = mission_plan_store();
+    let answer = |plans: &[(&str, u32)], asof: u32| {
+        let mut s: Snapshot = plans_snapshot(RUN5, asof, plans);
+        for e in &mut s.live {
+            e.record = format!("{}-v1", e.id).into_bytes();
+        }
+        s.tombs.push(Tombstone {
+            id: "b".into(),
+            run: None,
+            seq: Seq::new(2).expect("a seq"),
+        });
+        s.time = Time::Unknown;
+        s
+    };
 
     // 1. Subscribe, then GET (the seeded subscription's own order).
-    let mut sub = seed_subscribe(
-        &joiner,
-        &o.selector(),
-        SeedPolicy {
-            history: false,
-            state: true,
-            timeout: util::SETTLE,
-        },
-    )
-    .await
-    .expect("seed subscribe");
+    let mut sub = zenkey_fleet::seed_subscribe_with(&joiner, &collection(&o), policy(), &store)
+        .await
+        .expect("seed subscribe");
 
     // 2. The owner takes the GET, holds it, and puts plans/d.
     let q = o.next_query().await;
     o.matched().await;
-    o.put("d", "d-v1", 3).await;
-    // 3. Its answer is made now: plans/a v1 (T1), plans/b deleted (T2),
-    //    plans/d (T3). 4. Before sending it, two more puts.
-    o.put("a", "a-v2", 4).await;
-    o.put("c", "c-v1", 5).await;
+    o.put_in("d", RUN5, 3, b"d-v1").await;
+    // 3. Its answer is made now, as of seq 3. 4. Before sending it, two
+    //    more puts.
+    let snapshot = answer(&[("a", 1), ("d", 3)], 3);
+    o.put_in("a", RUN5, 4, b"a-v2").await;
+    o.put_in("c", RUN5, 5, b"c-v1").await;
     // 5. The answer, then the GET's end.
-    q.reply(o.key("a"), "a-v1")
-        .encoding(PLAN)
-        .timestamp(o.stamp(1))
-        .await
-        .expect("reply");
-    q.reply_del(o.key("b"))
-        .timestamp(o.stamp(2))
-        .await
-        .expect("reply_del");
-    q.reply(o.key("d"), "d-v1")
-        .encoding(PLAN)
-        .timestamp(o.stamp(3))
-        .await
-        .expect("reply");
+    o.pages(&q, &snapshot, &[]).await;
     drop(q);
 
     let mut held: BTreeMap<String, Held> = BTreeMap::new();
@@ -705,8 +684,8 @@ async fn s10_a_late_joiners_seed() {
                     plan,
                     Held {
                         kind: v.kind,
-                        value: String::from_utf8_lossy(&v.payload.to_bytes()).into_owned(),
-                        stamp: v.timestamp,
+                        value: text(&v),
+                        seq: v.inband().map(|s| s.seq.get()),
                         admitted,
                     },
                 );
@@ -719,68 +698,58 @@ async fn s10_a_late_joiners_seed() {
         held.get(plan)
             .unwrap_or_else(|| panic!("plans/{plan} is not held: {held:#?}"))
     };
-    // Expected 1: the stale reply lost to the newer live put.
+    // Expected 1: the stale entry lost to the newer live put.
     assert_eq!(
         get("a"),
         &Held {
             kind: SampleKind::Put,
             value: "a-v2".into(),
-            stamp: Some(o.stamp(4)),
+            seq: Some(4),
             admitted: 1,
         },
-        "the reply (T1) never shows after v2 (T4)"
+        "the entry (seq 1) never shows after v2 (seq 4)"
     );
-    // Expected 2: the put the answer lacks, through the subscription.
-    assert_eq!(get("c").value, "c-v1");
-    assert_eq!(get("c").stamp, Some(o.stamp(5)));
-    // Expected 3: the reply_del, a deletion with its stamp.
+    // Expected 2: the put the snapshot lacks, kept by the omission rule.
+    assert_eq!((get("c").value.as_str(), get("c").seq), ("c-v1", Some(5)));
+    // Expected 3: the tombstone, a deletion with its stamp.
     assert_eq!(
         get("b").kind,
         SampleKind::Delete,
         "a deletion, not an absence"
     );
-    assert_eq!(get("b").stamp, Some(o.stamp(2)));
+    assert_eq!(get("b").seq, Some(2));
     // Expected 4: one mutation, two paths, kept once.
-    assert_eq!(get("d").admitted, 1, "the live put and the reply are one");
-    assert_eq!(get("d").stamp, Some(o.stamp(3)));
+    assert_eq!(get("d").admitted, 1, "the live put and the entry are one");
+    assert_eq!(get("d").seq, Some(3));
     assert_eq!(held.len(), 4);
-    // Expected 5: the state leg ran to its final reply.
-    assert_eq!(
-        coverage.state,
-        Asked::Asked(SeedLeg {
-            replies: 3,
-            complete: true,
-            snapshots: Vec::new(),
-        })
-    );
+    // Expected 5: the snapshot complete at its one page, and the state leg
+    // ran to its final reply.
+    let leg = coverage.state.as_option().expect("the state leg");
+    assert_eq!(leg.replies, 1, "one page");
+    assert!(leg.complete, "{leg:?}");
+    assert_eq!(leg.snapshots.len(), 1);
+    assert!(leg.snapshots[0].complete && leg.snapshots[0].asof == 3);
     assert_eq!(coverage.history, Asked::NotAsked);
     assert_eq!(
         coverage.superseded, 2,
-        "the stale plans/a reply and plans/d's second copy, counted (O6)"
+        "the stale plans/a entry and plans/d's second copy, counted (O6)"
     );
 
     // 6. The control: GET, then subscribe, on the bare session.
     let mut ctl = HeldOwner::new(&owner, &joiner, "fleet-mgr-ctl").await;
     let replies = joiner
-        .get(ctl.selector())
+        .get(collection(&ctl))
         .target(zenoh::query::QueryTarget::All)
-        .consolidation(zenoh::query::ConsolidationMode::Latest)
+        .consolidation(zenoh::query::ConsolidationMode::None)
         .timeout(util::SETTLE)
         .await
         .expect("the control's GET");
     let q = ctl.next_query().await;
     // The answer is made (plans/a, plans/b deleted); then plans/c, then the
     // answer is sent.
-    ctl.put("c", "c-v1", 5).await;
-    q.reply(ctl.key("a"), "a-v1")
-        .encoding(PLAN)
-        .timestamp(ctl.stamp(1))
-        .await
-        .expect("reply");
-    q.reply_del(ctl.key("b"))
-        .timestamp(ctl.stamp(2))
-        .await
-        .expect("reply_del");
+    let made = answer(&[("a", 1)], 2);
+    ctl.put_in("c", RUN5, 5, b"c-v1").await;
+    ctl.pages(&q, &made, &[]).await;
     drop(q);
     let mut answered = Vec::new();
     while let Ok(reply) = replies.recv_async().await {
@@ -788,8 +757,7 @@ async fn s10_a_late_joiners_seed() {
             answered.push(sample.key_expr().as_str().to_owned());
         }
     }
-    answered.sort();
-    assert_eq!(answered, [ctl.key("a"), ctl.key("b")]);
+    assert_eq!(answered, [ctl.plans()], "one page");
     let (tx, mut live) = tokio::sync::mpsc::unbounded_channel::<String>();
     let _late = joiner
         .declare_subscriber(ctl.selector())
@@ -1772,9 +1740,8 @@ async fn drain_views(
 /// deletion with its stamp — and says which snapshots it heard. A member
 /// read's snapshots are one page each, complete; a page whose body is
 /// refused is delivered undecodable and moves nothing. A collection read's
-/// three pages share one key, so under `Latest`, which the leg keeps until
-/// E3, only the last arrives: the leg holds the snapshot incomplete, and
-/// the seed possibly incomplete, the last page's entry delivered.
+/// three pages share one key, and under `None` (#977's E3) every one
+/// arrives: the leg holds the snapshot complete.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_state_leg_reads_a_snapshots_entries() {
     use snapshot_owner as owner;
@@ -1909,4 +1876,333 @@ async fn a_zsnap_folds_a_snapshots_entries_into_rows() {
         taken.snapshot.header.answered, 4,
         "each entry a reply, and the refused page"
     );
+}
+
+// ─── §14 through the fleet's seed, the omission rule (#977's E4) ────────────
+
+/// The run every snapshot owner here writes under, but §14 step 7's second
+/// instance.
+const RUN5: zenkey_model::wire::Run = zenkey_model::wire::Run::U16(5);
+
+/// An envelope of run `run` and seq `seq` around `record`, a mutation's.
+fn mutation(run: zenkey_model::wire::Run, seq: u32, record: &[u8]) -> Vec<u8> {
+    use zenkey_model::wire::{Envelope, Form, Seq, Stamp, Tag};
+    Envelope {
+        form: Form::Mutation,
+        tag: Tag::NONE,
+        stamp: Stamp {
+            run,
+            seq: Seq::new(seq).expect("a seq"),
+        },
+        record,
+    }
+    .write()
+}
+
+/// The snapshot of `plans/{vehicle}` (coll 0) under `run` as of `asof`:
+/// each `(vehicle, seq)` a live entry whose record is 110 bytes, as §14's.
+fn plans_snapshot(
+    run: zenkey_model::wire::Run,
+    asof: u32,
+    plans: &[(&str, u32)],
+) -> zenkey_model::collection::Snapshot {
+    use zenkey_model::collection::{Confirmation, Entry, Snapshot, Time};
+    use zenkey_model::wire::{Seq, Tag};
+    let mut live: Vec<Entry> = plans
+        .iter()
+        .map(|(id, seq)| Entry {
+            id: (*id).to_owned(),
+            run: None,
+            seq: Seq::new(*seq).expect("a seq"),
+            confirmation: Confirmation::None,
+            record: format!("{id:-<110}").into_bytes(),
+        })
+        .collect();
+    live.sort_by(|a, b| a.id.as_bytes().cmp(b.id.as_bytes()));
+    Snapshot {
+        tag: Tag::NONE,
+        run,
+        asof: Seq::new(asof).expect("a seq"),
+        time: Time::Known { s: 3600, ms: 0 },
+        coll: 0,
+        live,
+        tombs: Vec::new(),
+    }
+}
+
+/// §14's 32 plans, `v00` to `v30` and `vehicle-01`, at seqs from `first`.
+fn the_32(first: u32) -> Vec<(String, u32)> {
+    let mut names: Vec<String> = (0..31).map(|i| format!("v{i:02}")).collect();
+    names.push("vehicle-01".to_owned());
+    names
+        .into_iter()
+        .enumerate()
+        .map(|(i, n)| (n, first + u32::try_from(i).expect("small")))
+        .collect()
+}
+
+/// The contracts a tool holds here: `mission_plan.v1`, given offline.
+fn mission_plan_store() -> zenkey_fleet::bus::contracts::BundleStore {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../zenkey/tests/contracts/mission_plan.v1.toml");
+    let (set, problems) = zenkey_fleet::ContractSet::load_path(&path);
+    assert!(problems.is_empty(), "{problems:?}");
+    let store = zenkey_fleet::bus::contracts::BundleStore::new(util::SETTLE);
+    store.seed(&set);
+    store
+}
+
+impl HeldOwner {
+    /// A live put of `record` on `plan` under `run` at `seq`, in its zk2c
+    /// envelope under `zenoh/bytes`, as an owner puts one (core §7.5).
+    async fn put_in(&self, plan: &str, run: zenkey_model::wire::Run, seq: u32, record: &[u8]) {
+        self.session
+            .put(self.key(plan), mutation(run, seq, record))
+            .encoding(zenoh::bytes::Encoding::ZENOH_BYTES)
+            .await
+            .expect("the owner's put");
+    }
+
+    /// The snapshot key of its plans.
+    fn plans(&self) -> String {
+        format!("zk2/ground/{}/mission_plan.v1/state/plans", self.service)
+    }
+
+    /// Answers `q` with `snapshot`'s pages at 1,024 bytes on the plans'
+    /// snapshot key, but those `lost` names.
+    async fn pages(
+        &self,
+        q: &zenoh::query::Query,
+        snapshot: &zenkey_model::collection::Snapshot,
+        lost: &[u32],
+    ) -> usize {
+        let pages = snapshot.paginate(1024).expect("pages");
+        for p in pages.iter().filter(|p| !lost.contains(&p.index)) {
+            q.reply(self.plans(), p.write().expect("a page"))
+                .encoding(zenoh::bytes::Encoding::ZENOH_BYTES)
+                .await
+                .expect("a page");
+        }
+        pages.len()
+    }
+}
+
+/// What a contract-holding seeded subscription has delivered of each plan,
+/// by its last chunk: a value's record, or `None` for a deletion; drained
+/// until `done` holds, or the boundary.
+async fn drain_plans(
+    sub: &mut zenkey_fleet::SeededSubscriber,
+    held: &mut BTreeMap<String, Option<String>>,
+    deletions: &mut Vec<String>,
+    done: impl Fn(&BTreeMap<String, Option<String>>) -> bool,
+) -> Option<zenkey_fleet::SeedCoverage> {
+    while !done(held) {
+        let item = tokio::time::timeout(util::SETTLE, sub.recv())
+            .await
+            .expect("a delivery")
+            .expect("stream alive");
+        match item {
+            SeedItem::Sample(v) => {
+                let plan = v.key.rsplit('/').next().expect("a chunk").to_owned();
+                if v.kind == SampleKind::Delete {
+                    deletions.push(plan.clone());
+                    held.insert(plan, None);
+                } else {
+                    held.insert(plan, Some(text(&v)));
+                }
+            }
+            SeedItem::Dropped(n) => panic!("this fixture never outruns the channel ({n})"),
+            SeedItem::SeedComplete(c) => return Some(c),
+        }
+    }
+    None
+}
+
+/// The collection read the seed asks.
+fn collection(o: &HeldOwner) -> String {
+    format!("{}/**", o.plans())
+}
+
+fn policy() -> SeedPolicy {
+    SeedPolicy {
+        history: false,
+        state: true,
+        timeout: util::SETTLE,
+    }
+}
+
+/// `spec/scenarios/state.md` §14 step 3, through the fleet's seed with the
+/// contract in hand (#977's E4): T holds `plans/v99`, heard at seq 1 of
+/// the owner's run, which the owner no longer has. Its answer to T's
+/// `plans/**` holds pages 0, 1 and 3 of 4: T holds the snapshot
+/// incomplete, merges their entries and drops nothing. It reads the
+/// collection again (the SHOULD, core §4.2), and that snapshot, complete,
+/// drops `plans/v99`: a deletion with no stamp. The leg is complete, its
+/// one snapshot settled by the second read.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn s14_a_page_lost_drops_nothing_and_the_read_again_drops_v99() {
+    let (owner, joiner) = timestamping_pair().await;
+    let mut o = HeldOwner::new(&owner, &joiner, "fleet-mgr-p3").await;
+    let store = mission_plan_store();
+    let mut sub = zenkey_fleet::seed_subscribe_with(&joiner, &collection(&o), policy(), &store)
+        .await
+        .expect("seed subscribe");
+    let q = o.next_query().await;
+    o.matched().await;
+    o.put_in("v99", RUN5, 1, b"v99").await;
+    let (mut held, mut deletions) = (BTreeMap::new(), Vec::new());
+    drain_plans(&mut sub, &mut held, &mut deletions, |h| {
+        h.contains_key("v99")
+    })
+    .await;
+    let plans: Vec<(String, u32)> = the_32(2);
+    let refs: Vec<(&str, u32)> = plans.iter().map(|(n, s)| (n.as_str(), *s)).collect();
+    let snapshot = plans_snapshot(RUN5, 33, &refs);
+    assert_eq!(o.pages(&q, &snapshot, &[2]).await, 4, "§14's four pages");
+    drop(q);
+    // The read again, answered whole.
+    let again = o.next_query().await;
+    assert_eq!(
+        again.key_expr().as_str(),
+        collection(&o),
+        "the collection read"
+    );
+    // Before it is answered, T holds page 0, 1 and 3's entries, and v99.
+    drain_plans(&mut sub, &mut held, &mut deletions, |h| h.len() == 25).await;
+    assert_eq!(
+        held.get("v99"),
+        Some(&Some("v99".to_owned())),
+        "nothing dropped"
+    );
+    assert!(deletions.is_empty(), "{deletions:?}");
+    o.pages(&again, &snapshot, &[]).await;
+    drop(again);
+    let coverage = drain_plans(&mut sub, &mut held, &mut deletions, |_| false)
+        .await
+        .expect("the boundary");
+    assert_eq!(deletions, ["v99"], "the complete snapshot drops it");
+    assert_eq!(held.values().filter(|v| v.is_some()).count(), 32);
+    let leg = coverage.state.as_option().expect("the state leg");
+    assert!(leg.complete, "settled by the read again: {leg:?}");
+}
+
+/// `spec/scenarios/state.md` §14 steps 5 and 6, through the fleet's seed
+/// with the contract in hand (#977's E4). T holds the 32 plans, heard at
+/// seqs 1 to 32. The owner deletes `plans/v05` and `plans/vehicle-01`
+/// beyond its window, its tombstones gone: T never hears them. It puts
+/// `plans/v31` at seq 35 between taking T's GET and sending its answer, a
+/// snapshot as of seq 34 listing the 30 plans left. T's omission rule
+/// drops `v05` and `vehicle-01`, and keeps `v31`, above the snapshot's
+/// asof. Then step 6: every plan deleted, the owner's snapshot is one page
+/// of no entry, complete, and T's omission rule drops every plan it held.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn s14_a_delete_beyond_the_window_and_an_empty_collection_reach_the_seed() {
+    let (owner, joiner) = timestamping_pair().await;
+    let mut o = HeldOwner::new(&owner, &joiner, "fleet-mgr-p5").await;
+    let store = mission_plan_store();
+    let mut sub = zenkey_fleet::seed_subscribe_with(&joiner, &collection(&o), policy(), &store)
+        .await
+        .expect("seed subscribe");
+    let q = o.next_query().await;
+    o.matched().await;
+    let plans = the_32(1);
+    for (n, seq) in &plans {
+        o.put_in(n, RUN5, *seq, n.as_bytes()).await;
+    }
+    // Deleted beyond the window at seqs 33 and 34, unheard; then v31.
+    o.put_in("v31", RUN5, 35, b"v31").await;
+    let (mut held, mut deletions) = (BTreeMap::new(), Vec::new());
+    drain_plans(&mut sub, &mut held, &mut deletions, |h| h.len() == 33).await;
+    let left: Vec<(&str, u32)> = plans
+        .iter()
+        .filter(|(n, _)| n != "v05" && n != "vehicle-01")
+        .map(|(n, s)| (n.as_str(), *s))
+        .collect();
+    o.pages(&q, &plans_snapshot(RUN5, 34, &left), &[]).await;
+    drop(q);
+    let coverage = drain_plans(&mut sub, &mut held, &mut deletions, |_| false)
+        .await
+        .expect("the boundary");
+    deletions.sort();
+    assert_eq!(deletions, ["v05", "vehicle-01"], "the deletes reach T");
+    assert_eq!(held.get("v31"), Some(&Some("v31".to_owned())), "above asof");
+    assert_eq!(held.values().filter(|v| v.is_some()).count(), 31);
+    let leg = coverage.state.as_option().expect("the state leg");
+    assert!(leg.complete && leg.snapshots.len() == 1, "{leg:?}");
+
+    // Step 6: an empty collection, read by a seed that holds three plans.
+    let mut sub = zenkey_fleet::seed_subscribe_with(&joiner, &collection(&o), policy(), &store)
+        .await
+        .expect("seed subscribe");
+    let q = o.next_query().await;
+    o.matched().await;
+    for (n, seq) in [("a", 40), ("b", 41), ("c", 42)] {
+        o.put_in(n, RUN5, seq, n.as_bytes()).await;
+    }
+    let (mut held, mut deletions) = (BTreeMap::new(), Vec::new());
+    drain_plans(&mut sub, &mut held, &mut deletions, |h| h.len() == 3).await;
+    assert_eq!(o.pages(&q, &plans_snapshot(RUN5, 50, &[]), &[]).await, 1);
+    drop(q);
+    let coverage = drain_plans(&mut sub, &mut held, &mut deletions, |_| false)
+        .await
+        .expect("the boundary");
+    deletions.sort();
+    assert_eq!(deletions, ["a", "b", "c"], "the owner's word: no member");
+    let leg = coverage.state.as_option().expect("the state leg");
+    assert!(leg.complete, "{leg:?}");
+    assert_eq!(leg.snapshots.len(), 1);
+    assert!(leg.snapshots[0].complete && leg.snapshots[0].pages == [0]);
+}
+
+/// `spec/scenarios/state.md` §14 step 7, through the fleet's seed with the
+/// contract in hand (#977's E4): two instances answer, the 32 plans under
+/// run 5 and `plans/x1` alone under run 6. Both snapshots are complete,
+/// and each one's omission rule spares the other run's plans, which T
+/// heard after it asked the GET: T holds 33 plans, whichever arrived
+/// first. A `reply_del` for `plans/v00` beside them, a collection's member
+/// the owner answers by snapshot, is no owner's answer: never delivered.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn s14_two_instances_answer_and_neither_drops_the_others() {
+    let (owner, joiner) = timestamping_pair().await;
+    let store = mission_plan_store();
+    let plans = the_32(1);
+    let refs: Vec<(&str, u32)> = plans.iter().map(|(n, s)| (n.as_str(), *s)).collect();
+    let five = plans_snapshot(RUN5, 32, &refs);
+    let six = plans_snapshot(zenkey_model::wire::Run::U16(6), 1, &[("x1", 1)]);
+    for (service, first, second) in [
+        ("fleet-mgr-p7a", &five, &six),
+        ("fleet-mgr-p7b", &six, &five),
+    ] {
+        let mut o = HeldOwner::new(&owner, &joiner, service).await;
+        let mut sub = zenkey_fleet::seed_subscribe_with(&joiner, &collection(&o), policy(), &store)
+            .await
+            .expect("seed subscribe");
+        let q = o.next_query().await;
+        o.pages(&q, first, &[]).await;
+        q.reply_del(o.key("v00"))
+            .attachment(
+                zenkey_model::wire::DeleteStamp {
+                    stamp: zenkey_model::wire::Stamp {
+                        run: RUN5,
+                        seq: zenkey_model::wire::Seq::new(40).expect("a seq"),
+                    },
+                }
+                .write(),
+            )
+            .await
+            .expect("a reply_del");
+        o.pages(&q, second, &[]).await;
+        drop(q);
+        let (mut held, mut deletions) = (BTreeMap::new(), Vec::new());
+        let coverage = drain_plans(&mut sub, &mut held, &mut deletions, |_| false)
+            .await
+            .expect("the boundary");
+        assert!(deletions.is_empty(), "{service}: {deletions:?}");
+        assert_eq!(held.len(), 33, "{service}: {held:?}");
+        assert!(held.contains_key("x1") && held.contains_key("v00"));
+        let leg = coverage.state.as_option().expect("the state leg");
+        assert!(leg.complete, "{service}: {leg:?}");
+        assert_eq!(leg.snapshots.len(), 2, "one for each run");
+        assert!(leg.snapshots.iter().all(|s| s.complete));
+    }
 }

@@ -267,7 +267,7 @@ pub use bus::query::{
     declare_repeating, declare_repeating_any, fleet_get,
 };
 pub use bus::scout::{ScoutStream, scout};
-pub use bus::seed::{SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
+pub use bus::seed::{SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe, seed_subscribe_with};
 pub use bus::serve::{MockResponder, ServedQuery, declare_responder};
 pub use bus::session::{
     OPEN_TIMEOUT, OpenFailure, TOOL_INTERESTS_TIMEOUT, check_namespace, open, open_in_namespace,

@@ -388,7 +388,7 @@ pub(crate) fn watch_scope(dep: &Deployment, obs: &Observation) -> Task<Message> 
         timeout: dep.timeout(),
         ..Default::default()
     };
-    services::watch::scope(monitor, selectors, policy)
+    services::watch::scope(monitor, selectors, policy, dep.store.clone())
 }
 
 fn unwatch_scope(obs: &mut Observation) -> Task<Message> {
