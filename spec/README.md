@@ -192,6 +192,9 @@ section number alone is the core's.
   lets a reader see that its view differs.
   [`freshness.v2`](profiles/freshness/v2.md) adopts it. It replaces
   re-puts.
+- **Snapshot**: one collection's state in a GET's reply, in pages
+  ([§7.5](core.md#75-the-zk2c-envelope)). Each entry carries its member's
+  stamp and, under a horizon, its confirmation. No owner writes one yet.
 - **Holder**: any participant that holds a bundle and serves it on its key
   ([§8.4](core.md#84-contract-retrieval)).
 - **Address**: a service's `<system>/<service>`, as a binding names it
@@ -220,7 +223,7 @@ section number alone is the core's.
 | [`descriptor.schema.json`](descriptor.schema.json) | JSON Schema of the descriptor record (core §3.3), generated the same way | `zenkey-model/src/descriptor.rs` |
 | [`catalog.schema.json`](catalog.schema.json) | JSON Schema of the deployment catalog (core §8.6), generated the same way. The reading rules it cannot state are §8.6's. | `zenkey-model/src/catalog.rs` |
 | [`core/`](core/) | The bare wire's error envelope: `error.proto`, `error.schema.json` (core §5.2) | |
-| [`conformance/`](conformance/) | Fixtures: keys, slugs, templates, contract lints, canonical forms, fingerprints, bundles, set checks, history, descriptors, errors, the compatibility matrix, the population budget, a late joiner's merge, the zk2c envelope, heartbeats, packed records, frames, deployment catalogs. | `zenkey-model/tests/conformance.rs` |
+| [`conformance/`](conformance/) | Fixtures: keys, slugs, templates, contract lints, canonical forms, fingerprints, bundles, set checks, history, descriptors, errors, the compatibility matrix, the population budget, a late joiner's merge, the zk2c envelope, heartbeats, snapshots' pages, packed records, frames, deployment catalogs. | `zenkey-model/tests/conformance.rs` |
 | [`scenarios/`](scenarios/) | Network rules that a fixture cannot check: setup, steps, expected observations. | the spike's runs |
 | [`profiles/`](profiles/) | The profiles (core §10), one directory each, with its own text version, changelog, fixtures and scenarios. They are listed, each with its text version, status, who uses it and the core version it is written against, in [the index](profiles/README.md#index), those nobody uses yet (`experimental`) in a table of their own, beside the template and the process. | `zenkey-model/tests/profiles.rs` |
 | [`CHANGELOG.md`](CHANGELOG.md) | The amendments to `core.md` since its first accepted version, newest first | |

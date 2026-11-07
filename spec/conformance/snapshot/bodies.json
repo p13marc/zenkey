@@ -1,0 +1,4354 @@
+{
+  "description": "core §7.5, a snapshot's pages. Written by an independent reading of the text (Python, standard library), checked, never blessed. A page's bytes are the whole GET reply's payload, CH to the last tombstone; its envelope parses as §7.5's snapshot on a put (`envelope/vectors.json` holds the envelope's refusals), and its body is what is read here. A page is `tag`, `run_width` (16 or 32) and `run` (CH's and the header's), `asof`, `time` (`{\"s\": t32, \"ms\": ms16}`, or `null` for the unknown time, t32 all ones and ms16 0), `index` and `more` (the page integer is index × 2 + more), `coll`, `live` and `tombs`. A live entry is `id` (a string, empty for the reply's key itself), `run_width` and `run` (`null` for the header's run), `seq`, `confirmation` (`none` for 0, the collection with no horizon; `time` for 1, vouched for at the snapshot's time; `conf` for 2, with `conf`, the last confirmation, a time or `null`) and `record` in hex. A tombstone is `id`, `run_width`, `run` and `seq`. A snapshot, in `pages`, is a page without `index` and `more`. `writes`: a page → its bytes in `hex` and their `size`, or the writer's refusal `{\"refused\": token}`, a token of the reading's for what it would refuse. `reads`: a page's bytes in hex → the page, or `{\"refused\": token}`, the first that applies reading the fields in order, and for one field the first in this list: `short` (the body ends before a byte a field needs, an integer's last byte included), `leb128` (an integer whose fifth byte has its high bit set, above 2^32 − 1, or not in its shortest form), `time` (a time or a conf with ms16 above 999, or t32 all ones with ms16 not 0), `id` (an id neither empty nor plain chunks joined by `/`), `order` (an id not above the one before it in its list, or a tombstone's id that a live entry of the body has), `flags` (a bit from 3 to 0 set, bit 4 without bit 7, confirmation 3, or a tombstone's confirmation other than 0), `run` (an entry's own run that is the header's, in width and value), `trailing` (a byte after the last tombstone). Every page read writes back to its bytes, and every page written reads back to its value. `pages`: a snapshot and a page size in bytes → the pages' bytes in order and their sizes, or the writer's refusal. The entries, live and tombstones together in the byte order of their ids, fill page 0, then page 1: a page takes the next entry when it holds none yet, or when its bytes with that entry are within the page size. The last page's more bit is 0, and a snapshot with no entry is one page. Every set of pages reads back, page by page, to the snapshot's entries.",
+  "writes": [
+    {
+      "note": "a page with no entry: an empty collection, the owner's word that it has no member as of asof. 16 bytes",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 9,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [],
+        "tombs": []
+      },
+      "expect": {
+        "hex": "e0000100000900000e1000fa00000000",
+        "size": 16
+      }
+    },
+    {
+      "note": "the time unknown: t32 all ones and ms16 0",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 9,
+        "time": null,
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [],
+        "tombs": []
+      },
+      "expect": {
+        "hex": "e00001000009ffffffff000000000000",
+        "size": 16
+      }
+    },
+    {
+      "note": "a member read: one entry, its id empty, the member's own key the reply's. No horizon, the header's run",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 9,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "",
+            "run_width": null,
+            "run": null,
+            "seq": 7,
+            "confirmation": "none",
+            "record": "7b226d6f6465223a2261227d"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "hex": "e0000100000900000e1000fa00000100000000070c7b226d6f6465223a2261227d00",
+        "size": 34
+      }
+    },
+    {
+      "note": "zenoh-modem's oper, a collection of one member with a horizon, vouched for as the snapshot is built: confirmation 1, at the snapshot's time",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 11329,
+        "asof": 1207,
+        "time": {
+          "s": 26308800,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 2,
+        "live": [
+          {
+            "id": "",
+            "run_width": null,
+            "run": null,
+            "seq": 1201,
+            "confirmation": "time",
+            "record": "7b2261646d696e223a227570222c226f706572223a227570222c2273696e63655f73223a353430307d"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "hex": "e02c410004b7019170c000fa00020100200004b1297b2261646d696e223a227570222c226f706572223a227570222c2273696e63655f73223a353430307d00",
+        "size": 63
+      }
+    },
+    {
+      "note": "the same member not vouched for now: confirmation 2, its last confirmation in conf",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 11329,
+        "asof": 1207,
+        "time": {
+          "s": 26308800,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 2,
+        "live": [
+          {
+            "id": "",
+            "run_width": null,
+            "run": null,
+            "seq": 1201,
+            "confirmation": "conf",
+            "conf": {
+              "s": 26308740,
+              "ms": 0
+            },
+            "record": "7b2261646d696e223a227570222c226f706572223a227570222c2273696e63655f73223a353430307d"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "hex": "e02c410004b7019170c000fa00020100400004b1019170840000297b2261646d696e223a227570222c226f706572223a227570222c2273696e63655f73223a353430307d00",
+        "size": 69
+      }
+    },
+    {
+      "note": "a last confirmation the owner's clock did not know: conf unknown",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 11329,
+        "asof": 1207,
+        "time": null,
+        "index": 0,
+        "more": false,
+        "coll": 2,
+        "live": [
+          {
+            "id": "",
+            "run_width": null,
+            "run": null,
+            "seq": 1201,
+            "confirmation": "conf",
+            "conf": null,
+            "record": "7b2261646d696e223a227570222c226f706572223a227570222c2273696e63655f73223a353430307d"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "hex": "e02c410004b7ffffffff000000020100400004b1ffffffff0000297b2261646d696e223a227570222c226f706572223a227570222c2273696e63655f73223a353430307d00",
+        "size": 69
+      }
+    },
+    {
+      "note": "an entry under an earlier 16-bit run, below a 32-bit header run: flags 0x80, then its run",
+      "page": {
+        "tag": 0,
+        "run_width": 32,
+        "run": 2587560977,
+        "asof": 3,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": 16,
+            "run": 65534,
+            "seq": 4,
+            "confirmation": "none",
+            "record": "2a"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "hex": "f09a3b0c1100000300000e1000fa000001016180fffe000004012a00",
+        "size": 28
+      }
+    },
+    {
+      "note": "an entry under an earlier 32-bit run, below a 16-bit header run: flags 0x90",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 3,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": 32,
+            "run": 16909060,
+            "seq": 4,
+            "confirmation": "none",
+            "record": "2a"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "hex": "e0000100000300000e1000fa00000101619001020304000004012a00",
+        "size": 28
+      }
+    },
+    {
+      "note": "an own 16-bit run and confirmation 1: flags 0xa0",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 3,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": 16,
+            "run": 257,
+            "seq": 4,
+            "confirmation": "time",
+            "record": "2a"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "hex": "e0000100000300000e1000fa0000010161a00101000004012a00",
+        "size": 26
+      }
+    },
+    {
+      "note": "an own 32-bit run and confirmation 2: flags 0xd0, then the run, the seq and conf",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 3,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": 32,
+            "run": 16909060,
+            "seq": 4,
+            "confirmation": "conf",
+            "conf": {
+              "s": 3599,
+              "ms": 999
+            },
+            "record": "2a"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "hex": "e0000100000300000e1000fa0000010161d00102030400000400000e0f03e7012a00",
+        "size": 34
+      }
+    },
+    {
+      "note": "an entry's own 32-bit run 1 below the header's 16-bit run 1: two runs of different widths are two runs",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 3,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": 32,
+            "run": 1,
+            "seq": 4,
+            "confirmation": "none",
+            "record": "2a"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "hex": "e0000100000300000e1000fa00000101619000000001000004012a00",
+        "size": 28
+      }
+    },
+    {
+      "note": "two tombstones, deletes within the window: one under the header's run, one under an earlier 32-bit run",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 12,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [],
+        "tombs": [
+          {
+            "id": "peer-a",
+            "run_width": 32,
+            "run": 12648430,
+            "seq": 8
+          },
+          {
+            "id": "peer-c",
+            "run_width": null,
+            "run": null,
+            "seq": 11
+          }
+        ]
+      },
+      "expect": {
+        "hex": "e0000100000c00000e1000fa0000000206706565722d619000c0ffee00000806706565722d630000000b",
+        "size": 42
+      }
+    },
+    {
+      "note": "live entries and tombstones, each list in the byte order of its ids: `a-b` < `a.b` < `a/b` < `a0`, `-` 0x2d, `.` 0x2e, `/` 0x2f, `0` 0x30",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 5,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 1,
+            "confirmation": "none",
+            "record": "01"
+          },
+          {
+            "id": "a-b",
+            "run_width": null,
+            "run": null,
+            "seq": 2,
+            "confirmation": "none",
+            "record": "02"
+          },
+          {
+            "id": "a/b",
+            "run_width": null,
+            "run": null,
+            "seq": 3,
+            "confirmation": "none",
+            "record": "03"
+          }
+        ],
+        "tombs": [
+          {
+            "id": "a.b",
+            "run_width": null,
+            "run": null,
+            "seq": 4
+          },
+          {
+            "id": "a0",
+            "run_width": null,
+            "run": null,
+            "seq": 5
+          }
+        ]
+      },
+      "expect": {
+        "hex": "e0000100000500000e1000fa000003016100000001010103612d6200000002010203612f620000000301030203612e620000000402613000000005",
+        "size": 59
+      }
+    },
+    {
+      "note": "a tombstone's id below every live entry's: each list is ordered on its own",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 6,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "b",
+            "run_width": null,
+            "run": null,
+            "seq": 6,
+            "confirmation": "none",
+            "record": "06"
+          }
+        ],
+        "tombs": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 5
+          }
+        ]
+      },
+      "expect": {
+        "hex": "e0000100000600000e1000fa000001016200000006010601016100000005",
+        "size": 30
+      }
+    },
+    {
+      "note": "ids of several chunks: a template `a/{x}/b/{y}` under its snapshot key `…/a`",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 3,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "x-1/b/y-1",
+            "run_width": null,
+            "run": null,
+            "seq": 1,
+            "confirmation": "none",
+            "record": "01"
+          },
+          {
+            "id": "x-1/b/y-2",
+            "run_width": null,
+            "run": null,
+            "seq": 2,
+            "confirmation": "none",
+            "record": "02"
+          },
+          {
+            "id": "x-2/b/y-1",
+            "run_width": null,
+            "run": null,
+            "seq": 3,
+            "confirmation": "none",
+            "record": "03"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "hex": "e0000100000300000e1000fa00000309782d312f622f792d3100000001010109782d312f622f792d3200000002010209782d322f622f792d3100000003010300",
+        "size": 64
+      }
+    },
+    {
+      "note": "a packed collection, tag 13: each record whole, 4 bytes with its pad, its length kept",
+      "page": {
+        "tag": 13,
+        "run_width": 16,
+        "run": 1,
+        "asof": 42,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 4,
+        "live": [
+          {
+            "id": "peer-a",
+            "run_width": null,
+            "run": null,
+            "seq": 40,
+            "confirmation": "time",
+            "record": "a5c00f80"
+          },
+          {
+            "id": "peer-b",
+            "run_width": null,
+            "run": null,
+            "seq": 41,
+            "confirmation": "conf",
+            "conf": {
+              "s": 3590,
+              "ms": 0
+            },
+            "record": "a5c01080"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "hex": "ed000100002a00000e1000fa00040206706565722d612000002804a5c00f8006706565722d624000002900000e06000004a5c0108000",
+        "size": 54
+      }
+    },
+    {
+      "note": "an empty record: length 0",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 1,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 1,
+            "confirmation": "none",
+            "record": ""
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "hex": "e0000100000100000e1000fa0000010161000000010000",
+        "size": 23
+      }
+    },
+    {
+      "note": "page 3, not the last: page field 7, 3 × 2 + 1",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 31,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 3,
+        "more": true,
+        "coll": 0,
+        "live": [
+          {
+            "id": "m",
+            "run_width": null,
+            "run": null,
+            "seq": 30,
+            "confirmation": "none",
+            "record": "00"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "hex": "e0000100001f00000e1000fa070001016d0000001e010000",
+        "size": 24
+      }
+    },
+    {
+      "note": "page 63, the last: page field 126, still one byte",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 31,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 63,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "m",
+            "run_width": null,
+            "run": null,
+            "seq": 30,
+            "confirmation": "none",
+            "record": "00"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "hex": "e0000100001f00000e1000fa7e0001016d0000001e010000",
+        "size": 24
+      }
+    },
+    {
+      "note": "page 64, the last: page field 128, two bytes 80 01",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 31,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 64,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "m",
+            "run_width": null,
+            "run": null,
+            "seq": 30,
+            "confirmation": "none",
+            "record": "00"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "hex": "e0000100001f00000e1000fa80010001016d0000001e010000",
+        "size": 25
+      }
+    },
+    {
+      "note": "page 64, not the last: page field 129, 81 01: the more bit never widens it",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 31,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 64,
+        "more": true,
+        "coll": 0,
+        "live": [
+          {
+            "id": "m",
+            "run_width": null,
+            "run": null,
+            "seq": 30,
+            "confirmation": "none",
+            "record": "00"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "hex": "e0000100001f00000e1000fa81010001016d0000001e010000",
+        "size": 25
+      }
+    },
+    {
+      "note": "collection 200: its index in two bytes, c8 01",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 9,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 200,
+        "live": [],
+        "tombs": []
+      },
+      "expect": {
+        "hex": "e0000100000900000e1000fa00c8010000",
+        "size": 17
+      }
+    },
+    {
+      "note": "collection 4294967295, the largest integer: ff ff ff ff 0f",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 9,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 4294967295,
+        "live": [],
+        "tombs": []
+      },
+      "expect": {
+        "hex": "e0000100000900000e1000fa00ffffffff0f0000",
+        "size": 20
+      }
+    },
+    {
+      "note": "a record of 200 bytes: its length in two bytes, c8 01",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 1,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 1,
+            "confirmation": "none",
+            "record": "abababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "hex": "e0000100000100000e1000fa000001016100000001c801abababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab00",
+        "size": 224
+      }
+    },
+    {
+      "note": "a record of 127 bytes: its length one byte, 7f",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 1,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 1,
+            "confirmation": "none",
+            "record": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "hex": "e0000100000100000e1000fa0000010161000000017fcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd00",
+        "size": 150
+      }
+    },
+    {
+      "note": "seq 0 and the largest seq, 16,777,215",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 16777215,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 0,
+            "confirmation": "none",
+            "record": "00"
+          },
+          {
+            "id": "b",
+            "run_width": null,
+            "run": null,
+            "seq": 16777215,
+            "confirmation": "none",
+            "record": "00"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "hex": "e00001ffffff00000e1000fa0000020161000000000100016200ffffff010000",
+        "size": 32
+      }
+    },
+    {
+      "note": "zenoh-modem's sdu/endpoint/{endpoint}, collection 4 of modem.v3's state: two endpoints vouched for and one not, and one deleted within the window",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 11329,
+        "asof": 1207,
+        "time": {
+          "s": 26308800,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 4,
+        "live": [
+          {
+            "id": "peer-a",
+            "run_width": null,
+            "run": null,
+            "seq": 1188,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d61222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-b",
+            "run_width": null,
+            "run": null,
+            "seq": 1190,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d62222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-d",
+            "run_width": null,
+            "run": null,
+            "seq": 1093,
+            "confirmation": "conf",
+            "conf": {
+              "s": 26308761,
+              "ms": 500
+            },
+            "record": "7b22656e64706f696e74223a22706565722d64222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a66616c73657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a66616c73657d5d7d"
+          }
+        ],
+        "tombs": [
+          {
+            "id": "peer-c",
+            "run_width": null,
+            "run": null,
+            "seq": 1196
+          }
+        ]
+      },
+      "expect": {
+        "hex": "e02c410004b7019170c000fa00040306706565722d61200004a4787b22656e64706f696e74223a22706565722d61222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d06706565722d62200004a6787b22656e64706f696e74223a22706565722d62222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d06706565722d64400004450191709901f47a7b22656e64706f696e74223a22706565722d64222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a66616c73657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a66616c73657d5d7d0106706565722d63000004ac",
+        "size": 431
+      }
+    },
+    {
+      "note": "ids out of order: `b` before `a`",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 2,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "b",
+            "run_width": null,
+            "run": null,
+            "seq": 1,
+            "confirmation": "none",
+            "record": "01"
+          },
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 2,
+            "confirmation": "none",
+            "record": "02"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "refused": "order"
+      }
+    },
+    {
+      "note": "one id twice among the live entries",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 2,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 1,
+            "confirmation": "none",
+            "record": "01"
+          },
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 2,
+            "confirmation": "none",
+            "record": "02"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "refused": "order"
+      }
+    },
+    {
+      "note": "one id live and a tombstone",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 2,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 2,
+            "confirmation": "none",
+            "record": "02"
+          }
+        ],
+        "tombs": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 1
+          }
+        ]
+      },
+      "expect": {
+        "refused": "order"
+      }
+    },
+    {
+      "note": "two tombstones out of order",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 2,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [],
+        "tombs": [
+          {
+            "id": "b",
+            "run_width": null,
+            "run": null,
+            "seq": 1
+          },
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 2
+          }
+        ]
+      },
+      "expect": {
+        "refused": "order"
+      }
+    },
+    {
+      "note": "an id with a capital: no plain chunk",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 1,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "A",
+            "run_width": null,
+            "run": null,
+            "seq": 1,
+            "confirmation": "none",
+            "record": "01"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "refused": "id"
+      }
+    },
+    {
+      "note": "an id with an empty chunk",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 1,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a//b",
+            "run_width": null,
+            "run": null,
+            "seq": 1,
+            "confirmation": "none",
+            "record": "01"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "refused": "id"
+      }
+    },
+    {
+      "note": "an id that is a verbatim chunk",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 1,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "@state",
+            "run_width": null,
+            "run": null,
+            "seq": 1,
+            "confirmation": "none",
+            "record": "01"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "refused": "id"
+      }
+    },
+    {
+      "note": "an id with a wildcard",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 1,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a/*",
+            "run_width": null,
+            "run": null,
+            "seq": 1,
+            "confirmation": "none",
+            "record": "01"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "refused": "id"
+      }
+    },
+    {
+      "note": "an entry's own run that is the header's",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 1,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": 16,
+            "run": 1,
+            "seq": 1,
+            "confirmation": "none",
+            "record": "01"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "refused": "run"
+      }
+    },
+    {
+      "note": "a time of 1000 ms",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 9,
+        "time": {
+          "s": 3600,
+          "ms": 1000
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [],
+        "tombs": []
+      },
+      "expect": {
+        "refused": "time"
+      }
+    },
+    {
+      "note": "a known time of t32 all ones, which reads as unknown",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 9,
+        "time": {
+          "s": 4294967295,
+          "ms": 0
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [],
+        "tombs": []
+      },
+      "expect": {
+        "refused": "time"
+      }
+    },
+    {
+      "note": "a conf of 1000 ms",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 1,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 1,
+            "confirmation": "conf",
+            "conf": {
+              "s": 1,
+              "ms": 1000
+            },
+            "record": "01"
+          }
+        ],
+        "tombs": []
+      },
+      "expect": {
+        "refused": "time"
+      }
+    }
+  ],
+  "reads": [
+    {
+      "note": "written: a page with no entry: an empty collection, the owner's word that it has no member as of asof. 16 bytes",
+      "hex": "e0000100000900000e1000fa00000000",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 9,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [],
+        "tombs": []
+      }
+    },
+    {
+      "note": "written: the time unknown: t32 all ones and ms16 0",
+      "hex": "e00001000009ffffffff000000000000",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 9,
+        "time": null,
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [],
+        "tombs": []
+      }
+    },
+    {
+      "note": "written: a member read: one entry, its id empty, the member's own key the reply's. No horizon, the header's run",
+      "hex": "e0000100000900000e1000fa00000100000000070c7b226d6f6465223a2261227d00",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 9,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "",
+            "run_width": null,
+            "run": null,
+            "seq": 7,
+            "confirmation": "none",
+            "record": "7b226d6f6465223a2261227d"
+          }
+        ],
+        "tombs": []
+      }
+    },
+    {
+      "note": "written: zenoh-modem's oper, a collection of one member with a horizon, vouched for as the snapshot is built: confirmation 1, at the snapshot's time",
+      "hex": "e02c410004b7019170c000fa00020100200004b1297b2261646d696e223a227570222c226f706572223a227570222c2273696e63655f73223a353430307d00",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 11329,
+        "asof": 1207,
+        "time": {
+          "s": 26308800,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 2,
+        "live": [
+          {
+            "id": "",
+            "run_width": null,
+            "run": null,
+            "seq": 1201,
+            "confirmation": "time",
+            "record": "7b2261646d696e223a227570222c226f706572223a227570222c2273696e63655f73223a353430307d"
+          }
+        ],
+        "tombs": []
+      }
+    },
+    {
+      "note": "written: the same member not vouched for now: confirmation 2, its last confirmation in conf",
+      "hex": "e02c410004b7019170c000fa00020100400004b1019170840000297b2261646d696e223a227570222c226f706572223a227570222c2273696e63655f73223a353430307d00",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 11329,
+        "asof": 1207,
+        "time": {
+          "s": 26308800,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 2,
+        "live": [
+          {
+            "id": "",
+            "run_width": null,
+            "run": null,
+            "seq": 1201,
+            "confirmation": "conf",
+            "conf": {
+              "s": 26308740,
+              "ms": 0
+            },
+            "record": "7b2261646d696e223a227570222c226f706572223a227570222c2273696e63655f73223a353430307d"
+          }
+        ],
+        "tombs": []
+      }
+    },
+    {
+      "note": "written: a last confirmation the owner's clock did not know: conf unknown",
+      "hex": "e02c410004b7ffffffff000000020100400004b1ffffffff0000297b2261646d696e223a227570222c226f706572223a227570222c2273696e63655f73223a353430307d00",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 11329,
+        "asof": 1207,
+        "time": null,
+        "index": 0,
+        "more": false,
+        "coll": 2,
+        "live": [
+          {
+            "id": "",
+            "run_width": null,
+            "run": null,
+            "seq": 1201,
+            "confirmation": "conf",
+            "conf": null,
+            "record": "7b2261646d696e223a227570222c226f706572223a227570222c2273696e63655f73223a353430307d"
+          }
+        ],
+        "tombs": []
+      }
+    },
+    {
+      "note": "written: an entry under an earlier 16-bit run, below a 32-bit header run: flags 0x80, then its run",
+      "hex": "f09a3b0c1100000300000e1000fa000001016180fffe000004012a00",
+      "expect": {
+        "tag": 0,
+        "run_width": 32,
+        "run": 2587560977,
+        "asof": 3,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": 16,
+            "run": 65534,
+            "seq": 4,
+            "confirmation": "none",
+            "record": "2a"
+          }
+        ],
+        "tombs": []
+      }
+    },
+    {
+      "note": "written: an entry under an earlier 32-bit run, below a 16-bit header run: flags 0x90",
+      "hex": "e0000100000300000e1000fa00000101619001020304000004012a00",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 3,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": 32,
+            "run": 16909060,
+            "seq": 4,
+            "confirmation": "none",
+            "record": "2a"
+          }
+        ],
+        "tombs": []
+      }
+    },
+    {
+      "note": "written: an own 16-bit run and confirmation 1: flags 0xa0",
+      "hex": "e0000100000300000e1000fa0000010161a00101000004012a00",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 3,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": 16,
+            "run": 257,
+            "seq": 4,
+            "confirmation": "time",
+            "record": "2a"
+          }
+        ],
+        "tombs": []
+      }
+    },
+    {
+      "note": "written: an own 32-bit run and confirmation 2: flags 0xd0, then the run, the seq and conf",
+      "hex": "e0000100000300000e1000fa0000010161d00102030400000400000e0f03e7012a00",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 3,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": 32,
+            "run": 16909060,
+            "seq": 4,
+            "confirmation": "conf",
+            "conf": {
+              "s": 3599,
+              "ms": 999
+            },
+            "record": "2a"
+          }
+        ],
+        "tombs": []
+      }
+    },
+    {
+      "note": "written: an entry's own 32-bit run 1 below the header's 16-bit run 1: two runs of different widths are two runs",
+      "hex": "e0000100000300000e1000fa00000101619000000001000004012a00",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 3,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": 32,
+            "run": 1,
+            "seq": 4,
+            "confirmation": "none",
+            "record": "2a"
+          }
+        ],
+        "tombs": []
+      }
+    },
+    {
+      "note": "written: two tombstones, deletes within the window: one under the header's run, one under an earlier 32-bit run",
+      "hex": "e0000100000c00000e1000fa0000000206706565722d619000c0ffee00000806706565722d630000000b",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 12,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [],
+        "tombs": [
+          {
+            "id": "peer-a",
+            "run_width": 32,
+            "run": 12648430,
+            "seq": 8
+          },
+          {
+            "id": "peer-c",
+            "run_width": null,
+            "run": null,
+            "seq": 11
+          }
+        ]
+      }
+    },
+    {
+      "note": "written: live entries and tombstones, each list in the byte order of its ids: `a-b` < `a.b` < `a/b` < `a0`, `-` 0x2d, `.` 0x2e, `/` 0x2f, `0` 0x30",
+      "hex": "e0000100000500000e1000fa000003016100000001010103612d6200000002010203612f620000000301030203612e620000000402613000000005",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 5,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 1,
+            "confirmation": "none",
+            "record": "01"
+          },
+          {
+            "id": "a-b",
+            "run_width": null,
+            "run": null,
+            "seq": 2,
+            "confirmation": "none",
+            "record": "02"
+          },
+          {
+            "id": "a/b",
+            "run_width": null,
+            "run": null,
+            "seq": 3,
+            "confirmation": "none",
+            "record": "03"
+          }
+        ],
+        "tombs": [
+          {
+            "id": "a.b",
+            "run_width": null,
+            "run": null,
+            "seq": 4
+          },
+          {
+            "id": "a0",
+            "run_width": null,
+            "run": null,
+            "seq": 5
+          }
+        ]
+      }
+    },
+    {
+      "note": "written: a tombstone's id below every live entry's: each list is ordered on its own",
+      "hex": "e0000100000600000e1000fa000001016200000006010601016100000005",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 6,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "b",
+            "run_width": null,
+            "run": null,
+            "seq": 6,
+            "confirmation": "none",
+            "record": "06"
+          }
+        ],
+        "tombs": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 5
+          }
+        ]
+      }
+    },
+    {
+      "note": "written: ids of several chunks: a template `a/{x}/b/{y}` under its snapshot key `…/a`",
+      "hex": "e0000100000300000e1000fa00000309782d312f622f792d3100000001010109782d312f622f792d3200000002010209782d322f622f792d3100000003010300",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 3,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "x-1/b/y-1",
+            "run_width": null,
+            "run": null,
+            "seq": 1,
+            "confirmation": "none",
+            "record": "01"
+          },
+          {
+            "id": "x-1/b/y-2",
+            "run_width": null,
+            "run": null,
+            "seq": 2,
+            "confirmation": "none",
+            "record": "02"
+          },
+          {
+            "id": "x-2/b/y-1",
+            "run_width": null,
+            "run": null,
+            "seq": 3,
+            "confirmation": "none",
+            "record": "03"
+          }
+        ],
+        "tombs": []
+      }
+    },
+    {
+      "note": "written: a packed collection, tag 13: each record whole, 4 bytes with its pad, its length kept",
+      "hex": "ed000100002a00000e1000fa00040206706565722d612000002804a5c00f8006706565722d624000002900000e06000004a5c0108000",
+      "expect": {
+        "tag": 13,
+        "run_width": 16,
+        "run": 1,
+        "asof": 42,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 4,
+        "live": [
+          {
+            "id": "peer-a",
+            "run_width": null,
+            "run": null,
+            "seq": 40,
+            "confirmation": "time",
+            "record": "a5c00f80"
+          },
+          {
+            "id": "peer-b",
+            "run_width": null,
+            "run": null,
+            "seq": 41,
+            "confirmation": "conf",
+            "conf": {
+              "s": 3590,
+              "ms": 0
+            },
+            "record": "a5c01080"
+          }
+        ],
+        "tombs": []
+      }
+    },
+    {
+      "note": "written: an empty record: length 0",
+      "hex": "e0000100000100000e1000fa0000010161000000010000",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 1,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 1,
+            "confirmation": "none",
+            "record": ""
+          }
+        ],
+        "tombs": []
+      }
+    },
+    {
+      "note": "written: page 3, not the last: page field 7, 3 × 2 + 1",
+      "hex": "e0000100001f00000e1000fa070001016d0000001e010000",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 31,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 3,
+        "more": true,
+        "coll": 0,
+        "live": [
+          {
+            "id": "m",
+            "run_width": null,
+            "run": null,
+            "seq": 30,
+            "confirmation": "none",
+            "record": "00"
+          }
+        ],
+        "tombs": []
+      }
+    },
+    {
+      "note": "written: page 63, the last: page field 126, still one byte",
+      "hex": "e0000100001f00000e1000fa7e0001016d0000001e010000",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 31,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 63,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "m",
+            "run_width": null,
+            "run": null,
+            "seq": 30,
+            "confirmation": "none",
+            "record": "00"
+          }
+        ],
+        "tombs": []
+      }
+    },
+    {
+      "note": "written: page 64, the last: page field 128, two bytes 80 01",
+      "hex": "e0000100001f00000e1000fa80010001016d0000001e010000",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 31,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 64,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "m",
+            "run_width": null,
+            "run": null,
+            "seq": 30,
+            "confirmation": "none",
+            "record": "00"
+          }
+        ],
+        "tombs": []
+      }
+    },
+    {
+      "note": "written: page 64, not the last: page field 129, 81 01: the more bit never widens it",
+      "hex": "e0000100001f00000e1000fa81010001016d0000001e010000",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 31,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 64,
+        "more": true,
+        "coll": 0,
+        "live": [
+          {
+            "id": "m",
+            "run_width": null,
+            "run": null,
+            "seq": 30,
+            "confirmation": "none",
+            "record": "00"
+          }
+        ],
+        "tombs": []
+      }
+    },
+    {
+      "note": "written: collection 200: its index in two bytes, c8 01",
+      "hex": "e0000100000900000e1000fa00c8010000",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 9,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 200,
+        "live": [],
+        "tombs": []
+      }
+    },
+    {
+      "note": "written: collection 4294967295, the largest integer: ff ff ff ff 0f",
+      "hex": "e0000100000900000e1000fa00ffffffff0f0000",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 9,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 4294967295,
+        "live": [],
+        "tombs": []
+      }
+    },
+    {
+      "note": "written: a record of 200 bytes: its length in two bytes, c8 01",
+      "hex": "e0000100000100000e1000fa000001016100000001c801abababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab00",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 1,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 1,
+            "confirmation": "none",
+            "record": "abababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab"
+          }
+        ],
+        "tombs": []
+      }
+    },
+    {
+      "note": "written: a record of 127 bytes: its length one byte, 7f",
+      "hex": "e0000100000100000e1000fa0000010161000000017fcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd00",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 1,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 1,
+            "confirmation": "none",
+            "record": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+          }
+        ],
+        "tombs": []
+      }
+    },
+    {
+      "note": "written: seq 0 and the largest seq, 16,777,215",
+      "hex": "e00001ffffff00000e1000fa0000020161000000000100016200ffffff010000",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 16777215,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 0,
+            "confirmation": "none",
+            "record": "00"
+          },
+          {
+            "id": "b",
+            "run_width": null,
+            "run": null,
+            "seq": 16777215,
+            "confirmation": "none",
+            "record": "00"
+          }
+        ],
+        "tombs": []
+      }
+    },
+    {
+      "note": "written: zenoh-modem's sdu/endpoint/{endpoint}, collection 4 of modem.v3's state: two endpoints vouched for and one not, and one deleted within the window",
+      "hex": "e02c410004b7019170c000fa00040306706565722d61200004a4787b22656e64706f696e74223a22706565722d61222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d06706565722d62200004a6787b22656e64706f696e74223a22706565722d62222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d06706565722d64400004450191709901f47a7b22656e64706f696e74223a22706565722d64222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a66616c73657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a66616c73657d5d7d0106706565722d63000004ac",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 11329,
+        "asof": 1207,
+        "time": {
+          "s": 26308800,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 4,
+        "live": [
+          {
+            "id": "peer-a",
+            "run_width": null,
+            "run": null,
+            "seq": 1188,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d61222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-b",
+            "run_width": null,
+            "run": null,
+            "seq": 1190,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d62222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-d",
+            "run_width": null,
+            "run": null,
+            "seq": 1093,
+            "confirmation": "conf",
+            "conf": {
+              "s": 26308761,
+              "ms": 500
+            },
+            "record": "7b22656e64706f696e74223a22706565722d64222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a66616c73657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a66616c73657d5d7d"
+          }
+        ],
+        "tombs": [
+          {
+            "id": "peer-c",
+            "run_width": null,
+            "run": null,
+            "seq": 1196
+          }
+        ]
+      }
+    },
+    {
+      "note": "an envelope with no body: the time needs 6 bytes",
+      "hex": "e00001000009",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a time cut short",
+      "hex": "e0000100000900000e",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "no page",
+      "hex": "e0000100000900000e1000fa",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a page integer cut short: its first byte's high bit set, and no byte after",
+      "hex": "e0000100000900000e1000fa80",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "four bytes of an integer, each with its high bit set, then the end: short, the fifth byte not read",
+      "hex": "e0000100000900000e1000fa80808080",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "no collection",
+      "hex": "e0000100000900000e1000fa00",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "no live count",
+      "hex": "e0000100000900000e1000fa0000",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a live count of 1 and no entry",
+      "hex": "e0000100000900000e1000fa000001",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "an id of 3 bytes, 2 given",
+      "hex": "e0000100000900000e1000fa000001036162",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "no flags",
+      "hex": "e0000100000900000e1000fa0000010161",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "an entry's own 16-bit run cut short",
+      "hex": "e0000100000900000e1000fa00000101618000",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "an entry's own 32-bit run cut short",
+      "hex": "e0000100000900000e1000fa000001016190000002",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "an entry's seq cut short",
+      "hex": "e0000100000900000e1000fa0000010161000000",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a conf cut short",
+      "hex": "e0000100000900000e1000fa00000101614000000100000e",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "no record length",
+      "hex": "e0000100000900000e1000fa000001016100000001",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a record of 2 bytes, 1 given",
+      "hex": "e0000100000900000e1000fa000001016100000001027b",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "no tombstone count",
+      "hex": "e0000100000900000e1000fa000000",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a tombstone count of 1 and no tombstone",
+      "hex": "e0000100000900000e1000fa00000001",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a tombstone's seq cut short",
+      "hex": "e0000100000900000e1000fa000000010161000000",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a tombstone's own run cut short",
+      "hex": "e0000100000900000e1000fa0000000101618000",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a live count of 2 and one entry",
+      "hex": "e0000100000900000e1000fa00000201610000000100",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a page integer not in its shortest form: 80 00 for 0",
+      "hex": "e0000100000900000e1000fa8000000000",
+      "expect": {
+        "refused": "leb128"
+      }
+    },
+    {
+      "note": "a collection index whose fifth byte has its high bit set",
+      "hex": "e0000100000900000e1000fa0080808080800000",
+      "expect": {
+        "refused": "leb128"
+      }
+    },
+    {
+      "note": "a collection index above 2^32 − 1: ff ff ff ff 1f",
+      "hex": "e0000100000900000e1000fa00ffffffff1f0000",
+      "expect": {
+        "refused": "leb128"
+      }
+    },
+    {
+      "note": "a collection index of 2^32 − 1, the largest, in 5 bytes",
+      "hex": "e0000100000900000e1000fa00ffffffff0f0000",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 9,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 4294967295,
+        "live": [],
+        "tombs": []
+      }
+    },
+    {
+      "note": "a live count not in its shortest form: 81 00 for 1",
+      "hex": "e0000100000900000e1000fa00008100",
+      "expect": {
+        "refused": "leb128"
+      }
+    },
+    {
+      "note": "an id length not in its shortest form",
+      "hex": "e0000100000900000e1000fa000001810061000000010000",
+      "expect": {
+        "refused": "leb128"
+      }
+    },
+    {
+      "note": "a record length not in its shortest form",
+      "hex": "e0000100000900000e1000fa000001016100000001800000",
+      "expect": {
+        "refused": "leb128"
+      }
+    },
+    {
+      "note": "a tombstone count not in its shortest form",
+      "hex": "e0000100000900000e1000fa0000008000",
+      "expect": {
+        "refused": "leb128"
+      }
+    },
+    {
+      "note": "a 6-byte integer: refused at its fifth byte, before its sixth",
+      "hex": "e0000100000900000e1000fa008080808080000000",
+      "expect": {
+        "refused": "leb128"
+      }
+    },
+    {
+      "note": "a fifth byte with its high bit set that ends the body: leb128, not short",
+      "hex": "e0000100000900000e1000fa008080808080",
+      "expect": {
+        "refused": "leb128"
+      }
+    },
+    {
+      "note": "a time of 1000 ms",
+      "hex": "e0000100000900000e1003e800000000",
+      "expect": {
+        "refused": "time"
+      }
+    },
+    {
+      "note": "a time of 65,535 ms",
+      "hex": "e0000100000900000e10ffff00000000",
+      "expect": {
+        "refused": "time"
+      }
+    },
+    {
+      "note": "t32 all ones and 1 ms: no time, known or unknown",
+      "hex": "e00001000009ffffffff000100000000",
+      "expect": {
+        "refused": "time"
+      }
+    },
+    {
+      "note": "t32 all ones and 999 ms",
+      "hex": "e00001000009ffffffff03e700000000",
+      "expect": {
+        "refused": "time"
+      }
+    },
+    {
+      "note": "a time of 999 ms, the last known millisecond",
+      "hex": "e0000100000900000e1003e700000000",
+      "expect": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 9,
+        "time": {
+          "s": 3600,
+          "ms": 999
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [],
+        "tombs": []
+      }
+    },
+    {
+      "note": "a conf of 1000 ms",
+      "hex": "e0000100000900000e1000fa0000010161400000010000000103e80000",
+      "expect": {
+        "refused": "time"
+      }
+    },
+    {
+      "note": "a conf of t32 all ones and 5 ms",
+      "hex": "e0000100000900000e1000fa000001016140000001ffffffff00050000",
+      "expect": {
+        "refused": "time"
+      }
+    },
+    {
+      "note": "an id with a capital: `A`",
+      "hex": "e0000100000900000e1000fa0000010141000000010000",
+      "expect": {
+        "refused": "id"
+      }
+    },
+    {
+      "note": "an id with an empty chunk: `a//b`",
+      "hex": "e0000100000900000e1000fa00000104612f2f62000000010000",
+      "expect": {
+        "refused": "id"
+      }
+    },
+    {
+      "note": "an id with a leading `/`: `/a`",
+      "hex": "e0000100000900000e1000fa000001022f61000000010000",
+      "expect": {
+        "refused": "id"
+      }
+    },
+    {
+      "note": "an id with a trailing `/`: `a/`",
+      "hex": "e0000100000900000e1000fa00000102612f000000010000",
+      "expect": {
+        "refused": "id"
+      }
+    },
+    {
+      "note": "an id with a verbatim chunk: `@state`",
+      "hex": "e0000100000900000e1000fa00000106407374617465000000010000",
+      "expect": {
+        "refused": "id"
+      }
+    },
+    {
+      "note": "an id with a wildcard: `a/*`",
+      "hex": "e0000100000900000e1000fa00000103612f2a000000010000",
+      "expect": {
+        "refused": "id"
+      }
+    },
+    {
+      "note": "an id with a chunk that starts with `-`: `-a`",
+      "hex": "e0000100000900000e1000fa000001022d61000000010000",
+      "expect": {
+        "refused": "id"
+      }
+    },
+    {
+      "note": "an id with a chunk that ends with `-`: `a-`",
+      "hex": "e0000100000900000e1000fa00000102612d000000010000",
+      "expect": {
+        "refused": "id"
+      }
+    },
+    {
+      "note": "an id with a space: `a b`",
+      "hex": "e0000100000900000e1000fa00000103612062000000010000",
+      "expect": {
+        "refused": "id"
+      }
+    },
+    {
+      "note": "an id with a `$*` chunk: `$*`",
+      "hex": "e0000100000900000e1000fa00000102242a000000010000",
+      "expect": {
+        "refused": "id"
+      }
+    },
+    {
+      "note": "an id with a character beyond ASCII, `é` in UTF-8: no plain chunk",
+      "hex": "e0000100000900000e1000fa00000102c3a9000000010000",
+      "expect": {
+        "refused": "id"
+      }
+    },
+    {
+      "note": "an id that is not UTF-8",
+      "hex": "e0000100000900000e1000fa00000101ff000000010000",
+      "expect": {
+        "refused": "id"
+      }
+    },
+    {
+      "note": "a tombstone's id with a capital",
+      "hex": "e0000100000900000e1000fa00000001014200000001",
+      "expect": {
+        "refused": "id"
+      }
+    },
+    {
+      "note": "two live ids out of order",
+      "hex": "e0000100000900000e1000fa000002016200000001000161000000020000",
+      "expect": {
+        "refused": "order"
+      }
+    },
+    {
+      "note": "one live id twice",
+      "hex": "e0000100000900000e1000fa000002016100000001000161000000020000",
+      "expect": {
+        "refused": "order"
+      }
+    },
+    {
+      "note": "`a/b` before `a`: a prefix comes first",
+      "hex": "e0000100000900000e1000fa00000203612f6200000001000161000000020000",
+      "expect": {
+        "refused": "order"
+      }
+    },
+    {
+      "note": "an empty id after another: the empty id is the least",
+      "hex": "e0000100000900000e1000fa0000020161000000010000000000020000",
+      "expect": {
+        "refused": "order"
+      }
+    },
+    {
+      "note": "two tombstones out of order",
+      "hex": "e0000100000900000e1000fa00000002016200000001016100000002",
+      "expect": {
+        "refused": "order"
+      }
+    },
+    {
+      "note": "a tombstone's id that a live entry of the body has",
+      "hex": "e0000100000900000e1000fa0000010161000000020001016100000001",
+      "expect": {
+        "refused": "order"
+      }
+    },
+    {
+      "note": "a live entry's flags 01: bit 0 set",
+      "hex": "e0000100000900000e1000fa0000010161010000020000010000",
+      "expect": {
+        "refused": "flags"
+      }
+    },
+    {
+      "note": "a live entry's flags 08: bit 3 set",
+      "hex": "e0000100000900000e1000fa0000010161080000020000010000",
+      "expect": {
+        "refused": "flags"
+      }
+    },
+    {
+      "note": "a live entry's flags 8f: an own run, bits 3–0 set",
+      "hex": "e0000100000900000e1000fa00000101618f0000020000010000",
+      "expect": {
+        "refused": "flags"
+      }
+    },
+    {
+      "note": "a live entry's flags 10: bit 4 without bit 7",
+      "hex": "e0000100000900000e1000fa0000010161100000020000010000",
+      "expect": {
+        "refused": "flags"
+      }
+    },
+    {
+      "note": "a live entry's flags 30: bit 4 without bit 7, confirmation 1",
+      "hex": "e0000100000900000e1000fa0000010161300000020000010000",
+      "expect": {
+        "refused": "flags"
+      }
+    },
+    {
+      "note": "a live entry's flags 60: confirmation 3",
+      "hex": "e0000100000900000e1000fa0000010161600000020000010000",
+      "expect": {
+        "refused": "flags"
+      }
+    },
+    {
+      "note": "a live entry's flags e0: confirmation 3 with an own run",
+      "hex": "e0000100000900000e1000fa0000010161e00000020000010000",
+      "expect": {
+        "refused": "flags"
+      }
+    },
+    {
+      "note": "a tombstone with confirmation 1",
+      "hex": "e0000100000900000e1000fa00000001016120000001",
+      "expect": {
+        "refused": "flags"
+      }
+    },
+    {
+      "note": "a tombstone with confirmation 2",
+      "hex": "e0000100000900000e1000fa00000001016140000001",
+      "expect": {
+        "refused": "flags"
+      }
+    },
+    {
+      "note": "a tombstone's flags 10: bit 4 without bit 7",
+      "hex": "e0000100000900000e1000fa00000001016110000001",
+      "expect": {
+        "refused": "flags"
+      }
+    },
+    {
+      "note": "an entry's own 16-bit run that is the header's 16-bit run 1",
+      "hex": "e0000100000900000e1000fa00000101618000010000010000",
+      "expect": {
+        "refused": "run"
+      }
+    },
+    {
+      "note": "an entry's own 32-bit run that is the header's 32-bit run 1",
+      "hex": "f00000000100000900000e1000fa000001016190000000010000010000",
+      "expect": {
+        "refused": "run"
+      }
+    },
+    {
+      "note": "a tombstone's own run that is the header's",
+      "hex": "e0000100000900000e1000fa000000010161800001000001",
+      "expect": {
+        "refused": "run"
+      }
+    },
+    {
+      "note": "an entry's own 16-bit run 1 below a 32-bit header run 1: two runs",
+      "hex": "f00000000100000900000e1000fa00000101618000010000010000",
+      "expect": {
+        "tag": 0,
+        "run_width": 32,
+        "run": 1,
+        "asof": 9,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": 16,
+            "run": 1,
+            "seq": 1,
+            "confirmation": "none",
+            "record": ""
+          }
+        ],
+        "tombs": []
+      }
+    },
+    {
+      "note": "a byte after the last tombstone",
+      "hex": "e0000100000900000e1000fa0000000101610000000100",
+      "expect": {
+        "refused": "trailing"
+      }
+    },
+    {
+      "note": "a byte after an empty page",
+      "hex": "e0000100000900000e1000fa0000000000",
+      "expect": {
+        "refused": "trailing"
+      }
+    },
+    {
+      "note": "an empty page's bytes twice",
+      "hex": "e0000100000900000e1000fa0000000000000e1000fa00000000",
+      "expect": {
+        "refused": "trailing"
+      }
+    },
+    {
+      "note": "a time of 1000 ms and a page integer not in its shortest form: the time first",
+      "hex": "e0000100000900000e1003e88000000000",
+      "expect": {
+        "refused": "time"
+      }
+    },
+    {
+      "note": "a bad id that is also out of order: id, the earlier refusal for one field",
+      "hex": "e0000100000900000e1000fa000002016200000001000141000000020000",
+      "expect": {
+        "refused": "id"
+      }
+    },
+    {
+      "note": "an out-of-order id, then bad flags on the same entry: order, its id read first",
+      "hex": "e0000100000900000e1000fa000002016200000001000161600000020000",
+      "expect": {
+        "refused": "order"
+      }
+    },
+    {
+      "note": "bad flags on the first entry, and the second cut short: flags",
+      "hex": "e0000100000900000e1000fa0000020161600000010001",
+      "expect": {
+        "refused": "flags"
+      }
+    },
+    {
+      "note": "confirmation 3 is refused at the flags, before the conf it would need",
+      "hex": "e0000100000900000e1000fa000001016160",
+      "expect": {
+        "refused": "flags"
+      }
+    },
+    {
+      "note": "an own run that is the header's, then a trailing byte: run",
+      "hex": "e0000100000900000e1000fa00000101618000010000010000ff",
+      "expect": {
+        "refused": "run"
+      }
+    },
+    {
+      "note": "a confirmation 2 whose conf is cut short: short",
+      "hex": "e0000100000900000e1000fa000001016140000001000000",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a 32-bit run's CH over a 16-bit run's bytes: the body begins two bytes later, and ends before its live count",
+      "hex": "f0000100000900000e1000fa00000000",
+      "expect": {
+        "refused": "short"
+      }
+    }
+  ],
+  "pages": [
+    {
+      "note": "no entry: one page, page 0, the last",
+      "snapshot": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 9,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "coll": 0,
+        "live": [],
+        "tombs": []
+      },
+      "page_bytes": 1024,
+      "expect": {
+        "pages": [
+          "e0000100000900000e1000fa00000000"
+        ],
+        "sizes": [
+          16
+        ]
+      }
+    },
+    {
+      "note": "no entry under a page size below the page's 16 bytes: still one page",
+      "snapshot": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 9,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "coll": 0,
+        "live": [],
+        "tombs": []
+      },
+      "page_bytes": 1,
+      "expect": {
+        "pages": [
+          "e0000100000900000e1000fa00000000"
+        ],
+        "sizes": [
+          16
+        ]
+      }
+    },
+    {
+      "note": "three entries within 1,024 bytes: one page",
+      "snapshot": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 3,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 1,
+            "confirmation": "none",
+            "record": "01"
+          },
+          {
+            "id": "c",
+            "run_width": null,
+            "run": null,
+            "seq": 3,
+            "confirmation": "none",
+            "record": "03"
+          }
+        ],
+        "tombs": [
+          {
+            "id": "b",
+            "run_width": null,
+            "run": null,
+            "seq": 2
+          }
+        ]
+      },
+      "page_bytes": 1024,
+      "expect": {
+        "pages": [
+          "e0000100000300000e1000fa0000020161000000010101016300000003010301016200000002"
+        ],
+        "sizes": [
+          38
+        ]
+      }
+    },
+    {
+      "note": "the page size equal to the one page's 38 bytes: one page",
+      "snapshot": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 3,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 1,
+            "confirmation": "none",
+            "record": "01"
+          },
+          {
+            "id": "c",
+            "run_width": null,
+            "run": null,
+            "seq": 3,
+            "confirmation": "none",
+            "record": "03"
+          }
+        ],
+        "tombs": [
+          {
+            "id": "b",
+            "run_width": null,
+            "run": null,
+            "seq": 2
+          }
+        ]
+      },
+      "page_bytes": 38,
+      "expect": {
+        "pages": [
+          "e0000100000300000e1000fa0000020161000000010101016300000003010301016200000002"
+        ],
+        "sizes": [
+          38
+        ]
+      }
+    },
+    {
+      "note": "one byte less: `c`, the last entry, moves to page 1",
+      "snapshot": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 3,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 1,
+            "confirmation": "none",
+            "record": "01"
+          },
+          {
+            "id": "c",
+            "run_width": null,
+            "run": null,
+            "seq": 3,
+            "confirmation": "none",
+            "record": "03"
+          }
+        ],
+        "tombs": [
+          {
+            "id": "b",
+            "run_width": null,
+            "run": null,
+            "seq": 2
+          }
+        ]
+      },
+      "page_bytes": 37,
+      "expect": {
+        "pages": [
+          "e0000100000300000e1000fa010001016100000001010101016200000002",
+          "e0000100000300000e1000fa020001016300000003010300"
+        ],
+        "sizes": [
+          30,
+          24
+        ]
+      }
+    },
+    {
+      "note": "a page size of 1: every page holds one entry, live and tombstones in id order",
+      "snapshot": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 5,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 1,
+            "confirmation": "none",
+            "record": "01"
+          },
+          {
+            "id": "c",
+            "run_width": null,
+            "run": null,
+            "seq": 3,
+            "confirmation": "none",
+            "record": "03"
+          },
+          {
+            "id": "e",
+            "run_width": null,
+            "run": null,
+            "seq": 5,
+            "confirmation": "none",
+            "record": "05"
+          }
+        ],
+        "tombs": [
+          {
+            "id": "b",
+            "run_width": null,
+            "run": null,
+            "seq": 2
+          },
+          {
+            "id": "d",
+            "run_width": null,
+            "run": null,
+            "seq": 4
+          }
+        ]
+      },
+      "page_bytes": 1,
+      "expect": {
+        "pages": [
+          "e0000100000500000e1000fa010001016100000001010100",
+          "e0000100000500000e1000fa03000001016200000002",
+          "e0000100000500000e1000fa050001016300000003010300",
+          "e0000100000500000e1000fa07000001016400000004",
+          "e0000100000500000e1000fa080001016500000005010500"
+        ],
+        "sizes": [
+          24,
+          22,
+          24,
+          22,
+          24
+        ]
+      }
+    },
+    {
+      "note": "a record larger than the page size: its entry has a page of its own, larger than the page size, and the pages around it fill",
+      "snapshot": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 5,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 1,
+            "confirmation": "none",
+            "record": "01"
+          },
+          {
+            "id": "b",
+            "run_width": null,
+            "run": null,
+            "seq": 2,
+            "confirmation": "none",
+            "record": "02"
+          },
+          {
+            "id": "c",
+            "run_width": null,
+            "run": null,
+            "seq": 3,
+            "confirmation": "none",
+            "record": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+          },
+          {
+            "id": "d",
+            "run_width": null,
+            "run": null,
+            "seq": 4,
+            "confirmation": "none",
+            "record": "04"
+          },
+          {
+            "id": "e",
+            "run_width": null,
+            "run": null,
+            "seq": 5,
+            "confirmation": "none",
+            "record": "05"
+          }
+        ],
+        "tombs": []
+      },
+      "page_bytes": 64,
+      "expect": {
+        "pages": [
+          "e0000100000500000e1000fa0100020161000000010101016200000002010200",
+          "e0000100000500000e1000fa030001016300000003ac02eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee00",
+          "e0000100000500000e1000fa0400020164000000040104016500000005010500"
+        ],
+        "sizes": [
+          32,
+          324,
+          32
+        ]
+      }
+    },
+    {
+      "note": "24 of zenoh-modem's endpoints, 22 live and 2 deleted within the window, under 1,024-byte pages",
+      "snapshot": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 11329,
+        "asof": 1207,
+        "time": {
+          "s": 26308800,
+          "ms": 250
+        },
+        "coll": 4,
+        "live": [
+          {
+            "id": "peer-00",
+            "run_width": null,
+            "run": null,
+            "seq": 1000,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3030222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-01",
+            "run_width": null,
+            "run": null,
+            "seq": 1001,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3031222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-02",
+            "run_width": null,
+            "run": null,
+            "seq": 1002,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3032222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-03",
+            "run_width": null,
+            "run": null,
+            "seq": 1003,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3033222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-04",
+            "run_width": null,
+            "run": null,
+            "seq": 1004,
+            "confirmation": "conf",
+            "conf": {
+              "s": 26308761,
+              "ms": 504
+            },
+            "record": "7b22656e64706f696e74223a22706565722d3034222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a66616c73657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a66616c73657d5d7d"
+          },
+          {
+            "id": "peer-05",
+            "run_width": null,
+            "run": null,
+            "seq": 1005,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3035222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-06",
+            "run_width": null,
+            "run": null,
+            "seq": 1006,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3036222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-08",
+            "run_width": null,
+            "run": null,
+            "seq": 1008,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3038222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-09",
+            "run_width": null,
+            "run": null,
+            "seq": 1009,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3039222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-10",
+            "run_width": null,
+            "run": null,
+            "seq": 1010,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3130222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-11",
+            "run_width": null,
+            "run": null,
+            "seq": 1011,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3131222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-12",
+            "run_width": null,
+            "run": null,
+            "seq": 1012,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3132222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-13",
+            "run_width": null,
+            "run": null,
+            "seq": 1013,
+            "confirmation": "conf",
+            "conf": {
+              "s": 26308761,
+              "ms": 513
+            },
+            "record": "7b22656e64706f696e74223a22706565722d3133222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a66616c73657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a66616c73657d5d7d"
+          },
+          {
+            "id": "peer-14",
+            "run_width": null,
+            "run": null,
+            "seq": 1014,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3134222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-15",
+            "run_width": null,
+            "run": null,
+            "seq": 1015,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3135222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-16",
+            "run_width": null,
+            "run": null,
+            "seq": 1016,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3136222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-18",
+            "run_width": null,
+            "run": null,
+            "seq": 1018,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3138222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-19",
+            "run_width": null,
+            "run": null,
+            "seq": 1019,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3139222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-20",
+            "run_width": null,
+            "run": null,
+            "seq": 1020,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3230222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-21",
+            "run_width": null,
+            "run": null,
+            "seq": 1021,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3231222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-22",
+            "run_width": null,
+            "run": null,
+            "seq": 1022,
+            "confirmation": "conf",
+            "conf": {
+              "s": 26308761,
+              "ms": 522
+            },
+            "record": "7b22656e64706f696e74223a22706565722d3232222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a66616c73657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a66616c73657d5d7d"
+          },
+          {
+            "id": "peer-23",
+            "run_width": null,
+            "run": null,
+            "seq": 1023,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3233222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          }
+        ],
+        "tombs": [
+          {
+            "id": "peer-07",
+            "run_width": null,
+            "run": null,
+            "seq": 1107
+          },
+          {
+            "id": "peer-17",
+            "run_width": null,
+            "run": null,
+            "seq": 1117
+          }
+        ]
+      },
+      "page_bytes": 1024,
+      "expect": {
+        "pages": [
+          "e02c410004b7019170c000fa01040707706565722d3030200003e8797b22656e64706f696e74223a22706565722d3030222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d07706565722d3031200003e9797b22656e64706f696e74223a22706565722d3031222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d07706565722d3032200003ea797b22656e64706f696e74223a22706565722d3032222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d07706565722d3033200003eb797b22656e64706f696e74223a22706565722d3033222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d07706565722d3034400003ec0191709901f87b7b22656e64706f696e74223a22706565722d3034222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a66616c73657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a66616c73657d5d7d07706565722d3035200003ed797b22656e64706f696e74223a22706565722d3035222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d07706565722d3036200003ee797b22656e64706f696e74223a22706565722d3036222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d0107706565722d303700000453",
+          "e02c410004b7019170c000fa03040707706565722d3038200003f0797b22656e64706f696e74223a22706565722d3038222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d07706565722d3039200003f1797b22656e64706f696e74223a22706565722d3039222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d07706565722d3130200003f2797b22656e64706f696e74223a22706565722d3130222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d07706565722d3131200003f3797b22656e64706f696e74223a22706565722d3131222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d07706565722d3132200003f4797b22656e64706f696e74223a22706565722d3132222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d07706565722d3133400003f50191709902017b7b22656e64706f696e74223a22706565722d3133222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a66616c73657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a66616c73657d5d7d07706565722d3134200003f6797b22656e64706f696e74223a22706565722d3134222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d00",
+          "e02c410004b7019170c000fa05040707706565722d3135200003f7797b22656e64706f696e74223a22706565722d3135222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d07706565722d3136200003f8797b22656e64706f696e74223a22706565722d3136222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d07706565722d3138200003fa797b22656e64706f696e74223a22706565722d3138222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d07706565722d3139200003fb797b22656e64706f696e74223a22706565722d3139222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d07706565722d3230200003fc797b22656e64706f696e74223a22706565722d3230222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d07706565722d3231200003fd797b22656e64706f696e74223a22706565722d3231222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d07706565722d3232400003fe01917099020a7b7b22656e64706f696e74223a22706565722d3232222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a66616c73657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a66616c73657d5d7d0107706565722d31370000045d",
+          "e02c410004b7019170c000fa06040107706565722d3233200003ff797b22656e64706f696e74223a22706565722d3233222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d00"
+        ],
+        "sizes": [
+          974,
+          962,
+          974,
+          150
+        ]
+      }
+    },
+    {
+      "note": "8 of them under 220-byte pages, one RF SDU each: one endpoint a page, and a tombstone sharing one",
+      "snapshot": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 11329,
+        "asof": 1207,
+        "time": {
+          "s": 26308800,
+          "ms": 250
+        },
+        "coll": 4,
+        "live": [
+          {
+            "id": "peer-00",
+            "run_width": null,
+            "run": null,
+            "seq": 1000,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3030222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-01",
+            "run_width": null,
+            "run": null,
+            "seq": 1001,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3031222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-02",
+            "run_width": null,
+            "run": null,
+            "seq": 1002,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3032222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-03",
+            "run_width": null,
+            "run": null,
+            "seq": 1003,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3033222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-04",
+            "run_width": null,
+            "run": null,
+            "seq": 1004,
+            "confirmation": "conf",
+            "conf": {
+              "s": 26308761,
+              "ms": 504
+            },
+            "record": "7b22656e64706f696e74223a22706565722d3034222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a66616c73657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a66616c73657d5d7d"
+          },
+          {
+            "id": "peer-05",
+            "run_width": null,
+            "run": null,
+            "seq": 1005,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3035222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          },
+          {
+            "id": "peer-06",
+            "run_width": null,
+            "run": null,
+            "seq": 1006,
+            "confirmation": "time",
+            "record": "7b22656e64706f696e74223a22706565722d3036222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d"
+          }
+        ],
+        "tombs": [
+          {
+            "id": "peer-07",
+            "run_width": null,
+            "run": null,
+            "seq": 1107
+          }
+        ]
+      },
+      "page_bytes": 220,
+      "expect": {
+        "pages": [
+          "e02c410004b7019170c000fa01040107706565722d3030200003e8797b22656e64706f696e74223a22706565722d3030222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d00",
+          "e02c410004b7019170c000fa03040107706565722d3031200003e9797b22656e64706f696e74223a22706565722d3031222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d00",
+          "e02c410004b7019170c000fa05040107706565722d3032200003ea797b22656e64706f696e74223a22706565722d3032222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d00",
+          "e02c410004b7019170c000fa07040107706565722d3033200003eb797b22656e64706f696e74223a22706565722d3033222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d00",
+          "e02c410004b7019170c000fa09040107706565722d3034400003ec0191709901f87b7b22656e64706f696e74223a22706565722d3034222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a66616c73657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a66616c73657d5d7d00",
+          "e02c410004b7019170c000fa0b040107706565722d3035200003ed797b22656e64706f696e74223a22706565722d3035222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d00",
+          "e02c410004b7019170c000fa0c040107706565722d3036200003ee797b22656e64706f696e74223a22706565722d3036222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d0107706565722d303700000453"
+        ],
+        "sizes": [
+          150,
+          150,
+          150,
+          150,
+          158,
+          150,
+          162
+        ]
+      }
+    },
+    {
+      "note": "128 tombstones, 1169 bytes on one page, under a page size of 1168: the 128th tombstone's 9 bytes would fit, but it widens the count to 2 bytes, 80 01, so page 0 holds 127",
+      "snapshot": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 127,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "coll": 0,
+        "live": [],
+        "tombs": [
+          {
+            "id": "n000",
+            "run_width": null,
+            "run": null,
+            "seq": 0
+          },
+          {
+            "id": "n001",
+            "run_width": null,
+            "run": null,
+            "seq": 1
+          },
+          {
+            "id": "n002",
+            "run_width": null,
+            "run": null,
+            "seq": 2
+          },
+          {
+            "id": "n003",
+            "run_width": null,
+            "run": null,
+            "seq": 3
+          },
+          {
+            "id": "n004",
+            "run_width": null,
+            "run": null,
+            "seq": 4
+          },
+          {
+            "id": "n005",
+            "run_width": null,
+            "run": null,
+            "seq": 5
+          },
+          {
+            "id": "n006",
+            "run_width": null,
+            "run": null,
+            "seq": 6
+          },
+          {
+            "id": "n007",
+            "run_width": null,
+            "run": null,
+            "seq": 7
+          },
+          {
+            "id": "n008",
+            "run_width": null,
+            "run": null,
+            "seq": 8
+          },
+          {
+            "id": "n009",
+            "run_width": null,
+            "run": null,
+            "seq": 9
+          },
+          {
+            "id": "n010",
+            "run_width": null,
+            "run": null,
+            "seq": 10
+          },
+          {
+            "id": "n011",
+            "run_width": null,
+            "run": null,
+            "seq": 11
+          },
+          {
+            "id": "n012",
+            "run_width": null,
+            "run": null,
+            "seq": 12
+          },
+          {
+            "id": "n013",
+            "run_width": null,
+            "run": null,
+            "seq": 13
+          },
+          {
+            "id": "n014",
+            "run_width": null,
+            "run": null,
+            "seq": 14
+          },
+          {
+            "id": "n015",
+            "run_width": null,
+            "run": null,
+            "seq": 15
+          },
+          {
+            "id": "n016",
+            "run_width": null,
+            "run": null,
+            "seq": 16
+          },
+          {
+            "id": "n017",
+            "run_width": null,
+            "run": null,
+            "seq": 17
+          },
+          {
+            "id": "n018",
+            "run_width": null,
+            "run": null,
+            "seq": 18
+          },
+          {
+            "id": "n019",
+            "run_width": null,
+            "run": null,
+            "seq": 19
+          },
+          {
+            "id": "n020",
+            "run_width": null,
+            "run": null,
+            "seq": 20
+          },
+          {
+            "id": "n021",
+            "run_width": null,
+            "run": null,
+            "seq": 21
+          },
+          {
+            "id": "n022",
+            "run_width": null,
+            "run": null,
+            "seq": 22
+          },
+          {
+            "id": "n023",
+            "run_width": null,
+            "run": null,
+            "seq": 23
+          },
+          {
+            "id": "n024",
+            "run_width": null,
+            "run": null,
+            "seq": 24
+          },
+          {
+            "id": "n025",
+            "run_width": null,
+            "run": null,
+            "seq": 25
+          },
+          {
+            "id": "n026",
+            "run_width": null,
+            "run": null,
+            "seq": 26
+          },
+          {
+            "id": "n027",
+            "run_width": null,
+            "run": null,
+            "seq": 27
+          },
+          {
+            "id": "n028",
+            "run_width": null,
+            "run": null,
+            "seq": 28
+          },
+          {
+            "id": "n029",
+            "run_width": null,
+            "run": null,
+            "seq": 29
+          },
+          {
+            "id": "n030",
+            "run_width": null,
+            "run": null,
+            "seq": 30
+          },
+          {
+            "id": "n031",
+            "run_width": null,
+            "run": null,
+            "seq": 31
+          },
+          {
+            "id": "n032",
+            "run_width": null,
+            "run": null,
+            "seq": 32
+          },
+          {
+            "id": "n033",
+            "run_width": null,
+            "run": null,
+            "seq": 33
+          },
+          {
+            "id": "n034",
+            "run_width": null,
+            "run": null,
+            "seq": 34
+          },
+          {
+            "id": "n035",
+            "run_width": null,
+            "run": null,
+            "seq": 35
+          },
+          {
+            "id": "n036",
+            "run_width": null,
+            "run": null,
+            "seq": 36
+          },
+          {
+            "id": "n037",
+            "run_width": null,
+            "run": null,
+            "seq": 37
+          },
+          {
+            "id": "n038",
+            "run_width": null,
+            "run": null,
+            "seq": 38
+          },
+          {
+            "id": "n039",
+            "run_width": null,
+            "run": null,
+            "seq": 39
+          },
+          {
+            "id": "n040",
+            "run_width": null,
+            "run": null,
+            "seq": 40
+          },
+          {
+            "id": "n041",
+            "run_width": null,
+            "run": null,
+            "seq": 41
+          },
+          {
+            "id": "n042",
+            "run_width": null,
+            "run": null,
+            "seq": 42
+          },
+          {
+            "id": "n043",
+            "run_width": null,
+            "run": null,
+            "seq": 43
+          },
+          {
+            "id": "n044",
+            "run_width": null,
+            "run": null,
+            "seq": 44
+          },
+          {
+            "id": "n045",
+            "run_width": null,
+            "run": null,
+            "seq": 45
+          },
+          {
+            "id": "n046",
+            "run_width": null,
+            "run": null,
+            "seq": 46
+          },
+          {
+            "id": "n047",
+            "run_width": null,
+            "run": null,
+            "seq": 47
+          },
+          {
+            "id": "n048",
+            "run_width": null,
+            "run": null,
+            "seq": 48
+          },
+          {
+            "id": "n049",
+            "run_width": null,
+            "run": null,
+            "seq": 49
+          },
+          {
+            "id": "n050",
+            "run_width": null,
+            "run": null,
+            "seq": 50
+          },
+          {
+            "id": "n051",
+            "run_width": null,
+            "run": null,
+            "seq": 51
+          },
+          {
+            "id": "n052",
+            "run_width": null,
+            "run": null,
+            "seq": 52
+          },
+          {
+            "id": "n053",
+            "run_width": null,
+            "run": null,
+            "seq": 53
+          },
+          {
+            "id": "n054",
+            "run_width": null,
+            "run": null,
+            "seq": 54
+          },
+          {
+            "id": "n055",
+            "run_width": null,
+            "run": null,
+            "seq": 55
+          },
+          {
+            "id": "n056",
+            "run_width": null,
+            "run": null,
+            "seq": 56
+          },
+          {
+            "id": "n057",
+            "run_width": null,
+            "run": null,
+            "seq": 57
+          },
+          {
+            "id": "n058",
+            "run_width": null,
+            "run": null,
+            "seq": 58
+          },
+          {
+            "id": "n059",
+            "run_width": null,
+            "run": null,
+            "seq": 59
+          },
+          {
+            "id": "n060",
+            "run_width": null,
+            "run": null,
+            "seq": 60
+          },
+          {
+            "id": "n061",
+            "run_width": null,
+            "run": null,
+            "seq": 61
+          },
+          {
+            "id": "n062",
+            "run_width": null,
+            "run": null,
+            "seq": 62
+          },
+          {
+            "id": "n063",
+            "run_width": null,
+            "run": null,
+            "seq": 63
+          },
+          {
+            "id": "n064",
+            "run_width": null,
+            "run": null,
+            "seq": 64
+          },
+          {
+            "id": "n065",
+            "run_width": null,
+            "run": null,
+            "seq": 65
+          },
+          {
+            "id": "n066",
+            "run_width": null,
+            "run": null,
+            "seq": 66
+          },
+          {
+            "id": "n067",
+            "run_width": null,
+            "run": null,
+            "seq": 67
+          },
+          {
+            "id": "n068",
+            "run_width": null,
+            "run": null,
+            "seq": 68
+          },
+          {
+            "id": "n069",
+            "run_width": null,
+            "run": null,
+            "seq": 69
+          },
+          {
+            "id": "n070",
+            "run_width": null,
+            "run": null,
+            "seq": 70
+          },
+          {
+            "id": "n071",
+            "run_width": null,
+            "run": null,
+            "seq": 71
+          },
+          {
+            "id": "n072",
+            "run_width": null,
+            "run": null,
+            "seq": 72
+          },
+          {
+            "id": "n073",
+            "run_width": null,
+            "run": null,
+            "seq": 73
+          },
+          {
+            "id": "n074",
+            "run_width": null,
+            "run": null,
+            "seq": 74
+          },
+          {
+            "id": "n075",
+            "run_width": null,
+            "run": null,
+            "seq": 75
+          },
+          {
+            "id": "n076",
+            "run_width": null,
+            "run": null,
+            "seq": 76
+          },
+          {
+            "id": "n077",
+            "run_width": null,
+            "run": null,
+            "seq": 77
+          },
+          {
+            "id": "n078",
+            "run_width": null,
+            "run": null,
+            "seq": 78
+          },
+          {
+            "id": "n079",
+            "run_width": null,
+            "run": null,
+            "seq": 79
+          },
+          {
+            "id": "n080",
+            "run_width": null,
+            "run": null,
+            "seq": 80
+          },
+          {
+            "id": "n081",
+            "run_width": null,
+            "run": null,
+            "seq": 81
+          },
+          {
+            "id": "n082",
+            "run_width": null,
+            "run": null,
+            "seq": 82
+          },
+          {
+            "id": "n083",
+            "run_width": null,
+            "run": null,
+            "seq": 83
+          },
+          {
+            "id": "n084",
+            "run_width": null,
+            "run": null,
+            "seq": 84
+          },
+          {
+            "id": "n085",
+            "run_width": null,
+            "run": null,
+            "seq": 85
+          },
+          {
+            "id": "n086",
+            "run_width": null,
+            "run": null,
+            "seq": 86
+          },
+          {
+            "id": "n087",
+            "run_width": null,
+            "run": null,
+            "seq": 87
+          },
+          {
+            "id": "n088",
+            "run_width": null,
+            "run": null,
+            "seq": 88
+          },
+          {
+            "id": "n089",
+            "run_width": null,
+            "run": null,
+            "seq": 89
+          },
+          {
+            "id": "n090",
+            "run_width": null,
+            "run": null,
+            "seq": 90
+          },
+          {
+            "id": "n091",
+            "run_width": null,
+            "run": null,
+            "seq": 91
+          },
+          {
+            "id": "n092",
+            "run_width": null,
+            "run": null,
+            "seq": 92
+          },
+          {
+            "id": "n093",
+            "run_width": null,
+            "run": null,
+            "seq": 93
+          },
+          {
+            "id": "n094",
+            "run_width": null,
+            "run": null,
+            "seq": 94
+          },
+          {
+            "id": "n095",
+            "run_width": null,
+            "run": null,
+            "seq": 95
+          },
+          {
+            "id": "n096",
+            "run_width": null,
+            "run": null,
+            "seq": 96
+          },
+          {
+            "id": "n097",
+            "run_width": null,
+            "run": null,
+            "seq": 97
+          },
+          {
+            "id": "n098",
+            "run_width": null,
+            "run": null,
+            "seq": 98
+          },
+          {
+            "id": "n099",
+            "run_width": null,
+            "run": null,
+            "seq": 99
+          },
+          {
+            "id": "n100",
+            "run_width": null,
+            "run": null,
+            "seq": 100
+          },
+          {
+            "id": "n101",
+            "run_width": null,
+            "run": null,
+            "seq": 101
+          },
+          {
+            "id": "n102",
+            "run_width": null,
+            "run": null,
+            "seq": 102
+          },
+          {
+            "id": "n103",
+            "run_width": null,
+            "run": null,
+            "seq": 103
+          },
+          {
+            "id": "n104",
+            "run_width": null,
+            "run": null,
+            "seq": 104
+          },
+          {
+            "id": "n105",
+            "run_width": null,
+            "run": null,
+            "seq": 105
+          },
+          {
+            "id": "n106",
+            "run_width": null,
+            "run": null,
+            "seq": 106
+          },
+          {
+            "id": "n107",
+            "run_width": null,
+            "run": null,
+            "seq": 107
+          },
+          {
+            "id": "n108",
+            "run_width": null,
+            "run": null,
+            "seq": 108
+          },
+          {
+            "id": "n109",
+            "run_width": null,
+            "run": null,
+            "seq": 109
+          },
+          {
+            "id": "n110",
+            "run_width": null,
+            "run": null,
+            "seq": 110
+          },
+          {
+            "id": "n111",
+            "run_width": null,
+            "run": null,
+            "seq": 111
+          },
+          {
+            "id": "n112",
+            "run_width": null,
+            "run": null,
+            "seq": 112
+          },
+          {
+            "id": "n113",
+            "run_width": null,
+            "run": null,
+            "seq": 113
+          },
+          {
+            "id": "n114",
+            "run_width": null,
+            "run": null,
+            "seq": 114
+          },
+          {
+            "id": "n115",
+            "run_width": null,
+            "run": null,
+            "seq": 115
+          },
+          {
+            "id": "n116",
+            "run_width": null,
+            "run": null,
+            "seq": 116
+          },
+          {
+            "id": "n117",
+            "run_width": null,
+            "run": null,
+            "seq": 117
+          },
+          {
+            "id": "n118",
+            "run_width": null,
+            "run": null,
+            "seq": 118
+          },
+          {
+            "id": "n119",
+            "run_width": null,
+            "run": null,
+            "seq": 119
+          },
+          {
+            "id": "n120",
+            "run_width": null,
+            "run": null,
+            "seq": 120
+          },
+          {
+            "id": "n121",
+            "run_width": null,
+            "run": null,
+            "seq": 121
+          },
+          {
+            "id": "n122",
+            "run_width": null,
+            "run": null,
+            "seq": 122
+          },
+          {
+            "id": "n123",
+            "run_width": null,
+            "run": null,
+            "seq": 123
+          },
+          {
+            "id": "n124",
+            "run_width": null,
+            "run": null,
+            "seq": 124
+          },
+          {
+            "id": "n125",
+            "run_width": null,
+            "run": null,
+            "seq": 125
+          },
+          {
+            "id": "n126",
+            "run_width": null,
+            "run": null,
+            "seq": 126
+          },
+          {
+            "id": "n127",
+            "run_width": null,
+            "run": null,
+            "seq": 127
+          }
+        ]
+      },
+      "page_bytes": 1168,
+      "expect": {
+        "pages": [
+          "e0000100007f00000e1000fa0100007f046e30303000000000046e30303100000001046e30303200000002046e30303300000003046e30303400000004046e30303500000005046e30303600000006046e30303700000007046e30303800000008046e30303900000009046e3031300000000a046e3031310000000b046e3031320000000c046e3031330000000d046e3031340000000e046e3031350000000f046e30313600000010046e30313700000011046e30313800000012046e30313900000013046e30323000000014046e30323100000015046e30323200000016046e30323300000017046e30323400000018046e30323500000019046e3032360000001a046e3032370000001b046e3032380000001c046e3032390000001d046e3033300000001e046e3033310000001f046e30333200000020046e30333300000021046e30333400000022046e30333500000023046e30333600000024046e30333700000025046e30333800000026046e30333900000027046e30343000000028046e30343100000029046e3034320000002a046e3034330000002b046e3034340000002c046e3034350000002d046e3034360000002e046e3034370000002f046e30343800000030046e30343900000031046e30353000000032046e30353100000033046e30353200000034046e30353300000035046e30353400000036046e30353500000037046e30353600000038046e30353700000039046e3035380000003a046e3035390000003b046e3036300000003c046e3036310000003d046e3036320000003e046e3036330000003f046e30363400000040046e30363500000041046e30363600000042046e30363700000043046e30363800000044046e30363900000045046e30373000000046046e30373100000047046e30373200000048046e30373300000049046e3037340000004a046e3037350000004b046e3037360000004c046e3037370000004d046e3037380000004e046e3037390000004f046e30383000000050046e30383100000051046e30383200000052046e30383300000053046e30383400000054046e30383500000055046e30383600000056046e30383700000057046e30383800000058046e30383900000059046e3039300000005a046e3039310000005b046e3039320000005c046e3039330000005d046e3039340000005e046e3039350000005f046e30393600000060046e30393700000061046e30393800000062046e30393900000063046e31303000000064046e31303100000065046e31303200000066046e31303300000067046e31303400000068046e31303500000069046e3130360000006a046e3130370000006b046e3130380000006c046e3130390000006d046e3131300000006e046e3131310000006f046e31313200000070046e31313300000071046e31313400000072046e31313500000073046e31313600000074046e31313700000075046e31313800000076046e31313900000077046e31323000000078046e31323100000079046e3132320000007a046e3132330000007b046e3132340000007c046e3132350000007d046e3132360000007e",
+          "e0000100007f00000e1000fa02000001046e3132370000007f"
+        ],
+        "sizes": [
+          1159,
+          25
+        ]
+      }
+    },
+    {
+      "note": "a 32-bit header run, entries under earlier runs, live and tombstones interleaved, under 48-byte pages",
+      "snapshot": {
+        "tag": 0,
+        "run_width": 32,
+        "run": 2587560977,
+        "asof": 15,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": 16,
+            "run": 7,
+            "seq": 10,
+            "confirmation": "none",
+            "record": "0a0a0a0a0a0a0a0a"
+          },
+          {
+            "id": "c",
+            "run_width": null,
+            "run": null,
+            "seq": 12,
+            "confirmation": "none",
+            "record": "0c0c0c0c0c0c0c0c"
+          },
+          {
+            "id": "e",
+            "run_width": null,
+            "run": null,
+            "seq": 14,
+            "confirmation": "time",
+            "record": "0e0e0e0e0e0e0e0e"
+          }
+        ],
+        "tombs": [
+          {
+            "id": "b",
+            "run_width": 32,
+            "run": 4277006349,
+            "seq": 11
+          },
+          {
+            "id": "d",
+            "run_width": null,
+            "run": null,
+            "seq": 13
+          },
+          {
+            "id": "f",
+            "run_width": null,
+            "run": null,
+            "seq": 15
+          }
+        ]
+      },
+      "page_bytes": 48,
+      "expect": {
+        "pages": [
+          "f09a3b0c1100000f00000e1000fa010001016180000700000a080a0a0a0a0a0a0a0a01016290feedf00d00000b",
+          "f09a3b0c1100000f00000e1000fa03000101630000000c080c0c0c0c0c0c0c0c0101640000000d",
+          "f09a3b0c1100000f00000e1000fa04000101652000000e080e0e0e0e0e0e0e0e0101660000000f"
+        ],
+        "sizes": [
+          45,
+          39,
+          39
+        ]
+      }
+    },
+    {
+      "note": "an id twice, live and a tombstone: the writer's refusal",
+      "snapshot": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 2,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 2,
+            "confirmation": "none",
+            "record": "02"
+          }
+        ],
+        "tombs": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 1
+          }
+        ]
+      },
+      "page_bytes": 1024,
+      "expect": {
+        "refused": "order"
+      }
+    },
+    {
+      "note": "an id that is no plain chunk: the writer's refusal",
+      "snapshot": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 1,
+        "asof": 2,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "coll": 0,
+        "live": [
+          {
+            "id": "a",
+            "run_width": null,
+            "run": null,
+            "seq": 1,
+            "confirmation": "none",
+            "record": "01"
+          },
+          {
+            "id": "B",
+            "run_width": null,
+            "run": null,
+            "seq": 2,
+            "confirmation": "none",
+            "record": "02"
+          }
+        ],
+        "tombs": []
+      },
+      "page_bytes": 1024,
+      "expect": {
+        "refused": "id"
+      }
+    }
+  ]
+}

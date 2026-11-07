@@ -148,6 +148,11 @@
 //!   read and written with them and §7.5's refusals, and a collection's
 //!   [`heartbeat::Digest`]. `freshness.v2` adopts it (core 0.82; #978's
 //!   F3): [`freshness::uses_v2`], and a reader's [`freshness::View`].
+//! - [`collection`]: the zk2c envelope's form 7, a collection's snapshot
+//!   (core §7.5, 0.97; #977's E1): a GET reply's page, its body read and
+//!   written with §7.5's refusals, a snapshot cut into pages under a page
+//!   size, and a complete set of pages assembled. Defined: no rule adopts
+//!   it yet (E2 reads it, E3 has owners write it).
 //!
 //! No item here opens a session or depends on `zenoh`: build scripts, CI
 //! tools and the Python verifier's fixtures all stand on this crate.
@@ -160,6 +165,7 @@ pub mod bundle;
 pub mod canonical;
 pub mod catalog;
 pub mod chunk;
+pub mod collection;
 pub mod compat;
 pub mod config;
 pub mod contract;

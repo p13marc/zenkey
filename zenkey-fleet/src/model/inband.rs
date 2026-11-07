@@ -189,6 +189,11 @@ pub fn payload<'a>(key: &str, encoding: Option<&str>, bytes: &'a [u8]) -> Payloa
             stamp: e.stamp,
             tag: e.tag,
         },
+        // A snapshot's page (core 0.97 §7.5, form 7) is read as before
+        // core 0.97 defined it, undecodable as a reserved form, until
+        // #977's E2 brings the snapshot reader: never decoded as a record
+        // of the key's type.
+        Reading::Snapshot(_) => Payload::Refused(Refusal::Reserved(wire::Form::Snapshot)),
         Reading::Refused(r) => Payload::Refused(r),
     }
 }

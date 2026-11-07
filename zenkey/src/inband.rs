@@ -363,6 +363,11 @@ fn envelope(sample: &Sample) -> Option<Result<(wire::Stamp, wire::Form), Refusal
                 Reading::Enveloped(e) | Reading::Heartbeat(e) | Reading::Framed(e) => {
                     Ok((e.stamp, e.form))
                 }
+                // A snapshot's page (core 0.97 §7.5, form 7) is read as
+                // before core 0.97 defined it, undecodable as a reserved
+                // form, until #977's E2 brings the snapshot reader: never
+                // as a record.
+                Reading::Snapshot(_) => Err(Refusal::Reserved(wire::Form::Snapshot)),
                 Reading::Refused(refusal) => Err(refusal),
                 Reading::Plain => return None,
             })
