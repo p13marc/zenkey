@@ -1,0 +1,1590 @@
+{
+ "description": "The tooling guide's §5, `.zrec` version 4, and its O8 (#990 V3, V4). `fixture` is four rows of a modem.v3 capture (zenctl 2688123d's `record`, 40 s of `zenctl gen h-3fa9c2d41b7e/rf0 modem.v3` under catalog e3a529fe; the #990 memo's §3) under a version-4 header: a JSON state, a frame, a packed state and a heartbeat, in the order recorded, with each row's `t` as recorded. The excerpt leaves gaps that are no loss. `header` is what a reader must hold after reading the header: the catalog, the revisions, each bundle verified by its fingerprint (core §9.6). `rows` is each row's line, its key's resolution (O2's rungs 3 to 6, from the header) and its decoded reading: a frame in `frame/apply.json`'s spelling read as a reader's first frame, a packed record and a JSON state in core §7.6's and §7.2's JSON reading, a heartbeat in `heartbeat/bodies.json`'s, each with O8's `dated` beside a time and `bound` beside a value. `cases` reads the fixture again: `patch` (RFC 6902, on the header line alone), then a reader that reads `reads`, holds `contracts` (bundles by fingerprint) and is given `catalog` (an id of `catalogs`) → `expect`: `refused`, the reading's refusal before any row, or what it read. A row's `as_recorded` is `rows`' reading; `_undated` drops each `dated`'s `utc` and names `unknown_catalog`; `_epoch_deployment` names the epoch `deployment`; `_epoch_assumed` keeps each wire number, dates nothing and reads the packed `time` field under 0; `_epoch_zero` dates each wire number from 0. Written by one reading of the guide and the core from the authoring sources (Python, standard library), and read again from the fixture's bytes alone by a second that shares no code with it; the four rows' values also agree with zenctl 2688123d's lens, replayed and read across the face. Checked, never blessed.",
+ "fixture": "modem-v4.zrec",
+ "source": {
+  "capture": "#990's run, zenctl 2688123d `record` (the #990 design memo, §3)",
+  "lines": [
+   88,
+   179,
+   290,
+   2262
+  ],
+  "heartbeat_retimed": {
+   "line": 2262,
+   "wire_was": {
+    "s": 1794062978,
+    "ms": 990
+   },
+   "wire_now": {
+    "s": 26837378,
+    "ms": 990
+   },
+   "why": "the reference owner writes a heartbeat's time in Unix seconds (zenkey/src/heartbeat.rs, EPOCH = 0), where core §7.5 counts it from the deployment epoch; the fixture holds what a conforming owner under e3a529fe writes, its seconds less 1767225600, every other bit as captured"
+  }
+ },
+ "header": {
+  "zrec": 4,
+  "catalog": {
+   "id": "e3a529fe",
+   "epoch": 1767225600
+  },
+  "revisions": [
+   {
+    "address": "h-3fa9c2d41b7e/rf0",
+    "iface": "freshness.v2",
+    "fingerprint": "sha256:8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890",
+    "named": "e3a529fe"
+   },
+   {
+    "address": "h-3fa9c2d41b7e/rf0",
+    "iface": "modem.v3",
+    "fingerprint": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+    "named": "e3a529fe"
+   }
+  ],
+  "bundles": {
+   "sha256:8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890": {
+    "verified": true,
+    "bytes": 603
+   },
+   "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf": {
+    "verified": true,
+    "bytes": 120081
+   }
+  }
+ },
+ "rows": [
+  {
+   "line": 2,
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/radio",
+   "resolves": {
+    "address": "h-3fa9c2d41b7e/rf0",
+    "iface": "modem.v3",
+    "fingerprint": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+    "resource": "state/radio"
+   },
+   "envelope": {
+    "form": "mutation",
+    "run": "0000",
+    "seq": 61,
+    "tag": 0
+   },
+   "decoded": {
+    "type": "json:RadioState",
+    "value": {
+     "access_technology": "access_technology-3",
+     "device": "device-3",
+     "registration": "registration-3"
+    }
+   }
+  },
+  {
+   "line": 3,
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast",
+   "resolves": {
+    "address": "h-3fa9c2d41b7e/rf0",
+    "iface": "modem.v3",
+    "fingerprint": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+    "resource": "stream/frames/fast"
+   },
+   "envelope": {
+    "form": "frame",
+    "run": "0000",
+    "seq": 6,
+    "tag": 7
+   },
+   "decoded": {
+    "type": "zk2c frame of packed:Readings",
+    "full": true,
+    "reading": {
+     "run": "0000",
+     "seq": 6,
+     "follows": "first",
+     "records": [
+      {
+       "seq": 6,
+       "time": "measured",
+       "at": {
+        "s": 26837356,
+        "ms": 523
+       },
+       "dated": {
+        "utc": "2026-11-07T14:49:16.523Z",
+        "epoch": "stated",
+        "catalog": "e3a529fe"
+       },
+       "fields": {
+        "sdu_tx_sdus_total": {
+         "state": "known",
+         "value": 60,
+         "bound": {
+          "width": 20
+         }
+        },
+        "sdu_tx_bytes_total": {
+         "state": "known",
+         "value": 24,
+         "bound": {
+          "width": 24
+         }
+        },
+        "sdu_rx_sdus_total": {
+         "state": "known",
+         "value": 24,
+         "bound": {
+          "width": 20
+         }
+        },
+        "sdu_rx_bytes_total": {
+         "state": "known",
+         "value": 60,
+         "bound": {
+          "width": 24
+         }
+        },
+        "sdu_dropped_total": {
+         "state": "known",
+         "value": 48,
+         "bound": {
+          "width": 20
+         }
+        },
+        "sdu_tx_failed_total": {
+         "state": "known",
+         "value": 12,
+         "bound": {
+          "width": 20
+         }
+        },
+        "sdu_rx_unroutable_total": {
+         "state": "known",
+         "value": 36,
+         "bound": {
+          "width": 20
+         }
+        },
+        "sdu_rx_oversize_total": {
+         "state": "known",
+         "value": 60,
+         "bound": {
+          "width": 20
+         }
+        },
+        "sdu_tx_oversize_total": {
+         "state": "known",
+         "value": 48,
+         "bound": {
+          "width": 20
+         }
+        },
+        "sched_dropped_total": {
+         "state": "known",
+         "value": 54,
+         "bound": {
+          "width": 20
+         }
+        },
+        "sched_stale_total": {
+         "state": "known",
+         "value": 24,
+         "bound": {
+          "width": 20
+         }
+        },
+        "sched_peerless_total": {
+         "state": "known",
+         "value": 48,
+         "bound": {
+          "width": 20
+         }
+        },
+        "sched_queue_depth": {
+         "state": "known",
+         "value": 286
+        },
+        "sched_lane_backlog_bytes": {
+         "state": "known",
+         "value": 659475
+        },
+        "sched_lane_backlog_drain_ms": {
+         "state": "known",
+         "value": "3348300",
+         "bound": {
+          "half_resolution": "50"
+         }
+        },
+        "air_tx_frames_total": {
+         "state": "known",
+         "value": 6,
+         "bound": {
+          "width": 20
+         }
+        },
+        "air_rx_frames_total": {
+         "state": "known",
+         "value": 42,
+         "bound": {
+          "width": 20
+         }
+        },
+        "air_cad_deferrals_total": {
+         "state": "known",
+         "value": 6,
+         "bound": {
+          "width": 20
+         }
+        },
+        "air_cad_forced_total": {
+         "state": "known",
+         "value": 48,
+         "bound": {
+          "width": 20
+         }
+        },
+        "layer_aead_auth_failures_total": {
+         "state": "known",
+         "value": 18,
+         "bound": {
+          "width": 20
+         }
+        },
+        "layer_aead_replays_total": {
+         "state": "known",
+         "value": 30,
+         "bound": {
+          "width": 20
+         }
+        },
+        "layer_aead_unknown_key_total": {
+         "state": "known",
+         "value": 6,
+         "bound": {
+          "width": 20
+         }
+        },
+        "layer_aead_send_key_id": {
+         "state": "known",
+         "value": 0
+        },
+        "layer_address_foreign_total": {
+         "state": "known",
+         "value": 48,
+         "bound": {
+          "width": 20
+         }
+        },
+        "layer_address_unknown_source_total": {
+         "state": "known",
+         "value": 24,
+         "bound": {
+          "width": 20
+         }
+        },
+        "layer_fec_repair_frames_total": {
+         "state": "known",
+         "value": 36,
+         "bound": {
+          "width": 20
+         }
+        },
+        "layer_fec_repaired_total": {
+         "state": "known",
+         "value": 36,
+         "bound": {
+          "width": 20
+         }
+        },
+        "layer_fec_unrecoverable_total": {
+         "state": "known",
+         "value": 54,
+         "bound": {
+          "width": 20
+         }
+        },
+        "layer_fec_late_repair_total": {
+         "state": "known",
+         "value": 36,
+         "bound": {
+          "width": 20
+         }
+        },
+        "layer_fec_unused_repair_total": {
+         "state": "known",
+         "value": 36,
+         "bound": {
+          "width": 20
+         }
+        },
+        "layer_fec_malformed_total": {
+         "state": "known",
+         "value": 6,
+         "bound": {
+          "width": 20
+         }
+        },
+        "layer_fragment_fragments_total": {
+         "state": "known",
+         "value": 30,
+         "bound": {
+          "width": 20
+         }
+        },
+        "layer_fragment_reassembled_total": {
+         "state": "known",
+         "value": 54,
+         "bound": {
+          "width": 20
+         }
+        },
+        "layer_fragment_rcs_failures_total": {
+         "state": "known",
+         "value": 60,
+         "bound": {
+          "width": 20
+         }
+        },
+        "layer_fragment_timeouts_total": {
+         "state": "known",
+         "value": 24,
+         "bound": {
+          "width": 20
+         }
+        },
+        "layer_fragment_oversize_total": {
+         "state": "known",
+         "value": 54,
+         "bound": {
+          "width": 20
+         }
+        },
+        "layer_fragment_malformed_total": {
+         "state": "known",
+         "value": 54,
+         "bound": {
+          "width": 20
+         }
+        },
+        "layer_compress_compressed_total": {
+         "state": "known",
+         "value": 30,
+         "bound": {
+          "width": 20
+         }
+        },
+        "layer_compress_stored_total": {
+         "state": "known",
+         "value": 6,
+         "bound": {
+          "width": 20
+         }
+        },
+        "layer_compress_bytes_saved_total": {
+         "state": "known",
+         "value": 30,
+         "bound": {
+          "width": 24
+         }
+        },
+        "layer_compress_dictionary_mismatch_total": {
+         "state": "known",
+         "value": 42,
+         "bound": {
+          "width": 20
+         }
+        },
+        "layer_compress_malformed_total": {
+         "state": "known",
+         "value": 30,
+         "bound": {
+          "width": 20
+         }
+        },
+        "air_airtime_ms_total": {
+         "state": "known",
+         "value": 24,
+         "bound": {
+          "width": 24
+         }
+        },
+        "air_retransmits_total": {
+         "state": "known",
+         "value": 60,
+         "bound": {
+          "width": 20
+         }
+        },
+        "air_bytes_wasted_total": {
+         "state": "known",
+         "value": 60,
+         "bound": {
+          "width": 24
+         }
+        },
+        "air_rx_errors_total": {
+         "state": "known",
+         "value": 36,
+         "bound": {
+          "width": 20
+         }
+        },
+        "air_duty_cycle_available": {
+         "state": "known",
+         "value": 0
+        },
+        "air_duty_cycle_wait_ms": {
+         "state": "known",
+         "value": "2325500",
+         "bound": {
+          "half_resolution": "50"
+         }
+        },
+        "radio_signal_bars": {
+         "state": "known",
+         "value": 4
+        },
+        "if_in_octets": {
+         "state": "known",
+         "value": 36,
+         "bound": {
+          "width": 40
+         }
+        },
+        "if_out_octets": {
+         "state": "known",
+         "value": 6,
+         "bound": {
+          "width": 40
+         }
+        },
+        "if_in_errors": {
+         "state": "known",
+         "value": 42,
+         "bound": {
+          "width": 32
+         }
+        },
+        "if_out_errors": {
+         "state": "known",
+         "value": 36,
+         "bound": {
+          "width": 32
+         }
+        },
+        "if_in_discards": {
+         "state": "known",
+         "value": 42,
+         "bound": {
+          "width": 32
+         }
+        },
+        "if_out_discards": {
+         "state": "known",
+         "value": 60,
+         "bound": {
+          "width": 32
+         }
+        },
+        "if_in_multicast_pkts": {
+         "state": "known",
+         "value": 6,
+         "bound": {
+          "width": 32
+         }
+        },
+        "if_in_pkts": {
+         "state": "known",
+         "value": 48,
+         "bound": {
+          "width": 32
+         }
+        },
+        "if_out_pkts": {
+         "state": "known",
+         "value": 54,
+         "bound": {
+          "width": 32
+         }
+        },
+        "if_qdisc_backlog_bytes": {
+         "state": "known",
+         "value": 6002963
+        },
+        "if_qdisc_backlog_pkts": {
+         "state": "known",
+         "value": 58582
+        },
+        "radio_rssi": {
+         "state": "known",
+         "value": "-141",
+         "bound": {
+          "half_resolution": "0.25"
+         }
+        },
+        "radio_rsrp": {
+         "state": "known",
+         "value": "-117",
+         "bound": {
+          "half_resolution": "0.5"
+         }
+        },
+        "radio_rsrq": {
+         "state": "known",
+         "value": "-37.5",
+         "bound": {
+          "half_resolution": "0.25"
+         }
+        },
+        "radio_snr": {
+         "state": "known",
+         "value": "-9.75",
+         "bound": {
+          "half_resolution": "0.125"
+         }
+        },
+        "radio_error_rate": {
+         "state": "known",
+         "value": "77.05",
+         "bound": {
+          "half_resolution": "0.005"
+         }
+        },
+        "link_rx_rate": {
+         "state": "known",
+         "value": "2331225500",
+         "bound": {
+          "half_resolution": "50"
+         }
+        },
+        "link_tx_rate": {
+         "state": "known",
+         "value": "6555791200",
+         "bound": {
+          "half_resolution": "50"
+         }
+        },
+        "link_rx_max_rate": {
+         "state": "known",
+         "value": "6701729200",
+         "bound": {
+          "half_resolution": "50"
+         }
+        },
+        "link_tx_max_rate": {
+         "state": "known",
+         "value": "4432023100",
+         "bound": {
+          "half_resolution": "50"
+         }
+        },
+        "link_latency": {
+         "state": "known",
+         "value": "52602700",
+         "bound": {
+          "half_resolution": "50"
+         }
+        },
+        "link_resources": {
+         "state": "known",
+         "value": 82
+        },
+        "link_rx_quality": {
+         "state": "known",
+         "value": 2
+        },
+        "link_tx_quality": {
+         "state": "known",
+         "value": 94
+        }
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "line": 4,
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/oper",
+   "resolves": {
+    "address": "h-3fa9c2d41b7e/rf0",
+    "iface": "modem.v3",
+    "fingerprint": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+    "resource": "state/packed/oper"
+   },
+   "envelope": {
+    "form": "mutation",
+    "run": "0000",
+    "seq": 91,
+    "tag": 4
+   },
+   "decoded": {
+    "type": "packed:OperRecord",
+    "value": {
+     "status": "up",
+     "admin": "up",
+     "recoverable": true,
+     "last_change": 1794062958504,
+     "uptime_s": 2003187156,
+     "clock_synced": false
+    },
+    "dated": {
+     "last_change": {
+      "utc": "2026-11-07T14:49:18.504Z",
+      "epoch": "stated",
+      "catalog": "e3a529fe"
+     }
+    }
+   }
+  },
+  {
+   "line": 5,
+   "key": "zk2/h-3fa9c2d41b7e/rf0/freshness.v2/stream/heartbeat/modem.v3",
+   "resolves": {
+    "address": "h-3fa9c2d41b7e/rf0",
+    "iface": "freshness.v2",
+    "fingerprint": "sha256:8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890",
+    "resource": "stream/heartbeat/{iface}",
+    "values": {
+     "iface": [
+      "modem.v3"
+     ]
+    }
+   },
+   "envelope": {
+    "form": "heartbeat",
+    "run": "0000",
+    "seq": 1,
+    "tag": 15
+   },
+   "decoded": {
+    "type": "zk2c heartbeat (modem.v3)",
+    "covers": "modem.v3",
+    "covered": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+    "time": {
+     "s": 26837378,
+     "ms": 990
+    },
+    "dated": {
+     "utc": "2026-11-07T14:49:38.990Z",
+     "epoch": "stated",
+     "catalog": "e3a529fe"
+    },
+    "sections": {
+     "state/destination/{destination}": {
+      "digest": "1be405f4",
+      "live": 2,
+      "vouched": [
+       0,
+       1
+      ],
+      "form": "bitmap"
+     },
+     "state/identity": {
+      "digest": "f5984c6f",
+      "vouched": true
+     },
+     "state/oper": {
+      "digest": "681d42d9",
+      "vouched": true
+     },
+     "state/packed/destination/{destination}": {
+      "digest": "aaf8b421",
+      "live": 2,
+      "vouched": [
+       0,
+       1
+      ],
+      "form": "bitmap"
+     },
+     "state/packed/identity": {
+      "digest": "88ca2b99",
+      "vouched": true
+     },
+     "state/packed/oper": {
+      "digest": "8b9ed070",
+      "vouched": true
+     },
+     "state/packed/radio": {
+      "digest": "431602db",
+      "vouched": true
+     },
+     "state/packed/sdu/endpoint/{endpoint}": {
+      "digest": "f69f5116",
+      "live": 2,
+      "vouched": [
+       0,
+       1
+      ],
+      "form": "bitmap"
+     },
+     "state/packed/sdu/link": {
+      "digest": "f84d435a",
+      "vouched": true
+     },
+     "state/packed/security": {
+      "digest": "c97c7c1b",
+      "vouched": true
+     },
+     "state/radio": {
+      "digest": "acd61992",
+      "vouched": true
+     },
+     "state/sdu/endpoint/{endpoint}": {
+      "digest": "abcc3e2f",
+      "live": 2,
+      "vouched": [
+       0,
+       1
+      ],
+      "form": "bitmap"
+     },
+     "state/sdu/link": {
+      "digest": "d0741ff3",
+      "vouched": true
+     },
+     "state/security": {
+      "digest": "233e4c2d",
+      "vouched": true
+     }
+    }
+   }
+  }
+ ],
+ "catalogs": {
+  "e3a529fe": {
+   "entries": [
+    {
+     "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+     "iface": "modem.v3",
+     "index": 0
+    },
+    {
+     "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1",
+     "iface": "config.v1",
+     "index": 1
+    },
+    {
+     "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df",
+     "iface": "health.v1",
+     "index": 2
+    },
+    {
+     "contract": "sha256:4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501",
+     "iface": "config.v1",
+     "index": 3
+    },
+    {
+     "contract": "sha256:60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f",
+     "iface": "health.v1",
+     "index": 4
+    },
+    {
+     "contract": "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+     "iface": "modem.v3",
+     "index": 5
+    },
+    {
+     "contract": "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+     "iface": "modem.v3",
+     "index": 6
+    },
+    {
+     "contract": "sha256:dc7c01069bffc9dc5a966c93cfe2444eca0391e71f051bc9bf6d2b2b54d4317b",
+     "iface": "sx1262_config.v1",
+     "index": 7
+    },
+    {
+     "contract": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+     "iface": "modem.v3",
+     "index": 8
+    }
+   ],
+   "epoch": 1767225600,
+   "format": "zk2-catalog/1",
+   "lineage": [
+    {
+     "entries": 3,
+     "id": "0a90fd61"
+    },
+    {
+     "entries": 5,
+     "id": "ea268fad"
+    },
+    {
+     "entries": 6,
+     "id": "36c25c0f"
+    },
+    {
+     "entries": 7,
+     "id": "ab76ec37"
+    },
+    {
+     "entries": 8,
+     "id": "8c808dff"
+    }
+   ]
+  },
+  "8c808dff": {
+   "entries": [
+    {
+     "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+     "iface": "modem.v3",
+     "index": 0
+    },
+    {
+     "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1",
+     "iface": "config.v1",
+     "index": 1
+    },
+    {
+     "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df",
+     "iface": "health.v1",
+     "index": 2
+    },
+    {
+     "contract": "sha256:4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501",
+     "iface": "config.v1",
+     "index": 3
+    },
+    {
+     "contract": "sha256:60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f",
+     "iface": "health.v1",
+     "index": 4
+    },
+    {
+     "contract": "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+     "iface": "modem.v3",
+     "index": 5
+    },
+    {
+     "contract": "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+     "iface": "modem.v3",
+     "index": 6
+    },
+    {
+     "contract": "sha256:dc7c01069bffc9dc5a966c93cfe2444eca0391e71f051bc9bf6d2b2b54d4317b",
+     "iface": "sx1262_config.v1",
+     "index": 7
+    }
+   ],
+   "epoch": 1767225600,
+   "format": "zk2-catalog/1",
+   "lineage": [
+    {
+     "entries": 3,
+     "id": "0a90fd61"
+    },
+    {
+     "entries": 5,
+     "id": "ea268fad"
+    },
+    {
+     "entries": 6,
+     "id": "36c25c0f"
+    },
+    {
+     "entries": 7,
+     "id": "ab76ec37"
+    }
+   ]
+  },
+  "0ff6bf6d": {
+   "entries": [
+    {
+     "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+     "iface": "modem.v3",
+     "index": 0
+    },
+    {
+     "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1",
+     "iface": "config.v1",
+     "index": 1
+    },
+    {
+     "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df",
+     "iface": "health.v1",
+     "index": 2
+    },
+    {
+     "contract": "sha256:4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501",
+     "iface": "config.v1",
+     "index": 3
+    },
+    {
+     "contract": "sha256:60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f",
+     "iface": "health.v1",
+     "index": 4
+    },
+    {
+     "contract": "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+     "iface": "modem.v3",
+     "index": 5
+    },
+    {
+     "contract": "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+     "iface": "modem.v3",
+     "index": 6
+    },
+    {
+     "contract": "sha256:dc7c01069bffc9dc5a966c93cfe2444eca0391e71f051bc9bf6d2b2b54d4317b",
+     "iface": "sx1262_config.v1",
+     "index": 7
+    },
+    {
+     "contract": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+     "iface": "modem.v3",
+     "index": 8
+    },
+    {
+     "contract": "sha256:8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890",
+     "iface": "freshness.v2",
+     "index": 9
+    }
+   ],
+   "epoch": 1767225600,
+   "format": "zk2-catalog/1",
+   "lineage": [
+    {
+     "entries": 3,
+     "id": "0a90fd61"
+    },
+    {
+     "entries": 5,
+     "id": "ea268fad"
+    },
+    {
+     "entries": 6,
+     "id": "36c25c0f"
+    },
+    {
+     "entries": 7,
+     "id": "ab76ec37"
+    },
+    {
+     "entries": 8,
+     "id": "8c808dff"
+    },
+    {
+     "entries": 9,
+     "id": "e3a529fe"
+    }
+   ]
+  },
+  "09729f63": {
+   "entries": [
+    {
+     "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+     "iface": "modem.v3",
+     "index": 0
+    },
+    {
+     "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1",
+     "iface": "config.v1",
+     "index": 1
+    },
+    {
+     "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df",
+     "iface": "health.v1",
+     "index": 2
+    },
+    {
+     "contract": "sha256:4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501",
+     "iface": "config.v1",
+     "index": 3
+    },
+    {
+     "contract": "sha256:60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f",
+     "iface": "health.v1",
+     "index": 4
+    },
+    {
+     "contract": "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+     "iface": "modem.v3",
+     "index": 5
+    },
+    {
+     "contract": "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+     "iface": "modem.v3",
+     "index": 6
+    },
+    {
+     "contract": "sha256:dc7c01069bffc9dc5a966c93cfe2444eca0391e71f051bc9bf6d2b2b54d4317b",
+     "iface": "sx1262_config.v1",
+     "index": 7
+    },
+    {
+     "contract": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+     "iface": "modem.v3",
+     "index": 8
+    },
+    {
+     "contract": "sha256:8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890",
+     "iface": "freshness.v2",
+     "index": 9
+    }
+   ],
+   "epoch": 1735689600,
+   "format": "zk2-catalog/1",
+   "lineage": [
+    {
+     "entries": 3,
+     "id": "0a90fd61"
+    },
+    {
+     "entries": 5,
+     "id": "ea268fad"
+    },
+    {
+     "entries": 6,
+     "id": "36c25c0f"
+    },
+    {
+     "entries": 7,
+     "id": "ab76ec37"
+    },
+    {
+     "entries": 8,
+     "id": "8c808dff"
+    },
+    {
+     "entries": 9,
+     "id": "e3a529fe"
+    }
+   ]
+  }
+ },
+ "cases": [
+  {
+   "name": "as recorded",
+   "note": "the header's catalog is held, and the descriptor named it: every time is dated, its epoch stated",
+   "reader": {
+    "reads": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "expect": {
+    "read": true,
+    "bundles": {
+     "sha256:8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890": "verified",
+     "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf": "verified"
+    },
+    "epoch": {
+     "h-3fa9c2d41b7e/rf0": {
+      "from": "stated",
+      "catalog": "e3a529fe"
+     }
+    },
+    "rows": "as_recorded"
+   }
+  },
+  {
+   "name": "a v3 reader",
+   "note": "a reader that reads versions 1 to 3 refuses version 4 by the rule it already has; zenctl 2688123d says `unsupported version 4`",
+   "reader": {
+    "reads": [
+     1,
+     2,
+     3
+    ]
+   },
+   "expect": {
+    "refused": "version"
+   }
+  },
+  {
+   "name": "a bundle whose contract is not its fingerprint",
+   "note": "freshness.v2's bundle with its cardinality moved from 256 to 255: core §9.6's step 12 refuses it (`fingerprint`), the file still reads, and the heartbeat's key stops at O2's rung 5, unavailable",
+   "patch": [
+    {
+     "op": "replace",
+     "path": "/bundles/1/bytes",
+     "value": "eyJjb250cmFjdCI6eyJmb3JtYXQiOiJ6azItY29udHJhY3QvZHJhZnQtMSIsImludGVyZmFjZSI6ImZyZXNobmVzcy52MiIsInJlcXVpcmVzIjp7fSwicmVzb3VyY2VzIjpbeyJhbm5vdGF0aW9ucyI6e30sImF0dGFjaG1lbnQiOm51bGwsImF0dGFjaG1lbnRfZW5jb2RpbmciOm51bGwsImNhcmRpbmFsaXR5IjoyNTUsImNvbmdlc3Rpb24iOiJkcm9wIiwiZGVwcmVjYXRlZCI6bnVsbCwiZW5jb2RpbmciOm51bGwsImVwb2NoIjpudWxsLCJleHByZXNzIjpmYWxzZSwiZ2F0ZSI6W10sImhpc3RvcnkiOm51bGwsImtpbmQiOiJzdHJlYW0iLCJvcHRpb25hbCI6ZmFsc2UsInBhcmFtcyI6eyJpZmFjZSI6InN0cmluZyJ9LCJwcmlvcml0eSI6ImRhdGEiLCJyYXRlIjpudWxsLCJyZWxpYWJpbGl0eSI6InJlbGlhYmxlIiwicmV0ZW50aW9uX3MiOm51bGwsInRlbXBsYXRlIjoiaGVhcnRiZWF0L3tpZmFjZX0iLCJ0b2tlbiI6InN0cmVhbSIsInR5cGUiOnsia2luZCI6InJhdyIsIm1lZGlhX3BhcmFtIjpudWxsLCJtZWRpYV90eXBlIjoiYXBwbGljYXRpb24vb2N0ZXQtc3RyZWFtIn19XSwic2NoZW1hcyI6W10sInVzZXMiOltdfSwiZXh0cmFzIjp7fSwic2NoZW1hcyI6e319"
+    }
+   ],
+   "reader": {
+    "reads": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "expect": {
+    "read": true,
+    "bundles": {
+     "sha256:8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890": {
+      "refused": "fingerprint"
+     },
+     "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf": "verified"
+    },
+    "rows": {
+     "5": {
+      "rung": "unavailable",
+      "refused": "fingerprint"
+     },
+     "2": "as_recorded",
+     "3": "as_recorded",
+     "4": "as_recorded"
+    }
+   }
+  },
+  {
+   "name": "--no-bundles, no --contracts",
+   "note": "no bundle carried and none given: every key stops at rung 5, not held, asked of the operator",
+   "patch": [
+    {
+     "op": "remove",
+     "path": "/bundles"
+    }
+   ],
+   "reader": {
+    "reads": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "expect": {
+    "read": true,
+    "bundles": {},
+    "rows": {
+     "2": {
+      "rung": "not_held"
+     },
+     "3": {
+      "rung": "not_held"
+     },
+     "4": {
+      "rung": "not_held"
+     },
+     "5": {
+      "rung": "not_held"
+     }
+    }
+   }
+  },
+  {
+   "name": "--no-bundles, with --contracts",
+   "note": "the reader's contracts hold both fingerprints: the rows read as recorded",
+   "patch": [
+    {
+     "op": "remove",
+     "path": "/bundles"
+    }
+   ],
+   "reader": {
+    "reads": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "contracts": [
+     "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+     "sha256:8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890"
+    ]
+   },
+   "expect": {
+    "read": true,
+    "bundles": {},
+    "rows": "as_recorded"
+   }
+  },
+  {
+   "name": "a bundle record could not retrieve",
+   "note": "the header lists freshness.v2's revision and carries no bundle for it: the heartbeat's key stops at rung 5, unavailable; the others read",
+   "patch": [
+    {
+     "op": "remove",
+     "path": "/bundles/1"
+    }
+   ],
+   "reader": {
+    "reads": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "expect": {
+    "read": true,
+    "bundles": {
+     "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf": "verified"
+    },
+    "rows": {
+     "5": {
+      "rung": "unavailable"
+     },
+     "2": "as_recorded",
+     "3": "as_recorded",
+     "4": "as_recorded"
+    }
+   }
+  },
+  {
+   "name": "--catalog the header's",
+   "reader": {
+    "reads": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "catalog": "e3a529fe"
+   },
+   "expect": {
+    "read": true,
+    "epoch": {
+     "h-3fa9c2d41b7e/rf0": {
+      "from": "stated",
+      "catalog": "e3a529fe"
+     }
+    },
+    "rows": "as_recorded"
+   }
+  },
+  {
+   "name": "--catalog a successor",
+   "note": "0ff6bf6d succeeds e3a529fe, appending freshness.v2: read through it, the same epoch",
+   "reader": {
+    "reads": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "catalog": "0ff6bf6d"
+   },
+   "expect": {
+    "read": true,
+    "epoch": {
+     "h-3fa9c2d41b7e/rf0": {
+      "from": "stated",
+      "catalog": "e3a529fe"
+     }
+    },
+    "rows": "as_recorded"
+   }
+  },
+  {
+   "name": "--catalog the header's predecessor",
+   "note": "e3a529fe succeeds 8c808dff, not the other way: refused before any row",
+   "reader": {
+    "reads": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "catalog": "8c808dff"
+   },
+   "expect": {
+    "refused": "unknown_catalog"
+   }
+  },
+  {
+   "name": "--catalog whose lineage holds the header's, another epoch",
+   "note": "09729f63: 0ff6bf6d with its epoch moved to 2025-01-01, so no successor",
+   "reader": {
+    "reads": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "catalog": "09729f63"
+   },
+   "expect": {
+    "refused": "epoch_moved"
+   }
+  },
+  {
+   "name": "across a face",
+   "note": "revisions from --contracts at record time, so no descriptor named a catalog (`named` absent): the header's catalog is the deployment's word",
+   "patch": [
+    {
+     "op": "remove",
+     "path": "/revisions/0/named"
+    },
+    {
+     "op": "remove",
+     "path": "/revisions/1/named"
+    }
+   ],
+   "reader": {
+    "reads": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "expect": {
+    "read": true,
+    "epoch": {
+     "h-3fa9c2d41b7e/rf0": {
+      "from": "deployment",
+      "catalog": "e3a529fe"
+     }
+    },
+    "rows": "as_recorded_epoch_deployment"
+   }
+  },
+  {
+   "name": "across a face, recorded with no --catalog",
+   "note": "nothing states the epoch: 0 assumed, and no time is dated; the frame's and the heartbeat's wire numbers stand, and the packed record holding a `time` field reads under 0, `epoch_assumed`",
+   "patch": [
+    {
+     "op": "remove",
+     "path": "/catalog"
+    },
+    {
+     "op": "remove",
+     "path": "/revisions/0/named"
+    },
+    {
+     "op": "remove",
+     "path": "/revisions/1/named"
+    }
+   ],
+   "reader": {
+    "reads": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "expect": {
+    "read": true,
+    "epoch": {
+     "h-3fa9c2d41b7e/rf0": {
+      "from": "assumed"
+     }
+    },
+    "rows": "as_recorded_epoch_assumed"
+   }
+  },
+  {
+   "name": "the owner named a catalog, none recorded",
+   "note": "the descriptor named e3a529fe, and the reader holds no catalog: its times are refused, `unknown_catalog`, never guessed (core §8.6); the packed record that holds a `time` field is undecodable, the others read",
+   "patch": [
+    {
+     "op": "remove",
+     "path": "/catalog"
+    }
+   ],
+   "reader": {
+    "reads": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "expect": {
+    "read": true,
+    "epoch": {
+     "h-3fa9c2d41b7e/rf0": {
+      "from": "unknown_catalog",
+      "catalog": "e3a529fe"
+     }
+    },
+    "rows": {
+     "4": {
+      "rung": "undecodable",
+      "refused": "unknown_catalog"
+     },
+     "3": "as_recorded_undated",
+     "5": "as_recorded_undated",
+     "2": "as_recorded"
+    }
+   }
+  },
+  {
+   "name": "the owner named no catalog",
+   "note": "the descriptor named none, so the owner counts from 0, stated (core §8.6); the header's catalog does not apply to it",
+   "patch": [
+    {
+     "op": "replace",
+     "path": "/revisions/0/named",
+     "value": null
+    },
+    {
+     "op": "replace",
+     "path": "/revisions/1/named",
+     "value": null
+    }
+   ],
+   "reader": {
+    "reads": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "expect": {
+    "read": true,
+    "epoch": {
+     "h-3fa9c2d41b7e/rf0": {
+      "from": "stated",
+      "epoch_s": 0
+     }
+    },
+    "rows": "as_recorded_epoch_zero"
+   }
+  },
+  {
+   "name": "a v3 file",
+   "note": "the same rows under a v3 header: no revision, so no provider without presence (O2 rung 3); `--across-face` with `--contracts` and `--catalog` reads it as across a face",
+   "patch": [
+    {
+     "op": "replace",
+     "path": "/zrec",
+     "value": 3
+    },
+    {
+     "op": "remove",
+     "path": "/catalog"
+    },
+    {
+     "op": "remove",
+     "path": "/revisions"
+    },
+    {
+     "op": "remove",
+     "path": "/bundles"
+    }
+   ],
+   "reader": {
+    "reads": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "expect": {
+    "read": true,
+    "rows": {
+     "2": {
+      "rung": "no_provider"
+     },
+     "3": {
+      "rung": "no_provider"
+     },
+     "4": {
+      "rung": "no_provider"
+     },
+     "5": {
+      "rung": "no_provider"
+     }
+    }
+   }
+  },
+  {
+   "name": "a bundle no revision names",
+   "patch": [
+    {
+     "op": "remove",
+     "path": "/revisions/1"
+    }
+   ],
+   "reader": {
+    "reads": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "expect": {
+    "refused": "header"
+   }
+  },
+  {
+   "name": "two catalogs",
+   "note": "one catalog per file: `catalog` is one object, never a list",
+   "patch": [
+    {
+     "op": "replace",
+     "path": "/catalog",
+     "value": [
+      {
+       "id": "e3a529fe",
+       "epoch": 1767225600,
+       "lineage": [
+        {
+         "entries": 3,
+         "id": "0a90fd61"
+        },
+        {
+         "entries": 5,
+         "id": "ea268fad"
+        },
+        {
+         "entries": 6,
+         "id": "36c25c0f"
+        },
+        {
+         "entries": 7,
+         "id": "ab76ec37"
+        },
+        {
+         "entries": 8,
+         "id": "8c808dff"
+        }
+       ]
+      },
+      {
+       "id": "0ff6bf6d",
+       "epoch": 1767225600,
+       "lineage": [
+        {
+         "entries": 3,
+         "id": "0a90fd61"
+        },
+        {
+         "entries": 5,
+         "id": "ea268fad"
+        },
+        {
+         "entries": 6,
+         "id": "36c25c0f"
+        },
+        {
+         "entries": 7,
+         "id": "ab76ec37"
+        },
+        {
+         "entries": 8,
+         "id": "8c808dff"
+        },
+        {
+         "entries": 9,
+         "id": "e3a529fe"
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "reader": {
+    "reads": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   "expect": {
+    "refused": "header"
+   }
+  }
+ ]
+}
