@@ -5428,7 +5428,8 @@ def _round106_readings(root: Path) -> list[tuple[str, Any, Any]]:
     scope and envelope families'), and the texts F-509 to F-511 quote."""
     import re
 
-    from . import across, link_v2
+    from . import across, echo_tool, link_v2, zk2c
+    from .contract import load_contract
 
     spec = root.parent
     repo = spec.parent
@@ -5455,6 +5456,24 @@ def _round106_readings(root: Path) -> list[tuple[str, Any, Any]]:
          + missing(l2, "**A tool's scope** is the face's plan (§2.3, observer §7.5)."),
          [True, True]),
     ]
+    # zk2py's echo tool over §7.3's tag rules, offline
+    pk = load_contract(spec.parent / "zenkey/tests/contracts/packed/packed.v1.toml")
+    held = echo_tool.Held([pk])
+    rec = pk.schemas.packed_record(next(r for r in pk.canonical["resources"]
+                                        if r["template"] == "reading/{unit}")["type"])
+    key = "zk2/lab/s/packed.v1/state/reading/u1"
+    ib = zk2c.InBand(16, 1, 0)
+    wrong = zk2c.mutation(ib, b"\x00" * 8, (rec.tag + 1) % 16)
+    r_wrong = echo_tool.row_of(key, False, len(wrong), zk2c.ENCODING, wrong, held=held)
+    unheld = zk2c.mutation(ib, b"\x01" * 5, 5)
+    r_unheld = echo_tool.row_of("zk2/lab/s/other.v1/state/x", False, len(unheld), zk2c.ENCODING, unheld)
+    r_zero = echo_tool.row_of("zk2/lab/s/other.v1/state/x", False, 9, zk2c.ENCODING, zk2c.mutation(ib, b"hi", 0))
+    out.append(("observer 0.29 §7.3 (zk2py's echo tool): a record under another tag than its packed type's is "
+                "undecodable, tag; one under tag 5 whose type is not held is shown as a packed record, never sniffed; "
+                "tag 0 is sniffed",
+                [bool(r_wrong["undecodable"]) and ": tag (" in r_wrong["undecodable"], r_wrong["sniffed"],
+                 r_unheld["sniffed"], r_unheld["declared_type"].get("shown"), r_zero["sniffed"] is not None],
+                [True, None, None, "<packed record, tag 5, 5 bytes>", True]))
     # F-509: tags.json's e3a529fe, a file whose id is its successor's
     tags = _load_json(root / "envelope" / "tags.json")
     cat_file = _load_json(repo / tags["catalogs"]["e3a529fe"])
@@ -7022,14 +7041,17 @@ def _mend_after_round94_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "a delete's None, never bytes",
                 [x for _, x in sunk], [{"temperature": "21.5", "humidity": "43.5", "pressure": "1013.2",
                                         "battery": "3.7"}, None]))
+    # Since observer 0.29 (round 106) the echo tool holds several revisions
+    # of an interface, and reads each sample with the one §7.5's three steps
+    # choose (envelope family, tags.json); it refused two before.
     try:
-        echo_tool.Held([load_contract(spec.parent / "zenkey/tests/contracts/packed/packed.v1.toml"),
-                        load_contract(spec.parent / "zenkey/tests/contracts/packed-wide.v1.toml")])
-        two: Any = "held"
+        two_held = echo_tool.Held([load_contract(spec.parent / "zenkey/tests/contracts/packed/packed.v1.toml"),
+                                   load_contract(spec.parent / "zenkey/tests/contracts/packed-wide.v1.toml")])
+        two: Any = sorted(two_held.several)
     except ValueError:
         two = "refused"
-    out.append(("zk2py's echo tool holds one revision per interface: it reads no descriptor to choose between two",
-                two, "refused"))
+    out.append(("zk2py's echo tool holds two revisions of an interface and chooses per sample by observer 0.29 §7.5, "
+                "where it refused two before (round 106)", two, ["packed.v1"]))
     return out
 
 

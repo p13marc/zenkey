@@ -655,6 +655,22 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "it reads that have one, declared again after two of them of silence, said on stderr and in the notes; given no "
      "policy, the medium taken for one that repairs, as the text says (far_side_live: constrained.md §9 step 2) "
      "(round 99, observer 0.23)"),
+    # observer 0.29 (#990 V1, V2; round 106): the scope by the face's plan, a
+    # selector given, the revision of a key, and CH's tag.
+    ("observer", "observer §7.5", "A tool given the face SHOULD NOT declare a scope for a resource the plan keeps off it",
+     MET, "echo_tool --across-face with --face-policy and --face: across.scopes, the plan's crossing resources and "
+          "heartbeats by link_v2.plan, nothing it denies a put (scope family, faces.json 17/17) (round 106)"),
+    ("observer", "observer §7.5", "A tool MUST NOT drop silently a selector it was given that meets none of its scopes",
+     MET, "echo_tool --across-face with a SELECTOR: across.declared, the scopes it includes and itself where it meets "
+          "one; one that meets none refused, exit 2, named (scope family) (round 106)"),
+    ("observer", "observer §7.5", "MUST read it with the revision chosen in this order", MET,
+     "echo_tool.Held.choose over across.revision_of_key: the deployment's word, CH's tag, the catalog's latest, "
+     "several revisions held (envelope family, tags.json 31/31) (round 106)"),
+    ("observer", "observer §7.3", "A tool MUST NOT decode a record as its declared type under a tag that is not that",
+     MET, "echo_tool.row_of: undecodable, tag, for a packed type's other tag and any tag other than 0 on another kind "
+          "(envelope family, tags.json; readings) (round 106)"),
+    ("observer", "observer §7.3", "A tool that holds no type for a record whose tag is not 0 MUST NOT sniff it", MET,
+     "echo_tool.row_of: shown <packed record, tag t, n bytes>, never sniffed (tags.json; readings) (round 106)"),
     # observer 0.21 (#981 K2): §7.6, a tool's frames.
     ("observer", "observer §7.6", "A tool MUST show a scheduled record's time as scheduled, with its `jitter_ms`",
      MET, "echo_tool's frame row, frame.Reader's records: time scheduled, after_ms step_ms × i and jitter_ms, never "
