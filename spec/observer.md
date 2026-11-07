@@ -690,8 +690,10 @@ and merge, a selector over several owners and "Observing S1" stay in core
     still be held.
   - **Without the contract** a tool cannot map a snapshot's collection
     index to a template, so it cannot tell which keys it holds are the
-    collection's. It applies no omission rule over that snapshot, and
-    shows the keys it held there as possibly stale. `[F: seed/snapshot.json]`
+    collection's. Nor can it without the revision the owner runs, which
+    maps the index (core §4.2). It applies no omission rule over that
+    snapshot, and shows the keys it held there as possibly stale.
+    `[F: seed/snapshot.json]`
   - An owner absent at the GET seeds nothing for its keys. That is O5's
     silence, never "no state", and the subscription shows its keys as
     they change from then on.

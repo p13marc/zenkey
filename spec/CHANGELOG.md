@@ -95,8 +95,38 @@ until the final.
 - **The confirmation's evidence** is `freshness.v2`'s scenario §3, which
   reads both codes.
 
+**Answered: zk2py round 103's F-495 to F-497.** Round 103 read 0.97's
+form 7 cold. Its three findings are a gap and two minor errors, none a
+blocker.
+- **F-497, a gap: the revision that maps a snapshot's index.** A
+  snapshot names no revision, and its tag is its collection's type's. A
+  minor revision that adds a resource sorting before a collection moves
+  its index. `modem.v3` 3.3's seven `packed/` states make
+  `sdu/endpoint/{endpoint}` 11, where 3.0 to 3.2 make it 4.
+  - **§4.2, new.** A late joiner MUST map the index with the revision the
+    owner's descriptor names (§3.3), never with another it holds. That is
+    the fingerprint §7.6's reader already takes from the descriptor.
+  - **Where no descriptor reaches the reader**, across a constrained
+    face, the revision is the deployment's word, as the catalog the owner
+    writes under is (§8.6, R7).
+  - **An index that names no collection of the reply's key** draws no
+    omission rule, and the entries still merge. §7.5's index points to
+    §4.2, and observer §4.1's "Without the contract" names the revision.
+  - **Not the finding's other fix,** the reply's key overriding the
+    index. Two collections on one snapshot key, `a` and `a/{x}`, are
+    told apart by the index alone.
+  - **The memo** names no revision. This follows the descriptor, which a
+    reader already reads the owner's other answers by.
+- **F-495, minor: the fixtures' endpoints.** `snapshot/README.md` and
+  two of `bodies.json`'s notes said the endpoints are collection 4 of
+  `modem.v3`'s state. They are 4 in 3.0 to 3.2, and 11 in 3.3, the
+  example's head. The notes say so, and the bytes keep 4: the index is
+  the fixture's own.
+- **F-496, minor: Appendix E's `snapshot/` row** names the paging cases'
+  refusal, as the fixtures' README does.
+
 **The evidence.**
-- **`seed/snapshot.json`,** new: 42 cases. A reader's collections and
+- **`seed/snapshot.json`,** new: 45 cases. A reader's collections and
   what it holds, then the GET's pages, per-key replies and live samples,
   give what it holds and each snapshot's completeness and omissions.
   Written by an independent reading of the text, and checked by a second
@@ -107,10 +137,15 @@ until the final.
   lost, `Latest`'s control, a delete beyond the window, an empty
   collection and two instances. `scenarios/constrained.md` §5 adds a
   page within a fragment, and `presence.md`'s GET is `None`.
+- **F-497's cases** in `seed/snapshot.json` hold `modem.v3` 3.2's and
+  3.3's collections, as `examples/zk2/.history` gives them, and the
+  revision the owner's descriptor names. By 3.3 a page's index 11 is the
+  endpoints', and by 3.2 its index 4. A 4 under 3.3 is
+  `packed/identity`, of another snapshot key, and drops nothing.
 
 **Deliberately not changed.**
-- **§7.5's form and its parse,** 0.97's. No fixture of `snapshot/` or
-  `envelope/` moves.
+- **§7.5's form and its parse,** 0.97's. No fixture's bytes in
+  `snapshot/` or `envelope/` move, and only F-495's two notes do.
 - **The merge's order,** S7 and §4.3's consumer rule.
 - **Retrieval (§8.4) and calls (§5),** already `None`.
 - **Profiles that read replies.** `desired.v1`, `alarms.v1`,
@@ -122,9 +157,10 @@ until the final.
   their profiles.
 - **No section number** and no fingerprint moves.
 
-**The figures.** `RULES.md` lists 262 rules, 12 more. S2's rules
-become three, one fewer. §4.2 adds seven owner rules and four for a late
-joiner, observer §4.1 one for a tool, and §12 one.
+**The figures.** `RULES.md` lists 263 rules, 13 more. S2's rules
+become three, one fewer. §4.2 adds seven owner rules, and S4 and the
+seed five for a late joiner, F-497's among them. Observer §4.1 adds one
+for a tool, and §12 one.
 
 ## 0.98 — 2026-11-07: the rule index reads a subject's own role (#609)
 

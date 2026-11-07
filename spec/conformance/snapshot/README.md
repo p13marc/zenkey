@@ -17,10 +17,14 @@ envelope's own refusals are [`envelope/vectors.json`](../envelope/vectors.json)'
 A snapshot on a key that is no state key is
 [`envelope/carries.json`](../envelope/carries.json)'s `key_kind`.
 
-**zenoh-modem's endpoints.** `sdu/endpoint/{endpoint}` is collection 4 of
-modem.v3's state, in the canonical form's order. Its records here are
-JSON documents of about 110 bytes, and its horizon is 60 s. So each live
-entry carries a confirmation. Under 1,024-byte pages, 24 endpoints take
+**zenoh-modem's endpoints.** The fixtures' bytes give
+`sdu/endpoint/{endpoint}` collection 4. That is its index in modem.v3 3.0
+to 3.2, in the canonical form's order. In 3.3, the example's head, it
+is 11. Seven `packed/` states sort before it, and 4 is `packed/identity`.
+A reader maps the index with the owner's revision (core §4.2). These
+fixtures read no contract. Its records here are JSON documents of about
+110 bytes, and its horizon is 60 s. So each live entry carries a
+confirmation. Under 1,024-byte pages, 24 endpoints take
 4 pages. Under 220-byte pages, one RF SDU each, every endpoint takes a
 page of its own.
 

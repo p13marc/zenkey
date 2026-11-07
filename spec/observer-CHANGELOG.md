@@ -31,7 +31,8 @@ collection read.
   ran to its timeout does. Its entries stand.
 - **Without the contract** a tool cannot map a snapshot's collection to a
   template. It applies no omission rule there, and shows the keys it
-  held as possibly stale.
+  held as possibly stale. Nor can it without the revision the owner
+  runs, which core §4.2 has map the index (zk2py round 103's F-497).
 
 **Changed: §2, §4.5 and §5.2.**
 - **§2's state instance.** An incomplete snapshot is no verdict. A

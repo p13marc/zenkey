@@ -52,12 +52,12 @@ The owner, consumer and caller sections each point to them.
 | Role | Rules |
 |---|---|
 | [Owner](#owner) | 83 |
-| [Consumer](#consumer) | 26 |
+| [Consumer](#consumer) | 27 |
 | [Caller](#caller) | 18 |
 | [Deployment](#deployment) | 18 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 77, 27 of them a reader's |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 78, 27 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 67 |
-| Every rule, once | 262 |
+| Every rule, once | 263 |
 | [Rule ids](#rule-ids) | 85 |
 
 ## Owner
@@ -288,6 +288,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST apply the omission rule when it holds a snapshot complete (§7.5) under run R as of asof A, on a key K that is its collection's snapshot key or a member's key. | `[F: seed/snapshot.json]` `[Sc: state.md §14]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner applies no omission rule over an incomplete snapshot, and SHOULD read the collection again. | `[F: seed/snapshot.json]` `[Sc: state.md §14]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A consumer or a tool MUST NOT merge a snapshot heard on a subscription, nor count it toward a complete snapshot. | `[F: seed/snapshot.json]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST map a snapshot's collection index with the revision of the interface that the owner's descriptor names (§3.3), never with another revision it holds. | `[F: seed/snapshot.json]` |
 
 ### [core §4.3 Runs and sequence numbers (S7)](core.md#43-runs-and-sequence-numbers-s7)
 
@@ -477,6 +478,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST apply the omission rule when it holds a snapshot complete (§7.5) under run R as of asof A, on a key K that is its collection's snapshot key or a member's key. | `[F: seed/snapshot.json]` `[Sc: state.md §14]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner applies no omission rule over an incomplete snapshot, and SHOULD read the collection again. | `[F: seed/snapshot.json]` `[Sc: state.md §14]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A consumer or a tool MUST NOT merge a snapshot heard on a subscription, nor count it toward a complete snapshot. | `[F: seed/snapshot.json]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST map a snapshot's collection index with the revision of the interface that the owner's descriptor names (§3.3), never with another revision it holds. | `[F: seed/snapshot.json]` |
 
 ### [core §5.1 Rules](core.md#51-rules)
 
