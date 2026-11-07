@@ -6811,6 +6811,62 @@ stamp a snapshot does not carry; which descriptor maps a snapshot when two
 instances answer) and four minor errors. None is a blocker. F-495 to F-502
 are answered. See "At core 0.100 (#977 E3)" in `SPEC-FINDINGS.md`.
 
+## Observer 0.29 and `link.v2` 0.10: a tool across a face (round 106)
+
+Round 106 continues round 105 on one branch, rebased on main 2186bd9f
+(#990 V1, V2):
+- **observer 0.29:** §7.5 is "Reading across a face". With a face policy and
+  its face, a tool's scopes are what the face's plan lets cross, each
+  heartbeat's exact key among them; a selector given is narrowed to them,
+  and one that meets none is refused. "The revision of a key" picks a
+  revision in three steps: the deployment's word, CH's tag, the catalog's
+  latest. §7.3's "CH's tag": a record under a tag not its type's is refused
+  `tag`, and one under a tag other than 0 whose type is not held is never
+  sniffed.
+- **link.v2 0.10:** §2.21 points to the tool's scope.
+- **The evidence:** `scope/faces.json` (17) and `envelope/tags.json` (31).
+
+No rule changed beyond what the changelogs state.
+
+### What round 106 changed in zk2py
+
+- **`across`** (new): `scopes`, a tool's scopes with or without a face
+  policy, the plan `link_v2.plan`'s, what crosses read from its denies on
+  `put`, each device of a device face taken as an owner too (F-511);
+  `declared`, a selector given narrowed or refused; `revision_of_key`,
+  §7.5's three steps and §7.3's tag; `catalog_by_id`, a catalog read and its
+  id checked, a predecessor through its successor's lineage (F-509).
+- **`echo_tool`:** `--across-face` with `--face-policy` and `--face` takes
+  the plan's scopes, and takes a SELECTOR, narrowed or refused; several
+  revisions of an interface are held, each sample read with the one chosen;
+  a record under a wrong tag is undecodable, `tag`, and one under a tag
+  other than 0 whose type is not held is shown as a packed record.
+- **The walk:** the `scope` family, `tags.json` in `envelope`, the
+  re-worded sentences and RULES.md's 267 rules re-keyed, F-509 to F-511
+  pinned. The class walk: 276 rows, observer 98 met, 3 not met, 2 n/a.
+
+**`just py-conformance`: 6523 of 6523** on main 2186bd9f. Of them,
+`envelope` 402, `scope` 17 and `readings` 965.
+
+### Live
+
+On the black boxes of 324c6d4f: their owner serves what zk2py's tool reads.
+- **`across_live`**, 4 of 4: zk2py's echo across zenoh-modem's RF face
+  against the owner example serving `modem.v3` 3.3 at rf0. With no policy it
+  hears the owner's heartbeat; through the face its one scope is
+  `frames/fast`, and it declares and hears nothing else; a selector over
+  `air/**` is refused, exit 2; one over `frames/*` is narrowed.
+- `constrained_live` 14/14 and `far_side_live` 16/16 with the new echo.
+
+**Waits on the black boxes** with V1, V2 and E4: `zenctl echo --across-face`
+against zk2py's owner of a packed state and a heartbeat, its scope by the
+plan and its revision by tag.
+
+Round 106 found F-509 to F-511: a minor error (`tags.json`'s `e3a529fe` is a
+successor's file), an ambiguity (a refused selector, or a refused read), and
+a gap (a device face's devices in the tool's plan). None is a blocker. See
+"At observer 0.29 (#990 V1, V2)" in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -7080,6 +7136,10 @@ impl/python/
                                 catalog's epoch, the owner example with --catalog and zk2py's (round 105)
     config_remint_live.py config.v1 0.13 §2.12: the re-mint's refusals in order, and its wait for step 1's
                                 undo, live (round 105)
+    across.py         observer §7.3 §7.5 reading across a face: the scopes by the face's plan, a selector
+                                given, the revision of a key in three steps, CH's tag (round 106)
+    across_live.py    observer §7.5, live: zk2py's echo across zenoh-modem's RF face against the owner example
+                                (round 106)
     echo_tool.py      observer §8.1 §8.2 a generic watcher: the samples a selector delivers, and its scope, what it watches
                                 and the verbatim kinds it excludes, in its report and on stderr; NDJSON rows with the
                                 scope on stderr alone; each payload sniffed, its row saying which case and where it

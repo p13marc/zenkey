@@ -26083,3 +26083,90 @@ an example's change, in no changelog (F-505).
   - F-503 to F-508.
 
   F-365 stays open as #965's.
+
+## At observer 0.29 (#990 V1, V2)
+
+Round 106 read observer 0.29 and link.v2 0.10 at main 2186bd9f, on top of
+round 105. It read cold observer §7.3 and §7.5 whole, observer 0.29's entry,
+link.v2 §2.21 and §2.3's plan. zk2py diffed `spec/` and `examples/zk2/`
+between 324c6d4f and 2186bd9f: the changes are observer §7.3, §7.5, its
+evidence table and header, link.v2 §2.21 and its header, RULES.md's five
+observer rules (267 in all, 82 the observer's), `scope/faces.json`,
+`envelope/tags.json`, and the index rows that name them. **No rule changed
+beyond what the changelogs state.** zk2py reads `faces.json` 17 of 17 and
+`tags.json` 31 of 31.
+
+### F-509 · minor · `envelope/tags.json` maps `e3a529fe` to a file whose id is `0ff6bf6d`
+
+> `envelope/tags.json`: "`catalogs` maps a catalog's id to its file, or to
+> its document, each a predecessor of e3a529fe in its lineage, so a reader
+> checks each id." `"e3a529fe": "examples/zk2/zenoh-modem/catalog.json"`.
+> Observer 0.29's entry: "They read modem.v3's four published revisions and
+> zenoh-modem's catalog `e3a529fe`".
+
+- **The error.** Since #1080 `catalog.json` is `0ff6bf6d`, which appends
+  `freshness.v2` at index 9. A reader that checks the file's id finds it is
+  not `e3a529fe`. `e3a529fe` is the catalog of its first nine entries, as
+  its lineage's last item says (core §8.6). The description does not say
+  so. This is F-505's drift, in another file.
+- **What zk2py does:** it reads a mapped file whose id differs as the
+  successor its lineage names, and checks the id of its first entries
+  (`across.catalog_by_id`). Each of the three ids reads.
+- **Fix:** map `e3a529fe` to its document, as `ab76ec37` and `0a90fd61`
+  are, or say that a file may be a successor read through its lineage.
+- **Changes:** a fixture's member, or its description.
+
+### F-510 · ambiguity · observer §7.5: "it refuses it": the selector, or the read?
+
+> Observer §7.5: "A tool MUST NOT drop silently a selector it was given
+> that meets none of its scopes: it refuses it, and says why."
+> `scope/faces.json`: "`expect`: `selectors`, the selectors the tool
+> declares, sorted by their bytes; or `refused`, the selectors given that
+> meet none of its scopes". Case 12 gives `frames/fast` and `air/**`, and
+> expects `{"refused": [air/**]}` alone.
+
+- **Two readings.** The tool refuses the one selector and declares the
+  others, here `frames/fast`. Or it refuses the read. Case 12's expect has
+  no `selectors`, which fits the second, but the format's "or" fits a
+  fixture that cannot say both.
+- **Why it matters.** A tool that refuses the read declares nothing. One
+  that refuses the selector declares the rest and says why.
+- **What zk2py does:** its echo tool refuses the read, exit 2, naming the
+  selector.
+- **Fix:** say which: "it refuses the read, and names the selector", or
+  "it refuses that selector, declares the others, and says why"; and give
+  case 12 both members if the second.
+- **Changes:** what a tool declares beside a refused selector.
+
+### F-511 · gap · observer §7.5 names no device of a device face among the owners the plan reads
+
+> Observer §7.5: "The tool derives the plan from the policy and the
+> contracts in hand, as a generator does, each service the policy lists
+> taken to implement them all". link.v2 §2.3 (0.7): "A device it names none
+> for is service_unknown, at the device's address."
+
+- **The gap.** A device face (link.v2 §2.5) lists its devices on the face,
+  not among `services`. Read as written, no device is taken to implement
+  anything, so the plan refuses each device `service_unknown`, and the tool
+  has no scope. link.v2's `plan.json` case 22, a device face whose one
+  owner is a device, is refused so.
+- **What zk2py does:** it takes each device of the policy's faces to
+  implement every contract in hand too (`across.scopes`).
+- **Fix:** "each service the policy lists, and each device of its faces,
+  taken to implement them all".
+- **Changes:** whether a tool across a device face has a scope.
+
+### Counts at observer 0.29 (#990 V1, V2)
+
+511 entries.
+- **New: F-509 to F-511:**
+  - a minor error: F-509;
+  - an ambiguity: F-510;
+  - a gap: F-511.
+  None is a blocker.
+- **Open:**
+  - F-436 (not re-run);
+  - F-437 to F-441;
+  - F-503 to F-511.
+
+  F-365 stays open as #965's.
