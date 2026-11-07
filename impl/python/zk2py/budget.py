@@ -33,7 +33,7 @@ from __future__ import annotations
 import re
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 #: §2.2: the no-ceiling value, written ``"unbounded"`` since 0.57, "the

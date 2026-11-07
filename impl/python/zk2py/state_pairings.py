@@ -1105,7 +1105,6 @@ def section13(report: Report, pairing: str) -> None:
 
 def section13_rust_readers(report: Report) -> None:
     """``py-rust`` §13 step 3: zk2py's candidate read by ``zenctl watch``."""
-    from . import live
 
     sec = "py-rust §13 step 3 (zenctl watch)"
     r, ep, _ = router(False)

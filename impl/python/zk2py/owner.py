@@ -111,7 +111,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 import zenoh
 
@@ -1086,7 +1086,6 @@ class Owner:
         record (core §7.6 "Writing", "What a writer takes"), under the
         deployment epoch. Raises :class:`zk2py.packed.Refused`: nothing is
         put of a value the text refuses."""
-        from . import packed
 
         rec = self.packed_record(key)
         if rec is None:
@@ -1562,14 +1561,19 @@ class Owner:
             raise StandbyRefused(f"{key}: it stands by on {iface}, and a standby puts and deletes none of its "
                                  "keys (redundancy.v1 §2.4)")
 
-    def new_epoch(self, new: str | None = None) -> str:
+    def new_epoch(self, new: str | None = None, before: Callable[[], None] | None = None) -> str:
         """Core §1.5 and §8.1: a new instance id while running, "make-before-
         break": the new descriptor's queryable and first put, then its
         tokens, in §8.2's order, and only then the old ones undeclared, "an
         overlap, never a gap". The session is kept (core §1.5's SHOULD of a
         new session is not taken: ``telemetry.v1`` scenarios §2, "the process
         unchanged"), so the stamps' id stays. ``new`` is the new id, a test's
-        choice, else 64 random bits. Returns the old instance id."""
+        choice, else 64 random bits. ``before`` runs once the new run is
+        taken and before the new instance declares anything, so what it puts
+        is the new instance's, under the new run ("A new instance writes
+        under a new run", core §4.3), before its tokens (``config.v1`` §2.3);
+        one that raises fails the re-mint as a declaration does. Returns the
+        old instance id."""
         assert self.session is not None
         old, old_entities = self.instance, self._instance_entities
         new = new or secrets.token_hex(8)
@@ -1583,15 +1587,17 @@ class Owner:
             # run", which its first descriptor states. A declaration that
             # raises leaves the old run too.
             with self._seq_lock:
-                before = (self.run, self._seq, dict(self._stream_seq), self._minted)
+                held = (self.run, self._seq, dict(self._stream_seq), self._minted)
                 self.take_run()
             try:
+                if before is not None:
+                    before()
                 entities, doc, tokens = self._declare_instance(self._plan_made, new)
             except Exception:
                 # The old run, its seq and its stream seqs come back; the run
                 # the failed re-mint took stays in runs_used (see the field).
                 with self._seq_lock:
-                    self.run, self._seq, self._stream_seq, self._minted = before[0], before[1], before[2], before[3]
+                    self.run, self._seq, self._stream_seq, self._minted = held[0], held[1], held[2], held[3]
                 raise
             self.instance, self._instance_entities, self.descriptor = new, entities, doc
             self._iface_tokens = tokens

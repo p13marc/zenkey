@@ -284,10 +284,21 @@ def read_page(data: bytes, key_token: str | None = None) -> dict[str, Any]:
 
 # -- writing -----------------------------------------------------------------
 
-def _id_bytes(e: dict[str, Any], what: str) -> bytes:
-    raw = str(e["id"]).encode("utf-8")
+def id_bytes(entry_id: Any, what: str = "an entry") -> bytes:
+    """An id's bytes, in the one encoding every writer, measure and order
+    here takes: ASCII, since "An id is empty, or plain chunks (§1.2) joined
+    by ``/``" and a plain chunk is ASCII (:func:`id_ok`). An id that is no
+    string, holds a character outside ASCII, or is no plain chunks is
+    refused ``id``, never an encoding error (the mend after round 103)."""
+    if not isinstance(entry_id, str):
+        raise Refused("id", f"{what}'s id {entry_id!r} is no string")
+    try:
+        raw = entry_id.encode("ascii")
+    except UnicodeEncodeError:
+        raise Refused("id", f"{what}'s id {entry_id!r} holds a character outside ASCII, which no plain chunk "
+                            "does") from None
     if not id_ok(raw):
-        raise Refused("id", f"{what}'s id {e['id']!r} is neither empty nor plain chunks joined by /")
+        raise Refused("id", f"{what}'s id {entry_id!r} is neither empty nor plain chunks joined by /")
     return raw
 
 
@@ -314,7 +325,7 @@ def _write_entry(e: dict[str, Any], header: tuple[int, int], tomb: bool, n: int,
                  live_ids: set[bytes]) -> tuple[bytes, bytes]:
     """One entry's bytes, its fields checked in the reading's order."""
     what = f"{'tombstone' if tomb else 'live entry'} {n}"
-    raw = _id_bytes(e, what)
+    raw = id_bytes(e["id"], what)
     if before is not None and raw <= before:
         raise Refused("order", f"{what}'s id {e['id']!r} is not above the one before it")
     if tomb and raw in live_ids:
@@ -402,8 +413,8 @@ def entries(snapshot: dict[str, Any]) -> list[tuple[bytes, bool, dict[str, Any]]
     is checked first as one page of every entry, so a snapshot the reading
     would refuse is refused with its token."""
     write_body({**snapshot, "index": 0, "more": False})
-    merged = [(str(e["id"]).encode("ascii"), False, e) for e in snapshot["live"]]
-    merged += [(str(e["id"]).encode("ascii"), True, e) for e in snapshot["tombs"]]
+    merged = [(id_bytes(e["id"]), False, e) for e in snapshot["live"]]
+    merged += [(id_bytes(e["id"]), True, e) for e in snapshot["tombs"]]
     merged.sort(key=lambda x: x[0])
     return merged
 
@@ -441,7 +452,7 @@ def _entry_size(e: dict[str, Any], tomb: bool) -> int:
     """An entry's bytes by §7.5's sizes: its id's length and bytes, flags, an
     own run's 2 or 4, the seq's 3; a live entry adds a conf's 6, its record's
     length and bytes."""
-    raw = str(e["id"]).encode("ascii")
+    raw = id_bytes(e["id"])
     n = leb128_size(len(raw)) + len(raw) + 1 + 3
     if e.get("run_width") is not None:
         n += e["run_width"] // 8
@@ -534,7 +545,7 @@ def random_snapshot(rng: Any) -> dict[str, Any]:
     run = rng.randrange(2**width)
     n = rng.choice((0, 1, 3, 20, 130, 300))
     ids = sorted({_random_id(rng) for _ in range(n)} | ({""} if rng.random() < 0.1 else set()),
-                 key=lambda x: x.encode("ascii"))
+                 key=id_bytes)
     horizon = rng.random() < 0.6
 
     def stamp() -> dict[str, Any]:

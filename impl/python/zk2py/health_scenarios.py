@@ -580,9 +580,9 @@ def section4r(report: Report) -> None:
     from .live_interop import Owner as Exe
 
     sec = "§4 clock ahead (the owner example)"
-    from .blackbox import directory
+    from .blackbox import BLACKBOX
 
-    exe = directory() / "owner"
+    exe = BLACKBOX / "owner"
     if not exe.is_file():
         report.check(sec, "the section ran", False, f"{exe} not found")
         return

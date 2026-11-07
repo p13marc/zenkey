@@ -632,6 +632,46 @@ class Core:
         self._start(instance)
         return Step()
 
+    def end_for_remint(self, now: int) -> Step:
+        """§2.12 (text 0.11, F-481), steps 1 and 2 of a re-mint: "A pending
+        change ends first, in the old instance, as ``cancel`` ends it
+        (§2.10). Its undo runs and its read-back is put", then "Its event is
+        published, ``rolled-back`` or ``partial`` (§2.17)". Nothing pending:
+        an empty step. A device that holds the undo leaves it in flight
+        (§2.7), the change ending when it completes."""
+        step = Step()
+        change = self.pending
+        if change is None:
+            return step
+        self._now = now
+        self._undo(change, step, now)
+        return step
+
+    def startup_values(self) -> dict[str, dict[str, Any]]:
+        """§2.3's startup value of every parameter that has one, by group:
+        what the device returns to at a re-mint (§2.12, step 3)."""
+        out: dict[str, dict[str, Any]] = {}
+        for g in self.schema:
+            for p in g["parameters"]:
+                v, _ = self.startup_value(g["name"], p["name"])
+                if v is not UNKNOWN:
+                    out.setdefault(g["name"], {})[p["name"]] = v
+        return out
+
+    def remint(self, instance: str) -> Callable[[], None]:
+        """§2.12, step 4: the core restarted as ``instance`` (:meth:`restart`).
+        Returns what puts the old instance back, for a re-mint that fails
+        after it: the core as it was, the persisted layer and the events'
+        instants shared."""
+        held = dict(self.__dict__)
+        self.restart(instance)
+
+        def back() -> None:
+            self.__dict__.clear()
+            self.__dict__.update(held)
+
+        return back
+
     def startup_value(self, group: str, param: str) -> tuple[Any, str]:
         """§2.3 "Startup value": "the persisted layer's, else the startup
         file's, else the owner's default"."""
@@ -1774,11 +1814,29 @@ class ConfigOwner:
         Fed through ``desired.v1``, §2.16 (text 0.10): it "begins a new run,
         so §2.7's restart holds of it: it MUST act on the first version it
         reads, the one it acted on before the re-mint included". zk2py's new
-        run reads its slice as at a start (§2.5 "When it seeds"). The new
-        instance's view and status are put before its tokens (§2.3), then the
-        tokens make before the old ones break (core §8.1). With
-        ``remint="refuse"`` it raises :class:`zk2py.owner.OwnerRefused`,
-        nothing moved, as the reference does. Returns the new instance id."""
+        run reads its slice as at a start (§2.5 "When it seeds").
+
+        **In §2.12's order** (the mend after round 103):
+        1. and 2. the pending change ends as ``cancel`` ends it, its view and
+           status put, then its event (:meth:`Core.end_for_remint`);
+        3. the device returns to its startup values
+           (:meth:`Core.startup_values`), before the core restarts;
+        4. the new instance: the core restarted (:meth:`Core.remint`) once
+           the new run is taken, its view and status put under that run
+           before its tokens (§2.3; core §4.3, "A new instance writes under
+           a new run"), then the tokens make before the old ones break (core
+           §8.1, :meth:`zk2py.owner.Owner.new_epoch`'s ``before``).
+
+        **A refusal, the instance running on**: with ``remint="refuse"``,
+        nothing moved, as the reference does; with an act in flight; with a
+        parameter set at runtime whose startup value is unknown; with the
+        pending change's undo left in flight by the device; and with a
+        device that will not return to its startup values. A pending change
+        ended before a refusal stays ended, as config.v2's owner keeps it and
+        review-bot says the reference does (#1055); §2.12 does not say
+        (F-499). A declaration that fails in step 4 puts the old instance
+        back, its view and status put again under its run. Returns the new
+        instance id."""
         import secrets
 
         from .owner import OwnerRefused
@@ -1793,24 +1851,38 @@ class ConfigOwner:
             if unknown:
                 raise OwnerRefused(f"config.v1 §2.12: {', '.join(unknown)} set at runtime, its startup value "
                                    "unknown: no re-mint")
-            change = self.core.pending
-            if change is not None:
-                now_ns = time.time_ns()
-                ended = Step()
-                self.core._now = now_ns  # noqa: SLF001 - the undo's event instant
-                self.core._undo(change, ended, now_ns)  # noqa: SLF001 - as cancel ends it (§2.10)
-                self._after(ended, put_first=True)
+            self._after(self.core.end_for_remint(time.time_ns()), put_first=True)
+            if self.core.in_flight is not None:
+                raise OwnerRefused("config.v1 §2.12: the pending change's undo is in flight (§2.7): no re-mint; "
+                                   "the change ends when it completes, as cancel ends it")
+            try:
+                self.device.boot(self.core.startup_values())
+            except Exception as e:  # noqa: BLE001 - a device that will not return refuses the re-mint
+                raise OwnerRefused(f"config.v1 §2.12: the device refuses to return to its startup values: no "
+                                   f"re-mint; a pending change ended stays ended ({e!r})") from e
             new = secrets.token_hex(8)
-            self.core.restart(new)
-            self.device.boot(self._startup_values())
+            back: list[Callable[[], None]] = []
+
+            def first_puts() -> None:
+                back.append(self.core.remint(new))
+                now = (encode_json(self.core.view()), encode_json(self.core.status()))
+                self.owner.set_state(self.view_key, now[0])
+                self.owner.set_state(self.status_key, now[1])
+                self._last_put = now
+
+            try:
+                self.owner.new_epoch(new, before=first_puts)
+            except Exception:
+                if back:
+                    # the old instance runs on, its run restored by new_epoch:
+                    # its view and status are the held ones again
+                    back[0]()
+                    self._last_put = None
+                    self._after(Step())
+                raise
             if self.role is not None:
                 self.role.restart()
                 self._fed_running, self._named = False, {}
-            now = (encode_json(self.core.view()), encode_json(self.core.status()))
-            self.owner.set_state(self.view_key, now[0])
-            self.owner.set_state(self.status_key, now[1])
-            self._last_put = now
-            self.owner.new_epoch(new)
             self.cv.notify_all()
         if self.fed is not None:
             # A seed that raises, or a close racing the re-mint, never ends

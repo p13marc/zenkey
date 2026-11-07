@@ -1206,6 +1206,52 @@ class Core:
         self.restarts += 1
         return self._start()
 
+    def returned(self, moved: dict[str, dict[str, Any]], result: Any) -> Step:
+        """v1 §2.12, step 3 refused: the device would not return to its
+        startup values (``moved``, the act's values). What it runs then is
+        its read-back, read as §2.11 reads a failed undo's: a value read
+        back, its source kept where it is the value held, else ``runtime``;
+        no value read back, unknown. A value that moved is one revision and
+        the record put (§2.3); none moved, nothing. The instance runs on
+        (§2.12), whose text says neither (F-499)."""
+        step = Step()
+        readback = ((result.get("readback") or {}) if isinstance(result, dict) else {})
+        moved_any = False
+        for g, ps in moved.items():
+            for p in ps:
+                cur = self.running[(g, p)]
+                if p in readback.get(g, {}):
+                    v = readback[g][p]
+                    same = cur.value is not UNKNOWN and v1.json_equal(v, cur.value)
+                    now = Running(v, cur.source if same else "runtime")
+                else:
+                    now = Running(UNKNOWN, None)
+                if now != cur:
+                    self.running[(g, p)] = now
+                    moved_any = True
+        if moved_any:
+            self.revision += 1
+            self._put(step)
+        return step
+
+    def remint(self) -> tuple[Step, Callable[[], Step]]:
+        """v1 §2.12, step 4 of a re-mint: :meth:`restart`, its step, and
+        what puts the old instance back for a re-mint that fails after it:
+        the core as it was, the persisted layer and the events' instants
+        shared, and its record put again."""
+        held = dict(self.__dict__)
+        step = self.restart()
+
+        def back() -> Step:
+            self.__dict__.clear()
+            self.__dict__.update(held)
+            self._put_state = None
+            again = Step()
+            self._put(again)
+            return again
+
+        return step, back
+
     def startup_value(self, group: str, param: str) -> tuple[Any, str | None]:
         if param in self.overlay.get(group, {}):
             return self.overlay[group][param], "overlay"
@@ -2000,8 +2046,19 @@ class ConfigV2Owner:
         where §2.12 says the reference refuses: a parameter set at runtime
         whose startup value is unknown, checked before anything moves, and a
         device that refuses to return to its startup values. An act is never
-        in flight here: the owner acts under its lock. Returns the new
-        instance id."""
+        in flight here: the owner acts under its lock.
+
+        **A pending change ended before a refusal stays ended** (the mend
+        after round 103): step 1 has ended it, its record and event out, when
+        the device refuses step 2's return, and the old instance runs on with
+        nothing pending. review-bot on #1076 says the reference keeps that
+        ending (#1055: "a cancel made before a refusal stays made"). §2.12
+        says the reference refuses "and the instance runs on", and not what
+        becomes of a change step 1 ended (F-499). The new instance's record is
+        put once its run is taken, before its tokens
+        (:meth:`zk2py.owner.Owner.new_epoch`'s ``before``); a declaration that
+        fails after it puts the old instance back, its record put again.
+        Returns the new instance id."""
         from .owner import OwnerRefused
 
         with self.lock:
@@ -2019,20 +2076,25 @@ class ConfigV2Owner:
             if moved:
                 result = self.device(("undo", moved))
                 if not (result == "ok" or result is None):
+                    # the instance runs on, holding what the device reads back
+                    self.steps.append(self.core.returned(moved, result))
                     self.cv.notify_all()
                     raise OwnerRefused("config.v1 §2.12: the device refuses to return to its startup values: no "
-                                       f"re-mint ({result})")
-            original = self.owner._declare_instance  # noqa: SLF001
+                                       f"re-mint; a pending change ended stays ended ({result})")
+            back: list[Callable[[], Step]] = []
 
-            def declare(plan: Any, instance: str, bundles: bool = False) -> Any:
-                self.steps.append(self.core.restart())
-                return original(plan, instance, bundles)
+            def first_put() -> None:
+                step, undo = self.core.remint()
+                back.append(undo)
+                self.steps.append(step)
 
-            self.owner._declare_instance = declare  # noqa: SLF001 - the record before the new tokens
             try:
-                self.owner.new_epoch()
-            finally:
-                self.owner._declare_instance = original  # noqa: SLF001
+                self.owner.new_epoch(before=first_put)
+            except Exception:
+                if back:
+                    self.steps.append(back[0]())
+                self.cv.notify_all()
+                raise
             self.cv.notify_all()
             return self.owner.instance
 

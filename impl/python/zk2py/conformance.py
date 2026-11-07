@@ -4004,7 +4004,7 @@ def _round97_readings(root: Path) -> list[tuple[str, Any, Any]]:
     :class:`zk2py.owner.Owner` before it starts. No session is opened."""
     import re
 
-    from . import acl, echo_tool, frame, freshness as fr, freshness_v2 as fv2, heartbeat, link, packed, zk2c
+    from . import acl, echo_tool, frame, freshness as fr, heartbeat, link, packed, zk2c
     from .contract import load_contract
     from .owner import Owner
 
@@ -5207,6 +5207,42 @@ def _round104_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 [refused, importlib.util.find_spec("zk2py.envelope") is None,
                  [calls.in_forms(e) for e in ("zenoh/bytes", "application/json", "zenoh/bytes;x", "zenoh/string")]],
                 [True, True, [True, False, False, False]]))
+    out += _mend_after_round103()
+    return out
+
+
+def _mend_after_round103() -> list[tuple[str, Any, Any]]:
+    """review-bot's notes on round 103 (#1076), the parts a reading shows:
+    a snapshot's id one encoding, a bad one always ``Refused``; config.v1's
+    re-mint through public Core methods; one black-box constant."""
+    from . import blackbox, config, config_v2, snapshot
+
+    base = {"tag": 0, "run_width": 16, "run": 1, "asof": 9, "time": {"s": 3600, "ms": 250}, "coll": 0, "tombs": []}
+    got = []
+    for bad in ("é", "a/é", 5, "a//b", "x\u00a0y"):
+        live_ = [{"id": bad, "run_width": None, "run": None, "seq": 1, "confirmation": "none", "record": "00"}]
+        row = []
+        for f in (lambda x: snapshot.write_page({**x, "index": 0, "more": False}), lambda x: snapshot.cut(x, 100),
+                  lambda x: snapshot.cut_by_arithmetic(x, 100), lambda x: snapshot.entries(x)):
+            try:
+                f({**base, "live": live_})
+                row.append("accepted")
+            except snapshot.Refused as e:
+                row.append(e.token)
+            except Exception as e:  # noqa: BLE001 - what the mend removes
+                row.append(type(e).__name__)
+        got.append(row)
+    out: list[tuple[str, Any, Any]] = [
+        ("the mend after round 103, 3: a snapshot id's bytes are ASCII in every writer, measure and order "
+         "(snapshot.id_bytes), so an id outside ASCII, no string, or no plain chunks is refused id, never an "
+         "encoding error", got, [["id"] * 4] * 5)]
+    out.append(("the mend after round 103, 1: config.v1's Core re-mints by public methods, end_for_remint, "
+                "startup_values and remint (which returns the old instance back), and config.v2's Core by remint "
+                "and returned; the black boxes' directory is one constant, read once",
+                [all(callable(getattr(config.Core, m, None)) for m in ("end_for_remint", "startup_values", "remint")),
+                 all(callable(getattr(config_v2.Core, m, None)) for m in ("remint", "returned")),
+                 hasattr(blackbox, "directory"), isinstance(blackbox.BLACKBOX, Path)],
+                [True, True, False, True]))
     return out
 
 

@@ -1399,7 +1399,7 @@ def section12(rp: Report, runs: int) -> None:
     ``ZK2PY_ZENCTL``), zenctl's ``redundancy``, ``doctor`` and ``check
     conform``, each holding ``ledger.v1`` offline, both asked of every
     shape, their answers compared."""
-    from . import hostid_scenarios as hs, live, redundancy as rd
+    from . import hostid_scenarios as hs, live
     from .redundancy_live import contract_at, read_tool, split_findings
 
     sec = f"§12 a tool's questions [{pairing()}]"

@@ -284,7 +284,6 @@ def run_one(report: Report, exe: Path, service: str, paths: list[Path], scale: i
 
     from . import bundle, live
     from .contract import load_contract
-    from .descriptor import check_descriptor
 
     run = f"{service} ← {', '.join(p.name for p in paths)}"
     contracts = [load_contract(p) for p in paths]
@@ -976,7 +975,7 @@ def run_python_bringup(report: Report) -> None:
     the owner, acts the moment the tokens appear."""
     import zenoh
 
-    from . import bundle, live
+    from . import live
     from .contract import load_contract
     from .owner import Owner as PyOwner
 
