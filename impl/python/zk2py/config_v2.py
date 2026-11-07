@@ -2147,8 +2147,8 @@ class Caller:
         payload = raw if raw is not None else self.request(op, fields or {})
         meta = {k: v for k, v in (("actor", actor), ("request_id", request_id)) if v is not None}
         # the query's payload as written, CH included, under zenoh/bytes
-        res = live.call(self.session, self.key(op), payload, timeout=timeout, first=True, bare=True,
-                        encoding=zk2c.ENCODING, attachment=json.dumps(meta).encode() if meta else None)
+        res = live.call(self.session, self.key(op), payload, timeout=timeout, first=True, written=True,
+                        attachment=json.dumps(meta).encode() if meta else None)
         at = time.time_ns()
         out = Called("silent", request=payload, at_ns=at)
         for r in res.replies:

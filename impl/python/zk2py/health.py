@@ -317,13 +317,56 @@ def fault(code: str, level: int, detail: str = "", at_ns: int = 0) -> bytes:
     return _fields([(1, "string", code), (2, "varint", level), (3, "string", detail), (4, "varint", at_ns)])
 
 
+class _Malformed(ValueError):
+    """Bytes that are no protobuf message."""
+
+
+def read_varint(data: bytes, pos: int) -> tuple[int, int]:
+    """A protobuf varint at ``pos``: (its value, the position after it)."""
+    value = shift = 0
+    while True:
+        if pos >= len(data):
+            raise _Malformed("truncated varint")
+        b = data[pos]
+        pos += 1
+        value |= (b & 0x7F) << shift
+        if not b & 0x80:
+            return value, pos
+        shift += 7
+        if shift >= 64:
+            raise _Malformed("varint too long")
+
+
+def _skip(data: bytes, pos: int, wire: int, field: int) -> int:
+    """Past an unknown field of wire type ``wire``, a group to its end."""
+    if wire == 0:
+        return read_varint(data, pos)[1]
+    if wire == 1:
+        pos += 8
+    elif wire == 5:
+        pos += 4
+    elif wire == 2:
+        n, pos = read_varint(data, pos)
+        pos += n
+    elif wire == 3:
+        while True:
+            key, pos = read_varint(data, pos)
+            if key & 7 == 4:
+                if key >> 3 != field:
+                    raise _Malformed("mismatched end group")
+                return pos
+            pos = _skip(data, pos, key & 7, key >> 3)
+    else:
+        raise _Malformed(f"wire type {wire}")
+    if pos > len(data):
+        raise _Malformed("truncated field")
+    return pos
+
+
 def decode(data: bytes, layout: dict[int, str]) -> dict[int, Any] | None:
     """A proto3 message whose fields are ``layout``'s (number -> "enum",
     "uint64" or "string"); None when it does not decode. Unknown fields are
     skipped, and the last occurrence of a field wins."""
-    from .envelope import EnvelopeError, _skip
-    from .envelope import _varint as read_varint
-
     out: dict[int, Any] = {}
     pos = 0
     try:
@@ -352,7 +395,7 @@ def decode(data: bytes, layout: dict[int, str]) -> dict[int, Any] | None:
                 pos += n
             else:
                 pos = _skip(data, pos, wire, number)
-    except (EnvelopeError, UnicodeDecodeError):
+    except (_Malformed, UnicodeDecodeError):
         return None
     return out
 

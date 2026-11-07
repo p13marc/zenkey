@@ -197,26 +197,15 @@ def family_descriptors(root: Path) -> list[Result]:
 # -- errors/ (core.md §5.2) --------------------------------------------------
 
 def family_errors(root: Path) -> list[Result]:
-    """``errors/``, every file, an unknown one failing: ``cases.json``, §5.2's
-    envelope decoded by its Encoding; ``forms.json`` (core 0.92), §7.5's
-    error form (:func:`_error_forms`)."""
-    from .envelope import EnvelopeError, decode
-
+    """``errors/``, every file, an unknown one failing: ``forms.json`` (core
+    0.92), §7.5's error form (:func:`_error_forms`), alone since core 0.99
+    removed ``cases.json`` with the bare wire's envelope (#985 C4d)."""
     out: list[Result] = []
     for path in sorted((root / "errors").iterdir()):
         if path.name == "forms.json":
             out += _error_forms(_load_json(path))
             continue
-        if path.name != "cases.json":
-            out.append((f"errors/{path.name}", False, "an unknown fixture file: the runner does not read it"))
-            continue
-        for c in _load_json(path)["cases"]:
-            payload = c["text"].encode("utf-8") if "text" in c else bytes.fromhex(c["hex"])
-            try:
-                got: Any = decode(c["encoding"], payload)
-            except EnvelopeError as e:
-                got = {"refused": e.tag}
-            out.append(_check(c["name"], got, c["expect"]))
+        out.append((f"errors/{path.name}", False, "an unknown fixture file: the runner does not read it"))
     return out
 
 
@@ -4000,7 +3989,8 @@ def family_readings(root: Path) -> list[Result]:
         + _mend_after_round93_readings(root) + _round94_readings(root) + _mend_after_round94_readings(root) \
         + _round95_readings(root) + _round96_readings(root) + _round96_k1_readings(root) + _round97_readings(root) \
         + _round98_readings(root) + _round99_readings(root) + _round100_readings(root) \
-        + _round101_readings(root) + _round102_readings(root) + _round103_readings(root)
+        + _round101_readings(root) + _round102_readings(root) + _round103_readings(root) \
+        + _round104_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -4890,7 +4880,7 @@ def _round101_readings(root: Path) -> list[tuple[str, Any, Any]]:
     # F-472: §5.2's Decoding MUST binds "a caller or a tool that reads the
     # bare wire", and RULES.md lists it under the caller alone, where the two
     # reading MUSTs of the same subject are under both.
-    from . import classes, live
+    from . import classes
 
     rows = classes._rules_md(spec)
     dec = sorted(r[0] for r in rows if r[1] == "core §5.2" and "**Decoding.**" in r[3])
@@ -5129,6 +5119,94 @@ def _round103_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 ["snapshot", page["expect"]["asof"], 4,
                  [snapshot.member_key(key, e["id"]) for e in page["expect"]["live"] + page["expect"]["tombs"]],
                  None, None, "the snapshot's body is refused", None]))
+    return out
+
+
+def _round104_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.99 and observer 0.27 (#985 C4d, the bare wire removed), read at
+    main 4b802646 (#609, round 104): zk2py read as the texts now say. A reply
+    under another Encoding is malformed, a reply error under one the
+    transport's, an earlier core's envelope among them; an owner refuses a
+    query under one ``invalid_request``, its bytes unparsed; the caller sends
+    only the request form, and zk2py holds no envelope decoder. The live half
+    is ``forms_live`` §9 steps 7 and 8."""
+    import importlib.util
+    from types import SimpleNamespace
+
+    from . import calls, live, zk2c
+    from .owner import OpCall, Owner
+
+    out: list[tuple[str, Any, Any]] = []
+    envs = [("application/json", b'{"code":"busy","message":""}'), ("application/json", b'{"code":"busy"}'),
+            ("application/cbor", bytes.fromhex("a264636f64656462757379676d65737361676560")),
+            ("application/protobuf;zk2.core.v1.Error", bytes.fromhex("0a0462757379")),
+            ("application/protobuf", bytes.fromhex("0a0462757379"))]
+    got = [live.read_reply_error(e, d) for e, d in envs]
+    out.append(("core 0.99 §5.2: a reply error under an earlier core's envelope Encodings, application/json, "
+                "application/cbor and application/protobuf with the suffix zk2.core.v1.Error, is the transport's, "
+                "its refusal encoding, whatever its bytes; zk2py's live.read_reply_error reads each so",
+                [(r.kind, r.refusal, r.code) for r in got], [("transport", "encoding", None)] * len(envs)))
+    shown = live.show_reply(got[0])
+    out.append(("observer 0.27 §7.3: a tool shows such a reply error as the transport's, with its Encoding and its "
+                "bytes, never as busy",
+                [shown.get("kind"), shown.get("transport"), "code" in shown],
+                ["transport", {"encoding": "application/json", "bytes": envs[0][1].hex(), "refusal": "encoding"},
+                 False]))
+    # "Under another Encoding a reply is no value form, so it is malformed
+    # too": vectors.json's JSON array of 8 bytes parses as a value form, and
+    # under application/json it is no value.
+    arr = bytes.fromhex("5b312c322c332c345d")
+    sample = SimpleNamespace(key_expr="zk2/h1/tc/tc.v1/@op/ping", encoding="application/json",
+                             payload=SimpleNamespace(to_bytes=lambda: arr), attachment=None)
+    rv = live.read_reply(sample)
+    sample_f = SimpleNamespace(key_expr="zk2/h1/tc/tc.v1/@op/ping", encoding="zenoh/bytes",
+                               payload=SimpleNamespace(to_bytes=lambda: arr), attachment=None)
+    rf = live.read_reply(sample_f)
+    out.append(("core 0.99 §5.1, \"Reading a value\": a reply under another Encoding is malformed, an answer all "
+                "the same, whatever its bytes; [1,2,3,4] under application/json is a refused value (encoding), and "
+                "under zenoh/bytes a value form, tag 11; a tool shows the first undecodable",
+                [(rv.kind, rv.refusal, rv.payload), (rf.kind, rf.tag), live.show_reply(rv).get("undecodable"),
+                 live.CallResult([rv]).silent],
+                [("refused_value", "encoding", b""), ("value", 11), "encoding", False]))
+    # The owner's half: a query under another Encoding carries no request form.
+    contract = _load_json(root / "envelope" / "calls.json")["contract"]
+    from .contract import load_contract
+
+    k = load_contract(root / contract)
+    res = next(r for r in k.canonical["resources"] if r["kind"] == "operation" and r["template"] == "reset")
+    op = calls.Operation.of_resource(res, k.schemas)
+    rec = op.encode("request", {"duty_available": "12.5", "signal_bars": 3, "oper": "up", "admin": True})
+
+    def query(payload: bytes, enc: str | None) -> Any:
+        return SimpleNamespace(payload=SimpleNamespace(to_bytes=lambda: payload), encoding=enc, attachment=None)
+
+    def read(payload: bytes, enc: str | None) -> tuple[Any, ...]:
+        c = OpCall(query(payload, enc), "zk2/h1/tc/seed.v1", res, op, lambda: zk2c.InBand(16, 1, 0), {},
+                   "zk2/h1/tc/seed.v1/@op/reset")
+        why = Owner._read_request(c)
+        return c.request_refusal, why is None, c.request
+    form = zk2c.request(rec, op.tag("request"))
+    rows = [read(form, "zenoh/bytes"), read(form, "application/json"), read(rec, "application/octet-stream"),
+            read(form, "zenoh/bytes;x"), read(form, None)]
+    out.append(("core 0.99 §5.1, \"The request\": an owner reads a query under zenoh/bytes by §7.5's parse, and "
+                "refuses one under another Encoding invalid_request, a form's bytes and a bare record alike; "
+                "zk2py's OpCall: reset's Status form read, refused encoding under application/json, "
+                "application/octet-stream and a schema suffix",
+                [(r[0], r[1]) for r in rows] + [rows[0][2] is not None],
+                [(None, True), ("encoding", False), ("encoding", False), ("encoding", False), (None, True), True]))
+    # The caller's half, and no decoder left.
+    try:
+        live.call(None, "zk2/h1/tc/seed.v1/@op/reset", rec, op=op, encoding="application/json")  # type: ignore[arg-type]
+    except ValueError as e:
+        refused: Any = "never" in str(e)
+    else:
+        refused = False
+    out.append(("core 0.99 §5.1: a caller writes its request as §7.5's request under zenoh/bytes; zk2py's live.call "
+                "refuses to send under another Encoding, and zk2py holds no envelope decoder (zk2py.envelope gone); "
+                "calls.in_forms is zenoh/bytes alone, compared as an exact string",
+                [refused, importlib.util.find_spec("zk2py.envelope") is None,
+                 [calls.in_forms(e) for e in ("zenoh/bytes", "application/json", "zenoh/bytes;x", "zenoh/string")]],
+                [True, True, [True, False, False, False]]))
     return out
 
 

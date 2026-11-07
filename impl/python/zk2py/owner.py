@@ -44,9 +44,11 @@ a failed call in §7.5's error form". Each CH carries its type's tag
 (:mod:`zk2py.calls`). A request is read by §7.5's parse, and its record as
 the ``request`` type, a packed one under CH's tag; one either refuses is
 ``invalid_request``, after the three refusals before any handler (§5.1,
-"The request"). A request under another ``Encoding`` is read as the bare
-wire, its payload the record (§5.1's MAY). An answer sent again is its
-first bytes, mark included (:meth:`OpCall.resend`).
+"The request"). Since core 0.99 (#985 C4d) the bare wire is gone: "Under
+another ``Encoding`` a query carries no request form", and is refused
+``invalid_request`` as a request the parse refuses is, whatever its bytes,
+no handler run. An answer sent again is its first bytes, mark included
+(:meth:`OpCall.resend`).
 
 **Bring-up (§8.2).** Step 2 runs first (the order of steps 1 and 2 is free),
 so a refusal declares nothing: a required resource not exposed, an optional
@@ -339,19 +341,20 @@ class OpCall:
         self.wire = b"" if query.payload is None else query.payload.to_bytes()
         enc = getattr(query, "encoding", None)
         self.encoding = calls.FORM_ENCODING if enc is None else str(enc)
-        #: core §5.1's MAY: a request under another Encoding is the bare
-        #: wire, its payload the record. A query with no payload at all
-        #: carries no Encoding of its own, and is read as a form: it has no
-        #: CH (``short``).
-        self.bare = query.payload is not None and calls.bare(self.encoding)
         #: the request's record (``payload``), its CH's tag, and the token of
-        #: §7.5's parse that refused it, then invalid_request (§5.1)
-        self.payload, self.tag, self.request_refusal = self.wire, None, None
-        if not self.bare:
+        #: the refusal, then invalid_request (§5.1, "The request"): core
+        #: 0.99, "Under another Encoding a query carries no request form",
+        #: ``encoding``, its bytes never parsed; else §7.5's parse's. A query
+        #: with no payload at all carries no Encoding of its own, and is read
+        #: as a form: it has no CH (``short``).
+        self.payload, self.tag, self.request_refusal = b"", None, None
+        if query.payload is not None and not calls.in_forms(self.encoding):
+            self.request_refusal = "encoding"
+        else:
             try:
                 env = zk2c.parse(self.wire, "query")
             except zk2c.Refused as e:
-                self.payload, self.request_refusal = b"", e.token
+                self.request_refusal = e.token
             else:
                 self.payload, self.tag = env.record or b"", env.tag
         #: the request read as its type (:meth:`zk2py.calls.Operation.decode`),
@@ -2523,25 +2526,26 @@ class Owner:
 
     @staticmethod
     def _read_request(call: "OpCall") -> str | None:
-        """Core §5.1, "The request" (0.94): "A request that §7.5's parse
-        refuses, or whose record does not decode as the operation's request
-        type, is refused with invalid_request. The record is read on the
-        contract's encoding (§7.2), and a packed one under its CH's tag
-        (§7.6)." Sets ``call.request``; returns why it is refused, or None.
-        A protobuf or raw record is handed to the handler as its bytes: its
-        decode is the handler's. A bare request (§5.1's MAY) has no CH, so a
-        packed one has no tag and cannot be read (observer §7.3: "One that
-        came in no envelope has no tag")."""
+        """Core §5.1, "The request" (0.99): "An owner reads a query under
+        zenoh/bytes by §7.5's parse. Under another Encoding a query carries
+        no request form … Such a query, a request the parse refuses, and one
+        whose record does not decode as the operation's request type are
+        refused with invalid_request. The record is read on the contract's
+        encoding (§7.2), and a packed one under its CH's tag (§7.6)." Sets
+        ``call.request``; returns why it is refused, or None. A protobuf or
+        raw record is handed to the handler as its bytes: its decode is the
+        handler's."""
         from . import calls, packed
 
+        if call.request_refusal == "encoding":
+            return (f"a query under {call.encoding} carries no request form, whatever its bytes: only "
+                    f"{calls.FORM_ENCODING} does (core §5.1, \"The request\")")
         if call.request_refusal is not None:
             return f"the request is no request form: {call.request_refusal} (core §7.5)"
         kind = call.op.kind("request")
         if kind not in ("packed", "jsonschema"):
             call.request = call.payload
             return None
-        if kind == "packed" and call.bare:
-            return "a packed request on the bare wire has no CH, so no tag (core §7.6)"
         try:
             call.request = call.op.decode("request", call.tag or 0, call.payload)
         except (packed.Refused, calls.Refused) as e:

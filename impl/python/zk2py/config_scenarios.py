@@ -154,8 +154,7 @@ def call(session: Any, address: str, op: str, request: Any, *, actor: str | None
             return Called("refused_value", raw=r.raw, at_ns=at)
         if r.kind == "error":
             # core 0.94 §5.2: a form's detail is the error type's own bytes,
-            # here json:ConfigError's JSON, which C holds the contract for;
-            # the bare wire's envelope carried it decoded
+            # here json:ConfigError's JSON, which C holds the contract for
             e = dict(r.error or {})
             if isinstance(e.get("detail"), (bytes, bytearray)):
                 try:
