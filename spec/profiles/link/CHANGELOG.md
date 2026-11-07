@@ -7,6 +7,32 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.11 — 2026-11-07: editorial: `plan.json`'s zenoh-modem cases on catalog `0ff6bf6d`, no rule changed (#990, #609)
+
+#1080 appended `freshness.v2` to zenoh-modem's `catalog.json`, whose id
+moved from `e3a529fe` to `0ff6bf6d`, and moved its five face policies to
+it. `v2/plan.json`'s cases 14 to 18 still held the old policies and
+catalog. zk2py round 105 filed it as F-505, a minor error.
+
+**Changed: `v2/plan.json`'s cases 14 to 18.** Each case's policy names
+`0ff6bf6d`, as its face file does, and its `catalog` is today's
+`catalog.json`, whose lineage ends at `e3a529fe`. Each plan expects
+`0ff6bf6d` as its `catalog`.
+- **Nothing else moves.** The cases load no `freshness.v2` contract, so
+  `catalog_missing` reads the same crossing revisions, all in both
+  catalogs. Each face's denies, frames, windows, liveness and findings are
+  as before. `zenctl acl gen` over the five face files and today's
+  catalog draws each case's findings.
+- **Each policy reads equal to its file** again, as `scope/faces.json`'s
+  description says of cases 14, 17 and 18.
+- **The other fix,** saying in `examples/zk2/zenoh-modem/link.md` that
+  the cases hold the plans at `e3a529fe`, would have kept two catalogs
+  for one deployment.
+
+**Deliberately not changed.**
+- **No rule** of this text, and no other case.
+- **The header** is still written against core 0.100.
+
 ## link.v2 0.10 — 2026-11-07: editorial: §2.21 points to a tool's scope, the face's plan, no rule changed (#990 V1)
 
 Observer text 0.29 makes a tool's scope across a face the face's plan,
