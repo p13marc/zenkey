@@ -30,7 +30,7 @@
 //!    not (§2.13). Across a constrained face neither crosses, and the
 //!    deployment's word stands for them (§2.11);
 //! 3. S4's GET of the scope's alarms (`bus::query::state_get`: target
-//!    `All`, consolidation `Latest`), every reply merged with the live
+//!    `All`, consolidation `None`), every reply merged with the live
 //!    deliveries by the owner's in-band stamp (core §4.2, §4.3: by seq
 //!    within a run, the later arrival across two), in the [`AlarmBook`];
 //! 4. when asked, every archive's last-known documents of the scope
@@ -300,9 +300,17 @@ impl AlarmRefresh {
                 },
             )),
         };
+        // The reader holds no catalog (`AlarmSpec` names none): an owner's
+        // entries are dated under 0 where its descriptor names no catalog,
+        // or no descriptor is in hand (the deployment's word), and go
+        // undated where it names one.
+        let epochs = crate::bus::query::EntryEpochs::of_presence(
+            &crate::model::deployment::Catalogs::default(),
+            presence.as_ref().and_then(|(_, p)| p.as_ref().ok()),
+        );
         let seed = match &cut {
             Some(why) => Err(why.clone()),
-            None => get(&self.session, self.scope.alarms_selector(), t).await,
+            None => get(&self.session, self.scope.alarms_selector(), t, &epochs).await,
         };
         let archived = if self.spec.archives && self.spec.face.is_none() {
             Some(match &cut {
@@ -323,10 +331,18 @@ impl AlarmRefresh {
 }
 
 /// S4's GET of `selector` (core §4.2): target `All`, consolidation
-/// `Latest`, through the crate's one state GET. A reply on a wildcard key
-/// is discarded (R6); an error reply, a timeout's included, makes it
-/// incomplete.
-pub async fn get(session: &Session, selector: &str, timeout: Duration) -> Result<SeedRead, String> {
+/// `None`, through the crate's one state GET, a snapshot's page read as its
+/// entries, each entry's confirmation dated under its owner's epoch
+/// (`epochs`), every reply merged per key by its stamp, never the last to
+/// arrive (`bus::query::merged`), so the book folds one reply a key. A
+/// reply on a wildcard key is discarded (R6); an error reply, a timeout's
+/// included, makes it incomplete.
+pub async fn get(
+    session: &Session,
+    selector: &str,
+    timeout: Duration,
+    epochs: &crate::bus::query::EntryEpochs,
+) -> Result<SeedRead, String> {
     let asked_at = Instant::now();
     let replies =
         crate::bus::query::state_get(session, selector, &crate::bus::query::GetOpts::new(timeout))
@@ -339,6 +355,7 @@ pub async fn get(session: &Session, selector: &str, timeout: Duration) -> Result
         discarded: 0,
         envelopes: Default::default(),
     };
+    let mut samples = Vec::new();
     while let Ok(reply) = replies.recv_async().await {
         let Ok(sample) = reply.result() else {
             out.complete = false;
@@ -348,7 +365,13 @@ pub async fn get(session: &Session, selector: &str, timeout: Duration) -> Result
             out.discarded += 1;
             continue;
         }
-        let (reply, envelope) = sample_of(sample, AlarmVia::Get);
+        // A snapshot's page is its entries (core §4.2; #977's E3).
+        samples.extend(crate::bus::query::reply_samples_aged(sample, epochs));
+    }
+    // One reply a key, the newer by its stamp (S4): the envelopes are
+    // filed by key.
+    for sample in crate::bus::query::merged(samples) {
+        let (reply, envelope) = sample_of(&sample, AlarmVia::Get);
         if let Some(e) = envelope {
             out.envelopes.insert(reply.key.clone(), e);
         }

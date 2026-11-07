@@ -3,7 +3,7 @@
 //! reports, and what comparing two says.
 //!
 //! A zk2 snapshot is the owners' current state kept on disk: one state GET
-//! per selector, target `All` and consolidation `Latest` (spec §4.2 S4),
+//! per selector, target `All` and consolidation `None` (spec §4.2 S4),
 //! each row keyed by its zk2 address and resource, its payload checked
 //! against the declared type, its stamp attributed to its owner, and its
 //! holder established from presence. The one obligation a capture does not

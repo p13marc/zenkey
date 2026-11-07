@@ -935,31 +935,34 @@ async fn a_state_read_keeps_its_bytes_and_a_raw_get_reads_a_tombstone() {
         .expect("a last-known read");
     assert_eq!(bytes_of(&last).as_deref(), Some(&body[..]), "{last:?}");
 
-    // The tombstone: a raw GET within the window reads the owner's
-    // `reply_del` as a delete, its kind kept, never a value.
+    // The tombstone: a raw GET within the window, a member read, is answered
+    // by the member's snapshot (core 0.100, #977's E3), whose tombstone reads
+    // as a delete, its kind kept, never a value.
     writer.delete().await.expect("a delete");
     let answers = loop {
-        let answers = zenkey_fleet::fleet_get(&tool, origin, &GetOpts::new(T))
+        let answers: Vec<FleetAnswer> = zenkey_fleet::fleet_get(&tool, origin, &GetOpts::new(T))
             .await
-            .expect("a GET");
+            .expect("a GET")
+            .iter()
+            .flat_map(|a| match a.entries() {
+                Some(Ok(entries)) => entries,
+                _ => vec![a.clone()],
+            })
+            .collect();
         if answers.iter().any(FleetAnswer::is_delete) {
             break answers;
         }
         settle("the owner answers with its tombstone").await;
     };
-    assert_eq!(answers.len(), 1, "one owner, one reply: {answers:?}");
+    assert_eq!(answers.len(), 1, "one owner, one entry: {answers:?}");
     let tombstone = &answers[0];
     assert_eq!(tombstone.key, origin);
     assert_eq!(tombstone.kind, Some(SampleKind::Delete));
-    // tc.netif.v1 uses freshness.v2 since #978's F5: its delete carried no
-    // Zenoh timestamp, and its `reply_del` carries the one the owner minted
-    // at the delete, its last confirmation (core 0.89's S2, F-460); the
-    // in-band stamp is the delete's attachment.
-    assert_eq!(
-        tombstone.timestamp.map(|t| *t.get_id()),
-        Some(zenoh::time::TimestampId::from(owners.zid())),
-        "a freshness.v2 reply_del carries the owner's last confirmation (S2)"
-    );
+    // A snapshot carries no Zenoh timestamp, and a tombstone no
+    // confirmation (core §7.5); its in-band stamp is its delete's.
+    assert_eq!(tombstone.timestamp, None, "a snapshot's tombstone");
+    assert!(tombstone.inband().is_some(), "the delete's in-band stamp");
+    let _ = &owners;
     let Answer::Value(payload) = &tombstone.answer else {
         panic!("a delete is a sample, not an error reply: {tombstone:?}")
     };
@@ -1120,4 +1123,78 @@ async fn a_call_is_read_from_its_form_alone() {
     assert_eq!(p["summaries"][0]["value"]["scanned"], 2);
     assert_eq!(p["marks"], serde_json::json!([mark, mark, mark]));
     assert_eq!(p["possibly_partial"], false);
+}
+
+/// Review-bot on #1086: a state GET's reader merges its replies per key by
+/// their in-band stamps (core S4), never keeping the last to arrive. Two
+/// repliers of one alarm key under one run, the newer (seq 4) first and
+/// the older (seq 2) 300 ms after it: the alarms reader keeps seq 4, one
+/// reply for the key.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_state_gets_replies_merge_per_key_whatever_arrives_last() {
+    use zenkey_model::wire::{Envelope, Form, Run, Seq, Stamp, Tag};
+    let (_router, ep) = router(None).await;
+    let (first, second, tool) = (client(&ep).await, client(&ep).await, client(&ep).await);
+    let key = "zk2/lab/al/alarms.v1/state/alarms/a659f813308ad1da";
+    let stamp = |seq| Stamp {
+        run: Run::U16(5),
+        seq: Seq::new(seq).expect("a seq"),
+    };
+    let put = |seq| {
+        Envelope {
+            form: Form::Mutation,
+            tag: Tag::NONE,
+            stamp: stamp(seq),
+            record: b"{}",
+        }
+        .write()
+    };
+    let mut held = Vec::new();
+    for (s, seq, wait) in [(&first, 4, 0), (&second, 2, 300)] {
+        let bytes = put(seq);
+        held.push(
+            s.declare_queryable("zk2/lab/al/alarms.v1/state/**")
+                .callback(move |q| {
+                    let bytes = bytes.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+                        q.reply(key, bytes)
+                            .encoding(zenoh::bytes::Encoding::ZENOH_BYTES)
+                            .await
+                            .expect("a reply");
+                    });
+                })
+                .await
+                .expect("a queryable"),
+        );
+    }
+    let selector = "zk2/lab/al/alarms.v1/state/alarms/*";
+    eventually("both repliers are reached", || async {
+        let rx = tool
+            .get(selector)
+            .consolidation(zenoh::query::ConsolidationMode::None)
+            .timeout(std::time::Duration::from_secs(2))
+            .await
+            .expect("a GET");
+        let mut n = 0;
+        while let Ok(r) = rx.recv_async().await {
+            n += usize::from(r.result().is_ok());
+        }
+        n == 2
+    })
+    .await;
+    let r = zenkey_fleet::get_alarms(
+        &tool,
+        selector,
+        std::time::Duration::from_secs(2),
+        &zenkey_fleet::EntryEpochs::default(),
+    )
+    .await
+    .expect("a GET");
+    assert_eq!(r.replies.len(), 1, "one reply a key: {:?}", r.replies);
+    assert_eq!(
+        r.envelopes.get(key),
+        Some(&Ok(stamp(4))),
+        "the newer, not the last"
+    );
 }

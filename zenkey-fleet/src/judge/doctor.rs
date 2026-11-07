@@ -676,16 +676,20 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
         // During the grace: the first health reading, and the descriptors
         // hostid-duplicate counts (hostid.v1 §2.12): every instance on a
         // system in the minted shape, the only systems a minting can name.
+        // During the grace no descriptor is in hand yet: the catalogs given
+        // date an entry, the deployment's word.
+        let epochs = crate::bus::query::EntryEpochs::of_catalogs(&spec.catalogs);
+        let epochs = &epochs;
         let first = async {
             if spec.asks(CheckId::HealthInconsistent) {
-                Some(crate::bus::health::get(s, &health, t).await)
+                Some(crate::bus::health::get(s, &health, t, epochs).await)
             } else {
                 None
             }
         };
         let first_config = async {
             if spec.asks(CheckId::ConfigProjection) {
-                Some(crate::bus::config::get(s, &config, t).await)
+                Some(crate::bus::config::get(s, &config, t, epochs).await)
             } else {
                 None
             }
@@ -782,23 +786,27 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
         }
         (contracts, out)
     };
+    // Each owner's entries dated under the catalog its descriptor names,
+    // read through the catalogs given (core §8.6).
+    let epochs = crate::bus::query::EntryEpochs::observed(&spec.catalogs, observed);
+    let epochs = &epochs;
     let second = async {
         if spec.asks_health() {
-            Some(crate::bus::health::get(s, &health, t).await)
+            Some(crate::bus::health::get(s, &health, t, epochs).await)
         } else {
             None
         }
     };
     let second_config = async {
         if spec.asks_config() {
-            Some(crate::bus::config::get(s, &config, t).await)
+            Some(crate::bus::config::get(s, &config, t, epochs).await)
         } else {
             None
         }
     };
     let alarms = async {
         if spec.asks_alarms() {
-            Some(crate::bus::alarms::get(s, crate::model::alarms::ALL, t).await)
+            Some(crate::bus::alarms::get(s, crate::model::alarms::ALL, t, epochs).await)
         } else {
             None
         }
@@ -1812,7 +1820,7 @@ async fn archive_keys(s: &Session, addr: &Addr, timeout: Duration) -> Result<Arc
 }
 
 /// An owner's state, read as S4 reads it — target `All`, consolidation
-/// `Latest` — over `state/**` and `@state/**` of one interface, each reply
+/// `None`, a snapshot's page as its entries — over `state/**` and `@state/**` of one interface, each reply
 /// sorted by what stamped it ([`StateStamps::add`]), the table read from
 /// `revision` when it is in hand.
 async fn state_stamps(
@@ -1841,15 +1849,21 @@ async fn state_stamps(
         let replies = s
             .get(&selector)
             .target(QueryTarget::All)
-            .consolidation(ConsolidationMode::Latest)
+            .consolidation(ConsolidationMode::None)
             .timeout(timeout)
             .await
             .map_err(|e| format!("GET {selector}: {e}"))?;
+        // A snapshot's page is its entries, which carry no Zenoh timestamp
+        // (core §4.2, §7.5; #977's E3).
+        let mut samples = Vec::new();
         while let Ok(reply) = replies.recv_async().await {
             let Ok(sample) = reply.result() else {
                 out.complete = false;
                 continue;
             };
+            samples.extend(crate::bus::query::reply_samples(sample));
+        }
+        for sample in &samples {
             // The envelope first (core §7.5): an in-band stamp is the
             // owner's own, a refused envelope undecodable.
             let read = crate::model::inband::read(sample.clone());

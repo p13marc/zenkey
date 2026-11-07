@@ -173,7 +173,8 @@ async fn get(s: &zenoh::Session, key: &str) -> Vec<Sample> {
     let mut out = Vec::new();
     while let Ok(r) = rx.recv_async().await {
         if let Ok(s) = r.into_result() {
-            out.push(common::strip(s));
+            // A snapshot's page is its entries (core §4.2; #977's E3).
+            out.extend(common::replies(s).into_iter().map(common::strip));
         }
     }
     out
@@ -192,7 +193,7 @@ async fn get_raw(s: &zenoh::Session, key: &str) -> Vec<Sample> {
     let mut out = Vec::new();
     while let Ok(r) = rx.recv_async().await {
         if let Ok(s) = r.into_result() {
-            out.push(s);
+            out.extend(common::replies(s));
         }
     }
     out

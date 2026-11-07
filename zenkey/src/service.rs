@@ -280,6 +280,73 @@ fn find_mut<'s>(impls: &'s mut [ImplState], iface: &IfaceId) -> Result<&'s mut I
         .ok_or_else(|| Error::NotImplemented(iface.clone()))
 }
 
+/// The exposed collections of `s`'s interface of kind token `token` its
+/// state queryable over `root` answers (core §4.2, "Answering a state
+/// GET"; #977's E3): each `state` or `@state` resource, its index among its
+/// token's, its snapshot key, its tag, and whether it is a per-key
+/// resource, a state §4.3's table lists (`freshness.v1`'s horizon, a
+/// `desired.v1` desired resource, a metric resource, every state of a
+/// governed interface), or one with a horizon under `freshness.v2`.
+fn answered(
+    s: &ImplState,
+    token: KindToken,
+    root: &str,
+    epoch: i64,
+) -> Result<Vec<crate::state::Answered>> {
+    use zenkey_model::template::Segment;
+    let c = s.imp.contract();
+    let v2 = zenkey_model::freshness::uses_v2(c);
+    let mut out = Vec::new();
+    for r in c.resources.iter().filter(|r| r.token == token) {
+        let name = resource_name(r);
+        if !s.exposed.contains(&name) {
+            continue;
+        }
+        let Some(coll) = zenkey_model::collection::coll_of(c, r) else {
+            continue;
+        };
+        let horizon = matches!(
+            zenkey_model::freshness::horizon_of(r),
+            zenkey_model::freshness::Horizon::Within(_)
+        );
+        let desired = matches!(
+            zenkey_model::desired::declaration_of(r),
+            zenkey_model::desired::Declaration::Declared(_)
+        );
+        let per_key =
+            (horizon && !v2) || desired || s.metrics.contains_key(&name) || s.gate.is_some();
+        let chunks: Vec<&str> = r
+            .template
+            .segments()
+            .iter()
+            .map(|g| match g {
+                Segment::Literal(l) => l.as_str(),
+                Segment::Param(_) => "*",
+                Segment::Rest(_) => "**",
+            })
+            .collect();
+        let pattern =
+            OwnedKeyExpr::try_from(format!("{root}/{}", chunks.join("/"))).map_err(zenoh)?;
+        out.push(crate::state::Answered {
+            root: root.to_owned(),
+            template: r.template.clone(),
+            pattern,
+            snapshot_key: zenkey_model::collection::snapshot_prefix(&r.template)
+                .map(|p| format!("{root}/{}", p.join("/"))),
+            coll,
+            tag: s
+                .packed(r, epoch)
+                .ok()
+                .flatten()
+                .map_or(zenkey_model::wire::Tag::NONE, |p| p.tag()),
+            per_key,
+            horizon: horizon && v2,
+            epoch,
+        });
+    }
+    Ok(out)
+}
+
 impl ServiceBuilder {
     /// Starts declaring the service `config.address` on `session`, with a
     /// freshly minted instance id (§1.5).
@@ -307,6 +374,9 @@ impl ServiceBuilder {
         let window = config
             .tombstone_window_s
             .map_or(DEFAULT_WINDOW, std::time::Duration::from_secs);
+        let page_bytes = config
+            .snapshot_page_bytes
+            .unwrap_or(crate::state::DEFAULT_PAGE_BYTES);
         let (addr, minted) = match config.resolve_with(hostid) {
             Ok(r) => (Ok(r.address), r.minted),
             Err(e) => (Err(Arc::new(e)), None),
@@ -335,7 +405,7 @@ impl ServiceBuilder {
             roles: Vec::new(),
             ops: Arc::default(),
             minter: Arc::new(Minter::new(session)),
-            store: Arc::new(Store::new(window)),
+            store: Arc::new(Store::new(window, page_bytes)),
             state_ifaces: BTreeSet::new(),
             closed: tokio::sync::watch::Sender::new(false),
             health: None,
@@ -1866,23 +1936,29 @@ impl Service {
 
     /// Declares `iface`'s state queryables, once: one over `state/**` and
     /// one over `@state/**` where the contract has such resources (S2).
+    /// Each answers its exposed collections (core §4.2; #977's E3): their
+    /// snapshot keys, their `coll` indices, and which are per key.
     async fn ensure_state_server(&mut self, iface: &IfaceId) -> Result<()> {
         if self.state_qs.contains_key(iface) {
             return Ok(());
         }
         let s = find(&self.impls, iface)?;
         let gate = s.gate.clone();
+        let epoch = self.deployment_epoch();
         let mut qs = Vec::new();
         for token in [KindToken::State, KindToken::ExplicitState] {
             if !s.imp.contract().resources.iter().any(|r| r.token == token) {
                 continue;
             }
-            let ke = OwnedKeyExpr::try_from(format!(
-                "zk2/{}/{}/{iface}/{token}/**",
+            let root = format!(
+                "zk2/{}/{}/{iface}/{token}",
                 self.addr.system, self.addr.service
-            ))
-            .map_err(zenoh)?;
+            );
+            self.store
+                .answer_collections(answered(s, token, &root, epoch)?);
+            let ke = OwnedKeyExpr::try_from(format!("{root}/**")).map_err(zenoh)?;
             let store = Arc::clone(&self.store);
+            let minter = Arc::clone(&self.minter);
             // redundancy.v1 §2.4: a governed interface's, only while it
             // serves.
             qs.push(
@@ -1890,7 +1966,7 @@ impl Service {
                     &self.session,
                     ke,
                     false,
-                    Arc::new(move |q| store.answer(&q)),
+                    Arc::new(move |q| store.answer(&q, &minter, &root)),
                     gate.as_ref(),
                 )
                 .await?,

@@ -299,7 +299,10 @@ pub async fn set(cli: ConfigSetArgs) -> Result<()> {
                 ConfigCheckedRead::View => zenkey_fleet::bus::config::view_key(&address),
                 _ => ConfigTarget::One(address.clone()).state_selector(true),
             };
-            let got = zenkey_fleet::get_config(&session, &selector, t)
+            // Only the documents' values are read here, never their age:
+            // the catalogs given date nothing that is judged.
+            let epochs = zenkey_fleet::EntryEpochs::of_catalogs(&spec.catalogs);
+            let got = zenkey_fleet::get_config(&session, &selector, t, &epochs)
                 .await
                 .map_err(|e| anyhow::anyhow!("config set: reading {selector}: {e}"))?;
             let docs = got.services.get(&address);

@@ -2575,18 +2575,21 @@ pub struct Res {
     /// members hold member tokens: on a device face, `epoch_on_device` (v2
     /// §2.5). Across revisions, any one's.
     pub epoch: Option<String>,
+    /// A state whose deletes only a tombstone proves (v2 §2.11, 0.9; core
+    /// S3): a per-key resource (core §4.2), or a template whose first chunk
+    /// is a parameter, which has no snapshot key. [`tombstone_only`] reads
+    /// it; across revisions, where any one is.
+    pub tombstone_only: bool,
 }
 
 impl Res {
     /// A resource of `token` at `template`, with resolved `annotations`, and
     /// nothing else stated: no history, no frame, a type that is not packed,
-    /// `drop`, in a revision that does not list `link.v2`.
+    /// `drop`, in a revision that does not list `link.v2` and uses no
+    /// profile ([`tombstone_only`]).
     #[must_use]
     pub fn new(template: Template, token: KindToken, annotations: BTreeMap<String, Value>) -> Self {
         Res {
-            template,
-            token,
-            annotations,
             history: false,
             frame: None,
             packed: false,
@@ -2594,6 +2597,10 @@ impl Res {
             longest_bytes: None,
             link_v2: false,
             epoch: None,
+            tombstone_only: tombstone_only(token, &template, &annotations, |_| false),
+            template,
+            token,
+            annotations,
         }
     }
 
@@ -2662,8 +2669,51 @@ impl Res {
             longest_bytes,
             link_v2: uses_v2(c),
             epoch: r.epoch.clone(),
+            tombstone_only: tombstone_only(r.token, &r.template, &r.annotations, |p| {
+                c.uses.iter().any(|u| u.to_string() == p)
+            }),
         }
     }
+}
+
+/// Whether a resource of `token` at `template`, with resolved
+/// `annotations`, in a revision whose `uses` lists the profiles `uses`
+/// says, is a state whose deletes only a tombstone proves (v2 §2.11, 0.9):
+///
+/// - a per-key resource (core §4.2): a state that declares
+///   `freshness.ttl_s` above 0, of a revision that does not use
+///   `freshness.v2`; one whose annotations hold `desired.target_param`; a
+///   metric resource of `telemetry.v1` or `telemetry.v2` (a key of its
+///   vocabulary), of a revision that uses one; any state of a revision
+///   that uses `redundancy.v1`;
+/// - a template whose first chunk is a parameter, which has no snapshot
+///   key (core §4.2).
+///
+/// Every other state is read by snapshot, whose complete answer omits a
+/// member deleted beyond the window.
+#[must_use]
+pub fn tombstone_only(
+    token: KindToken,
+    template: &Template,
+    annotations: &BTreeMap<String, Value>,
+    uses: impl Fn(&str) -> bool,
+) -> bool {
+    if !is_state(token) {
+        return false;
+    }
+    let horizon = freshness::horizon(Kind::State, annotations).ttl().is_some()
+        && !uses(freshness::PROFILE_V2);
+    let desired = annotations.contains_key(crate::desired::TARGET_PARAM);
+    let metric = (uses(crate::telemetry::PROFILE) || uses(crate::telemetry::PROFILE_V2))
+        && crate::telemetry::VOCABULARY
+            .iter()
+            .any(|k| annotations.contains_key(&format!("telemetry.{k}")));
+    let governed = uses(crate::redundancy::PROFILE);
+    horizon
+        || desired
+        || metric
+        || governed
+        || crate::collection::snapshot_prefix(template).is_none()
 }
 
 /// What the plan needs of the deployment (§2.3): the interfaces each listed
@@ -2798,6 +2848,7 @@ fn merge(revisions: &[Vec<Res>]) -> (Vec<Res>, BTreeSet<usize>) {
         }
         let block = rs.iter().any(|r| r.block);
         out[i].block = block;
+        out[i].tombstone_only = rs.iter().any(|r| r.tombstone_only);
         out[i].longest_bytes = rs
             .iter()
             .filter(|r| r.block || !block)
@@ -2889,7 +2940,9 @@ pub enum AttachPlan {
     Device { devices: Vec<String> },
 }
 
-/// A listed owner of state's tombstone window floor (§2.11).
+/// A listed owner of state's tombstone window floor (§2.11): under a
+/// link.v2 policy, an owner of state whose deletes only a tombstone proves
+/// ([`Res::tombstone_only`], v2 §2.11).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Window {
     pub service: String,
@@ -3428,7 +3481,10 @@ fn plan_face(
                 .iter()
                 .flat_map(|i| resources_of(i).iter().map(move |r| (i, r)))
         };
-        if resources().any(|(_, r)| is_state(r.token)) {
+        // v2 §2.11 (0.9): a link.v2 policy floors only an owner of state
+        // whose deletes only a tombstone proves; link.v1 every owner of
+        // state.
+        if resources().any(|(_, r)| is_state(r.token) && (!v2 || r.tombstone_only)) {
             windows.push(Window {
                 service: s.address.clone(),
                 min_s: face.max_outage_s,
@@ -3759,7 +3815,8 @@ fn carve_at(
 
 /// Each listed owner of state whose configured window (`windows`, by
 /// address; [`DEFAULT_WINDOW_S`] when absent) is below a face's outage
-/// (§2.11).
+/// (§2.11). Under a link.v2 policy, only an owner of state whose deletes
+/// only a tombstone proves (v2 §2.11, [`Res::tombstone_only`]).
 #[must_use]
 pub fn check_windows(
     policy: &FacePolicy,
@@ -3772,11 +3829,15 @@ pub fn check_windows(
         let Some(ifaces) = deployment.implements.get(s.key) else {
             continue;
         };
+        // v2 §2.11 (0.9): under link.v2, only state whose deletes only a
+        // tombstone proves, in any revision given.
+        let v2 = policy.profile == Profile::V2;
         let owns_state = ifaces.iter().any(|i| {
-            deployment
-                .interfaces
-                .get(i)
-                .is_some_and(|revs| revs.iter().flatten().any(|r| is_state(r.token)))
+            deployment.interfaces.get(i).is_some_and(|revs| {
+                revs.iter()
+                    .flatten()
+                    .any(|r| is_state(r.token) && (!v2 || r.tombstone_only))
+            })
         });
         if !owns_state {
             continue;

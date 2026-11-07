@@ -1068,7 +1068,15 @@ impl Merged {
                 .await
                 .unwrap();
             while let Ok(r) = rx.recv_async().await {
-                if let Ok(s) = r.result() {
+                let Ok(s) = r.result() else { continue };
+                // A snapshot's page is its entries (core §4.2; #977's E3).
+                let each = match zenkey::inband::read(s.clone()) {
+                    zenkey::inband::Read::Snapshot { page: Ok(p), .. } => {
+                        zenkey::inband::replies(s, &p)
+                    }
+                    _ => vec![s.clone()],
+                };
+                for s in each {
                     let mark = zenkey::inband::read(s.clone()).mark();
                     self.apply(s.key_expr().as_ref(), s.kind(), mark);
                 }

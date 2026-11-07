@@ -860,7 +860,8 @@ enum GetEnd {
 }
 
 /// S4's GET of `selector` (core §4.2): target `All`, consolidation
-/// `Latest`; a reply on a wildcard key is discarded (R6). With the samples,
+/// `None`, a snapshot's page read as its entries; a reply on a wildcard key
+/// is discarded (R6). With the samples,
 /// how the GET ended: its final reply, zenoh's `Timeout`, or another error
 /// reply.
 async fn state_replies(
@@ -894,7 +895,10 @@ async fn state_replies(
         if sample.key_expr().is_wild() {
             continue;
         }
-        out.push(sample_of(sample, SampleVia::Get));
+        // A snapshot's page is its entries (core §4.2; #977's E3).
+        for sample in crate::bus::query::reply_samples(sample) {
+            out.push(sample_of(&sample, SampleVia::Get));
+        }
     }
     if end == GetEnd::Final && !replied {
         end = GetEnd::Empty;

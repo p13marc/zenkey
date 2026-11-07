@@ -1,5 +1,5 @@
 {
-  "description": "core §4.2, a late joiner's seed over snapshots: the merge of a GET's snapshots and per-key replies with its subscription's samples, the omission rule, asof and pages. Written by an independent reading of the text (Python, standard library), checked by a second, never blessed. Every key here is an owner's state key, and every sample carries an in-band stamp, `{width, run, seq}` as `inband.json` writes it, so a consumer's merge and a tool's agree on every case. `collections`: what the reader's contract gives it, each `{coll, template, snapshot_key}`: the collection's index, its template, and its snapshot key (§4.2); a reader without the contract has none. `view`: what the reader holds when it asks the GET, each `{key, sample, stamp, record}`, `sample` `put` or `delete`, `record` a put's record in hex. `arrivals`: in order, everything after it asks the GET, each `via` `get` (one of the GET's replies) or `subscription` (a live sample), on `key`: a sample `{sample, stamp, record}` (a per-key resource's reply or `reply_del`, or a live put or delete), or a snapshot's page, `page` as `snapshot/bodies.json` reads one, with its bytes in `hex`. The merge keeps the newer by in-band stamp: within one run, one width and one value, a higher seq; another run is unordered and kept, the later arrival; an equal stamp is one mutation, kept once. A page's entries merge as it arrives, each on its member's key: the page's key, then `/` and the id, the key itself for the empty id. A live entry is a put, a tombstone a delete, each stamped with its own run or the header's, and its seq. One snapshot's pages share their key, tag, run width, run, asof, time and coll. It is complete once it holds each index from 0 to a page whose more bit is 0. Then, on a key K that is the snapshot key or a member's key of the collection with that coll, the omission rule drops each member of the collection at K or under it that the reader holds and the snapshot lists neither live nor as a tombstone, unless held under the snapshot's run with a seq above asof, or under another run and heard after the GET was asked: every arrival was, no view entry was, and a held value heard again by an arrival with its stamp, kept once, then was. A member matches its template under the snapshot key, each parameter one chunk. A page heard on a subscription is neither merged nor counted. `expect.view`: what the reader holds after the last arrival, sorted by key bytes. `expect.snapshots`: each snapshot heard by the GET, in order of its first page, with its key, coll, run, asof, the page indices held, whether it is complete, and the keys its omission rule dropped, sorted.",
+  "description": "core §4.2, a late joiner's seed over snapshots: the merge of a GET's snapshots and per-key replies with its subscription's samples, the omission rule, asof and pages. Written by an independent reading of the text (Python, standard library), checked by a second, never blessed. Every key here is an owner's state key, and every sample carries an in-band stamp, `{width, run, seq}` as `inband.json` writes it, so a consumer's merge and a tool's agree on every case. `collections`: what the reader's contract gives it, each `{coll, template, snapshot_key}`: the collection's index, its template, and its snapshot key (§4.2); a reader without the contract has none. A case may give instead `revisions`, each revision of the interface the reader holds by its fingerprint, with its collections, and `descriptor`, the fingerprint the owner's descriptor names (§3.3): the reader maps a snapshot's coll by that revision's collections alone. `view`: what the reader holds when it asks the GET, each `{key, sample, stamp, record}`, `sample` `put` or `delete`, `record` a put's record in hex. `arrivals`: in order, everything after it asks the GET, each `via` `get` (one of the GET's replies) or `subscription` (a live sample), on `key`: a sample `{sample, stamp, record}` (a per-key resource's reply or `reply_del`, or a live put or delete), or a snapshot's page, `page` as `snapshot/bodies.json` reads one, with its bytes in `hex`. The merge keeps the newer by in-band stamp: within one run, one width and one value, a higher seq; another run is unordered and kept, the later arrival; an equal stamp is one mutation, kept once. A page's entries merge as it arrives, each on its member's key: the page's key, then `/` and the id, the key itself for the empty id. A live entry is a put, a tombstone a delete, each stamped with its own run or the header's, and its seq. One snapshot's pages share their key, tag, run width, run, asof, time and coll. It is complete once it holds each index from 0 to a page whose more bit is 0. Then, on a key K that is the snapshot key or a member's key of the collection with that coll, the omission rule drops each member of the collection at K or under it that the reader holds and the snapshot lists neither live nor as a tombstone, unless held under the snapshot's run with a seq above asof, or under another run and heard after the GET was asked: every arrival was, no view entry was, and a held value heard again by an arrival with its stamp, kept once, then was. A member matches its template under the snapshot key, each parameter one chunk. A page heard on a subscription is neither merged nor counted. `expect.view`: what the reader holds after the last arrival, sorted by key bytes. `expect.snapshots`: each snapshot heard by the GET, in order of its first page, with its key, coll, run, asof, the page indices held, whether it is complete, and the keys its omission rule dropped, sorted.",
   "cases": [
     {
       "note": "a collection read, one page, into an empty view: each entry is its member's put or delete, on the snapshot key plus its id",
@@ -4122,6 +4122,614 @@
           {
             "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans",
             "coll": 0,
+            "run": {
+              "width": 16,
+              "run": 5
+            },
+            "asof": 9,
+            "pages": [
+              0
+            ],
+            "complete": true,
+            "omitted": []
+          }
+        ]
+      }
+    },
+    {
+      "note": "the revision the owner's descriptor names maps coll: it names modem.v3 3.3, and the reader holds 3.2 too. By 3.3, coll 11 is `sdu/endpoint/{endpoint}`, whose snapshot key the page rides, so the complete snapshot's omission drops peer-b; 3.2 declares 7 states and has no collection 11",
+      "revisions": {
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404": [
+          {
+            "coll": 0,
+            "template": "destination/{destination}",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/destination"
+          },
+          {
+            "coll": 1,
+            "template": "identity",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/identity"
+          },
+          {
+            "coll": 2,
+            "template": "oper",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/oper"
+          },
+          {
+            "coll": 3,
+            "template": "radio",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/radio"
+          },
+          {
+            "coll": 4,
+            "template": "sdu/endpoint/{endpoint}",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint"
+          },
+          {
+            "coll": 5,
+            "template": "sdu/link",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/link"
+          },
+          {
+            "coll": 6,
+            "template": "security",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/security"
+          }
+        ],
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf": [
+          {
+            "coll": 0,
+            "template": "destination/{destination}",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/destination"
+          },
+          {
+            "coll": 1,
+            "template": "identity",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/identity"
+          },
+          {
+            "coll": 2,
+            "template": "oper",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/oper"
+          },
+          {
+            "coll": 3,
+            "template": "packed/destination/{destination}",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/destination"
+          },
+          {
+            "coll": 4,
+            "template": "packed/identity",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/identity"
+          },
+          {
+            "coll": 5,
+            "template": "packed/oper",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/oper"
+          },
+          {
+            "coll": 6,
+            "template": "packed/radio",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/radio"
+          },
+          {
+            "coll": 7,
+            "template": "packed/sdu/endpoint/{endpoint}",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/sdu/endpoint"
+          },
+          {
+            "coll": 8,
+            "template": "packed/sdu/link",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/sdu/link"
+          },
+          {
+            "coll": 9,
+            "template": "packed/security",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/security"
+          },
+          {
+            "coll": 10,
+            "template": "radio",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/radio"
+          },
+          {
+            "coll": 11,
+            "template": "sdu/endpoint/{endpoint}",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint"
+          },
+          {
+            "coll": 12,
+            "template": "sdu/link",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/link"
+          },
+          {
+            "coll": 13,
+            "template": "security",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/security"
+          }
+        ]
+      },
+      "descriptor": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+      "view": [
+        {
+          "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint/peer-a",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 1
+          },
+          "record": "7b22656e64706f696e74223a22706565722d61222c227570223a747275657d"
+        },
+        {
+          "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint/peer-b",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 2
+          },
+          "record": "7b22656e64706f696e74223a22706565722d62222c227570223a747275657d"
+        }
+      ],
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint",
+          "page": {
+            "tag": 0,
+            "run_width": 16,
+            "run": 5,
+            "asof": 9,
+            "time": {
+              "s": 3600,
+              "ms": 250
+            },
+            "index": 0,
+            "more": false,
+            "coll": 11,
+            "live": [
+              {
+                "id": "peer-a",
+                "run_width": null,
+                "run": null,
+                "seq": 1,
+                "confirmation": "time",
+                "record": "7b22656e64706f696e74223a22706565722d61222c227570223a747275657d"
+              }
+            ],
+            "tombs": []
+          },
+          "hex": "e0000500000900000e1000fa000b0106706565722d61200000011f7b22656e64706f696e74223a22706565722d61222c227570223a747275657d00"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint/peer-a",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 1
+            },
+            "record": "7b22656e64706f696e74223a22706565722d61222c227570223a747275657d"
+          }
+        ],
+        "snapshots": [
+          {
+            "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint",
+            "coll": 11,
+            "run": {
+              "width": 16,
+              "run": 5
+            },
+            "asof": 9,
+            "pages": [
+              0
+            ],
+            "complete": true,
+            "omitted": [
+              "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint/peer-b"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "note": "the same reader, the owner's descriptor naming 3.2: coll 4 is `sdu/endpoint/{endpoint}` by 3.2, and peer-b is dropped; by 3.3 it would be `packed/identity`, a collection of another snapshot key",
+      "revisions": {
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404": [
+          {
+            "coll": 0,
+            "template": "destination/{destination}",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/destination"
+          },
+          {
+            "coll": 1,
+            "template": "identity",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/identity"
+          },
+          {
+            "coll": 2,
+            "template": "oper",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/oper"
+          },
+          {
+            "coll": 3,
+            "template": "radio",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/radio"
+          },
+          {
+            "coll": 4,
+            "template": "sdu/endpoint/{endpoint}",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint"
+          },
+          {
+            "coll": 5,
+            "template": "sdu/link",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/link"
+          },
+          {
+            "coll": 6,
+            "template": "security",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/security"
+          }
+        ],
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf": [
+          {
+            "coll": 0,
+            "template": "destination/{destination}",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/destination"
+          },
+          {
+            "coll": 1,
+            "template": "identity",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/identity"
+          },
+          {
+            "coll": 2,
+            "template": "oper",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/oper"
+          },
+          {
+            "coll": 3,
+            "template": "packed/destination/{destination}",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/destination"
+          },
+          {
+            "coll": 4,
+            "template": "packed/identity",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/identity"
+          },
+          {
+            "coll": 5,
+            "template": "packed/oper",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/oper"
+          },
+          {
+            "coll": 6,
+            "template": "packed/radio",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/radio"
+          },
+          {
+            "coll": 7,
+            "template": "packed/sdu/endpoint/{endpoint}",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/sdu/endpoint"
+          },
+          {
+            "coll": 8,
+            "template": "packed/sdu/link",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/sdu/link"
+          },
+          {
+            "coll": 9,
+            "template": "packed/security",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/security"
+          },
+          {
+            "coll": 10,
+            "template": "radio",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/radio"
+          },
+          {
+            "coll": 11,
+            "template": "sdu/endpoint/{endpoint}",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint"
+          },
+          {
+            "coll": 12,
+            "template": "sdu/link",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/link"
+          },
+          {
+            "coll": 13,
+            "template": "security",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/security"
+          }
+        ]
+      },
+      "descriptor": "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+      "view": [
+        {
+          "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint/peer-a",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 1
+          },
+          "record": "7b22656e64706f696e74223a22706565722d61222c227570223a747275657d"
+        },
+        {
+          "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint/peer-b",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 2
+          },
+          "record": "7b22656e64706f696e74223a22706565722d62222c227570223a747275657d"
+        }
+      ],
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint",
+          "page": {
+            "tag": 0,
+            "run_width": 16,
+            "run": 5,
+            "asof": 9,
+            "time": {
+              "s": 3600,
+              "ms": 250
+            },
+            "index": 0,
+            "more": false,
+            "coll": 4,
+            "live": [
+              {
+                "id": "peer-a",
+                "run_width": null,
+                "run": null,
+                "seq": 1,
+                "confirmation": "time",
+                "record": "7b22656e64706f696e74223a22706565722d61222c227570223a747275657d"
+              }
+            ],
+            "tombs": []
+          },
+          "hex": "e0000500000900000e1000fa00040106706565722d61200000011f7b22656e64706f696e74223a22706565722d61222c227570223a747275657d00"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint/peer-a",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 1
+            },
+            "record": "7b22656e64706f696e74223a22706565722d61222c227570223a747275657d"
+          }
+        ],
+        "snapshots": [
+          {
+            "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint",
+            "coll": 4,
+            "run": {
+              "width": 16,
+              "run": 5
+            },
+            "asof": 9,
+            "pages": [
+              0
+            ],
+            "complete": true,
+            "omitted": [
+              "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint/peer-b"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "note": "the descriptor names 3.3, and a page on the endpoints' snapshot key says coll 4, 3.2's index for them: by 3.3, 4 is `packed/identity`, whose snapshot key is not the reply's, so the reader applies no omission rule. The entries merge on their keys, and peer-b stays",
+      "revisions": {
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404": [
+          {
+            "coll": 0,
+            "template": "destination/{destination}",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/destination"
+          },
+          {
+            "coll": 1,
+            "template": "identity",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/identity"
+          },
+          {
+            "coll": 2,
+            "template": "oper",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/oper"
+          },
+          {
+            "coll": 3,
+            "template": "radio",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/radio"
+          },
+          {
+            "coll": 4,
+            "template": "sdu/endpoint/{endpoint}",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint"
+          },
+          {
+            "coll": 5,
+            "template": "sdu/link",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/link"
+          },
+          {
+            "coll": 6,
+            "template": "security",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/security"
+          }
+        ],
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf": [
+          {
+            "coll": 0,
+            "template": "destination/{destination}",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/destination"
+          },
+          {
+            "coll": 1,
+            "template": "identity",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/identity"
+          },
+          {
+            "coll": 2,
+            "template": "oper",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/oper"
+          },
+          {
+            "coll": 3,
+            "template": "packed/destination/{destination}",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/destination"
+          },
+          {
+            "coll": 4,
+            "template": "packed/identity",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/identity"
+          },
+          {
+            "coll": 5,
+            "template": "packed/oper",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/oper"
+          },
+          {
+            "coll": 6,
+            "template": "packed/radio",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/radio"
+          },
+          {
+            "coll": 7,
+            "template": "packed/sdu/endpoint/{endpoint}",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/sdu/endpoint"
+          },
+          {
+            "coll": 8,
+            "template": "packed/sdu/link",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/sdu/link"
+          },
+          {
+            "coll": 9,
+            "template": "packed/security",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/security"
+          },
+          {
+            "coll": 10,
+            "template": "radio",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/radio"
+          },
+          {
+            "coll": 11,
+            "template": "sdu/endpoint/{endpoint}",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint"
+          },
+          {
+            "coll": 12,
+            "template": "sdu/link",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/link"
+          },
+          {
+            "coll": 13,
+            "template": "security",
+            "snapshot_key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/security"
+          }
+        ]
+      },
+      "descriptor": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+      "view": [
+        {
+          "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint/peer-a",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 1
+          },
+          "record": "7b22656e64706f696e74223a22706565722d61222c227570223a747275657d"
+        },
+        {
+          "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint/peer-b",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 2
+          },
+          "record": "7b22656e64706f696e74223a22706565722d62222c227570223a747275657d"
+        }
+      ],
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint",
+          "page": {
+            "tag": 0,
+            "run_width": 16,
+            "run": 5,
+            "asof": 9,
+            "time": {
+              "s": 3600,
+              "ms": 250
+            },
+            "index": 0,
+            "more": false,
+            "coll": 4,
+            "live": [
+              {
+                "id": "peer-a",
+                "run_width": null,
+                "run": null,
+                "seq": 3,
+                "confirmation": "time",
+                "record": "7b22656e64706f696e74223a22706565722d61222c227570223a747275657d"
+              }
+            ],
+            "tombs": []
+          },
+          "hex": "e0000500000900000e1000fa00040106706565722d61200000031f7b22656e64706f696e74223a22706565722d61222c227570223a747275657d00"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint/peer-a",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 3
+            },
+            "record": "7b22656e64706f696e74223a22706565722d61222c227570223a747275657d"
+          },
+          {
+            "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint/peer-b",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 2
+            },
+            "record": "7b22656e64706f696e74223a22706565722d62222c227570223a747275657d"
+          }
+        ],
+        "snapshots": [
+          {
+            "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint",
+            "coll": 4,
             "run": {
               "width": 16,
               "run": 5

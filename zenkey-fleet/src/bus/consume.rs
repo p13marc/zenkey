@@ -4,8 +4,11 @@
 //! state (S5).
 //!
 //! **Current and last-known are different questions** (S6). [`get_state`]
-//! asks the owner, with target `All` and consolidation `Latest` (the
-//! runtime's S4 GET), and silence is no rows — never "no value".
+//! asks the owner, with target `All` and consolidation `None` (the
+//! runtime's S4 GET, a collection read where it asks every member; #977's
+//! E3), and silence is no rows — never "no value". A complete snapshot of
+//! no entry is the owner's word, no rows with its snapshot listed
+//! ([`StateReport::snapshots`]).
 //! [`last_known`] asks one archive, explicitly, and its report says
 //! `last_known` in its first field: a tool never presents it as current.
 //!
@@ -112,8 +115,11 @@ fn all_bound(r: &Resource, values: &Bindings) -> bool {
 }
 
 /// The owner's current state (S4): a GET on its keys for the resource,
-/// target `All`, consolidation `Latest`, through the runtime's consumer.
+/// target `All`, consolidation `None`, through the runtime's consumer, its
+/// collection read where every member is asked (core §4.2; #977's E3).
 /// No reply within the timeout is no rows: silence, never "no value" (S6).
+/// A complete snapshot of no entry is no rows too, and its snapshot says
+/// the owner answered.
 /// A value row keeps the owner's reply bytes beside its rendering
 /// ([`StateRow::bytes`], #765).
 pub async fn get_state(session: &Session, read: StateRead<'_>) -> Result<StateReport> {
@@ -174,7 +180,7 @@ pub async fn get_state_answer_in(
         vec![member_key(owner, revision, r, values)?]
     } else {
         consumer
-            .selectors(&name)
+            .get_selectors(&name, None)
             .map_err(|e| runtime("get", &address, e))?
             .iter()
             .map(|k| k.as_str().to_owned())
@@ -193,23 +199,35 @@ pub async fn get_state_answer_in(
         .map(crate::report::CollectionSnapshot::from)
         .collect();
     let inband_of = |key: &str| inband.get(key).copied().map(InbandStamp::from);
-    // freshness.v2 (#978's F3): a collection's reply carries its member's
-    // last confirmation as its Zenoh timestamp.
-    let confirmed_by_heartbeat = zenkey::model::freshness::uses_v2(revision.contract())
-        && matches!(
-            zenkey::model::freshness::horizon_of(r),
-            zenkey::model::freshness::Horizon::Within(_)
-        );
+    // freshness.v2 §2.6 (text 0.7): a snapshot's live entry carries its
+    // member's confirmation, 1 at the snapshot's time, 2 at its last
+    // confirmation, both on the owner's clock from the deployment epoch.
+    let confirmations = got.confirmations;
+    let at_epoch = epoch
+        .given()
+        .unwrap_or(zenkey_model::catalog::EPOCH_WITHOUT_CATALOG);
+    let confirmation_of = |key: &str| {
+        let c = confirmations.get(key)?;
+        let ms = u64::try_from(c.at()?.unix_ms(at_epoch)?).ok()?;
+        Some(stamp(&zenoh::time::Timestamp::new(
+            zenoh::time::NTP64::from(Duration::from_millis(ms)),
+            crate::bus::query::owner_clock(key),
+        )))
+    };
     let mut rows: Vec<StateRow> = got
         .current
         .into_iter()
         .map(|c| match c {
             zenkey::state::Current::Value { key, sample } => StateRow {
                 inband: inband_of(&key),
-                timestamp: sample.timestamp().map(stamp),
-                last_confirmation: confirmed_by_heartbeat
-                    .then(|| sample.timestamp().map(stamp))
-                    .flatten(),
+                // A snapshot's entry carries no Zenoh timestamp: the one the
+                // runtime gave it is its confirmation's (freshness.v2 §2.6).
+                timestamp: if confirmations.contains_key(&key) {
+                    None
+                } else {
+                    sample.timestamp().map(stamp)
+                },
+                last_confirmation: confirmation_of(&key),
                 value: StateValue::Value {
                     payload: Box::new(payload(
                         revision,

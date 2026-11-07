@@ -851,7 +851,7 @@
       }
     },
     {
-      "note": "zenoh-modem's sdu/endpoint/{endpoint}, collection 4 of modem.v3's state: two endpoints vouched for and one not, and one deleted within the window",
+      "note": "zenoh-modem's sdu/endpoint/{endpoint}, collection 4 of modem.v3 3.0 to 3.2's state (11 in 3.3, whose `packed/` states sort before it): two endpoints vouched for and one not, and one deleted within the window",
       "page": {
         "tag": 0,
         "run_width": 16,
@@ -2055,7 +2055,7 @@
       }
     },
     {
-      "note": "written: zenoh-modem's sdu/endpoint/{endpoint}, collection 4 of modem.v3's state: two endpoints vouched for and one not, and one deleted within the window",
+      "note": "written: zenoh-modem's sdu/endpoint/{endpoint}, collection 4 of modem.v3 3.0 to 3.2's state (11 in 3.3, whose `packed/` states sort before it): two endpoints vouched for and one not, and one deleted within the window",
       "hex": "e02c410004b7019170c000fa00040306706565722d61200004a4787b22656e64706f696e74223a22706565722d61222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d06706565722d62200004a6787b22656e64706f696e74223a22706565722d62222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a747275657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a747275657d5d7d06706565722d64400004450191709901f47a7b22656e64706f696e74223a22706565722d64222c22646576696365223a227378313236322d30222c226c616e6573223a5b7b226c616e65223a22636f6e74726f6c222c22636f6e6e6563746564223a66616c73657d2c7b226c616e65223a2262756c6b222c22636f6e6e6563746564223a66616c73657d5d7d0106706565722d63000004ac",
       "expect": {
         "tag": 0,

@@ -8,7 +8,7 @@ consumer. The owner holds its state's value at start.
 
 **Steps.** A tool subscribes to `zk2/*/*/@zk/**` with history, and calls the
 owner's operation the moment its interface token appears. At that moment it
-also GETs the owner's state, with `All` + `Latest`.
+also GETs the owner's state, with `All` + `None` (core S4).
 
 **Expected.**
 - The call succeeds: alive ⇒ callable.

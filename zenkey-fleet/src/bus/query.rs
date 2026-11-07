@@ -3,8 +3,9 @@
 //!
 //! Two disciplines, one `session.get`: the fan-in's (target `All`,
 //! consolidation `None`, every reply attributed by its key) and spec §4.2's
-//! state GET (target `All`, consolidation `Latest`, S4), which a late
-//! joiner seeds from (0.26; #614, FL4).
+//! state GET (target `All`, consolidation `None` since core 0.100, S4),
+//! which a late joiner seeds from (0.26; #614, FL4), each snapshot's page
+//! read as its entries (`reply_samples`; #977's E3).
 
 use std::time::Duration;
 
@@ -383,18 +384,20 @@ pub(crate) async fn disciplined_get(
 }
 
 /// **The** state GET of this crate: spec §4.2's S4, target `All` and
-/// consolidation **`Latest`**, both set explicitly — the GET a late joiner
-/// seeds from after its subscription is declared (0.26), and the only GET
-/// here that consolidates.
+/// consolidation **`None`**, both set explicitly (core 0.100, #977's E3) —
+/// the GET a late joiner seeds from after its subscription is declared
+/// (0.26).
 ///
-/// `Latest` keeps, per key, the reply with the greatest timestamp, ranks an
-/// unstamped one lowest, and delivers at the GET's completion (§4.1). That
-/// is the whole reason it is not [`disciplined_get`]: a fan-out under
-/// the fan-in discipline wants every reply, a state read wants each key's newest.
-/// One selector over several owners is still "addressed to the owner's
-/// keys" (0.26): each key it matches has one owner (P3), so `Latest`
-/// consolidates each key over that owner's answers; a foreign key is
-/// outside S4 and answered by whatever holds it.
+/// An owner answers it per collection: a collection read with the
+/// collection's snapshot, in pages on its snapshot key, a member read with
+/// each member's, a per-key resource with a reply per key (core §4.2).
+/// `Latest` would keep one page of a snapshot and hold every reply until
+/// the final ("Why `None`"), so every reply is delivered as it arrives,
+/// and the caller merges them per key: each page read as its entries
+/// ([`reply_samples`]), each key's newer kept by the owner's in-band stamp
+/// (observer §4.1). One selector over several owners is still "addressed
+/// to the owner's keys" (0.26): each key it matches has one owner (P3); a
+/// foreign key is outside S4 and answered by whatever holds it.
 ///
 /// Attribution is unchanged: each reply is drained by its own key.
 pub(crate) async fn state_get(
@@ -402,7 +405,233 @@ pub(crate) async fn state_get(
     selector: &str,
     opts: &GetOpts,
 ) -> Result<zenoh::handlers::FifoChannelHandler<zenoh::query::Reply>> {
-    issue(session, selector, opts, ConsolidationMode::Latest).await
+    issue(session, selector, opts, ConsolidationMode::None).await
+}
+
+/// A state GET's reply as the per-key replies it stands for (core §4.2,
+/// "What a profile reads"; #977's E3): a snapshot's page its entries, each
+/// on its member's key, a live entry a put of the bytes its mutation put
+/// and a tombstone a delete whose attachment is its envelope; a page whose
+/// body is refused, and every other reply, as it came, so a reader of
+/// mutations shows a refused one undecodable.
+/// No entry carries a Zenoh timestamp: a snapshot carries none.
+pub(crate) fn reply_samples(sample: &zenoh::sample::Sample) -> Vec<zenoh::sample::Sample> {
+    reply_samples_in(sample, None)
+}
+
+/// [`reply_samples`] for a reader that ages what it reads (`freshness.v2`
+/// §2.6, text 0.7): a live entry with a confirmation whose time is known (1
+/// at the snapshot's time, 2 at its conf; core §7.5) carries it as its
+/// Zenoh timestamp, counted from the deployment epoch in force for its
+/// owner ([`EntryEpochs::of`]), so the reader ages the entry from it as it
+/// aged a reply from its stamp. Its id names the owner's clock, which
+/// built the snapshot, by the owner's address ([`owner_clock`]): a snapshot
+/// carries no zid. Every other entry carries none, and so does every entry
+/// of an owner whose epoch cannot be had (`unknown_catalog`, or catalogs
+/// that disagree; core §8.6): undated, never dated under another epoch.
+pub(crate) fn reply_samples_aged(
+    sample: &zenoh::sample::Sample,
+    epochs: &EntryEpochs,
+) -> Vec<zenoh::sample::Sample> {
+    reply_samples_at(sample, epochs.of(sample.key_expr().as_str()))
+}
+
+/// [`reply_samples_aged`] under `epoch`, one already resolved for the
+/// reply's owner (a `config.v2` target's); `None` dates nothing.
+pub(crate) fn reply_samples_at(
+    sample: &zenoh::sample::Sample,
+    epoch: Option<i64>,
+) -> Vec<zenoh::sample::Sample> {
+    reply_samples_in(sample, epoch)
+}
+
+/// The deployment epoch a reader dates each owner's snapshot entries under
+/// (core §7.6, §8.6; `freshness.v2` §2.6; review-bot on #1086), as the
+/// frames' readers take theirs: the catalog the owner's descriptors name,
+/// read through the catalogs given (`--catalog`); with no descriptor of it
+/// in hand, as across a constrained face, the catalogs' own, the
+/// deployment's word. Only with no catalog given and none named is it 0,
+/// the deployment's word then too ([`zenkey_model::catalog::EPOCH_WITHOUT_CATALOG`]).
+/// An owner that names a catalog none given is or succeeds, or whose
+/// instances name different ones, or catalogs that state different epochs
+/// with no descriptor in hand, has none: its entries go undated.
+#[derive(Debug, Clone, Default)]
+pub struct EntryEpochs {
+    catalogs: crate::model::deployment::Catalogs,
+    /// What each owner's descriptors in hand state.
+    stated:
+        std::collections::BTreeMap<zenkey_model::grammar::Addr, crate::model::deployment::Stated>,
+}
+
+impl EntryEpochs {
+    /// Under `catalogs`, with no descriptor in hand.
+    pub fn of_catalogs(catalogs: &crate::model::deployment::Catalogs) -> EntryEpochs {
+        EntryEpochs {
+            catalogs: catalogs.clone(),
+            stated: std::collections::BTreeMap::new(),
+        }
+    }
+
+    /// Under `catalogs`, each owner `observed` holds a descriptor of under
+    /// the catalog its descriptors name.
+    pub fn observed(
+        catalogs: &crate::model::deployment::Catalogs,
+        observed: &crate::model::catalog::Observed,
+    ) -> EntryEpochs {
+        let catalog = crate::model::catalog::Catalog::new(observed);
+        let stated = catalog
+            .addresses()
+            .map(|a| {
+                (
+                    a.clone(),
+                    crate::model::deployment::Stated::of(&catalog.stated_catalogs(a)),
+                )
+            })
+            .collect();
+        EntryEpochs {
+            catalogs: catalogs.clone(),
+            stated,
+        }
+    }
+
+    /// [`EntryEpochs::observed`] where a presence read is in hand, else
+    /// [`EntryEpochs::of_catalogs`].
+    pub fn of_presence(
+        catalogs: &crate::model::deployment::Catalogs,
+        observed: Option<&crate::model::catalog::Observed>,
+    ) -> EntryEpochs {
+        match observed {
+            Some(o) => EntryEpochs::observed(catalogs, o),
+            None => EntryEpochs::of_catalogs(catalogs),
+        }
+    }
+
+    /// The epoch of `key`'s owner, in seconds since the Unix epoch; `None`
+    /// where none can be had.
+    pub fn of(&self, key: &str) -> Option<i64> {
+        use crate::model::deployment::{Epoch, Stated};
+        let stated = owner_of(key)
+            .and_then(|a| self.stated.get(&a).copied())
+            .unwrap_or(Stated::Unread);
+        match self.catalogs.epoch(stated) {
+            Epoch::Stated(e) | Epoch::Deployment(e) => Some(e),
+            Epoch::Assumed => Some(zenkey_model::catalog::EPOCH_WITHOUT_CATALOG),
+            Epoch::Unknown(_) | Epoch::Ambiguous => None,
+        }
+    }
+}
+
+/// The owner's address of a zk2 data key, a namespace in front skipped.
+fn owner_of(key: &str) -> Option<zenkey_model::grammar::Addr> {
+    let mut rest = Some(key);
+    while let Some(k) = rest {
+        if k.starts_with("zk2/")
+            && let Ok(zenkey_model::grammar::ZkKey::Data { addr, .. }) =
+                zenkey_model::grammar::parse(k)
+        {
+            return Some(addr);
+        }
+        rest = k.split_once('/').map(|(_, r)| r);
+    }
+    None
+}
+
+/// A state GET's replies merged per key (core S4, §4.2; observer §4.1;
+/// review-bot on #1086): two instances answering one key, a page and a
+/// per-key reply, or a page heard twice, keep the newer by the tool's
+/// merge (`zenkey_model::seed::admits_mark_in`), never the last to arrive.
+/// Within one run by seq (a stream key's serially), across two runs or two
+/// wires the later arrival, since nothing orders them; a reply with no
+/// envelope by its Zenoh timestamp, and one with neither stamp, or with a
+/// refused envelope, below every stamped one. Each key keeps one item, in
+/// the order its key first arrived.
+#[derive(Debug)]
+pub(crate) struct KeyMerge<T> {
+    order: Vec<String>,
+    held: std::collections::BTreeMap<String, (T, zenkey_model::seed::Held)>,
+}
+
+impl<T> Default for KeyMerge<T> {
+    fn default() -> Self {
+        KeyMerge {
+            order: Vec::new(),
+            held: std::collections::BTreeMap::new(),
+        }
+    }
+}
+
+impl<T> KeyMerge<T> {
+    /// Offers `item` on `key`, ordered by `mark`: whether it is kept over
+    /// what the key held.
+    pub(crate) fn offer(
+        &mut self,
+        key: &str,
+        mark: Option<zenkey_model::seed::Mark>,
+        item: T,
+    ) -> bool {
+        let was = self.held.get(key).map(|(_, h)| *h);
+        let order = zenkey_model::seed::Order::of_key(key);
+        if !zenkey_model::seed::admits_mark_in(order, was.unwrap_or_default(), mark) {
+            return false;
+        }
+        if was.is_none() {
+            self.order.push(key.to_owned());
+        }
+        let after = was.unwrap_or_default().after_mark(mark);
+        self.held.insert(key.to_owned(), (item, after));
+        true
+    }
+
+    /// The item each key kept, in the order its key first arrived.
+    pub(crate) fn into_items(mut self) -> Vec<T> {
+        self.order
+            .iter()
+            .filter_map(|k| self.held.remove(k))
+            .map(|(item, _)| item)
+            .collect()
+    }
+}
+
+/// A state GET's samples, [`reply_samples`]' among them, merged per key
+/// ([`KeyMerge`]): one sample a key, the newer by its in-band stamp, else
+/// its Zenoh timestamp.
+pub(crate) fn merged(
+    samples: impl IntoIterator<Item = zenoh::sample::Sample>,
+) -> Vec<zenoh::sample::Sample> {
+    let mut merge = KeyMerge::default();
+    for s in samples {
+        let key = s.key_expr().as_str().to_owned();
+        let mark = zenkey::inband::read(s.clone()).mark();
+        merge.offer(&key, mark, s);
+    }
+    merge.into_items()
+}
+
+fn reply_samples_in(
+    sample: &zenoh::sample::Sample,
+    epoch: Option<i64>,
+) -> Vec<zenoh::sample::Sample> {
+    if sample.kind() == zenoh::sample::SampleKind::Delete {
+        return vec![sample.clone()];
+    }
+    let encoding = sample.encoding().to_string();
+    let bytes = sample.payload().to_bytes();
+    let key = sample.key_expr().as_str();
+    match (
+        crate::model::inband::page(key, Some(&encoding), &bytes),
+        epoch,
+    ) {
+        (Some(Ok(page)), Some(e)) => zenkey::inband::replies_confirmed(sample, &page, e),
+        (Some(Ok(page)), None) => zenkey::inband::replies(sample, &page),
+        _ => vec![sample.clone()],
+    }
+}
+
+/// The id a snapshot's confirmations are stamped under
+/// (`reply_samples_aged`): the owner's clock, named by its address
+/// (`zenkey::inband::owner_clock`).
+pub fn owner_clock(key: &str) -> zenoh::time::TimestampId {
+    zenkey::inband::owner_clock(key)
 }
 
 /// The one `session.get` behind [`disciplined_get`] and [`state_get`]:
@@ -723,5 +952,71 @@ impl RepeatingQuery {
     /// as [`matching_status`](Self::matching_status).
     pub async fn matching_events(&self) -> Result<crate::bus::write::MatchingEvents> {
         crate::bus::write::MatchingEvents::for_querier(&self.querier).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zenkey_model::seed::Mark;
+    use zenkey_model::wire::{Run, Seq, Stamp};
+
+    fn ib(run: u16, seq: u32) -> Option<Mark> {
+        Some(Mark::InBand(Stamp {
+            run: Run::U16(run),
+            seq: Seq::new(seq).expect("a seq"),
+        }))
+    }
+
+    const K: &str = "zk2/lab/cfg/config.v1/state/view";
+
+    /// Review-bot on #1086: two replies of one key in the wrong order, an
+    /// instance's page entry at seq 4 then another replier's per-key reply
+    /// of that run at seq 2, keep seq 4, where the last arrival used to
+    /// win. Across two runs nothing orders them, so the later arrival is
+    /// kept (observer §4.1); an unstamped or refused reply never replaces a
+    /// stamped one; each key keeps one item, in the order it first came.
+    #[test]
+    fn a_key_keeps_its_newer_reply_whatever_arrives_last() {
+        let mut m = KeyMerge::default();
+        assert!(m.offer(K, ib(5, 4), "seq 4"));
+        assert!(!m.offer(K, ib(5, 2), "seq 2"), "older within the run");
+        assert!(!m.offer(K, ib(5, 4), "seq 4 again"), "the same mutation");
+        assert!(!m.offer(K, None, "unstamped"));
+        assert!(m.offer("zk2/lab/cfg/config.v1/state/status", ib(5, 3), "status"));
+        assert_eq!(m.into_items(), ["seq 4", "status"]);
+
+        let mut m = KeyMerge::default();
+        assert!(m.offer(K, ib(5, 9), "run 5"));
+        assert!(
+            m.offer(K, ib(6, 1), "run 6"),
+            "another run: the later arrival"
+        );
+        assert_eq!(m.into_items(), ["run 6"]);
+    }
+
+    /// Review-bot on #1086: an entry is dated under the epoch in force,
+    /// never under 0 where a catalog is given. With no catalog given and
+    /// no descriptor in hand, 0 is the deployment's word; with one, its
+    /// epoch is; with two that disagree, none is, and the entry goes
+    /// undated.
+    #[test]
+    fn an_entry_is_dated_under_the_epoch_in_force() {
+        use crate::model::deployment::{Catalogs, DeploymentCatalog};
+        assert_eq!(
+            EntryEpochs::default().of(K),
+            Some(zenkey_model::catalog::EPOCH_WITHOUT_CATALOG)
+        );
+        let modem = DeploymentCatalog::new(1_767_225_600).expect("a catalog");
+        let given = Catalogs::new(vec![modem.clone()]);
+        assert_eq!(EntryEpochs::of_catalogs(&given).of(K), Some(1_767_225_600));
+        assert_eq!(
+            EntryEpochs::of_catalogs(&given).of(&format!("ns/{K}")),
+            Some(1_767_225_600),
+            "a key in a namespace"
+        );
+        let other = DeploymentCatalog::new(1_700_000_000).expect("a catalog");
+        let two = Catalogs::new(vec![modem, other]);
+        assert_eq!(EntryEpochs::of_catalogs(&two).of(K), None);
     }
 }

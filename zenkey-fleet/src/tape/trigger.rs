@@ -45,7 +45,7 @@
 //! projection through that session per address, as the watchdog's does
 //! (#747); `alert-firing` reads `alarms.v1` through live readers in that
 //! session, as the watchdog's does (#800, AC). The preamble is the owners' own
-//! answer (S4: target `All`, consolidation `Latest`, R6's discard) on the
+//! answer (S4: target `All`, consolidation `None`, R6's discard) on the
 //! plain-`state` projection of the watched selectors
 //! ([`state_projection`]), never a storage's.
 
@@ -235,9 +235,17 @@ pub fn state_projection(namespace: &str, selector: &str) -> Option<String> {
 }
 
 /// The owners' current state under `selector` (S4): target `All`,
-/// consolidation `Latest`, each reply on a concrete key (R6). A deletion
-/// within an owner's window is not a value, and is left out. Returns the
-/// values and the error replies counted.
+/// consolidation `None`, each reply on a concrete key (R6), a snapshot's
+/// page read as its entries (core §4.2; #977's E3), merged per key by the
+/// tool's merge (observer §4.1, `bus::query::KeyMerge`). A deletion within
+/// an owner's window is not a value: it orders the key's later replies,
+/// and keeps no row. Returns the values, in the order their keys first
+/// arrived, and the error replies counted.
+///
+/// **The bound** is `max_replies` replies, as [`TriggerSpec::max_replies`]
+/// says, a snapshot's page counted one reply however many entries it
+/// holds: past it a reply is drained, counted with the errors (the
+/// header's `incomplete`), and not merged.
 async fn state_get(
     session: &Session,
     selector: &str,
@@ -247,25 +255,37 @@ async fn state_get(
     let replies = session
         .get(selector)
         .target(QueryTarget::All)
-        .consolidation(ConsolidationMode::Latest)
+        .consolidation(ConsolidationMode::None)
         .timeout(timeout)
         .await
         .map_err(|e| Error::bus("state preamble", selector, e))?;
-    let (mut values, mut errors) = (Vec::new(), 0u64);
+    let mut errors = 0u64;
+    let mut kept = 0usize;
+    // A deletion's item is `None`: it holds the key's mark, no row.
+    let mut merge: crate::bus::query::KeyMerge<Option<SampleView>> = Default::default();
     while let Ok(reply) = replies.recv_async().await {
-        match reply.into_result() {
-            Ok(s) if s.kind() == SampleKind::Put && !s.key_expr().is_wild() => {
-                if values.len() < max_replies {
-                    values.push(SampleView::of(&s));
-                } else {
-                    errors += 1;
-                }
+        let s = match reply.into_result() {
+            Ok(s) if !s.key_expr().is_wild() => s,
+            Ok(_) => continue,
+            Err(_) => {
+                errors += 1;
+                continue;
             }
-            Ok(_) => {}
-            Err(_) => errors += 1,
+        };
+        if kept >= max_replies {
+            errors += 1;
+            continue;
+        }
+        kept += 1;
+        for s in crate::bus::query::reply_samples(&s) {
+            let view = SampleView::of(&s);
+            let mark = view.mark();
+            let key = view.key.clone();
+            let item = (view.kind == SampleKind::Put).then_some(view);
+            merge.offer(&key, mark, item);
         }
     }
-    Ok((values, errors))
+    Ok((merge.into_items().into_iter().flatten().collect(), errors))
 }
 
 /// The watch set: every selector asked for, minus any that another one in
@@ -633,7 +653,7 @@ where
         // What the ring cannot tell you, fetched at trigger time: a key the
         // ring holds already has its story in the pre-roll rows, and a
         // preamble that repeated it would put a newer value *before* the
-        // deltas that led to it. `Latest` kept one value per key; two
+        // deltas that led to it. Each GET kept one value per key; two
         // overlapping selectors could still both hold one, kept once.
         let in_ring: BTreeSet<&str> = ring.iter().map(|v| v.key.as_str()).collect();
         let mut seen = BTreeSet::new();

@@ -246,13 +246,21 @@ pub fn read(sample: Sample) -> Read {
         Some(Ok(read)) => read,
     };
     if form == wire::Form::Snapshot {
-        let page = {
-            let bytes = sample.payload().to_bytes();
-            Page::parse(&bytes).map(Box::new).map_err(|r| match r {
-                zenkey_model::collection::PageRefusal::Body(b) => b,
-                // `envelope` parsed this envelope as a snapshot's.
-                other => unreachable!("a snapshot's envelope: {other}"),
-            })
+        use zenkey_model::collection::PageRefusal;
+        // `envelope` parsed this envelope as a snapshot's; a refusal of it
+        // here is the envelope's, never a panic on network input
+        // (review-bot on #1078).
+        let page = Page::parse(&sample.payload().to_bytes());
+        let page = match page {
+            Ok(p) => Ok(Box::new(p)),
+            Err(PageRefusal::Body(b)) => Err(b),
+            Err(PageRefusal::Envelope(refusal)) => return Read::Refused { sample, refusal },
+            Err(PageRefusal::NotSnapshot(f)) => {
+                return Read::Refused {
+                    sample,
+                    refusal: Refusal::Reserved(f),
+                };
+            }
         };
         return Read::Snapshot { sample, page };
     }
@@ -492,6 +500,85 @@ pub fn replies(sample: &Sample, page: &Page) -> Vec<Sample> {
             })
         })
         .collect()
+}
+
+/// [`replies`] for a reader that ages what it reads (`freshness.v2` §2.6,
+/// text 0.7; #977's E3): a live entry with a confirmation whose time is
+/// known (1 at the snapshot's time, 2 at its conf; core §7.5) carries it
+/// as its Zenoh timestamp, counted from the deployment epoch `epoch` in
+/// seconds, so the reader ages it as it aged a reply from its stamp. Its id
+/// names the owner's clock, which built the snapshot, by the owner's
+/// address ([`owner_clock`]): a snapshot carries no zid. Every other entry
+/// carries none.
+#[must_use]
+pub fn replies_confirmed(sample: &Sample, page: &Page, epoch: i64) -> Vec<Sample> {
+    use zenkey_model::collection::Confirmation;
+    use zenoh::bytes::Encoding;
+    use zenoh::key_expr::KeyExpr;
+    let clock = owner_clock(sample.key_expr().as_str());
+    page.members(sample.key_expr().as_str())
+        .into_iter()
+        .filter_map(|m| {
+            let key = KeyExpr::try_from(m.key.clone()).ok()?;
+            Some(match (m.payload(), m.attachment()) {
+                (Some(payload), _) => {
+                    let time = match m.confirmation {
+                        Confirmation::None => None,
+                        Confirmation::AtTime => Some(page.time),
+                        Confirmation::At(t) => Some(t),
+                    };
+                    let ts = time
+                        .and_then(|t| t.unix_ms(epoch))
+                        .and_then(|ms| u64::try_from(ms).ok())
+                        .map(|ms| {
+                            Timestamp::new(
+                                zenoh::time::NTP64::from(std::time::Duration::from_millis(ms)),
+                                clock,
+                            )
+                        });
+                    SampleBuilder::put(key, payload)
+                        .encoding(Encoding::ZENOH_BYTES)
+                        .timestamp(ts)
+                        .into()
+                }
+                (None, attachment) => SampleBuilder::delete(key).attachment(attachment).into(),
+            })
+        })
+        .collect()
+}
+
+/// The id a snapshot's confirmations are stamped under
+/// ([`replies_confirmed`]): the owner's clock, named by the owner's
+/// address in `key`, a namespace in front skipped (or the key itself),
+/// mixed into 16 bytes. A snapshot
+/// names no zid, so no measurement of the owner's session matches it; the
+/// deployment's word trusts it as any other (`freshness.v2` §2.6).
+#[must_use]
+pub fn owner_clock(key: &str) -> zenoh::time::TimestampId {
+    // The data key from its first `zk2` chunk on, a namespace in front
+    // skipped, so a key read in one and the same key read in none agree.
+    let mut owner = key.to_owned();
+    let mut rest = Some(key);
+    while let Some(k) = rest {
+        if k.starts_with("zk2/")
+            && let Ok(zenkey_model::grammar::ZkKey::Data { addr, .. }) =
+                zenkey_model::grammar::parse(k)
+        {
+            owner = addr.to_string();
+            break;
+        }
+        rest = k.split_once('/').map(|(_, r)| r);
+    }
+    let mix = |seed: u64| {
+        owner.bytes().fold(seed, |h, b| {
+            (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+        })
+    };
+    let mut id = [0u8; 16];
+    id[..8].copy_from_slice(&mix(0xcbf2_9ce4_8422_2325).to_le_bytes());
+    id[8..].copy_from_slice(&mix(0x8422_2325_cbf2_9ce4).to_le_bytes());
+    id[15] |= 1;
+    zenoh::time::TimestampId::try_from(id).expect("16 bytes, not all zero")
 }
 
 /// Why a sample's envelope was refused, read without stripping it

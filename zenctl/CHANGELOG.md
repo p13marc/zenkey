@@ -6,6 +6,26 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — owners answer in snapshots (#977 E3)
+
+Core 0.100 has an owner answer a state GET per collection: a collection read
+with its snapshot, in pages, a member read with each member's, and a
+per-key resource with a reply per key. Every state GET is consolidation
+`None`, and the reader merges its replies per key.
+
+| Before | Now | Notes |
+|---|---|---|
+| `get state` without `--param`: the template's selector, `…/plans/*`, under `Latest` | the collection read, `…/plans/**`, under `None`; JSON `selectors` says so | its snapshot arrives whole; a member read (`--param` given) keeps the member's key |
+| `get state`: a snapshot of no entry, exit 2 | exit 0, no row, its snapshot listed complete | the owner's word that it held no member (core §4.2); silence is still exit 2 |
+| `get state` of a `freshness.v2` collection: `last confirmed` from the reply's Zenoh timestamp | from the entry's confirmation: the snapshot's time while vouched for, else its last confirmation, under the owner's epoch; its clock named by the owner's address | `freshness.v2` 0.7 §2.6 |
+| `get`, `health`, `config`, `alarms`, `desired`, `why`, `doctor`, `snapshot`, `record --on`: an owner's state GET under `Latest` | under `None`, each page read as its entries | a snapshot of several pages is read whole |
+| `health`, `config`, `alarms`, `desired`, `doctor`, `check conform`: two replies of one key, from two instances or a page and a per-key reply, the last to arrive kept | the newer by its in-band stamp, within one run by seq, across two runs the later arrival | core S4, observer §4.1 (review-bot on #1086) |
+| `health`, `config`, `alarms`, `doctor`: an entry's confirmation dated under epoch 0 | under the epoch in force: the catalog the owner's descriptor names, read through `--catalog` where the verb takes one (`doctor`, `config`), else the catalogs given; 0 only with no catalog given and none named | an owner naming a catalog none given is or succeeds goes undated, its freshness unobservable, never 56 years off (core §8.6) |
+| `get state`, and every reader above, over a complete snapshot whose owner's descriptor read failed (an error reply, its timeout, a descriptor that does not read) | no omission rule: every entry merges, and nothing held drops | only where no descriptor answers at all is the reader's revision the deployment's word (core §4.2, F-497) |
+| `record --on`'s preamble: at most `max_replies` keys, a deletion taking one | at most `max_replies` replies, a snapshot's page one reply; a deletion keeps no row | its doc's bound, as before E3 |
+| `acl gen`: a binding leaving a state template unbound granted `…/state/plans/*` | `…/state/plans/**`, the collection read and its snapshot key | core §11.1 |
+| `acl gen --face-policy` under a `link.v2` policy: a window floor for every listed owner of state | only for an owner of state whose deletes only a tombstone proves | `link.v2` 0.9 §2.11 |
+
 ## Unreleased (`main`, zk2) — a heartbeat's time from the catalog's epoch (#1080)
 
 `freshness.v2` 0.6 §2.4: an owner's heartbeat counts its time from the

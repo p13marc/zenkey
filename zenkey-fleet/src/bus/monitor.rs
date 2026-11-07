@@ -1090,9 +1090,11 @@ impl Monitor {
     ///
     /// - the subscriber is declared first, then the seed legs run as bounded
     ///   GETs: S4's state GET on the selector (target `All`, consolidation
-    ///   `Latest`: each key's owner answers, and whatever holds a foreign
-    ///   key), and the `@adv` caches of the advanced publishers present
-    ///   (spec §2.5);
+    ///   `None`: each key's owner answers, by snapshot where it reads a
+    ///   collection, and whatever holds a foreign key), and the `@adv`
+    ///   caches of the advanced publishers present (spec §2.5). The watch
+    ///   holds no contract, so it maps no snapshot's index and applies no
+    ///   omission rule (observer §4.1, "Without the contract");
     /// - one per-key merge by the owner's in-band stamp spans seed *and*
     ///   live samples for the watch's whole life (observer §4.1: a tool
     ///   keeps core §4.2's merge for as long as it follows; by seq within a

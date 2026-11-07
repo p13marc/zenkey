@@ -403,10 +403,13 @@ impl Running {
 
 /// The payloads of a state GET (All + Latest).
 async fn state(tool: &zenoh::Session, key: &str) -> Vec<Vec<u8>> {
-    get(tool, key, b"", QueryTarget::All, ConsolidationMode::Latest)
+    get(tool, key, b"", QueryTarget::All, ConsolidationMode::None)
         .await
         .into_iter()
         .filter_map(|r| r.into_result().ok())
+        // A snapshot's page is its entries (core §4.2; #977's E3).
+        .flat_map(common::replies)
+        .filter(|s| s.kind() == zenoh::sample::SampleKind::Put)
         .map(|s| common::record(&s))
         .collect()
 }
@@ -3179,7 +3182,8 @@ async fn the_owner_example_implements_config_v2() {
                 .unwrap();
             let mut got = None;
             while let Ok(r) = rx.recv_async().await {
-                if let Ok(s) = r.into_result() {
+                // A snapshot's page is its entries (core §4.2; #977's E3).
+                for s in r.into_result().into_iter().flat_map(common::replies) {
                     let bytes = s.payload().to_bytes();
                     let e = zenkey::model::wire::Envelope::parse(&bytes).unwrap();
                     got = Some(iface.read_record(e.tag.get(), e.record, 0).unwrap());

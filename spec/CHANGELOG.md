@@ -3,6 +3,196 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.100 — 2026-11-07: state GETs answered by snapshot (#977)
+
+Epic #975, zk2c, makes the wire bandwidth-first. 0.97 defined form 7,
+the snapshot, and no rule adopted it. This version, 0.100 after 0.99's
+bare wire removed (#985's C4d), is #977's E3, the flip: an owner answers
+a state GET with one snapshot per collection, in pages, where it
+answered a reply per key. Every reply carries its key
+as text through each router, and its replier's id, about 120 bytes over
+each member's value. A reader now gets those bytes once per page.
+
+**Changed: S2, which key answers what.** "Answering a state GET", new
+under §4.2's table, says it.
+- **A collection** is one state or `@state` resource of an interface,
+  with its members. Its **snapshot key** is its key up to the template's
+  first parameter.
+- **A collection read**, a selector that includes the snapshot key
+  followed by `/**`, MUST draw the collection's snapshot on that key.
+- **A member read** MUST draw a snapshot of each member it reaches, on
+  the member's own key. A concrete key with no member MUST draw a
+  snapshot of no entry there.
+- **The per-key resources** keep S2's reply per key, its bytes and its
+  Zenoh timestamp: the states §4.3's table lists, and an archive's
+  records. S2's two stamp rules now bind those replies alone.
+- **asof** MUST be a seq at or below which the owner has recorded every
+  state mutation it minted.
+- **A live entry with a horizon** MUST carry its confirmation: 1 while
+  the owner vouches for the member, else 2 with its last confirmation.
+- **Pages** MUST be cut by §7.5's paging rule, under the page size,
+  1,024 bytes unless the deployment sets another.
+
+**Changed: S3.** A delete within the window is a tombstone in a
+snapshot, or a per-key `reply_del`. The deployment's raised window binds
+only what a tombstone alone proves: a per-key resource, a collection with
+no snapshot key, and a collection aligned from a peer archive.
+`link.v2` §2.11 floors those behind a face.
+
+**Changed: S4.** A state GET's consolidation is `None`, where it was
+`Latest`, and the consumer merges its replies per key. "Why `None`"
+says why: `Latest` keeps one page of a snapshot, and holds every reply
+until the final.
+
+**Added: §4.2's seed over snapshots.**
+- **Entries** merge as replies, each as its page arrives.
+- **The omission rule.** A late joiner MUST apply it to a complete
+  snapshot: a member the snapshot does not list has no value. Its guard
+  keeps a value newer than the snapshot: under its run above asof, or
+  under another run heard after the GET was asked.
+- **An incomplete snapshot** drops nothing, and a late joiner SHOULD read
+  the collection again.
+- **A snapshot heard on a subscription** MUST NOT be merged.
+- **What a profile reads** as a reply or a `reply_del` is a live entry
+  or a tombstone.
+
+**Changed elsewhere.**
+- **§4.3.** The table's `freshness.v2` row goes: its time rides in band.
+  "Minting" mints a snapshot's time and each last confirmation as it did
+  the reply's stamp. The residual risks "Inside a seed" and "Where two
+  instances answer" are rewritten for `None`.
+- **§4.4.** Alignment reads by snapshot, a collection read or a member
+  read of each key recorded. An absence from the owner's complete
+  snapshot is positive evidence. A snapshot's entry is
+  kept as the put it stands for.
+- **§4.1 and Appendix B.** `None` delivers each reply as it arrives, and
+  `Auto` on a concrete key is `Latest`. A reply's key must intersect the
+  query's.
+- **§7.5.** The page size's default, a snapshot's pages complete on one
+  key, and a reader drops a snapshot heard live.
+- **§8.5.** A state GET across a face, and its pages' cost.
+- **§11.1.** Consume's GET covers a collection's snapshot key with
+  `/**`. A per-template grant refuses the snapshot by its own key.
+- **§12.** A constrained reader's fragment bounds the page size.
+
+**Decided here, where the memo left it open or said otherwise.**
+- **`freshness.v1`'s states stay per key.** The memo answered them with
+  confirmation 2. Their row reads a reply's Zenoh time, which is the
+  memo's own test for a per-key resource. So `freshness.v1` is unchanged.
+- **An archive's records stay per key,** with their attachment, as the
+  memo's §1.2 said. Its `@state/{origin...}` has no snapshot key anyway.
+- **A concrete member read with no member** draws a snapshot of no
+  entry. The memo had it draw nothing. Without it, a consumer bound to
+  one member could never see a delete beyond the window.
+- **The omission rule reaches the snapshot's key and under it.** So a
+  member's own snapshot speaks for that member alone.
+- **"Heard after the GET"** counts a mutation heard again. Two
+  instances' snapshots then seed alike in either order.
+- **S3 still binds a collection aligned from a peer archive.** A peer
+  answers per key, so its absence proves nothing. The memo relaxed S3 to
+  the per-key resources.
+- **No warning lint** for a template whose first chunk is a parameter.
+  No contract has one, and its members are answered one by one.
+- **The confirmation's evidence** is `freshness.v2`'s scenario §3, which
+  reads both codes.
+
+**Answered: zk2py round 103's F-495 to F-497.** Round 103 read 0.97's
+form 7 cold. Its three findings are a gap and two minor errors, none a
+blocker.
+- **F-497, a gap: the revision that maps a snapshot's index.** A
+  snapshot names no revision, and its tag is its collection's type's. A
+  minor revision that adds a resource sorting before a collection moves
+  its index. `modem.v3` 3.3's seven `packed/` states make
+  `sdu/endpoint/{endpoint}` 11, where 3.0 to 3.2 make it 4.
+  - **§4.2, new.** A late joiner MUST map the index with the revision the
+    owner's descriptor names (§3.3), never with another it holds. That is
+    the fingerprint §7.6's reader already takes from the descriptor.
+  - **Where no descriptor reaches the reader**, across a constrained
+    face, the revision is the deployment's word, as the catalog the owner
+    writes under is (§8.6, R7).
+  - **An index that names no collection of the reply's key** draws no
+    omission rule, and the entries still merge. §7.5's index points to
+    §4.2, and observer §4.1's "Without the contract" names the revision.
+  - **Not the finding's other fix,** the reply's key overriding the
+    index. Two collections on one snapshot key, `a` and `a/{x}`, are
+    told apart by the index alone.
+  - **The memo** names no revision. This follows the descriptor, which a
+    reader already reads the owner's other answers by.
+- **F-495, minor: the fixtures' endpoints.** `snapshot/README.md` and
+  two of `bodies.json`'s notes said the endpoints are collection 4 of
+  `modem.v3`'s state. They are 4 in 3.0 to 3.2, and 11 in 3.3, the
+  example's head. The notes say so, and the bytes keep 4: the index is
+  the fixture's own.
+- **F-496, minor: Appendix E's `snapshot/` row** names the paging cases'
+  refusal, as the fixtures' README does.
+
+**Answered: zk2py round 104's F-498 and F-502.** Round 104 read core 0.99
+(#985's C4d) cold. Two of its five findings name the core, neither a
+blocker.
+- **F-498, a gap: a fixture with no rule.** E2 (#1078, c6f64924)
+  cherry-picked `seed/snapshot.json` onto `main` ahead of its rule, at
+  core 0.99. It had 42 cases, and no entry or row of Appendix E named it.
+  §4.2 here states what it pins:
+  - the snapshot key;
+  - a page's entries, merged as the page arrives;
+  - when a snapshot is complete (§7.5);
+  - the omission rule, its two guards and "heard after the GET";
+  - a snapshot heard on a subscription;
+  - a reader without the contract.
+
+  Appendix C and Appendix E name the file. E2's 42 cases stand
+  unchanged, and F-497's three make 45.
+- **F-502, minor: §5.1's order of refusals.** "The request" names three
+  refusals since 0.99: a query under another `Encoding`, a request the
+  parse refuses, and one whose record does not decode. "The order of
+  refusals" placed only the last, after the three refusals of the key.
+  It now places all three there. That is where the reference refuses
+  them: `zenkey`'s operation server reads the request after the key's
+  refusals. So a wildcard call under `application/json` to an operation
+  that forbids fan-out is `fanout_forbidden`. Round 104 saw both owners
+  answer so. No rule changed, and no fixture. `scenarios/operations.md`
+  §9 adds the step, step 9, which the text cites, and `zenkey`'s
+  `operations.rs` runs it, with an unexposed operation called under
+  `application/json` answered `unavailable`.
+
+**The evidence.**
+- **`seed/snapshot.json`:** 45 cases, E2's 42 and F-497's three. A
+  reader's collections and what it holds, then the GET's pages, per-key
+  replies and live samples, give what it holds and each snapshot's
+  completeness and omissions.
+  Written by an independent reading of the text, and checked by a second
+  that parses each page's bytes itself. They agree on 70,000 random cases
+  too. Checked, never blessed.
+- **`scenarios/state.md`:** §1, §2, §3, §5, §6, §7's step 5 and §10
+  rewritten for snapshots, and §14 new: pages, a member read, a page
+  lost, `Latest`'s control, a delete beyond the window, an empty
+  collection and two instances. `scenarios/constrained.md` §5 adds a
+  page within a fragment, and `presence.md`'s GET is `None`.
+- **F-497's cases** in `seed/snapshot.json` hold `modem.v3` 3.2's and
+  3.3's collections, as `examples/zk2/.history` gives them, and the
+  revision the owner's descriptor names. By 3.3 a page's index 11 is the
+  endpoints', and by 3.2 its index 4. A 4 under 3.3 is
+  `packed/identity`, of another snapshot key, and drops nothing.
+
+**Deliberately not changed.**
+- **§7.5's form and its parse,** 0.97's. No fixture's bytes in
+  `snapshot/` or `envelope/` move, and only F-495's two notes do.
+- **The merge's order,** S7 and §4.3's consumer rule.
+- **Retrieval (§8.4) and calls (§5),** already `None`.
+- **Profiles that read replies.** `desired.v1`, `alarms.v1`,
+  `health.v1`, `config.v1` and `config.v2` read an entry as a reply,
+  through "What a profile reads". `redundancy.v1` §2.10's "A seed" still
+  says `Latest` keeps one reply per key: under `None` both arrive, and
+  the consumer keeps the incumbent's. Its text, its scenario §9,
+  `telemetry.v1`'s scenario §9 and `alarms.v1`'s scenario §3 are left for
+  their profiles.
+- **No section number** and no fingerprint moves.
+
+**The figures.** `RULES.md` lists 262 rules, 13 more than 0.99's. S2's rules
+become three, one fewer. §4.2 adds seven owner rules, and S4 and the
+seed five for a late joiner, F-497's among them. Observer §4.1 adds one
+for a tool, and §12 one.
+
 ## 0.99 — 2026-11-07: the bare wire removed (#980, #985)
 
 0.94, #985's C4c, moved every call onto §7.5's forms and kept a MAY. A

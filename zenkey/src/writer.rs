@@ -940,13 +940,18 @@ impl EventWriter {
         record: &[u8],
         stamp: zenkey_model::wire::Stamp,
     ) -> Result<String> {
-        self.put_under(
-            ZBytes::from(record.to_vec()),
-            None,
-            SystemTime::now(),
-            Some(stamp),
-        )
-        .await
+        let put = self
+            .put_under(
+                ZBytes::from(record.to_vec()),
+                None,
+                SystemTime::now(),
+                Some(stamp),
+            )
+            .await;
+        // The model's seq was pending (core §4.2, "Its asof"): an event is
+        // never recorded, so it holds no snapshot's asof back once sent.
+        self.minter.settle(stamp);
+        put
     }
 
     async fn put_under(

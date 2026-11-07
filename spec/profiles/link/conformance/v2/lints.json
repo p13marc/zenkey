@@ -1130,7 +1130,118 @@
       ],
       "note": "a namespace the carve does not carry: `zk_not_denied` (§2.15). Written by reading link.v2 0.7",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"probe-a\"\nattach           = \"device\"\ndevices          = [\"lab/probe-a\"]\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "contracts": [
+        "examples/zk2/link/radio.v1.toml"
+      ],
+      "expect": [
+        {
+          "at": "lab/radio-a",
+          "code": "window_under_outage",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "implements": {
+        "radio-a": [
+          "radio.v1"
+        ]
+      },
+      "note": "§2.11: radio.v1's `oper`, a `freshness.v1` state, is a per-key resource: its owner's window left at 60 s against an outage of 86,400 s is `window_under_outage`",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 2\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 271\nopen_timeout_ms      = 1000000\naccept_timeout_ms    = 1000000\ninterests_timeout_ms = 1000000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"none\"\nmax_outage_s     = 86400\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 1000000\n",
+      "windows": {}
+    },
+    {
+      "contracts": [
+        "examples/zk2/link/radio.v1.toml"
+      ],
+      "expect": [],
+      "implements": {
+        "radio-a": [
+          "radio.v1"
+        ]
+      },
+      "note": "§2.11: the same window raised to the outage: no finding",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 2\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 271\nopen_timeout_ms      = 1000000\naccept_timeout_ms    = 1000000\ninterests_timeout_ms = 1000000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"none\"\nmax_outage_s     = 86400\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 1000000\n",
+      "windows": {
+        "lab/radio-a": 86400
+      }
+    },
+    {
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "expect": [],
+      "implements": {
+        "radio-a": [
+          "config.v1",
+          "health.v1",
+          "modem.v3"
+        ]
+      },
+      "note": "§2.11: zenoh-modem's contracts are read by snapshot: rf0's window at the core's 60 s draws no finding under a link.v2 policy, where link.v1's draws `window_under_outage`",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 2\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 271\nopen_timeout_ms      = 1000000\naccept_timeout_ms    = 1000000\ninterests_timeout_ms = 1000000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"none\"\nmax_outage_s     = 86400\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 1000000\n",
+      "windows": {}
+    },
+    {
+      "expect": [
+        {
+          "at": "lab/radio-a",
+          "code": "window_under_outage",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "implements": {
+        "radio-a": [
+          "relay.v1"
+        ]
+      },
+      "interfaces": {
+        "relay.v1": [
+          {
+            "annotations": {},
+            "template": "{peer}/route",
+            "token": "state"
+          }
+        ]
+      },
+      "note": "§2.11: a template whose first chunk is a parameter keeps the floor: a window one second short is `window_under_outage`",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 2\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 271\nopen_timeout_ms      = 1000000\naccept_timeout_ms    = 1000000\ninterests_timeout_ms = 1000000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"none\"\nmax_outage_s     = 86400\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 1000000\n",
+      "windows": {
+        "lab/radio-a": 86399
+      }
+    },
+    {
+      "expect": [],
+      "implements": {
+        "radio-a": [
+          "relay.v1"
+        ]
+      },
+      "interfaces": {
+        "relay.v1": [
+          {
+            "annotations": {},
+            "template": "route/{peer}",
+            "token": "state"
+          },
+          {
+            "annotations": {},
+            "template": "oper",
+            "token": "@state"
+          }
+        ]
+      },
+      "note": "§2.11: states read by snapshot draw no floor, whatever window is given",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 2\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 271\nopen_timeout_ms      = 1000000\naccept_timeout_ms    = 1000000\ninterests_timeout_ms = 1000000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"none\"\nmax_outage_s     = 86400\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 1000000\n",
+      "windows": {
+        "lab/radio-a": 1
+      }
     }
   ],
-  "description": "link.v2's linter (v2.md §2.1, §2.4, §2.10, §2.16), a face's `frames` and `horizon_s` among it. Each case is a face policy, `policy`, and `expect`, every finding of it, sorted by face (none first), `at`, then `code`, as link.v1's lints.json writes them. A policy with no `profile` is link.v1's, read finding for finding as link.v1 §2.1 says. A device face (§2.5) is `attach = \"device\"` with `devices`. A case may carry link.v1's `block`, read as link.v1's lints.json reads it, `zk_not_denied` on a device face read as §2.15 says. The device cases, from case 40, were written by reading the text, not derived by the reference."
+  "description": "link.v2's linter (v2.md §2.1, §2.4, §2.10, §2.11, §2.16), a face's `frames` and `horizon_s` among it. Each case is a face policy, `policy`, and `expect`, every finding of it, sorted by face (none first), `at`, then `code`, as link.v1's lints.json writes them. A policy with no `profile` is link.v1's, read finding for finding as link.v1 §2.1 says. A device face (§2.5) is `attach = \"device\"` with `devices`. A case may carry link.v1's `block`, read as link.v1's lints.json reads it, `zk_not_denied` on a device face read as §2.15 says. The device cases, from case 40, were written by reading the text, not derived by the reference. A case may give a deployment and its windows as link.v1's lints.json does (`implements`, `contracts` or `interfaces`, `windows`): the plan is derived, and `window_under_outage` reads §2.11's floor."
 }

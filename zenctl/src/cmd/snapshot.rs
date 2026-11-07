@@ -3,7 +3,7 @@
 //! compared by zk2 key.
 //!
 //! The take is the engine's [`take_snapshot`]: one state GET per selector,
-//! the owners answering (spec §4.2 S4: target All, consolidation Latest),
+//! the owners answering (spec §4.2 S4: target All, consolidation None),
 //! every reply folded per key and resolved through the raw observers' lens
 //! — the presence read made first, in the namespace, naming each address's
 //! instances and its owner's session zid, and the revisions its descriptors

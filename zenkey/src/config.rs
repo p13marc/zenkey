@@ -150,6 +150,11 @@ pub struct ServiceConfig {
     /// The tombstone window, in seconds (S3): 60 unless set. For state an
     /// archive records, at least the longest outage expected between them.
     pub tombstone_window_s: Option<u64>,
+    /// The page size its snapshots are cut under, in bytes (core §4.2,
+    /// "Pages"; §7.5): [`crate::state::DEFAULT_PAGE_BYTES`], 1,024, unless
+    /// set. A deployment sets it for an owner read across a constrained
+    /// face, from the face's batch (§8.5).
+    pub snapshot_page_bytes: Option<usize>,
     /// A router-stamped key this owner watches to detect its own clock
     /// running ahead (§4.3, "Ahead"). Unset: no detection.
     pub clock_reference: Option<String>,
@@ -232,6 +237,8 @@ struct RawConfig {
     #[serde(default)]
     tombstone_window_s: Option<u64>,
     #[serde(default)]
+    snapshot_page_bytes: Option<usize>,
+    #[serde(default)]
     clock_reference: Option<String>,
     #[serde(default)]
     meta: BTreeMap<String, serde_json::Value>,
@@ -263,6 +270,7 @@ impl TryFrom<RawConfig> for ServiceConfig {
             capabilities: raw.capabilities,
             bindings: raw.bindings,
             tombstone_window_s: raw.tombstone_window_s,
+            snapshot_page_bytes: raw.snapshot_page_bytes,
             clock_reference: raw.clock_reference,
             meta: raw.meta,
         })
@@ -286,6 +294,7 @@ impl ServiceConfig {
             capabilities: BTreeSet::new(),
             bindings: BTreeMap::new(),
             tombstone_window_s: None,
+            snapshot_page_bytes: None,
             clock_reference: None,
             meta: BTreeMap::new(),
         }

@@ -557,11 +557,44 @@ fn peer_config(endpoint: &str, listen: bool, gossip: bool) -> zenoh::Config {
     c
 }
 
+/// A GET's reply as the per-key replies it stands for (core §4.2, "What a
+/// profile reads"; #977's E3): a snapshot's page its entries, each on its
+/// member's key; every other reply as it came.
+pub fn replies(s: zenoh::sample::Sample) -> Vec<zenoh::sample::Sample> {
+    match zenkey::inband::read(s.clone()) {
+        zenkey::inband::Read::Snapshot { page: Ok(p), .. } => zenkey::inband::replies(&s, &p),
+        _ => vec![s],
+    }
+}
+
+/// [`replies`], each live entry stamped with its confirmation as the
+/// runtime's consumer stamps it (`zenkey::inband::replies_confirmed`,
+/// `freshness.v2` §2.6), its time from the deployment epoch 0.
+pub fn replies_aged(s: zenoh::sample::Sample) -> Vec<zenoh::sample::Sample> {
+    match zenkey::inband::read(s.clone()) {
+        zenkey::inband::Read::Snapshot { page: Ok(p), .. } => {
+            zenkey::inband::replies_confirmed(&s, &p, 0)
+        }
+        _ => vec![s],
+    }
+}
+
+/// A member read's page as the reply its one entry stands for, on the
+/// page's own key (core §4.2: its id empty); every other sample as it came.
+fn entry(s: zenoh::sample::Sample) -> zenoh::sample::Sample {
+    let mut r = replies(s.clone());
+    if r.len() == 1 && r[0].key_expr() == s.key_expr() {
+        r.remove(0)
+    } else {
+        s
+    }
+}
+
 /// A sample read as a reader reads it (core §4.3, §7.5): a put that
-/// carries the zk2c envelope with its record as its payload, every other
-/// sample unchanged.
+/// carries the zk2c envelope with its record as its payload, a member
+/// read's page as its entry's, every other sample unchanged.
 pub fn strip(s: zenoh::sample::Sample) -> zenoh::sample::Sample {
-    zenkey::inband::read(s).into_sample()
+    zenkey::inband::read(entry(s)).into_sample()
 }
 
 /// A sample's payload as its record: [`strip`]'s.
@@ -569,9 +602,10 @@ pub fn record(s: &zenoh::sample::Sample) -> Vec<u8> {
     strip(s.clone()).payload().to_bytes().into_owned()
 }
 
-/// A sample's in-band stamp, when it carries the envelope.
+/// A sample's in-band stamp, when it carries the envelope; a member read's
+/// page's, its entry's.
 pub fn inband(s: &zenoh::sample::Sample) -> Option<zenkey::model::wire::Stamp> {
-    zenkey::inband::stamp(s)
+    zenkey::inband::stamp(&entry(s.clone()))
 }
 
 /// One heartbeat as a raw subscriber reads it (`freshness.v2` §2.4, core

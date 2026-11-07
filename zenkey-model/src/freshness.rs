@@ -353,6 +353,39 @@ pub enum Observation {
     Archived,
 }
 
+/// What a GET reader read of one member from its collection's snapshot
+/// (`freshness.v2` §2.6, text 0.7; core §4.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Entry {
+    /// The snapshot lists the member neither live nor as a tombstone.
+    Omitted,
+    /// A tombstone: a `reply_del`.
+    Tombstone,
+    /// A live entry, with its confirmation's age at the instant of
+    /// judgement: the snapshot's time for confirmation 1, the entry's conf
+    /// for 2. `None` for confirmation 0, or a time that is unknown: no
+    /// stamp.
+    Live { stamp_age: Option<StampAge> },
+}
+
+impl Observation {
+    /// A snapshot's `entry` of one member as a GET's observation (v2 §2.6):
+    /// an entry is judged as a reply, its confirmation's time as the stamp,
+    /// under the reader's trust in the owner's `clock`, which built the
+    /// snapshot. A member a `complete` snapshot omits is deleted, by core
+    /// §4.2's omission rule, and one an incomplete snapshot omits is
+    /// silent.
+    #[must_use]
+    pub fn of_entry(complete: bool, entry: Entry, clock: ClockTrust) -> Observation {
+        let reply = match entry {
+            Entry::Omitted if !complete => None,
+            Entry::Omitted | Entry::Tombstone => Some(Reply::Delete),
+            Entry::Live { stamp_age } => Some(Reply::Put { stamp_age }),
+        };
+        Observation::Got { reply, clock }
+    }
+}
+
 /// The answer to "is this member's value fresh?" (§5). Stale is the
 /// finding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -974,6 +1007,22 @@ impl<T: Arrival> View<T> {
             sections.push(SectionRead::Confirmed(vouched));
         }
         Applied::Read { gap, sections }
+    }
+
+    /// A GET's snapshot vouched for `key`'s live value at `at` (v2 §2.6,
+    /// text 0.7; core §7.5's confirmation): kept as a heartbeat's would be,
+    /// when it is later than what the view held. A deleted member, or one
+    /// the view does not hold, is left as it is.
+    pub fn confirm(&mut self, key: &str, at: T) {
+        let Some(k) = crate::heartbeat::base_relative(key) else {
+            return;
+        };
+        if let Some(h) = self.members.get_mut(k)
+            && !h.deleted
+            && h.confirmed.is_none_or(|c| c < at)
+        {
+            h.confirmed = Some(at);
+        }
     }
 
     /// The last heartbeat that vouched for `key` since its last mutation.

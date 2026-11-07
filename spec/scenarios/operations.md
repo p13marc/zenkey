@@ -265,6 +265,9 @@ receives it.
 8. **A request under another `Encoding`.** `h1/tc` serves `set` again. A
    session of the test's own sends it the bytes of step 1's request form,
    `0x40` then the record, under `application/json`.
+9. **The order of refusals under another `Encoding`.** The same session
+   sends those bytes under `application/json` to `…/@op/interfaces/*/set`,
+   a wildcard call to an operation that forbids fan-out.
 
 **Expected.**
 1. Every query arrives under `zenoh/bytes`, as `0x40` then the request's
@@ -308,3 +311,6 @@ receives it.
 8. `invalid_request`, and no handler runs. Under another `Encoding` a
    query carries no request form, whatever its bytes (core §5.1, "The
    request").
+9. `fanout_forbidden`, and no handler runs: the key's refusals come
+   before the request is read, whatever the query's `Encoding` (core
+   §5.1, "The order of refusals").

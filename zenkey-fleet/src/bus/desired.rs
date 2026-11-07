@@ -806,13 +806,22 @@ async fn reports_get(
                         Ok(r) => r,
                         Err(_) => return (false, replies_out),
                     };
+                    let mut samples = Vec::new();
                     while let Ok(reply) = replies.recv_async().await {
                         let Ok(sample) = reply.result() else {
                             complete = false;
                             continue;
                         };
+                        if sample.key_expr().as_str().contains('*') {
+                            continue;
+                        }
+                        // A snapshot's page is its entries (core §4.2;
+                        // #977's E3).
+                        samples.extend(crate::bus::query::reply_samples(sample));
+                    }
+                    for sample in &samples {
                         let key = sample.key_expr().as_str();
-                        if key.contains('*') || sample.kind() == SampleKind::Delete {
+                        if sample.kind() == SampleKind::Delete {
                             continue;
                         }
                         // The envelope first (core §7.5): a report is its
@@ -865,7 +874,9 @@ fn slice_asked(res: &RoleResolution, reports: Option<&Result<ReportsGet, String>
 }
 
 /// S4's GET of one slice from its author (core §4.2): target `All`,
-/// consolidation `Latest`, through the crate's one state GET.
+/// consolidation `None`, through the crate's one state GET, every reply
+/// merged per key by its stamp, never the last to arrive
+/// (`bus::query::merged`).
 async fn slice_get(session: &Session, slice: &str, t: Duration) -> Result<SliceGet, String> {
     let replies = crate::bus::query::state_get(session, slice, &crate::bus::query::GetOpts::new(t))
         .await
@@ -876,17 +887,21 @@ async fn slice_get(session: &Session, slice: &str, t: Duration) -> Result<SliceG
         replies: Vec::new(),
         at: SystemTime::now(),
     };
+    let mut samples = Vec::new();
     while let Ok(reply) = replies.recv_async().await {
         let Ok(sample) = reply.result() else {
             out.complete = false;
             continue;
         };
-        let key = sample.key_expr().as_str();
-        if key.contains('*') {
+        if sample.key_expr().as_str().contains('*') {
             continue;
         }
+        // A snapshot's entry stands for its reply (core §4.2; #977's E3).
+        samples.extend(crate::bus::query::reply_samples(sample));
+    }
+    for sample in crate::bus::query::merged(samples) {
         out.replies.push(SliceReply {
-            key: key.to_owned(),
+            key: sample.key_expr().as_str().to_owned(),
             delete: sample.kind() == SampleKind::Delete,
             stamp: sample
                 .timestamp()

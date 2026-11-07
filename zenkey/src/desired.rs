@@ -30,7 +30,7 @@
 //! | §2.1 one document type per role: a target given a role on two or more desired resources MUST refuse to start (0.7, F-224) | [`ServiceBuilder::desired_target`] counts the author's desired resources the requirement names (every one for a requirement naming none, or a manifest's role, core §3.1); two or more are `two_documents`, refused ([`Error::NotExposed`]), and [`ServiceBuilder::start`] refuses too, nothing declared |
 //! | §2.3 one author, each target parameter bound to `self.system` or `self.service`; the slice's key | [`model::binding`] over the role's configured binding: an invalid one refused, the start with it ([`Error::NotExposed`]), an optional one left unbound the kill switch |
 //! | §2.4 the version is the author's stamp; a type MAY carry a revision | each sample's zenoh timestamp; the revision read by [`model::revision_of_text`] (a JSON payload, every number exact) or [`model::revision_of_value`] (CBOR, protobuf) |
-//! | §2.5 subscribe, then seed, at start and each time the author's instance token appears | [`Target`]: the subscription on the slice's key, then S4's GET (target `All`, consolidation `Latest`), every sample and reply judged in the order it arrives on one task |
+//! | §2.5 subscribe, then seed, at start and each time the author's instance token appears | [`Target`]: the subscription on the slice's key, then S4's GET (target `All`, consolidation `None`), every sample and reply judged in the order it arrives on one task |
 //! | §2.5 the author's instance token, never an interface token | the watch reads `zk2/<author>/@zk/instance/*` |
 //! | §2.5 SHOULD seed again after a lost delivery | not detected: a zenoh subscriber does not say what it lost; [`TargetStartup::reread`] is the deployment's period, which covers it |
 //! | §2.5 a GET that draws nothing is no verdict; R6 | nothing is observed from silence; a sample or reply on any key but the slice's is discarded |
@@ -1832,14 +1832,19 @@ impl TargetInner {
         });
     }
 
-    /// S4's GET of the slice (target `All`, consolidation `Latest`): the
-    /// replies on its key, and whether it ran to its final reply.
+    /// S4's GET of the slice (target `All`, consolidation `None`; #977's
+    /// E3): every reply on its key, in the order it arrived, and whether
+    /// it ran to its final reply. A desired resource is a per-key resource
+    /// (core §4.2), answered with a reply per key; two on the key, two
+    /// instances', are judged in turn, as §2.6 orders an author's versions.
+    /// A snapshot's entry on the key stands for its reply (core §4.2, "What
+    /// a profile reads").
     async fn get_owner(&self, key: &str) -> (Vec<Incoming>, bool) {
         let rx = match self
             .session
             .get(key)
             .target(QueryTarget::All)
-            .consolidation(ConsolidationMode::Latest)
+            .consolidation(ConsolidationMode::None)
             .timeout(self.startup.timeout)
             .with(flume::unbounded::<Reply>())
             .await
@@ -1855,7 +1860,18 @@ impl TargetInner {
         while let Ok(r) = rx.recv_async().await {
             match r.into_result() {
                 // R6: a reply on any key but the slice's is discarded.
-                Ok(s) if s.key_expr().as_str() == key => out.push(Incoming::of(&s, Via::Owner)),
+                Ok(s) if s.key_expr().as_str() == key => match crate::inband::read(s.clone()) {
+                    crate::inband::Read::Snapshot {
+                        sample,
+                        page: Ok(page),
+                    } => out.extend(
+                        crate::inband::replies(&sample, &page)
+                            .iter()
+                            .filter(|m| m.key_expr().as_str() == key)
+                            .map(|m| Incoming::of(m, Via::Owner)),
+                    ),
+                    _ => out.push(Incoming::of(&s, Via::Owner)),
+                },
                 Ok(_) => {}
                 Err(_) => complete = false,
             }

@@ -7,6 +7,60 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.9 — 2026-11-07: §2.11, windows floored only where a tombstone alone proves a delete (#977 E5)
+
+Core 0.100 (#977's E3) answers a state GET by snapshot. A complete
+snapshot omits a member deleted beyond the window, and a concrete member
+read with no member draws a snapshot of no entry. So a late joiner across
+a face learns of such a delete without a raised window. `link.v1` §2.11
+floors every listed owner of state at the face's outage, for want of
+that. This text, written against core 0.100, narrows the floor.
+
+**Added: §2.11, which replaces `link.v1` §2.11 for a link.v2 policy.**
+- **The rule.** A deployment MUST configure each listed service that
+  owns a resource whose deletes only a tombstone proves, a device face's
+  devices among them (§2.5), with a window of at least the face's
+  `max_outage_s`. `[F: v2/plan.json, v2/lints.json]`
+- **Those resources** are the per-key resources (core §4.2) and a
+  template whose first chunk is a parameter, which has no snapshot key.
+  The plan reads them from the revisions given, their `uses` included.
+- **The plan's `windows`** lists only such owners, and
+  `window_under_outage` reads that floor.
+- **What the floor does not see.** Core S3 still raises the window of a
+  collection an archive aligns from a peer archive, and a reader whose
+  grant reaches part of a collection by a wildcard proves no absence.
+- **So zenoh-modem's `rf0` keeps its 60 s window** on its faces: its
+  states are read by snapshot.
+
+**Changed: §0 and §5.** §0's readings name §2.11. §5's window row reads
+§2.11's floor. Appendix A gains its row.
+
+**The evidence.**
+- **`conformance/v2/plan.json`:** 37 cases, 10 new on the SBD router's
+  policy, whose face exposes nothing, so that only the windows move. They
+  cover a template with a leading parameter, states read by snapshot, a
+  `freshness.v1` state, the same under `freshness.v2`, a desired
+  resource, a state metric, a governed interface, two revisions, and
+  zenoh-modem's contracts.
+- **17 faces of 15 earlier cases** lose their floor: probe.v1's,
+  the device faces' among them, `tracker.v1`'s on its device face, whose
+  note now says so, and zenoh-modem's five routers'. radio.v1's stays:
+  its `oper` is a `freshness.v1` state, a per-key resource. The link.v1
+  policies' plans are unchanged.
+- **`conformance/v2/lints.json`:** 63 cases, 5 new with a deployment and
+  its windows.
+- **Written by an independent reading of the text.** The same script
+  first reproduced every face's windows by `link.v1`'s rule, a device
+  face's devices read as listed services, before applying this one.
+  Checked, never blessed.
+
+**Deliberately not changed.**
+- **`link.v1` §2.11.** A link.v1 policy floors every listed owner of
+  state, as before.
+- **No other rule, plan member or finding.** The floor's form,
+  `{service, min_s}`, is `link.v1`'s.
+- **The status stays `draft`.** It restates `link.v1` text 0.16 still.
+
 ## link.v2 0.8 — 2026-11-02: editorial: Appendix B reads `modem.v3` 3.3's frames, no rule changed (#991)
 
 #991 gives `modem.v3` revision 3.3. Its readings cross in three frame

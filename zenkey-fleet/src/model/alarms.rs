@@ -340,8 +340,8 @@ pub struct SeedRead {
     pub discarded: u64,
     /// What each key answered under a zk2c envelope said (core §7.5): its
     /// in-band stamp, what orders it, or why the envelope was refused, its
-    /// reply then undecodable, never read as a document. `S4`'s `Latest`
-    /// answers a key once.
+    /// reply then undecodable, never read as a document. The GET's replies
+    /// are merged per key by their stamps (S4), so a key answers once.
     pub envelopes: BTreeMap<String, Result<zenkey_model::wire::Stamp, zenkey_model::wire::Refusal>>,
 }
 
@@ -1342,14 +1342,19 @@ impl AlarmBook {
         // §2.14 step 5 (text 0.11): only a stamp its owner set is
         // attributed. A freshness.v2 owner's put carries none, so a
         // subscription's delivery arrives under a router's stamp or none;
-        // a GET's reply carries its last confirmation, the owner's.
+        // a GET's reply carries its last confirmation, the owner's. Since
+        // core 0.100 (#977's E3) that is a snapshot's confirmation, stamped
+        // on the owner's clock named by its address, which no zid is: no
+        // instance's, so unattributed.
         let by_heartbeat = self.confirms_by_heartbeat(&e.owner);
+        let snapshot_clock = crate::bus::query::owner_clock(key);
         let stamp_id = e
             .latest
             .as_ref()
             .filter(|l| l.doc.is_some())
             .filter(|l| l.via == AlarmVia::Get || !by_heartbeat)
             .and_then(|l| l.stamp.as_ref())
+            .filter(|t| *t.get_id() != snapshot_clock)
             .map(|t| zid_value(&t.get_id().to_string()));
         let previous_instance = !zids.is_empty() && stamp_id.is_some_and(|id| !zids.contains(&id));
         let held_whole = self.owner_set(&e.owner, now).verdict == SetVerdict::Established;

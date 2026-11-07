@@ -548,7 +548,13 @@ pub async fn observe(
             return None;
         }
         let scope = crate::model::alarms::AlarmScope::of(&address);
-        Some(crate::bus::alarms::get(session, scope.alarms_selector(), t).await)
+        // No catalog is given to `check conform`: 0 where the owner's
+        // descriptor names none, and undated where it names one.
+        let epochs = crate::bus::query::EntryEpochs::observed(
+            &crate::model::deployment::Catalogs::default(),
+            o,
+        );
+        Some(crate::bus::alarms::get(session, scope.alarms_selector(), t, &epochs).await)
     };
     let telemetry = async {
         if presence.is_err() {
@@ -1596,7 +1602,12 @@ async fn config_suite(
         None => {
             let selector =
                 crate::bus::config::ConfigTarget::One(address.clone()).state_selector(false);
-            crate::bus::config::get(session, &selector, t).await
+            // No catalog is given to `check conform` (see the alarms').
+            let epochs = crate::bus::query::EntryEpochs::observed(
+                &crate::model::deployment::Catalogs::default(),
+                presence,
+            );
+            crate::bus::config::get(session, &selector, t, &epochs).await
         }
         Some(Ok(target)) => {
             crate::bus::config::get_records(session, &[(address.clone(), target.clone())], t).await

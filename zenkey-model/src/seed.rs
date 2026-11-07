@@ -378,8 +378,8 @@ pub struct HeldMember<'a> {
     pub heard_after: bool,
 }
 
-/// The omission rule (core 0.97 §4.2 as E3 states it; #977's E2 defines
-/// it, and no reader applies it before E3): a late joiner holds `snapshot`
+/// The omission rule (core §4.2; #977's E2 defines it, E3's readers apply
+/// it, through [`crate::collection::omit`]): a late joiner holds `snapshot`
 /// complete, heard on `key`, its collection's snapshot key or a member's
 /// key. Each member of the collection at `key` or under it
 /// (`of_collection` says which keys are its members) that the snapshot
