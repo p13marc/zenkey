@@ -461,7 +461,10 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   `v2/lints.json` 40–57 written from the text and run unblessed;
   `config.v1` 0.10's §2.1 excepts the first hop; `scenarios/constrained.md`
   §10 runs in `zenkey/tests/constrained.rs` (`ServiceConfig::first_hop`,
-  the device's sessions by zid under the carve); 246 rules.
+  the device's sessions by zid under the carve); 246 rules. Core 0.98
+  (zk2py round 102's F-492) changed no text: the index reads the role a
+  subject opens with and each role joined to it, never one its qualifier
+  names, so the owner class counts 76.
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`

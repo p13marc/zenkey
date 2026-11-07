@@ -3,6 +3,22 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.98 — 2026-11-07: the rule index reads a subject's own role (#609)
+
+zk2py's round 102 read core 0.96 and observer 0.26 cold. Its F-492 is the
+index's. No text changed, and no rule did. `observer.md` stays text 0.26.
+
+**F-492: the index's, no text changed.** Two rules name the owner only in
+a qualifier of their subject. Core §8.4's SHOULD binds "A deployment with
+such an owner". Observer §3.11's MUST NOT binds "A tool that knows an
+owner is on a first hop". `scripts/gen-rules-index.py` read every role
+word of a subject, so `RULES.md` listed both under the owner too. It now
+reads the role a subject opens with, and each role joined to it, as in "A
+caller or a tool". The owner class counts 76 where it counted 78. The
+deployment's rule stays under the deployment, the tool's under the
+observer, and the index still lists 250 rules. Its self-test holds both
+cases.
+
 ## 0.97 — 2026-11-02: a collection's snapshot defined (#977)
 
 Epic #975, zk2c, makes the wire bandwidth-first. An owner answers a state
