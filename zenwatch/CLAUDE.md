@@ -66,7 +66,9 @@ Claude Code loads this file when working in `zenwatch/`; the root `CLAUDE.md` is
   `run`'s start a `liveliness-gone` naming an interface that an instance
   present marks `"token": false` (#982 H3: a first-hop owner holds no
   interface token; `PresenceRules::refuse_tokenless`, saying to write
-  `instance-gone`).
+  `instance-gone`; a presence read for it that failed refuses nothing and
+  is said at warn, naming the rules left unchecked, `engine::tokenless_refusal`,
+  #1074).
   `check-config` and `run` pass one gate (`load_checked`: the file, the
   context, the namespace, the contracts, the state file). Sinks: `ntfy`,
   `smtp`, `webhook`, `exec` — the one that runs code, deliberately last.

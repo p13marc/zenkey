@@ -7,6 +7,12 @@ names where its question went, or that nothing on `main` asks it yet. No
 aliases and no shims, except where the two spellings were always one fact
 (`base` and `namespace`).
 
+## Unreleased (`main`, zk2) — a failed read for the tokenless refusal is said (#1074)
+
+| Before | Now | Notes |
+|---|---|---|
+| `run`'s start: a presence read for the tokenless refusal that failed, skipped in silence | said at warn, naming the `liveliness-gone` rules it leaves unchecked; it still refuses nothing | those rules run, and one on a tokenless interface never fires |
+
 ## Unreleased (`main`, zk2) — `liveliness-gone` on a tokenless interface (#982 H3)
 
 | Before | Now | Notes |
