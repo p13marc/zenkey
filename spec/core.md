@@ -1094,8 +1094,29 @@ from S4's GET and follows a subscription.
 - **A snapshot heard on a subscription** is no owner's answer (§7.5). A
   consumer or a tool MUST NOT merge a snapshot heard on a subscription,
   nor count it toward a complete snapshot. `[F: seed/snapshot.json]`
-- **Without the contract** a reader cannot map a collection's index to
-  its template, so it applies no omission rule: [`observer.md`](observer.md) §4.1.
+- **The owner's revision maps the index.** A late joiner MUST map a
+  snapshot's collection index with the revision of the interface that the
+  owner's descriptor names (§3.3), never with another revision it holds.
+  A snapshot names no revision: its tag is its collection's type's (§7.5).
+  `[F: seed/snapshot.json]`
+  - **Why.** A minor revision can add a resource that sorts before a
+    collection, and so move its index. `modem.v3` 3.3's seven `packed/`
+    states make `sdu/endpoint/{endpoint}` collection 11. In 3.0 to 3.2 it
+    is 4, and 3.3's 4 is `packed/identity`. One deployment can run both
+    revisions (R4).
+  - **Where no descriptor reaches the reader**, as across a constrained
+    face (§8.5), the owner's revision is the deployment's word, as the
+    catalog the owner writes under is (§8.6, R7). Where that catalog lists
+    one revision of the interface, it is that one.
+  - **An index the reply's key does not name.** Where that revision has
+    no state resource of the reply key's kind token at the index, or has
+    one of which the reply's key is neither the snapshot key nor a
+    member's key, the late joiner applies no omission rule over that
+    snapshot. Its entries still merge, on their keys.
+    `[F: seed/snapshot.json]`
+- **Without the contract**, or without the owner's revision, a reader
+  cannot map a collection's index to its template, so it applies no
+  omission rule: [`observer.md`](observer.md) §4.1.
 - **R6 and a tool's seed**: [`observer.md`](observer.md) §4.1.
 - **A selector over several owners.** A GET on a selector that matches
   several owners' keys is addressed to the owner's keys, as S4 requires,
@@ -2302,7 +2323,9 @@ record      that many bytes
   **more**. More is 1 when a later page of the snapshot follows.
 - **The collection's index** is its resource's place, from 0, among the
   interface's resources of the reply key's kind token, in the canonical
-  form's order (§9.5). A reader with the contract maps it to a template.
+  form's order (§9.5). A reader maps it to a template with the revision
+  its owner runs (§4.2): a minor revision that adds a resource can move
+  it.
 
 **The flags** byte holds four fields, its bits numbered as CH's are:
 
@@ -5364,7 +5387,7 @@ section each was written against, whose pointer leads on.
 | `conformance/compat/` | §9.7 retention, §9.8, R4 |
 | `conformance/descriptors/` | §3.3 |
 | `conformance/budget/` | §2.7, `lossless.json` and the reader's stall included |
-| `conformance/seed/` | §4.2 a late joiner's merge: `merge.json` the Zenoh timestamps' order, unstamped samples, and a tool's across two ids; `inband.json` §4.3's in-band stamps, plain and serial order, and a tool's and a consumer's across two runs; `snapshot.json` a seed over snapshots, their pages, asof and the omission rule |
+| `conformance/seed/` | §4.2 a late joiner's merge: `merge.json` the Zenoh timestamps' order, unstamped samples, and a tool's across two ids; `inband.json` §4.3's in-band stamps, plain and serial order, and a tool's and a consumer's across two runs; `snapshot.json` a seed over snapshots, their pages, asof, the omission rule and the revision that maps a collection's index |
 | `conformance/errors/` | §5.2: `forms.json` §7.5's error form, and every reply error it refuses read as the transport's, a router's `Timeout`, a querier's and one under another `Encoding` among them |
 | `conformance/envelope/` | §7.5, a call's forms and a snapshot's envelope included; `calls.json` §5.1's and §5.2's forms by an operation's types |
 | `conformance/snapshot/` | §7.5, a snapshot's pages: their bytes, their reading and the paging rule |
@@ -5532,11 +5555,12 @@ brief:
     neither. They give which arrivals a tool's merge keeps, and for a
     state key, which a consumer accepts.
   - **`snapshot.json`**: a reader's collections, each its index, template
-    and snapshot key; what it holds when it asks a GET; and what arrives
-    after, by the GET or the subscription: a sample, or a snapshot's page
-    as `snapshot/bodies.json` reads one, with its hex. They give what it
-    holds after the last arrival, and each snapshot's pages, whether it
-    is complete, and what its omission rule dropped.
+    and snapshot key, or those of each revision it holds, with the one the
+    owner's descriptor names. Then what it holds when it asks a GET, and
+    what arrives after, by the GET or the subscription: a sample, or a
+    snapshot's page as `snapshot/bodies.json` reads one, with its hex.
+    They give what it holds after the last arrival, and each snapshot's
+    pages, whether it is complete, and what its omission rule dropped.
 - **`envelope/`**: one byte → CH's form, run width and tag
   (`vectors.json`'s `headers`). An envelope's or a form's bytes in hex,
   and the sample that carries them → the parse, or the refusal's token,
@@ -5565,7 +5589,7 @@ brief:
   size, or the writer's refusal (`bodies.json`'s `writes`). A page's bytes,
   CH to its last tombstone → the page, or the reader's refusal, the first
   in §7.5's order (`reads`). A snapshot and a page size → its pages' bytes
-  and sizes (`pages`).
+  and sizes, or the writer's refusal (`pages`).
   - **A page** is its tag, run and asof, its time, index, more bit and
     collection, and its live entries and tombstones.
   - **An entry** is its id, its own run or `null` for the header's, and
