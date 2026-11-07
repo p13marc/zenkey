@@ -51,7 +51,9 @@ Claude Code loads this file when working in `zengui/`; the root `CLAUDE.md` is t
   Each live tick hands the lens feed the runs its puts state in band
   (`update::bus::hear_runs` over `LensFeed::runs_in`/`on_runs`, #1074), so
   a descriptor kept across a token's return is read again once a put
-  states another run.
+  states another run. Since #1079 `runs_in` hands on only a run not read
+  yet at its address, and `on_runs` holds the feed's read across no GET,
+  so a tick never spawns a call that queues behind another's GET.
   **The lens**: the feed's catalog and generation, the contract store
   (offline contracts plus retrieval, §8.4), and the identity cache under
   its own `identity_epoch`, bumped at every door the lens's inputs move

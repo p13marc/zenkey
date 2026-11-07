@@ -450,8 +450,20 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   filtered by `KeptDescriptors::addresses` without the lock, then
   `on_runs`, which zengui's tick calls), a kept descriptor stating another
   run forgotten so the return GETs, a reused one on trust
-  (`KeptDescriptors::on_trust`) until a put states another run, then read
-  again once (`outrun`), a silent GET leaving it held; the
+  (`KeptDescriptors::on_trust`, by its reuse, `reuse_of`) until a GET
+  serves it (`served`), a put stating another run owing that GET
+  (`outrun`), a silent GET leaving it held and on trust; since #1079 each
+  `(address, run)` read once (`KeptDescriptors::asked`/`asked_of`, at most
+  `MAX_ASKED_RUNS` 16 per address; a run already read filtered by
+  `runs_in` too, so a tick hearing it spawns nothing), read again only when
+  a token of the address goes or comes (`follow_keeping`) or at a full read
+  (`forget_described`), and `on_runs` holding the feed's read only to say
+  what is owed and again to apply what the GETs served, never across a GET
+  or `fetch_all`, an answer the instance's token or a re-read outran
+  meanwhile dropped (`served` false); `src/bus/lens.rs`' tests run it
+  through an injected describe, no bus (`LensFeed::over`,
+  `describe_with`), and `tests/first_hop.rs` reads the lens's counters
+  after its catalog settles (`until_lens`); the
   doctor's `first-hop-token` (35 checks, a warning, `DoctorSpec::first_hop`,
   not asked without one): an interface token, or a contract key a device's
   own session answers (`HeldBundles`, replier zid against `meta.zid`, every
