@@ -292,7 +292,7 @@ linked to R1 through a path the test can cut and heal.
 1. 20 executions on A, none on B: B declares no operation queryable, and
    no `unavailable` one.
 2. One reply, A's.
-3. No value and no envelope from B: the call ends silent, or with zenoh's
+3. No value and no error from B: the call ends silent, or with zenoh's
    own error reply, which X reads as silence (core O5).
 
 ## §9 A consumer following the incumbent during a split (§2.10; core S7)
