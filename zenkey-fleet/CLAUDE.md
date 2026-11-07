@@ -374,7 +374,11 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   the runtime's consumer on the owner's contract (`Window::open_v2`), and
   acts through `Client` on it (`ConfigCall::v2`: `set_of`/`control_of`
   write `Set<T>`/`Control` from `config.v1`'s requests, a reply read as
-  `ConfigActAnswer::Record`, a refusal's `Error` by the layout).
+  `ConfigActAnswer::Record`, a refusal's `Error` by the layout as
+  `ConfigAppError::V2`, its code the packed enum's own name and the escape
+  `null`, never `config.v1`'s spelling; zk2py round 102, F-485).
+  `ConfigRefusal::message` is `None` where an error form carried none, on
+  either profile (core §7.5), never `""`.
   `model::config::view_of` reads the record as the view, so every §5 judge
   runs on it (`ConfigReading::profile`, `differs` for "survives",
   `Fresh::Record`, projection not asked); `ConfigReport` gains `profile`,

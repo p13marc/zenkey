@@ -361,7 +361,11 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   `cli::ConfigV2Args`); the record stands for the view, every act answers
   `record`, a contract group's `set` and `--status` are refused here.
   `live_zk2.rs`'s `config_v2_*` run scenarios-v2 §13–§14 and the doctor
-  and `check conform` against `rfcfg.v1` on the owner example's device.
+  and `check conform` against `rfcfg.v1` on the owner example's device;
+  `config_v2_verbs_…` runs §11 step 2 too: a device refusal shows
+  `"error": {"code": "device_refused"}` (table `Error device_refused`) and
+  no `message` (table `refused — app, no message`), zk2py round 102's
+  F-485.
   **Tree (#307)**, and the depth carries meaning: a **noun** is something
   declared, alive or persisted and gets verbs under it (`service
   list|show`, `iface list|show`, `schema show`, `namespace list`,

@@ -4,6 +4,15 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — a `config.v2` refusal in its own words (#609, F-485)
+
+zk2py's round 102 read the Config tool's engine cold.
+
+| Before | Now | Notes |
+|---|---|---|
+| a `config.v2` owner's refusal: "ConfigError device-refused", `config.v1`'s spelling | "Error device_refused", the packed enum's own name; its escape "the escape: a code this revision does not name", no longer undecodable | v2 §2.5, §4 |
+| a refusal whose error form carried no message: an empty caption | "no message", never an empty string | core §7.5; v2 §2.15 sends none for a change carrying a sensitive value |
+
 ## Unreleased (`main`, zk2) — a first hop's link closed (#982 H3)
 
 | Before | Now | Notes |
