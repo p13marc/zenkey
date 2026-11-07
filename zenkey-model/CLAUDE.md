@@ -305,10 +305,19 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   the pages held, `complete`), `coll_of`/`collection_of` (a resource's index
   among its kind token's, canonical order), `snapshot_prefix` and
   `is_member`; `seed::apply_snapshot` (the omission rule over a complete
-  snapshot, `HeldMember`), which no reader calls before E3; and
-  `seed_snapshot` runs E3's draft `seed/snapshot.json` (42 cases, merge,
-  pages, the omission rule), cherry-picked; size helpers saturate
-  (`saturating`), and `read_body` never pre-allocates from a count.
+  snapshot, `HeldMember`); size helpers saturate (`saturating`), and
+  `read_body` never pre-allocates from a count. E3 (core 0.99, the flip):
+  `collection_at` (the collection a snapshot's index names, read with the
+  owner's revision, `None` where the reply's key is neither its snapshot
+  key nor a member's: no omission, F-497), `omit` (the omission rule over a
+  complete snapshot through it), `collection_read` (a selector over every
+  member as `<snapshot key>/**`); `freshness::Entry`/`Observation::of_entry`
+  (a snapshot's entry aged as a reply, v2 0.6 §2.6) and `View::confirm`;
+  `link::tombstone_only`/`Res::tombstone_only` (link.v2 0.9 §2.11's floor:
+  a per-key resource or a template with a leading parameter, any revision's);
+  `seed_snapshot` runs `seed/snapshot.json` (45 cases, a case's
+  `revisions`/`descriptor` mapping coll by the descriptor's revision),
+  `link_v2_lints` reads a case's deployment and windows.
   `telemetry.v2` (#983 T1, text 0.1, draft since T4): `telemetry::PROFILE_V2`/`uses_v2`, `SERIES`,
   `VOCABULARY_V2` (W105 reads a later major's own vocabulary, `contract::vocabulary`);
   `Measure::Counter { value, width }` (`Measure::counter` for v1's 64 bits), `pair`'s serial window

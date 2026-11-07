@@ -1009,6 +1009,22 @@ impl<T: Arrival> View<T> {
         Applied::Read { gap, sections }
     }
 
+    /// A GET's snapshot vouched for `key`'s live value at `at` (v2 §2.6,
+    /// text 0.6; core §7.5's confirmation): kept as a heartbeat's would be,
+    /// when it is later than what the view held. A deleted member, or one
+    /// the view does not hold, is left as it is.
+    pub fn confirm(&mut self, key: &str, at: T) {
+        let Some(k) = crate::heartbeat::base_relative(key) else {
+            return;
+        };
+        if let Some(h) = self.members.get_mut(k)
+            && !h.deleted
+            && h.confirmed.is_none_or(|c| c < at)
+        {
+            h.confirmed = Some(at);
+        }
+    }
+
     /// The last heartbeat that vouched for `key` since its last mutation.
     #[must_use]
     pub fn confirmed(&self, key: &str) -> Option<T> {

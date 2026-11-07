@@ -1,7 +1,10 @@
 //! A collection's snapshot (core §7.5's form 7, 0.97; #977's E1): one
 //! `state` or `@state` resource's members, their values and tombstones, in
-//! the pages of a GET's reply. Defined, and adopted by no rule yet: E2
-//! reads it, E3 has owners write it.
+//! the pages of a GET's reply. An owner answers a state GET with one per
+//! collection (core §4.2, #977's E3), and a reader merges its entries per
+//! key ([`Page::members`]), holds its pages ([`hear`]), and applies the
+//! omission rule over a complete one ([`omit`]), mapping its index with
+//! the revision the owner's descriptor names ([`collection_at`]).
 //!
 //! ```text
 //! page        CH · run · asof · body          a GET reply's payload, CH's tag the collection's type's
@@ -69,6 +72,7 @@ impl Time {
             .ok()
             .filter(|&s| s != u32::MAX)?;
         // From 0 to 999: `since` is not negative here.
+        debug_assert!((0..1000).contains(&(since % 1000)));
         let ms = (since % 1000) as u16;
         Some(Time::Known { s, ms })
     }
@@ -856,8 +860,8 @@ pub fn member_key(key: &str, id: &str) -> String {
     }
 }
 
-/// One entry of a page as the per-key reply it stands for (core 0.97
-/// §4.2's "what a profile reads", read by #977's E2): on its member's key,
+/// One entry of a page as the per-key reply it stands for (core §4.2's
+/// "What a profile reads"): on its member's key,
 /// with its stamp, a live entry the put of its record and a tombstone the
 /// delete. A reader that reads per-key replies reads these the same way:
 /// [`Member::payload`] is the bytes the mutation put, and
@@ -1055,8 +1059,8 @@ pub fn collection_of(contract: &Contract, kind: KindToken, coll: u32) -> Option<
         .nth(usize::try_from(coll).ok()?)
 }
 
-/// A collection's snapshot key below its kind token (core 0.97 §4.2,
-/// "Answering a state GET", E3's text): its template's chunks before its
+/// A collection's snapshot key below its kind token (core §4.2,
+/// "Answering a state GET"): its template's chunks before its
 /// first parameter, the whole template when it has none. `None` for a
 /// template whose first chunk is a parameter, which has no snapshot key.
 #[must_use]
@@ -1080,21 +1084,96 @@ pub fn snapshot_prefix(template: &Template) -> Option<Vec<&str>> {
 /// are not read: the caller asks of keys at or under one page's key.
 #[must_use]
 pub fn is_member(resource: &Resource, key: &str) -> bool {
+    data_of(key).is_some_and(|(kind, chunks)| {
+        let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
+        kind == resource.token && resource.template.matches(&refs).is_some()
+    })
+}
+
+/// The collection read of a GET on `selector`, a key expression over one
+/// resource's members (core §4.2, "A collection read"): its snapshot key
+/// followed by `/**`, where every parameter from its template's first on
+/// is a wildcard, so the GET asks for the collection whole.
+/// `None` for a selector that binds a parameter, which reads members, and
+/// for a template whose first chunk is a parameter, which has no snapshot
+/// key.
+#[must_use]
+pub fn collection_read(selector: &str, template: &Template) -> Option<String> {
+    let prefix = snapshot_prefix(template)?;
+    let n = template.segments().len();
+    if n == prefix.len() {
+        // No parameter: the member's key is the snapshot key, and its
+        // member read is answered by snapshot already.
+        return None;
+    }
+    let chunks: Vec<&str> = selector.split('/').collect();
+    let tail = chunks.len().checked_sub(n - prefix.len())?;
+    let head = tail.checked_sub(prefix.len())?;
+    // Past the prefix, each parameter a wildcard and each literal itself.
+    let rest = chunks[tail..]
+        .iter()
+        .zip(&template.segments()[prefix.len()..])
+        .all(|(c, g)| match g {
+            Segment::Literal(l) => c == l,
+            Segment::Param(_) => *c == "*",
+            Segment::Rest(_) => *c == "**",
+        });
+    (chunks[head..tail] == prefix[..] && rest).then(|| format!("{}/**", chunks[..tail].join("/")))
+}
+
+/// A zk2 data key's kind token and resource chunks, read from its first
+/// `zk2` chunk from which the grammar parses a data key, a namespace in
+/// front skipped (as [`is_member`] reads one).
+fn data_of(key: &str) -> Option<(KindToken, Vec<String>)> {
     let mut rest = Some(key);
     while let Some(k) = rest {
         if k.starts_with("zk2/")
-            && let Ok(ZkKey::Data {
-                kind,
-                resource: chunks,
-                ..
-            }) = parse(k)
+            && let Ok(ZkKey::Data { kind, resource, .. }) = parse(k)
         {
-            let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
-            return kind == resource.token && resource.template.matches(&refs).is_some();
+            return Some((kind, resource));
         }
         rest = k.split_once('/').map(|(_, r)| r);
     }
-    false
+    None
+}
+
+/// The collection a snapshot heard on `key` with index `coll` is, read
+/// with `contract`, the revision the owner's descriptor names (core §4.2,
+/// "The owner's revision maps the index"; #977's E3, F-497): the state
+/// resource of the reply key's kind token at `coll`, where `key` is its
+/// snapshot key or one of its members' keys. `None` where the revision has
+/// no such resource at the index, or has one of which `key` is neither:
+/// the reader then applies no omission rule over the snapshot, and its
+/// entries still merge on their keys.
+#[must_use]
+pub fn collection_at<'c>(contract: &'c Contract, key: &str, coll: u32) -> Option<&'c Resource> {
+    let (kind, chunks) = data_of(key)?;
+    let r = collection_of(contract, kind, coll)?;
+    let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
+    let at_snapshot_key = snapshot_prefix(&r.template).is_some_and(|p| p == refs);
+    (at_snapshot_key || r.template.matches(&refs).is_some()).then_some(r)
+}
+
+/// The omission rule over a snapshot a reader holds complete in `pages`,
+/// heard on `key`, read with `contract`, the revision the owner's
+/// descriptor names (core §4.2; #977's E3): the keys of `held` it drops,
+/// [`crate::seed::apply_snapshot`] over the collection
+/// [`collection_at`] names. Nothing where the pages are not one complete
+/// snapshot, or the index names no collection of `key`.
+#[must_use]
+pub fn omit<'a>(
+    contract: &Contract,
+    key: &str,
+    pages: &[Page],
+    held: impl IntoIterator<Item = crate::seed::HeldMember<'a>>,
+) -> Vec<&'a str> {
+    let Some(snapshot) = Snapshot::complete(pages) else {
+        return Vec::new();
+    };
+    let Some(r) = collection_at(contract, key, snapshot.coll) else {
+        return Vec::new();
+    };
+    crate::seed::apply_snapshot(&snapshot, key, |k| is_member(r, k), held)
 }
 
 #[cfg(test)]
@@ -1358,5 +1437,42 @@ type = { raw = "text/plain" }
         assert_eq!(pages[0].size(), 16);
         assert_eq!(Page::parse(&bytes).as_ref(), Ok(&pages[0]));
         assert_eq!(Snapshot::complete(&pages), Some(s));
+    }
+
+    #[test]
+    fn a_selector_over_every_member_reads_the_collection_whole() {
+        let t = crate::template::Template::parse("sdu/endpoint/{endpoint}").unwrap();
+        assert_eq!(
+            super::collection_read("zk2/h/rf0/modem.v3/state/sdu/endpoint/*", &t).as_deref(),
+            Some("zk2/h/rf0/modem.v3/state/sdu/endpoint/**")
+        );
+        assert_eq!(
+            super::collection_read("zk2/h/rf0/modem.v3/state/sdu/endpoint/a", &t),
+            None
+        );
+        let lead = crate::template::Template::parse("{peer}/route").unwrap();
+        assert_eq!(
+            super::collection_read("zk2/h/s/i.v1/state/*/route", &lead),
+            None
+        );
+        let one = crate::template::Template::parse("oper").unwrap();
+        assert_eq!(
+            super::collection_read("zk2/h/s/i.v1/state/oper", &one),
+            None
+        );
+        let two = crate::template::Template::parse("a/{x}/b/{y}").unwrap();
+        assert_eq!(
+            super::collection_read("zk2/h/s/i.v1/state/a/X/b/*", &two),
+            None
+        );
+        assert_eq!(
+            super::collection_read("zk2/h/s/i.v1/state/a/*/b/*", &two).as_deref(),
+            Some("zk2/h/s/i.v1/state/a/**")
+        );
+        // Another resource's selector of as many chunks reads nothing whole.
+        assert_eq!(
+            super::collection_read("zk2/h/s/i.v1/state/plans/*", &t),
+            None
+        );
     }
 }
