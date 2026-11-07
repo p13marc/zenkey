@@ -4,6 +4,13 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — a first hop's link closed (#982 H3)
+
+| Before | Now | Notes |
+|---|---|---|
+| an address up, down or unobservable | also "link closed", for a device a face policy lists on a device face with no instance token in a complete read: the unobservable tone, never down, and "N link closed" in the status cell when there is one | observer §3.11; zengui takes no `--face-policy` yet, so it shows it only where its projection is given one |
+| the doctor pane: thirty-four checks | thirty-five, `first-hop-token` among them | |
+
 ## Unreleased (`main`, zk2) — the Config tool on a `config.v2` owner (#985 G3)
 
 | Before | Now | Notes |

@@ -7,6 +7,13 @@ names where its question went, or that nothing on `main` asks it yet. No
 aliases and no shims, except where the two spellings were always one fact
 (`base` and `namespace`).
 
+## Unreleased (`main`, zk2) — `liveliness-gone` on a tokenless interface (#982 H3)
+
+| Before | Now | Notes |
+|---|---|---|
+| `liveliness-gone <ns>/zk2/<sys>/<svc>/@zk/alive/<iface>/**` on an interface whose provider is tokenless: ran, and never fired | refused at `run`'s start, exit 2, when an instance present marks the interface `"token": false`, naming the rule, the owner and `instance-gone <system>/<service>` to write instead | core §8.1, observer §3.6: an owner on a first hop holds no interface token; a selector not naming one interface (`alive/**`) is not refused |
+| the scheduled doctor: thirty-four checks | thirty-five: `first-hop-token`, never asked here, since zenwatch takes no face policy | the `zenwatch.v1` schema's check id stays an open string |
+
 ## Unreleased (`main`, zk2) — `catalog`: the deployment catalog, and the doctor's `catalog-missing` (#980, C1c)
 
 | Before | Now | Notes |

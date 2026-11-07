@@ -424,3 +424,17 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `link::check_block`; `to_json5` and `far_json5` name the devices;
   `tests/acl_plans.rs` pins `link-v2.device.json5` (the RF medium with
   `lab/radio-a` a device) and explains its pairs in both postures.
+  A first hop's readers (#982 H3, observer §3.11): `model::first_hop::
+  FirstHop` (a face policy's devices, `of_policy`); `LivePresence::
+  with_first_hop` tracks each and reads its absence under a complete read
+  as `AddressStatus::LinkClosed` (`link_closed`), never down, a withdrawal
+  still unobservable until the read it owes, `AddressWatch` moving nothing
+  on it; `Catalog::first_hop`/`service_given` fill the listings'
+  `first_hop` (`FirstHopSighting`); `LensFeed` keeps the descriptor an
+  instance takes with it and reads it again at its token's return, no GET
+  (`KeptDescriptors`, bounded at 1,024; `Observed::follow_keeping`;
+  `descriptors_read`/`descriptors_kept`), a re-read's replacing it; the
+  doctor's `first-hop-token` (35 checks, a warning, `DoctorSpec::first_hop`,
+  not asked without one): an interface token, or a contract key a device's
+  own session answers (`HeldBundles`, replier zid against `meta.zid`).
+  `tests/first_hop.rs` is constrained.md §10 from the tools' side.

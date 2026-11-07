@@ -44,6 +44,10 @@ Claude Code loads this file when working in `zengui/`; the root `CLAUDE.md` is t
   own on a watch session of its own, in no namespace on the wire keys (`presence_link.rs`, the zenwatch pattern,
   coalesced to four snapshots a second), so the pump's `Dropped(n)` cannot
   knock it to lost, and its batches fold into the `LensFeed` in order.
+  A first-hop device's `AddressStatus::LinkClosed` (#982 H3, observer
+  §3.11) shows "link closed" in the unobservable tone, never down, and
+  the status cell counts it apart; zengui takes no face policy yet, so
+  only a projection given one (`LivePresence::with_first_hop`) says it.
   **The lens**: the feed's catalog and generation, the contract store
   (offline contracts plus retrieval, §8.4), and the identity cache under
   its own `identity_epoch`, bumped at every door the lens's inputs move

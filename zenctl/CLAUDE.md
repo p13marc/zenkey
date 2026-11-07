@@ -24,9 +24,13 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   `--last-known <archive>`, never shown as current) beside the raw `get
   <selector>`, `watch` (R6 discards counted apart), `replay --namespace`;
   `pub` refuses a key a zk2 service owns (P3), and `retire` is gone.
-  FJ6's `doctor` judges a zk2 deployment against the core: thirty-four
-  checks since #980's C1c, `catalog-missing` asked only with `doctor
-  --catalog` (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`,
+  FJ6's `doctor` judges a zk2 deployment against the core: thirty-five
+  checks since #982's H3, `catalog-missing` asked only with `doctor
+  --catalog` and `first-hop-token` only with `doctor --face-policy`
+  (`service list|show --face-policy` list each device of a device face,
+  its link `up`, `link_closed` or `unobservable`, never down, `first_hop`
+  in the report; observer §3.11, #982 H3;
+  `zenkey_fleet::judge::doctor`, ids in `report::CheckId`,
   an appendable vocabulary whose JSON Schema is one open string branch
   since `zenwatch.v1` 1.1, so a new id leaves that contract unchanged), each a
   `Judgement` whose finding is the yes, read through a session in the
