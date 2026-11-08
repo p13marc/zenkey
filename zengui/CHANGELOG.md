@@ -4,6 +4,15 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — the freshness book's bounds, said (#1120)
+
+No rule changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| an owner interface past the freshness book's 256: its heartbeats counted nowhere a person sees | the status strip says how many, "freshness.v2: N interfaces past the 256 followed — their heartbeats not read", a caution | its own number, beside the strip's other bounds |
+| a member held before its key resolved: kept until forgotten past 4,096, even when its owner's revision turned out to use no freshness.v2 | dropped once that revision resolves, or once its owner's view is refused | the earliest held is still forgotten first past 4,096 |
+
 ## Unreleased (`main`, zk2) — a quiet collection's heartbeats read (#1113)
 
 No rule changed.

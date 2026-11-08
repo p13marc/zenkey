@@ -190,6 +190,10 @@ pub struct Status<'a> {
     /// Replay mode (issue #74): the panes are fed from a file and the live
     /// link is off — the strip must not describe a link nobody is pumping.
     pub replaying: bool,
+    /// Owner interfaces the window's `freshness.v2` book refused past its
+    /// bound (#1120): their heartbeats are not read, and the Inspector
+    /// shows nothing of them.
+    pub freshness_refused: u64,
     /// The monitor's retained window (#217): the budget is deliberately
     /// visible here, in the resting state — an operator should not discover
     /// the bound by hitting it. `None` before a monitor exists (O4), and
@@ -256,6 +260,7 @@ impl<'a> Status<'a> {
             prefs_note: chrome.prefs_note.as_deref(),
             replaying: work.replay.replay.is_some(),
             retention: obs.retention,
+            freshness_refused: obs.freshness.refused(),
         }
     }
 }
@@ -362,6 +367,19 @@ pub fn keys_text(keys: usize, evicted: u64) -> String {
 /// bound cost, not what the bounds cost between them.
 pub fn identity_text(cached: usize, evicted: u64) -> String {
     format!("identities: {cached} cached (+{evicted} retired — cache bound reached)")
+}
+
+/// The freshness book's bound (#1120), once it has refused an interface:
+/// its own number, never folded into another, as every bound's on this
+/// strip (O6). `None` while it refused none.
+pub fn freshness_text(refused: u64) -> Option<String> {
+    (refused > 0).then(|| {
+        format!(
+            "freshness.v2: {} past the {} followed — their heartbeats not read",
+            kit::plural(usize::try_from(refused).unwrap_or(usize::MAX), "interface"),
+            crate::freshness::MAX_OWNERS
+        )
+    })
 }
 
 /// The retained window's strip line (#217): the budget stated in the
@@ -494,6 +512,10 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
     // bitten: the key count already states the population, so a quiet cache
     // has nothing to disclose. Warning tone, like every other bound that is
     // costing something, and its own number.
+    // The freshness book's bound (#1120), once it has refused an interface.
+    if let Some(label) = freshness_text(s.freshness_refused) {
+        r = r.push(kit::status_chip(Tone::Caution, label));
+    }
     let (identities, identities_evicted) = s.identity;
     if identities_evicted > 0 {
         r = r.push(kit::status_chip(
@@ -576,6 +598,21 @@ pub fn link_word(link: &LinkState, replaying: bool, unreachable: bool) -> (Tone,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #1120: the freshness book's refusals are said once there is one,
+    /// as their own number, and not before.
+    #[test]
+    fn the_strip_says_the_interfaces_the_freshness_book_refused() {
+        assert_eq!(freshness_text(0), None);
+        assert_eq!(
+            freshness_text(1).as_deref(),
+            Some("freshness.v2: 1 interface past the 256 followed — their heartbeats not read")
+        );
+        assert_eq!(
+            freshness_text(3).as_deref(),
+            Some("freshness.v2: 3 interfaces past the 256 followed — their heartbeats not read")
+        );
+    }
 
     /// The pill's word (#536): every link state has one, the healthy and
     /// the failed states never share one, and the dot's tone agrees with the

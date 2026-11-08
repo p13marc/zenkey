@@ -1085,6 +1085,7 @@ fn the_strip_names_the_zk2_read_and_last_known_beside_it() {
             prefs_note: None,
             replaying: false,
             retention: None,
+            freshness_refused: 0,
         }));
         ui.find(text).is_ok()
     }
