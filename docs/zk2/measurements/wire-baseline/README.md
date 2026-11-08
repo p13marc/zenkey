@@ -569,6 +569,10 @@ lost all came after its link failed (W2's finding 5).
 Run 2026-11-08, from zenkey at 2fa3e6ab (#1098's branch, with modem.v3 3.4
 and link.v2 0.12). The same path, drivers and fork as phases 1 and 2, with
 three changes: zk2c's owners, link.v2's transport, and, for W1-73, rf0's face.
+The face policies were #1098's, which list each face's events: the rendered
+access control in `results/zk2c-*/configs/` denies the unlisted ones by name.
+Before #1098 a face lists none, and every exposed `face/` event crosses it,
+`face/device_fault` across lora0's SF7 face among them.
 
 - **The owners are zenkey's reference, not a device's.**
   - modem.v3's owner is **`zenctl gen`**, zenkey's generator, under
@@ -700,14 +704,15 @@ Measured under the lean stack with 16-bit runs (`zk2c-w2-lean-1`, the
 counters): **668.8 KB a day both directions as W2 makes it, 2.6 % of RF**
 (steady window 688.9 KB A->B and 71.5 KB B->A, 2,296 s and 238 s of air,
 with gen's 1,399 events; less those and plus the acts and reconnects as
-above). The corrected model, Appendix A §10, says 666 KB.
+above). The corrected model, Appendix A §10, says 674 KB.
 
 - **zk2c cuts W2 by 25 times on RF, not 41.** Today's W2 crossed 16.49 MB a
   day under the lean stack, derived (phase 2), and the model says 18.37 MB:
   25 and 27 times the 0.67 MB measured. Against phase 2's lean run with a
   dictionary trained on its own traffic, 10.46 MB, it is 16 times. The
-  channel goes from 64 % to 2.6 %. The model's 443 KB (1.7 %, 41 times) misses
-  by 1.5 times, in two elements.
+  channel goes from 64 % to 2.6 %. The first model's 443 KB (1.7 %, 41 times)
+  missed by 1.5 times, in three elements: the heartbeats, the desired
+  re-reads and the reconnects.
 - **The heartbeat is one put per interface, not 18 B inside a frame.**
   freshness.v2 sends a heartbeat per interface with a collection, each on its
   own key (§2.4). W2's device has three: health.v1's and rfcfg.v1's every
@@ -821,15 +826,16 @@ router B opened a new transport 3.9 s after the restore. Its reopen cost
 1. **The headline holds in order and misses in factor.** zk2c takes W2 from
    64 % of RF's channel to 2.6 %, and the idle link from 34,560 keep-alives a
    day each way to 1,440. W2 measured 669 KB a day, 25 times less than
-   today's wire derived the same way, where the report says 443 KB and 41
-   times (W2's findings above). W1-73 fits RF in 1.5 % with gen's frames and
+   today's wire derived the same way, where the report's first model said
+   443 KB and 41 times (W2's findings above). W1-73 fits RF in 1.5 % with gen's frames and
    LoRa SF7's duty in 55 %.
 2. **Appendix A is corrected where the model missed** (§10): W1-73's frames
-   at zenoh-modem's ranges (168 KB a day, not 200 KB), W2's heartbeats per
-   interface and its desired GET unconditional (666 KB, not 443 KB). Each
-   correction asserts the run it rests on; the measured anatomy (frame,
-   envelope, put, SDU) is asserted byte for byte. The report's text still
-   quotes the uncorrected zk2c figures.
+   at zenoh-modem's ranges (168 KB a day, not 200 KB, and at LoRa 288 s at
+   SF7, 916 s at SF9, 762 s at SF12's hourly keyframe), W2's heartbeats per
+   interface, its desired GET unconditional and a reconnect's subscriptions
+   (674 KB, not 443 KB). Each correction asserts the run it rests on; the
+   measured anatomy (frame, envelope, put, SDU) is asserted byte for byte.
+   The report's text quotes the corrected and measured figures.
 3. **`zenctl acl gen` does not write a face router's timestamping.** A
    router stamps every unstamped put it routes unless told not to (core
    §4.1), and core §8.2 says a deployment SHOULD turn it off on a router that

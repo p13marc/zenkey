@@ -10,22 +10,24 @@
 
 **Low bandwidth is the priority, and compatibility may break.** On that brief, zk2's wire spends most of a constrained link re-sending what has not changed. It spends the rest on per-message metadata that is larger than the information it carries.
 
-The reference device (W2, §2.2) on zenoh-modem's 2,400 bit/s RF link sends **18.4 MB a day today, 71 % of the channel**. Under the compact wire proposed here, "zk2c", it costs **443 KB a day, 1.7 %: 41 times less**.
+The reference device (W2, §2.2) on zenoh-modem's 2,400 bit/s RF link sends **18.4 MB a day today, 71 % of the channel**. Under the compact wire proposed here, "zk2c", it measured **669 KB a day, 2.6 %: 25 times less** than today's wire measured the same way, 16.5 MB (§9). The model, corrected to that run, gives 674 KB.
 
-| Element, W2 on RF (both directions) | Today, KB/day | zk2c, KB/day | What changes |
-|---|---:|---:|---|
-| Telemetry, 8 gauges + 4 counters every 10 s | 10,843 | 334 | One packed vector frame per 30 s, widths from declared ranges, on a declared key (§5.3) |
-| config.v1 view and status re-puts | 6,003 | 0.3 | The schema moves to the contract; values are sent on change; the heartbeat confirms them |
-| Keep-alives | 1,028 | 25 | One every 60 s, lease 240 s with keep_alive 4; data suppresses uplink keep-alives |
-| health.v1 status re-puts | 252 | 0.2 | Sent on change; the heartbeat confirms it |
-| alarms.v1 confirmations and transitions | 136 | 0.4 | Transitions are 8-byte records; confirmations are heartbeat bits |
-| desired.v1 periodic re-reads | 91 | 27 | Conditional GET by version |
-| Reconnects (4 a day) | 11 | 3.5 | Instance token only; one key scope per kind |
-| Events (15 a day) | 4 | 0.7 | Declared scope and an 8-character suffix instead of a ULID key |
-| Heartbeat (new) | — | 52 | 18 B every 30 s, half its 60-s horizon; 10.4 KB/day at a 300-s horizon |
-| **Total** | **18,367** | **443** | **41× less** |
+| Element, W2 on RF (both directions) | Today, KB/day | zk2c measured, KB/day | zk2c model, KB/day | What changes |
+|---|---:|---:|---:|---|
+| Telemetry, 8 gauges + 4 counters every 10 s | 10,843 | 334 | 334 | One packed vector frame per 30 s, widths from declared ranges, on a declared key (§5.3) |
+| config.v1 view and status re-puts | 6,003 | not measured | 0.3 | The schema moves to the contract; values are sent on change; the heartbeat confirms them |
+| Keep-alives | 1,028 | 22 | 25 | One every 60 s, lease 240 s with keep_alive 4; data suppresses uplink keep-alives |
+| health.v1 status re-puts | 252 | 0.2 | 0.2 | Sent on change; the heartbeat confirms it |
+| alarms.v1 confirmations and transitions | 136 | 2.0 | 0.4 | Confirmations are the heartbeat's; transitions stay alarms.v1's JSON documents, where the model has 8-byte records |
+| desired.v1 periodic re-reads | 91 | 84 | 64 | Today's GET every 300 s, its reply the whole document; a conditional GET by version would make it 27 |
+| Reconnects (4 a day) | 11 | 12 | 12 | Instance token only, one key scope per kind; the far side's subscriptions again, one per resource |
+| Events (15 a day) | 4 | 1.3 | 0.7 | A declared scope and the occurrence chunk instead of a ULID key |
+| Heartbeat (new) | — | 238 | 238 | One put per interface with a collection: health.v1's and the config's every 28.5 s, alarms.v1's every 427.5 s, 16–18 B each |
+| **Total** | **18,367** | **669** | **674** | **25× less measured, 27× modelled** |
 
-The today column is Appendix A's model, corrected to today's wire as measured across zenoh-modem's simulated RF and LoRa ([`measurements/wire-baseline/`](measurements/wire-baseline/README.md)). Appendix A asserts each tolerance. The zk2c column stays a model, built from Zenoh 1.10.1's codec layouts, zenoh-modem's layer formats and the zk2 rules.
+The today column is Appendix A's model, corrected to today's wire as measured across zenoh-modem's simulated RF and LoRa ([`measurements/wire-baseline/`](measurements/wire-baseline/README.md)). The zk2c columns are the same baseline's zk2c runs, on RF at link.v2's transport, and Appendix A's model corrected to them (its section 10). Appendix A asserts each tolerance. The measured column gives each element from the bare run's decode, with the lean stack's 16 B an SDU added (32-bit runs, 695 KB in all); its total is the lean run's counters, with 16-bit runs.
+
+The first zk2c model said 443 KB, 41 times less. It missed three things the reference's wire does. The heartbeat is one put per interface with a collection, never 18 B inside the telemetry frames: 52 KB modelled, 238 KB measured. Desired's re-read is today's GET, its reply the whole document: 27 KB, 64 KB. And a reconnect re-sends the far side's subscriptions, one per resource by its exact key: 3.5 KB, 12 KB.
 
 Today's column is what the owner sends. Measured, 16.5 MB of it reached the air, with compress storing as the model assumes. Router A's `drop` congestion control discarded 19 % of the telemetry before the air. That is a loss today's wire inflicts, not a saving (§9).
 
@@ -40,12 +42,12 @@ Today's column is what the owner sends. Measured, 16.5 MB of it reached the air,
 
 **Per medium:**
 
-- **RF, 2,400 bit/s, 220-byte frames.** zenoh-modem's 73 modem readings fit in **200 KB a day at one per minute** (§5.11). Today the 4 readings allowed across the face cost 334 KB a day at that rate, and the uplink's keep-alives 563 KB more. Measured, the readings took 281 KB, since zenoh batched some of them.
+- **RF, 2,400 bit/s, 220-byte frames.** zenoh-modem's 73 modem readings fit in **168 KB a day at one per minute**, 24 of them moving (§5.11). Measured across rf0's face with every reading moving every other minute, their frames took 207 KB. Today the 4 readings allowed across the face cost 334 KB a day at that rate, and the uplink's keep-alives 563 KB more. Measured, the readings took 281 KB, since zenoh batched some of them.
 - **LoRa SX1262, 1 % duty cycle (864 s of air a day).**
   - No LoRa face ships today, so "today" is what the current wire would cost. On today's wire the 4 link readings at one per minute exceed the duty budget at every spreading factor. Measured, the uplink took 999 s a day at SF7, 2,494 s at SF9 and 14,032 s at SF12; the model gives 909, 3,100 and 21,527 s.
   - Keep-alives and reopens are part of it. At zenoh-modem's keep_alive of 2, every lost keep-alive closed the link, and each reopen re-sends the handshake and every declaration (§6.2).
-  - zk2c fits the readings at SF9 in 473 s. At SF7, all 73 readings fit at one per minute (325 s a day).
-  - At SF12, all 73 fit only as an hourly keyframe plus 15-minute deltas, at 96 % of the budget.
+  - zk2c fits the 4 link readings at SF9 in 473 s. At SF7, all 73 readings fit at one per minute: 288 s a day with 24 moving. Measured across lora0's face with every reading moving every other minute, the uplink took 474 s, 55 % of the budget, its keep-alives included.
+  - At SF12, all 73 fit only as an hourly keyframe plus 15-minute deltas, at 88 % of the budget.
 - **Iridium SBD, 270 bytes each way per message.** A message is the bill, so bits buy *records per message*. A full keyframe of all 73 readings fits in one message (230 bytes) if its counters wrap at 24 bits, a declared loss (§5.11). Each data message refreshes the lease, so it can replace a keep-alive the tuned link sends anyway (§6.7).
 
 **What cannot shrink:**
@@ -332,6 +334,7 @@ Each element is given as today's wire, what must be kept, the compact layout, th
 - **Today.** Every member with a horizon is re-put unchanged, with a fresh stamp, at intervals of at most ttl/2; a stream must send a new sample at least as often ([freshness.v1](../../spec/profiles/freshness/v1.md)).
 - **zk2c.** **Confirmation is not mutation.** The heartbeat confirms by one bit per member, and GET and snapshot replies carry the last confirmation time.
   - Cost: 18 bytes every 30 s at a 60-s horizon, 52 KB/day for all of W2's horizon state. A 300-s horizon cuts that to 10.4 KB/day.
+  - Measured (§9), freshness.v2 sends one heartbeat per interface with a collection, each its own put: W2's three, health.v1's and the config's every 28.5 s and alarms.v1's every 427.5 s, cost 238 KB a day on RF.
   - Horizons on the hop should be chosen in seconds of budget, not left at 60.
 - **Risk.** An owner-wide heartbeat reveals every collection's liveness to anyone allowed to read it, wider than per-interface ACLs. Offer per-interface heartbeats, at about 11 extra bytes each.
 
@@ -368,9 +371,10 @@ Each element is given as today's wire, what must be kept, the compact layout, th
   - W2: 8 gauges × 11 bits + 4 counters × 32 bits = 216 bits per sample.
   - Three samples per 30-s frame cost 334 KB a day on RF; one frame per 10 s costs 536 KB.
   - Histogram bounds move to the contract and `count` is dropped.
-- **W1, zenoh-modem's 73 readings.** With declared ranges (illustrative: 14 integer gauges at 3–24 bits, 8 measures at 7–14 bits, 315 bits together):
-  - **Keyframe**: every member, absolute. 254 bytes with 32-bit counters. With 24-bit counters it is 203 bytes, a declared loss: a reader cannot recover the totals, and more than one wrap between two readings goes unseen.
-  - **Delta frame**: a 73-bit changed bitmap and the *absolute* values of the members that changed. Assuming 16 counters and 8 gauges change per minute, 98 bytes. A lost delta frame leaves the omitted members unknown, never wrong; the next keyframe heals them.
+- **W1, zenoh-modem's 73 readings.** At zenoh-modem's declared ranges (modem.v3's `Readings`: 51 counters at 20–40 bits, each for its worst rate, and 22 gauges at 1–27 bits, 1,469 bits of codes, every field optional), measured byte for byte (§9):
+  - **Keyframe**: every member, absolute. 205 bytes on a 16-bit run, its put 210 bytes, so two SDUs under the lean stack. A counter pair further apart than its width's window reads `wrap_or_decrease`, never a wrong rate.
+  - **Delta frame**: a 73-bit changed bitmap and the *absolute* values of the members that changed. Assuming 16 counters and 8 gauges change per minute, 84 bytes. A lost delta frame leaves the omitted members unknown, never wrong; the next keyframe heals them.
+  - The first model's illustrative widths gave 254 bytes and 98 bytes, on a `data_low` frame.
 
   | W1 case | RF | LoRa SF7 | LoRa SF9 | LoRa SF12 |
   |---|---|---|---|---|
@@ -378,12 +382,13 @@ Each element is given as today's wire, what must be kept, the compact layout, th
   | The same, today's uplink with its keep-alives and reopens: model (measured) | 897 KB/day (844) | 909 s ✗ (999) | 3,100 s ✗ (2,494) | 21,527 s ✗ (14,032) |
   | 4 link readings at 1/min, zk2c | 71 KB/day | 140 s | 473 s | 4,978 s ✗ (fits every 6 min) |
   | All 73 at 1/min, today | 6.52 MB/day | ✗ | ✗ | ✗ |
-  | All 73, zk2c: deltas each minute, keyframe every 15 min | **200 KB/day** | 325 s | 1,043 s ✗ (556 s every 2 min) | hourly keyframe + 15-min deltas: 833 s |
+  | All 73, zk2c: deltas each minute, keyframe every 15 min | **168 KB/day** | 288 s | 916 s ✗ (502 s every 2 min) | hourly keyframe + 15-min deltas: 762 s |
+  | All 73, zk2c, measured: a full frame of every reading, then one of none | 207 KB/day | 363 s (474 s with the uplink's keep-alives) | — | — |
 
-  ✗ marks a case that exceeds the 864 s of air the 1 % duty cycle allows in a day. modem.v3's streams are `data_low`, so every put and frame carries the 2-byte QoS extension. No LoRa face ships today, so the LoRa "today" rows are what the current wire would cost.
+  ✗ marks a case that exceeds the 864 s of air the 1 % duty cycle allows in a day. modem.v3's streams are `data_low`, so every put and frame carries the 2-byte QoS extension. Its frame resource `frames/fast` is `data`, which carries none, on a face's 3-byte frame of 16-bit sequence numbers. The first model's all-73 row was 200 KB, 325 s, 1,043 s (556 s) and 833 s. No LoRa face ships today, so the LoRa "today" rows are what the current wire would cost.
   - The readings' rows send each reading in its own SDU, the upper bound. zenoh batched some of them on the paced links. The measured readings fell between that bound and all four in one SDU, on every medium (§9).
   - The uplink row adds the keep-alives and, at LoRa's keep_alive of 2, the reopens. Each keep-alive lost on the downlink closes the link (§6.2).
-  - zk2c's rows are the readings alone.
+  - zk2c's rows are the readings alone, but the measured one's SF7 figure in brackets.
 - **Deadband.** A declared δ and maximum interval let the owner omit members that moved less than δ. The reader then knows the value to ±δ until the interval runs out, and nothing after. That is a declared loss, allowed by the brief. It is forbidden on timed and arbitrated streams (§5.17, §5.18).
 - **Risk.** One key per group means ACLs apply per group; split groups by audience.
 
@@ -463,7 +468,7 @@ Each element is given as today's wire, what must be kept, the compact layout, th
   - The version is the author's (run, seq).
   - **Report**: role 4 · source 2 · outcome 3 · last-known 1 · reserved 6, then in_force 40 · observed 40 · revision 16 · refusal code 3 · pointer index 8 · detail index 8 · reserved 5 = **17 bytes**.
   - The re-read becomes a **conditional GET** carrying the held version; an unchanged slice answers in about 35 bytes, 20 of them the reply's responder id.
-- **After.** 27 KB a day for W2. It falls to nearly zero where the author's heartbeat crosses the face, since the target then reads only when the author's high-water seq moves.
+- **After.** 27 KB a day for W2. It falls to nearly zero where the author's heartbeat crosses the face, since the target then reads only when the author's high-water seq moves. Measured (§9), the reference's re-read is still today's GET, its reply the whole document: 64 KB a day.
 
 ### 5.16 redundancy.v1
 
@@ -494,6 +499,8 @@ Each element is given as today's wire, what must be kept, the compact layout, th
 ### 6.1 One heartbeat per owner and horizon
 
 The heartbeat replaces five separate periodic re-sends (§4.4). Its period is half the shortest horizon the owner declares, so **horizons become budget parameters**. At 18 bytes, a 60-s horizon costs 52 KB a day and a 300-s horizon 10.4 KB a day. Express it per interface where ACLs differ.
+
+freshness.v2 took the per-interface form: one heartbeat per interface with a collection, each its own put on its own key. Measured on RF (§9), W2's three cost 238 KB a day, between every pair in one SDU and each in its own, where one per owner at 18 B would cost 52 KB.
 
 ### 6.2 Lease and keep-alive per medium
 
@@ -559,7 +566,7 @@ On SBD the message is the unit:
 
 | Priority | Work | Evidence of done |
 |---|---|---|
-| **P0** | Run W1 and W2 today and as zk2c on zenoh-modem's fake RF, LoRa and SBD media. Today on RF and LoRa is done (§9) | Measured bytes, SDUs, airtime and billed messages per day in both directions, against Appendix A's model |
+| **P0** | Run W1 and W2 today and as zk2c on zenoh-modem's fake RF, LoRa and SBD media. Today on RF and LoRa, and zk2c on RF and LoRa SF7, are done (§9) | Measured bytes, SDUs, airtime and billed messages per day in both directions, against Appendix A's model |
 | **P0** | Apply the per-medium lease and keep-alive settings of §6.2 | Keep-alive counts per day match the table; no flapping |
 | **P1** | A zk2c layout generator in zenkey-build: widths from bounds, scale/offset, reserved codes, extension bit, layout tag; Rust and Python codecs with shared vectors | Cross-language test vectors; refusal of a wrong revision |
 | **P1** | Heartbeat and snapshot in the runtime; freshness as confirmation | Stale never fresh; loss detected by the high-water seq; seed boundary exact |
@@ -569,9 +576,15 @@ On SBD the message is the unit:
 
 ## 9. Measurement plan
 
-**Today's half is done.** The wire baseline, [`measurements/wire-baseline/`](measurements/wire-baseline/README.md), measured today's wire end to end, in both directions, under the lean stack:
+**Today's half is done, and zk2c's on RF.** The wire baseline, [`measurements/wire-baseline/`](measurements/wire-baseline/README.md), measured today's wire end to end, in both directions, under the lean stack:
 - W1 and the idle link on RF, and on LoRa at SF7, SF9 and SF12;
 - W2 on RF.
+
+It then measured zk2c the same way (its "zk2c on RF, and W1-73 at LoRa SF7"), with zenkey's reference as the owners, at link.v2's transport:
+- the idle link: 1,440 keep-alives a day each way, the model's figure exactly;
+- W1 with all 73 modem readings, across rf0's face and across lora0's SF7 face, `zenctl gen` as modem.v3's owner;
+- W2 on RF: **669 KB a day, 2.6 % of the channel, 25 times less than today's 16.5 MB**;
+- the four guarantees, through the tools across rf0's face.
 
 Appendix A is corrected to it:
 - a declared key scope is 1 byte, and a frame 5 bytes, or 7 on a priority other than `data`;
@@ -586,19 +599,22 @@ Where the model meets the measurements, Appendix A asserts the tolerance:
 - **W1.** Keep-alives are exact wherever the link held. The model sends each reading in its own SDU, since batching depends on when the owner puts; gen put them 140 ms apart. The measured readings fall between that bound and all four in one SDU, on every medium. On RF the measured batching, 3.1 SDUs a tick, and compression account for all but 1 %.
 - **LoRa's reopens.** Each window's count is within one of the model's rate. Each reopen's air is within 45 % of the model's: below it where the trained dictionary compressed the declarations, above it where an open was retried.
 
+- **zk2c.** Appendix A's section 10 asserts the measured anatomy byte for byte: the face's 3-byte frame, the envelope, the put, each SDU. W2's telemetry is the model's exactly. W2 as a whole is within 1 % of the lean run, once the model takes each heartbeat as its own put, the desired re-read as today's GET and a reconnect's subscriptions as the far side's. W1-73's frames are within 2 % on RF and 1 % of air at SF7. The first zk2c model said 443 KB for W2 and 200 KB for W1-73.
+
 The baseline README's model column is Appendix A before these corrections. Its LoRa W1 figures add the uplink's keep-alives to the readings: 754 s at SF7 and 2,485 s at SF9. This report then quoted the readings alone, 680 s and 2,247 s. A duty budget pays for the uplink's whole air, so the README's were the right ones. The corrected Appendix A counts the reopens too.
 
 **What the model cannot price:**
 - **Router A's queue.** Its `drop` congestion control discarded 19 % of W2's telemetry before the air, where each tick's burst met the config view's 1.6 KB. The model has no queue. It prices what the owner sends, and the drop is a gap of today's wire.
 - **A link that does not come back.** On RF, once a transport under W2's load closed, no new one carried data again, in 4 runs of 4. The cause is not established. A reconnect in the model is a link that comes back.
 - **A declaration lost while the link comes up.** It is never repaired [Z20]. The far router then drops every put on that scope, or no GET reaches the queryable. The costing runs set up with no loss.
-- **Replies after their timeout.** Every desired re-read on RF timed out at the target's 1-s default, and its reply still crossed, 3.3–7.4 s later. The model counts bytes that buy nothing there.
+- **Replies after their timeout.** Every desired re-read on RF timed out at the target's 1-s default, and its reply still crossed, 3.3–7.4 s later. Under zk2c's lighter load, 4 of 12 still did. The model counts bytes that buy nothing there.
 - **A value of several SDUs.** It crosses only when every SDU does, since zenoh resends no fragment.
 
 **What remains:**
 - SBD, which needs an in-process harness in zenoh-modem;
 - W2 on LoRa, and across a face;
-- the zk2c runs, with all 73 modem readings, once Tracks A and B land.
+- zk2c at LoRa SF9 and SF12, and with zenoh-modem's own owner, modem-mgmt, once it is ported;
+- a "stale" or "unconfirmed" from the tools across a face, where today they fall silent or unobservable once a horizon passes (#990).
 
 For each remaining run:
 - Measure both directions: bytes, SDUs, airtime and billed messages per day.
@@ -618,7 +634,7 @@ For each remaining run:
 
 ## Appendix A. Reproduce every figure
 
-Run with Python 3 (`python3 -I`); it needs no third-party package and asserts the figures the text quotes. Today's wire is the model corrected to the wire baseline ([`measurements/wire-baseline/`](measurements/wire-baseline/README.md)). Each correction cites the finding and the run it rests on. The measured figures are constants in the code, and each tolerance is an assertion against them. The rest of the Zenoh model follows the 1.10.1 codec layouts read for this review, the layer sizes follow zenoh-modem's READMEs, and the airtime follows the Semtech formula with zenoh-modem's simulator parameters. Gauge widths for W1 and the per-minute change counts are illustrative assumptions, marked in the code. The baseline's `model.py` runs this script; its committed `results/model.json` is from before the correction.
+Run with Python 3 (`python3 -I`); it needs no third-party package and asserts the figures the text quotes. Today's wire is the model corrected to the wire baseline ([`measurements/wire-baseline/`](measurements/wire-baseline/README.md)). Each correction cites the finding and the run it rests on. The measured figures are constants in the code, and each tolerance is an assertion against them. The rest of the Zenoh model follows the 1.10.1 codec layouts read for this review, the layer sizes follow zenoh-modem's READMEs, and the airtime follows the Semtech formula with zenoh-modem's simulator parameters. Gauge widths for W1 and the per-minute change counts are illustrative assumptions, marked in the code. The baseline's `model.py` runs this script; its committed `results/model.json` is from before the correction. Section 10 checks the zk2c column against the baseline's zk2c runs (its "zk2c on RF, and W1-73 at LoRa SF7") and corrects it where the model, not the wire, missed: W1's 73 readings at zenoh-modem's ranges, and W2's heartbeats, desired re-reads and reconnects. The text quotes the corrected figures and the measured ones; section 6's zk2c rows stay the first model, and `model.py --zk2c` writes `results/model-zk2c.json` from them.
 
 ```python
 """Reproduce every figure of the bandwidth-first redesign report. Standard library only.
@@ -1167,6 +1183,151 @@ sbd_key24 = put(B(key24), qos=True) + FRAME + QOS + (1 + 4 + 8)
 sbd_key32 = put(B(key32), qos=True) + FRAME + QOS + (1 + 4 + 8)
 print("SBD: keyframe SDU", sbd_key24, "B (24-bit counters),", sbd_key32, "B (32-bit), of", SBD_SLOT)
 assert sbd_key24 <= SBD_SLOT < sbd_key32 and 48 * SBD_SLOT == 12_960
+
+# 10. zk2c against the zk2c runs ----------------------------------------------------------
+# Baseline, "zk2c on RF, and W1-73 at LoRa SF7": W1-73 across rf0's face with zenctl gen as
+# modem.v3's owner, W2 with the owner example and gen at link.v2's transport, bare and decoded.
+# zk2c's wire is the reference's: no HLC on a put, each on a scope its far reader declared by
+# its exact key, a reliable or block one with the QoS extension. The face's 16-bit sequence
+# numbers make a frame 3 B (the model's FRAME is 5), and an envelope (CH, run, seq) is 6 B
+# with a 16-bit run, 8 B with the 32-bit one gen and the owner example draw without a run file.
+FRAME16 = 1 + 2
+ENV16, ENV32 = 1 + 2 + 3, 1 + 4 + 3
+
+
+def sdu_list16(messages, layers=LEAN, mtu=RF_MTU):
+    """sdu_list() on a link.v2 face: its 3-byte frame, no QoS extension on the frame."""
+    cap = mtu - layers - FRAME16
+    out, used = [], None
+    for m in messages:
+        if m > cap:
+            rest = m + FIRST_FRAG
+            while rest > 0:
+                out.append(min(cap, rest) + FRAME16 + layers)
+                rest -= cap
+            used = None
+            continue
+        if used is None or used + m > cap:
+            out.append(FRAME16 + layers)
+            used = 0
+        out[-1] += m
+        used += m
+    return out
+
+
+def sdus16(messages, layers=LEAN, mtu=RF_MTU):
+    s = sdu_list16(messages, layers, mtu)
+    return len(s), sum(s)
+
+
+# W1-73. frames/fast's record (modem.v3 3.3, schemas/modem-readings.json) holds the 73
+# readings at zenoh-modem's ranges, each optional: 51 counters and 22 gauges, 1,469 bits of
+# codes. A frame's body (core §7.7) is the time (42 bits), `full` (1), then per field a
+# presence bit and its code; a delta record puts one bit per field before those that follow.
+# Section 8's illustrative widths gave 254 B and 98 B.
+READING_COUNTERS = [20, 24, 20, 24] + [20] * 31 + [24, 20, 20, 24, 20, 24, 20, 40, 40] + [32] * 7
+READING_GAUGES = [10, 20, 16, 4, 1, 16, 3, 24, 16, 9, 7, 7, 9, 14, 27, 27, 27, 27, 20, 7, 7, 7]
+assert (len(READING_COUNTERS), sum(READING_COUNTERS)) == (51, 1164)
+assert (len(READING_GAUGES), sum(READING_GAUGES)) == (22, 305)
+HEAD = 42 + 1 + 73                    # the time, `full`, and the full record's presence bits
+full_body = B(HEAD + sum(READING_COUNTERS) + sum(READING_GAUGES))
+none_body = B(HEAD)
+assert (full_body, none_body) == (199, 15)
+# gen writes every field at random on even ticks and none on odd ones, so its frames are
+# full records of every reading or of none: 207 B and 23 B of payload with its 32-bit run,
+# in SDUs of 215 B and 30 B (zk2c-w1-bare-1, exact), a day 720 of each.
+assert [put(ENV32 + b) + FRAME16 for b in (full_body, none_body)] == [215, 30]
+W1_73_FRAMES = 176_397                        # bare, a day (zk2c-w1-bare-1, 1,800 s)
+assert within(720 * (215 + 30), W1_73_FRAMES, 0.001)
+# The face's events at gen's rates, its contract's ceilings: face/device_fault (`low`, one
+# a minute) is 97 B of form 4 in a 120-B SDU, its key's 12-character occurrence chunk and a
+# reliable, block event's QoS extension; 172,941 B a day. The two `rare` ones never fell in
+# the window.
+assert put(97, suffix=13, qos=True) + FRAME16 == 120
+assert within(1440 * 120.1, 172_941, 0.001)
+# Corrected: a full record every 15 and a delta each minute with 16 counters and 8 gauges
+# moving at the layout's mean widths, a data put on the face (no QoS extension), a 16-bit
+# run, the lean stack. A full frame's put (210 B) takes two SDUs under the lean stack.
+c_bar = sum(READING_COUNTERS) / len(READING_COUNTERS)
+g_bar = sum(READING_GAUGES) / len(READING_GAUGES)
+key16 = ENV16 + full_body
+delta16 = ENV16 + B(HEAD + 16 * (1 + c_bar) + 8 * (1 + g_bar))     # 73 delta bits, then each
+assert (key16, delta16) == (205, 84)
+w1_73 = 96 * sdus16([put(key16)])[1] + 1344 * sdus16([put(delta16)])[1]
+print(f"W1-73 zk2c on RF, corrected: {w1_73 / 1e3:.0f} KB/day (section 8: {ac / 1e3:.0f} KB); "
+      f"keyframe {key16} B, delta {delta16} B")
+assert round(w1_73 / 1e3) == 168
+# Under the lean stack (zk2c-w1-lean-1, gen's 16-bit run): gen's frames are the model's within
+# 2 % (compress stored most of them, and saved 579 B in 30 minutes), and an idle direction's
+# keep-alives exactly 1,440 a day, one a minute, where today's lease of 10 s sent 34,560.
+gen_lean = 720 * sdus16([put(ENV16 + full_body)])[1] + 720 * sdus16([put(ENV16 + none_body)])[1]
+assert within(gen_lean, 207_256, 0.02)
+assert round(DAY * 4 / 240) * (KEEPALIVE + LEAN) == 24_480                # measured 24,479 B
+# At LoRa SF7 across lora0's face (zk2c-sf7-lean-1, lease 120 s, keep_alive 4): gen's frames
+# took 363.0 s of air a day, the model's 365.5 s within 1 % (zenoh's batch the driver's 206 B,
+# a full frame in two SDUs). The uplink sent 2,160 keep-alives a day, not the 1,440 of one
+# between two frames: frames a minute apart spared one keep-alive in four, a cost of the wire.
+def face_air(message, sf):
+    """One message's air across a LoRa face under the lean stack, on the 3-byte frame: zenoh
+    fragments it at what a 222-B frame (115 B at SF9) leaves, and SF10-12 tile the SDUs."""
+    return sum(lora_air_s(x, sf) for x in sdu_list16([message], mtu=115 if sf == 9 else 222))
+
+
+sf7_gen = 720 * sum(face_air(put(ENV16 + b), 7) for b in (full_body, none_body))
+assert within(sf7_gen, 363.0, 0.01)
+# Corrected, as section 8's cases: every minute, every 2 minutes, an hourly keyframe with
+# 15-minute deltas. Section 8 gave 325 s, 1,043 s (556 s) and 833 s.
+fk = {sf: face_air(put(key16), sf) for sf in (7, 9, 12)}
+fd = {sf: face_air(put(delta16), sf) for sf in (7, 9, 12)}
+w1_73_air = {sf: (96 * fk[sf] + 1344 * fd[sf], 96 * fk[sf] + 624 * fd[sf],
+                  24 * fk[sf] + 72 * fd[sf]) for sf in (7, 9, 12)}
+print("W1-73 zk2c on LoRa, corrected: SF7 {:.0f} s every minute; SF9 {:.0f} s ({:.0f} s every 2 "
+      "min); SF12 hourly keyframe + 15-min deltas {:.0f} s (of 864)".format(
+          w1_73_air[7][0], w1_73_air[9][0], w1_73_air[9][1], w1_73_air[12][2]))
+assert [round(x) for x in (w1_73_air[7][0], w1_73_air[9][0], w1_73_air[9][1], w1_73_air[12][2])] \
+    == [288, 916, 502, 762]
+
+# W2. Telemetry is the model's exactly: frames/sample's three records crossed in 93 B (91 B
+# and a 32-bit run) and a 100-B SDU, where the model's 5-byte frame and 16-bit run give 100 B
+# too; on the face's 3-byte frame with a 16-bit run it is 98 B.
+W2Z = {"telemetry": 288_000, "heartbeat": 154_368, "keep-alive": 1_317}   # bare, a day
+W2Z_SDUS = {"heartbeat": 5_225}                         # (zk2c-w2-bare-1, 2,100 s, decoded)
+assert put(B(FRAME_HDR + 3 * (8 * 11 + 4 * 32)) + 2) + FRAME16 == 100
+assert within(cycles / 3 * 100, W2Z["telemetry"], 0.001)
+# The heartbeat is one put per interface with a collection (freshness.v2 §2.4), on its own
+# key, never inside a telemetry frame as section 6 has it: health.v1's and rfcfg.v1's every
+# 28.5 s, 18 B each, alarms.v1's every 427.5 s, 19 B. Health's and config's leave together
+# and often share an SDU: the day lies between every pair in one SDU and each alone.
+hb_pairs = DAY / 28.5
+hb_low = hb_pairs * sdus16([put(18), put(18)])[1] + DAY / 427.5 * sdus16([put(19)])[1]
+hb_high = 2 * hb_pairs * sdus16([put(18)])[1] + DAY / 427.5 * sdus16([put(19)])[1]
+hb_lean = W2Z["heartbeat"] + LEAN * W2Z_SDUS["heartbeat"]
+assert hb_low < hb_lean < hb_high
+# The desired re-read every 300 s is today's GET, not section 6's conditional one: a 12-B
+# request, and the author's 166-B reply and 6-B final in one SDU or two (measured 175 B in
+# 1.7 SDUs a re-read), 63.9 KB a day where section 6 had 27.4 KB. The target's own report,
+# put once in the window (366 B), is not in it.
+des = 288 * (sdus16([12])[1] + sdus16([166, 6])[1])
+assert within(des, 288 * (15 + LEAN) + 288 * (175 + 1.71 * LEAN), 0.06)
+# The downlink's keep-alives: one a minute, less where a reply refreshed the lease.
+assert within(rows["keep-alive"][1], W2Z["keep-alive"] + LEAN * 1_317, 0.10)
+# A reconnect re-sends the device's presence and declarations, and the far side's
+# subscriptions, one per resource by its exact key (core §8.5): 1,214 B in 11.4 SDUs A->B and
+# 1,443 B in 13 SDUs B->A, bare, where section 6 priced the far side's as none.
+rec = RECONNECTS * (1_214 + 1_443 + LEAN * (11.4 + 13))
+modelled = rows["heartbeat"][1] + rows["desired"][1] + rows["reconnect"][1]
+w2_zk2c = after - modelled + hb_lean + des + rec
+print(f"W2 zk2c on RF, corrected: {w2_zk2c / 1e3:.0f} KB/day ({after / 1e3:.0f} KB modelled) = "
+      f"{100 * w2_zk2c / RF_DAY_BYTES:.1f} % of RF, {today / w2_zk2c:.1f}x less than today: "
+      f"heartbeats {hb_lean / 1e3:.0f} KB, desired {des / 1e3:.0f} KB, "
+      f"reconnects {rec / 1e3:.0f} KB")
+assert (round(w2_zk2c / 1e3), round(today / w2_zk2c)) == (674, 27)
+# Measured under the lean stack with 16-bit runs (zk2c-w2-lean-1), as W2 makes it: the steady
+# window's counters, 688,896 B A->B and 71,465 B B->A a day; gen's 1,399 events cut to W2's 15
+# (77 B each); the acts at their daily counts, 2,186 B and 618 B; and 4 reconnects, 5,586 B and
+# 6,604 B (zk2c-w2-bare-1, decoded). Compression stored 221 of 245 SDUs and saved 69 B.
+W2Z_LEAN = (688_896 - 1_399 * 77 + 15 * 77 + 2_186 + 5_586) + (71_465 + 618 + 6_604)
+assert within(w2_zk2c, W2Z_LEAN, 0.01)
 print("all assertions hold")
 ```
 
