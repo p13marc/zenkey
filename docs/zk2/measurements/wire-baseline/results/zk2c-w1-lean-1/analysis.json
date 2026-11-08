@@ -1,0 +1,227 @@
+{
+ "run": "zk2c-w1-lean-1",
+ "medium": "rf-zk2c",
+ "stack": "lean",
+ "loss": 0.05,
+ "windows": [
+  {
+   "window": "idle",
+   "seconds": 600.013,
+   "ab": {
+    "tx_sdus": 10,
+    "tx_bytes": 170,
+    "rx_sdus_far": 10,
+    "rx_bytes_far": 170,
+    "relay_sdus": 10,
+    "relay_bytes": 170,
+    "relay_dropped": 0,
+    "kinds": {
+     "keep-alive": 10
+    },
+    "kind_bytes": {
+     "keep-alive": 170
+    },
+    "kind_airtime_s": {
+     "keep-alive": 0.567
+    },
+    "other_sizes": {},
+    "tx_layers": {
+     "compress/compressed_total": 0,
+     "compress/stored_total": 10,
+     "compress/bytes_saved_total": 0,
+     "aead/auth_failures_total": 0,
+     "aead/replays_total": 0
+    },
+    "airtime_s": 0.567,
+    "keepalives_lost": 0,
+    "per_day": {
+     "sdus": 1440,
+     "bytes": 24479,
+     "airtime_s": 81.6,
+     "airtime_pct": 0.094,
+     "keepalives": 1440,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 1440,
+       "bytes": 24479,
+       "airtime_s": 81.6
+      }
+     }
+    }
+   },
+   "ba": {
+    "tx_sdus": 10,
+    "tx_bytes": 170,
+    "rx_sdus_far": 9,
+    "rx_bytes_far": 153,
+    "relay_sdus": 10,
+    "relay_bytes": 170,
+    "relay_dropped": 1,
+    "kinds": {
+     "keep-alive": 10
+    },
+    "kind_bytes": {
+     "keep-alive": 170
+    },
+    "kind_airtime_s": {
+     "keep-alive": 0.567
+    },
+    "other_sizes": {},
+    "tx_layers": {
+     "compress/compressed_total": 0,
+     "compress/stored_total": 10,
+     "compress/bytes_saved_total": 0,
+     "aead/auth_failures_total": 0,
+     "aead/replays_total": 0
+    },
+    "airtime_s": 0.567,
+    "links_opened": 0,
+    "keepalives_lost": 1,
+    "per_day": {
+     "sdus": 1440,
+     "bytes": 24479,
+     "airtime_s": 81.6,
+     "airtime_pct": 0.094,
+     "keepalives": 1440,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 1440,
+       "bytes": 24479,
+       "airtime_s": 81.6
+      }
+     }
+    }
+   }
+  },
+  {
+   "window": "w1",
+   "seconds": 1800.041,
+   "ab": {
+    "tx_sdus": 82,
+    "tx_bytes": 7859,
+    "rx_sdus_far": 78,
+    "rx_bytes_far": 7491,
+    "relay_sdus": 82,
+    "relay_bytes": 7859,
+    "relay_dropped": 4,
+    "kinds": {
+     "keep-alive": 7,
+     "data": 74,
+     "other": 1
+    },
+    "kind_bytes": {
+     "keep-alive": 119,
+     "data": 7711,
+     "other": 29
+    },
+    "kind_airtime_s": {
+     "keep-alive": 0.397,
+     "data": 25.703,
+     "other": 0.097
+    },
+    "other_sizes": {
+     "29": 15,
+     "44": 15,
+     "113": 27,
+     "114": 3,
+     "211": 3,
+     "212": 1,
+     "214": 1,
+     "216": 1,
+     "219": 3,
+     "220": 6
+    },
+    "tx_layers": {
+     "compress/compressed_total": 39,
+     "compress/stored_total": 43,
+     "compress/bytes_saved_total": 579,
+     "aead/auth_failures_total": 0,
+     "aead/replays_total": 0
+    },
+    "airtime_s": 26.197,
+    "keepalives_lost": 0,
+    "per_day": {
+     "sdus": 3936,
+     "bytes": 377223,
+     "airtime_s": 1257.4,
+     "airtime_pct": 1.455,
+     "keepalives": 336,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 336,
+       "bytes": 5712,
+       "airtime_s": 19.0
+      },
+      "data": {
+       "sdus": 3552,
+       "bytes": 370120,
+       "airtime_s": 1233.7
+      },
+      "other": {
+       "sdus": 48,
+       "bytes": 1392,
+       "airtime_s": 4.6
+      }
+     }
+    }
+   },
+   "ba": {
+    "tx_sdus": 30,
+    "tx_bytes": 510,
+    "rx_sdus_far": 29,
+    "rx_bytes_far": 493,
+    "relay_sdus": 30,
+    "relay_bytes": 510,
+    "relay_dropped": 1,
+    "kinds": {
+     "keep-alive": 30
+    },
+    "kind_bytes": {
+     "keep-alive": 510
+    },
+    "kind_airtime_s": {
+     "keep-alive": 1.7
+    },
+    "other_sizes": {},
+    "tx_layers": {
+     "compress/compressed_total": 0,
+     "compress/stored_total": 30,
+     "compress/bytes_saved_total": 0,
+     "aead/auth_failures_total": 0,
+     "aead/replays_total": 0
+    },
+    "airtime_s": 1.7,
+    "links_opened": 0,
+    "keepalives_lost": 1,
+    "per_day": {
+     "sdus": 1440,
+     "bytes": 24479,
+     "airtime_s": 81.6,
+     "airtime_pct": 0.094,
+     "keepalives": 1440,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 1440,
+       "bytes": 24479,
+       "airtime_s": 81.6
+      }
+     }
+    }
+   },
+   "far_samples": {
+    "events/face/device_fault": 27,
+    "stream/frames/fast": 29
+   },
+   "far_payload_bytes": {
+    "events/face/device_fault": {
+     "97": 24,
+     "98": 3
+    },
+    "stream/frames/fast": {
+     "21": 15,
+     "205": 14
+    }
+   }
+  }
+ ]
+}

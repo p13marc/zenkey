@@ -1,0 +1,27 @@
+{
+ "medium": "rf-zk2c",
+ "stack": "bare",
+ "inst": "w2",
+ "batch_size": 222,
+ "ports": {
+  "router_a": 17501,
+  "router_b": 17502,
+  "driver_a": 17510,
+  "driver_b": 17511,
+  "relay_a": 17512,
+  "relay_b": 17513
+ },
+ "run": "/srv/dev/targets/zenkey-989/run/w2",
+ "face": false,
+ "max_sdu": 220,
+ "rate": 2400,
+ "latency_ms": 150,
+ "jitter_ms": 30,
+ "loss": 0.05,
+ "lease": 240000,
+ "keep_alive": 4,
+ "open": 10000,
+ "interests": 10000,
+ "sequence": "16bit",
+ "timers": "zenohd-rf0.face.toml's [transport] (link.v2 \u00a72.16)"
+}

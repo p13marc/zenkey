@@ -5,19 +5,24 @@
   // zk2 wire:
   // - the TCP face and the lane socket are this run's;
   // - NO lane-face access_control and no downsampling: "today" is everything
-  //   zk2's rules make travel (constrained-overhead-review.md §2.2);
+  //   zk2's rules make travel (constrained-overhead-review.md §2.2). #989's
+  //   zk2c runs on a face put rf0's plan on router A instead (render.py --face);
   // - batch_size is the driver's zenoh_batch_size; lease and keep_alive are
   //   @TIMERS_WHY@;
-  // - wait_before_close is at least the lease, as rf0's comment requires.
+  // - wait_before_close is at least the lease, as rf0's comment requires;
+  // - mode: @MODE_WHY@.
   // zk2 clients attach to the TCP face.
-  mode: "peer",
+  mode: "@MODE@",
 @ENDPOINTS@
   scouting: {
     multicast: { enabled: false },
     gossip: { enabled: false },
   },
 @ROUTING@
+  @TIMESTAMPING@
+@ACL@
   transport: {
+    @AUTH@
     unicast: {
       open_timeout: @OPEN@,
       accept_timeout: @OPEN@,
@@ -27,6 +32,7 @@
         batch_size: @BATCH@,
         lease: @LEASE@,
         keep_alive: @KA@,
+        @SEQ@
         queue: {
           congestion_control: {
             block: { wait_before_close: @WBC@ },

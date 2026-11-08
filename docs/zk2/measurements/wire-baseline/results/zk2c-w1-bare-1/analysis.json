@@ -1,0 +1,223 @@
+{
+ "run": "zk2c-w1-bare-1",
+ "medium": "rf-zk2c",
+ "stack": "bare",
+ "loss": 0.05,
+ "windows": [
+  {
+   "window": "idle",
+   "seconds": 1200.013,
+   "ab": {
+    "tx_sdus": 20,
+    "tx_bytes": 20,
+    "rx_sdus_far": 19,
+    "rx_bytes_far": 19,
+    "relay_sdus": 20,
+    "relay_bytes": 20,
+    "relay_dropped": 1,
+    "kinds": {
+     "keep-alive": 20
+    },
+    "kind_bytes": {
+     "keep-alive": 20
+    },
+    "kind_airtime_s": {
+     "keep-alive": 0.067
+    },
+    "other_sizes": {},
+    "tx_layers": {},
+    "airtime_s": 0.067,
+    "keepalives_lost": 1,
+    "per_day": {
+     "sdus": 1440,
+     "bytes": 1440,
+     "airtime_s": 4.8,
+     "airtime_pct": 0.006,
+     "keepalives": 1440,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 1440,
+       "bytes": 1440,
+       "airtime_s": 4.8
+      }
+     }
+    }
+   },
+   "ba": {
+    "tx_sdus": 20,
+    "tx_bytes": 20,
+    "rx_sdus_far": 19,
+    "rx_bytes_far": 19,
+    "relay_sdus": 20,
+    "relay_bytes": 20,
+    "relay_dropped": 1,
+    "kinds": {
+     "keep-alive": 20
+    },
+    "kind_bytes": {
+     "keep-alive": 20
+    },
+    "kind_airtime_s": {
+     "keep-alive": 0.067
+    },
+    "other_sizes": {},
+    "tx_layers": {},
+    "airtime_s": 0.067,
+    "links_opened": 0,
+    "keepalives_lost": 1,
+    "per_day": {
+     "sdus": 1440,
+     "bytes": 1440,
+     "airtime_s": 4.8,
+     "airtime_pct": 0.006,
+     "keepalives": 1440,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 1440,
+       "bytes": 1440,
+       "airtime_s": 4.8
+      }
+     }
+    }
+   },
+   "elements_per_day": {
+    "ab": {
+     "keep-alive": {
+      "bytes": 1440,
+      "sdus": 1440.0
+     }
+    },
+    "ba": {
+     "keep-alive": {
+      "bytes": 1440,
+      "sdus": 1440.0
+     }
+    }
+   },
+   "decode_errors": {},
+   "opens_at": {
+    "ab": [],
+    "ba": []
+   }
+  },
+  {
+   "window": "w1",
+   "seconds": 1800.027,
+   "ab": {
+    "tx_sdus": 60,
+    "tx_bytes": 7278,
+    "rx_sdus_far": 58,
+    "rx_bytes_far": 7033,
+    "relay_sdus": 60,
+    "relay_bytes": 7278,
+    "relay_dropped": 2,
+    "kinds": {
+     "data": 60
+    },
+    "kind_bytes": {
+     "data": 7278
+    },
+    "kind_airtime_s": {
+     "data": 24.26
+    },
+    "other_sizes": {
+     "30": 15,
+     "120": 27,
+     "121": 3,
+     "215": 15
+    },
+    "tx_layers": {},
+    "airtime_s": 24.26,
+    "keepalives_lost": 0,
+    "per_day": {
+     "sdus": 2880,
+     "bytes": 349339,
+     "airtime_s": 1164.5,
+     "airtime_pct": 1.348,
+     "keepalives": 0,
+     "by_kind": {
+      "data": {
+       "sdus": 2880,
+       "bytes": 349339,
+       "airtime_s": 1164.5
+      }
+     }
+    }
+   },
+   "ba": {
+    "tx_sdus": 30,
+    "tx_bytes": 30,
+    "rx_sdus_far": 28,
+    "rx_bytes_far": 28,
+    "relay_sdus": 30,
+    "relay_bytes": 30,
+    "relay_dropped": 2,
+    "kinds": {
+     "keep-alive": 30
+    },
+    "kind_bytes": {
+     "keep-alive": 30
+    },
+    "kind_airtime_s": {
+     "keep-alive": 0.1
+    },
+    "other_sizes": {},
+    "tx_layers": {},
+    "airtime_s": 0.1,
+    "links_opened": 0,
+    "keepalives_lost": 2,
+    "per_day": {
+     "sdus": 1440,
+     "bytes": 1440,
+     "airtime_s": 4.8,
+     "airtime_pct": 0.006,
+     "keepalives": 1440,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 1440,
+       "bytes": 1440,
+       "airtime_s": 4.8
+      }
+     }
+    }
+   },
+   "far_samples": {
+    "events/face/device_fault": 30,
+    "stream/frames/fast": 28
+   },
+   "far_payload_bytes": {
+    "events/face/device_fault": {
+     "97": 27,
+     "98": 3
+    },
+    "stream/frames/fast": {
+     "23": 14,
+     "207": 14
+    }
+   },
+   "elements_per_day": {
+    "ab": {
+     "telemetry": {
+      "bytes": 176397,
+      "sdus": 1440.0
+     },
+     "events": {
+      "bytes": 172941,
+      "sdus": 1440.0
+     }
+    },
+    "ba": {
+     "keep-alive": {
+      "bytes": 1440,
+      "sdus": 1440.0
+     }
+    }
+   },
+   "decode_errors": {},
+   "opens_at": {
+    "ab": [],
+    "ba": []
+   }
+  }
+ ]
+}

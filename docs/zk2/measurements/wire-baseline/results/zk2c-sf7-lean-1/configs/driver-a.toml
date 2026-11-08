@@ -1,0 +1,59 @@
+# Driver A of #989's wire baseline (LoRa SF7, EU868, link.v2's transport, lean stack).
+# A udp-medium bearer (lab-air) paced to 5469 bit/s with a 222-byte
+# frame; loss and latency come from the relay between the two drivers.
+# Rendered by render.py from configs/driver.toml.in.
+socket_dir = "/srv/dev/targets/zenkey-989/run/lora/a"
+# The aead layer's nonce counters (--init-layer-state).
+state_dir = "/srv/dev/targets/zenkey-989/state/lora/a"
+
+[[device]]
+name = "rfa"
+# 222 - 2 (overhead) - 14 (compress 1, aead 13) + Zenoh's 2-byte length prefix
+zenoh_batch_size = 208
+
+[device.medium]
+kind = "udp"
+bind = "127.0.0.1:17610"
+max_sdu = 222
+rate_bps = 5469
+
+[device.medium.peers]
+b = "127.0.0.1:17612"
+
+[[device.endpoints]]
+name = "b"
+role = "dial"
+
+[[device.endpoints.lanes]]
+name = "air"
+reliable = false
+priorities = [0, 7]
+
+# The lean stack (constrained-overhead-review.md §3.2), in the order an
+# outgoing SDU meets it, nearest the scheduler first.
+[[device.layers]]
+kind = "compress"                         # 1 byte stored, or 3 + a zstd body
+dictionary_file = "/srv/dev/targets/zenkey-989/cfg/lora/rf.zdict"
+level = 3
+
+[[device.layers]]
+kind = "aead"                             # 1 + 4 + 8 = 13 bytes
+suite = "aes-128-ccm"
+tag_bytes = 8
+mode = "sealed"
+key_file = "/srv/dev/targets/zenkey-989/cfg/rf.keys"
+key_id = 0
+accept = [0]
+self = "a"
+
+# Stands in for the address layer's 2 bytes (dst, src): layer-address refuses
+# the udp medium ("unknown lane */be#0"), which addresses peers itself.
+[[device.layers]]
+kind = "overhead"
+bytes = 2
+
+# The management plane on a unix socket of its own, never on the data
+# routers, so none of it crosses the air.
+[management]
+listen = ["unixsock-stream//srv/dev/targets/zenkey-989/run/lora/a/mgmt.sock"]
+telemetry_interval_ms = 1000
