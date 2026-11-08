@@ -20,6 +20,13 @@ policy shapes the tool's scopes and its session's transport, not the path.
 **The reverse** (:func:`run_zenctl`): zk2py's owner read by ``zenctl echo
 --across-face``, its scope by the face's plan, and its revision by tag.
 
+**A face's events** (:func:`run_lora`; link.v2 0.12 §2.7, #1098, round 108):
+zk2py's owner of ``modem.v3`` 3.4 at ``h-c2a95e41d7f0/lora0`` puts one
+occurrence of each of its three ``face/`` events, read by ``zenctl echo
+--across-face`` through LoRa SF7's face, whose ``events`` lists two: it
+hears those two, and not ``face/device_fault``. ``--only lora`` runs it
+alone.
+
 It runs four windows of 35 s, the heartbeat's period's half, and two more
 for the reverse: a live runner, run by hand, never by the walk (``just
 py-conformance``), which is all the per-push lane runs (review-bot on #1090).
@@ -34,6 +41,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 from .blackbox import BLACKBOX
 
@@ -203,9 +211,116 @@ def run_zenctl() -> list[tuple[str, bool, str]]:
     return out
 
 
+LORA = "h-c2a95e41d7f0/lora0"
+
+
+def run_lora() -> list[tuple[str, bool, str]]:
+    """link.v2 0.12 §2.7 live: zk2py's owner of ``modem.v3`` 3.4 at lora0,
+    under zenoh-modem's catalog, puts ``face/oper_change`` and
+    ``face/identity_change`` (packed, each record written by zk2py's packed
+    writer) and ``face/device_fault`` (JSON), once each, ``rare`` and
+    ``low`` kept; ``zenctl echo --across-face`` through
+    ``zenohd-lora0-sf7.face.toml``'s face ``lora``, holding modem.v3's
+    published revisions and the catalog, declares the plan's scopes and
+    hears the two the face lists alone."""
+    import shutil
+    import tempfile
+
+    from . import catalog, packed
+    from .contract import load_contract
+    from .live_interop import _r1
+    from .owner import Owner
+
+    out: list[tuple[str, bool, str]] = []
+    tmp = Path(tempfile.mkdtemp(prefix="zk2py-hist-"))
+    shutil.copytree(REPO / "examples" / "zk2" / ".history" / "modem.v3", tmp / ".history" / "modem.v3")
+    face = MODEM / "faces" / "zenohd-lora0-sf7.face.toml"
+    system, service = LORA.split("/")
+    r, ep, _ = _r1(timestamping=False)
+    o = Owner(system, service, [load_contract(MODEM / "modem.v3.toml")], connect=ep)
+    o.catalog = catalog.read((MODEM / "catalog.json").read_bytes())
+    events = json.loads((MODEM / "schemas" / "modem-events.json").read_text(encoding="utf-8"))
+    base = f"zk2/{LORA}/modem.v3/events/face"
+    try:
+        o.start()
+        holder: dict[str, Any] = {}
+
+        def echo() -> None:
+            p = subprocess.Popen([str(BLACKBOX / "zenctl"), "echo", "-c", ep, "--format", "ndjson", "--contracts",
+                                  str(tmp / ".history"), "--catalog", str(MODEM / "catalog.json"), "--across-face",
+                                  LORA, "--face-policy", str(face), "--face", "lora"],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                so, se = p.communicate(timeout=20)
+            except subprocess.TimeoutExpired:
+                p.terminate()
+                so, se = p.communicate(timeout=10)
+            holder["rows"] = [json.loads(x) for x in so.splitlines() if x.strip().startswith("{")]
+            holder["err"] = se
+
+        import threading
+
+        th = threading.Thread(target=echo, daemon=True)
+        th.start()
+        time.sleep(8.0)
+        oc, ic = packed.record(events, "OperChangeRecord"), packed.record(events, "IdentityChangeRecord")
+        records = {"oper_change": (oc, oc.write({"status": "up", "occurrences": 1})),
+                   "identity_change": (ic, ic.write({"mfg_name_changed": False, "model_name_changed": False,
+                                                     "serial_num_changed": False, "hardware_rev_changed": False,
+                                                     "firmware_rev_changed": True, "software_rev_changed": False,
+                                                     "imei_changed": False, "occurrences": 1}))}
+        put = {
+            "oper_change": o.occur(f"{base}/oper_change", records["oper_change"][1]),
+            "identity_change": o.occur(f"{base}/identity_change", records["identity_change"][1]),
+            "device_fault": o.occur(f"{base}/device_fault", b'{"detail": "PA over temperature"}'),
+        }
+        th.join(40)
+        rows, err = holder.get("rows", []), holder.get("err", "")
+        heard = sorted({x.get("key") for x in rows})
+        scopes = [f"zk2/{LORA}/modem.v3/events/face/{e}/*" for e in ("identity_change", "oper_change")]
+        out.append(("zenctl echo --across-face through LoRa SF7's face (link.v2 0.12 §2.7): its scopes the plan's, "
+                    "frames/fast and the two face/ events the face lists, each event's last chunk a wildcard; of "
+                    "zk2py's three occurrences it hears face/oper_change and face/identity_change, and not "
+                    "face/device_fault, which the face does not list",
+                    all(x in err for x in scopes) and "face/device_fault" not in err
+                    and heard == sorted([put["identity_change"], put["oper_change"]]),
+                    f"heard {heard}; put {put}; {err[-600:]}"))
+        typed = {x.get("key"): (x.get("type"), x.get("typed"), (x.get("identity") or {}).get("chosen"))
+                 for x in rows}
+        # zk2py's own choice of each key's revision (across.revision_of_key):
+        # with the catalog given, step 1 leaves 3.4 alone, the deployment's
+        # word, which zenctl's identity states as no "chosen" (as run_zenctl
+        # reads it)
+        from . import across
+
+        held = across.load_history(tmp / ".history" / "modem.v3")
+        mine = {}
+        width_bit = 0x10 if (o.run or (32, 0))[0] == 32 else 0
+        for k, rec in ((put["oper_change"], records["oper_change"]), (put["identity_change"],
+                                                                      records["identity_change"])):
+            # form 4's CH: code 4, the run's width bit, the record type's tag
+            ch = across.revision_of_key(k, 0x80 | width_bit | rec[0].tag, len(rec[1]), held, o.catalog)
+            mine[k] = (ch.by, ch.step, ch.revision[7:15] if ch.revision else None)
+        want = {put["oper_change"]: ("packed:OperChangeRecord", True, None),
+                put["identity_change"]: ("packed:IdentityChangeRecord", True, None)}
+        out.append(("zenctl echo across the face reads each heard event as its packed type, its revision chosen "
+                    "with no descriptor, as zk2py chooses it: 3.4 by the deployment's catalog at step 1 (observer "
+                    "0.33 §7.5)",
+                    typed == want and all(m[:2] == ("deployment", 1) and m[2] == "04836e17" for m in mine.values()),
+                    f"zenctl {typed}; zk2py {mine}"))
+    except Exception as e:  # noqa: BLE001 - a run that could not finish is a failure
+        out.append(("the lora run finished", False, f"{type(e).__name__}: {e}"))
+    finally:
+        o.close()
+        r.close()
+        shutil.rmtree(tmp, ignore_errors=True)
+    return out
+
+
 def main() -> int:
     failed = 0
-    for name, ok, detail in run() + run_zenctl():
+    runs = run_lora() if sys.argv[1:] == ["--only", "lora"] else run() + run_zenctl() + run_lora()
+    for name, ok, detail in runs:
         print(f"{'PASS' if ok else 'FAIL'} {name}" + (f": {detail}" if detail else ""), flush=True)
         failed += not ok
     return 1 if failed else 0
