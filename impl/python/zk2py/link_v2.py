@@ -1,5 +1,5 @@
-"""``link.v2``, text 0.1 to 0.12 (``spec/profiles/link/v2.md``, draft,
-written against core 0.77 to 0.100; #988 L1 to L4, #1098): a constrained face, and the transport it
+"""``link.v2``, text 0.1 to 0.14 (``spec/profiles/link/v2.md``, draft,
+written against core 0.77 to 0.100; #988 L1 to L4, #1098, #1106): a constrained face, and the transport it
 runs. Read cold by zk2py in round 96 (#609).
 
 It restates ``link.v1`` by reference (§0), and :mod:`zk2py.link` keeps those
@@ -39,6 +39,16 @@ listed interface cross only when the face lists it and its contract exposes
 it ``link``, the rest denied by name by ``link.v1``'s carve-out; an entry
 naming no event resource is ``event_unknown``. A link.v1 policy's
 ``events`` is :mod:`zk2py.link`'s ``unknown_field``.
+
+**Text 0.13** (#1106; round 109), a face router stamps nothing (§2.18,
+§2.19): :func:`emit` writes ``timestamping: { enabled: { router: false,
+peer: false } }`` after the eight keys, :func:`block` nests it beside the
+``transport`` and ``routing`` objects, and :func:`far_block` is the same
+three for the far end; :func:`check_transport` reads the router's ``mode``
+(``router`` where none is stated, as zenohd runs) and its
+``timestamping/enabled`` (:func:`stamps`), and warns ``face_timestamping``
+at ``timestamping``. :func:`read_config` reads a router's configuration
+file as the fixture's ``router`` states it. Text 0.14 is editorial.
 
 The fixtures are ``conformance/v2/`` (``lints.json``, ``plan.json``,
 ``exposure.json``, ``transport.json``).
@@ -819,20 +829,35 @@ def narrowed(policy: PolicyV2, principal: str) -> list[str] | None:
 
 # -- §2.18 the transport block, §2.19 its checks -------------------------------------------------
 
+#: §2.18 (0.13): "A generator MUST write the near router's timestamping off
+#: beside the transport, for a router and for a peer: ``timestamping: {
+#: enabled: { router: false, peer: false } }``", after the eight keys
+#: (``transport.json``'s ``emit``: "then timestamping off for a router and a
+#: peer").
+TIMESTAMPING_OFF = (("timestamping/enabled/router", False), ("timestamping/enabled/peer", False))
+#: §2.19's table (0.13): "``timestamping/enabled`` | on for a router, off for
+#: a peer and a client", in both bindings.
+STAMPS_BY_DEFAULT = {"router": True, "peer": False, "client": False}
+#: §2.19's table (0.13): "``mode`` | ``"router"``, as zenohd runs".
+DEFAULT_MODE = "router"
+
+
 def emit(policy: PolicyV2) -> list[dict[str, Any]]:
     """§2.18: each key at zenoh's configuration key, ``wait_before_close`` in
-    µs, all eight, in the policy's table's order; nothing for a ``link.v1``
-    policy."""
+    µs, all eight, in the policy's table's order, then timestamping off for a
+    router and a peer (0.13); nothing for a ``link.v1`` policy, which states
+    no transport to write it beside."""
     if policy.transport is None:
         return []
     return [{"key": f"transport.{k}", "path": path,
              "value": policy.transport[k] * 1000 if k == "wait_before_close_ms" else policy.transport[k]}
-            for k, (path, _, _) in TRANSPORT.items()]
+            for k, (path, _, _) in TRANSPORT.items()] + \
+        [{"key": "timestamping", "path": path, "value": v} for path, v in TIMESTAMPING_OFF]
 
 
 def block(policy: PolicyV2) -> dict[str, Any]:
-    """The emitted keys as the router's top-level ``transport`` and
-    ``routing`` objects (§2.18)."""
+    """The emitted keys as the router's top-level ``transport``, ``routing``
+    and ``timestamping`` objects (§2.18)."""
     out: dict[str, Any] = {}
     for e in emit(policy):
         node = out
@@ -841,6 +866,61 @@ def block(policy: PolicyV2) -> dict[str, Any]:
             node = node.setdefault(p, {})
         node[parts[-1]] = e["value"]
     return out
+
+
+def far_block(policy: PolicyV2) -> dict[str, Any]:
+    """§2.18's far end's block: "On request, a generator writes the same three
+    objects for the far end: the far router's configuration, the gateway
+    client's session configuration, or each device's. A far router routes
+    onto the face too." The near router's block, whole."""
+    return block(policy)
+
+
+def read_config(config: dict[str, Any]) -> dict[str, Any]:
+    """A router's configuration (its JSON5 read as a JSON document), as a
+    tool reads it for §2.19 and as ``transport.json``'s ``router`` states
+    it: each of the eight keys at zenoh's key where the file states it, its
+    ``mode`` and its ``timestamping/enabled`` where it states them."""
+    def at(path: str) -> tuple[bool, Any]:
+        node: Any = config
+        for part in path.split("/"):
+            if not isinstance(node, dict) or part not in node:
+                return False, None
+            node = node[part]
+        return True, node
+
+    out: dict[str, Any] = {}
+    for path in [p for p, _, _ in TRANSPORT.values()] + ["mode", "timestamping/enabled"]:
+        found, v = at(path)
+        if found:
+            out[path] = v
+    return out
+
+
+def stamps(config: dict[str, Any]) -> bool:
+    """§2.19 (0.13): whether the router stamps what it routes, "read at the
+    mode it runs". "A tool reads the configuration's ``mode``, ``router``
+    where it states none, as zenohd runs. It reads ``timestamping/enabled``
+    as a boolean, whatever the mode, or as a value per mode. A mode it
+    leaves out is at its default: on for a router, off for a peer and a
+    client." ``config`` is :func:`read_config`'s.
+
+    Where the text says nothing, zk2py's reading: a value that is neither a
+    boolean nor a value per mode of booleans, or a ``mode`` that is none of
+    the three, is no setting zenoh runs (as a string lease is, §2.19); the
+    router is then read as stamping, so the warning holds until the file
+    shows timestamping off."""
+    mode = config.get("mode", DEFAULT_MODE)
+    if mode not in STAMPS_BY_DEFAULT:
+        return True
+    if "timestamping/enabled" not in config:
+        return STAMPS_BY_DEFAULT[mode]
+    v = config["timestamping/enabled"]
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, dict) and all(k in STAMPS_BY_DEFAULT and isinstance(x, bool) for k, x in v.items()):
+        return v.get(mode, STAMPS_BY_DEFAULT[mode])
+    return True
 
 
 def _read(config: dict[str, Any], binding: str) -> dict[str, Any]:
@@ -870,7 +950,7 @@ def check_transport(policy_text: str, router: dict[str, Any], peer: dict[str, An
     if policy.transport is None:
         return {"emit": [], "findings": []}
     out: list[dict[str, Any]] = []
-    emitted = {e["key"].removeprefix("transport."): e["value"] for e in emit(policy)}
+    emitted = {e["key"].removeprefix("transport."): e["value"] for e in emit(policy) if e["key"] != "timestamping"}
     got = _read(router, policy.binding)
     for k in TRANSPORT:
         if not _same(got[k], emitted[k]):
@@ -878,6 +958,11 @@ def check_transport(policy_text: str, router: dict[str, Any], peer: dict[str, An
     lease, wait = got["lease_ms"], got["wait_before_close_ms"]
     if type(lease) is int and type(wait) is int and wait < lease * 1000:
         out.append(link.finding("wait_under_lease", None, "transport.wait_before_close_ms"))
+    # §2.19 (0.13): "face_timestamping (warning, at timestamping): the router
+    # stamps the puts it routes, read at the mode it runs." The far end's
+    # configuration is read for its lease and keep_alive alone.
+    if stamps(router):
+        out.append(link.finding("face_timestamping", None, "timestamping", "warning"))
     if peer is not None:
         theirs = _read(peer, policy.binding)
         for k in ("lease_ms", "keep_alive"):

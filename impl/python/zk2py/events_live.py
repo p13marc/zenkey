@@ -1,8 +1,9 @@
 """``scenarios/state.md`` §8, "Events replay", live, as core 0.103 rewrote
-it (#980 C2c, C2d; #609, round 107) and core 0.104 extended it (round 108):
-each occurrence on its run and seq's key, its payload form 4 with its time, a
-replay filtered by each event's time and ordered by it, and step 4's two puts
-that carry no event, never delivered. ``python -m zk2py.events_live
+it (#980 C2c, C2d; #609, round 107) and core 0.104 and 0.105 extended it
+(rounds 108 and 109): each occurrence on its run and seq's key, its payload
+form 4 with its time, a replay filtered by each event's time and ordered by
+it, and step 4's three samples that carry no event, two puts and a delete,
+never delivered. ``python -m zk2py.events_live
 [--only py|rust|zenctl|replayed]``.
 
 **The union storage.** zenoh-python's router loads no plugin, so no storage
@@ -10,7 +11,8 @@ manager runs here. :class:`UnionStorage` stands in for one on
 ``zk2/*/*/*/events/**`` whose backend ignores ``_time``, as §8's setup says
 of the memory backend (spike S5): one sample per key, a later put replacing
 what it held (core Appendix B, 0.103), and every GET answered with all it
-holds, whatever its ``_time``.
+holds, whatever its ``_time``. A delete it keeps nothing of: no
+``reply_del`` answers a GET (§8 Expected 2 counts the backend's puts).
 
 **The pairings** (``journal.v1``, ``zenkey/tests/contracts/journal.v1.toml``,
 at ``lab/journal``):
@@ -20,17 +22,19 @@ at ``lab/journal``):
   :func:`zk2py.live.replay_events` at step 5), twice: under 16-bit runs (a
   run record) and under 32-bit draws. The restart of step 3 is a new
   :class:`~zk2py.owner.Owner` on the same record, or a new draw. Step 4's
-  two puts come from a zk2py session of its own; and, beyond §8, a delete
-  on an events key, counted ``form`` (:func:`run_delete`, F-522);
+  three samples come from a zk2py session of its own; and, beyond §8
+  (:func:`run_delete`), a delete on an events key heard with each kind of
+  attachment, and a queryable's ``reply_del`` in a replay, each counted by
+  its attachment's refusal, else ``form`` (core 0.105);
 - ``zenctl``: the Rust readers of zk2py's owner: ``zenctl echo`` hearing
   occurrences live, and ``zenctl get`` replaying them from the stand-in;
   and ``zenctl echo`` hearing step 4's two puts from zk2py, a tool's
   reading of them (observer §7.3, which core 0.104 left as it was);
 - ``replayed``: step 4 with a Rust writer: ``zenctl record`` captures
-  zk2py's two puts, ``zenctl replay`` publishes them on a bus where no
-  service runs at ``lab/journal``, and the owner example puts two
-  occurrences beside them; zk2py's consumer, subscribed and replaying,
-  delivers the owner example's two and neither replayed put;
+  zk2py's two puts and its delete, ``zenctl replay`` publishes them on a
+  bus where no service runs at ``lab/journal``, and the owner example puts
+  two occurrences beside them; zk2py's consumer, subscribed and replaying,
+  delivers the owner example's two and none of step 4's samples;
 - ``rust``: the owner example's occurrences (``put journal.v1
   events/entries``) read by zk2py's consumer: a 32-bit draw, then a 16-bit
   run (``--run-file``) after a restart, and an unknown time while its clock
@@ -150,6 +154,22 @@ def _put_no_events(session: Any, puts: list[tuple[str, bytes, str]]) -> None:
         session.put(k, payload, encoding=enc)
 
 
+def _delete_key(width: int, run: int) -> str:
+    """§8 step 4's third sample (core 0.105): "It then deletes a third such
+    key, its attachment a delete (§7.5's form 1)", a seq beyond the puts'."""
+    from .lexical import occurrence_chunk
+
+    return f"{MEMBER}/{occurrence_chunk(width, run, 9_000_002)}"
+
+
+def _delete_third(session: Any, width: int, run: int) -> str:
+    from . import zk2c
+
+    k = _delete_key(width, run)
+    session.delete(k, attachment=zk2c.deletion(zk2c.InBand(width, run, 9_000_002)))
+    return k
+
+
 class Heard:
     """What a consumer's subscription to the event delivered and counted
     undecodable (:func:`zk2py.live.subscribe_events`)."""
@@ -233,14 +253,16 @@ def _section8(width: int, connect: str, tool: Any, storage: UnionStorage) -> tup
     storage.wait_for(len(every))
     # Step 4: the consumer subscribes to the event; another session then
     # puts a mutation and a JSON document with no envelope on keys of
-    # events/entries whose occurrence chunks no occurrence took.
+    # events/entries whose occurrence chunks no occurrence took, then
+    # deletes a third such key, its attachment a delete (core 0.105).
     heard = Heard(tool)
     other = live.open_client(connect)
     intruders = _no_events(width, run2[1])
     try:
         time.sleep(0.5)
         _put_no_events(other, intruders)
-        heard.wait_for(2)
+        deleted = _delete_third(other, width, run2[1])
+        heard.wait_for(3)
     finally:
         other.close()
         heard.close()
@@ -292,13 +314,16 @@ def _section8(width: int, connect: str, tool: Any, storage: UnionStorage) -> tup
                 f"last {got[-1] if got else None}"))
     with heard.lock:
         live_got, live_bad = list(heard.delivered), sorted(heard.undecodable)
-    out.append((f"{tag}: Expected 5: neither of step 4's puts is delivered, by the subscription or by the replay; "
-                "the consumer counts each undecodable, refused as form: it carries no event (core 0.104 §2.6)",
-                not live_got and live_bad == [(k, "form") for k in no_event_keys]
+    three = sorted(no_event_keys + [deleted])
+    out.append((f"{tag}: Expected 5: none of step 4's three samples is delivered, by the subscription or by the "
+                "replay; the consumer counts each undecodable, refused as form: each carries no event, in an "
+                "envelope §7.5's parse accepts or in none (core 0.105 §2.6). The subscription counts the three; the "
+                "backend keeps no delete, so the replay returns and counts the two puts",
+                not live_got and live_bad == [(k, "form") for k in three]
                 and sorted(rp.undecodable) == [(k, "form") for k in no_event_keys]
-                and not set(no_event_keys) & set(got),
+                and not set(three) & set(got) and deleted not in storage.held,
                 f"subscription delivered {len(live_got)}, counted {live_bad}; replay counted {sorted(rp.undecodable)}"))
-    info.update(keys=keys, runs=(run1, run2), replay=rp, intruders=intruders)
+    info.update(keys=keys, runs=(run1, run2), replay=rp, intruders=intruders, deleted=deleted)
     return out, info
 
 
@@ -341,26 +366,67 @@ def _table(text: str) -> dict[str, list[str]]:
 
 
 def run_delete() -> list[Result]:
-    """Beyond §8 (F-522, open): a delete on an events key, which no text has
-    a consumer read. zk2py's subscription counts it undecodable, ``form``,
-    as §4.2 counts a stray ``reply_del``, and delivers nothing."""
+    """Beyond §8 (core 0.105, F-522's answer): a delete on an events key,
+    heard with each kind of attachment, and a queryable's ``reply_del`` with
+    each in a replay. None is delivered. Each is counted by its attachment's
+    refusal where §7.5's parse refuses it, else ``form``: one that reads as
+    a delete, and one with no attachment, which carries none (core 0.105's
+    entry; F-527)."""
+    import zenoh
+
     from . import live, zk2c
     from .lexical import occurrence_chunk
     from .live_interop import _r1
 
+    kinds = [("a delete (form 1)", lambda k, s: zk2c.deletion(zk2c.InBand(16, 7, s)), "form"),
+             ("no attachment", lambda k, s: None, "form"),
+             ("an empty attachment", lambda k, s: b"", "short"),
+             ("a mutation (form 0)", lambda k, s: zk2c.mutation(zk2c.InBand(16, 7, s), b"x"), "sample_kind"),
+             ("a delete with a byte after its seq", lambda k, s: zk2c.deletion(zk2c.InBand(16, 7, s)) + b"\0",
+              "trailing")]
+    cases = []
+    for i, (what, att, want) in enumerate(kinds):
+        seq = 9_000_100 + i
+        k = f"{MEMBER}/{occurrence_chunk(16, 7, seq)}"
+        cases.append((what, k, att(k, seq), want))
+    out: list[Result] = []
     r, ep, _ = _r1(timestamping=True)
     tool, other = live.open_client(ep), live.open_client(ep)
     heard = Heard(tool)
+    q = None
     try:
         time.sleep(0.5)
-        k = f"{MEMBER}/{occurrence_chunk(16, 7, 9_000_002)}"
-        other.delete(k, attachment=zk2c.deletion(zk2c.InBand(16, 7, 9_000_002)))
-        heard.wait_for(1)
+        for _, k, a, _ in cases:
+            if a is None:
+                other.delete(k)
+            else:
+                other.delete(k, attachment=a)
+        heard.wait_for(len(cases))
         with heard.lock:
-            got = (list(heard.delivered), list(heard.undecodable))
-        return [("beyond §8 (F-522): a delete on an events key, heard by zk2py's subscription, is never delivered "
-                 "and counted undecodable, form (zk2py's reading)", got == ([], [(k, "form")]), f"{got}")]
+            got = (list(heard.delivered), sorted(heard.undecodable))
+        want = sorted((k, w) for _, k, _, w in cases)
+        out.append(("beyond §8 (core 0.105): a delete on an events key, heard by zk2py's subscription with each kind "
+                    "of attachment, is never delivered, and is counted by the parse's refusal (short, sample_kind, "
+                    "trailing), else form (a delete, or none)", got == ([], want), f"{got}"))
+
+        def answer(query: Any) -> None:
+            for _, k, a, _ in cases:
+                if a is None:
+                    query.reply_del(k)
+                else:
+                    query.reply_del(k, attachment=a)
+
+        q = other.declare_queryable(f"{MEMBER}/*", zenoh.handlers.Callback(answer), complete=False)
+        time.sleep(0.5)
+        rp = live.replay_events(tool, f"{MEMBER}/*", RETENTION_S)
+        out.append(("beyond §8 (core 0.105): a queryable's reply_del on an events key, in zk2py's replay, with each "
+                    "kind of attachment, is never delivered, and is counted as the subscription counts it (§2.6: "
+                    "\"or from a queryable that answers with a reply_del\")",
+                    not rp.delivered and sorted(rp.undecodable) == want, f"{sorted(rp.undecodable)}"))
+        return out
     finally:
+        if q is not None:
+            q.undeclare()
         heard.close()
         other.close()
         tool.close()
@@ -531,9 +597,11 @@ def run_zenctl_no_event() -> list[Result]:
 
 
 def run_replayed() -> list[Result]:
-    """§8 step 4 with a Rust writer of the two puts (core 0.104 §2.6, "put by
-    an owner of an earlier core or by a broken writer"): ``zenctl record``
-    captures them from a zk2py session on one router, and ``zenctl replay``
+    """§8 step 4 with a Rust writer of its three samples (core 0.104 §2.6, "put
+    by an owner of an earlier core or by a broken writer"; core 0.105, "A
+    delete comes from a broken writer"): ``zenctl record`` captures zk2py's
+    two puts and its delete from a zk2py session on one router, and
+    ``zenctl replay``
     (``--force-base --i-know``: the operator's word that this bus is meant,
     and that it writes an owner's keys) publishes them on a second, beside
     the owner example putting two occurrences. zk2py's consumer subscribes
@@ -552,18 +620,29 @@ def run_replayed() -> list[Result]:
         time.sleep(3.0)
         w = live.open_client(epa)
         _put_no_events(w, intruders)
+        deleted = _delete_third(w, 16, 7)
         so, se = rec.communicate(timeout=30)
         w.close()
     finally:
         ra.close()
     rows = [json.loads(x) for x in capture.read_text(encoding="utf-8").splitlines()[1:] if x.strip()]         if capture.exists() else []
-    out.append(("replayed: zenctl record captures zk2py's two puts whole, each under its Encoding",
-                [(x.get("key"), x.get("encoding")) for x in rows] == [(k, e) for k, _, e in intruders],
+    out.append(("replayed: zenctl record captures zk2py's two puts whole, each under its Encoding, and its delete",
+                [(x.get("key"), x.get("encoding")) for x in rows[:2]] == [(k, e) for k, _, e in intruders]
+                and len(rows) == 3 and rows[2].get("key") == deleted,
                 f"exit {rec.returncode}; {[(x.get('key'), x.get('encoding')) for x in rows]}; {se.strip()[-200:]}"))
+    out.append(("replayed: the capture's row of the delete (reported: its kind, and whether it keeps the "
+                "attachment)", True,
+                f"{ {k: v for k, v in rows[2].items() if k not in ('key',)} if len(rows) > 2 else None }"))
     r, ep, _ = _r1(timestamping=True)
     tool = live.open_client(ep)
     storage = UnionStorage(r)
     heard = Heard(tool)
+    import zenoh
+
+    raw_dels: list[tuple[str, bytes | None]] = []
+    raw_sub = tool.declare_subscriber(f"{MEMBER}/*", zenoh.handlers.Callback(
+        lambda smp: raw_dels.append((str(smp.key_expr), None if smp.attachment is None else smp.attachment.to_bytes()))
+        if smp.kind == zenoh.SampleKind.DELETE else None))
     exe = None
     try:
         exe = Exe(BLACKBOX / "owner", ADDRESS, [JOURNAL], connect=ep)
@@ -576,7 +655,7 @@ def run_replayed() -> list[Result]:
                 real.append(line.split(" ", 1)[1].strip())
         rp_out = subprocess.run([str(BLACKBOX / "zenctl"), "replay", "-c", ep, "--speed", "10", "--force-base",
                                  "--i-know", str(capture)], capture_output=True, text=True, timeout=60)
-        heard.wait_for(4)
+        heard.wait_for(5)
         storage.wait_for(4)
         with storage.lock:
             held = {k: storage.held[k][1] for k, _, _ in intruders if k in storage.held}
@@ -584,14 +663,20 @@ def run_replayed() -> list[Result]:
             live_keys, live_bad = sorted(o.key for o in heard.delivered), sorted(heard.undecodable)
         rp = live.replay_events(tool, f"{MEMBER}/*", RETENTION_S)
         want_bad = [(k, "form") for k in sorted(k for k, _, _ in intruders)]
-        out.append(("replayed: zenctl replay publishes both on the second bus, under their Encodings, beside the "
-                    "owner example's two occurrences",
-                    rp_out.returncode == 0 and len(real) == 2 and held == {k: e for k, _, e in intruders},
-                    f"exit {rp_out.returncode}; real {real}; held {held}; {rp_out.stderr.strip()[-200:]}"))
+        want_live = sorted(want_bad + [(deleted, "form")])
+        from . import zk2c
+
+        out.append(("replayed: zenctl replay publishes the three on the second bus, the puts under their Encodings, "
+                    "and the delete with its attachment, a delete (form 1), beside the owner example's two "
+                    "occurrences",
+                    rp_out.returncode == 0 and len(real) == 2 and held == {k: e for k, _, e in intruders}
+                    and raw_dels == [(deleted, zk2c.deletion(zk2c.InBand(16, 7, 9_000_002)))],
+                    f"exit {rp_out.returncode}; real {real}; held {held}; deletes heard {raw_dels}; "
+                    f"{rp_out.stderr.strip()[-200:]}"))
         out.append(("replayed: zk2py's consumer delivers the owner example's two occurrences, by the subscription "
-                    "and by the replay, and neither replayed put; it counts each undecodable, form (core 0.104 §2.6, "
-                    "state.md §8 Expected 5)",
-                    live_keys == sorted(real) and live_bad == want_bad
+                    "and by the replay, and none of step 4's three; the subscription counts each undecodable, form, "
+                    "and the replay the two puts the backend kept (core 0.105 §2.6, state.md §8 Expected 5)",
+                    live_keys == sorted(real) and live_bad == want_live
                     and sorted(o.key for o in rp.delivered) == sorted(real) and sorted(rp.undecodable) == want_bad,
                     f"subscription {live_keys} {live_bad}; replay {[o.key for o in rp.delivered]} "
                     f"{sorted(rp.undecodable)}"))
@@ -600,6 +685,7 @@ def run_replayed() -> list[Result]:
     finally:
         if exe is not None:
             exe.close()
+        raw_sub.undeclare()
         heard.close()
         storage.close()
         tool.close()

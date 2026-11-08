@@ -497,18 +497,31 @@ def py_rust(report: Report) -> None:
                      json.dumps(said)[:900])
         import re
 
+        # Round 109: the black boxes of 67eac08c write the size as "<n B"
+        # and name the declared type and the refusal beside it.
+        sizes = [re.fullmatch(r"<(\d+) (?:B|bytes?)\b(.*)>", str(x.get("value"))) for x in rows]
         report.check(sec, "F-436: zenctl echo renders each undecodable record as its declared type and size, "
                           "never its bytes as text (observer §7.3: MUST NOT show garbage)",
-                     len(rows) == 3 and all(re.fullmatch(r"<\d+ bytes?>", str(x.get("value"))) for x in rows),
+                     len(rows) == 3 and all(sizes) and [int(m.group(1)) for m in sizes] == [5, 1, 2]
+                     and all("packed:Ties" in m.group(2) for m in sizes),
                      json.dumps([x.get("value") for x in rows]))
         for name, path in (("packed-wide", WIDE), ("packed-collide", COLLIDE)):
             p = _zenctl("watch", "-c", ep, "--format", "ndjson", "--contracts", str(path), "--for", "2", "lab/pyp",
                         IFACE, "stream/sensor")
             rows = [json.loads(x) for x in p.stdout.splitlines() if x.startswith("{")]
             summary = next((x for x in rows if x.get("row") == "summary"), {})
+            # Round 109: since F-436's fix the reference rows each record it
+            # refuses, undecodable with its refusal named, which delivers
+            # nothing.
+            shown = [x for x in rows if x.get("row") in ("sample", "key")]
+            delivered = [x for x in shown if (x.get("payload") or {}).get("as") != "undecodable"]
             report.check(sec, f"zenctl watch holding {name}: the runtime's consumer delivers none of zk2py's "
-                              "Sensor records (core §7.6's reader)",
-                         not _values(rows), f"exit {p.returncode}; summary {json.dumps(summary)[:300]}")
+                              "Sensor records (core §7.6's reader), and rows each one undecodable, its refusal "
+                              "named (observer §7.3, F-436's fix)",
+                         not delivered and bool(shown)
+                         and all((x.get("payload") or {}).get("reason") for x in shown),
+                         f"exit {p.returncode}; {len(shown)} rows, {len(delivered)} delivered; summary "
+                         f"{json.dumps(summary)[:300]}")
             echo = subprocess.Popen([str(BLACKBOX / "zenctl"), "echo", "-c", ep, "--format", "ndjson",
                                      "--contracts", str(path), "--count", "2",
                                      f"zk2/lab/pyp/{IFACE}/stream/sensor"],

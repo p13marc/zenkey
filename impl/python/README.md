@@ -7120,6 +7120,120 @@ reference's state in core 0.104's entry). None is a blocker. F-512 to
 F-518 are answered. See "At link.v2 0.12 and core 0.104" in
 `SPEC-FINDINGS.md`.
 
+## `link.v2` 0.13 and 0.14 and core 0.105: a face router stamps nothing, and round 108 answered (round 109)
+
+Round 109 read main 67eac08c, which takes:
+- **link.v2 0.13** (#1106): §2.18, a generator writes the near router's
+  timestamping off beside the transport, `timestamping: { enabled: {
+  router: false, peer: false } }`, and the far end's block the same three
+  objects; §2.19, `face_timestamping`, a warning at `timestamping`, read
+  at the router's `mode`, `router` where none is stated, and its
+  `timestamping/enabled`, a boolean or a value per mode; §5's row;
+  `scenarios-v2.md` §3; `v2/transport.json`, 21 cases;
+- **link.v2 0.14:** round 108's F-519 and F-520 answered, editorial;
+- **core 0.105:** F-521 to F-523 answered. §2.6's "A sample that carries
+  no event": a delete on an events key is never delivered, heard or
+  replayed, and the count names §7.5's refusal first, `form` for the
+  rest. `state.md` §8 step 4 deletes a third key. 0.104's note on the
+  reference is corrected.
+
+No rule changed beyond what the changelogs state.
+
+### Its walk of `RULES.md` at 0.105
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 90 | 78 | 3 | 9 |
+| consumer | 33 | 29 | 0 | 4 |
+| caller | 18 | 18 | 0 | 0 |
+| observer | 104 | 99 | 3 | 2 |
+| static, in every class | 68 | 66 | 0 | 2 |
+
+- **284 rows walked of 284, none without a verdict.** 29 verdicts are
+  beyond the index.
+- **The re-key came first,** in the commit that brings `just
+  py-conformance` level (6630 of 6630). Core 0.105 widens the
+  consumer's MUST NOT in place, and zk2py's consumer delivered no delete
+  on an events key already, so the row stays met.
+
+### What round 109 changed in zk2py
+
+- **`link_v2`** (0.13):
+  - `emit` writes timestamping off for a router and a peer after the
+    eight keys, `block` nests it beside `transport` and `routing`, and
+    `far_block` is the far end's three objects;
+  - `check_transport` reads the router's `mode` and its
+    `timestamping/enabled` (`stamps`), and warns `face_timestamping`;
+  - `read_config` reads a router's configuration as the fixture's
+    `router` states it;
+  - where the text says nothing, a value zenoh would not load is read as
+    stamping, so the warning stands until the file shows it off;
+  - `far_side.FarSide.config`, a far side's session, carries the third
+    object too.
+- **The consumer** (core 0.105 §2.6): `live.sample_no_event` and
+  `live.delete_read`. A delete on an events key is never delivered:
+  heard (`live.subscribe_events`, `Owner.subscribe_role`), or a
+  `reply_del` in a replay (`live.replay_events`, which reads
+  `Answer.attachment`). It is counted by its attachment's refusal where
+  §7.5's parse refuses it, and `form` where it reads as a delete or has
+  none (F-527). Round 108 counted every delete `form`, as core 0.105's
+  entry notes.
+- **`events_live`:** §8 step 4's delete, from zk2py and replayed by
+  `zenctl replay`. Beyond §8, a delete heard, and a queryable's
+  `reply_del` replayed, with each kind of attachment.
+- **`stamp_live`,** new: `scenarios-v2.md` §3 on a zenoh-python N run
+  from zk2py's generated configuration alone, the Rust `zenctl check
+  face` over the same file, and the far end's block, run once.
+- **The mend** (`py-carry-r108.md`): F-519 to F-523's answers, each
+  checked (see "At core 0.105 and link.v2 0.14"). The carry list names
+  no review-bot note on #1104 that touches `impl/python/`.
+
+**`just py-conformance`: 6636 of 6636** on 67eac08c. Of them, `link` 330
+(`v2/transport.json` 21 of 21, the family whole) and `readings`
+1008.
+
+### Live
+
+On the black boxes of 67eac08c. Every router is zenoh-python's, zenoh
+1.10.1: `bin/current` holds no zenohd.
+
+| Runner | What | Result |
+|---|---|---|
+| `stamp_live --only near` | `scenarios-v2.md` §3: N from zk2py's generated configuration (access control, `usrpwd`, the plan's downsampling and the three objects), the owner `lab/radio-a` a zk2py owner on the near side, F as `ground` over the face direct and F2 through a relay; zk2py's check and `zenctl check face` over N's file, under the block and with its `timestamping` removed; `oper` judged by its owner's own stamp (F-524), N's stamping by `fault`'s occurrences; each stamp's bytes toward the far side, 26 | 11/11 |
+| `stamp_live --only far` | the far end's block, once: FR, a router from `link_v2.far_block`, routes a far owner's occurrences onto the face with no stamp, and with its `timestamping` removed stamps each with its own zid; the owner example on the far side stamps `oper` itself | 4/4 |
+| `events_live --only py` | `state.md` §8 whole, step 4's three samples, under 16-bit runs and 32-bit draws; beyond §8, a delete heard and a `reply_del` replayed with each kind of attachment (`form`, `form`, `short`, `sample_kind`, `trailing`) | 12/12 |
+| `events_live --only replayed` | §8 step 4 by `zenctl record` and `zenctl replay`, the delete with its attachment; zk2py delivers the owner example's two occurrences alone | 4/4 |
+| `events_live --only zenctl`, `--only rust` | as in round 108, over the consumer's new count | 4/4 each |
+| `packed_live` | both pairings, rerun whole; F-436's checks re-keyed to the reference's fix | 27/27 |
+| `far_side_live`, `across_live`, `constrained_live` | over `FarSide.config`'s timestamping object | 16/16, 8/8, 14/14 |
+
+**The reference, observed (not findings):**
+- **`zenctl check face`** over zk2py's N reports no `face_timestamping`,
+  every transport row equal to the plan, and in the control
+  `face_timestamping` alone of the timestamping codes. It exits 1 under
+  both, for its rule-by-rule comparison with its own plan: zk2py's rule
+  ids and grants are zk2py's.
+- **`zenctl record`** keeps a delete's attachment in its row
+  (`attachment_b64`), and **`zenctl replay`** publishes the delete with
+  it.
+- **The owner example** stamps `radio.v1`'s `oper` with a Zenoh
+  timestamp of its own (F-524), as zk2py's owner does.
+- **F-436 is fixed:** `zenctl watch` rows each packed record its layout
+  refuses, its refusal named, and `zenctl echo` renders each as its size
+  and declared type.
+
+**Not run:** a zenohd black box, none being in `bin/current`; a Rust
+consumer of an event, which no black box is (`consume` refuses one);
+`scenarios-v2.md` §1 and §2 on routers.
+
+Round 109 found F-524 to F-528: a contradiction (§3's `oper` carries its
+owner's timestamp), an ambiguity (a delete on an events key with no
+attachment, `short` or `form`) and three minor errors (§2.18's block of
+two objects, core §8.2's "Nothing checks this posture", and §8 Expected
+5's replay count). None is a blocker. F-519 to F-523 are answered, and
+F-436, re-run, is closed. See
+"At core 0.105 and link.v2 0.14" in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -7321,7 +7435,8 @@ impl/python/
     link.py           link.v1   the face policy, exposure, the plan and its carve-out, the checks, a generator
     link_scenarios.py link.v1   scenarios.md §1–§13 on zenoh-python routers, over examples/zk2/link/
     link_v2.py        link.v2   the policy, the plan, the transport block and its checks (round 96); the contract
-                                side and frames per face, exposure.json (0.3, round 99)
+                                side and frames per face, exposure.json (0.3, round 99); timestamping off in the
+                                block, the far end's block, and face_timestamping (0.13, round 109)
     far_side.py       §8.1 §8.5 a far side across a face: the reply timeout, a subscription's horizon, Redeclaring
                                 (core 0.91, observer 0.23, link.v2 0.4; round 99)
     far_side_live.py  §8.1 §8.5 constrained.md §8 and §9 in process, a proxy dropping a batch the far client sends
@@ -7404,7 +7519,10 @@ impl/python/
                                 face hearing the two events it lists of zk2py's owner (--only lora, round 108)
     events_live.py    §2.6 §7.5 scenarios/state.md §8 live: zk2py's owner and consumer, the owner example's events,
                                 zenctl echo and get, over a union storage stand-in (round 107); step 4's two puts
-                                that carry no event, from zk2py and replayed by zenctl replay (round 108)
+                                that carry no event, from zk2py and replayed by zenctl replay (round 108); step 4's
+                                delete, and deletes and reply_dels by their attachments (round 109)
+    stamp_live.py     link.v2   scenarios-v2.md §3 on a zenoh-python N run from zk2py's generated configuration,
+                                zenctl check face over it, and a far router from the far end's block (round 109)
     stray_live.py     §4.2      scenarios/state.md §15, a stray reply_del and an owner on an earlier revision
                                 (round 107); the readers given the owner's revision (step 3, round 108)
     archive_live.py   §4.4 S5   scenarios/state.md §4 to §6: the Rust archive aligning from zk2py's owner
