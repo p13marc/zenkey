@@ -136,7 +136,7 @@
       }
     },
     {
-      "note": "rf0 through its face: frames/fast and modem.v3 3.4's three `face/` events cross, each event's last chunk a wildcard; no collection crosses, so no heartbeat does",
+      "note": "rf0 through its face: frames/fast and the three `face/` events its face lists cross, each event's last chunk a wildcard; no collection crosses, so no heartbeat does",
       "contracts": [
         "examples/zk2/zenoh-modem/modem.v3.toml",
         "spec/profiles/config/config.v1.toml",
@@ -159,7 +159,7 @@
       }
     },
     {
-      "note": "lora0 at SF12 through its face: frames/slow, and the three `face/` events its plan lets cross, published or not (a face lists frames, never events)",
+      "note": "lora0 at SF12 through its face: frames/slow alone, the face listing no event (`events = []`, link.v2 §2.7)",
       "contracts": [
         "examples/zk2/zenoh-modem/modem.v3.toml",
         "spec/profiles/config/config.v1.toml",
@@ -174,15 +174,12 @@
       "typed": null,
       "expect": {
         "selectors": [
-          "zk2/h-c2a95e41d7f0/lora0/modem.v3/events/face/device_fault/*",
-          "zk2/h-c2a95e41d7f0/lora0/modem.v3/events/face/identity_change/*",
-          "zk2/h-c2a95e41d7f0/lora0/modem.v3/events/face/oper_change/*",
           "zk2/h-c2a95e41d7f0/lora0/modem.v3/stream/frames/slow"
         ]
       }
     },
     {
-      "note": "sat0 through its SBD face: frames/paid, and the three `face/` events its plan lets cross, published or not",
+      "note": "sat0 through its SBD face: frames/paid alone, the face listing no event",
       "contracts": [
         "examples/zk2/zenoh-modem/modem.v3.toml",
         "spec/profiles/config/config.v1.toml",
@@ -197,9 +194,6 @@
       "typed": null,
       "expect": {
         "selectors": [
-          "zk2/h-71c0e2a9d4b3/sat0/modem.v3/events/face/device_fault/*",
-          "zk2/h-71c0e2a9d4b3/sat0/modem.v3/events/face/identity_change/*",
-          "zk2/h-71c0e2a9d4b3/sat0/modem.v3/events/face/oper_change/*",
           "zk2/h-71c0e2a9d4b3/sat0/modem.v3/stream/frames/paid"
         ]
       }
@@ -509,7 +503,7 @@
       }
     },
     {
-      "note": "a face policy whose face lists a frame of no contract in hand: the plan is refused, so there is no scope",
+      "note": "a face policy whose face lists a frame and events of no contract in hand: the plan is refused, so there is no scope",
       "contracts": [
         "spec/profiles/config/config.v1.toml",
         "spec/profiles/health/health.v1.toml"
@@ -523,7 +517,53 @@
       "typed": null,
       "expect": {
         "plan_refused": [
+          "event_unknown",
           "frame_unknown"
+        ]
+      }
+    },
+    {
+      "note": "lora0 at SF7 through its face, given its events: narrowed to the two the face lists, each event's last chunk a wildcard; `face/device_fault` and the four JSON events are in no scope (link.v2 §2.7)",
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "across": [
+        "h-c2a95e41d7f0/lora0"
+      ],
+      "policy": "examples/zk2/zenoh-modem/faces/zenohd-lora0-sf7.face.toml",
+      "face": "lora",
+      "reads": "samples",
+      "typed": [
+        "zk2/h-c2a95e41d7f0/lora0/modem.v3/events/**"
+      ],
+      "expect": {
+        "selectors": [
+          "zk2/h-c2a95e41d7f0/lora0/modem.v3/events/face/identity_change/*",
+          "zk2/h-c2a95e41d7f0/lora0/modem.v3/events/face/oper_change/*"
+        ]
+      }
+    },
+    {
+      "note": "lora0 at SF7 through its face, given `face/device_fault`, which the face does not list: refused, never dropped",
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "across": [
+        "h-c2a95e41d7f0/lora0"
+      ],
+      "policy": "examples/zk2/zenoh-modem/faces/zenohd-lora0-sf7.face.toml",
+      "face": "lora",
+      "reads": "samples",
+      "typed": [
+        "zk2/h-c2a95e41d7f0/lora0/modem.v3/events/face/device_fault/*"
+      ],
+      "expect": {
+        "refused": [
+          "zk2/h-c2a95e41d7f0/lora0/modem.v3/events/face/device_fault/*"
         ]
       }
     }

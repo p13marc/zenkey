@@ -357,7 +357,7 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   scope a selector given includes and the selector itself where it only
   meets one, and names the rest in `Narrowed::unmet`, never dropping one.
   `tests/face_scope.rs` runs `spec/conformance/scope/faces.json` whole
-  (17 cases over zenoh-modem's rf0, lora0 and sat0 faces).
+  (19 cases over zenoh-modem's rf0, lora0 and sat0 faces, two of them a face's listed events, link.v2 0.12).
   The revision of a key with no descriptor naming the owner's (#990 V2a,
   observer 0.29 §7.5) is `model::choice::choose`: over every revision of
   the key's interface held (`Target::Data`, `Collection` for a snapshot's

@@ -20,11 +20,11 @@
 # not. frames/fast and frames/paid are the faster media's and SBD's
 # (`frame_unlisted`), and the chip has no ARQ (`no_arq`).
 #
-# Events (modem.v3 3.4, #991): the plan lets the three `face/` events cross,
-# and `face/device_fault` draws `not_packed`, but lora0's owner publishes
-# none at SF12: beside frames/slow's 785 s, `face/oper_change` alone, 2
-# tiles an occurrence at 24 a day, reaches 864.04 s of the 864 (link.md,
-# "Events"). With lora0's own readings, 434 s, the two `rare` ones would fit.
+# Events (modem.v3 3.4, #991): the face lists none, `events = []` (link.v2
+# 0.12 §2.7), so the plan denies every event: beside frames/slow's 785 s,
+# `face/oper_change` alone, 2 tiles an occurrence at 24 a day, reaches
+# 864.04 s of the 864 (link.md, "Events"). With lora0's own readings,
+# 434 s, the two `rare` ones would fit.
 profile  = "link.v2"
 system   = "h-c2a95e41d7f0"
 services = ["lora0"]
@@ -54,6 +54,8 @@ loss_ppm         = 50000
 arq              = false
 reply_timeout_ms = 120000
 horizon_s        = 1800
+# none: beside frames/slow, even one `rare` event exceeds the duty
+events           = []
 
 # frames/slow writes a full record at least every 4 (modem.v3), hourly at
 # one every 15 minutes, as the face asks.

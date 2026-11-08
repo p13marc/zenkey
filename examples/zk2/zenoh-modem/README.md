@@ -362,8 +362,8 @@ The downlink's keep-alives are the ground's air: 148 s, 119 s and 142 s at SF7, 
 SF7, SF9 and SF12. SF9's and SF12's faces now run a lease of four frame intervals, 480 s and 3,600 s,
 so their frames replace every uplink keep-alive ([link](link.md), the note at its top).
 
-**With revision 3.4's events** (#991), each face adds the `face/` events its device's owner
-publishes, at their rate's worst case, beside the frames' **All 73**: RF 594 KB a day (2.3 %), the
+**With revision 3.4's events** (#991), each face adds the `face/` events its policy lists (`link.v2`
+0.12 §2.7, #1098), at their rate's worst case, beside the frames' **All 73**: RF 594 KB a day (2.3 %), the
 three; LoRa SF7 381 s (44 %) and SF9 550 s (64 %), the two `rare` ones; SF12 785 s and SBD 96
 messages, none. [link.md](link.md)'s "Events" has the arithmetic, and
 `zenkey-fleet/tests/acl_plans.rs`'s `zenoh_modem_events_fit_each_face_budget` checks it.
@@ -437,10 +437,10 @@ keep both until modem.v4, and the twins are new resources, as 3.3's packed state
 | `face/device_fault` | JSON `DeviceFaultEvent`: `DeviceFault` without the two; its `detail` is free text | 245 B at 221 B of JSON | `link`, `low` | RF |
 | `action_event` | no twin | | `host`: `burst(600/h)` fits no radio face | none |
 
-A face policy lists frames, never events (`link.v2` §2.7), so every face that exposes lets the three
-cross, and which a device publishes is its owner's configuration, `config:device.events.<name>`,
-as a frame's cadence is. The text (an `oper_change`'s reason, an identity's names, a fault's words
-on LoRa) stays on the host bus. [link.md](link.md)'s "Events" holds the cadence check: each face's
+Each face policy lists the events its face carries (`link.v2` 0.12 §2.7, #1098), and its plan
+denies the rest, and each device's owner publishes those its face lists,
+`config:device.events.<name>`. The text (an `oper_change`'s reason, an identity's names, a fault's
+words on LoRa) stays on the host bus. [link.md](link.md)'s "Events" holds the cadence check: each face's
 events at their rate's worst case, beside 3.3's frames' figures.
 
 ### Procedures (10)
