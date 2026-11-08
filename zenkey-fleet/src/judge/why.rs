@@ -1004,10 +1004,27 @@ impl<'o> Ladder<'o> {
                 match replies.iter().find(|r| r.bytes.is_some()) {
                     Some(r) => {
                         self.value = self.render(r);
+                        // An event's time and its key's stamp (core 0.101
+                        // §7.5's form 4; observer 0.30 §7.3).
+                        let occurred = r
+                            .bytes
+                            .as_deref()
+                            .and_then(|b| {
+                                crate::model::occurrence::event_time(
+                                    &r.key,
+                                    r.encoding.as_deref(),
+                                    b,
+                                )
+                            })
+                            .zip(r.inband)
+                            .map(|(t, s)| {
+                                format!(": {}", crate::model::occurrence::words(t, s, None))
+                            })
+                            .unwrap_or_default();
                         WhyRung::healthy(
                             RungId::Answer,
                             section,
-                            "a union storage answers the occurrence (§2.6)",
+                            format!("a union storage answers the occurrence (§2.6){occurred}"),
                         )
                     }
                     None => WhyRung::unobservable(

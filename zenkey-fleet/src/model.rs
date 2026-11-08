@@ -93,6 +93,7 @@ pub mod inband;
 pub mod jsonschema;
 pub mod lens;
 pub mod namespace;
+pub mod occurrence;
 pub mod presence_live;
 pub mod presence_watch;
 pub mod recorded;

@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.100** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.101** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -130,11 +130,27 @@ to, if any, is resolution's question (§2.2). `[F: keys.json]`
   token, `<fp16>` is the first 16 of them. `[F: keys.json]`
 - **A member value** is a plain chunk: the slugged value of the epoch
   parameter. `<epoch>` is an instance id. `[F: keys.json]`
+- **An occurrence chunk** (events, §2.6) is a run and a seq (§4.3), the
+  run's bits then the seq's 24, in Crockford's base32 in lowercase, the
+  ULID's alphabet (below). Its characters are most significant first, and
+  zero-filled at the top.
+  - A 16-bit run's chunk is 40 bits, in 8 characters.
+  - A 32-bit run's chunk is 56 bits, in 12 characters, the first `0` or
+    `1`.
+
+  So run 5 at seq 9, `0x0500_0009`, is `002g0009`, and the 32-bit run
+  `0xdeadbeef` at seq 9 is `1qndqvqg0009`. The decode is exact and reads
+  no contract. The fixed width makes the chunk's byte order its seq's
+  within one run. `[F: keys.json]`
 - **A ULID chunk** (events, §2.6) is 26 characters of Crockford's base32 in
   lowercase: digits, and lowercase letters except `i`, `l`, `o`, `u`. The
   check is lexical and the chunk is never decoded, so the first character
   has no bound: `8zzzzzzzzzzzzzzzzzzzzzzzzz`, beyond 128 bits, is a ULID
   chunk. `[F: keys.json]`
+- **An events key's last chunk** is an occurrence chunk or a ULID chunk.
+  This version admits both, while owners move from the ULID to the
+  occurrence chunk (§2.6). A later version will refuse the ULID.
+  `[F: keys.json]`
 
 ### 1.3 Kind tokens
 
@@ -400,9 +416,17 @@ not, is §2.7's.
 ### 2.6 Events
 
 - **One key per occurrence.** An owner publishes each occurrence once, with
-  a one-shot put, on `…/<iface>/events/<template>/<ulid>`. The last chunk is
-  a lowercase ULID (§1.2) minted by the owner. A reader strips it before
-  resolving the template. `[F: keys.json]`
+  a one-shot put, on `…/<iface>/events/<template>/<occurrence>`. The last
+  chunk is a lowercase ULID (§1.2) minted by the owner. A reader strips it
+  before resolving the template, a ULID or an occurrence chunk alike.
+  `[F: keys.json]`
+  - **The occurrence chunk** (§1.2) is the run and the seq the
+    occurrence took (§4.3). The put's payload is then an event (§7.5's
+    form 4), which carries the occurrence's time. The key is unique while
+    S7 holds, orders one run's occurrences, and needs no clock. So an
+    owner whose clock is unknown still keys an occurrence.
+  - This version defines the chunk and the form, and owners still write
+    the ULID. A later version adopts them.
 - **`rate`** is `rare` (at most 1/h), `low` (at most 1/min) or `burst(<n>/h)`,
   for each member of the template, within any period that long (§2.7).
   **`retention`** is `<n>` followed by `s`, `m`, `h`, `d` or `w`.
@@ -427,6 +451,13 @@ not, is §2.7's.
   retention. Enforcing the bound needs a time-series backend, or a filter on
   the consumer's side: the storage manager's memory backend ignores `_time`
   (spike S5). `[Sc: state.md §8]`
+  - **An occurrence's time** is its event's (§7.5), or its ULID's 48 bits
+    of milliseconds where its key ends in one. An unknown time is never
+    judged within the retention or beyond it: the storage's `_time` bound
+    alone admitted the occurrence.
+  - **The order** of a replay is the occurrences' times, then their seqs
+    within one run. Two of one time under two runs keep the order they
+    arrived in.
 
 ### 2.7 The population budget
 
@@ -454,7 +485,8 @@ presence budget (§8.3) is another. `[F: budget/]`
 
   `[F: budget/bounds.json]`
 - **A member** is one value of the template's parameters: a key, for a
-  stream or a state; for an event, its key without the ULID chunk (§2.6).
+  stream or a state; for an event, its key without its last chunk, the
+  ULID or the occurrence chunk (§2.6).
 - **The owner's rule.** An owner MUST NOT hold more live members of a
   templated stream, state or event than its bound. A member is **live**:
   - **state:** while its key has a value. A deleted key is not live;
@@ -490,8 +522,8 @@ presence budget (§8.3) is another. `[F: budget/]`
     as cardinality × rate × retention, which holds only when each member
     has the rate. A rate per template would make it rate × retention.
   - An owner keeps it by counting its own occurrences per member, and a
-    tool measures it from keys alone: the ULID stripped and the template
-    resolved (§2.2). A rate per instance could not be measured, since a
+    tool measures it from keys alone: the last chunk stripped and the
+    template resolved (§2.2). A rate per instance could not be measured, since a
     key names no instance, and a re-mint does not reset it.
   - **Across a restart.** A restart is a re-mint (§1.5), so the
     rate holds across it: a restarted owner counts the occurrences its
@@ -1993,6 +2025,7 @@ query, reply and reply error carry a form as their payload:
 ```text
 mutation, a put's payload            CH · run · seq · record
 delete, a delete's attachment        CH · run · seq
+event, a put's payload               CH · t32 · ms16 · record
 heartbeat, a put's payload           CH · run · seq · body
 frame, a put's payload               CH · run · seq · body
 snapshot, a GET reply's payload      CH · run · asof · body
@@ -2014,7 +2047,8 @@ So CH is the form's code × 32, plus the width bit × 16, plus the tag. With
 tag 0, a mutation's CH is `0x00` with a 16-bit run and `0x10` with a 32-bit
 run. A delete's is `0x20` or `0x30`. And `0x1b` is `000 1 1011`: form 0, a
 32-bit run and tag 11. Only the `packed` kind defines a tag (§7.6). A
-delete carries no record, so its tag is 0. A heartbeat's tag names a
+delete carries no record, so its tag is 0. An event's tag is its record's
+type's, as a mutation's is, and its width bit its key's run's (below). A heartbeat's tag names a
 contract revision (below). A frame's tag is its declaration's (§7.7).
 A snapshot's is its collection's type's, as a mutation's is.
 - **A request's** tag is its operation's `request` type's. Its width bit
@@ -2024,8 +2058,7 @@ A snapshot's is its collection's type's, as a mutation's is.
 - **An error's** is the operation's `error` type's, whether a detail
   follows or not. It is 0 for an operation that declares none.
 
-**The forms.** Each form has one code. This version defines seven of
-them, and reserves the other for a later version:
+**The forms.** Each form has one code. This version defines all eight:
 
 | Code | Form | What it carries |
 |---|---|---|
@@ -2033,7 +2066,7 @@ them, and reserves the other for a later version:
 | 1 | delete | a delete's run and seq, as its attachment, and no record |
 | 2 | value | a call's request, as its query's payload; and a reply's run and seq, then its record |
 | 3 | error | a reply error's run and seq, then §5.2's error in bytes (below) |
-| 4 | event | reserved: an event's occurrence |
+| 4 | event | an event's occurrence, a put's payload on an `events` key: its time, then its record (below) |
 | 5 | frame | a stream's records under one header, a put's payload (§7.7) |
 | 6 | heartbeat | an owner's confirmation of the state it holds for one interface (below) |
 | 7 | snapshot | a collection's state, a GET reply's payload, in pages (below) |
@@ -2051,7 +2084,8 @@ the owner's when it builds the snapshot. Its **asof** takes the seq's
 place (below).
 
 **The record** is every byte after a mutation's seq, possibly none. It
-is read as the resource's type says (§7.1). A heartbeat, a frame and a
+is read as the resource's type says (§7.1). An event's is every byte
+after its time. A heartbeat, a frame and a
 snapshot carry a **body** there instead, never a record of the resource's
 type. A heartbeat's is read with its covered revision's collections
 (below). A frame's is read with its declaration (§7.7). A snapshot's is
@@ -2101,7 +2135,8 @@ So `0xa0` is `busy`, with no cause, detail or message. `0x50` is
 
 **Sizes.** A mutation is 6 bytes over its record, or 8 with a 32-bit run.
 So is a heartbeat over its body, a frame over its body, and a snapshot's
-page over its body.
+page over its body. An event is 7 bytes over its record, whatever its
+run: its key holds the stamp.
 A delete's attachment is 6 or 8 bytes, and an attachment costs 2 more on
 the wire. Beside them, a Zenoh timestamp is 26 bytes. A predefined
 Encoding is 1 byte, and `zenoh/bytes` costs none (Appendix B).
@@ -2113,6 +2148,21 @@ Encoding is 1 byte, and `zenoh/bytes` costs none (Appendix B).
   6 bytes over its id and its record, while each is below 128 bytes. A
   tombstone adds 5 bytes over its id. An entry's own run adds 2 or 4, and
   its confirmation's time 6.
+
+**The event** (form 4) is an occurrence's put on an `events` key whose
+last chunk is an occurrence chunk (§1.2, §2.6).
+- **Its stamp is its key's.** The occurrence chunk holds the run and the
+  seq, so the event carries the occurrence's time in their place. CH's
+  width bit is the chunk's: 0 for 8 characters, 1 for 12.
+- **Its time** is `t32 · ms16`, big-endian, counted from the deployment
+  epoch (§7.6) as a snapshot's time is (below). All ones in t32, with
+  ms16 0, say the owner's clock is unknown. An ms16 above 999, or any
+  but 0 under all ones, is unused.
+- **Its order.** An event key holds one occurrence, so no merge compares
+  two events. Within one run they order by seq, as §4.3 orders state and
+  events, and across two runs nothing orders them but their times.
+
+`[F: envelope/vectors.json, carries.json]`
 
 **Why the payload.** Zenoh gives a sample one attachment.
 [`telemetry.v1`](profiles/telemetry/v1.md)'s Epoch, a contract's declared
@@ -2128,8 +2178,9 @@ key is (§1.1). The parser knows what carries the bytes, its **sample**:
 - a delete's attachment, or a `reply_del`'s (S2);
 - a call's query, its reply or its `reply_err`, each one's payload.
 
-For a frame and a snapshot it also knows its key's kind token, which the
-grammar reads from the key alone. It knows nothing more. So it reports the
+For a frame, an event and a snapshot it also knows its key, which the
+grammar reads alone: its kind token, and an event key's last chunk. It
+knows nothing more. So it reports the
 tag of every form but a delete, and checks none: §7.6's reader, a
 heartbeat's reader and §7.7's do. Of an error, it reads the byte and the
 message, and takes the detail's bytes unread. Of a snapshot, it takes the
@@ -2137,18 +2188,24 @@ body unread: the snapshot's own reading reads it (below). An
 implementation MUST refuse an envelope or a form for the first of these
 that applies, in this order:
 - no byte at all, so no CH (`short`);
-- a reserved form, 4 (`form`);
+- a reserved form (`form`). This version reserves none;
 - a form its sample does not carry (`sample_kind`). A put carries a
-  mutation, a heartbeat, a frame or a snapshot, and a delete's attachment
-  a delete. A query and a reply carry a value, and a `reply_err` an error;
+  mutation, an event, a heartbeat, a frame or a snapshot, and a delete's
+  attachment a delete. A query and a reply carry a value, and a
+  `reply_err` an error;
 - a frame on a key whose kind token is not `stream`, such as a state's,
-  an event's or an `@stream` key, or a snapshot on a key whose kind token
-  is neither `state` nor `@state` (`key_kind`);
+  an event's or an `@stream` key, an event on a key whose kind token is
+  not `events`, or a snapshot on a key whose kind token is neither
+  `state` nor `@state` (`key_kind`);
 - a delete whose tag is not 0 (`tag`);
 - a request whose width bit is 1 (`request_run`);
-- fewer bytes than CH, the run and the seq need, and an error's byte
-  after them (`short`);
+- an event whose key's last chunk is not an occurrence chunk of CH's
+  width: a ULID chunk, or 8 characters under a width bit of 1, or 12
+  under 0 (`key_stamp`);
+- fewer bytes than CH, the run and the seq need, an event's CH, t32 and
+  ms16, and an error's byte after them (`short`);
 - a byte after a delete's seq (`trailing`);
+- an event whose time is unused (`time`);
 - then, reading an error's byte and what follows it:
   - a cause on a code other than `unavailable`, or none on `unavailable`
     (`cause`);
@@ -3242,7 +3299,7 @@ facts.
   - A consumer across a constrained face SHOULD NOT use a selector wider
     than what it reads.
   - **A template's selector** is its key with each parameter a wildcard,
-    and an event's ULID chunk too. Its literal prefix is what is declared.
+    and an event's last chunk too. Its literal prefix is what is declared.
   - **What it buys.** Each put toward such a consumer carries a scope id
     of 1 or 2 bytes, plus the member's chunks under a template. Under
     `zk2/**` it carries every chunk after `zk2` as text.
@@ -5391,7 +5448,7 @@ section each was written against, whose pointer leads on.
 | `conformance/budget/` | §2.7, `lossless.json` and the reader's stall included |
 | `conformance/seed/` | §4.2 a late joiner's merge: `merge.json` the Zenoh timestamps' order, unstamped samples, and a tool's across two ids; `inband.json` §4.3's in-band stamps, plain and serial order, and a tool's and a consumer's across two runs; `snapshot.json` a seed over snapshots, their pages, asof, the omission rule and the revision that maps a collection's index |
 | `conformance/errors/` | §5.2: `forms.json` §7.5's error form, and every reply error it refuses read as the transport's, a router's `Timeout`, a querier's and one under another `Encoding` among them |
-| `conformance/envelope/` | §7.5, a call's forms and a snapshot's envelope included; `calls.json` §5.1's and §5.2's forms by an operation's types |
+| `conformance/envelope/` | §7.5, a call's forms, an event and a snapshot's envelope included; `calls.json` §5.1's and §5.2's forms by an operation's types |
 | `conformance/snapshot/` | §7.5, a snapshot's pages: their bytes, their reading and the paging rule |
 | `conformance/frame/` | §7.7 |
 | `conformance/catalog/` | §8.6 |
@@ -5508,7 +5565,8 @@ brief:
 - **`keys.json`:** each case is a key and its parse, or `null` when the key
   is refused.
   - **A data key** parses to `{form: "data", system, service, iface, token,
-    resource: [chunks]}`.
+    resource: [chunks]}`. An events key's adds `occurrence`, its last
+    chunk's stamp `{run_width, run, seq}`, or `null` for a ULID.
   - **A control key** parses to `{form: "instance" | "alive" | "member" |
     "contract", …}`, with the fields its form names: `instance`, `iface`,
     `fp16`, `member`, `epoch`, `sha256`.

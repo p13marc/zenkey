@@ -13,6 +13,27 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.30 — 2026-11-07: an event's stamp from its key (#980 C2a)
+
+Core 0.101 (#980's C2a) defines §7.5's form 4, the event, whose stamp is
+its key's occurrence chunk and whose payload carries the occurrence's
+time. This version is the reader's half, and is written against core
+0.101.
+
+**Added: §7.3, "The envelope first", an event.** A tool reads an event's
+run and seq from its key, and its record after its time. It shows the
+time, or that the owner's clock was unknown, beside the run and the seq.
+
+**Changed: §7.5's scope.** An event's last chunk is a wildcard whatever
+it is, an occurrence chunk or a ULID.
+
+**Deliberately not changed.**
+- **No rule.** "The envelope first" already binds a tool to core §7.5's
+  reading, form 4's included. The bullet says what that reading gives.
+- **A tool's merge** (§4.1). An event key holds one occurrence, so no
+  merge compares two events.
+- **The header** is written against core 0.101.
+
 ## 0.29 — 2026-11-07: across a face, the face's plan for a scope and CH's tag for a revision; a packed record never sniffed (#990 V1, V2)
 
 #990's black-box run read zenoh-modem's RF face with `zenctl`. Its scope

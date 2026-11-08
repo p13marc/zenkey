@@ -634,7 +634,9 @@ fn human(secs: u64) -> String {
 
 /// The union storages an enrollment's services call for (spec §2.6): one
 /// per event resource of every interface they implement, keyed
-/// `zk2/*/*/<iface>/events/<template>/<ulid>` under `base`, its lifespan
+/// `zk2/*/*/<iface>/events/<template>/<occurrence>` under `base`, its last
+/// chunk a wildcard, so it holds a ULID's occurrences and an occurrence
+/// chunk's alike (core 0.101 §1.2), its lifespan
 /// the contract's `retention` (the longest, where the revisions given
 /// differ). What could not be planned is listed, and so are the archives,
 /// which never are (§4.4).

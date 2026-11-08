@@ -6,6 +6,20 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — an event's key from its run and seq, read (#980 C2b)
+
+Core 0.101 defines an occurrence chunk, an event key's last chunk from
+the run and the seq the occurrence took, and §7.5's form 4, the event,
+which carries the occurrence's time. Owners still write ULID keys until
+C2c, and the tools read both.
+
+| Before | Now | Notes |
+|---|---|---|
+| a key ending in an 8- or 12-character occurrence chunk: no zk2 key | an events key, its stamp the chunk's | core §1.2; a ULID stays one |
+| a put of form 4: undecodable, `zk2c envelope refused: form` | its record read as a mutation's, its stamp its key's | `key_stamp` and `time` name a refused one |
+| `watch` on an event: `in band run r, seq s` | `at t, run r, seq s`, or `at time unknown, run r, seq s`, its time from the deployment epoch; JSON `occurred` | an occurrence on a ULID key shows as before |
+| `why` on an event key a union storage answers | the answer names the occurrence's time and stamp | |
+
 ## Unreleased (`main`, zk2) — a value dated and bounded, and `.zrec` version 4 (#990 V3, V4)
 
 The tooling guide's O8 and §5's version 4; no rule in core or observer

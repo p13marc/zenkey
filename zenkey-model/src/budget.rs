@@ -464,7 +464,7 @@ pub enum Reading {
 pub struct Window {
     /// The instants each member was heard, on one clock (the reader's
     /// receive clock), from any origin. An event's member is its key
-    /// without the ULID chunk.
+    /// without its last chunk, an occurrence chunk or a ULID (core §2.7).
     pub heard: BTreeMap<String, Vec<Duration>>,
     /// How long the window listened, counted from when its subscription is
     /// taken to have reached the owner: its declaration plus the reader's

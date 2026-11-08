@@ -247,8 +247,8 @@ async fn a_state_get_reads_enveloped_replies() {
     );
     assert_eq!(
         answer.undecodable.get(&vehicle(3)).map(|r| r.token()),
-        Some("form"),
-        "form 4, an event, is reserved"
+        Some("key_kind"),
+        "form 4, an event, on a state key (core 0.101)"
     );
 }
 
@@ -365,7 +365,8 @@ async fn a_typed_get_keeps_each_keys_in_band_stamp() {
     );
     assert_eq!(
         answer.undecodable.get(&vehicle(3)).map(|r| r.token()),
-        Some("form")
+        Some("key_kind"),
+        "an event on a state key"
     );
     // A consumer orders the seed's replies by them (§4.2, §4.3).
     let mut order = ValueOrder::new();

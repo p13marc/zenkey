@@ -779,7 +779,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 |---|---|---|
 | [§7.5](core.md#75-the-zk2c-envelope) | An implementation that writes an error MUST cut a message longer than 255 bytes to its longest prefix of whole characters within 255 bytes. | `[F: errors/forms.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | An implementation MUST NOT write an error with a cause on a code other than `unavailable`, `unavailable` without one, or a detail on a code other than `app`. | `[F: errors/forms.json]` |
-| [§7.5](core.md#75-the-zk2c-envelope) | An implementation MUST refuse an envelope or a form for the first of these that applies, in this order: (9 items) | `[F: envelope/vectors.json, carries.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | An implementation MUST refuse an envelope or a form for the first of these that applies, in this order: (11 items) | `[F: envelope/vectors.json, carries.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | Every envelope and form an implementation accepts MUST write back to the same bytes. | `[F: envelope/vectors.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | An implementation that writes a heartbeat MUST write its covered revision's tag in CH. | `[F: heartbeat/layouts.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | An implementation that writes a templated section MUST write the list only where it is shorter than the bitmap. | `[F: heartbeat/bodies.json]` |

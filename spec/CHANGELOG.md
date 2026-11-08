@@ -3,6 +3,84 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.101 — 2026-11-07: an event's key from its run and seq, defined (#980 C2a)
+
+Epic #975, zk2c, makes the wire bandwidth-first. An occurrence's key ends
+in a 26-character ULID, 48 bits of milliseconds and 80 random ones. This
+version is #980's C2a: it defines a shorter last chunk and the event's
+form, and adopts neither. An owner still writes the ULID, and C2c will
+adopt both.
+
+**Added: §1.2, the occurrence chunk.** A run and a seq, the run's bits
+then the seq's 24, in Crockford's base32 in lowercase, the ULID's
+alphabet, most significant first and zero-filled.
+- **8 characters** for a 16-bit run, 40 bits, and **12** for a 32-bit
+  run, 56 bits, whose first character is `0` or `1`.
+- **The decode is exact**, and reads no contract. The fixed width makes
+  the chunk's byte order its seq's within one run.
+- **An events key's last chunk** is an occurrence chunk or a ULID chunk.
+  This version admits both. A later version will refuse the ULID.
+
+**Added: §7.5, form 4, the event.** `CH · t32 · ms16 · record`, a put's
+payload on an `events` key whose last chunk is an occurrence chunk.
+- **Its stamp is its key's**, so it carries the occurrence's time in the
+  run's and the seq's place: 7 bytes over the record, where a mutation
+  takes 6 or 8. CH's width bit is the chunk's.
+- **Its time** is a snapshot's `t32 · ms16`, from the deployment epoch,
+  all ones in t32 for an unknown clock.
+- **The forms table** defines all eight: no form is reserved now. The
+  `form` refusal stays in the list for a later version's reserved form,
+  and a reader's own conventions keep its token.
+- **The parse** gains two refusals:
+  - `key_stamp`: an event whose key's last chunk is not an occurrence
+    chunk of CH's width, after `request_run` and before `short`;
+  - `time`: an event whose time is unused, after the delete's
+    `trailing`.
+
+  An event on a key whose kind token is not `events` is `key_kind`, as a
+  frame and a snapshot are. A put carries an event, so form 4 on a
+  delete's attachment, a query, a reply or a `reply_err` is
+  `sample_kind`, where it was `form`.
+
+**Changed: §2.6.** The key is `…/events/<template>/<occurrence>`, its
+last chunk a ULID or an occurrence chunk, and a reader strips either.
+"Replay" says what an occurrence's time is, its event's or its ULID's,
+that an unknown time is never judged within the retention or beyond it,
+and that a replay orders by time, then by seq within one run. None of it
+is a rule yet. §2.7's member and §8.5's template selector strip the last
+chunk, whichever it is.
+
+**Changed: Appendix E.** An events key's parse in `keys.json` adds
+`occurrence`, its last chunk's stamp, or `null` for a ULID.
+
+**Decided here, where #980's C2 memo left a default.**
+- **The stamp in the key alone**, form 4 carrying the time. A store that
+  drops keys would need the stamp in the payload too. None does: a union
+  storage, `.zrec` and an archive keep the key.
+- **`t32 · ms16`**, where the report had t32 alone: two occurrences in one
+  second under two runs would otherwise tie.
+- **Crockford base32** at 8 or 12 characters, where hex takes 10 or 14.
+- **Both chunks read** until C2c, and the ULID refused at C2d.
+- **`key_kind`, not `sample_kind`, for form 4 on a key that is not
+  `events`.** The memo, read against core 0.75, named `sample_kind`. Core
+  0.83 gave a frame on the wrong key `key_kind` since, and 0.97 a
+  snapshot, so an event follows them.
+
+**Deliberately not changed.**
+- **No owner rule.** §2.6 still says an owner keys an occurrence with a
+  ULID, and nothing requires form 4. C2c adds the owner's MUST and
+  rewrites `state.md` §8.
+- **§4.3's seq.** Events already take the owner-wide state and event seq
+  (0.73), which is what makes the chunk unique per occurrence.
+- **The evidence.** `keys.json` gains 11 cases: 8 and 12 characters,
+  the greatest of each, a templated event's, and the refusals of a 12
+  starting `2`, an uppercase chunk, an `i`, 9 characters and 7. Its ULID
+  cases stand, each with `occurrence` `null`. `envelope/vectors.json`
+  gains 15 cases, the 14 on a put carrying their key, and `carries.json`
+  10: `event` read, and `key_kind` and `key_stamp` refused. The cases
+  that read form 4 as `form` now read it as `short`, `time` or
+  `sample_kind`.
+
 ## 0.100 — 2026-11-07: state GETs answered by snapshot (#977)
 
 Epic #975, zk2c, makes the wire bandwidth-first. 0.97 defined form 7,

@@ -87,7 +87,7 @@ impl Time {
 
     /// Its two fields, as a writer writes them, or `time` for one the
     /// reading would refuse or read as another.
-    fn fields(self) -> Result<(u32, u16), BodyRefusal> {
+    pub(crate) fn fields(self) -> Result<(u32, u16), BodyRefusal> {
         match self {
             Time::Unknown => Ok((u32::MAX, 0)),
             Time::Known { s, ms } if s != u32::MAX && ms <= 999 => Ok((s, ms)),
@@ -97,7 +97,7 @@ impl Time {
 
     /// The two fields read: unknown, known, or `time` for an unused ms16
     /// (above 999, or any but 0 with t32 all ones).
-    fn of_fields(s: u32, ms: u16) -> Result<Time, BodyRefusal> {
+    pub(crate) fn of_fields(s: u32, ms: u16) -> Result<Time, BodyRefusal> {
         match (s, ms) {
             (u32::MAX, 0) => Ok(Time::Unknown),
             (u32::MAX, _) => Err(BodyRefusal::Time),
