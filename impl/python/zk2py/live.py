@@ -2006,6 +2006,75 @@ def replay_events(session: zenoh.Session, selector: str, retention_s: int, now_m
     return out
 
 
+# -- core S5, §4.4: last-known state from an archive, explicitly (round 107) --------
+
+def archive_key(archive: str, origin: str) -> str:
+    """Core §4.4: "Its key is the archived key without its leading ``zk2``
+    chunk, slugged as a rest parameter, under the archive's own ``@state``
+    token: ``zk2/<system>/<archive>/archive.v1/@state/{origin...}``". The
+    archive's address is ``<system>/<service>``."""
+    from . import slug
+
+    chunks = origin.split("/")
+    if chunks[0] != "zk2":
+        raise ValueError(f"{origin}: not a zk2 key")
+    return f"zk2/{archive}/archive.v1/@state/" + "/".join(slug.slug(c) for c in chunks[1:])
+
+
+@dataclass
+class LastKnown:
+    """An archive's answer for one origin (core S5, §4.4): the bytes the
+    owner put, its envelope included (``raw``), their record and in-band
+    stamp, the reply's attachment (``{"iface", "contract", "type",
+    "confirmed"}``), and whether it was a deletion. "The archive's answer is
+    last-known, never current, and a consumer MUST NOT present it as
+    current" (S6): :meth:`shown`."""
+
+    key: str
+    origin: str
+    raw: bytes
+    record: bytes | None
+    stamp: Any
+    attachment: dict[str, Any]
+    deleted: bool = False
+
+    def shown(self) -> str:
+        conf = "confirmed" if self.attachment.get("confirmed") is True else "unconfirmed"
+        what = "deleted" if self.deleted else f"{len(self.record or b'')} bytes"
+        return f"last-known ({conf}), from an archive: {what} of {self.origin}, {self.stamp}"
+
+
+def last_known(session: zenoh.Session, archive: str, origin: str,
+               timeout: float = GET_TIMEOUT_S) -> LastKnown | None:
+    """Core S5: "last-known state MUST be read from an archive (§4.4),
+    explicitly": a GET of ``origin``'s key at ``archive`` (target ``All``,
+    consolidation ``None``), its reply read envelope first (observer §7.3:
+    the owner's put, as the archive keeps it). None for no reply."""
+    key = archive_key(archive, origin)
+    out = None
+    for rep in session.get(key, target=zenoh.QueryTarget.ALL, consolidation=zenoh.ConsolidationMode.NONE,
+                           timeout=timeout):
+        if rep.ok is None:
+            continue
+        s = rep.ok
+        att = s.attachment.to_bytes() if s.attachment is not None else b""
+        try:
+            doc = json.loads(att) if att else {}
+        except ValueError:
+            doc = {}
+        deleted = s.kind == zenoh.SampleKind.DELETE
+        raw = s.payload.to_bytes()
+        rec, stamp = None, None
+        if not deleted:
+            try:
+                env = zk2c.parse(raw, "put", zk2c.key_token(origin), zk2c.last_chunk(origin))
+                rec, stamp = env.record, env.stamp
+            except zk2c.Refused:
+                pass
+        out = LastKnown(str(s.key_expr), origin, raw, rec, stamp, doc if isinstance(doc, dict) else {}, deleted)
+    return out
+
+
 # -- §4 state, a consumer's GET --------------------------------------------------
 
 @dataclass
