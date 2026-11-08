@@ -39,52 +39,72 @@ zk2 contract compat --history contracts/.history contracts/thruster.v1.toml
 zk2 contract bundle contracts/thruster.v1.toml --history contracts/.history
 ```
 
-## Changes since 0.20
+## Changes since 0.21
 
-- **The wire breaks 0.20's.** A state GET is answered by snapshot
-  (core 0.100, [#977](https://git.marcpardo.eu/marcpardo/zenkey/issues/977)):
-  one per collection, in pages of form 7, read under consolidation `None`,
-  merged per key, with the omission rule over a complete snapshot.
-  `collection` reads the pages (`Heard`, `hear`, `Page::members`, `omit`)
-  and `seed::apply_snapshot` applies the rule to what a late joiner holds.
-  A `reply_del` on a member of a collection answered by snapshot is no
-  owner's answer (`collection::stray_reply_del`, `STRAY_REPLY_DEL`). A
-  `freshness.v2` heartbeat's time counts from the catalog's epoch
-  (`freshness.v2` 0.6,
-  [#1080](https://git.marcpardo.eu/marcpardo/zenkey/issues/1080)).
-- **The bare wire is gone** (core 0.99,
-  [#985](https://git.marcpardo.eu/marcpardo/zenkey/issues/985)'s C4d): a
-  call's reply or error under any `Encoding` but `zenoh/bytes` carries no
-  form.
-  - `envelope::{Envelope, EnvelopeError, decode, encode, JSON, CBOR,
-    PROTOBUF}`, `Detail::raw`, `Detail::raw_bytes` and
-    `ErrorReading::Envelope` are removed. Read a reply error with
-    `envelope::read_error` or `ErrorForm::read`: one that is no error form
-    is the transport's.
-  - `wire::read_value` returns `Result<wire::Envelope, FormRefusal>` in
-    place of a `Reading`, whose `Plain` was the bare wire:
-    `FormRefusal::Encoding` under another `Encoding`, `FormRefusal::Form`
-    for the parse's refusal, and `FormRefusal::reason` to name either.
+- **The wire breaks 0.21's: an event's key ends in its owner's run and
+  seq** (core 0.101 and 0.103,
+  [#980](https://git.marcpardo.eu/marcpardo/zenkey/issues/980)'s C2). An
+  events key's last chunk is an occurrence chunk, the run and the seq in
+  lowercase Crockford base32, 8 characters for a 16-bit run and 12 for a
+  32-bit one, where a ULID took 26. The grammar refuses a ULID there, so
+  a 0.21 owner's event keys are no zk2 keys to 0.22.
+  - `chunk::occurrence` reads the stamp a chunk names, `is_occurrence`
+    asks whether it names one, and `write_occurrence` writes it.
+  - The put's payload is form 4, `CH · t32 · ms16 · record`: the
+    occurrence's time from the deployment epoch, known or unknown, and its
+    stamp its key's. `wire::Event` writes it, and `wire::read_event` and
+    `read_put` (`Reading::Event`) read it. Its refusals are `key_stamp`
+    and `time` (`Refusal::{KeyStamp, Time}`). A 0.21 reader refuses form
+    4.
+  - A put or a delete on an events key that carries no event is never
+    delivered (core 0.104 and 0.105).
+  - A `reply_del` is a stray by the owner's revision under its run, never
+    the reader's (core 0.102,
+    [#1094](https://git.marcpardo.eu/marcpardo/zenkey/issues/1094)): give
+    `collection::stray_reply_del` the revision the owner's descriptor
+    names.
+- **`link.v2` 0.12 to 0.14**
+  ([#1098](https://git.marcpardo.eu/marcpardo/zenkey/issues/1098),
+  [#1106](https://git.marcpardo.eu/marcpardo/zenkey/issues/1106)):
+  - A face lists the events it carries, `events = [...]`, as it lists its
+    `frames` (`Face::events`). On a face with `events`, each other exposed
+    event is denied by name, and an entry that names no event of a listed
+    interface is `event_unknown`.
+  - A face router stamps nothing. `TIMESTAMPING_OFF` is the
+    `timestamping` block the plan writes, `StatedTransport::stamps` reads
+    a router's at its `mode`, and the check warns `face_timestamping`.
+- **Removed:** `chunk::is_lower_ulid`. Use `chunk::is_occurrence`, or
+  `chunk::occurrence` for the stamp.
+- **Grown:** `wire::Reading::Event`, `wire::Refusal::{KeyStamp, Time}`,
+  `link::Code::{FaceTimestamping, EventUnknown}` and the field
+  `link::Face::events`. A `match` over those enums, or a `Face` written
+  field by field, needs them.
 - **The authoring format and the canonical form did not move:** a
-  contract that lints under 0.20 lints under 0.21, at the same
+  contract that lints under 0.21 lints under 0.22, at the same
   fingerprint.
 
-## What 0.21 does not promise
+## What 0.22 does not promise
 
 zk2c, the bandwidth-first wire (epic
 [#975](https://git.marcpardo.eu/marcpardo/zenkey/issues/975)), is not
-finished. Two things under 0.21 are still moving, and a 0.22 may break
+finished. Two things under 0.22 are still moving, and a 0.23 may break
 either:
 
 - **The authoring format** and the canonical form a fingerprint is taken
-  over. A contract that lints under 0.21 may need editing under
-  0.22, and its fingerprint may change.
-- **The wire.** An event's key is to end in its run and seq in place of
-  a ULID ([#980](https://git.marcpardo.eu/marcpardo/zenkey/issues/980)'s
-  C2), and the rest of #975 follows. The keys, the envelope and the forms
-  this crate reads and writes move with it.
+  over. A contract that lints under 0.22 may need editing under
+  0.23, and its fingerprint may change.
+- **The wire and the profiles.** These are still open:
+  - `freshness.v2`'s heartbeat, one put per interface, which the
+    maintainer is deciding
+    ([#1110](https://git.marcpardo.eu/marcpardo/zenkey/issues/1110));
+  - `link.v2`'s subjects by user name, in progress
+    ([#1107](https://git.marcpardo.eu/marcpardo/zenkey/issues/1107));
+  - #980's C3, the archive attachment, and C5, the compact descriptor.
 
-A 0.21.x patch release changes neither.
+  The keys, the envelope, the forms and the policies this crate reads
+  and writes move with them.
+
+A 0.22.x patch release changes neither.
 
 **Zenoh's unstable API:** none. The only zenoh crate this one depends on
 is `zenoh-keyexpr`.

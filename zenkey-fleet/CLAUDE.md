@@ -4,7 +4,7 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
 
 - `zenkey-fleet/` — the **fleet engine crate** (Apache-2.0; 0.18.x on
   crates.io is the v1 engine, released from the `v1` branch, which no
-  member of `main` links since #614 FL11b; the in-tree 0.21.0 is zk2's, on
+  member of `main` links since #614 FL11b; the in-tree 0.22.0 is zk2's, on
   crates.io from 0.20.0, #929, its README listing the zenoh unstable APIs
   it uses; `zenoh-ext` is a dev-dependency, the library naming none of
   it): the shared core of the zk2 explorers — zenctl,

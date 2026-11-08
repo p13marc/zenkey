@@ -18,7 +18,7 @@ something is *wrong* (`judge/`), does it turn a stream into a recording or
 back (`tape/`)? A new serde-pinned struct is not a module question at all —
 it goes to `report/`, by the rule that module's docs state.
 
-It reads a deployment through the zk2 runtime (`zenkey` 0.21) and its
+It reads a deployment through the zk2 runtime (`zenkey` 0.22) and its
 session-free model (`zenkey-model`): presence from instance and interface
 tokens, descriptors, contract bundles retrieved by fingerprint, and every
 payload rendered through the contract that declares it. **`main` is the zk2
@@ -102,7 +102,7 @@ deployment.
 
 ## `judge/` — verdicts
 
-`doctor` (zk2's: a deployment against the core, thirteen checks, each a
+`doctor` (zk2's: a deployment against the core, 37 checks, each a
 verdict in the judgement shape, #612 FJ6) and its `doctor_delta`, `expect`,
 `probe`, `field`, `condition` (the watchdog), and `common` — the caps on how
 many offenders a report names.
@@ -118,8 +118,9 @@ moving.
 
 ## `tape/` — traffic as a thing
 
-`record` (`.zrec` capture and replay, normative for the format; version 3
-carries each row's QoS axes), `ingest` (the row dialect it is made of),
+`record` (`.zrec` capture and replay, normative for the format; version 4
+carries each row's QoS axes, and in its header the catalog, the revisions
+and their bundles), `ingest` (the row dialect it is made of),
 `snapshot` (`.zsnap`), `trigger` (armed capture), `generate`, `mock` and
 `synth` (contract-driven mock owners, marked synthetic), `bench`.
 
@@ -132,61 +133,80 @@ Explorer *configuration* — named connection contexts, `~/.config`, the
 completion cache — is not here; it lives in `zenkey-explorer-config`, so a
 library consumer of this crate does not pay for `dirs` and `toml`.
 
-## Changes since 0.20
+## Changes since 0.21
 
-- **The wire breaks 0.20's** (core 0.100,
-  [#977](https://git.marcpardo.eu/marcpardo/zenkey/issues/977)). Every
-  state GET, `bus::query::state_get`'s and the seed's, the doctor's,
-  `check conform`'s, `.zsnap`'s and the profiles' readers' among them, is
-  under consolidation `None`. Each snapshot's page reads as its entries,
-  merged per key by its stamp, and the seed applies the omission rule
-  where the contracts are in hand (`seed_subscribe_with`,
-  `Monitor::watch_seeded_with`). A `reply_del` on a member of a
-  collection answered by snapshot is undecodable, `form`. A call's reply
-  under any `Encoding` but `zenoh/bytes` renders undecodable (core 0.99,
-  [#985](https://git.marcpardo.eu/marcpardo/zenkey/issues/985)'s C4d).
-- **Across a face** (observer 0.29,
-  [#990](https://git.marcpardo.eu/marcpardo/zenkey/issues/990)'s V1 and
-  V2): `FaceScope` is a tool's scope, the face's plan when a face policy
-  is given, with each heartbeat; `model::choice` picks a key's revision
-  among several held by the catalog and CH's tag (`KeyIdentity::chosen`,
-  and `Unresolved::NoneLeft` naming the step that left none). A record
-  under a CH tag other than 0 whose type is not held renders as a packed
-  record, never sniffed. `LensFeed::runs_in` and `on_runs` ask each
-  address's run once, outside the lens's lock
-  ([#1079](https://git.marcpardo.eu/marcpardo/zenkey/issues/1079)).
-- **Removed:** `OperationAnswer::Malformed`, `ConfigActAnswer::Malformed`,
-  `MalformedReply`, `RepliesView::malformed`, `BenchReport::malformed` and
-  `bus::conform::FanoutSeen::malformed`. A reply error that is no error
-  form is the transport's, silence, and a value with no form is
-  undecodable.
-- **Changed:**
-  - `bus::{alarms, config, health}::get` take an `&EntryEpochs`, the epoch
-    each entry's confirmation is dated under (`EntryEpochs::of_catalogs`,
-    `observed`);
-  - `ConfigRefusal::message` is an `Option<String>`, and
-    `ConfigRefusal::error` a `ConfigAppError`, `V1(ConfigError)` or
-    `config.v2`'s `V2 { code }`;
-  - `CheckId::ALL` holds 35 checks, `first-hop-token` among them, and
-    `AddressStatus` gains `LinkClosed`
-    ([#982](https://git.marcpardo.eu/marcpardo/zenkey/issues/982)'s H3).
+- **The wire breaks 0.21's: an event's key ends in its owner's run and
+  seq** (core 0.101 to 0.105,
+  [#980](https://git.marcpardo.eu/marcpardo/zenkey/issues/980)'s C2).
+  - A key that ends in a ULID is no zk2 key: the lens reads it raw, and no
+    event replay keeps it.
+  - An event's time is form 4's, read under its owner's epoch by
+    `model::occurrence` (`event_time`, `OccurrenceTime`, `time_of`,
+    `words`). `tape::{mock, generate}` key each event by run and seq.
+  - A watch, through the runtime's `Consumer`, shows a sample on an
+    events key that carries no event, a put or a delete, as undecodable,
+    `form`, never as a sample (core 0.104 and 0.105).
+  - A `reply_del` is a stray by the owner's revision under its run,
+    retrieved where the tool holds another (core 0.102,
+    [#1094](https://git.marcpardo.eu/marcpardo/zenkey/issues/1094)).
+- **`.zrec` version 4**
+  ([#990](https://git.marcpardo.eu/marcpardo/zenkey/issues/990)'s V4).
+  `ZREC_VERSION` is 4, and `ZREC_READS` reads 1 to 4; a 0.21 reader
+  refuses a version-4 file. `ZrecHeader` gains `catalog`, `revisions` and
+  `bundles` (`ZrecCatalog`, `ZrecAncestor`, `ZrecRevision`,
+  `ZrecBundle`), so a capture resolves offline as its live window did
+  (`model::recorded::Recorded`, `Lens::recorded`). `read_header` refuses
+  a header by its token (`HeaderRefusal`), and `reader_catalogs` reads a
+  given `--catalog` against the recorded one. `TriggerSpec` gains `served`
+  and `catalogs`.
+- **Dated values and bounds** (the tooling guide's O8, #990's V3):
+  `model::deployment::Dating` (`Catalogs::dating`, `Lens::dating_of`)
+  dates a time in UTC under the epoch it names (`report::Dated`,
+  `DatedEpoch`), and `model::frame::bound_of` gives a field's bound
+  (`report::Bound`). `bus::consume::{get_state, last_known, watch}` and
+  their `_in` forms take an `impl Into<Dating>`, which an `Epoch` still
+  is.
+- **The doctor, `watch` and `field`** (#990's V5, V6 and V2c):
+  - `CheckId::ALL` holds 37 checks, `packed-refused` and
+    `state-unconfirmed` added (`StateStamps::{packed_read,
+    packed_refused, confirmations}`, `EntryConfirmed`);
+  - `WatchConfirmation` gains `lost`, `diverged` and `absent`,
+    `WatchSummary` gains `heartbeats`, `heartbeats_lost` and
+    `heartbeats_diverged`, and `WatchSample` gains `occurred`;
+  - `FieldRow` and `PathStats` gain `absent` and `unknown`, and
+    `FieldObservation::observe_record` reads a frame's records
+    (`RecordField`).
+- **The catalog and the face in every reader**
+  ([#1087](https://git.marcpardo.eu/marcpardo/zenkey/issues/1087), #990's
+  V7 and V8):
+  - `HealthSpec`, `AlarmSpec` and `WatchdogSpec` gain `catalogs`, which
+    date a snapshot's confirmations; `HealthSpec` and `AlarmSpec` are no
+    longer `Copy`;
+  - `run_conform` takes the `&Catalogs` too;
+  - `watch_resource_across` (`bus::consume::watch_across`) watches
+    through a face's far side;
+  - `Publication::retire_with` deletes with an attachment, so a replayed
+    delete's stamp rides.
 
-## What 0.21 does not promise
+## What 0.22 does not promise
 
 zk2c, the bandwidth-first wire (epic
 [#975](https://git.marcpardo.eu/marcpardo/zenkey/issues/975)), is not
-finished. Two things under 0.21 are still moving, and a 0.22 may break
+finished. Two things under 0.22 are still moving, and a 0.23 may break
 either:
 
-- **The wire.** An event's key is to end in its run and seq in place of
-  a ULID ([#980](https://git.marcpardo.eu/marcpardo/zenkey/issues/980)'s
-  C2), and the rest of #975 follows. What the readers decode, and how
-  they order it, moves with it.
+- **The wire and the profiles.** These are still open:
+  `freshness.v2`'s heartbeat, one put per interface, which the maintainer
+  is deciding ([#1110](https://git.marcpardo.eu/marcpardo/zenkey/issues/1110));
+  `link.v2`'s subjects by user name, in progress
+  ([#1107](https://git.marcpardo.eu/marcpardo/zenkey/issues/1107)); and
+  #980's C3, the archive attachment, and C5, the compact descriptor. What
+  the readers decode, and how the plans are drawn, moves with them.
 - **The authoring format** and the canonical form a fingerprint is taken
   over, which the lens and the contract retrieval read. Neither moved
-  from 0.20 to 0.21.
+  from 0.21 to 0.22.
 
-A 0.21.x patch release changes neither.
+A 0.22.x patch release changes neither.
 
 ## Zenoh's unstable API
 
