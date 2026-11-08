@@ -79,13 +79,16 @@ class FarSide:
     def config(self) -> dict[str, Any]:
         """The far end's session configuration, each of the eight keys at
         zenoh's configuration key (link.v2 §2.18's block, ``wait_before_close``
-        in µs), for :func:`zk2py.live.open_client`'s ``transport``."""
-        out = {}
-        from .link_v2 import TRANSPORT
+        in µs), and since link.v2 0.13 the block's third object, timestamping
+        off for a router and a peer ("the same three objects for the far
+        end"), for :func:`zk2py.live.open_client`'s ``transport``."""
+        out: dict[str, Any] = {}
+        from .link_v2 import TIMESTAMPING_OFF, TRANSPORT
 
         for k, (path, _, _) in TRANSPORT.items():
             v = self.transport[k]
             out[path] = v * 1000 if k == "wait_before_close_ms" else v
+        out["timestamping/enabled"] = {path.rsplit("/", 1)[1]: v for path, v in TIMESTAMPING_OFF}
         return out
 
 

@@ -1027,11 +1027,14 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "core §4.2", "A consumer or a tool MUST NOT merge a stray `reply_del` as a deletion", MET,
      "seed.LateJoiner, a tool's, given the owner's revision (stray_live §15 step 1, T) (round 107, core 0.102)"),
     # core 0.104 (F-514's answer): a put on an events key that carries no
-    # event (round 108).
+    # event (round 108); core 0.105 (F-522's answer) widened it in place to a
+    # delete on an events key (round 109).
     ("consumer", "core §2.6", "A consumer MUST NOT deliver a put on an events key whose payload is no event",
      MET, "live.no_event, read by live.replay_events, live.subscribe_events and Owner.subscribe_role: a mutation or a "
      "payload with no envelope counted undecodable, form, never delivered (events_live §8 Expected 5, py-py and "
-     "zenctl replay's puts beside the owner example's) (round 108, core 0.104)"),
+     "zenctl replay's puts beside the owner example's) (round 108, core 0.104); a delete on an events key, heard or "
+     "replayed as a reply_del, never delivered either (events_live §8 step 4's third sample) (round 109, core "
+     "0.105)"),
 ]
 
 
