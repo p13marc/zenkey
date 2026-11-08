@@ -2931,8 +2931,8 @@
           "health.v1"
         ]
       },
-      "note": "zenoh-modem's RF router (Appendix B, `examples/zk2/zenoh-modem/faces/`) over modem.v3 3.4, which lists link.v1: what it exposes is its three frame resources over one record of all 73 readings, all packed, so none draws `not_packed` (§2.17); 3.2's nine are deprecated and `host`, so they are denied with the reading subtrees; the face lists `frames/fast` at 60 s, crossing whole with no downsampling, and denies `frames/slow` and `frames/paid` by name (`frame_unlisted`, §2.7); `frames/fast`'s 300 s horizon is liveness evidence; one frame a minute replaces each keep-alive, so no `keep_alive_not_suppressed` (§2.16); the catalog the ground holds lists every crossing revision (§2.18); modem.v3 3.4's three `face/` events are exposed `link`, so each crosses whole, never downsampled (link.v1 §2.9), and its four JSON events are denied by name; `face/device_fault` is JSON, so it draws `not_packed` (§2.17)",
-      "policy": "# zenoh-modem's RF node (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\nbinding  = \"zm-1.10.2-r1\"           # the zenoh fork zenoh-modem's routers run\ncatalog  = \"29bf7d47\"               # catalog.json, which the ground holds\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4            # a keep-alive every 60 s, which a frame a minute replaces\nwait_before_close_ms = 240000       # at least the lease\nsequence             = \"16bit\"\nbatch_bytes          = 222          # the radio's 220 B SDU and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.rf]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000            # 5 %\narq              = false            # no link ARQ on the radio (zenoh-modem's tracker)\nreply_timeout_ms = 15000            # 16 full batches take 11.8 s\nhorizon_s        = 120              # one frame a minute affords a 120 s horizon\n\n[face.rf.frames]\n\"modem.v3/frames/fast\" = { every_s = 60 }\n"
+      "note": "zenoh-modem's RF router (Appendix B, `examples/zk2/zenoh-modem/faces/`) over modem.v3 3.4, which lists link.v1: what it exposes is its three frame resources over one record of all 73 readings, all packed, so none draws `not_packed` (§2.17); 3.2's nine are deprecated and `host`, so they are denied with the reading subtrees; the face lists `frames/fast` at 60 s, crossing whole with no downsampling, and denies `frames/slow` and `frames/paid` by name (`frame_unlisted`, §2.7); `frames/fast`'s 300 s horizon is liveness evidence; one frame a minute replaces each keep-alive, so no `keep_alive_not_suppressed` (§2.16); the catalog the ground holds lists every crossing revision (§2.18); the face lists modem.v3 3.4's three `face/` events, which cross whole, never downsampled (§2.7, link.v1 §2.9), and its four JSON events are denied by name; `face/device_fault` is JSON, so it draws `not_packed` (§2.17)",
+      "policy": "# zenoh-modem's RF node (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\nbinding  = \"zm-1.10.2-r1\"           # the zenoh fork zenoh-modem's routers run\ncatalog  = \"29bf7d47\"               # catalog.json, which the ground holds\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4            # a keep-alive every 60 s, which a frame a minute replaces\nwait_before_close_ms = 240000       # at least the lease\nsequence             = \"16bit\"\nbatch_bytes          = 222          # the radio's 220 B SDU and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.rf]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000            # 5 %\narq              = false            # no link ARQ on the radio (zenoh-modem's tracker)\nreply_timeout_ms = 15000            # 16 full batches take 11.8 s\nhorizon_s        = 120              # one frame a minute affords a 120 s horizon\nevents           = [\"modem.v3/face/device_fault\", \"modem.v3/face/identity_change\", \"modem.v3/face/oper_change\"]\n\n[face.rf.frames]\n\"modem.v3/frames/fast\" = { every_s = 60 }\n"
     },
     {
       "catalog": {
@@ -3264,6 +3264,7 @@
                 "key_exprs": [
                   "zk2/*/*/modem.v3/events/action_event/**",
                   "zk2/*/*/modem.v3/events/device_fault/**",
+                  "zk2/*/*/modem.v3/events/face/device_fault/**",
                   "zk2/*/*/modem.v3/events/identity_change/**",
                   "zk2/*/*/modem.v3/events/oper_change/**"
                 ],
@@ -3277,12 +3278,6 @@
             "downsampling": null,
             "far": "ground",
             "findings": [
-              {
-                "at": "modem.v3/events/face/device_fault",
-                "code": "not_packed",
-                "face": "lora",
-                "severity": "warning"
-              },
               {
                 "at": "modem.v3/stream/frames/paid",
                 "code": "frame_unlisted",
@@ -3339,8 +3334,8 @@
           "health.v1"
         ]
       },
-      "note": "zenoh-modem's LoRa router at SF7 (Appendix B): `frames/fast` at 60 s, against a keep-alive interval of 30 s, so the uplink pays a keep-alive between two frames (`keep_alive_not_suppressed`, §2.16); `frames/slow` and `frames/paid` are denied by name (`frame_unlisted`, §2.7); modem.v3 3.4's three `face/` events cross as on RF, `face/device_fault` warned `not_packed` (§2.17): a face lists frames, never events (§2.7), so which of them a device publishes is its owner's configuration",
-      "policy": "# zenoh-modem's LoRa node at SF7 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"29bf7d47\"\n\n[transport]\nlease_ms             = 120000\nkeep_alive           = 4\nwait_before_close_ms = 120000\nsequence             = \"16bit\"\nbatch_bytes          = 224          # the chip's 222 B frame and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 5469\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nhorizon_s        = 120\n\n[face.lora.frames]\n\"modem.v3/frames/fast\" = { every_s = 60 }\n"
+      "note": "zenoh-modem's LoRa router at SF7 (Appendix B): `frames/fast` at 60 s, against a keep-alive interval of 30 s, so the uplink pays a keep-alive between two frames (`keep_alive_not_suppressed`, §2.16); `frames/slow` and `frames/paid` are denied by name (`frame_unlisted`, §2.7); the face lists modem.v3 3.4's two `rare` events, which cross whole, and the plan denies `face/device_fault` by name with the four JSON events (§2.7)",
+      "policy": "# zenoh-modem's LoRa node at SF7 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"29bf7d47\"\n\n[transport]\nlease_ms             = 120000\nkeep_alive           = 4\nwait_before_close_ms = 120000\nsequence             = \"16bit\"\nbatch_bytes          = 224          # the chip's 222 B frame and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 5469\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nhorizon_s        = 120\nevents           = [\"modem.v3/face/identity_change\", \"modem.v3/face/oper_change\"]\n\n[face.lora.frames]\n\"modem.v3/frames/fast\" = { every_s = 60 }\n"
     },
     {
       "catalog": {
@@ -3672,6 +3667,7 @@
                 "key_exprs": [
                   "zk2/*/*/modem.v3/events/action_event/**",
                   "zk2/*/*/modem.v3/events/device_fault/**",
+                  "zk2/*/*/modem.v3/events/face/device_fault/**",
                   "zk2/*/*/modem.v3/events/identity_change/**",
                   "zk2/*/*/modem.v3/events/oper_change/**"
                 ],
@@ -3685,12 +3681,6 @@
             "downsampling": null,
             "far": "ground",
             "findings": [
-              {
-                "at": "modem.v3/events/face/device_fault",
-                "code": "not_packed",
-                "face": "lora",
-                "severity": "warning"
-              },
               {
                 "at": "modem.v3/stream/frames/fast",
                 "code": "frame_over_batch",
@@ -3748,8 +3738,8 @@
           "health.v1"
         ]
       },
-      "note": "zenoh-modem's LoRa router at SF9 (Appendix B): `frames/fast` at 120 s, asked for a full record every 900 s, which its 15 records reach by a full record every seventh (`keyframe_s`, §2.7); 120 s is the keep-alive interval, so none is paid beside the data (§2.16); its largest frame, 216 B, a delta record that includes every field, is above the 117 B batch (`frame_over_batch`, link.v1 §2.8); `frames/slow` and `frames/paid` are denied by name (`frame_unlisted`, §2.7); modem.v3 3.4's three `face/` events cross as on RF, `face/device_fault` warned `not_packed` (§2.17): a face lists frames, never events (§2.7), so which of them a device publishes is its owner's configuration",
-      "policy": "# zenoh-modem's LoRa node at SF9 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"29bf7d47\"\n\n[transport]\nlease_ms             = 480000\nkeep_alive           = 4\nwait_before_close_ms = 480000\nsequence             = \"16bit\"\nbatch_bytes          = 117          # the chip's 115 B frame and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 1758\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000            # 16 full batches take 8.5 s\nhorizon_s        = 120\n\n[face.lora.frames]\n\"modem.v3/frames/fast\" = { every_s = 120, keyframe_s = 900 }\n"
+      "note": "zenoh-modem's LoRa router at SF9 (Appendix B): `frames/fast` at 120 s, asked for a full record every 900 s, which its 15 records reach by a full record every seventh (`keyframe_s`, §2.7); 120 s is the keep-alive interval, so none is paid beside the data (§2.16); its largest frame, 216 B, a delta record that includes every field, is above the 117 B batch (`frame_over_batch`, link.v1 §2.8); `frames/slow` and `frames/paid` are denied by name (`frame_unlisted`, §2.7); the face lists modem.v3 3.4's two `rare` events, which cross whole, and the plan denies `face/device_fault` by name with the four JSON events (§2.7)",
+      "policy": "# zenoh-modem's LoRa node at SF9 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"29bf7d47\"\n\n[transport]\nlease_ms             = 480000\nkeep_alive           = 4\nwait_before_close_ms = 480000\nsequence             = \"16bit\"\nbatch_bytes          = 117          # the chip's 115 B frame and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 1758\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000            # 16 full batches take 8.5 s\nhorizon_s        = 120\nevents           = [\"modem.v3/face/identity_change\", \"modem.v3/face/oper_change\"]\n\n[face.lora.frames]\n\"modem.v3/frames/fast\" = { every_s = 120, keyframe_s = 900 }\n"
     },
     {
       "catalog": {
@@ -4047,42 +4037,9 @@
                   "egress",
                   "ingress"
                 ],
-                "id": "events:config.v1",
+                "id": "events",
                 "key_exprs": [
-                  "zk2/*/*/config.v1/events/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "events:health.v1",
-                "key_exprs": [
-                  "zk2/*/*/health.v1/events/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "events:modem.v3",
-                "key_exprs": [
-                  "zk2/*/*/modem.v3/events/action_event/**",
-                  "zk2/*/*/modem.v3/events/device_fault/**",
-                  "zk2/*/*/modem.v3/events/identity_change/**",
-                  "zk2/*/*/modem.v3/events/oper_change/**"
+                  "zk2/*/*/*/events/**"
                 ],
                 "messages": [
                   "put",
@@ -4094,12 +4051,6 @@
             "downsampling": null,
             "far": "ground",
             "findings": [
-              {
-                "at": "modem.v3/events/face/device_fault",
-                "code": "not_packed",
-                "face": "lora",
-                "severity": "warning"
-              },
               {
                 "at": "modem.v3/stream/frames/fast",
                 "code": "frame_unlisted",
@@ -4151,8 +4102,8 @@
           "health.v1"
         ]
       },
-      "note": "zenoh-modem's LoRa router at SF12 (Appendix B): `frames/slow` at 900 s, asked for a full record hourly, which its 4 records reach (`keyframe_s`, §2.7); its 1,800 s horizon is twice its cadence and the face's `horizon_s`, so it is liveness evidence with no `interval_over_horizon` or `horizon_under_face` (§2.12); the 900 s keep-alive interval is the cadence, so none is paid beside the data (§2.16); `frames/fast` and `frames/paid` are denied by name (`frame_unlisted`, §2.7); modem.v3 3.4's three `face/` events cross as on RF, `face/device_fault` warned `not_packed` (§2.17): a face lists frames, never events (§2.7), so which of them a device publishes is its owner's configuration",
-      "policy": "# zenoh-modem's LoRa node at SF12 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"29bf7d47\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 4\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 224          # the fragment layer's 222 B SDU and 2 B of stream framing\nopen_timeout_ms      = 40000\naccept_timeout_ms    = 40000\ninterests_timeout_ms = 40000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 900\nmax_outage_s     = 3600\nlink_bps         = 293\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 120000\nhorizon_s        = 1800\n\n# frames/slow writes a full record at least every 4 (modem.v3), hourly at\n# one every 15 minutes, as the face asks.\n[face.lora.frames]\n\"modem.v3/frames/slow\" = { every_s = 900, keyframe_s = 3600 }\n"
+      "note": "zenoh-modem's LoRa router at SF12 (Appendix B): `frames/slow` at 900 s, asked for a full record hourly, which its 4 records reach (`keyframe_s`, §2.7); its 1,800 s horizon is twice its cadence and the face's `horizon_s`, so it is liveness evidence with no `interval_over_horizon` or `horizon_under_face` (§2.12); the 900 s keep-alive interval is the cadence, so none is paid beside the data (§2.16); `frames/fast` and `frames/paid` are denied by name (`frame_unlisted`, §2.7); the face lists no event (`events = []`), so `events` is denied whole (§2.7)",
+      "policy": "# zenoh-modem's LoRa node at SF12 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"29bf7d47\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 4\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 224          # the fragment layer's 222 B SDU and 2 B of stream framing\nopen_timeout_ms      = 40000\naccept_timeout_ms    = 40000\ninterests_timeout_ms = 40000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 900\nmax_outage_s     = 3600\nlink_bps         = 293\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 120000\nhorizon_s        = 1800\nevents           = []\n\n# frames/slow writes a full record at least every 4 (modem.v3), hourly at\n# one every 15 minutes, as the face asks.\n[face.lora.frames]\n\"modem.v3/frames/slow\" = { every_s = 900, keyframe_s = 3600 }\n"
     },
     {
       "catalog": {
@@ -4450,42 +4401,9 @@
                   "egress",
                   "ingress"
                 ],
-                "id": "events:config.v1",
+                "id": "events",
                 "key_exprs": [
-                  "zk2/*/*/config.v1/events/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "events:health.v1",
-                "key_exprs": [
-                  "zk2/*/*/health.v1/events/**"
-                ],
-                "messages": [
-                  "put",
-                  "delete",
-                  "declare_subscriber"
-                ]
-              },
-              {
-                "flows": [
-                  "egress",
-                  "ingress"
-                ],
-                "id": "events:modem.v3",
-                "key_exprs": [
-                  "zk2/*/*/modem.v3/events/action_event/**",
-                  "zk2/*/*/modem.v3/events/device_fault/**",
-                  "zk2/*/*/modem.v3/events/identity_change/**",
-                  "zk2/*/*/modem.v3/events/oper_change/**"
+                  "zk2/*/*/*/events/**"
                 ],
                 "messages": [
                   "put",
@@ -4497,12 +4415,6 @@
             "downsampling": null,
             "far": "ground-gateway",
             "findings": [
-              {
-                "at": "modem.v3/events/face/device_fault",
-                "code": "not_packed",
-                "face": "sbd",
-                "severity": "warning"
-              },
               {
                 "at": "modem.v3/stream/frames/fast",
                 "code": "frame_unlisted",
@@ -4553,8 +4465,8 @@
           "health.v1"
         ]
       },
-      "note": "zenoh-modem's SBD router (Appendix B): the face lists `frames/paid` alone, every frame a full record, at the keep-alive interval, so a message replaces a keep-alive (§2.16); `frames/fast` and `frames/slow` are denied by name (`frame_unlisted`, §2.7); `frames/paid`'s 3,600 s horizon is the face's `horizon_s`, so the plan lists it as evidence, and liveness across the face is observable (link.v1 §2.12); modem.v3 3.4's three `face/` events cross as on RF, `face/device_fault` warned `not_packed` (§2.17): a face lists frames, never events (§2.7), so which of them a device publishes is its owner's configuration",
-      "policy": "# zenoh-modem's SBD terminal (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-71c0e2a9d4b3\"\nservices = [\"sat0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"29bf7d47\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 2\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 271          # a message's 270 B, as configs/zenohd-sat0.json5 ships it\nopen_timeout_ms      = 1000000\naccept_timeout_ms    = 1000000\ninterests_timeout_ms = 1000000\n\n[face.sbd]\nfar              = \"ground-gateway\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 1800\nmax_outage_s     = 86400\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 1000000\nhorizon_s        = 3600\n\n[face.sbd.frames]\n\"modem.v3/frames/paid\" = { every_s = 1800 }\n"
+      "note": "zenoh-modem's SBD router (Appendix B): the face lists `frames/paid` alone, every frame a full record, at the keep-alive interval, so a message replaces a keep-alive (§2.16); `frames/fast` and `frames/slow` are denied by name (`frame_unlisted`, §2.7); `frames/paid`'s 3,600 s horizon is the face's `horizon_s`, so the plan lists it as evidence, and liveness across the face is observable (link.v1 §2.12); the face lists no event (`events = []`), so `events` is denied whole (§2.7)",
+      "policy": "# zenoh-modem's SBD terminal (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-71c0e2a9d4b3\"\nservices = [\"sat0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"29bf7d47\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 2\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 271          # a message's 270 B, as configs/zenohd-sat0.json5 ships it\nopen_timeout_ms      = 1000000\naccept_timeout_ms    = 1000000\ninterests_timeout_ms = 1000000\n\n[face.sbd]\nfar              = \"ground-gateway\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 1800\nmax_outage_s     = 86400\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 1000000\nhorizon_s        = 3600\nevents           = []\n\n[face.sbd.frames]\n\"modem.v3/frames/paid\" = { every_s = 1800 }\n"
     },
     {
       "contracts": [
@@ -8006,6 +7918,449 @@
       },
       "note": "\u00a72.11: a listed service that owns no state has no floor, as link.v1's",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 2\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 271\nopen_timeout_ms      = 1000000\naccept_timeout_ms    = 1000000\ninterests_timeout_ms = 1000000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"none\"\nmax_outage_s     = 86400\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 1000000\n"
+    },
+    {
+      "expect": {
+        "binding": "zenoh-1.10.1",
+        "catalog": null,
+        "faces": [
+          {
+            "attach": {
+              "shape": "client"
+            },
+            "deny": [
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "zk",
+                "key_exprs": [
+                  "zk2/**/@zk/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "adv",
+                "key_exprs": [
+                  "zk2/**/@adv/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "admin",
+                "key_exprs": [
+                  "@/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream",
+                "key_exprs": [
+                  "zk2/*/*/*/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@stream",
+                "key_exprs": [
+                  "zk2/*/*/*/@stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "state",
+                "key_exprs": [
+                  "zk2/*/*/*/state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@state",
+                "key_exprs": [
+                  "zk2/*/*/*/@state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events:probe.v1",
+                "key_exprs": [
+                  "zk2/*/*/probe.v1/events/change/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              }
+            ],
+            "downsampling": null,
+            "far": "ground",
+            "findings": [],
+            "liveness": [
+              {
+                "evidence": [],
+                "service": "lab/radio-a"
+              }
+            ],
+            "name": "radio",
+            "reply_timeout_ms": 1000000,
+            "windows": []
+          }
+        ],
+        "transport": {
+          "accept_timeout_ms": 1000000,
+          "batch_bytes": 271,
+          "interests_timeout_ms": 1000000,
+          "keep_alive": 2,
+          "lease_ms": 3600000,
+          "open_timeout_ms": 1000000,
+          "sequence": "16bit",
+          "wait_before_close_ms": 3600000
+        }
+      },
+      "implements": {
+        "radio-a": [
+          "probe.v1"
+        ]
+      },
+      "interfaces": {
+        "probe.v1": [
+          {
+            "annotations": {
+              "link.exposure": "link"
+            },
+            "template": "change",
+            "token": "events",
+            "type": "packed"
+          },
+          {
+            "annotations": {
+              "link.exposure": "link"
+            },
+            "template": "fault",
+            "token": "events",
+            "type": "packed"
+          }
+        ]
+      },
+      "note": "a face lists one event of two (\u00a72.7): `fault` crosses, whole, and `change`, exposed too, is denied by name in `events:probe.v1`",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 2\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 271\nopen_timeout_ms      = 1000000\naccept_timeout_ms    = 1000000\ninterests_timeout_ms = 1000000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 1800\nmax_outage_s     = 86400\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 1000000\nevents           = [\"probe.v1/fault\"]\n"
+    },
+    {
+      "expect": {
+        "binding": "zenoh-1.10.1",
+        "catalog": null,
+        "faces": [
+          {
+            "attach": {
+              "shape": "client"
+            },
+            "deny": [
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "zk",
+                "key_exprs": [
+                  "zk2/**/@zk/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "adv",
+                "key_exprs": [
+                  "zk2/**/@adv/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "admin",
+                "key_exprs": [
+                  "@/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream",
+                "key_exprs": [
+                  "zk2/*/*/*/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@stream",
+                "key_exprs": [
+                  "zk2/*/*/*/@stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "state",
+                "key_exprs": [
+                  "zk2/*/*/*/state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@state",
+                "key_exprs": [
+                  "zk2/*/*/*/@state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events",
+                "key_exprs": [
+                  "zk2/*/*/*/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              }
+            ],
+            "downsampling": null,
+            "far": "ground",
+            "findings": [],
+            "liveness": [
+              {
+                "evidence": [],
+                "service": "lab/radio-a"
+              }
+            ],
+            "name": "radio",
+            "reply_timeout_ms": 1000000,
+            "windows": []
+          }
+        ],
+        "transport": {
+          "accept_timeout_ms": 1000000,
+          "batch_bytes": 271,
+          "interests_timeout_ms": 1000000,
+          "keep_alive": 2,
+          "lease_ms": 3600000,
+          "open_timeout_ms": 1000000,
+          "sequence": "16bit",
+          "wait_before_close_ms": 3600000
+        }
+      },
+      "implements": {
+        "radio-a": [
+          "probe.v1"
+        ]
+      },
+      "interfaces": {
+        "probe.v1": [
+          {
+            "annotations": {
+              "link.exposure": "link"
+            },
+            "template": "change",
+            "token": "events",
+            "type": "packed"
+          },
+          {
+            "annotations": {
+              "link.exposure": "link"
+            },
+            "template": "fault",
+            "token": "events",
+            "type": "packed"
+          }
+        ]
+      },
+      "note": "an empty `events` lists none (\u00a72.7): no event crosses, so `events` is denied whole, both exposed ones under it",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 2\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 271\nopen_timeout_ms      = 1000000\naccept_timeout_ms    = 1000000\ninterests_timeout_ms = 1000000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 1800\nmax_outage_s     = 86400\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 1000000\nevents           = []\n"
+    },
+    {
+      "expect": {
+        "refused": [
+          {
+            "at": "probe.v1/events/nothing",
+            "code": "event_unknown",
+            "face": "radio",
+            "severity": "error"
+          }
+        ]
+      },
+      "implements": {
+        "radio-a": [
+          "probe.v1"
+        ]
+      },
+      "interfaces": {
+        "probe.v1": [
+          {
+            "annotations": {
+              "link.exposure": "link"
+            },
+            "template": "change",
+            "token": "events",
+            "type": "packed"
+          },
+          {
+            "annotations": {
+              "link.exposure": "link"
+            },
+            "template": "fault",
+            "token": "events",
+            "type": "packed"
+          }
+        ]
+      },
+      "note": "an entry of `events` that names no event resource of a listed interface refuses the plan (`event_unknown`, \u00a72.7)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 2\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 271\nopen_timeout_ms      = 1000000\naccept_timeout_ms    = 1000000\ninterests_timeout_ms = 1000000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 1800\nmax_outage_s     = 86400\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 1000000\nevents           = [\"probe.v1/fault\", \"probe.v1/nothing\"]\n"
     }
   ],
   "description": "link.v2's plan (v2.md \u00a72.3, \u00a72.4, \u00a72.7, \u00a72.8, \u00a72.11, \u00a72.12, \u00a72.16, \u00a72.17, \u00a72.18). Each case is a face policy, `policy`, and a deployment as link.v1's plan.json writes it (`implements`, `contracts` loaded from the repository's root, or `interfaces` inline). `expect` is `{refused}`, the findings that refuse it (a policy's linter's, warnings included, or a deployment's errors alone, link.v1 \u00a72.3), or the plan: `binding`, `catalog` (null when the policy names none), `transport` (null for a link.v1 policy) and `faces`, each face as link.v1's plan.json writes it with `reply_timeout_ms` for a link.v2 face. A face's plan carries `frames` for a link.v2 face with `frames`: each listed frame that crosses, `{resource, every_s, keyframe_s}`, and none for an empty `frames` (\u00a72.3). A case's own `catalog`, where it gives one, is the core \u00a78.6 catalog the far side holds (\u00a72.18); an inline revision has no fingerprint, so a case about the catalog loads contracts. An inline resource may state `type`, its type's kind: `packed` is packed, and any other or none is not (\u00a72.17). `narrow` names principals: `expect.narrowed` gives, for each, the link protocols a subject bound to it is selected by (link.v1 \u00a72.4 over the binding's list), null when no face excludes any. A device face (\u00a72.5) names its devices by address: `implements` maps a listed service's name, or a device's `<system>/<service>`, to its interfaces, and its plan's `attach` is `{shape: \"device\", devices}`. An inline interface may state `uses`, which a device's `presence_required` reads for `redundancy.v1`, and an inline resource `epoch`, the parameter its template declares as its epoch (`epoch_on_device`). The device cases, from case 22, were written by reading the text, not derived by the reference. A link.v2 face's `windows` is \u00a72.11's floor: each listed service that owns a state or @state resource whose deletes only a tombstone proves, a per-key resource (core \u00a74.2) or a template whose first chunk is a parameter, read from its revisions' kinds, templates, resolved annotations and `uses`. A device's address is its window's `service`, as it is a listed service's. An inline revision uses what its `uses` lists, and none where it states none."

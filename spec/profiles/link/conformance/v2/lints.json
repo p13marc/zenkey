@@ -1241,7 +1241,91 @@
       "windows": {
         "lab/radio-a": 1
       }
+    },
+    {
+      "note": "a face's `events`, an entry's template with a parameter among them: no finding but `no_arq` (§2.1, §2.7)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nhorizon_s        = 300\nevents           = [\"probe.v1/fault\", \"probe.v1/peers/{p}/change\"]\n",
+      "expect": [
+        {
+          "at": "arq",
+          "code": "no_arq",
+          "face": "radio",
+          "severity": "warning"
+        }
+      ]
+    },
+    {
+      "note": "an empty `events` lists no event: no finding but `no_arq` (§2.1, §2.7)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nhorizon_s        = 300\nevents           = []\n",
+      "expect": [
+        {
+          "at": "arq",
+          "code": "no_arq",
+          "face": "radio",
+          "severity": "warning"
+        }
+      ]
+    },
+    {
+      "note": "`events` on a face that exposes none: `bad_value`, as its `interval_s` would be (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 2\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 271\nopen_timeout_ms      = 1000000\naccept_timeout_ms    = 1000000\ninterests_timeout_ms = 1000000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"none\"\nmax_outage_s     = 86400\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 1000000\nevents           = [\"probe.v1/fault\"]\n",
+      "expect": [
+        {
+          "at": "events",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        }
+      ]
+    },
+    {
+      "note": "`events` is one value: an entry repeated and one keyed by no interface id are one `bad_value` at `events` (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nhorizon_s        = 300\nevents           = [\"probe.v1/fault\", \"probe.v1/fault\", \"fault\"]\n",
+      "expect": [
+        {
+          "at": "arq",
+          "code": "no_arq",
+          "face": "radio",
+          "severity": "warning"
+        },
+        {
+          "at": "events",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        }
+      ]
+    },
+    {
+      "note": "`events` that is not an array, and an entry that is not a string: `bad_value` at `events` each time (§2.1)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nhorizon_s        = 300\nevents           = \"probe.v1/fault\"\n",
+      "expect": [
+        {
+          "at": "arq",
+          "code": "no_arq",
+          "face": "radio",
+          "severity": "warning"
+        },
+        {
+          "at": "events",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        }
+      ]
+    },
+    {
+      "note": "a link.v1 policy knows no `events`: `unknown_field` (§2.1)",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\nevents       = [\"probe.v1/fault\"]\n",
+      "expect": [
+        {
+          "at": "events",
+          "code": "unknown_field",
+          "face": "radio",
+          "severity": "error"
+        }
+      ]
     }
   ],
-  "description": "link.v2's linter (v2.md §2.1, §2.4, §2.10, §2.11, §2.16), a face's `frames` and `horizon_s` among it. Each case is a face policy, `policy`, and `expect`, every finding of it, sorted by face (none first), `at`, then `code`, as link.v1's lints.json writes them. A policy with no `profile` is link.v1's, read finding for finding as link.v1 §2.1 says. A device face (§2.5) is `attach = \"device\"` with `devices`. A case may carry link.v1's `block`, read as link.v1's lints.json reads it, `zk_not_denied` on a device face read as §2.15 says. The device cases, from case 40, were written by reading the text, not derived by the reference. A case may give a deployment and its windows as link.v1's lints.json does (`implements`, `contracts` or `interfaces`, `windows`): the plan is derived, and `window_under_outage` reads §2.11's floor."
+  "description": "link.v2's linter (v2.md §2.1, §2.4, §2.10, §2.11, §2.16), a face's `frames`, `events` and `horizon_s` among it. Each case is a face policy, `policy`, and `expect`, every finding of it, sorted by face (none first), `at`, then `code`, as link.v1's lints.json writes them. A policy with no `profile` is link.v1's, read finding for finding as link.v1 §2.1 says. A device face (§2.5) is `attach = \"device\"` with `devices`. A case may carry link.v1's `block`, read as link.v1's lints.json reads it, `zk_not_denied` on a device face read as §2.15 says. The device cases, from case 40, and the `events` cases, from case 63, were written by reading the text, not derived by the reference. A case may give a deployment and its windows as link.v1's lints.json does (`implements`, `contracts` or `interfaces`, `windows`): the plan is derived, and `window_under_outage` reads §2.11's floor."
 }

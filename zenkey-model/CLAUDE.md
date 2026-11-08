@@ -72,7 +72,12 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   `frame_unknown`, `keyframe_unreachable`, `catalog_missing` and
   warnings `not_packed`, `timed_downsampled`, `frame_unlisted` (read
   across the policy's faces), `horizon_under_face`, `block_over_batch`,
-  `keep_alive_not_suppressed`; a v1 policy's plan is unchanged; and
+  `keep_alive_not_suppressed`; a v1 policy's plan is unchanged; link.v2
+  0.12, #1098: `Face::events` (`parse_events`, one value, names
+  `<iface>/events/<template>`), `crossing_v2` denying an exposed event a
+  face's `events` leaves out (`Reason::Unlisted`, which warns
+  `frame_unlisted` for a frame alone) and the refusal `event_unknown`;
+  and
   link.v2 0.7, #982 H1: `Attach::Device { devices }` (`attach =
   "device"`, a v2 policy's only), `device_listed`, `FacePolicy::owners`
   (each listed service and device as an `Owner`, a device keyed in

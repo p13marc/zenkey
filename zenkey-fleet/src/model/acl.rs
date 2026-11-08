@@ -2510,6 +2510,10 @@ pub fn link_says(code: link::Code) -> &'static str {
             "an entry of the face's frames names no frame resource of a listed interface \
              (link.v2 §2.7)"
         }
+        C::EventUnknown => {
+            "an entry of the face's events names no event resource of a listed interface \
+             (link.v2 §2.7)"
+        }
         C::FrameUnlisted => {
             "an exposed frame resource the face's frames leaves out, which no face of the \
              policy lets cross: its owner writes it for no far side (link.v2 §2.7)"
