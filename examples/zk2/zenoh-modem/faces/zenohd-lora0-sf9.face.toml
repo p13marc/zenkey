@@ -16,11 +16,17 @@
 # (link.v1 §2.8), is above the chip's 117 B batch (`frame_over_batch`), and
 # its 207 B full record fragments into two frames every 15 minutes. frames/slow and frames/paid are SF12's and SBD's
 # (`frame_unlisted`), and the chip has no ARQ (`no_arq`).
+#
+# Events (modem.v3 3.4, #991): the plan lets the three `face/` events cross,
+# and `face/device_fault` draws `not_packed`. lora0's owner publishes
+# `face/oper_change` and `face/identity_change` at SF9, 16 s of air a day
+# at their worst case beside the frames' 534 s: 550 s, 64 % of the duty.
+# `face/device_fault` would take 2,423 s more (link.md, "Events").
 profile  = "link.v2"
 system   = "h-c2a95e41d7f0"
 services = ["lora0"]
 binding  = "zm-1.10.2-r1"
-catalog  = "0ff6bf6d"
+catalog  = "29bf7d47"
 
 [transport]
 lease_ms             = 480000

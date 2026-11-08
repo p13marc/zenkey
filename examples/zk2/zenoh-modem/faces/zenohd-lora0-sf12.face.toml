@@ -19,11 +19,17 @@
 # `horizon_s`, so it is liveness evidence here, as 3.2's frames/link was
 # not. frames/fast and frames/paid are the faster media's and SBD's
 # (`frame_unlisted`), and the chip has no ARQ (`no_arq`).
+#
+# Events (modem.v3 3.4, #991): the plan lets the three `face/` events cross,
+# and `face/device_fault` draws `not_packed`, but lora0's owner publishes
+# none at SF12: beside frames/slow's 785 s, `face/oper_change` alone, 2
+# tiles an occurrence at 24 a day, reaches 864.04 s of the 864 (link.md,
+# "Events"). With lora0's own readings, 434 s, the two `rare` ones would fit.
 profile  = "link.v2"
 system   = "h-c2a95e41d7f0"
 services = ["lora0"]
 binding  = "zm-1.10.2-r1"
-catalog  = "0ff6bf6d"
+catalog  = "29bf7d47"
 
 [transport]
 lease_ms             = 3600000

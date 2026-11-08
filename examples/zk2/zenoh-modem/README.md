@@ -51,9 +51,10 @@ Its seam crates are on crates.io for out-of-tree backends.
   routers, the ground side, and what is still to decide.
 - [`catalog.json`](catalog.json) is the deployment catalog ([core §8.6](../../../spec/core.md#86-the-deployment-catalog)),
   provisioned to rf0's host and to the ground. It indexes `modem.v3`, `config.v1` and
-  `health.v1` at their current revisions (`modem.v3` 3.3 at index 8), `sx1262_config.v1`
-  (index 7, #985 G4), and `freshness.v2`'s standard contract, which each of their owners serves
-  (index 9, catalog `0ff6bf6d`, #1080). It dates times from 2026-01-01. A new revision goes in
+  `health.v1` at their current revisions (`modem.v3` 3.4 at index 10, catalog `29bf7d47`, #991,
+  after 3.3 at index 8), `sx1262_config.v1` (index 7, #985 G4), and `freshness.v2`'s standard
+  contract, which each of their owners serves (index 9, #1080). It dates times from 2026-01-01.
+  A new revision goes in
   with `zk2 catalog add`, which writes the catalog's successor.
 
 **The verdict.** Every v1 entry maps or is deleted for a stated reason, and the constrained-face
@@ -105,7 +106,8 @@ Example keys, for host `h-3fa9c2d41b7e` and device `rf0`:
 ```text
 zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sdu/dropped_total           a link-exposed counter
 zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint/peer-b          a templated state, cardinality 64
-zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/01j9x3k7q2m4n5p6r7s8t9v0wx
+zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g0009         an occurrence: run 0005, seq 9
+zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/oper_change/002g000a    its packed twin, for a face (3.4)
 zk2/h-3fa9c2d41b7e/sat0/modem.v3/@op/action/mailbox_check
 zk2/h-3fa9c2d41b7e/rf0/config.v1/@op/set/radio                      a reach group: {token, apply_at} first
 zk2/h-3fa9c2d41b7e/rf0/config.v1/state/view                         the echo; GET is the read
@@ -119,7 +121,8 @@ zk2/*/*/@zk/alive/config.v1/**                                     "which device
 ## Decisions recorded here
 
 - **v1's events are zk2 events, all five:** `kind = "event"`, one key per occurrence,
-  `…/events/<template>/<ulid>` (draft 1, D3). Each exists so that a reader arriving after the
+  `…/events/<template>/<occurrence>` (draft 1, D3; the ULID chunk until core 0.103, the run and
+  the seq since). Each exists so that a reader arriving after the
   fact still learns what happened (v1 RFC 04 §1.3), which is the case r3.2 called
   occurrence-keyed and r3.3 made the `events` kind. A reliable stream would lose them to a
   reader that was not connected.
@@ -127,8 +130,9 @@ zk2/*/*/@zk/alive/config.v1/**                                     "which device
   - `device_fault` is edge-triggered raised/cleared, which is `alarms.v1`'s shape
     ([`spec/profiles/alarms/v1.md`](../../../spec/profiles/alarms/v1.md), Appendix B): a later
     option, not taken in a 1:1 mapping.
-  - The v1 ULIDs are already lowercase (`modem-mgmt/src/clock.rs:54-69`), so the keys are the
-    same shape.
+  - The v1 ULIDs were already lowercase (`modem-mgmt/src/clock.rs:54-69`), so the keys kept
+    their shape until core 0.103 made the last chunk the occurrence's run and seq, which the
+    runtime's `EventWriter` writes (#980 C2).
 - **The action event is renamed `action_event/{occurrence}`.** `action/{occurrence}` would have
   the same shape as the operation `action/{name}` (gap 3).
 - **QoS keeps v1's three profiles** explicitly: `sampled` for telemetry, `refreshed` for states,
@@ -358,6 +362,12 @@ The downlink's keep-alives are the ground's air: 148 s, 119 s and 142 s at SF7, 
 SF7, SF9 and SF12. SF9's and SF12's faces now run a lease of four frame intervals, 480 s and 3,600 s,
 so their frames replace every uplink keep-alive ([link](link.md), the note at its top).
 
+**With revision 3.4's events** (#991), each face adds the `face/` events its device's owner
+publishes, at their rate's worst case, beside the frames' **All 73**: RF 594 KB a day (2.3 %), the
+three; LoRa SF7 381 s (44 %) and SF9 550 s (64 %), the two `rare` ones; SF12 785 s and SBD 96
+messages, none. [link.md](link.md)'s "Events" has the arithmetic, and
+`zenkey-fleet/tests/acl_plans.rs`'s `zenoh_modem_events_fit_each_face_budget` checks it.
+
 The 73 JSON streams stay, at 5 s on the host bus, for host tools: one reading, two series, which
 a tool labels apart ("`sdu/dropped_total` (`frames/fast`)").
 
@@ -402,15 +412,36 @@ its heartbeat with it every 30 s, which SBD's messages and LoRa's duty cannot af
 
 | # | v1 `events/modem/…` | Gate | v1 rate | zk2 | Retention · bound |
 |---|---|---|---|---|---|
-| 1 | `device/{device}/oper_change/{event_id}` | — | `rare` | `modem.v3/events/oper_change/<ulid>` | `7d` · 168 |
-| 2 | `device/{device}/device_fault/{event_id}` | — | `low` | `modem.v3/events/device_fault/<ulid>` | `1d` · 1,440 |
-| 3 | `device/{device}/identity_change/{event_id}` | — | `rare` | `modem.v3/events/identity_change/<ulid>` | `7d` · 168 |
+| 1 | `device/{device}/oper_change/{event_id}` | — | `rare` | `modem.v3/events/oper_change/<occurrence>` | `7d` · 168 |
+| 2 | `device/{device}/device_fault/{event_id}` | — | `low` | `modem.v3/events/device_fault/<occurrence>` | `1d` · 1,440 |
+| 3 | `device/{device}/identity_change/{event_id}` | — | `rare` | `modem.v3/events/identity_change/<occurrence>` | `7d` · 168 |
 | 4 | `device/{device}/config_change/{event_id}` | `config` | `burst(600/h)` | `config.v1/stream/changes/{occurrence}` | `7d` · 100,800 (worst case) |
-| 5 | `device/{device}/action/{event_id}` | `actions` | `burst(600/h)` | `modem.v3/events/action_event/<ulid>` | `1d` · 14,400 |
+| 5 | `device/{device}/action/{event_id}` | `actions` | `burst(600/h)` | `modem.v3/events/action_event/<occurrence>` | `1d` · 14,400 |
 
 Revision 3.3 changes none of them (#991). Each template is a literal, so a far reader subscribed to
-`…/events/<template>/*` declares `…/events/<template>`, and each put carries its ULID chunk alone:
-the shortest suffix core §8.5 allows (#980 C1b). None is exposed, so none crosses a face.
+`…/events/<template>/*` declares `…/events/<template>`, and each put carries its last chunk alone:
+the shortest suffix core §8.5 allows (#980 C1b). Since core 0.103 that chunk is the occurrence's
+run and seq, 8 characters under a run file's 16-bit run and 12 under a 32-bit one, and the payload
+is form 4, which carries the occurrence's time (#980 C2). The four stay `host`, so none crosses a
+face.
+
+**Since revision 3.4 (#991), three twins for a face**, under `face/`, beside the JSON four, each
+without `event_id` and `at_ms`, which the key and form 4 carry. Removing a required property from
+the JSON types would break them within the major (core §9.8, `required_removed`), so the JSON four
+keep both until modem.v4, and the twins are new resources, as 3.3's packed states were:
+
+| 3.4 event | Type | Its put on a face | Exposure | Carried by |
+|---|---|---:|---|---|
+| `face/oper_change` | packed `OperChangeRecord`: the status, the occurrences folded in; 3 B | 26 B | `link`, `rare` | RF, LoRa SF7 and SF9 |
+| `face/identity_change` | packed `IdentityChangeRecord`: a bit per identity field that changed, the IMEI before and after; at most 16 B | 39 B | `link`, `rare` | RF, LoRa SF7 and SF9 |
+| `face/device_fault` | JSON `DeviceFaultEvent`: `DeviceFault` without the two; its `detail` is free text | 245 B at 221 B of JSON | `link`, `low` | RF |
+| `action_event` | no twin | | `host`: `burst(600/h)` fits no radio face | none |
+
+A face policy lists frames, never events (`link.v2` §2.7), so every face that exposes lets the three
+cross, and which a device publishes is its owner's configuration, `config:device.events.<name>`,
+as a frame's cadence is. The text (an `oper_change`'s reason, an identity's names, a fault's words
+on LoRa) stays on the host bus. [link.md](link.md)'s "Events" holds the cadence check: each face's
+events at their rate's worst case, beside 3.3's frames' figures.
 
 ### Procedures (10)
 

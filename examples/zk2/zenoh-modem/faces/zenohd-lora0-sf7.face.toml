@@ -18,11 +18,17 @@
 # frames, 1,440 a day and 74 s of air in the baseline's SF7 runs, 376 s of
 # the 864 in all. frames/slow and frames/paid are SF12's and SBD's
 # (`frame_unlisted`), and the chip has no ARQ (`no_arq`).
+#
+# Events (modem.v3 3.4, #991): the plan lets the three `face/` events cross,
+# and `face/device_fault` draws `not_packed`. lora0's owner publishes
+# `face/oper_change` and `face/identity_change` at SF7, 4.9 s of air a day
+# at their worst case beside the frames' 376 s: 381 s, 44 % of the duty.
+# `face/device_fault`, 60 an hour, would take 679 s more (link.md, "Events").
 profile  = "link.v2"
 system   = "h-c2a95e41d7f0"
 services = ["lora0"]
 binding  = "zm-1.10.2-r1"
-catalog  = "0ff6bf6d"
+catalog  = "29bf7d47"
 
 [transport]
 lease_ms             = 120000
