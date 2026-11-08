@@ -331,6 +331,10 @@ pub enum Undecodable {
     /// reader does not read its entries; with its body's refusal when the
     /// body is refused, which a GET's reader reports too.
     Snapshot(Option<BodyRefusal>),
+    /// A put on an events key whose payload is no event (core §2.6, "A put
+    /// that carries no event"): a mutation, or a sample with no envelope,
+    /// heard or replayed. Refused as `form`, as a stray `reply_del` is.
+    NoEvent,
 }
 
 impl Undecodable {
@@ -345,6 +349,7 @@ impl Undecodable {
             Undecodable::Heartbeat => "heartbeat",
             Undecodable::Framed => "frame",
             Undecodable::Mutation => "mutation",
+            Undecodable::NoEvent => "form",
             Undecodable::Snapshot(None) => "snapshot",
             Undecodable::Snapshot(Some(r)) => r.token(),
         }
@@ -362,6 +367,7 @@ impl Undecodable {
             Undecodable::Frame(r) => format!("a frame refused by its layout, {r}"),
             Undecodable::Framed => FRAME_AS_RECORD.to_owned(),
             Undecodable::Mutation => MUTATION_ON_FRAME.to_owned(),
+            Undecodable::NoEvent => NO_EVENT.to_owned(),
             Undecodable::Snapshot(None) => SNAPSHOT_AS_RECORD.to_owned(),
             Undecodable::Snapshot(Some(r)) => format!("a zk2c snapshot's body refused: {r}"),
         }
@@ -415,6 +421,25 @@ pub const SNAPSHOT_AS_RECORD: &str =
 /// reading"): its samples travel as frames.
 pub const MUTATION_ON_FRAME: &str =
     "a record that came in no frame, on a frame resource: it has no reading";
+
+/// Why a put on an events key that carries no event is undecodable (core
+/// §2.6): no time to judge it by, and no owner writes one.
+pub const NO_EVENT: &str = "a put on an events key whose payload is no event (form 4): a \
+     mutation, or a sample with no envelope, carries no time (core §2.6)";
+
+/// [`Undecodable::NoEvent`] where `no_event`, a put on an events key that
+/// carries no event (core §2.6), else admitted: what a reader asks after
+/// [`admit`], so a refused envelope keeps its own refusal.
+///
+/// # Errors
+/// [`Undecodable::NoEvent`] where `no_event`.
+pub fn no_event(no_event: bool) -> Result<(), Undecodable> {
+    if no_event {
+        Err(Undecodable::NoEvent)
+    } else {
+        Ok(())
+    }
+}
 
 /// Admits a read sample of a frame resource, `layout` its frame layout
 /// (core §7.7): a frame's body parsed under the tag its CH carried, for

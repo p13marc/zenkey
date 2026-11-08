@@ -52,12 +52,12 @@ The owner, consumer and caller sections each point to them.
 | Role | Rules |
 |---|---|
 | [Owner](#owner) | 85 |
-| [Consumer](#consumer) | 31 |
+| [Consumer](#consumer) | 32 |
 | [Caller](#caller) | 17 |
 | [Deployment](#deployment) | 18 |
 | [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 83, 27 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 67 |
-| Every rule, once | 273 |
+| Every rule, once | 274 |
 | [Rule ids](#rule-ids) | 85 |
 
 ## Owner
@@ -279,6 +279,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§2.6](core.md#26-events) | A consumer MUST keep a replayed occurrence whose time (§7.5's form 4) is within the retention, and drop one whose time is beyond it. | `[Sc: state.md §8]` |
 | [§2.6](core.md#26-events) | **The filter.** … A consumer MUST NOT judge an unknown time within the retention or beyond it: the storage's `_time` bound alone admitted that occurrence. | `[Sc: state.md §8]` |
 | [§2.6](core.md#26-events) | A consumer MUST deliver a replay in the order of the occurrences' times, then their seqs within one run. | `[Sc: state.md §8]` |
+| [§2.6](core.md#26-events) | **A put that carries no event.** … A consumer MUST NOT deliver a put on an events key whose payload is no event, such as a mutation or a payload with no envelope, whether a subscription heard it or a replay returned it. | `[Sc: state.md §8]` |
 
 ### [core §3.2 Binding rules](core.md#32-binding-rules)
 
@@ -697,7 +698,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§7.5](observer.md#75-reading-across-a-face) | A tool given the face SHOULD NOT declare a scope for a resource the plan keeps off it. | `[F: scope/faces.json]` |
 | [§7.5](observer.md#75-reading-across-a-face) | **A selector given.** … A tool MUST NOT drop silently a selector it was given that meets none of its scopes: it refuses the read, declaring none of the selectors, and names each such selector and why. | `[F: scope/faces.json]` |
 | [§7.5](observer.md#75-reading-across-a-face) | A tool across a constrained face whose medium repairs no lost frame SHOULD declare a scope again when it has heard nothing on it for two of its horizons while its session's transport stayed up, as core §8.5 says. | `[Sc: constrained.md §9]` |
-| [§7.5](observer.md#75-reading-across-a-face) | **The revision of a key.** … A tool that reads a mutation, a frame or a heartbeat with no descriptor naming the owner's revision MUST read it with the revision chosen in this order. | `[F: envelope/tags.json]` |
+| [§7.5](observer.md#75-reading-across-a-face) | **The revision of a key.** … A tool that reads a mutation, an event, a frame or a heartbeat with no descriptor naming the owner's revision MUST read it with the revision chosen in this order. | `[F: envelope/tags.json]` |
 
 ### [observer §7.6 Frames](observer.md#76-frames)
 

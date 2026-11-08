@@ -357,7 +357,7 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   scope a selector given includes and the selector itself where it only
   meets one, and names the rest in `Narrowed::unmet`, never dropping one.
   `tests/face_scope.rs` runs `spec/conformance/scope/faces.json` whole
-  (17 cases over zenoh-modem's rf0, lora0 and sat0 faces).
+  (19 cases over zenoh-modem's rf0, lora0 and sat0 faces, two of them a face's listed events, link.v2 0.12).
   The revision of a key with no descriptor naming the owner's (#990 V2a,
   observer 0.29 §7.5) is `model::choice::choose`: over every revision of
   the key's interface held (`Target::Data`, `Collection` for a snapshot's
@@ -382,11 +382,12 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   its envelope), in the lens, `render`'s fallback and `render_detail`;
   and a type of any other kind under a tag other than 0 is refused
   (`render::tag_refused`, in `decode_under` and `render_resource`).
-  `tests/choice.rs` runs `spec/conformance/envelope/tags.json` whole (31
-  cases; its `e3a529fe` an inline document since zk2py round 106's
-  answers, `catalog.json` being `0ff6bf6d` since #1080 and `29bf7d47`,
-  modem.v3 3.4 at index 10, since #991) and the lens end to end, over the
-  five published revisions of modem.v3.
+  `tests/choice.rs` runs `spec/conformance/envelope/tags.json` whole (36
+  cases since zk2py round 107's answers, cases 31 to 35 modem.v3 3.4's
+  `face/` events; its `e3a529fe` an inline document since round 106's,
+  and `29bf7d47`, modem.v3 3.4 at index 10 (#991), inline beside it since
+  round 107's, `catalog.json` copied whole with its lineage) and the lens
+  end to end, over the published revisions of modem.v3.
   Step 3 orders by one index, two revisions at the same index (two
   unrelated catalogs) ambiguous, and `Step::Any` is said
   `{"by": "any", "step": 1}` (`ByTag::Any`; review-bot on #1088).

@@ -1506,13 +1506,14 @@ doc         = "an operator action ran or was refused: the action, its arguments,
 #   folded in, in 3 B and at most 16 B. Their text, a reason or a name, stays in the JSON event.
 # - `face/device_fault` is JSON, `DeviceFaultEvent`: its `detail` is the medium's own words, free
 #   text, which a packed record cannot hold (core §7.6; #979's B3 adds none here). A link.v2
-#   face's plan warns `not_packed` for it.
+#   face's plan warns `not_packed` for it, where the face lists it: RF's alone.
 # - Exposed `link`, so each crosses every face that exposes, whole and never downsampled
-#   (link.v1 §2.9). A face policy lists frames, never events (link.v2 §2.7), so which of them a
-#   face carries is its device's owner's configuration, `config:device.events.<name>` (a
-#   `[[device]]`'s `events` list in zenoh-modem's file), as a frame's cadence is: on RF all three,
-#   on LoRa the two `rare` ones at SF7 and SF9 and none at SF12, whose frames/slow leaves too
-#   little of the duty, and none on SBD, one paid message a keyframe (link.md, "Events").
+#   (link.v1 §2.9). Each face lists the events it carries (link.v2 0.12 §2.7), and its plan
+#   denies the rest, and each device's owner publishes those its face lists,
+#   `config:device.events.<name>` (a `[[device]]`'s `events` list in zenoh-modem's file): on RF
+#   all three, on LoRa the two `rare` ones at SF7 and SF9 and none at SF12, whose frames/slow
+#   leaves too little of the duty, and none on SBD, one paid message a keyframe (link.md,
+#   "Events").
 # - `face/device_fault` stays off LoRa: at `low`, 60 an hour, its worst case is more air than
 #   SF7's, SF9's or SF12's duty leaves beside the frames. `action_event` has no twin: its
 #   `burst(600/h)` fits no radio face, and it stays `host`.

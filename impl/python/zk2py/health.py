@@ -586,16 +586,32 @@ def status_agrees(r: Reading) -> str:
     return "yes"
 
 
+_STANDARD: list[Any] = []
+
+
+def standard() -> Any:
+    """The standard contract (§3), loaded once."""
+    from .contract import load_contract
+
+    if not _STANDARD:
+        c = load_contract(CONTRACT)
+        if not c.valid:
+            raise ValueError(f"{CONTRACT}: {c.codes}")
+        _STANDARD.append(c)
+    return _STANDARD[0]
+
+
 def read_near(tool: Any, address: str, *, subscriber: fr.Subscriber | None = None,
               trust: fr.ClockTrust | None = None, get: bool = True,
-              timeout: float = 1.0) -> tuple[Reading, dict[str, Any]]:
+              timeout: float = 1.0, contracts: list[Any] | None = None) -> tuple[Reading, dict[str, Any]]:
     """One reading of ``address`` (``<system>/<service>``) on the near side,
     for §2.11: its presence (observer §3), its descriptor (§2.7, the interface
     token playing no part), the status as ``subscriber`` saw it (a present,
     listed owner holds one, §2.3, so its silence ages it) and as a GET over
     ``health.v1/state/**`` answered it (core S2, aged against ``trust``),
-    and the checks that GET answered (§2.4). Returns the reading and what
-    was read."""
+    and the checks that GET answered (§2.4). The GET reads the owner's
+    revision among ``contracts``, the standard contract where none is
+    given (core 0.102 §4.2). Returns the reading and what was read."""
     import json
 
     from . import live
@@ -634,7 +650,12 @@ def read_near(tool: Any, address: str, *, subscriber: fr.Subscriber | None = Non
                      for x in subscriber.of(status_key) if x.refusal is None]
     checks = None
     if get:
-        st = live.get_state(tool, f"zk2/{address}/{IFACE}/state/**", timeout=timeout)
+        # core 0.102 §4.2 (review-bot on #1100, 2): the owner's revision read
+        # by its descriptors, so that a stray reply_del is never merged
+        from . import seed_snapshot as ss
+
+        st = live.get_state(tool, f"zk2/{address}/{IFACE}/state/**", timeout=timeout,
+                            revision=ss.ByDescriptor(contracts if contracts is not None else [standard()]))
         info["replies"] = st.replies
         mine = [x for x in st.replies if x.key == status_key]
         if mine:

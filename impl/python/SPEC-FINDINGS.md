@@ -26342,3 +26342,142 @@ example's fixtures; zk2py reads every one.
   - F-512 to F-518.
 
   F-365 stays open as #965's.
+
+## At link.v2 0.12 and core 0.104
+
+Round 108 read link.v2 0.12 (#1098, a face's `events`), core 0.104,
+observer 0.33 and `freshness.v2` 0.8 (round 107 answered), with link.v1
+0.19's wording, on the branch at 889e84e9. It read cold link.v2 §2.7
+whole (with §2.1's and §2.3's rows, §0, §5 and Appendices A and B), core
+§2.6 and Appendix B whole, observer §7.5's "The revision of a key" and
+`freshness.v2` §2.4. zk2py diffed `spec/` and `examples/zk2/` between
+main 4e45d0de and 889e84e9. **No rule changed beyond what the changelogs
+state:** `RULES.md` gains core 0.104's one consumer rule and widens
+observer §7.5's object, and zenoh-modem's five faces list their events,
+as link.v2 0.12's entry says.
+
+**The answers hold**, F-512 to F-518:
+- **F-512** (observer 0.33): §7.5 names an event, its key's occurrence
+  chunk stripped. `envelope/tags.json` 36 of 36; case 9 (from 0) carries
+  `0x80`.
+- **F-513** (core 0.104): the two orders are stated, and the MUST is
+  unchanged. `events_live` writes step 1's recent occurrences newest
+  first, and zk2py's replay delivers them oldest first.
+- **F-514** (core 0.104): a consumer MUST NOT deliver a put that carries
+  no event. zk2py counts it `form`, subscribed and replayed, beside a
+  Rust writer's (`zenctl replay`) too.
+- **F-515** (`freshness.v2` 0.8), **F-516**, **F-517** and **F-518** (core
+  0.104): each text says what the finding asked.
+
+### F-519 · minor · link.v2 0.12's entry counts 40 cases in `v2/plan.json`, which holds 41
+
+> `profiles/link/CHANGELOG.md`, link.v2 0.12, "The evidence":
+> "`v2/plan.json` gains three cases, 40 in all: a face that lists one
+> event of two, an empty `events`, and an entry that names no event
+> (`event_unknown`)."
+
+- **The error.** The file holds 41 cases. Case 40 (from 0), "a face's
+  `events` that lists an event its contract does not expose `link`", came
+  in a later commit, with no line in the entry. It is the only case of
+  §2.7's "Listed and not exposed".
+- **What zk2py does:** it passes all 41. Its reading counts them.
+- **Fix:** "gains four cases, 41 in all", naming the fourth.
+- **Changes:** a changelog's evidence.
+
+### F-520 · minor · link.v2 §5 answers yes for a face "that lists no event", which is what §2.1 calls `events = []`
+
+> link.v2 §5: "Does this event resource cross this face? | It is exposed,
+> and the face lists it or lists no event (§2.7)." §2.1: "An empty
+> `events` lists no event." §2.7: "An empty `events`, `events = []`,
+> lists none, and no event crosses the face."
+
+- **The error.** By §2.1's own words, a face with `events = []` "lists
+  no event". So §5's yes-when holds for it, and every exposed event
+  crosses, where §2.7 lets none cross. §5 means a face with no `events`.
+- **The same in the frames row**, since 0.6: "the face lists it or lists
+  no frame", beside §2.1's "An empty `frames` lists no frame".
+- **What zk2py does:** it reads §2.7, as `v2/plan.json`'s case 38 (from
+  0) does. No event crosses an empty `events`.
+- **Fix:** "and the face lists it, or has no `events`", and "has no
+  `frames`" in the frames row.
+- **Changes:** wording of what a tool may conclude.
+
+### F-521 · ambiguity · core §2.6: is a refused envelope on an events key counted `form`, or by its refusal?
+
+> Core §2.6: "A consumer MUST NOT deliver a put on an events key whose
+> payload is no event, such as a mutation or a payload with no envelope
+> … It counts it undecodable, refused as `form`". Observer §7.3: "A
+> refused envelope is undecodable, and the tool names the refusal."
+
+- **Two readings.** A JSON document put under `zenoh/bytes` on an events
+  key has an envelope that the parse refuses. Its `{`, `0x7b`, reads as
+  form 3, so the refusal is `sample_kind`. The put carries no event, so
+  the new rule would count it `form`. A refused envelope is counted by
+  its refusal elsewhere, so it would be `sample_kind`.
+- **The scenario** avoids the case: `state.md` §8 step 4 puts its JSON
+  document under `application/json`, which carries no envelope.
+- **What zk2py does:** it counts a refused envelope by its refusal, and
+  `form` for an envelope the parse reads as another form or a sample that
+  carries none (`live.no_event`).
+- **Fix:** "an envelope the parse reads as another form, or a sample
+  that carries none (observer §7.3). A refused envelope is counted by its
+  refusal."
+- **Changes:** which reason a consumer's count names.
+
+### F-522 · gap · nothing says what a consumer does with a delete on an events key
+
+> Core §2.6: "An owner MUST publish each occurrence once, with a
+> one-shot put"; "A consumer MUST NOT deliver a put on an events key
+> whose payload is no event". §7.5's parse refuses no delete there: "a
+> delete's attachment a delete". §2.6: "An event key is never an owner's
+> state (§4.4)."
+
+- **The gap.** A broken writer, or a storage's `reply_del`, can put a
+  delete on an events key. It carries no event, but the rule names puts
+  alone. A consumer may deliver it as an occurrence gone, which no event
+  means, or drop it uncounted.
+- **What zk2py does:** it never delivers one. It counts it undecodable,
+  `form`, on its subscriptions and in a replay, as §4.2 counts a stray
+  `reply_del`, "a delete is no form that owner answers the member in"
+  (`live.no_event`; `events_live`'s check beyond §8).
+- **Fix:** "a put or a delete on an events key whose payload is no
+  event", or a sentence of its own.
+- **Changes:** what a consumer does with a delete on an events key.
+
+### F-523 · minor · core 0.104's entry says the reference delivers both of `state.md` §8 step 4's puts, and §8's note that the reference runs §8
+
+> `CHANGELOG.md`, 0.104: "The reference delivers both today.
+> `Consumer::replay` keeps such a put as an unknown time, and the
+> subscription delivers it. The code half is listed for a Rust lane."
+> Its evidence: "Written ahead of the reference, which delivers both."
+> `scenarios/state.md` §8: "The reference runs §8 in
+> `zenkey/tests/state.rs` (`s8_events_replay`)."
+
+- **The error.** The two disagree on whether the reference passes step
+  4. The branch's head, 889e84e9, which this PR merges, is titled "a put
+  that carries no event is never delivered". So once it merges, the
+  entry's "today" is stale, and §8's note holds.
+- **Unverified.** No black box consumes an event (`consume` refuses one),
+  so zk2py cannot see which holds. `zenctl echo` is a tool, and shows
+  both puts, as observer §7.3 says.
+- **What zk2py does:** it judges §8 by its expected, which names no
+  implementation.
+- **Fix:** say in the entry that the code half lands with it, or that it
+  does not.
+- **Changes:** wording.
+
+### Counts at link.v2 0.12 and core 0.104
+
+523 entries.
+- **New: F-519 to F-523:**
+  - an ambiguity: F-521;
+  - a gap: F-522;
+  - three minor errors: F-519, F-520 and F-523.
+  None is a blocker.
+- **Answered this round:** F-512 to F-518.
+- **Open:**
+  - F-436 (not re-run);
+  - F-437 to F-441;
+  - F-519 to F-523.
+
+  F-365 stays open as #965's.

@@ -33,7 +33,7 @@ says what it will be.
 | **The runtime and codegen** | Landed | `zenkey` and `zenkey-build` 0.21: `ServiceBuilder`, the generated `Server`, `Consumer` and `Client`, packed structs, typed frame writers ([`docs/zk2/codegen.md`](../../../docs/zk2/codegen.md)) |
 | A published release | Landed, 0.21.0 | `zenkey-model`, `zenkey`, `zenkey-build` and `zenkey-fleet` are on crates.io: 0.20.0 first (PR #1072, #929), then 0.21.0, which this guide follows. 0.21's state GETs are answered by snapshot, which 0.20 does not read (step 2). No release tag of them exists: the release tags end at v1's `0.14.0` |
 | `modem-contract` as a zk2 contract crate | Missing: zenoh-modem's to build | [`contract-crate.md`](contract-crate.md) is its design |
-| **The contract, `modem.v3` 3.4** | Landed, #991 | Three events for a face, under `face/`, beside the four JSON events, each without `event_id` and `at_ms`, which the key and form 4 carry: `face/oper_change` and `face/identity_change` packed, `face/device_fault` JSON; exposed `link`, each gated `config:device.events.<name>`; the JSON four stay `host`, and keep both fields until modem.v4 ([link.md](link.md), "Events"); [`catalog.json`](catalog.json) `29bf7d47`, index 10 |
+| **The contract, `modem.v3` 3.4** | Landed, #991 | Three events for a face, under `face/`, beside the four JSON events, each without `event_id` and `at_ms`, which the key and form 4 carry: `face/oper_change` and `face/identity_change` packed, `face/device_fault` JSON; exposed `link`, each gated `config:device.events.<name>` and listed by the faces that carry it (`link.v2` 0.12, #1098); the JSON four stay `host`, and keep both fields until modem.v4 ([link.md](link.md), "Events"); [`catalog.json`](catalog.json) `29bf7d47`, index 10 |
 | `modem.v3` 3.3 | Landed, PR #1059 | Ranges taken from zenoh-modem's code; `frames/fast`, `frames/slow` and `frames/paid` over one record of all 73 readings, the largest frame 216 B; 3.2's nine frames deprecated and `host`; the seven states' packed twins under `packed/`; `uses` `telemetry.v2`, `freshness.v2` and `link.v1`; [`catalog.json`](catalog.json) `0ff6bf6d`, index 8, where `e3a529fe` appended it. The faces list one frame each, SF9's lease is 480 s and SF12's 3,600 s, and `link.v2`'s plans are derived from 3.3 (#991) |
 | `modem.v3` 3.2 | Landed, deprecated by 3.3 | Nine frame resources over packed records, at illustrative ranges; catalog `ab76ec37`, index 6 |
 | **The wire:** packed records | Landed | Core §7.6; generated structs carried by `zenkey::codec::Packed<T>` (#979) |
@@ -239,9 +239,11 @@ move together.
     clock is not trusted writes the time as unknown. The records' `event_id` and `at_ms` then
     repeat the key and form 4.
   - With 3.4, each occurrence a device's face carries is also written to its `face/` twin, on
-    a device whose `[[device]]` lists it in its `events` (`config:device.events.<name>`): rf0
-    the three, lora0 at SF7 or SF9 `oper_change` and `identity_change`, lora0 at SF12 and sat0
-    none (link.md, "Events"). The twins' records hold no `event_id`, `at_ms` or `device`.
+    a device whose `[[device]]` lists it in its `events` (`config:device.events.<name>`), as its
+    face policy lists it (`link.v2` 0.12 §2.7, #1098): rf0 the three, lora0 at SF7 or SF9
+    `oper_change` and `identity_change`, lora0 at SF12 and sat0 none (link.md, "Events"). The
+    plan denies on each face what its policy does not list. The twins' records hold no
+    `event_id`, `at_ms` or `device`.
   - Nothing for snapshots: the runtime answers a state GET with one snapshot per collection (core
     0.100, #977). A node whose states are read across a face sets
     `ServiceConfig::snapshot_page_bytes` (`snapshot_page_bytes` in its configuration file) from
@@ -575,7 +577,6 @@ A migration started today would hit each of these.
 |---|---|---|
 | **The readers' `wait_before_close` default** is zenoh 1.10.1's 5 s | Pass `--wait-before-close`, or `--face-policy` where a verb takes it | #1011 |
 | **Event keys in 0.21 end in a ULID.** `main` keys an occurrence by its run and seq (core 0.103), for the next release | Keep the four events `host`, and publish no `face/` twin, until modem-mgmt takes that release | #980 (C2) |
-| **A face policy lists frames, never events.** Every face that exposes lets 3.4's three `face/` events cross | Each device's owner publishes only the twins its face affords (`config:device.events.<name>`) | #991 |
 | **No text in packed records,** so four backends cannot move to `config.v2` | Text stays in the JSON states, and those backends on `config.v1`. Across RF, a GET of the status by grant; the view is never pushed | #979 (B3) |
 | **zengui and zenwatch have no face scope,** and `get state`, `watch`, `call` and `telemetry` take no `--face-policy` | Set `--selector`, `--zenoh-config`, `--timeout` and `--settle` by hand, and give a zenwatch rule exact keys (§4) | #990 (V7, V8) |
 | **The doctor has no `packed-refused` or `state-unconfirmed`,** and `watch` shows no lost heartbeat or divergence | `get state` shows each member's last confirmation, and the watchdog's `invalid-payload` names a layout's refusal on a stream | #990 (V5, V6) |

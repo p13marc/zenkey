@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Text version** | 0.32 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.33 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
 | **Written against** | core 0.103 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
@@ -1314,9 +1314,9 @@ reads. `[Sc: constrained.md §7]` `[F: scope/faces.json]`
 
 **The revision of a key.** No descriptor crosses a face, so there the
 revision a sample's owner writes under is the deployment's word (core
-§4.2, §8.6). A tool that reads a mutation, a frame or a heartbeat with
-no descriptor naming the owner's revision MUST read it with the
-revision chosen in this order. `[F: envelope/tags.json]`
+§4.2, §8.6). A tool that reads a mutation, an event, a frame or a
+heartbeat with no descriptor naming the owner's revision MUST read it
+with the revision chosen in this order. `[F: envelope/tags.json]`
 1. **The deployment's word.** Of the revisions of the key's interface
    that the tool holds, those that give the key a resource, and of
    those, where the tool was given a catalog, the ones it lists (core
@@ -1324,8 +1324,9 @@ revision chosen in this order. `[F: envelope/tags.json]`
    (core §4.2). The tool reads the sample with it, its tag checked as
    §7.3 says.
 2. **The tag.** Of several left, those whose tag is CH's: the type's for
-   a mutation (§7.3), the frame form's for a frame (core §7.7), and the
-   revision's own for a heartbeat (core §7.5). One left is the revision.
+   a mutation or an event (§7.3), the frame form's for a frame (core
+   §7.7), and the revision's own for a heartbeat (core §7.5). One left is
+   the revision.
 3. **The latest.** Where several are still left, the tool was given a
    catalog, and they read the sample alike, the revision is the one the
    catalog lists last, at its highest index. They read it alike when
@@ -1339,6 +1340,9 @@ revision chosen in this order. `[F: envelope/tags.json]`
 - **A heartbeat's** key names the interface it covers. Its revisions are
   those of that interface whose contracts use `freshness.v2`, and its
   resource in each is that revision's collections.
+- **An event's** key gives a revision a resource once its occurrence
+  chunk is stripped (core §2.6). Its tag is its record's type's, as a
+  mutation's is (core §7.5).
 - **What the tool says.** It names how it chose. A revision that steps 2
   and 3 chose is chosen by tag: the tool's reading of CH, never the
   deployment's word. It maps no snapshot's index, which the owner's

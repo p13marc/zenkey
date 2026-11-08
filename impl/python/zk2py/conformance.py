@@ -5056,11 +5056,12 @@ def _round103_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("core 0.97's and 0.98's entries: RULES.md lists 250 rules, the static rules 67 with §7.5's four, the "
                 "owner 76; 249 since core 0.99's one fewer (round 104); 262 and the owner 83 since core 0.100 "
                 "(round 105); 267 since observer 0.29's five (round 106); 268 since core 0.102's one, and 273 and the "
-                "owner 85 since core 0.103's five (round 107)",
+                "owner 85 since core 0.103's five (round 107); 274 since core 0.104's one, the consumer's (round "
+                "108)",
                 missing(log, "`RULES.md` lists 250 rules, 4 more", "The owner class counts 76 where it counted 78",
                         "[`RULES.md`](RULES.md) lists 249 rules, 1 fewer", "`RULES.md` lists 262 rules, 13 more")
                 + [int(once.group(1)) if once else None, counted.get("Implementation: the static rules"),
-                   counted.get("Owner")], [273, 67, 85]))
+                   counted.get("Owner")], [274, 67, 85]))
     # §7.5's "Sizes", by zk2py's own writer.
     base = {"tag": 0, "run_width": 16, "run": 1, "asof": 9, "time": {"s": 3600, "ms": 250}, "index": 0,
             "more": False, "coll": 0, "live": [], "tombs": []}
@@ -5111,9 +5112,9 @@ def _round103_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("F-495 answered (core 0.100): snapshot/README.md and bodies.json's notes say sdu/endpoint/{endpoint} "
                 "is collection 4 in modem.v3 3.0 to 3.2 and 11 in 3.3 (71f55126, catalog index 8), of 14, the seven "
                 "packed states before it; oper is 2 in each; 3.4 (04836e17, index 10, the head since #1099) adds "
-                "events alone, so 11 too",
-                missing(readme, "That is its index in modem.v3 3.0 to 3.2, in the canonical form's order. In 3.3, the "
-                                "example's head, it is 11.")
+                "events alone, so 11 too, as the README says since core 0.104 (F-518's answer, round 108)",
+                missing(readme, "That is its index in modem.v3 3.0 to 3.2, in the canonical form's order. In 3.3 and "
+                                "3.4 it is 11.", "3.4 adds events alone, which no collection index counts.")
                 + [q for q in ("is collection 4 of modem.v3's state, in the canonical form's order",) if q in readme]
                 + [modem.fingerprint[7:15], len(states), states.index("sdu/endpoint/{endpoint}"),
                    states.index("oper"), sorted(earlier.items()), len(notes)],
@@ -5264,6 +5265,7 @@ def _round104_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out += _round105_readings(root)
     out += _round106_readings(root)
     out += _round107_readings(root)
+    out += _round108_readings(root)
     return out
 
 
@@ -5459,8 +5461,9 @@ def _round106_readings(root: Path) -> list[tuple[str, Any, Any]]:
                    "A tool given the face SHOULD NOT declare a scope for a resource the plan keeps off it.",
                    "A tool MUST NOT drop silently a selector it was given that meets none of its scopes: it refuses "
                    "the read, declaring none of the selectors, and names each such selector and why.",
-                   "A tool that reads a mutation, a frame or a heartbeat with no descriptor naming the owner's "
-                   "revision MUST read it with the revision chosen in this order.",
+                   # observer 0.33 (F-512's answer, round 108): an event too
+                   "A tool that reads a mutation, an event, a frame or a heartbeat with no descriptor naming the "
+                   "owner's revision MUST read it with the revision chosen in this order.",
                    "A tool MUST NOT decode a record as its declared type under a tag that is not that type's",
                    "A tool that holds no type for a record whose tag is not 0 MUST NOT sniff it.")
          + missing(l2, "**A tool's scope** is the face's plan (§2.3, observer §7.5)."),
@@ -5522,6 +5525,151 @@ def _round106_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 missing(obs, "each service the policy lists, and each device of its faces (`link.v2` §2.5), taken to "
                              "implement them all")
                 + [sorted(f["code"] for f in services_only.get("refused", []))], [["service_unknown"]]))
+    return out
+
+
+def _round108_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """link.v2 0.12 (#1098), core 0.104, observer 0.33 and freshness.v2 0.8
+    (round 107 answered), read cold (#609, round 108): each version and its
+    entry, the rules as their texts state them, and what the changelogs claim
+    of their fixtures. The fixtures are the link, scope and envelope
+    families'; the live half is ``events_live`` (``state.md`` §8 step 4) and
+    ``across_live`` (a face's events)."""
+    import re
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    def header(rel: str) -> tuple[str | None, str | None]:
+        t = flat(rel)
+        v = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+)", t)
+        w = re.search(r"\| \*\*Written against\*\* \| core (\d+\.\d+)", t)
+        return (v.group(1) if v else None, w.group(1) if w else None)
+
+    core, obs, l2 = flat("core.md"), flat("observer.md"), flat("profiles/link/v2.md")
+    st = flat("scenarios/state.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = f"{m.group(1)}.{m.group(2)}" if m else None
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.104 or later, observer 0.33 or later, link.v2 0.12 or later and freshness.v2 0.8 or later, each "
+         "with its entry; link.v1 0.19 entered, editorial",
+         [_at_least(core_v, "0.104"), _at_least(header("observer.md")[0], "0.33"),
+          _at_least(header("profiles/link/v2.md")[0], "0.12"), _at_least(header("profiles/freshness/v2.md")[0], "0.8")]
+         + entry("CHANGELOG.md", "0.104", "a put that carries no event")
+         + entry("observer-CHANGELOG.md", "0.33", "an event's revision across a face")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 0.12", "a face lists the events it carries")
+         + entry("profiles/link/CHANGELOG.md", "0.19", "editorial")
+         + entry("profiles/freshness/CHANGELOG.md", "`v2.md` 0.8", "a member's times minted at each put"),
+         [True, True, True, True]),
+    ]
+    # link.v2 0.12: §2.1's key, §2.3's refusal, §2.7's rule as the text states them
+    out.append(("link.v2 0.12 §2.1, §2.3 and §2.7: a face's events, one value, only with expose = \"link\"; "
+                "event_unknown; a generator's MUST, the rest denied by name, no events keeping link.v1's rule, "
+                "an empty one listing none, a listed event whole, one listed and not exposed denied",
+                missing(l2, "| `events` | an array of entries `<iface>/<template>`, none repeated; it may be empty | "
+                            "no; only with `expose = \"link\"` | The event resources that cross the face (§2.7). |",
+                        "**`frames`, `events` and `horizon_s`** on a face whose `expose` is `\"none\"` are "
+                        "`bad_value`, as its `interval_s` is: nothing crosses there.",
+                        "It knows no `events` either, its `unknown_field`.",
+                        "**`events` is one value.** An entry that is not a string, or not an interface id, `/` and a "
+                        "template (core §2.2), and an entry repeated are each `bad_value` at `events`, reported once. "
+                        "An empty `events` lists no event.",
+                        "| `event_unknown` | the face | the name the entry names | An entry of `events` names no "
+                        "event resource of a listed interface (§2.7). |",
+                        "On a face with `events`, a generator MUST let an event resource of a listed interface cross "
+                        "only when the face lists it and its contract exposes it `link`.",
+                        "**A face with no `events`** keeps `link.v1`'s rule: every event resource exposed `link` "
+                        "crosses. An empty `events`, `events = []`, lists none, and no event crosses the face.",
+                        "**A listed event crosses whole**, every occurrence, never downsampled (`link.v1` §2.9).",
+                        "**Listed and not exposed.** An event resource the face lists and its contract does not "
+                        "expose `link` does not cross"), []))
+    # The changelog's evidence, counted
+    plan = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "plan.json")["cases"]
+    lints = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "lints.json")["cases"]
+    faces = _load_json(root / "scope" / "faces.json")["cases"]
+    out.append(("link.v2 0.12's evidence as zk2py counts it: v2/plan.json 41 cases, 4 of them a face with events "
+                "over an inline probe.v1 (37 to 40, from 0), the last, an event listed and not exposed, added after "
+                "the entry, which says 40; v2/lints.json 69, 6 with events; scope/faces.json 19",
+                [len(plan), [i for i, c in enumerate(plan) if "events  " in c["policy"] and "interfaces" in c],
+                 len(lints), sum("events" in c["policy"] for c in lints), len(faces)],
+                [41, [37, 38, 39, 40], 69, 6, 19]))
+    # core 0.104 §2.6 and state.md §8
+    out.append(("core 0.104 §2.6: a consumer MUST NOT deliver a put on an events key that carries no event, heard "
+                "or replayed, counted undecodable, form; why, and where one comes from; state.md §8 step 4 and "
+                "Expected 5, and step 1's recent occurrences written newest first",
+                missing(core, "A consumer MUST NOT deliver a put on an events key whose payload is no event, such as "
+                              "a mutation or a payload with no envelope, whether a subscription heard it or a replay "
+                              "returned it.",
+                        "**Why.** §7.5's parse refuses no mutation on an events key. But a mutation carries no time, "
+                        "so the filter could neither keep it nor drop it.",
+                        "**Where one comes from.** A storage can still answer one, put by an owner of an earlier "
+                        "core or by a broken writer.")
+                + missing(st, "One is a mutation (§7.5's form 0) under `zenoh/bytes`. The other is a JSON document "
+                              "under `application/json`, with no envelope.",
+                          "5. Neither of step 4's puts is delivered, by the subscription or by the replay. The "
+                          "consumer counts each undecodable, refused as `form`: it carries no event (core §2.6).",
+                          "The owner writes the recent ones newest first, so among them a later seq carries an "
+                          "earlier time."), []))
+    # zk2py's consumer over §2.6's new rule, offline: carries.json's reads on
+    # an events key, and a payload under another Encoding
+    from . import live, zk2c
+
+    car = _load_json(root / "envelope" / "carries.json")
+    ev_reads = [c for c in car["reads"] if zk2c.key_token(c["key"]) == "events"]
+    got = [[c["expect"], live.no_event(c["key"], zk2c.read_put(c["key"], zk2c.ENCODING, bytes.fromhex(c["hex"])))]
+           for c in ev_reads]
+    k = "zk2/lab/journal/journal.v1/events/entries/000g0001"
+    got.append(["application/json", live.no_event(k, zk2c.read_put(k, "application/json", b"{}"))])
+    got.append(["a state key", live.no_event("zk2/lab/s/a.v1/state/x", zk2c.read_put(
+        "zk2/lab/s/a.v1/state/x", zk2c.ENCODING, zk2c.mutation(zk2c.InBand(16, 1, 1), b"")))])
+    # F-522 (open): a delete on an events key, which no text names, zk2py
+    # counts form too
+    got.append(["a delete", live.no_event(k, zk2c.read_delete(k, zk2c.ENCODING, zk2c.deletion(
+        zk2c.InBand(16, 1, 1))), deleted=True)])
+    want = [[c["expect"], None if c["expect"] == {"reads": "event"} else
+             ("form" if "reads" in c["expect"] else c["expect"]["refused"])] for c in ev_reads]
+    want += [["application/json", "form"], ["a state key", None], ["a delete", "form"]]
+    out.append(("core 0.104 §2.6 (live.no_event, which live.replay_events, live.subscribe_events and "
+                "Owner.subscribe_role read): over carries.json's reads on an events key, an event delivered, a "
+                "mutation (or any envelope but an event) counted form, a refused envelope by its refusal (observer "
+                "§7.3), a payload under another Encoding form; a key of another kind is not the rule's; a delete "
+                "on an events key, which no text names (F-522), form too",
+                [len(ev_reads), got], [len(ev_reads), want]))
+    out.append(("observer 0.33 §7.5: an event among the samples whose revision a tool chooses with no descriptor",
+                missing(obs, "A tool that reads a mutation, an event, a frame or a heartbeat with no descriptor "
+                             "naming the owner's revision MUST read it with the revision chosen in this order."),
+                []))
+    # Round 108's findings, each text as it quotes it, so an answer moves it
+    log = flat("profiles/link/CHANGELOG.md")
+    out.append(("F-519 (open): link.v2 0.12's entry counts 40 cases in v2/plan.json, which holds 41",
+                missing(log, "`v2/plan.json` gains three cases, 40 in all") + [len(plan)], [41]))
+    out.append(("F-520 (open): link.v2 §5 answers yes for a face that \"lists no event\", §2.1's words for "
+                "events = [], and the frames row likewise",
+                missing(l2, "It is exposed, and the face lists it or lists no event (§2.7).",
+                        "It is exposed, and the face lists it or lists no frame (§2.7).",
+                        "An empty `events` lists no event.", "An empty `frames` lists no frame."), []))
+    out.append(("F-521 (open): core §2.6 counts a put that carries no event form, observer §7.3 a refused envelope by "
+                "its refusal; a JSON document under zenoh/bytes on an events key is refused sample_kind",
+                missing(core, "It counts it undecodable, refused as `form`, as §4.2 counts a stray `reply_del`.")
+                + missing(obs, "A refused envelope is undecodable, and the tool names the refusal.")
+                + [zk2c.reads(k, b'{"entry": "no envelope"}')], [{"refused": "sample_kind"}]))
+    out.append(("F-522 (open): core §2.6's rule names a put alone; nothing says what a consumer does with a delete on "
+                "an events key",
+                missing(core, "A consumer MUST NOT deliver a put on an events key whose payload is no event")
+                + [q for q in ("a delete on an events key", "put or a delete on an events key") if q in core], []))
+    out.append(("F-523 (open): core 0.104's entry says the reference delivers both of state.md §8 step 4's puts, "
+                "and §8's note that the reference runs §8",
+                missing(flat("CHANGELOG.md"), "The reference** delivers both today.",
+                        "**Written ahead of the reference**, which delivers both.")
+                + missing(st, "The reference runs §8 in `zenkey/tests/state.rs` (`s8_events_replay`)."), []))
     return out
 
 
@@ -5625,9 +5773,9 @@ def _round107_readings(root: Path) -> list[tuple[str, Any, Any]]:
                               "of the run and the seq the occurrence took (§4.3).",
                         "The owner MUST write the put's payload as an event (§7.5's form 4), with the occurrence's "
                         "time.",
+                        # core 0.104 (F-513's answer, round 108): the two orders
                         "**An occurrence seen earlier.** An owner that relays one, such as a device's, writes the "
-                        "time it occurred. Its key still takes the owner's next seq, so within one run the relayed "
-                        "occurrences order by their arrival at the owner, and across runs by their times.",
+                        "time it occurred. Its key still takes the owner's next seq when the owner writes it.",
                         "It is unknown while §4.3's clock guard holds, as a heartbeat's is, and where the owner does "
                         "not trust its clock.",
                         "A consumer MUST keep a replayed occurrence whose time (§7.5's form 4) is within the "
@@ -5639,7 +5787,9 @@ def _round107_readings(root: Path) -> list[tuple[str, Any, Any]]:
                         "seq within one run.",
                         "Between two runs at one time, and among the unknown times of two runs, the order is "
                         "unspecified: nothing orders two runs (§4.3).",
-                        "zenoh 1.10.1's storage manager refuses no put on a key it holds (Appendix B)."), []))
+                        # core 0.104 (F-517's answer, round 108)
+                        "zenoh 1.10.1's storage manager keeps a key's newest put by its Zenoh timestamp, and the "
+                        "later occurrence's is the newer (Appendix B)."), []))
     # §7.5, form 4
     ev16 = zk2c.event(16, {"s": 3600, "ms": 250}, b"{}")
     ev32 = zk2c.event(32, {"s": 3600, "ms": 250}, b"{}")
@@ -5677,9 +5827,12 @@ def _round107_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("core 0.103 Appendix B: the storage manager holds one sample per key and refuses no put on a key it "
                 "holds; state.md §8 rewritten: 1,000 occurrences dated by put_at, an unknown time, a run change, "
                 "503 replayed in time order, the unknown time last",
-                missing(core, "The storage manager holds one sample per key, the newest by its timestamp, and refuses "
-                              "no put on a key it holds: a later put replaces what it held")
-                + missing(st, "1. The owner publishes 1,000 occurrences, dated by `put_at`.",
+                # core 0.104 (F-516's and F-517's answers, round 108)
+                missing(core, "The storage manager keeps one sample per key under `History::Latest`, its memory "
+                              "backend's: the newest by its Zenoh timestamp. It refuses no put for holding the key.")
+                + missing(st, "1. The owner publishes 1,000 occurrences, each with a time of its own, as an owner "
+                              "writes one it relays (core §2.6, \"An occurrence seen earlier\"; the reference's "
+                              "`put_at`).",
                           "2. The owner publishes one occurrence of an unknown time.",
                           "It publishes two occurrences, dated T − 100.5 s and T − 0.5 s.",
                           "2. The replay holds 503 occurrences",
@@ -5753,37 +5906,66 @@ def _round107_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "another interface, nothing raises; that revision is no longer listed for the key's interface, so "
                 "another is chosen",
                 ["raised" not in got, got.get("revision") != chosen], [True, True]))
-    # Round 107's findings, each text as it quotes it, so an answer moves it
+    # Round 107's findings, answered by core 0.104, observer 0.33 and
+    # freshness.v2 0.8 (round 108): each answer as its text states it
     car = _load_json(root / "envelope" / "carries.json")
     fv2 = flat("profiles/freshness/v2.md")
     snap_readme = flat("conformance/snapshot/README.md")
-    ev_case = next(c for c in tags["cases"] if "/events/" in c["key"])
-    out.append(("F-512 (open): observer §7.5's revision of a key names a mutation, a frame or a heartbeat, no event; "
-                "tags.json's one event case gives CH 0x00, a mutation",
-                missing(obs, "A tool that reads a mutation, a frame or a heartbeat with no descriptor naming the "
-                             "owner's revision MUST read it with the revision chosen in this order.")
-                + [ev_case["ch"]], ["0x00"]))
-    out.append(("F-513 (open): core §2.6 orders one run's relayed occurrences by their arrival, and the replay's MUST "
-                "by their times",
-                missing(core, "so within one run the relayed occurrences order by their arrival at the owner, and "
-                              "across runs by their times.",
+    ev_cases = [c for c in tags["cases"] if "/events/" in c["key"]]
+    out.append(("F-512 answered (observer 0.33): §7.5's revision of a key names an event, its key's occurrence chunk "
+                "stripped and its tag its record's type's; tags.json's six event cases (9 and 31 to 35, from 0), "
+                "case 9 under form 4's CH 0x80 where it gave a mutation's",
+                missing(obs, "A tool that reads a mutation, an event, a frame or a heartbeat with no descriptor "
+                             "naming the owner's revision MUST read it with the revision chosen in this order.")
+                + [len(tags["cases"]), [tags["cases"].index(c) for c in ev_cases], ev_cases[0]["ch"]],
+                [36, [9, 31, 32, 33, 34, 35], "0x80"]))
+    out.append(("F-513 answered (core 0.104): §2.6's two orders, the seqs the owner's writing and the times the "
+                "occurrences', a replay by time first; §7.5's \"Its order\" the same; the MUST unchanged",
+                missing(core, "**Two orders.** Within one run, the seqs are the order the owner wrote the "
+                              "occurrences in. Their times are when they occurred. So a relayed occurrence can carry "
+                              "a time earlier than an earlier seq's.",
+                        "**A replay** delivers by time first (below). So it delivers such an occurrence before the "
+                        "earlier seq's.",
+                        "**The seq** decides only within one run, between occurrences of one time and among those "
+                        "of none. Where their times differ, the time decides, against the seqs if need be (above).",
+                        "Within one run, their seqs are the order the owner wrote them in, as §4.3 numbers state and "
+                        "events. Their times are when they occurred, and a replay delivers by time, then by seq "
+                        "(§2.6).",
                         "A consumer MUST deliver a replay in the order of the occurrences' times, then their seqs "
-                        "within one run."), []))
-    out.append(("F-514 (open): core §2.6's replay names no sample on an events key that is no event; carries.json "
-                "reads a mutation there, \"as an owner writes until a later version\"",
-                [any(c["note"] == "a mutation on an occurrence chunk's key, as an owner writes until a later version"
-                     and c["expect"] == {"reads": "mutation"} for c in car["reads"])]
-                + [q for q in ("A replayed sample on an events key that carries no event",) if q in core], [True]))
-    out.append(("F-515 (open): freshness.v2 §2.4 mints the times \"at each mutation of the member\", where core 0.102 "
-                "§4.3 mints at each put",
-                missing(fv2, "The times** are minted at each mutation of the member, at each heartbeat that vouches "
-                             "for it and as the owner builds the snapshot"), []))
-    out.append(("F-516 (open): state.md §8 dates its occurrences by put_at, the reference's writer",
-                missing(st, "1. The owner publishes 1,000 occurrences, dated by `put_at`."), []))
-    out.append(("F-517 (open): Appendix B keeps the newest by its timestamp and refuses no put",
-                missing(core, "the newest by its timestamp, and refuses no put on a key it holds"), []))
-    out.append(("F-518 (open): snapshot/README.md calls modem.v3 3.3 the example's head, which is 3.4 since #1099",
-                missing(snap_readme, "In 3.3, the example's head, it is 11."), []))
+                        "within one run.")
+                + [q for q in ("so within one run the relayed occurrences order by their arrival at the owner",)
+                   if q in core], []))
+    out.append(("F-514 answered (core 0.104): §2.6's \"A put that carries no event\", a consumer's MUST NOT, live and "
+                "in replay, counted undecodable, form; carries.json's read 36 (from 0) still reads a mutation there, "
+                "and its note says a consumer counts it form",
+                missing(core, "A consumer MUST NOT deliver a put on an events key whose payload is no event, such as "
+                              "a mutation or a payload with no envelope, whether a subscription heard it or a replay "
+                              "returned it. It counts it undecodable, refused as `form`, as §4.2 counts a stray "
+                              "`reply_del`.")
+                + [car["reads"].index(c) for c in car["reads"] if "/events/" in c["key"]
+                   and c["expect"] == {"reads": "mutation"} and "a consumer counts it undecodable, `form` (core §2.6)"
+                   in c["note"]], [36]))
+    out.append(("F-515 answered (freshness.v2 0.8): §2.4 mints the times at each put, and §0's last confirmation is "
+                "the later of the last put and the last heartbeat",
+                missing(fv2, "The times** are minted at each put of the member, at each heartbeat that vouches for "
+                             "it and as the owner builds the snapshot",
+                        "Last confirmation:** the later of a member's last put and the last heartbeat that vouched "
+                        "for it.")
+                + [q for q in ("minted at each mutation", "last mutation") if q in fv2], []))
+    out.append(("F-516 answered (core 0.104): state.md §8 step 1 says what put_at does, citing §2.6's \"An occurrence "
+                "seen earlier\", and names it in parentheses",
+                missing(st, "1. The owner publishes 1,000 occurrences, each with a time of its own, as an owner "
+                            "writes one it relays (core §2.6, \"An occurrence seen earlier\"; the reference's "
+                            "`put_at`).")
+                + [q for q in ("dated by `put_at`",) if q in st], []))
+    out.append(("F-517 answered (core 0.104): Appendix B's storage manager under History::Latest keeps the newest by "
+                "its Zenoh timestamp, refuses no put for holding the key, and skips an older one as outdated",
+                missing(core, "A put on a key it holds replaces what it held when its timestamp is newer, and is "
+                              "skipped as outdated when it is older")
+                + [q for q in ("the newest by its timestamp, and refuses no put on a key it holds",) if q in core], []))
+    out.append(("F-518 answered (core 0.104): snapshot/README.md says the index is 11 in 3.3 and 3.4",
+                missing(snap_readme, "In 3.3 and 3.4 it is 11.")
+                + [q for q in ("In 3.3, the example's head, it is 11.",) if q in snap_readme], []))
     # observer 0.30 to 0.32
     out.append(("observer 0.30 §7.3: a tool reads an event's run and seq from its key and its record after its time, "
                 "and shows the time or that the clock was unknown; 0.32 §7.5: an event's last chunk, its occurrence "
@@ -5879,13 +6061,13 @@ def _round105_readings(root: Path) -> list[tuple[str, Any, Any]]:
                                             "zenohd-rf0.face.toml").read_text(encoding="utf-8")],
                 [False, True, True]))
     out.append(("F-506 answered (core 0.102) in core §4.3 \"Minting\": a last confirmation at each put and heartbeat, "
-                "a delete's carried by nothing; freshness.v2 §2.4 still mints the times \"at each mutation of the "
-                "member\" (round 107's finding)",
+                "a delete's carried by nothing; freshness.v2 §2.4 mints the times at each put since its text 0.8 "
+                "(F-515's answer, round 108)",
                 missing(core, "An owner mints a last confirmation at each put of such a member, and as it writes each "
                               "heartbeat that vouches for it (§7.5). A delete's would be carried by nothing: a "
                               "tombstone has no confirmation.")
                 + [q for q in ("a delete among them",) if q in core]
-                + missing(fv2, "The times** are minted at each mutation of the member"), []))
+                + missing(fv2, "The times** are minted at each put of the member"), []))
     out.append(("F-507 answered (core 0.102): the owner's descriptor is that of the instance whose run is the "
                 "snapshot's; where the descriptors reach the reader and none states it, no omission rule applies "
                 "(zk2py's seed_snapshot.ByDescriptor, no fallback to a lone descriptor since round 107)",
@@ -6263,23 +6445,39 @@ def _modem33_readings(root: Path) -> list[tuple[str, Any, Any]]:
                           if e.startswith("modem.v3/stream/frames/")],
                          sorted(x["code"] for x in face.get("findings", []) if x["code"] != "frame_unlisted"),
                          [x["code"] for x in link_v2.lint(text)]]
+        # link.v2 0.12 §2.7 (#1098): each face lists its events, and what of
+        # modem.v3's crosses is read from the plan's denies, as a tool's scope
+        # is (observer §7.5).
+        pol, _ = link_v2.parse_policy(text)
+        listed_ev = sorted(e.rsplit("/", 1)[-1] for f_ in (pol.faces if pol else []) for e in (f_.events or []))
+        ev_deny = [d["key_exprs"] for d in face.get("deny", []) if d["id"] in ("events", "events:modem.v3")]
+        planned[name] += [listed_ev, ev_deny]
+    every = [["zk2/*/*/*/events/**"]]
+    json_events = [f"zk2/*/*/modem.v3/events/{e}/**" for e in ("action_event", "device_fault", "identity_change",
+                                                                 "oper_change")]
+    lora = [sorted(json_events + ["zk2/*/*/modem.v3/events/face/device_fault/**"])]
     out.append(("zenoh-modem's five faces (link.v2 0.8 Appendix B), each planned by zk2py with catalog.json as its "
                 "v2/plan.json case 14 to 18, whole (F-505 answered by link.v2 0.11; since #1099 the cases and the "
                 "faces carry 29bf7d47): one frame each at its cadence, liveness evidence, the two others "
                 "frame_unlisted; SF7 keep_alive_not_suppressed, SF9 frame_over_batch (216 B over 117 B); no_arq but "
-                "on SBD; modem.v3 3.4's face/device_fault, JSON, not_packed on each",
+                "on SBD. Since link.v2 0.12 (#1098, round 108) each face lists its events (Appendix B): RF the three "
+                "face/ events, its plan denying the four JSON ones by name, and face/device_fault, JSON, not_packed "
+                "on RF alone; SF7 and SF9 the two rare ones, face/device_fault denied by name; SF12 and SBD none, "
+                "every event denied whole",
                 planned,
                 {"zenohd-rf0": [True, "29bf7d47", "29bf7d47", [("frames/fast", 60, None)],
-                                ["modem.v3/stream/frames/fast"], ["not_packed"], ["no_arq"]],
+                                ["modem.v3/stream/frames/fast"], ["not_packed"], ["no_arq"],
+                                ["device_fault", "identity_change", "oper_change"], [json_events]],
                  "zenohd-lora0-sf7": [True, "29bf7d47", "29bf7d47", [("frames/fast", 60, None)],
-                                      ["modem.v3/stream/frames/fast"], ["keep_alive_not_suppressed", "not_packed"],
-                                      ["no_arq"]],
+                                      ["modem.v3/stream/frames/fast"], ["keep_alive_not_suppressed"], ["no_arq"],
+                                      ["identity_change", "oper_change"], lora],
                  "zenohd-lora0-sf9": [True, "29bf7d47", "29bf7d47", [("frames/fast", 120, 900)],
-                                      ["modem.v3/stream/frames/fast"], ["frame_over_batch", "not_packed"], ["no_arq"]],
+                                      ["modem.v3/stream/frames/fast"], ["frame_over_batch"], ["no_arq"],
+                                      ["identity_change", "oper_change"], lora],
                  "zenohd-lora0-sf12": [True, "29bf7d47", "29bf7d47", [("frames/slow", 900, 3600)],
-                                       ["modem.v3/stream/frames/slow"], ["not_packed"], ["no_arq"]],
+                                       ["modem.v3/stream/frames/slow"], [], ["no_arq"], [], every],
                  "zenohd-sat0": [True, "29bf7d47", "29bf7d47", [("frames/paid", 1800, None)],
-                                 ["modem.v3/stream/frames/paid"], ["not_packed"], []]}))
+                                 ["modem.v3/stream/frames/paid"], [], [], [], every]}))
     return out
 
 
@@ -6324,12 +6522,12 @@ def _core096_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("core 0.96's entry: RULES.md lists 246 rules, 0.95's 239, the core's four and observer 0.26's three; "
                 "250 since core 0.97's four, and core 0.98's still; 249 since core 0.99 (round 104); 262 since core "
                 "0.100's 13 (round 105); 267 since observer 0.29 (round 106); 273 since core 0.102's one and 0.103's "
-                "five (round 107)",
+                "five (round 107); 274 since core 0.104's one (round 108)",
                 missing(flat("CHANGELOG.md"), "lists 246 rules: 0.95's 239, these four and observer 0.26's three",
                         "`RULES.md` lists 250 rules, 4 more", "the index still lists 250 rules",
                         "lists 249 rules, 1 fewer", "`RULES.md` lists 262 rules, 13 more than 0.99's")
                 + missing(flat("observer-CHANGELOG.md"), "**`RULES.md`** counts 267 rules, 82 of them the observer's.")
-                + [int(once.group(1)) if once else None], [273]))
+                + [int(once.group(1)) if once else None], [274]))
     out.append(("core 0.96 §8.1, §8.4, §8.5 and observer 0.26 §3.6, §3.11: the rules as their texts state them",
                 missing(core, "Such an owner SHOULD put every interface it implements in its tokenless set.",
                         "Such an owner MUST NOT implement `archive.v1`, nor an interface whose contract uses "

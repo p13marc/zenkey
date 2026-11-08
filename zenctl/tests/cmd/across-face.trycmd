@@ -85,13 +85,13 @@ Error: --face-policy ../examples/zk2/link/media/rf.face.toml --face sbd: the pol
 With a face policy and its face (#990 V1, observer §7.5), the scope is
 what the face's plan lets cross, each service the policy lists taken to
 implement every contract in hand. A plan the profile refuses gives no
-scope: here the rf face lists `modem.v3/frames/fast`, and no contract in
-hand declares it.
+scope: here the rf face lists `modem.v3/frames/fast` and three of its
+events (link.v2 §2.7), and no contract in hand declares them.
 
 ```console
 $ zenctl echo --across-face h-3fa9c2d41b7e/rf0 --contracts ../spec/profiles/health/health.v1.toml --face-policy ../examples/zk2/zenoh-modem/faces/zenohd-rf0.face.toml --face rf
 ? 2
-Error: --face-policy ../examples/zk2/zenoh-modem/faces/zenohd-rf0.face.toml --face rf: the face's plan is refused (link.v2 §2.3), so there is no scope (observer §7.5): error frame_unknown [face rf] modem.v3/stream/frames/fast: an entry of the face's frames names no frame resource of a listed interface (link.v2 §2.7)
+Error: --face-policy ../examples/zk2/zenoh-modem/faces/zenohd-rf0.face.toml --face rf: the face's plan is refused (link.v2 §2.3), so there is no scope (observer §7.5): error event_unknown [face rf] modem.v3/events/face/device_fault: an entry of the face's events names no event resource of a listed interface (link.v2 §2.7); error event_unknown [face rf] modem.v3/events/face/identity_change: an entry of the face's events names no event resource of a listed interface (link.v2 §2.7); error event_unknown [face rf] modem.v3/events/face/oper_change: an entry of the face's events names no event resource of a listed interface (link.v2 §2.7); error frame_unknown [face rf] modem.v3/stream/frames/fast: an entry of the face's frames names no frame resource of a listed interface (link.v2 §2.7)
 
 ```
 

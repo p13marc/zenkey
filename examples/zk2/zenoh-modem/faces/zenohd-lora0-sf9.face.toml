@@ -17,11 +17,11 @@
 # its 207 B full record fragments into two frames every 15 minutes. frames/slow and frames/paid are SF12's and SBD's
 # (`frame_unlisted`), and the chip has no ARQ (`no_arq`).
 #
-# Events (modem.v3 3.4, #991): the plan lets the three `face/` events cross,
-# and `face/device_fault` draws `not_packed`. lora0's owner publishes
-# `face/oper_change` and `face/identity_change` at SF9, 16 s of air a day
-# at their worst case beside the frames' 534 s: 550 s, 64 % of the duty.
-# `face/device_fault` would take 2,423 s more (link.md, "Events").
+# Events (modem.v3 3.4, #991): the face lists `face/oper_change` and
+# `face/identity_change` (link.v2 0.12 §2.7), 16 s of air a day at their
+# worst case beside the frames' 534 s: 550 s, 64 % of the duty. The plan
+# denies `face/device_fault` by name: it would take 2,423 s more (link.md,
+# "Events").
 profile  = "link.v2"
 system   = "h-c2a95e41d7f0"
 services = ["lora0"]
@@ -51,6 +51,8 @@ loss_ppm         = 50000
 arq              = false
 reply_timeout_ms = 15000            # 16 full batches take 8.5 s
 horizon_s        = 120
+# the two `rare` ones: `face/device_fault` would exceed the duty
+events           = ["modem.v3/face/identity_change", "modem.v3/face/oper_change"]
 
 [face.lora.frames]
 "modem.v3/frames/fast" = { every_s = 120, keyframe_s = 900 }

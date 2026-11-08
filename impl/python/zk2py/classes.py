@@ -11,7 +11,9 @@ classes, each at the full level (core §12: not the constrained modifier):
 - **owner**: :mod:`zk2py.owner`'s :class:`~zk2py.owner.Owner`, and every
   profile's owner built on it;
 - **consumer**: a role's subscription through its bindings
-  (:meth:`~zk2py.owner.Owner.subscribe_role`), S4's GET
+  (:meth:`~zk2py.owner.Owner.subscribe_role`), an event's subscription and
+  replay (:func:`zk2py.live.subscribe_events`,
+  :func:`zk2py.live.replay_events`), S4's GET
   (:func:`zk2py.live.get_state`), a late joiner (:mod:`zk2py.seed`), and the
   profiles' consumers (a ``desired.v1`` target, a ``timing.v1`` reader, an
   ``arbitration.v1`` actuator, a ``redundancy.v1`` follower);
@@ -665,7 +667,8 @@ WALK: list[tuple[str, str, str, str, str]] = [
           "one; one that meets none refused, exit 2, named (scope family) (round 106)"),
     ("observer", "observer §7.5", "MUST read it with the revision chosen in this order", MET,
      "echo_tool.Held.choose over across.revision_of_key: the deployment's word, CH's tag, the catalog's latest, "
-     "several revisions held (envelope family, tags.json 31/31) (round 106)"),
+     "several revisions held (envelope family, tags.json 31/31) (round 106); an event's too, its occurrence chunk "
+     "stripped and its tag its record's type's (tags.json 36/36) (round 108, observer 0.33)"),
     ("observer", "observer §7.3", "A tool MUST NOT decode a record as its declared type under a tag that is not that",
      MET, "echo_tool.row_of: undecodable, tag, for a packed type's other tag and any tag other than 0 on another kind "
           "(envelope family, tags.json; readings) (round 106)"),
@@ -1023,6 +1026,12 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "undecodable, form (stray_live §15 steps 1 and 2) (round 107, core 0.102)"),
     ("observer", "core §4.2", "A consumer or a tool MUST NOT merge a stray `reply_del` as a deletion", MET,
      "seed.LateJoiner, a tool's, given the owner's revision (stray_live §15 step 1, T) (round 107, core 0.102)"),
+    # core 0.104 (F-514's answer): a put on an events key that carries no
+    # event (round 108).
+    ("consumer", "core §2.6", "A consumer MUST NOT deliver a put on an events key whose payload is no event",
+     MET, "live.no_event, read by live.replay_events, live.subscribe_events and Owner.subscribe_role: a mutation or a "
+     "payload with no envelope counted undecodable, form, never delivered (events_live §8 Expected 5, py-py and "
+     "zenctl replay's puts beside the owner example's) (round 108, core 0.104)"),
 ]
 
 

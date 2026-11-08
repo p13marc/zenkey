@@ -747,8 +747,10 @@ pub fn timed(annotations: &BTreeMap<String, Value>) -> bool {
 /// link.v2's reading of whether a resource's pushes cross a face (v2 §2.7,
 /// §2.8): [`crossing`]'s, and then a frame resource crosses whole, never
 /// downsampled, unless the face's `frames` leaves it out (`listed`
-/// `Some(false)`; `None` for a face with no `frames`), and a stream that
-/// would be downsampled is denied when it is timed.
+/// `Some(false)`; `None` for a face with no `frames`), an exposed event
+/// crosses whole unless the face's `events` leaves it out (`listed` alike,
+/// from `events`), and a stream that would be downsampled is denied when
+/// it is timed.
 #[must_use]
 pub fn crossing_v2(
     token: KindToken,
@@ -758,13 +760,16 @@ pub fn crossing_v2(
     listed: Option<bool>,
 ) -> Crossing {
     let c = crossing(token, shape.templated, exposure, expose);
-    if c.pushes != Pushes::Downsampled {
-        return c;
-    }
     let denied = |reason| Crossing {
         pushes: Pushes::Denied,
         reason,
     };
+    if token == KindToken::Events && c.pushes == Pushes::Whole && listed == Some(false) {
+        return denied(Reason::Unlisted);
+    }
+    if c.pushes != Pushes::Downsampled {
+        return c;
+    }
     if shape.frame {
         if listed == Some(false) {
             return denied(Reason::Unlisted);
@@ -955,6 +960,10 @@ pub enum Code {
     /// A face's `frames` entry that names no frame resource of a listed
     /// interface (v2 §2.7).
     FrameUnknown,
+    /// A face's `events` entry that names no event resource of a listed
+    /// interface (v2 §2.7). An event that is listed but not exposed is
+    /// denied, never this.
+    EventUnknown,
     /// An exposed frame resource of a listed interface that a face's
     /// `frames` leaves out, and that crosses no face of the policy (v2
     /// §2.7).
@@ -1037,6 +1046,7 @@ impl Code {
             Self::PackedRequired => "packed_required",
             Self::NotPacked => "not_packed",
             Self::FrameUnknown => "frame_unknown",
+            Self::EventUnknown => "event_unknown",
             Self::FrameUnlisted => "frame_unlisted",
             Self::KeyframeUnreachable => "keyframe_unreachable",
             Self::HorizonUnderFace => "horizon_under_face",
@@ -1221,6 +1231,11 @@ pub struct Face {
     /// cadence. `None` when the face lists none: every exposed frame
     /// resource crosses, as `link.v1` §2.7 says.
     pub frames: Option<BTreeMap<String, FrameCadence>>,
+    /// link.v2's `events` (v2 §2.7): the event resources that cross the
+    /// face, by their name (§0, `<iface>/events/<template>`). `None` when
+    /// the face lists none: every exposed event crosses, as `link.v1` §2.7
+    /// says.
+    pub events: Option<BTreeSet<String>>,
     /// link.v2's `horizon_s` (v2 §2.12): the shortest horizon the face
     /// affords a crossing heartbeat or frame resource.
     pub horizon_s: Option<u64>,
@@ -1894,6 +1909,7 @@ const FACE_KEYS_V2: &[&str] = &[
     "reply_timeout_ms",
     "horizon_s",
     "frames",
+    "events",
     "devices",
 ];
 
@@ -2000,6 +2016,31 @@ fn parse_frames(
         }
     }
     ok.then_some(frames)
+}
+
+/// A face's `events` (v2 §2.1, §2.7): an array of entries
+/// `<iface>/<template>`, an interface id and a template, none repeated,
+/// possibly empty; each kept as the event resource's name (§0,
+/// `<iface>/events/<template>`). `None` when it is not one: `events` is
+/// one value, reported once.
+fn parse_events(face: &str, v: &toml::Value, out: &mut Vec<Finding>) -> Option<BTreeSet<String>> {
+    let read = || {
+        let mut names = BTreeSet::new();
+        for x in v.as_array()? {
+            let (i, rest) = x.as_str()?.split_once('/')?;
+            let iface: crate::grammar::IfaceId = i.parse().ok()?;
+            let template = Template::parse(rest).ok()?;
+            if !names.insert(format!("{iface}/events/{}", template.as_str())) {
+                return None;
+            }
+        }
+        Some(names)
+    };
+    let events = read();
+    if events.is_none() {
+        out.push(Finding::new(Code::BadValue, Some(face), "events"));
+    }
+    events
 }
 
 /// What a face is read against: its profile, its binding's link protocols
@@ -2208,10 +2249,21 @@ fn parse_face(
                 f.map(Some)
             }
         };
+        let events = match t.get("events") {
+            None => Some(None),
+            Some(v) => {
+                let e = parse_events(name, v, out);
+                if e.is_none() {
+                    ok = false;
+                }
+                e.map(Some)
+            }
+        };
         // Like `interval_s`, a face that exposes none lets nothing cross,
-        // so it lists no frame and affords no horizon (v2 §2.1).
+        // so it lists no frame and no event, and affords no horizon (v2
+        // §2.1).
         if expose == Some(Expose::None) {
-            for key in ["frames", "horizon_s"] {
+            for key in ["frames", "events", "horizon_s"] {
                 if t.contains_key(key) {
                     out.push(Finding::new(Code::BadValue, at, key));
                     ok = false;
@@ -2255,6 +2307,7 @@ fn parse_face(
             arq,
             reply_timeout_ms,
             frames: frames?,
+            events: events?,
             horizon_s,
         });
     }
@@ -2299,6 +2352,7 @@ fn parse_face(
         arq: None,
         reply_timeout_ms: None,
         frames: None,
+        events: None,
         horizon_s: None,
     })
 }
@@ -3151,10 +3205,12 @@ fn plan_face(
     let crossing_of = |iface: &str, r: &Res| {
         let e = exposure(kind_of(r.token), &r.annotations);
         if v2 {
-            let listed = face
-                .frames
-                .as_ref()
-                .map(|f| f.contains_key(&res_name(iface, r)));
+            let name = res_name(iface, r);
+            let listed = if r.token == KindToken::Events {
+                face.events.as_ref().map(|l| l.contains(&name))
+            } else {
+                face.frames.as_ref().map(|f| f.contains_key(&name))
+            };
             crossing_v2(r.token, r.shape(), &e, face.expose, listed)
         } else {
             crossing(r.token, r.template.has_params(), &e, face.expose)
@@ -3172,6 +3228,18 @@ fn plan_face(
             errors.push(Finding::new(Code::FrameUnknown, Some(name), entry.clone()));
         }
     }
+    // A listed event's entry names an event resource of a listed
+    // interface (v2 §2.7).
+    for entry in face.events.iter().flatten() {
+        let known = listed.iter().any(|i| {
+            resources_of(i)
+                .iter()
+                .any(|r| r.token == KindToken::Events && &res_name(i, r) == entry)
+        });
+        if !known {
+            errors.push(Finding::new(Code::EventUnknown, Some(name), entry.clone()));
+        }
+    }
     for iface in listed {
         let (resources, disagree) = &view[*iface];
         for (i, r) in resources.iter().enumerate() {
@@ -3186,7 +3254,9 @@ fn plan_face(
                     Some(name),
                     res_name(iface, r),
                 )),
-                Reason::Unlisted => {
+                // An unlisted frame is warned of (v2 §2.7); an unlisted
+                // event is not.
+                Reason::Unlisted if r.frame.is_some() => {
                     facts.unlisted.insert(res_name(iface, r));
                 }
                 _ => {}
@@ -4530,6 +4600,7 @@ mod tests {
             arq: None,
             reply_timeout_ms: None,
             frames: None,
+            events: None,
             horizon_s: None,
         }
     }

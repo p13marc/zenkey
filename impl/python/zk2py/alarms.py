@@ -1221,14 +1221,30 @@ def attribute_entry(reply: Any, runs: Iterable[str]) -> str | None:
     return OWN if head.run_hex() in stated else PREVIOUS
 
 
-def seed_get(tool: Any, address: str, timeout: float = 1.0) -> SeedGet:
+_STANDARD: list[Any] = []
+
+
+def standard() -> Any:
+    """The standard contract (§3), loaded once."""
+    if not _STANDARD:
+        _STANDARD.append(load())
+    return _STANDARD[0]
+
+
+def seed_get(tool: Any, address: str, timeout: float = 1.0, contracts: list[Any] | None = None) -> SeedGet:
     """S4's GET (target ``All``, consolidation ``Latest``) of the owner's
-    alarms, recorded with the instant it was asked."""
+    alarms, recorded with the instant it was asked. The owner's revision,
+    among ``contracts`` (the standard contract where none is given), is
+    read by its descriptors before the GET, so that a stray ``reply_del``
+    is counted undecodable, never merged as a deletion (core 0.102 §4.2;
+    review-bot on #1100, 2): "unless the owner's revision cannot be read"."""
     from . import live
+    from . import seed_snapshot as ss
 
     prefix = f"zk2/{address}/{PROFILE}/{TOKEN}/{PREFIX}/"
     asked = time.monotonic_ns()
-    st = live.get_state(tool, prefix + "*", timeout=timeout)
+    st = live.get_state(tool, prefix + "*", timeout=timeout,
+                        revision=ss.ByDescriptor(contracts if contracts is not None else [standard()]))
     return SeedGet(asked, not st.errors, {r.key: r for r in st.replies if r.key.startswith(prefix)})
 
 
@@ -1336,6 +1352,9 @@ class AlarmsReader:
         receive-path watch and the subscription built on ``session``
         (:meth:`offline`)."""
         self.session, self.qos, self.timeout = session, qos, timeout
+        #: the revisions the reader holds, by which it reads each owner's
+        #: (core §4.2): the standard contract unless :attr:`contracts` is set
+        self.contracts: list[Any] | None = None
         self.trust = trust or fr.ClockTrust(word=True)
         self.reply_timeout_ns = int(reply_timeout_s * fr.NS)
         #: how long the owner is watched past a window's end (§2.15,
@@ -1453,7 +1472,7 @@ class AlarmsReader:
             self.noted.append(time.monotonic_ns())
 
     def seed(self, address: str) -> SeedGet:
-        g = seed_get(self.session, address, self.timeout)
+        g = seed_get(self.session, address, self.timeout, self.contracts)
         self.seeds.setdefault(address, []).append(g)
         if g.complete and address in self.v2:
             # freshness.v2 §2.5: the GET's answer replaces the view
@@ -1680,7 +1699,8 @@ class OwnerReading:
 def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = None,
                window: Window | None = None, seed: SeedGet | None = None, trust: fr.ClockTrust | None = None,
                get: bool = True, horizon: fr.Horizon = HORIZON, keys_known: Iterable[str] = (),
-               timeout: float = 1.0, lost_at: int | None = None) -> OwnerReading:
+               timeout: float = 1.0, lost_at: int | None = None,
+               contracts: list[Any] | None = None) -> OwnerReading:
     """One reading of ``address`` (``<system>/<service>``):
     - presence (observer §3) by a liveliness GET of its instance tokens, the
       descriptor through it (§2.13: never the interface token);
@@ -1711,8 +1731,12 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
     runs: set[str] = set()
     v2 = subscriber is not None and address in {a for a, _ in getattr(subscriber, "views", {})}
     if presence == "present":
-        for other in pres.instances[1:]:
-            for a in live.get_descriptor(tool, f"zk2/{address}/@zk/instance/{other['instance']}", timeout=timeout):
+        # review-bot on #1100, 1: every present instance's descriptor in one
+        # GET, never one GET per extra instance on every call
+        insts = [x["instance"] for x in pres.instances]
+        got = live.get_descriptors(tool, address, insts, timeout=timeout)
+        for other in insts[1:]:
+            for a in got[other]:
                 if a.ok:
                     try:
                         r_ = json.loads(a.payload).get("run")
@@ -1720,8 +1744,7 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
                         r_ = None
                     if isinstance(r_, str):
                         runs.add(r_)
-        inst = pres.instances[0]["instance"]
-        d = live.get_descriptor(tool, f"zk2/{address}/@zk/instance/{inst}", timeout=timeout)
+        d = got[insts[0]]
         if len(d) == 1 and d[0].ok:
             doc = json.loads(d[0].payload)
             meta_zid = (doc.get("meta") or {}).get("zid")
@@ -1731,7 +1754,7 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
             descriptor = {"lists": False} if entry is None else {"lists": True, "token": entry.get("token", True)}
     prefix = f"zk2/{address}/{PROFILE}/{TOKEN}/{PREFIX}/"
     if seed is None and get:
-        seed = seed_get(tool, address, timeout)
+        seed = seed_get(tool, address, timeout, contracts)
     replies = {} if seed is None else seed.replies
     verdict = owner_set(presence, descriptor, None, None if seed is None else seed.seed, window,
                         ttl_s=horizon.ttl_s or TTL_S)

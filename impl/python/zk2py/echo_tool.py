@@ -346,8 +346,8 @@ def row_of(key: str, delete: bool, size: int, encoding: str, payload: bytes | No
             and read.tag is not None and read.form in ("mutation", "event", "frame", "heartbeat"):
         # observer 0.29 §7.5: the revision chosen in three steps, CH's tag
         # checked as §7.3 says. An event (core 0.101) carries its record's
-        # type's tag as a mutation does, so zk2py reads it through the same
-        # steps, which name no event (F-512)
+        # type's tag as a mutation does; observer 0.33 names it among the
+        # steps' samples (F-512's answer)
         choice = held.choose(key, payload[0], len(read.record or b""))
         if choice.revision is not None and read.form != "heartbeat":
             from . import across

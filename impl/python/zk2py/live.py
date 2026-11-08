@@ -1009,6 +1009,8 @@ class Answer:
     #: the zid of the session that sent the reply, "whatever key the reply
     #: is on" (Appendix B, 0.12), or None when it cannot be read
     replier: str | None = None
+    #: a ``reply_del``: the reply's sample is a delete (round 108)
+    deleted: bool = False
 
 
 def replier_of(reply: Any) -> str | None:
@@ -1071,7 +1073,8 @@ def _replies(session: zenoh.Session, selector: str, target: zenoh.QueryTarget, t
         if item.ok is not None:
             s = item.ok
             yield Answer(True, str(s.key_expr), str(s.encoding), s.payload.to_bytes(),
-                         s.timestamp is not None, s.attachment is not None, replier_of(item))
+                         s.timestamp is not None, s.attachment is not None, replier_of(item),
+                         s.kind == zenoh.SampleKind.DELETE)
         else:
             e = item.err
             yield Answer(False, None, str(e.encoding), e.payload.to_bytes(), replier=replier_of(item))
@@ -1094,6 +1097,26 @@ def get_descriptor(session: zenoh.Session, instance_key: str,
         if a.ok and (a.key is None or "*" in a.key):
             continue
         out.append(a)
+    return out
+
+
+def get_descriptors(session: zenoh.Session, address: str, instances: list[str],
+                    timeout: float = GET_TIMEOUT_S) -> dict[str, list[Answer]]:
+    """The descriptors of ``instances``, present instances of ``address``
+    (``<system>/<service>``), in one GET (review-bot on #1100, 1): with one
+    instance, :func:`get_descriptor` of its key; with more, one GET of
+    ``zk2/<address>/@zk/instance/*`` with target All, each reply attributed
+    by its key, since every instance answers on its own key (§3.3 "The
+    GET"). Returns each instance's replies, an instance with none mapped to
+    an empty list."""
+    keys = {f"zk2/{address}/@zk/instance/{i}": i for i in instances}
+    out: dict[str, list[Answer]] = {i: [] for i in instances}
+    if len(instances) == 1:
+        out[instances[0]] = get_descriptor(session, next(iter(keys)), timeout)
+        return out
+    for a in _answers(session, f"zk2/{address}/@zk/instance/*", zenoh.QueryTarget.ALL, timeout):
+        if a.ok and a.key in keys:
+            out[keys[a.key]].append(a)
     return out
 
 
@@ -1924,8 +1947,9 @@ class Replay:
     - ``delivered``: every occurrence kept, in §2.6's order;
     - ``dropped``: those whose time is beyond the retention;
     - ``undecodable``: replies on an events key whose envelope was refused,
-      ``(key, token)``, or that carry no event (``not_event``, zk2py's
-      reading: F-514), never delivered;
+      ``(key, token)``, or that carry no event, ``(key, "form")`` (core 0.104
+      §2.6, F-514's answer), a ``reply_del`` there among them (F-522), never
+      delivered;
     - ``not_zk2``: replies on keys the grammar refuses, a ULID's key among
       them (core 0.103 §1.2), which no reader resolves."""
 
@@ -1935,18 +1959,46 @@ class Replay:
     not_zk2: list[str] = field(default_factory=list)
 
 
+#: Core §2.6 (0.104): the token a consumer counts a put on an events key
+#: under when its payload is no event, "as §4.2 counts a stray reply_del".
+NO_EVENT = "form"
+
+
+def no_event(key: str, read: zk2c.Read | None, deleted: bool = False) -> str | None:
+    """Core §2.6 (0.104), "A put that carries no event": "A consumer MUST NOT
+    deliver a put on an events key whose payload is no event, such as a
+    mutation or a payload with no envelope, whether a subscription heard it
+    or a replay returned it. It counts it undecodable, refused as form". The
+    token a consumer counts such a put, read through §7.5's parse, under
+    (:data:`NO_EVENT`), or the parse's own where it refused the envelope
+    ("A refused envelope is undecodable, and the tool names the refusal",
+    observer §7.3; zk2py's reading); None for an event, or a key that is no
+    zk2 events key. A delete there, ``deleted`` (a subscription's or a
+    ``reply_del``), no text names (F-522): zk2py counts it ``form`` too, as
+    §4.2 counts a stray ``reply_del``, "a delete is no form that owner
+    answers the member in", never delivering it."""
+    if zk2c.key_token(key) != "events":
+        return None
+    if deleted or read is None:
+        return NO_EVENT
+    if read.refused:
+        return read.refusal or "refused"
+    if read.form != "event" or read.stamp is None:
+        return NO_EVENT
+    return None
+
+
 def occurrence_of(key: str, encoding: str, payload: bytes, epoch_s: int = 0) -> Occurrence | tuple[str, str] | None:
     """A put on ``key`` read as an occurrence: an :class:`Occurrence`, or
-    ``(key, token)`` where its envelope is refused or is no event, or None
-    where the key is no zk2 events key."""
+    ``(key, token)`` where its envelope is refused or it carries no event
+    (:func:`no_event`), or None where the key is no zk2 events key."""
     parsed = zk2c.data_key(key)
     if parsed is None or parsed.get("form") != "data" or parsed.get("token") != "events":
         return None
     read = zk2c.read_put(key, encoding, payload)
-    if read.refused:
-        return (key, read.refusal or "refused")
-    if read.form != "event" or read.stamp is None:
-        return (key, "not_event")
+    token = no_event(key, read)
+    if token is not None:
+        return (key, token)
     t = None if read.time == zk2c.UNKNOWN_TIME else read.time
     at = None if t is None else (epoch_s + t["s"]) * 1000 + t["ms"]
     return Occurrence(key, read.stamp, t, at, read.record or b"", read.tag or 0)
@@ -1994,6 +2046,9 @@ def replay_events(session: zenoh.Session, selector: str, retention_s: int, now_m
     for a in _answers(session, f"{selector}?_time=[now(-{retention_s}s)..]", zenoh.QueryTarget.ALL, timeout):
         if not a.ok or a.key is None:
             continue
+        if a.deleted and zk2c.key_token(a.key) == "events":
+            out.undecodable.append((a.key, NO_EVENT))
+            continue
         o = occurrence_of(a.key, a.encoding or "", a.payload, epoch_s)
         if o is None:
             out.not_zk2.append(a.key)
@@ -2004,6 +2059,32 @@ def replay_events(session: zenoh.Session, selector: str, retention_s: int, now_m
     kept, out.dropped = replay_filter(occs, retention_s, now_ms)
     out.delivered = replay_order(kept)
     return out
+
+
+def subscribe_events(session: zenoh.Session, selector: str, deliver: Any, undecodable: Any,
+                     epoch_s: int = 0) -> Any:
+    """A consumer's subscription to an event (core §2.6): each put heard on
+    an events key read as :func:`occurrence_of` reads a replay's, so that
+    "whether a subscription heard it or a replay returned it" one rule holds
+    (0.104). ``deliver`` gets each :class:`Occurrence`; ``undecodable`` gets
+    ``(key, token)`` for a put that carries no event (``form``) or whose
+    envelope is refused, never delivered. A delete delivers nothing: an
+    owner publishes each occurrence "with a one-shot put", and no rule has a
+    consumer read a delete on an events key (F-522): it is counted
+    ``(key, "form")`` (:func:`no_event`). Returns the subscriber."""
+    def received(sample: zenoh.Sample) -> None:
+        if sample.kind != zenoh.SampleKind.PUT:
+            token = no_event(str(sample.key_expr), None, deleted=True)
+            if token is not None:
+                undecodable((str(sample.key_expr), token))
+            return
+        o = occurrence_of(str(sample.key_expr), str(sample.encoding), sample.payload.to_bytes(), epoch_s)
+        if isinstance(o, tuple):
+            undecodable(o)
+        elif o is not None:
+            deliver(o)
+
+    return session.declare_subscriber(selector, zenoh.handlers.Callback(received))
 
 
 # -- core S5, §4.4: last-known state from an archive, explicitly (round 107) --------

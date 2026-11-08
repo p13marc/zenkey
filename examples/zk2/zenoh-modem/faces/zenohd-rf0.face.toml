@@ -25,11 +25,10 @@
 # does not publish them. The radio repairs no lost frame, so the linter
 # warns `no_arq`.
 #
-# Events (modem.v3 3.4, #991): the plan lets the three `face/` events cross,
-# whole, and denies the four JSON ones by name; `face/device_fault`, JSON,
-# draws `not_packed`. A face lists frames, never events (link.v2 §2.7):
-# rf0's owner publishes all three (`config:device.events.<name>`), their
-# worst case 417 KB a day beside the frames' 177 KB, 2.3 % of the radio's
+# Events (modem.v3 3.4, #991): the face lists the three `face/` events
+# (link.v2 0.12 §2.7), which cross whole, and the plan denies the four JSON
+# ones by name; `face/device_fault`, JSON, draws `not_packed`. Their worst
+# case is 417 KB a day beside the frames' 177 KB, 2.3 % of the radio's
 # 25.9 MB (link.md, "Events").
 profile  = "link.v2"
 system   = "h-3fa9c2d41b7e"
@@ -60,6 +59,8 @@ loss_ppm         = 50000            # 5 %
 arq              = false            # no link ARQ on the radio (zenoh-modem's tracker)
 reply_timeout_ms = 15000            # 16 full batches take 11.8 s
 horizon_s        = 120              # one frame a minute affords a 120 s horizon
+# all three of modem.v3 3.4's events for a face (link.md, "Events")
+events           = ["modem.v3/face/device_fault", "modem.v3/face/identity_change", "modem.v3/face/oper_change"]
 
 [face.rf.frames]
 "modem.v3/frames/fast" = { every_s = 60 }

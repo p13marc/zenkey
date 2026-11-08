@@ -2496,7 +2496,10 @@ class Owner:
         handed on. Its ``time`` fields are read under ``epoch``, the
         deployment's, 0 where none is stated. A delete carries no record, so
         it hands ``sink`` (key, None), never bytes; its envelope, in the
-        delete's attachment, is read as every delete's is.
+        delete's attachment, is read as every delete's is. A put on an events
+        key that carries no event, a mutation or a payload with no envelope,
+        is undecodable, ``form``, never handed on (core 0.104 §2.6,
+        :func:`zk2py.live.no_event`).
 
         ``across``, a :class:`zk2py.far_side.FarSide` (core §8.5, 0.91):
         where the face's medium repairs no lost frame, each subscription with
@@ -2506,6 +2509,7 @@ class Owner:
         (:class:`zk2py.far_side.Redeclaring`). Returns the subscriptions,
         each undeclared by ``.undeclare()``."""
         from . import far_side, packed
+        from .live import no_event
 
         assert self.session is not None
 
@@ -2518,6 +2522,14 @@ class Owner:
                 read = zk2c.read_sample(sample)
                 if read.refused:
                     self.undecodable.append((key, read.refusal))
+                    return
+                # Core §2.6 (0.104): "A consumer MUST NOT deliver a put on an
+                # events key whose payload is no event ... It counts it
+                # undecodable, refused as form"; a delete there likewise,
+                # zk2py's reading (F-522).
+                token = no_event(key, read, deleted=sample.kind == zenoh.SampleKind.DELETE)
+                if token is not None:
+                    self.undecodable.append((key, token))
                     return
                 if record is not None:
                     if sample.kind == zenoh.SampleKind.DELETE:

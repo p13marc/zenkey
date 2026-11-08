@@ -344,9 +344,15 @@ class Subscriber:
                  get_timeout: float = 1.0, wait_s: float = 0.2):
         import zenoh
 
+        from . import seed_snapshot as ss
+        from types import SimpleNamespace
+
         self.session = session
         self.address = address
         self.layout = heartbeat.layout_of(canonical, fingerprint)
+        #: the revision the reader holds, by which a stray reply_del is told
+        #: (core 0.102 §4.2)
+        self.revision = ss.ByDescriptor([SimpleNamespace(canonical=canonical, fingerprint=fingerprint)])
         #: core §7.5: each collection's index "among the interface's
         #: resources of the reply key's kind token, in the canonical form's
         #: order", by ``<token>/<template>``
@@ -460,7 +466,10 @@ class Subscriber:
         try:
             if self.closed:
                 return
-            st = live.get_state(self.session, self.read_selectors[resource], timeout=self.get_timeout)
+            # core 0.102 §4.2 (review-bot on #1100, 2): the owner's revision,
+            # the one this reader holds, read by its descriptors
+            st = live.get_state(self.session, self.read_selectors[resource], timeout=self.get_timeout,
+                                revision=self.revision)
             arrived = time.monotonic_ns()
             if st.silent:
                 return

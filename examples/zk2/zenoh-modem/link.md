@@ -130,14 +130,15 @@
 > `face/device_fault` (JSON, its words free text). `action_event`'s `burst(600/h)` fits no radio
 > face, and it has no twin.
 > - **What crosses.** An exposed event crosses whole, every occurrence, never downsampled
->   (`link.v1` §2.9). Each plan denies the four JSON events by name, `events:modem.v3`, and lets
->   the three twins cross. `face/device_fault` draws `not_packed` on every face (`link.v2` §2.17).
-> - **Which face carries which.** A face policy lists frames, never events (`link.v2` §2.7), so
->   every face that exposes lets all three cross. Which a device publishes is its owner's
->   configuration, `config:device.events.<name>`, as its frames' cadence is: rf0 the three,
->   lora0 at SF7 or SF9 the two `rare` ones, lora0 at SF12 and sat0 none.
+>   (`link.v1` §2.9). Each plan denies the four JSON events by name, `events:modem.v3`.
+> - **Which face carries which.** Each face lists its events, as it lists its frames (`link.v2`
+>   0.12 §2.7, #1098), and its plan denies by name each exposed one it leaves out: rf0's face
+>   lists the three, lora0's at SF7 or SF9 the two `rare` ones, `face/device_fault` denied, and
+>   lora0's at SF12 and sat0's none, `events = []`, every event denied. Each device's owner
+>   publishes what its face lists, `config:device.events.<name>`. `face/device_fault` crosses RF
+>   alone, so RF's plan alone warns `not_packed` (`link.v2` §2.17).
 > - **The cadence check** (#991's per-medium budgets; `zenkey-fleet/tests/acl_plans.rs`,
->   `zenoh_modem_events_fit_each_face_budget`). The wire model of 3.3's figures (README, "What each
+>   `zenoh_modem_events_fit_each_face_budget`), over what each face lists. The wire model of 3.3's figures (README, "What each
 >   face spends"), for one occurrence alone in its SDU: a put on the scope the far reader's
 >   template-prefix subscription declares, its suffix `/` and an 8-character chunk (a 16-bit run;
 >   12 characters add 4 B), the QoS extension (reliable, `block`), form 4's 7 B and the record;
