@@ -2808,7 +2808,10 @@ async fn stamping_near(block: &str, name: &str) -> (zenoh::Session, String, Path
 }
 
 /// Steps 2 and 3 of link.v2 scenarios §3 against N running `block`: the
-/// timestamp F's sample of `oper` carries, N's zid, and the tool's findings.
+/// timestamp F's occurrence of `fault` carries, N's zid, and the tool's
+/// findings. An event, not `oper`: `oper` is on core §4.3's table (radio.v1
+/// uses freshness.v1 and `oper` has a TTL), so its owner stamps it, and only
+/// an unstamped put shows what N adds (link.v2 0.16, F-524).
 async fn stamped_across(
     block: &str,
     name: &str,
@@ -2821,7 +2824,7 @@ async fn stamped_across(
     let f = client(&format!("unixsock-stream/{}", sock.display()), "ground").await;
     let (tx, rx) = std::sync::mpsc::channel();
     let _sub = f
-        .declare_subscriber("zk2/lab/radio-a/radio.v1/state/oper")
+        .declare_subscriber("zk2/lab/radio-a/radio.v1/events/fault/*")
         .callback(move |s: zenoh::sample::Sample| {
             let _ = tx.send(s.timestamp().cloned());
         })
@@ -2830,20 +2833,26 @@ async fn stamped_across(
     let o = owner(&tcp, "radio-a").await;
     let owner_ref = &o;
     let mut stamp = None;
-    eventually("F receives the owner's oper across the face", || {
-        if let Ok(t) = rx.try_recv() {
-            stamp = Some(t);
-        }
-        let done = stamp.is_some();
-        let o = owner_ref;
-        async move {
-            if !done {
-                o.put("state/oper", "up").await;
-                tokio::time::sleep(Duration::from_millis(100)).await;
+    let mut n_put = 0u64;
+    eventually(
+        "F receives an occurrence of the owner's fault across the face",
+        || {
+            if let Ok(t) = rx.try_recv() {
+                stamp = Some(t);
             }
-            done
-        }
-    })
+            let done = stamp.is_some();
+            let o = owner_ref;
+            n_put += 1;
+            let key = format!("events/fault/{}", occurrence(n_put));
+            async move {
+                if !done {
+                    o.put(&key, "fault").await;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                done
+            }
+        },
+    )
     .await;
     let zid = n.zid().to_string();
     let plan = plan(V2_POLICY);
