@@ -140,9 +140,16 @@ async fn s8_events_replay() {
     );
     b.require("journal", journal.clone(), false);
     let auditor = b.start().await.unwrap();
+    // Each refusal the subscription makes, by key and why (step 4).
+    let refused: Arc<Mutex<Vec<(String, zenkey::inband::Undecodable)>>> = Arc::default();
+    let r = Arc::clone(&refused);
     let consumer = auditor
         .consumer("journal", Arc::new(contract("journal.v1")))
-        .unwrap();
+        .unwrap()
+        .with_refused(move |x: zenkey::consumer::Refused| {
+            let key = x.read.sample().key_expr().as_str().to_owned();
+            r.lock().unwrap().push((key, x.why));
+        });
     let heard: Arc<Mutex<Vec<String>>> = Arc::default();
     let h = Arc::clone(&heard);
     let sub = consumer
@@ -193,6 +200,28 @@ async fn s8_events_replay() {
         format!("zk2/lab/journal/journal.v1/events/entries/{}", e.chunk())
     };
     let (mutation_key, json_key) = (stray_key(1), stray_key(2));
+    // Each a key the consumer reads (review-bot on #1104): an events key
+    // whose last chunk is a 16-bit run's occurrence chunk, run 0x7777 and
+    // its seq, so a refusal below is the payload's, never the key's.
+    for (key, seq) in [(&mutation_key, 1), (&json_key, 2)] {
+        assert!(
+            matches!(
+                zenkey::model::grammar::parse(key),
+                Ok(zenkey::model::grammar::ZkKey::Data { .. })
+            ),
+            "{key}: a zk2 data key"
+        );
+        let chunk = key.rsplit('/').next().unwrap();
+        assert_eq!(chunk.len(), 8, "{key}: a 16-bit run's chunk");
+        assert_eq!(
+            zenkey::model::chunk::occurrence(chunk),
+            Some(InBand {
+                run: Run::U16(0x7777),
+                seq: wire::Seq::new(seq).unwrap(),
+            }),
+            "{key}"
+        );
+    }
     let mutation = Envelope::mutation(
         wire::Tag::NONE,
         InBand {
@@ -222,6 +251,21 @@ async fn s8_events_replay() {
         sub.undecodable() == 2
     })
     .await;
+    // Each refused for carrying no event, token `form` (core §2.6).
+    let mut why = refused.lock().unwrap().clone();
+    why.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut expected = vec![mutation_key.clone(), json_key.clone()];
+    expected.sort();
+    assert_eq!(
+        why.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>(),
+        expected,
+        "step 4's two keys, each refused once"
+    );
+    assert!(
+        why.iter()
+            .all(|(_, w)| *w == zenkey::inband::Undecodable::NoEvent && w.token() == "form"),
+        "{why:?}"
+    );
     assert!(
         heard.lock().unwrap().iter().all(|r| r != "{}"),
         "no put that carries no event is delivered"
