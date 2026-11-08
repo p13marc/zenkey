@@ -474,6 +474,12 @@ fn toggle_watch(dep: &Deployment, obs: &mut Observation, path: String) -> Task<M
         obs.seeding_paths.remove(&path);
         return services::watch::release(monitor, path, id);
     }
+    // Across a face the pump watches the face's scope whole (#990 V7): a
+    // subtree's `…/**` would subscribe wider than it (core §8.5).
+    if dep.across_face() {
+        tracing::info!("{path}: across a face, the face's scope is watched whole");
+        return Task::none();
+    }
     // Watching seeds (issue #92): current state arrives before live
     // traffic, through the same merge discipline as everything else.
     let selector = scope::subtree_selector(&path);

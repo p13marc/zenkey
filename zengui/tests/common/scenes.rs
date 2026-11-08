@@ -335,6 +335,15 @@ pub const ALL: &[Scene] = &[
     // its epoch in the Point: the plotted leaf is `value.value`, its §2.11
     // rate in `1/s`, and the owner's restart — a new epoch — a reset with a
     // gap and no rate across it.
+    // Across a constrained face (#990 V7): `site-a/rf0` read with no
+    // presence, the pump on the face scope's selectors alone, every other
+    // feed of the world unheard; the strip says so.
+    Scene {
+        name: "across-face",
+        size: DESKTOP,
+        build: across_face,
+        landmark: "across a face",
+    },
     Scene {
         name: "inspector-metric-counter",
         size: DESKTOP,
@@ -1517,6 +1526,46 @@ fn metered(prefs: Prefs, key: &str, ticks: u32) -> (Zengui, World) {
     world.verdicts(&mut app);
     preset(&mut app, LayoutPreset::Explore);
     (app, world)
+}
+
+/// `site-a/rf0`, zenoh-modem's device, read across a face (#990 V7): the
+/// window launched with `--across-face site-a/rf0` and the metered world's
+/// contracts, no presence ever sent, the world publishing what the face
+/// scope's selectors reach, and its `tx_bytes_total` selected.
+fn across_face(theme: ThemeChoice) -> Zengui {
+    use zengui::message::{BusMsg, LinkState};
+    let mut settings = super::settings();
+    settings.contracts = super::metered_contract_paths();
+    settings.across = Some(zengui::config::AcrossFace {
+        addresses: vec![super::MODEM.parse().expect("an address")],
+        face: None,
+    });
+    let mut app = Zengui::with_prefs(settings, prefs(theme), None).0;
+    let world = World::metered();
+    let contracts = world.contracts();
+    let scope = zenkey_fleet::FaceScope::of(
+        &[super::MODEM.parse().expect("an address")],
+        &contracts.set,
+        "",
+        zenkey_fleet::model::face_scope::Reads::Samples,
+        None,
+    )
+    .expect("a scope");
+    let mut world = world.across(scope.selectors().to_vec());
+    send(&mut app, Message::Bus(BusMsg::ContractsLoaded(contracts)));
+    send(&mut app, Message::Bus(BusMsg::Link(LinkState::Pumping)));
+    world.tick(&mut app);
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::Reveal(TX_BYTES.into())),
+    );
+    send(
+        &mut app,
+        Message::Subject(SubjectMsg::Select(Subject::Key(TX_BYTES.into()))),
+    );
+    world.ticks(&mut app, 12);
+    preset(&mut app, LayoutPreset::Explore);
+    app
 }
 
 fn metric_counter(theme: ThemeChoice) -> Zengui {

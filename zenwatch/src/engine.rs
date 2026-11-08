@@ -403,6 +403,11 @@ pub struct Engine<'a> {
     /// The deployment catalogs (`catalog`, core §8.6): the scheduled
     /// doctor's `catalog-missing` judges against them.
     pub catalogs: &'a zenkey_fleet::Catalogs,
+    /// Across a constrained face (`across_face`, #990 V7): the engine
+    /// rules' selectors narrowed to the face's scope, declared in place of
+    /// the rules' own, with no presence read for the lens. `None` reads
+    /// the deployment through presence.
+    pub across: Option<&'a [String]>,
 }
 
 /// Delivery counters shared with the spawned deliveries, and each sink's
@@ -573,7 +578,7 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
         catalogs: e.catalogs.clone(),
     };
     let mut watchdog = (!engine_rules.is_empty())
-        .then(|| zenkey_fleet::watchdog(e.bus, e.store, e.contracts, &spec).pin());
+        .then(|| zenkey_fleet::watchdog_across(e.bus, e.store, e.contracts, &spec, e.across).pin());
     let mut watchdog_done = watchdog.is_none();
 
     // Presence, live (#614): one projection of the whole deployment, its
@@ -1174,6 +1179,27 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
             ""
         },
     );
+    if let Some(a) = &loaded.across {
+        eprintln!(
+            "zenwatch: across a constrained face to {}{}: watching {} — no presence is read, \
+             every key resolved through the contracts held (core §8.5, observer §7.5)",
+            a.scope
+                .addresses()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", "),
+            match a.scope.far() {
+                Some(far) => format!(
+                    " (face {:?}: what its plan lets cross, its transport, a {} ms reply \
+                     timeout)",
+                    far.face, far.reply_timeout_ms
+                ),
+                None => String::new(),
+            },
+            a.selectors.join(" + ")
+        );
+    }
     let summary = run_on(
         Engine {
             bus: &bus,
@@ -1199,6 +1225,7 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
             doctor: cfg.doctor.as_ref(),
             clocks_synced: cfg.clocks_synced,
             catalogs: &loaded.catalogs,
+            across: loaded.across.as_ref().map(|a| a.selectors.as_slice()),
         },
         stop_signal(),
     )

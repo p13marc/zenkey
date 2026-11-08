@@ -378,6 +378,38 @@ pub(crate) fn watch_scope(dep: &Deployment, obs: &Observation) -> Task<Message> 
     let Some(monitor) = obs.monitor.clone() else {
         return Task::none();
     };
+    // Across a face (#990 V7; core §8.5, observer §7.5): the face's scope,
+    // a custom scope's selectors narrowed to it, never `zk2/**`, and no
+    // seed, since its GET would reach wider than the scope.
+    if dep.across_face() {
+        let Some(Ok(scope)) = &dep.face_scope else {
+            return Task::none();
+        };
+        let selectors = if dep.settings.scope == crate::scope::ScopePreset::Custom {
+            match scope.narrow(&dep.settings.selectors) {
+                Ok(n) => {
+                    for unmet in &n.unmet {
+                        tracing::warn!(
+                            "--selector {unmet} meets none of the selectors across the face: \
+                             not watched (observer §7.5)"
+                        );
+                    }
+                    n.selectors
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "{}: not a key expression ({}): nothing watched across the face",
+                        e.selector,
+                        e.error
+                    );
+                    Vec::new()
+                }
+            }
+        } else {
+            scope.selectors().to_vec()
+        };
+        return services::watch::scope_across(monitor, std::sync::Arc::clone(scope), selectors);
+    }
     let selectors = dep
         .settings
         .scope

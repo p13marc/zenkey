@@ -157,6 +157,15 @@ sub_state! {
         /// feed's generation: a reseeded store restarts the feed, whose
         /// generation may come round to the number already held.
         pub(crate) identity_epoch: u64,
+        /// The scope across a constrained face (`--across-face`, #990 V7;
+        /// observer §7.5): what the data pump subscribes to, built from
+        /// the contracts held offline once they load, under the namespace.
+        /// `None` with no `--across-face`; `Some(Err)` names why there is
+        /// no scope (no contract yet, the face's plan refused, nothing in
+        /// it), and the pump then subscribes to nothing.
+        pub(crate) face_scope: Option<Result<Arc<zenkey_fleet::FaceScope>, String>>,
+        /// What the strip says of [`Self::face_scope`], built with it.
+        pub(crate) across_note: String,
     }
 }
 
@@ -185,9 +194,74 @@ impl Deployment {
             // keeps that one sentence (#107).
             identity: IdentityCache::with_capacity(max_keys),
             identity_epoch: 0,
+            face_scope: None,
+            across_note: String::new(),
         };
         dep.rebuild_namespace_options();
+        dep.refresh_face_scope();
         dep
+    }
+
+    /// Whether the owners are read across a constrained face (#990 V7): no
+    /// presence is read, and the pump subscribes to the face's scope alone.
+    pub(crate) fn across_face(&self) -> bool {
+        self.settings.across.is_some()
+    }
+
+    /// Rebuild [`Self::face_scope`] from the contracts held and the
+    /// namespace (#990 V7): what a contracts load and a namespace move
+    /// call. No scope without `--across-face`.
+    pub(crate) fn refresh_face_scope(&mut self) {
+        let Some(across) = &self.settings.across else {
+            self.face_scope = None;
+            self.across_note.clear();
+            return;
+        };
+        let scope =
+            match &self.contracts {
+                None => Err("the contracts are not loaded yet".to_owned()),
+                Some(c) => {
+                    across
+                        .policy()
+                        .map_err(|e| e.to_string())
+                        .and_then(|policy| {
+                            let face = policy.as_ref().zip(across.face.as_ref()).map(
+                                |(policy, (_, name))| zenkey_fleet::model::face_scope::Face {
+                                    policy,
+                                    name: name.as_str(),
+                                },
+                            );
+                            zenkey_fleet::FaceScope::of(
+                                &across.addresses,
+                                &c.set,
+                                &self.settings.namespace,
+                                zenkey_fleet::model::face_scope::Reads::Samples,
+                                face,
+                            )
+                            .map(Arc::new)
+                            .map_err(|e| e.to_string())
+                        })
+                }
+            };
+        let addresses = across
+            .addresses
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.across_note = match &scope {
+            Ok(s) => format!(
+                "{} selector(s) under {addresses}, {}; no presence read, every key \
+                 resolved through the contracts held (observer §7.5)",
+                s.selectors().len(),
+                match s.face() {
+                    Some(face) => format!("what face {face}'s plan lets cross"),
+                    None => "each resource of the contracts held".to_owned(),
+                }
+            ),
+            Err(e) => format!("no scope under {addresses}: {e}"),
+        };
+        self.face_scope = Some(scope);
     }
 
     pub(crate) fn namespace(&self) -> &str {
@@ -222,6 +296,7 @@ impl Deployment {
         self.session = session;
         self.contracts = contracts;
         self.reseed_store();
+        self.refresh_face_scope();
     }
 
     /// A fresh contract store, seeded with the contracts held offline

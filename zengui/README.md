@@ -45,6 +45,19 @@ other revision a descriptor names is retrieved by fingerprint from the
 holders that serve it (spec §8.4). `--registry` is v1's, and is refused by
 name.
 
+**Across a constrained face** (`--across-face SYSTEM/SERVICE`, repeatable;
+core §8.5, observer §7.5) no descriptor crosses, so zengui reads no
+presence: every key resolves through the contracts held, and the data pump
+subscribes to one selector per resource of those contracts under each
+address (a concrete resource's exact key, a template's with each parameter
+a wildcard, each `freshness.v2` heartbeat), never `zk2/**`, watched whole
+and unseeded; a `--selector` is narrowed to them, and a subtree watch is
+not offered. With `--face-policy F --face N` (a `link.v2` policy) the scope
+is what the face's plan lets cross, every session runs the face's
+`[transport]`, and the default `--timeout` is its `reply_timeout_ms`. A
+wildcard address, a policy the linter refuses and a face it does not name
+are refused at launch. The strip's scope reads "across a face".
+
 ## The lens and presence
 
 **Presence** runs on a monitor of its own on the namespaced session, so the
@@ -73,6 +86,8 @@ zengui -c … --scope streams                          # its ambient streams (`t
 zengui -c … --scope explicit                         # its explicit @stream and @state, named
 zengui -c … --selector 'demo/**'                     # your own key expressions
 zengui -c … --contracts examples/zk2/.history        # contracts held offline (repeatable)
+zengui -c … --contracts examples/zk2/zenoh-modem --across-face h-3fa9c2d41b7e/rf0 \
+  --face-policy examples/zk2/zenoh-modem/faces/zenohd-rf0.face.toml --face rf   # across a face
 ```
 
 ### A note on `**`

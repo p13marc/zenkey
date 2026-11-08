@@ -22,16 +22,29 @@ pub struct Transport {
     pub connect: Vec<String>,
     pub listen: Vec<String>,
     pub scouting: Option<bool>,
+    /// The face the owners sit across (`--face-policy F --face N`, #990
+    /// V7): every session runs its `[transport]` (#988 L4, link.v2 §2.16).
+    pub far: Option<zenkey_model::link::FarSide>,
 }
 
 impl Transport {
     /// The transport half of the settings in force.
     pub fn of(s: &crate::config::Settings) -> Transport {
+        // Checked at launch (`config::across_face`): a policy that has
+        // since gone unreadable is said, and the sessions open as without.
+        let far = s.across.as_ref().and_then(|a| match a.far() {
+            Ok(far) => far,
+            Err(e) => {
+                tracing::warn!("{e}: the sessions open without the face's transport");
+                None
+            }
+        });
         Transport {
             zenoh_config: s.zenoh_config.clone(),
             connect: s.connect.clone(),
             listen: s.listen.clone(),
             scouting: s.scouting,
+            far,
         }
     }
 }
@@ -61,24 +74,27 @@ fn spend<T>(opened: Result<T, zenkey_fleet::OpenFailure>) -> ServiceResult<T> {
 
 /// The session in no namespace.
 async fn raw(t: &Transport) -> ServiceResult<zenoh::Session> {
-    spend(
-        zenkey_fleet::open_reporting(t.zenoh_config.as_deref(), &t.connect, &t.listen, t.scouting)
-            .await,
-    )
+    let (file, connect, listen) = (t.zenoh_config.as_deref(), &t.connect, &t.listen);
+    spend(match &t.far {
+        Some(far) => {
+            zenkey_fleet::open_reporting_across(far, file, connect, listen, t.scouting).await
+        }
+        None => zenkey_fleet::open_reporting(file, connect, listen, t.scouting).await,
+    })
 }
 
 /// The session in `namespace`.
 async fn namespaced(namespace: &str, t: &Transport) -> ServiceResult<zenoh::Session> {
-    spend(
-        zenkey_fleet::open_in_namespace(
-            namespace,
-            t.zenoh_config.as_deref(),
-            &t.connect,
-            &t.listen,
-            t.scouting,
-        )
-        .await,
-    )
+    let (file, connect, listen) = (t.zenoh_config.as_deref(), &t.connect, &t.listen);
+    spend(match &t.far {
+        Some(far) => {
+            zenkey_fleet::open_in_namespace_across(
+                far, namespace, file, connect, listen, t.scouting,
+            )
+            .await
+        }
+        None => zenkey_fleet::open_in_namespace(namespace, file, connect, listen, t.scouting).await,
+    })
 }
 
 /// A **watch session** for `namespace` (#830, core §8.1, 0.37; #875): a
@@ -94,16 +110,13 @@ pub async fn watch_session(
     namespace: &str,
     t: &Transport,
 ) -> ServiceResult<zenkey_fleet::WatchSession> {
-    spend(
-        zenkey_fleet::open_watch(
-            namespace,
-            t.zenoh_config.as_deref(),
-            &t.connect,
-            &t.listen,
-            t.scouting,
-        )
-        .await,
-    )
+    let (file, connect, listen) = (t.zenoh_config.as_deref(), &t.connect, &t.listen);
+    spend(match &t.far {
+        Some(far) => {
+            zenkey_fleet::open_watch_across(far, namespace, file, connect, listen, t.scouting).await
+        }
+        None => zenkey_fleet::open_watch(namespace, file, connect, listen, t.scouting).await,
+    })
 }
 
 /// Both sessions, the raw one first: a dead transport is said once, by the
@@ -222,6 +235,7 @@ mod tests {
             connect: vec![connect.into()],
             listen: vec![],
             scouting: None,
+            far: None,
         }
     }
 

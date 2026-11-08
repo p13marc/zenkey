@@ -1070,6 +1070,7 @@ fn the_strip_names_the_zk2_read_and_last_known_beside_it() {
             last_known,
             scope_label: "all",
             scope_coverage: "",
+            across: None,
             keys: 0,
             keys_evicted: 0,
             identity: (0, 0),

@@ -72,7 +72,19 @@ Claude Code loads this file when working in `zenwatch/`; the root `CLAUDE.md` is
   is said at warn, naming the rules left unchecked, `engine::tokenless_refusal`,
   #1074).
   `check-config` and `run` pass one gate (`load_checked`: the file, the
-  context, the namespace, the contracts, the state file). Sinks: `ntfy`,
+  context, the namespace, the contracts, the state file).
+  **Across a constrained face** (`across_face: { addresses, contracts,
+  policy, face }`, #990 V7; core §8.5, observer §7.5): `config::check`
+  refuses a wildcard address, a policy without its face or the reverse,
+  every rule that reads presence or the doctor and the `doctor` block;
+  `load_checked` loads the block's contracts beside the others, builds the
+  fleet's `FaceScope` (`Loaded::across`, `Across { scope, selectors }`) and
+  narrows each engine rule's selector to it, one that meets none refused by
+  its rule, exit 2; `BusSettings::far` opens every session through the
+  fleet's `open_*_across` and floors the timeout at the face's
+  `reply_timeout_ms`; the engine runs `zenkey_fleet::watchdog_across` with
+  the narrowed selectors (`Engine::across`), so no presence is read for the
+  lens (`tests/refusals.rs`' `across_a_face_a_rule_is_narrowed_to_the_faces_scope_or_refused`). Sinks: `ntfy`,
   `smtp`, `webhook`, `exec` — the one that runs code, deliberately last.
   **Secrets are env-var names or file paths, never inline**: a bare string
   in a secret position fails to parse. **The three states are preserved**

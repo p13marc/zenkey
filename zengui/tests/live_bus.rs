@@ -483,6 +483,7 @@ async fn a_late_joiners_seed_counts_its_state_leg() {
         echo_lines: 100,
         history_entries: 10,
         max_keys: 1000,
+        across: None,
     };
     let (mut app, boot) =
         zengui::app::Zengui::with_prefs(settings, zengui::prefs::Prefs::default(), None);
@@ -660,6 +661,7 @@ async fn the_tree_shows_rungs_and_a_budget_badge_on_real_traffic() {
         echo_lines: 100,
         history_entries: 10,
         max_keys: 1000,
+        across: None,
     };
     let (mut app, boot) =
         zengui::app::Zengui::with_prefs(settings, zengui::prefs::Prefs::default(), None);
@@ -768,6 +770,7 @@ async fn booted_at(
         echo_lines: 500,
         history_entries: 10,
         max_keys: 5000,
+        across: None,
     };
     let (mut app, boot) =
         zengui::app::Zengui::with_prefs(settings, zengui::prefs::Prefs::default(), None);

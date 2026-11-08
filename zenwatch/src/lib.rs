@@ -114,6 +114,20 @@ pub struct Loaded {
     /// through the process's `hostid.v1` minter, before any session opens
     /// (§2.7); `None` under `publish: false`.
     pub publish: Option<zenkey::ServiceConfig>,
+    /// The scope across a constrained face (`across_face`, #990 V7), and
+    /// the engine rules' selectors narrowed to it: what the watchdog
+    /// declares in place of the rules' own. `None` without the block.
+    pub across: Option<Across>,
+}
+
+/// The `across_face` block, read (#990 V7; core §8.5, observer §7.5).
+#[derive(Debug, Clone)]
+pub struct Across {
+    /// The fleet's scope: one selector per resource of the contracts in
+    /// hand under each address, or what the face's plan lets cross.
+    pub scope: zenkey_fleet::FaceScope,
+    /// The engine rules' selectors narrowed to it, each declared once.
+    pub selectors: Vec<String>,
 }
 
 /// [`load_config`], then what the deployment decides — the same refusals
@@ -146,6 +160,12 @@ pub fn load_checked(path: &Path, dep: &DeploymentArgs) -> Result<Loaded> {
                 .iter()
                 .map(|p| (format!("--contracts {}", p.display()), p.clone())),
         )
+        .chain(cfg.across_face.iter().flat_map(|a| {
+            a.contracts
+                .iter()
+                .enumerate()
+                .map(|(i, p)| (format!("across_face.contracts[{i}]"), p.clone()))
+        }))
         .collect();
     let contracts = load_contracts(&sources, &mut problems);
     // Core §8.6: each catalog read as a reader reads it; a refusal is the
@@ -164,7 +184,26 @@ pub fn load_checked(path: &Path, dep: &DeploymentArgs) -> Result<Loaded> {
     if !problems.is_empty() {
         return Err(refuse(path, &problems));
     }
-    let bus = bus::resolve(&cfg.bus, dep.context.as_deref(), dep.namespace.as_deref())?;
+    let mut bus = bus::resolve(&cfg.bus, dep.context.as_deref(), dep.namespace.as_deref())?;
+    let across = match &cfg.across_face {
+        None => None,
+        Some(a) => {
+            let across = across_face(a, &cfg, &contracts, &bus.namespace, &mut problems);
+            if !problems.is_empty() {
+                return Err(refuse(path, &problems));
+            }
+            let across = across.expect("no problem, so a scope");
+            // Core §8.1: a reply across the face takes at least its
+            // `reply_timeout_ms`.
+            if let Some(far) = across.scope.far() {
+                bus.timeout = bus
+                    .timeout
+                    .max(std::time::Duration::from_millis(far.reply_timeout_ms));
+                bus.far = Some(far.clone());
+            }
+            Some(across)
+        }
+    };
     if let Some(state) = &cfg.state_file
         && let Err(e) = discipline::state::load(state, &bus.namespace)
     {
@@ -190,7 +229,113 @@ pub fn load_checked(path: &Path, dep: &DeploymentArgs) -> Result<Loaded> {
         catalogs,
         bus,
         publish,
+        across,
     })
+}
+
+/// The `across_face` block's scope and the engine rules' selectors narrowed
+/// to it (#990 V7): refused, as a problem by where it was named, a policy
+/// that cannot be read or that the linter refuses, a face the far side
+/// does not read, a scope the fleet refuses (no contract, the plan's
+/// errors, nothing in it), and an engine rule whose selector meets none of
+/// the scope (observer §7.5: never dropped silently).
+fn across_face(
+    a: &config::AcrossFaceConfig,
+    cfg: &config::Config,
+    contracts: &ContractSet,
+    namespace: &str,
+    problems: &mut Vec<ConfigProblem>,
+) -> Option<Across> {
+    let mut problem = |path: &str, message: String| {
+        problems.push(ConfigProblem {
+            path: path.to_owned(),
+            message,
+        });
+    };
+    let addresses: Vec<zenkey_model::grammar::Addr> =
+        a.addresses.iter().filter_map(|s| s.parse().ok()).collect();
+    let policy = match &a.policy {
+        None => None,
+        Some(p) => {
+            let text = match std::fs::read_to_string(p) {
+                Ok(t) => t,
+                Err(e) => {
+                    problem("across_face.policy", format!("{}: {e}", p.display()));
+                    return None;
+                }
+            };
+            let parsed = zenkey_model::link::parse(&text);
+            match parsed.policy {
+                Some(policy) => Some(policy),
+                None => {
+                    let errors: Vec<String> = parsed
+                        .findings
+                        .iter()
+                        .filter(|f| f.is_error())
+                        .map(ToString::to_string)
+                        .collect();
+                    problem(
+                        "across_face.policy",
+                        format!(
+                            "{}: the linter refuses it ({}); `zenctl check face` names every \
+                             finding",
+                            p.display(),
+                            errors.join("; ")
+                        ),
+                    );
+                    return None;
+                }
+            }
+        }
+    };
+    let face = policy
+        .as_ref()
+        .zip(a.face.as_deref())
+        .map(|(policy, name)| zenkey_fleet::model::face_scope::Face { policy, name });
+    let scope = match zenkey_fleet::FaceScope::of(
+        &addresses,
+        contracts,
+        namespace,
+        zenkey_fleet::model::face_scope::Reads::Samples,
+        face,
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            problem("across_face", e.to_string());
+            return None;
+        }
+    };
+    // Each engine rule's selector, a wire key as the scope's are, narrowed
+    // to it; one that meets none is refused by its rule.
+    let mut selectors: Vec<String> = Vec::new();
+    for (i, r) in cfg.rules.iter().enumerate() {
+        let Ok(rules::RuleKind::Engine(c)) = rules::parse_rule(&r.rule) else {
+            continue;
+        };
+        let Some(sel) = c.selector() else { continue };
+        match scope.narrow(&[sel.to_owned()]) {
+            Err(e) => problem(
+                &format!("rules[{i}].rule"),
+                format!("{}: not a key expression ({})", e.selector, e.error),
+            ),
+            Ok(n) if !n.unmet.is_empty() || n.selectors.is_empty() => problem(
+                &format!("rules[{i}].rule"),
+                format!(
+                    "{sel} reaches none of the selectors across the face ({}): type a \
+                     selector under one of them",
+                    scope.selectors().join(" + ")
+                ),
+            ),
+            Ok(n) => {
+                for s in n.selectors {
+                    if !selectors.contains(&s) {
+                        selectors.push(s);
+                    }
+                }
+            }
+        }
+    }
+    Some(Across { scope, selectors })
 }
 
 /// The contracts `sources` name, loaded once (spec §9.7, §8.5): a path

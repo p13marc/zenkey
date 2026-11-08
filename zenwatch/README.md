@@ -431,6 +431,33 @@ provisions: the scheduled doctor's `catalog-missing` judges every running
 revision against it, and is not asked without one; a file not there, or one
 a reader refuses, is refused (exit 2).
 
+`across_face` reads owners across a constrained face (core §8.5, observer
+§7.5): no descriptor crosses one, so no presence is read, and each engine
+rule's selector is narrowed to the face's scope, one selector per resource
+of the contracts in hand under each address, or with `policy` and `face`
+(a `link.v2` face policy) what the face's plan lets cross; the sessions
+then run the face's `[transport]`, and the timeout is at least its
+`reply_timeout_ms`.
+
+```json5
+across_face: {
+  addresses: ["h-3fa9c2d41b7e/rf0"],              // SYSTEM/SERVICE, no wildcard
+  contracts: ["examples/zk2/zenoh-modem"],         // beside the top-level `contracts`
+  policy: "examples/zk2/zenoh-modem/faces/zenohd-rf0.face.toml",
+  face: "rf",
+},
+rules: [
+  { name: "fast", rule: "rate-below zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast 0.1", sinks: ["ops"] },
+],
+```
+
+Refused, exit 2: a wildcard address, `policy` without `face` or the other
+way round, a policy the linter refuses or a face it does not name, a scope
+with nothing in it, an engine rule whose selector meets none of the scope,
+and every rule that reads presence or the doctor (`instance-gone`,
+`liveliness-gone`, `alerts`, `alert-firing`, `doctor`) and the scheduled
+`doctor` block.
+
 ### Two sessions, both clients, and they fail fast
 
 zenwatch opens **two** sessions through the same engine calls as zenctl

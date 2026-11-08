@@ -96,6 +96,7 @@ pub fn settings() -> Settings {
         echo_lines: 500,
         history_entries: 50,
         max_keys: 50_000,
+        across: None,
     }
 }
 
@@ -271,6 +272,9 @@ pub struct World {
     /// (core §4.3, #976 A4; [`World::sealing`]): run `0003`, a seq per
     /// tick, under `zenoh/bytes`. Every other feed keeps its plain wire.
     sealed: Option<&'static str>,
+    /// Across a constrained face ([`World::across`], #990 V7): the pump's
+    /// selectors, the face scope's, and only the feeds they reach publish.
+    scope: Option<Vec<String>>,
     /// `lab/packed`'s packed sensor stream beside the rest
     /// ([`World::packed`], #979 B2).
     packed: bool,
@@ -1018,6 +1022,7 @@ impl World {
             metered,
             timed: false,
             sealed: None,
+            scope: None,
             packed: false,
             framed: false,
             meterframed: false,
@@ -1031,6 +1036,19 @@ impl World {
     pub fn sealing(mut self, key: &'static str) -> World {
         self.sealed = Some(key);
         self
+    }
+
+    /// The world as a window across a constrained face sees it (#990 V7):
+    /// its pump subscribed to `selectors` alone, so only the feeds they
+    /// reach arrive, and presence is never sent.
+    pub fn across(mut self, selectors: Vec<String>) -> World {
+        self.scope = Some(selectors);
+        self
+    }
+
+    /// The contracts this world was built from.
+    pub fn contracts(&self) -> Arc<zengui::services::contracts::LoadedContracts> {
+        Arc::clone(&self.contracts)
     }
 
     /// `addr`'s `health.v1`, as the engine judges a reading of this world
@@ -1986,6 +2004,15 @@ impl World {
             .write();
             row.2 = "zenoh/bytes";
         }
+        if let Some(scope) = &self.scope {
+            let reached = |key: &str| {
+                let k = zenoh::key_expr::KeyExpr::new(key).expect("a key");
+                scope.iter().any(|s| {
+                    zenoh::key_expr::KeyExpr::new(s.as_str()).is_ok_and(|s| s.intersects(&k))
+                })
+            };
+            payloads.retain(|p| reached(p.0));
+        }
         let feeds = payloads.len();
         let mut stray = None;
         for (key, body, encoding, attachment) in &payloads {
@@ -2029,7 +2056,7 @@ impl World {
             keys: feeds,
             keys_evicted: 0,
             keys_unwatched: 0,
-            watched: Arc::from(vec!["**".to_string()]),
+            watched: Arc::from(self.scope.clone().unwrap_or_else(|| vec!["**".to_string()])),
             seeded: Vec::new(),
             merge_evicted: 0,
             totals,

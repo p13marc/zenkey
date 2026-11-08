@@ -150,6 +150,7 @@ pub fn pane(d: SettingsData<'_>) -> Element<'_, Message> {
         echo_lines: _,      // controlled below (live)
         history_entries: _, // controlled below (live)
         max_keys: _,        // controlled below (reconnect)
+        across: _,          // launch only: `--across-face` (#990 V7)
     } = d.settings;
 
     let muted = |theme: &iced::Theme| text::Style {

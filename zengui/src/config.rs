@@ -90,6 +90,25 @@ pub struct Cli {
     #[arg(long = "catalog", value_name = "PATH")]
     pub catalog: Vec<PathBuf>,
 
+    /// Read the owner SYSTEM/SERVICE across a constrained face, repeatable
+    /// (core §8.5, observer §7.5; #990 V7): no descriptor crosses one, so
+    /// no presence is read, each key resolves through `--contracts` alone,
+    /// and the data pump subscribes to one selector per resource of the
+    /// contracts in hand under each address, never `zk2/**`.
+    #[arg(long = "across-face", value_name = "SYSTEM/SERVICE")]
+    pub across_face: Vec<String>,
+
+    /// The `link.v2` face policy the owners are read across (#990 V7, with
+    /// `--face`): the scope is what the face's plan lets cross, the
+    /// sessions run its `[transport]`, and the default `--timeout` is its
+    /// `reply_timeout_ms`.
+    #[arg(long, value_name = "FILE", requires_all = ["across_face", "face"])]
+    pub face_policy: Option<PathBuf>,
+
+    /// The face of `--face-policy` the owners sit across.
+    #[arg(long, value_name = "NAME", requires = "face_policy")]
+    pub face: Option<String>,
+
     /// v1's registry directories. Refused by name: zk2 reads contracts
     /// (`--contracts`), and a registry slice describes nothing a zk2 bus
     /// carries.
@@ -205,6 +224,98 @@ pub struct Settings {
     pub echo_lines: usize,
     pub history_entries: usize,
     pub max_keys: usize,
+    /// The owners read across a constrained face (`--across-face`, #990
+    /// V7), `None` on a deployment read through presence.
+    pub across: Option<AcrossFace>,
+}
+
+/// The owners `--across-face` names, and the face `--face-policy` and
+/// `--face` give (#990 V7): what the window's scope and sessions are built
+/// from, with no presence read (observer §7.5).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AcrossFace {
+    /// Each `SYSTEM/SERVICE`, checked at launch.
+    pub addresses: Vec<zenkey_model::grammar::Addr>,
+    /// The `link.v2` policy and the face's name, when given.
+    pub face: Option<(PathBuf, String)>,
+}
+
+impl AcrossFace {
+    /// The face's far side (#988 L4): its transport, reply timeout and
+    /// whether its medium repairs a lost frame. `None` without a face.
+    ///
+    /// # Errors
+    /// A policy that cannot be read, that the linter refuses, a `link.v1`
+    /// one, or a face it does not name.
+    pub fn far(&self) -> anyhow::Result<Option<zenkey_model::link::FarSide>> {
+        let Some((path, face)) = &self.face else {
+            return Ok(None);
+        };
+        let policy = self.policy()?.expect("a face names its policy");
+        policy
+            .far_side(face)
+            .map(Some)
+            .map_err(|e| anyhow::anyhow!("--face-policy {} --face {face}: {e}", path.display()))
+    }
+
+    /// The face policy, read and linted, when one was given.
+    ///
+    /// # Errors
+    /// A file that cannot be read, or a policy the linter refuses.
+    pub fn policy(&self) -> anyhow::Result<Option<zenkey_model::link::FacePolicy>> {
+        let Some((path, _)) = &self.face else {
+            return Ok(None);
+        };
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("--face-policy {}: {e}", path.display()))?;
+        let parsed = zenkey_model::link::parse(&text);
+        match parsed.policy {
+            Some(p) => Ok(Some(p)),
+            None => {
+                let errors: Vec<String> = parsed
+                    .findings
+                    .iter()
+                    .filter(|f| f.is_error())
+                    .map(ToString::to_string)
+                    .collect();
+                anyhow::bail!(
+                    "--face-policy {}: the linter refuses it ({}); `zenctl check face` names \
+                     every finding",
+                    path.display(),
+                    errors.join("; ")
+                )
+            }
+        }
+    }
+}
+
+/// `--across-face`'s addresses and the face, checked: each a plain
+/// `SYSTEM/SERVICE`, and the face one the policy's far side reads.
+fn across_face(
+    addresses: Vec<String>,
+    policy: Option<PathBuf>,
+    face: Option<String>,
+) -> anyhow::Result<Option<AcrossFace>> {
+    if addresses.is_empty() {
+        return Ok(None);
+    }
+    let addresses = addresses
+        .iter()
+        .map(|a| {
+            a.parse::<zenkey_model::grammar::Addr>().map_err(|e| {
+                anyhow::anyhow!(
+                    "--across-face {a}: {e}. Name one service, SYSTEM/SERVICE, each a plain \
+                     chunk: a wildcard would subscribe wider than the window reads (core §8.5)"
+                )
+            })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let across = AcrossFace {
+        addresses,
+        face: policy.zip(face),
+    };
+    across.far()?;
+    Ok(Some(across))
 }
 
 /// The words a `--registry` is refused with: the flag is v1's, and the zk2
@@ -320,6 +431,15 @@ impl Cli {
         )?;
         let contracts = contracts(self.contracts, &prefs.contracts)?;
         let catalogs = paths("--catalog", self.catalog, &prefs.catalogs)?;
+        let across = across_face(self.across_face, self.face_policy, self.face)?;
+        // Across a face its `reply_timeout_ms` is the default: a flag or a
+        // context still wins (core §8.1).
+        let face_timeout = across
+            .as_ref()
+            .map(AcrossFace::far)
+            .transpose()?
+            .flatten()
+            .map(|far| far.reply_timeout_ms.div_ceil(1000));
         Ok(Settings {
             namespace,
             connect: if self.connect.is_empty() {
@@ -343,7 +463,11 @@ impl Cli {
             // are remembered by this window, never by the shared context.
             contracts,
             catalogs,
-            timeout_secs: self.timeout.or(context.timeout).unwrap_or(5),
+            timeout_secs: self
+                .timeout
+                .or(context.timeout)
+                .or(face_timeout)
+                .unwrap_or(5),
             scope,
             selectors,
             // The flag can only assert, so it wins by OR: `--eager` over a
@@ -355,6 +479,7 @@ impl Cli {
             echo_lines,
             history_entries,
             max_keys,
+            across,
         })
     }
 }
@@ -921,5 +1046,79 @@ mod tests {
         // …while a selector on the command line still implies custom.
         let s = parse_remembering(&["--selector", "demo/**"], &stranded).unwrap();
         assert_eq!(s.scope, ScopePreset::Custom);
+    }
+
+    /// `--across-face` (#990 V7): each address a plain `SYSTEM/SERVICE`, a
+    /// wildcard refused; `--face-policy` and `--face` together, the face
+    /// one the policy's far side reads, its `reply_timeout_ms` the default
+    /// `--timeout` (rounded up to whole seconds) below a flag; none of it
+    /// without `--across-face`.
+    #[test]
+    fn across_a_face_the_owners_and_the_face_are_checked_at_launch() {
+        let policy = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../examples/zk2/zenoh-modem/faces/zenohd-rf0.face.toml"
+        );
+        let s = parse(&["--across-face", "h-3fa9c2d41b7e/rf0"]).unwrap();
+        let a = s.across.expect("across");
+        assert_eq!(a.addresses[0].to_string(), "h-3fa9c2d41b7e/rf0");
+        assert!(a.face.is_none());
+        assert_eq!(s.timeout_secs, 5, "no face: the default");
+        assert!(a.far().unwrap().is_none());
+
+        let e = parse(&["--across-face", "*/rf0"]).unwrap_err().to_string();
+        assert!(e.contains("--across-face */rf0"), "{e}");
+
+        let s = parse(&[
+            "--across-face",
+            "h-3fa9c2d41b7e/rf0",
+            "--face-policy",
+            policy,
+            "--face",
+            "rf",
+        ])
+        .unwrap();
+        let far = s
+            .across
+            .as_ref()
+            .unwrap()
+            .far()
+            .unwrap()
+            .expect("a far side");
+        assert_eq!(far.face, "rf");
+        assert_eq!(s.timeout_secs, 15, "the face's reply_timeout_ms, 15 000");
+        let s = parse(&[
+            "--across-face",
+            "h-3fa9c2d41b7e/rf0",
+            "--face-policy",
+            policy,
+            "--face",
+            "rf",
+            "--timeout",
+            "3",
+        ])
+        .unwrap();
+        assert_eq!(s.timeout_secs, 3, "a flag still wins");
+
+        let e = parse(&[
+            "--across-face",
+            "h-3fa9c2d41b7e/rf0",
+            "--face-policy",
+            policy,
+            "--face",
+            "nope",
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("--face nope"), "{e}");
+        assert!(
+            parse(&["--across-face", "a/b", "--face-policy", policy]).is_err(),
+            "a policy needs its face"
+        );
+        assert!(
+            parse(&["--face-policy", policy, "--face", "rf"]).is_err(),
+            "a face needs --across-face"
+        );
+        assert!(parse(&[]).unwrap().across.is_none());
     }
 }
