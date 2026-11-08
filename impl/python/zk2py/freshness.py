@@ -777,7 +777,7 @@ def reading_of(r: Any, epoch_s: int = 0, complete: bool = True, owner_id: str | 
 
 
 def get_reading(session: Any, key: str, timeout: float = 1.0, epoch_s: int = 0,
-                owner_id: str | None = None) -> GetReading:
+                owner_id: str | None = None, contracts: list[Any] | None = None) -> GetReading:
     """A GET of one state member as core S4 says (target All, consolidation
     None, core 0.100), the member's reply kept for §2.6. Where it comes as a
     snapshot's entry (a member read: "a snapshot of that member alone, on
@@ -785,10 +785,16 @@ def get_reading(session: Any, key: str, timeout: float = 1.0, epoch_s: int = 0,
     confirmation, each time counted from the deployment epoch ``epoch_s``
     (the catalog's, else 0); a snapshot of no entry on the key is the
     owner's word, its member deleted (§2.6: "A member a complete snapshot
-    omits has no value")."""
+    omits has no value"). ``contracts``, the revisions the reader holds: the
+    owner's among them is read by its descriptors before the GET, so that a
+    stray ``reply_del`` is never merged as a deletion (core 0.102 §4.2,
+    review-bot on #1100, 2); with none the owner's revision cannot be read,
+    and every ``reply_del`` is merged, as the text says."""
     from . import live
+    from . import seed_snapshot as ss
 
-    st = live.get_state(session, key, timeout=timeout)
+    st = live.get_state(session, key, timeout=timeout,
+                        revision=None if contracts is None else ss.ByDescriptor(contracts))
     mine = [r for r in st.replies if r.key == key]
     whole = bool(st.complete_for(key))
     if not mine:
@@ -843,11 +849,15 @@ def read_service(session: Any, address: str, contracts: list[dict[str, Any]], wi
             on_subscribed()
         readings: dict[str, GetReading] = {}
         from . import live
+        from . import seed_snapshot as ss
 
+        # core 0.102 §4.2 (review-bot on #1100, 2): the owner's revision,
+        # among the canonical forms the tool holds, read by its descriptors
+        by = ss.ByDescriptor.of_canonical(contracts)
         for _, r, key in watched:
             if r["kind"] != "state":
                 continue
-            st = live.get_state(session, _template_key(key), timeout=get_timeout)
+            st = live.get_state(session, _template_key(key), timeout=get_timeout, revision=by)
             for rep in st.replies:
                 readings[rep.key] = (GetReading("delete", rep.stamp_ns, rep.stamp_id, rep.stamp) if rep.deleted
                                      else GetReading("put", rep.stamp_ns, rep.stamp_id, rep.stamp, rep.payload))

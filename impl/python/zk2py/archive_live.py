@@ -224,13 +224,13 @@ def _dropped(origin: str) -> Any:
 #: The vehicle's archive reads its owners' presence every 500 ms
 #: (``--no-watch``): with its watch session, the default, it re-reads no owner
 #: whose instance token comes back after an outage of the link (a deviation
-#: of the reference, reported by :func:`watch_deviation`).
+#: of the reference, #1101, reported by :func:`watch_deviation`).
 POLL = ["--no-watch"]
 
 
 def section4_5(only: set[str]) -> list[Result]:
     """§4, then §5 steps 1 to 3, on one deployment."""
-    from . import live, zk2c
+    from . import live
 
     out: list[Result] = []
     d = Deployment()
@@ -256,8 +256,9 @@ def section4_5(only: set[str]) -> list[Result]:
         ctype = next(r["type"] for r in d.contract.canonical["resources"] if r["template"] == "plans/{vehicle}")
         out.append(("§4: the consumer reads the archive's key for the plan: v3's bytes as the owner put them, its "
                     "envelope included, its type identity in the attachment (iface, contract, and type, the "
-                    "canonical form's type object, core §4.4), and its confirmed, false while the owner is "
-                    "unreachable",
+                    "canonical form's type object, core §4.4), and its confirmed, a boolean: core §4.4 has it "
+                    "false while alignment has not confirmed the key, and a cut alone does not unconfirm one "
+                    "aligned before it, so neither value is judged here",
                     lk is not None and lk.raw == put_wire and lk.attachment.get("iface") == "zk2py_ground.v1"
                     and lk.attachment.get("contract") == d.contract.fingerprint
                     and lk.attachment.get("type") == ctype and isinstance(lk.attachment.get("confirmed"), bool)
@@ -274,15 +275,20 @@ def section4_5(only: set[str]) -> list[Result]:
         d.owner.delete_state(PLAN)
         m = a.mark()
         d.heal()
-        gone = a.wait(_dropped(PLAN), 30, m)
+        # review-bot on #1100, 4: the text's expected alone, "The owner's
+        # snapshot of the plan holds its tombstone, and the archive drops
+        # it": its deletion held within W (``held … tombstone``), never the
+        # key gone, and read back as a deletion, never as no reply
+        held = a.wait(_held(PLAN, None, True), 30, m)
         reads = [x for x in d.owner.snapshots_sent[sent:] if x[0] == PLAN]
         lk = live.last_known(d.c, "vehicle-01/archive", PLAN)
         line = a.command(f"last-known {PLAN}", "last-known")
         out.append(("§5 step 1: deleted within W while cut, healed within W: the archive re-reads the plan by a member "
                     "read of its key (a snapshot on the plan's own key), whose tombstone it keeps: the plan dropped, "
-                    "its deletion held within the window",
-                    gone is not None and bool(reads) and (lk is None or lk.deleted) and line is not None
-                    and line.rstrip().endswith("tombstone"),
+                    "its deletion held within the window, which zk2py reads back from the archive's key as a "
+                    "deletion",
+                    held is not None and bool(reads) and lk is not None and lk.deleted and line is not None
+                    and line.rstrip().endswith("tombstone") and f"gone {PLAN}" not in a.since(m),
                     f"{a.since(m)}; the owner's member-read snapshots {reads[:3]}; {line}; zk2py reads "
                     f"{lk and ('deleted' if lk.deleted else lk.record)}"))
         # -- §5 step 2 -----------------------------------------------------
@@ -333,7 +339,6 @@ def section4_5(only: set[str]) -> list[Result]:
                     "evidence, and drops the plan",
                     tomb is not None and gone is not None and not d.owner_seen(),
                     f"owner-side {tomb}; vehicle {a.since(m)}"))
-        _ = zk2c
     except Exception as e:  # noqa: BLE001 - a run that could not finish is a failure
         out.append(("§4/§5: the run finished", False, f"{type(e).__name__}: {e}"))
     finally:
@@ -344,8 +349,6 @@ def section4_5(only: set[str]) -> list[Result]:
 def section6(step: int) -> list[Result]:
     """§6, one step: the link cut for longer than 60 s, the owner deleting
     the plan and ``status`` while it is cut."""
-    from . import live
-
     out: list[Result] = []
     d = Deployment()
     tag = f"§6 step {step}"
@@ -397,7 +400,6 @@ def section6(step: int) -> list[Result]:
                         "its reply_del, and the vehicle's archive drops both",
                         any(_dropped(PLAN)(x) for x in lines) and any(_dropped(STATUS)(x) for x in lines),
                         f"{lines}; {plan}; {status}"))
-        _ = live
     except Exception as e:  # noqa: BLE001 - a run that could not finish is a failure
         out.append((f"{tag}: the run finished", False, f"{type(e).__name__}: {e}"))
     finally:
@@ -431,7 +433,7 @@ def watch_deviation() -> list[Result]:
         return [("DEVIATION", dropped is not None,
                  f"§5 step 1 under the archive's watch session (its default): the owner seen again "
                  f"{seen}; the archive re-read {len(reads)} time(s) and printed {a.since(m)} within 30 s "
-                 "(re-read and dropped under --no-watch)")]
+                 "(re-read and dropped under --no-watch; #1101)")]
     finally:
         d.close()
 

@@ -1097,6 +1097,26 @@ def get_descriptor(session: zenoh.Session, instance_key: str,
     return out
 
 
+def get_descriptors(session: zenoh.Session, address: str, instances: list[str],
+                    timeout: float = GET_TIMEOUT_S) -> dict[str, list[Answer]]:
+    """The descriptors of ``instances``, present instances of ``address``
+    (``<system>/<service>``), in one GET (review-bot on #1100, 1): with one
+    instance, :func:`get_descriptor` of its key; with more, one GET of
+    ``zk2/<address>/@zk/instance/*`` with target All, each reply attributed
+    by its key, since every instance answers on its own key (§3.3 "The
+    GET"). Returns each instance's replies, an instance with none mapped to
+    an empty list."""
+    keys = {f"zk2/{address}/@zk/instance/{i}": i for i in instances}
+    out: dict[str, list[Answer]] = {i: [] for i in instances}
+    if len(instances) == 1:
+        out[instances[0]] = get_descriptor(session, next(iter(keys)), timeout)
+        return out
+    for a in _answers(session, f"zk2/{address}/@zk/instance/*", zenoh.QueryTarget.ALL, timeout):
+        if a.ok and a.key in keys:
+            out[keys[a.key]].append(a)
+    return out
+
+
 # -- §8.4 contract retrieval -----------------------------------------------------
 
 @dataclass

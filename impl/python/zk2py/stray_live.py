@@ -21,6 +21,14 @@ and within W T GETs ``state/**``: by the descriptor's revision the
 ``reply_del`` is the owner's, merged as a deletion; by 1.1 alone it would be
 a stray one.
 
+**Step 3, the readers** (review-bot on #1100, 2; round 108): a member read
+of ``plans/v03``, played as step 1's, the owner's member snapshot and the
+stray ``reply_del`` beside it, read by :func:`zk2py.freshness.get_reading`,
+the reader the alarms, health and freshness tools share the GET of, given
+the revisions it holds: the member stays live, the ``reply_del`` refused,
+``form``; without them it reads the member deleted, as the text says a
+reader that cannot read the owner's revision does.
+
 Exit 0 when every check passes, 1 when any fails.
 """
 
@@ -182,11 +190,80 @@ def step2() -> list[Result]:
     return out
 
 
+def step3() -> list[Result]:
+    import threading
+
+    from . import freshness as fr
+    from . import live
+    from . import seed_snapshot as ss
+    from . import snapshot_live as sl
+    from . import zk2c
+    from .live_interop import _r1
+
+    out: list[Result] = []
+    r, ep, _ = _r1(timestamping=False)
+    tool, helper = live.open_client(ep), live.open_client(ep)
+    f = sl.Fleet("zk2py", ep)
+    player = None
+    try:
+        f.setup()
+        time.sleep(0.5)
+        key = f"{f.base}/plans/v03"
+        answer = sl.raw_get(tool, key)
+        head = ss.read_page_of(answer[0][0], answer[0][1])
+        stamp = zk2c.InBand(head["run_width"], head["run"], head["asof"] + 1)
+        player = sl.Player(helper, f"{f.base}/plans/**")
+        owner_off = sl._quiet(f)  # noqa: SLF001 - the runner's own helper
+
+        def play() -> None:
+            player.taken.wait(5.0)
+            with player.lock:
+                qs, player.queries = player.queries, []
+            for q in qs:
+                for k, b in answer:
+                    q.reply(k, b, encoding=zk2c.ENCODING)
+                q.reply_del(key, attachment=zk2c.deletion(stamp))
+                q.drop()
+
+        def read(contracts: Any) -> Any:
+            th = threading.Thread(target=play, daemon=True)
+            player.taken.clear()
+            th.start()
+            got = fr.get_reading(tool, key, timeout=5.0, contracts=contracts)
+            th.join(10)
+            return got
+
+        try:
+            time.sleep(0.3)
+            given = read([f.contract])
+            control = read(None)
+        finally:
+            owner_off()
+        out.append(("§15, the readers (freshness.get_reading, given the revisions the reader holds): plans/v03 read "
+                    "live from the owner's member snapshot; the stray reply_del never merged as a deletion "
+                    "(core 0.102 §4.2; review-bot on #1100, 2)",
+                    given.reply == "put" and given.snapshot,
+                    f"{given.reply}, snapshot {given.snapshot}"))
+        out.append(("§15, the readers, the control: without the owner's revision the reply_del is merged, the "
+                    "member read deleted, as the text says a reader that cannot read the owner's revision does",
+                    control.reply == "delete", f"{control.reply}"))
+    except Exception as e:  # noqa: BLE001 - a run that could not finish is a failure
+        out.append(("§15 step 3: the run finished", False, f"{type(e).__name__}: {e}"))
+    finally:
+        if player is not None:
+            player.close()
+        f.close()
+        tool.close()
+        helper.close()
+        r.close()
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.stray_live", description=__doc__.split("\n")[0])
     ap.parse_args(argv)
     failed = 0
-    for what, ok, detail in step1() + step2():
+    for what, ok, detail in step1() + step2() + step3():
         print(f"{'PASS' if ok else 'FAIL'} {what}" + (f": {detail}" if detail else ""), flush=True)
         failed += not ok
     return 1 if failed else 0

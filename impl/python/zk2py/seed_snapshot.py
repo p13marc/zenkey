@@ -424,6 +424,16 @@ class ByDescriptor:
         #: "<system>/<service>" -> each descriptor read, as a dict
         self.descriptors: dict[str, list[dict[str, Any]]] = {}
 
+    @classmethod
+    def of_canonical(cls, canonicals: list[dict[str, Any]]) -> "ByDescriptor":
+        """The revisions a reader holds as canonical forms (a bundle's, core
+        §9.5), each with the fingerprint of its JCS bytes."""
+        from types import SimpleNamespace
+
+        from . import jcs
+
+        return cls([SimpleNamespace(canonical=c, fingerprint=jcs.jcs_id(c)) for c in canonicals])
+
     def prepare(self, session: Any, selector: str) -> None:
         import json
 
@@ -432,6 +442,7 @@ class ByDescriptor:
         chunks = selector.split("/")
         if len(chunks) < 3 or chunks[0] != "zk2":
             return
+        read: dict[str, list[dict[str, Any]]] = {}
         for a in live.get_descriptor(session, f"zk2/{chunks[1]}/{chunks[2]}/@zk/instance/*"):
             if not a.ok:
                 continue
@@ -440,7 +451,14 @@ class ByDescriptor:
             except ValueError:
                 continue
             if isinstance(doc, dict) and isinstance(doc.get("service"), str):
-                self.descriptors.setdefault(doc["service"], []).append(doc)
+                read.setdefault(doc["service"], []).append(doc)
+        # Each read replaces what an earlier one held of the services it
+        # reached, so a reader that keeps one across its GETs holds the
+        # instances present now, never a gone one's descriptor; a concrete
+        # address that none answered for holds none
+        if "*" not in chunks[1] and "*" not in chunks[2]:
+            read.setdefault(f"{chunks[1]}/{chunks[2]}", [])
+        self.descriptors.update(read)
 
     def revision(self, key: str, run_width: int, run: int) -> Any:
         """The contract of the revision the owner's descriptor names for
