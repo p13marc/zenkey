@@ -353,7 +353,7 @@ fn judge(
         members(node, &mut chunks, &mut |chunks, seen| {
             let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
             let refs = match (events, refs.split_last()) {
-                (true, Some((_ulid, template))) => template,
+                (true, Some((_occurrence, template))) => template,
                 _ => &refs[..],
             };
             if r.template.matches(refs).is_some() {

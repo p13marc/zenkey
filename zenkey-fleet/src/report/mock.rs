@@ -50,7 +50,7 @@ pub struct GenPlanEntry {
     pub resource: String,
     pub kind: Kind,
     /// Base-relative. A member's concrete key; an event's prefix, below
-    /// which each occurrence gets a fresh ULID chunk (§2.6); an
+    /// which each occurrence gets its occurrence chunk (§2.6); an
     /// operation's template, every parameter `*`.
     pub key: String,
     /// The member's template values, unslugged.

@@ -1053,12 +1053,12 @@ impl<'a> Lens<'a> {
 }
 
 /// The resource chunks a template is matched against (§2.6): an event
-/// key's last chunk is the occurrence's ULID, which "a reader strips before
+/// key's last chunk is the occurrence chunk, which "a reader strips before
 /// resolving the template"; every other kind's chunks are the template's
 /// own (#702, which found event keys resolving to no resource here).
 pub fn template_chunks(kind: zenkey_model::grammar::KindToken, chunks: &[String]) -> &[String] {
     match (kind, chunks.split_last()) {
-        (zenkey_model::grammar::KindToken::Events, Some((_ulid, template))) => template,
+        (zenkey_model::grammar::KindToken::Events, Some((_occurrence, template))) => template,
         _ => chunks,
     }
 }
@@ -2046,10 +2046,10 @@ mod tests {
         assert_eq!(m.differs, ["priority", "express"]);
     }
 
-    /// An event key resolves to its template with its ULID chunk stripped
+    /// An event key resolves to its template with its occurrence chunk stripped
     /// (§2.6), through the lens and through `render_with` alike (#702).
     #[test]
-    fn an_event_key_resolves_without_its_ulid() {
+    fn an_event_key_resolves_without_its_occurrence_chunk() {
         let l = zenkey_model::contract::load_str(
             "[interface]\nname = \"m\"\nmajor = 1\n\
              [resources.\"link/{iface}\"]\nkind = \"event\"\ntype = { raw = \"text/plain\" }\n\
@@ -2065,7 +2065,7 @@ mod tests {
         let mut set = ContractSet::new();
         set.insert(rev.clone());
         let cat = catalog(&fp, None);
-        let key = "zk2/lab/m/m.v1/events/link/eth0/01jqz3m6v2b8d9e0f1g2h3j4k5";
+        let key = "zk2/lab/m/m.v1/events/link/eth0/002g0009";
         let r = Lens::new("", Some(&cat), &set)
             .resolve(key)
             .resolved

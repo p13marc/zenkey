@@ -6,6 +6,26 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — an event keyed by its run and seq, and the ULID refused (#980 C2c, C2d)
+
+Core 0.103: an owner keys each occurrence by the run and the seq it took,
+and writes §7.5's form 4, its time inside. A key that ends in a ULID is
+no zk2 key.
+
+| Before | Now | Notes |
+|---|---|---|
+| `mock owner`, `tape generate`: each event on a fresh ULID key, its record a mutation's | on its occurrence chunk's key, 8 or 12 characters, its payload an event with its time | the plan's note says "a key per event by its run and seq" |
+| `watch` on such an owner's event: `in band run r, seq s` | `at t, run r, seq s`, or `at time unknown, run r, seq s` | C2b's reading, now every event's |
+| `echo` on an event: its key and its record | a line more, `at t, run r, seq s`, its time under its owner's epoch where one is given | the table form and `--hex`; `--raw` and `--fmt` unchanged |
+| a key ending in a ULID: an events key, its time the ULID's | no zk2 key, read raw, and no event replay keeps it | core §1.2 |
+| `config set`'s request id, a fresh ULID | the same id, from `zenkey::call::request_id` | O7 takes any string |
+
+**Migration: a mixed fleet.** A `zenctl` built before C2b drops every
+occurrence an owner of core 0.103 writes: its grammar refuses the
+occurrence chunk's key, and its envelope refuses form 4 as `form`. Move
+the tools and the consumers before the owners. A `zenctl` of C2b reads
+both.
+
 ## Unreleased (`main`, zk2) — a GET's alarm attributed by its snapshot's run, and a stray `reply_del` read by the owner's revision (zk2py rounds 105, 106)
 
 Core 0.102 §4.2 and `alarms.v1` 0.14 §2.14 step 5.

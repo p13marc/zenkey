@@ -60,7 +60,7 @@ pub struct Subject {
     pub kind: Option<KindToken>,
     /// The data key, base-relative.
     pub key: Option<String>,
-    /// Its resource chunks, the ULID of an occurrence included.
+    /// Its resource chunks, an occurrence's chunk included.
     pub chunks: Vec<String>,
 }
 

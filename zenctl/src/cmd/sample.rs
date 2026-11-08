@@ -30,6 +30,33 @@ pub struct Line {
     /// `None` on a deletion, which carries nothing to decode (#115).
     pub checked: Option<(PayloadRendering, Conformance)>,
     pub attachment: Option<PayloadRendering>,
+    /// An event's time and stamp (core §7.5's form 4, observer §7.3), as
+    /// `t, run r, seq s`: its time under its owner's epoch where the lens
+    /// gives one. `None` for every sample that is no event.
+    pub occurred: Option<String>,
+}
+
+/// An event's time and its key's stamp, for a person (observer §7.3):
+/// `None` for a sample that is no event.
+fn occurred(
+    key: &str,
+    encoding: Option<&str>,
+    bytes: &[u8],
+    lens: &zenkey_fleet::Lens<'_>,
+) -> Option<String> {
+    let time = zenkey_fleet::model::occurrence::event_time(key, encoding, bytes)?;
+    // The zk2 key from its first `zk2` chunk that parses, a namespace in
+    // front or none (core §1.1).
+    let parsed = std::iter::once(0)
+        .chain(key.match_indices('/').map(|(i, _)| i + 1))
+        .filter(|&i| key[i..].starts_with("zk2/"))
+        .find_map(|i| zenkey_model::grammar::parse(&key[i..]).ok())?;
+    let zenkey_model::grammar::ZkKey::Data { addr, resource, .. } = parsed else {
+        return None;
+    };
+    let stamp = zenkey_model::chunk::occurrence(resource.last()?)?;
+    let epoch = lens.epoch_of(&addr).given();
+    Some(zenkey_fleet::model::occurrence::words(time, stamp, epoch))
 }
 
 /// What one payload is, for [`Line::of`].
@@ -147,6 +174,7 @@ impl Line {
                 identity: lens.identity(key),
                 checked,
                 attachment: None,
+                occurred: occurred(key, encoding, &bytes, lens),
                 key: key.to_owned(),
                 encoding: encoding.map(str::to_owned),
                 bytes,
@@ -157,6 +185,7 @@ impl Line {
                 identity: lens.identity(key),
                 checked: None,
                 attachment: None,
+                occurred: None,
                 key: key.to_owned(),
                 encoding: encoding.map(str::to_owned),
                 bytes,
@@ -173,6 +202,7 @@ impl Line {
             identity: c.identity,
             checked: Some((c.rendering, c.conformance)),
             attachment,
+            occurred: occurred(key, encoding, &bytes, lens),
             key: key.to_owned(),
             encoding: encoding.map(str::to_owned),
             bytes,

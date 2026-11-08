@@ -4,6 +4,23 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — an event keyed by its run and seq, and the ULID refused (#980 C2c, C2d)
+
+Core 0.103: an owner keys each occurrence by the run and the seq it took,
+and writes §7.5's form 4, its time inside. A key that ends in a ULID is
+no zk2 key.
+
+| Before | Now | Notes |
+|---|---|---|
+| a key ending in a ULID: an event key, its replay retention judged by the ULID's time | no zk2 key: the tree shows it raw, and a replay neither judges nor resolves it | core §1.2 |
+| an event replay judged by the ULID where the key ended in one | by its event's time alone, under its owner's epoch; an unknown time, or an epoch only assumed, is never counted older | core §2.6 |
+| the Config tool's idempotency key, a fresh ULID | the same, from `zenkey::call::request_id` | |
+
+**Migration: a mixed fleet.** A `zengui` built before C2b drops every
+occurrence an owner of core 0.103 writes: its grammar refuses the key,
+and its envelope refuses form 4 as `form`. Move the tools and the
+consumers before the owners.
+
 ## Unreleased (`main`, zk2) — a value dated and bounded, a replay under `--catalog` (#990 V3, V4)
 
 | Before | Now | Notes |

@@ -6,7 +6,7 @@
 //! deployment's word, to implement every contract in hand (core R7). A
 //! **scope** is one selector per resource under each address: a concrete
 //! resource's exact key, and a template's key with every parameter a
-//! wildcard, an event's ULID chunk too. Each interface in hand whose
+//! wildcard, an event's occurrence chunk too. Each interface in hand whose
 //! contract uses `freshness.v2` and has a collection adds its heartbeat's
 //! exact key, `…/freshness.v2/stream/heartbeat/<iface>`; a `freshness.v2`
 //! contract in hand adds no scope of its own. Each subscription then
@@ -431,10 +431,10 @@ fn shorter(a: Option<Duration>, b: Option<Duration>) -> Option<Duration> {
 
 /// The selector of `r` under `addr`, base-relative: its exact key for a
 /// concrete resource, and for a template its key with each parameter a
-/// wildcard (`*`, a rest parameter `**`), an event's ULID chunk too. Built
+/// wildcard (`*`, a rest parameter `**`), an event's occurrence chunk too. Built
 /// from the grammar's chunks, never `format!`, as
 /// [`zenkey_model::grammar::kind_selector`] is, then canonized (a rest
-/// parameter before an event's ULID).
+/// parameter before an event's occurrence chunk).
 fn resource_selector(addr: &Addr, iface: &IfaceId, r: &Resource) -> Result<String, Refusal> {
     let iface = iface.to_string();
     let mut chunks: Vec<&str> = vec![

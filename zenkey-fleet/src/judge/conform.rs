@@ -319,11 +319,11 @@ fn period_words(d: std::time::Duration) -> String {
     }
 }
 
-/// An event's member is its key without the ULID chunk (§2.6, §2.7); any
+/// An event's member is its key without its occurrence chunk (§2.6, §2.7); any
 /// other key is its own member.
 fn member_of(kind: Kind, key: &str) -> &str {
     match (kind, key.rsplit_once('/')) {
-        (Kind::Event, Some((member, _ulid))) => member,
+        (Kind::Event, Some((member, _occurrence))) => member,
         _ => key,
     }
 }
@@ -5209,7 +5209,7 @@ mod tests {
             }
         });
         (
-            format!("zk2/lab/al/al.v1/events/alarms/{src}/01hzzzzzzzzzzzzzzzzzzzzz{n:02}"),
+            format!("zk2/lab/al/al.v1/events/alarms/{src}/{n:08}"),
             Arrival {
                 at: Duration::from_secs_f64(at),
                 stamp,
@@ -5329,7 +5329,7 @@ mod tests {
         // A best-effort event: never lossless, named, however long.
         let logs_once = window(
             vec![(
-                "zk2/lab/al/al.v1/events/logs/a/01hzzzzzzzzzzzzzzzzzzzzz01".to_owned(),
+                "zk2/lab/al/al.v1/events/logs/a/00000001".to_owned(),
                 Arrival {
                     at: Duration::from_secs(1),
                     stamp: None,

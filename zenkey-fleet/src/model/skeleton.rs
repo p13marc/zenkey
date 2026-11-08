@@ -29,7 +29,7 @@
 //! **Where a resource is placed.** Each `(address, interface, revision)` a
 //! descriptor names becomes `<namespace>/zk2/<system>/<service>/<iface>/
 //! <token>/<template…>`; an event's leaf is one more chunk, the
-//! occurrence's, an occurrence chunk or a ULID (core 0.101 §1.2), kept
+//! occurrence's, its occurrence chunk (core §1.2), kept
 //! symbolic as `{occurrence}` (§2.6); an operation
 //! is a declared leaf whose [`DeclRef::kind`] says so, since a frontend
 //! offers no "watch" on a queryable. An interface a token names and no

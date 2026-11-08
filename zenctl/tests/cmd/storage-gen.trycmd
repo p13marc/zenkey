@@ -194,7 +194,7 @@ Error: --deployment: cannot read tests/cmd/fixtures/no-such-deployment.toml: No 
 
 `--enrollment` reads the enrollment `acl gen` reads, and the contracts its
 services implement: a **union storage** per event resource (spec §2.6), keyed
-`zk2/*/*/<iface>/events/<template>/<ulid>`, its lifespan the contract's
+`zk2/*/*/<iface>/events/<template>/<occurrence>`, its lifespan the contract's
 `retention`. The tcgui pilot's backends implement three interfaces, and only
 `tc.netem.v1` declares an event; nothing is planned on any owner's state (S4).
 With no `[events]` volume named, the union storage uses zenoh's memory backend,

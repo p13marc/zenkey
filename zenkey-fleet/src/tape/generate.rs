@@ -5,8 +5,8 @@
 //! publishes every stream, state and event resource of each interface
 //! through the runtime's writers, which give each sample the contract's
 //! QoS and `Encoding`, each value its in-band stamp under the instance's
-//! run (S1, core §4.3; [`GenSpec::run_store`]) and each event a fresh ULID
-//! key (§2.6). Every operation is served over its template,
+//! run (S1, core §4.3; [`GenSpec::run_store`]) and each event its own key,
+//! ending in its run and seq (§2.6). Every operation is served over its template,
 //! answering each call with one synthesized `response` (and its `summary`,
 //! when `replies = "many"` declares one).
 //!

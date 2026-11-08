@@ -5309,9 +5309,7 @@ async fn storage_gen_derives_a_union_storage_that_takes_an_owners_events() {
     // probe publisher on the event's keys, rather than put until heard.
     let probe = bus
         .owners
-        .declare_publisher(
-            "zk2/h-3fa9c2d41b7e/tc/tc.netem.v1/events/applied/01hzzzzzzzzzzzzzzzzzzzzzzz",
-        )
+        .declare_publisher("zk2/h-3fa9c2d41b7e/tc/tc.netem.v1/events/applied/zzzzzzzz")
         .await
         .expect("a probe publisher");
     let deadline = Instant::now() + SETTLE;
@@ -5869,12 +5867,15 @@ async fn check_conform_judges_an_events_rate_and_population() {
     bus.services.push(b.start().await.expect("start"));
     let session = bus.owners.clone();
     bus.keep(Task(tokio::spawn(async move {
+        // Each occurrence on its own key, an occurrence chunk's (core §1.2):
+        // 8 Crockford digits under a 16-bit run.
+        let mut seq = 0u64;
         loop {
             for src in ["a", "b", "c"] {
-                let ulid = zenkey::writer::ulid(std::time::SystemTime::now());
+                seq += 1;
                 let _ = session
                     .put(
-                        format!("zk2/host-a/al/al.v1/events/alarms/{src}/{ulid}"),
+                        format!("zk2/host-a/al/al.v1/events/alarms/{src}/{seq:08}"),
                         "alarm",
                     )
                     .encoding(zenoh::bytes::Encoding::TEXT_PLAIN)
@@ -6838,9 +6839,7 @@ async fn complete_window_then_an_absent_owner(namespace: Option<&str>) {
     // publisher on the event's keys (its presence read comes before it).
     let probe = bus
         .owners
-        .declare_publisher(
-            "zk2/host-a/pulse/pulse.v1/events/pulses/probe/01hzzzzzzzzzzzzzzzzzzzzzzz",
-        )
+        .declare_publisher("zk2/host-a/pulse/pulse.v1/events/pulses/probe/zzzzzzzz")
         .await
         .expect("a probe publisher");
     let matching = |want: bool| {
@@ -7014,9 +7013,7 @@ async fn check_conform_reads_a_window_unobservable_when_its_own_transport_closes
     // publisher on the event's keys.
     let probe = bus
         .owners
-        .declare_publisher(
-            "zk2/host-a/pulse/pulse.v1/events/pulses/probe/01hzzzzzzzzzzzzzzzzzzzzzzz",
-        )
+        .declare_publisher("zk2/host-a/pulse/pulse.v1/events/pulses/probe/zzzzzzzz")
         .await
         .expect("a probe publisher");
     let deadline = Instant::now() + SETTLE;

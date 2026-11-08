@@ -1,14 +1,12 @@
-//! An event's occurrence as a tool reads it (core 0.101 §1.2, §2.6, §7.5;
-//! observer 0.30 §7.3; #980's C2b): its time, and how a tool shows it.
+//! An event's occurrence as a tool reads it (core §1.2, §2.6, §7.5;
+//! observer §7.3; #980's C2b, C2c): its time, and how a tool shows it.
 //!
-//! An events key's last chunk is an occurrence chunk or a ULID, and core
-//! 0.101 admits both while owners move to the first. Under an occurrence
-//! chunk the put's payload is an event (form 4), which carries the
-//! occurrence's time from the deployment epoch, known or unknown, and whose
-//! stamp is the chunk's. Under a ULID the time is the ULID's 48 bits of
-//! milliseconds. A reader strips either chunk before resolving the template
-//! (the lens, the skeleton, the budget's member), which reads the last chunk
-//! whatever it is; this module reads the time.
+//! An events key's last chunk is an occurrence chunk, and a key that ends
+//! in anything else, a ULID among them, is no zk2 key (core 0.103). The
+//! put's payload is an event (form 4), which carries the occurrence's time
+//! from the deployment epoch, known or unknown, and whose stamp is the
+//! chunk's. A reader strips the chunk before resolving the template (the
+//! lens, the skeleton, the budget's member); this module reads the time.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -53,27 +51,21 @@ pub fn instant(time: Time, epoch: Option<i64>) -> Option<SystemTime> {
     UNIX_EPOCH.checked_add(Duration::from_millis(ms))
 }
 
-/// An occurrence's time, from its key and its payload: an occurrence
-/// chunk's event's under `epoch`, or a ULID's.
+/// An occurrence's time, from its key and its payload: its event's under
+/// `epoch`.
 pub fn time_of(
     key: &str,
     encoding: Option<&str>,
     bytes: &[u8],
     epoch: Option<i64>,
 ) -> OccurrenceTime {
-    let Some(chunk) = key.rsplit('/').next() else {
-        return OccurrenceTime::Unread;
-    };
-    if zenkey_model::chunk::is_occurrence(chunk) {
-        return match event_time(key, encoding, bytes) {
-            Some(t) => instant(t, epoch).map_or(OccurrenceTime::Unknown, OccurrenceTime::At),
-            None => OccurrenceTime::Unread,
-        };
+    match event_time(key, encoding, bytes) {
+        Some(t) => instant(t, epoch).map_or(OccurrenceTime::Unknown, OccurrenceTime::At),
+        None => OccurrenceTime::Unread,
     }
-    zenkey::writer::ulid_time(chunk).map_or(OccurrenceTime::Unread, OccurrenceTime::At)
 }
 
-/// An event's time and stamp, for a person (observer 0.30 §7.3): `t, run
+/// An event's time and stamp, for a person (observer §7.3): `t, run
 /// r, seq s`, its time in RFC 3339 under `epoch`, or `time unknown` for an
 /// unknown clock, or its seconds and milliseconds from the deployment
 /// epoch where none is in hand.
@@ -118,11 +110,11 @@ mod tests {
         (format!("{KEY}/{}", e.chunk()), e.write().unwrap())
     }
 
-    /// An occurrence chunk's time is its event's under the epoch; an
-    /// unknown time, or one no epoch dates, is never judged; a ULID's is
-    /// its own; a mutation on an occurrence chunk's key has none.
+    /// An occurrence's time is its event's under the epoch; an unknown
+    /// time, or one no epoch dates, is never judged; a key that ends in a
+    /// ULID is no event key, and a mutation on an event's key has none.
     #[test]
-    fn an_occurrences_time_is_its_events_or_its_ulids() {
+    fn an_occurrences_time_is_its_events() {
         let (key, bytes) = event(Time::Known { s: 3600, ms: 250 });
         let enc = Some(wire::ENCODING);
         let at = UNIX_EPOCH + Duration::from_millis(1_767_225_600_000 + 3_600_250);
@@ -135,16 +127,15 @@ mod tests {
         let t = time_of(&unknown, enc, &ubytes, Some(0));
         assert_eq!(t, OccurrenceTime::Unknown);
         assert!(!t.before(SystemTime::now()), "never judged");
-        let ulid_at = UNIX_EPOCH + Duration::from_millis(1_700_000_000_123);
-        let ulid = zenkey::writer::ulid(ulid_at);
         assert_eq!(
             time_of(
-                &format!("{KEY}/{ulid}"),
+                &format!("{KEY}/01j9zk6q6x5m2f4a8c0d3e7b9h"),
                 enc,
-                b"\0\0\x01\0\0\x07{}",
+                &bytes,
                 Some(0)
             ),
-            OccurrenceTime::At(ulid_at)
+            OccurrenceTime::Unread,
+            "a ULID's key, no zk2 key since core 0.103"
         );
         let mutation = wire::Envelope::mutation(
             Tag::NONE,
@@ -165,7 +156,7 @@ mod tests {
         );
     }
 
-    /// `t, run r, seq s` (observer 0.30 §7.3).
+    /// `t, run r, seq s` (observer §7.3).
     #[test]
     fn an_event_is_shown_by_its_time_and_its_stamp() {
         let stamp = Stamp {

@@ -393,8 +393,9 @@ impl Reads {
 /// deployment's word, to implement every contract in hand (core R7), as
 /// `telemetry --across-face` takes it. The scope is one selector per
 /// resource under each address, a concrete resource's exact key and a
-/// template's key with every parameter a wildcard, an event's ULID chunk
-/// too, and each interface's `freshness.v2` heartbeat by its exact key.
+/// template's key with every parameter a wildcard, an event's occurrence
+/// chunk too, and each interface's `freshness.v2` heartbeat by its exact
+/// key.
 ///
 /// With `--face-policy` and `--face` (#988 L4, #990 V1), the scope is what
 /// the face's plan lets cross (observer §7.5), and the face's far side
@@ -1232,9 +1233,9 @@ mod tests {
     /// Across a face (core §8.5, observer §7.5; #980 C1b), the scope is one
     /// selector per resource the contracts give under the address: a
     /// concrete resource's exact key, a template's key with its parameter a
-    /// wildcard, an event's ULID chunk too, and no operation. The default
-    /// scope keeps the ambient ones, `--explicit` the explicit ones beside
-    /// them, and never `<ns>/zk2/**`.
+    /// wildcard, an event's occurrence chunk too, and no operation. The
+    /// default scope keeps the ambient ones, `--explicit` the explicit ones
+    /// beside them, and never `<ns>/zk2/**`.
     #[test]
     fn across_a_face_the_scope_is_the_contracts_resources() {
         let (_dir, set) = hop_contracts();

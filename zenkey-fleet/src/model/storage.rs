@@ -8,7 +8,7 @@
 //! the one `acl gen` reads (spec §11.1) — names the services and the
 //! interfaces they implement, and with the contracts it is enough to
 //! derive the **union storages** the core describes (§2.6): one per event
-//! resource, keyed `zk2/*/*/<iface>/events/<template>/<ulid>`, its
+//! resource, keyed `zk2/*/*/<iface>/events/<template>/<occurrence>`, its
 //! `garbage_collection.lifespan` the contract's `retention`. The file's
 //! `[events]` block says which volume they use; without one they use
 //! zenoh's memory backend, and the plan says so.
@@ -635,8 +635,7 @@ fn human(secs: u64) -> String {
 /// The union storages an enrollment's services call for (spec §2.6): one
 /// per event resource of every interface they implement, keyed
 /// `zk2/*/*/<iface>/events/<template>/<occurrence>` under `base`, its last
-/// chunk a wildcard, so it holds a ULID's occurrences and an occurrence
-/// chunk's alike (core 0.101 §1.2), its lifespan
+/// chunk a wildcard (core §1.2), its lifespan
 /// the contract's `retention` (the longest, where the revisions given
 /// differ). What could not be planned is listed, and so are the archives,
 /// which never are (§4.4).
@@ -726,7 +725,7 @@ fn derive_events(
                     }
                 }
             }
-            // The occurrence's own ULID chunk (§2.6).
+            // The occurrence's own chunk (§2.6).
             chunks.push("*".into());
             let joined = crate::model::namespace::join(base, chunks.join("/"));
             let key_expr = zenoh::key_expr::OwnedKeyExpr::autocanonize(joined.clone())
@@ -1839,7 +1838,7 @@ mod tests {
     }
 
     /// A union storage per event resource (§2.6): the template's
-    /// parameters and its ULID chunk wildcarded, a rest parameter `**`
+    /// parameters and its occurrence chunk wildcarded, a rest parameter `**`
     /// (canonical), the lifespan the contract's retention, the providers
     /// named — and nothing on a state resource (S4). An interface without
     /// events, one whose contract was not given and the archive are each

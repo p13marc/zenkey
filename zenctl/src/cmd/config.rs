@@ -205,7 +205,7 @@ fn claimed(claim: &ClaimArgs) -> zenkey::CallMetadata {
             claim
                 .request_id
                 .clone()
-                .unwrap_or_else(|| zenkey::writer::ulid(SystemTime::now())),
+                .unwrap_or_else(|| zenkey::call::request_id(SystemTime::now())),
         ),
     }
 }

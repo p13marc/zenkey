@@ -32,10 +32,10 @@ pub struct WatchSample {
     /// absent when it carried no envelope, as an `@stream` sample does not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inband: Option<InbandStamp>,
-    /// An event's time (core 0.101 §7.5's form 4; observer 0.30 §7.3), as
+    /// An event's time (core §7.5's form 4; observer §7.3), as
     /// `crate::model::occurrence::words` spells it with its stamp: `t, run
     /// r, seq s`, `time unknown` for an unknown clock. Absent for every
-    /// sample that is no event, an occurrence on a ULID key among them.
+    /// sample that is no event.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub occurred: Option<String>,
     /// The sample's Zenoh timestamp and whose clock issued it; absent when
