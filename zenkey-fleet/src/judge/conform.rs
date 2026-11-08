@@ -4176,6 +4176,7 @@ mod tests {
     fn sample(key: &str, conformance: Conformance, qos: bool, clock: Option<&str>) -> WatchSample {
         let rev = revision();
         WatchSample {
+            occurred: None,
             provider: "lab/m".into(),
             key: key.into(),
             values: BTreeMap::new(),

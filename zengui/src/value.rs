@@ -417,7 +417,9 @@ pub fn plan(key: &str, identity: Option<&Resolution>) -> ReadPlan {
 
 /// An event key's occurrence time, from its last chunk (§2.6): a ULID's
 /// first ten characters are its creation time in milliseconds, in
-/// Crockford's base32. `None` when the chunk is no ULID.
+/// Crockford's base32. `None` when the chunk is no ULID: an occurrence
+/// chunk's time is its event's (core 0.101 §7.5's form 4), which
+/// `zenkey_fleet::model::occurrence::time_of` reads from the payload.
 pub fn occurrence_time(key: &str) -> Option<std::time::SystemTime> {
     const ALPHABET: &[u8] = b"0123456789abcdefghjkmnpqrstvwxyz";
     let chunk = key.rsplit('/').next()?;

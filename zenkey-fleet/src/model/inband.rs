@@ -232,6 +232,14 @@ pub fn payload<'a>(key: &str, encoding: Option<&str>, bytes: &'a [u8]) -> Payloa
             header: e.stamp,
             tag: e.tag,
         },
+        // An event (core 0.101 §7.5's form 4; #980's C2b): its record, as a
+        // mutation's, its stamp its key's; its time is
+        // `crate::model::occurrence`'s to read.
+        Reading::Event(e) => Payload::Record {
+            record: e.record,
+            stamp: e.stamp,
+            tag: e.tag,
+        },
         Reading::Refused(r) => Payload::Refused(r),
     }
 }

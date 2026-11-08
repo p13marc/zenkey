@@ -636,7 +636,11 @@ pub async fn watch_in(
                         epoch,
                     ),
                 });
-                let sample = watch_sample(
+                let occurred = d
+                    .occurred
+                    .zip(d.inband)
+                    .map(|(t, s)| crate::model::occurrence::words(t, s, epoch.epoch.given()));
+                let mut sample = watch_sample(
                     &rev,
                     declared.as_ref(),
                     &d.provider,
@@ -645,6 +649,7 @@ pub async fn watch_in(
                     d.inband,
                     rendered.map(|p| (p, None)),
                 );
+                sample.occurred = occurred;
                 if tx.try_send(sample).is_err() {
                     lag.fetch_add(1, Ordering::Relaxed);
                 }
@@ -711,6 +716,7 @@ fn watch_sample(
     WatchSample {
         provider: provider.to_string(),
         inband: inband.map(InbandStamp::from),
+        occurred: None,
         timestamp: sample.timestamp().map(stamp),
         qos_mismatch: declared.and_then(|declared| qos_mismatch(declared, &observed)),
         key,

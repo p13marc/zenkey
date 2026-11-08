@@ -232,9 +232,21 @@ pub(crate) fn replies(
             continue;
         };
         if let Some(horizon) = horizon {
-            let at = crate::value::occurrence_time(&a.key)
-                .or_else(|| a.timestamp.map(|t| t.get_time().to_system_time()));
-            if at.is_some_and(|at| at < horizon) {
+            // An occurrence's time (core 0.101 §2.6): its event's under its
+            // owner's epoch, or its ULID's; an unknown one is never judged,
+            // and a key with neither falls back to its Zenoh timestamp.
+            use zenkey_fleet::model::occurrence::{OccurrenceTime, time_of};
+            let epoch = owner_of(&over, &a.key)
+                .and_then(|addr| addr.parse().ok())
+                .and_then(|addr| over.epoch_of(&addr).given());
+            let at = match time_of(&a.key, a.encoding.as_deref(), &payload.to_bytes(), epoch) {
+                OccurrenceTime::Unread => a
+                    .timestamp
+                    .map(|t| OccurrenceTime::At(t.get_time().to_system_time()))
+                    .unwrap_or(OccurrenceTime::Unread),
+                t => t,
+            };
+            if at.before(horizon) {
                 older += 1;
                 continue;
             }

@@ -537,16 +537,18 @@ pub fn confirmation_lines(c: &zenkey_fleet::report::WatchConfirmation) -> Vec<St
 }
 
 /// A watched sample, for a person: its key and provider, then its
-/// rendering.
+/// rendering. An event (core 0.101 §7.5's form 4) shows its time beside
+/// its key's stamp, `at t, run r, seq s` (observer 0.30 §7.3).
 pub fn sample_lines(s: &WatchSample) -> Vec<String> {
     let mut lines = vec![format!(
         "{}  [{}]{}{}",
         s.key,
         s.provider,
-        s.inband
-            .as_ref()
-            .map(|i| format!("  in band {i}"))
-            .unwrap_or_default(),
+        match (&s.occurred, &s.inband) {
+            (Some(o), _) => format!("  at {o}"),
+            (None, Some(i)) => format!("  in band {i}"),
+            (None, None) => String::new(),
+        },
         s.timestamp
             .as_ref()
             .map(|t| format!("  {}", stamp_text(t)))

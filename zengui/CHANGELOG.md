@@ -34,6 +34,13 @@ JSON, CBOR or protobuf envelope.
 | Send: a value under an `Encoding` other than `zenoh/bytes` decoded as its type | undecodable, "no call form under …", no mark | core §5.1: an answer all the same |
 | Send and the Config tool: a "malformed envelope" card | gone: no reply has read so since core 0.95 | |
 
+## Unreleased (`main`, zk2) — an event's key from its run and seq, read (#980 C2b)
+
+| Before | Now | Notes |
+|---|---|---|
+| an event key ending in an occurrence chunk: no zk2 key, and its put undecodable | read: its record a mutation's, its stamp its key's | core 0.101 §1.2, §7.5's form 4; owners still write ULIDs until C2c |
+| an event replay's retention judged by the key's ULID, else the Zenoh timestamp | by the occurrence's time, its event's under its owner's epoch where its key ends in an occurrence chunk; an unknown time is never counted older | core §2.6 |
+
 ## Unreleased (`main`, zk2) — the omission rule in the tree's seed (#977 E4)
 
 | Before | Now | Notes |

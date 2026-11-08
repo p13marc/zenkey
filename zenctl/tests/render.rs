@@ -4172,6 +4172,7 @@ fn a_watch_keeps_r6_discards_apart_from_its_lag() {
         key: "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0".into(),
         values: Default::default(),
         inband: None,
+        occurred: None,
         timestamp: None,
         event: WatchEvent::Put {
             payload: Box::new(actfx::structural()),
@@ -4210,6 +4211,17 @@ fn a_watch_keeps_r6_discards_apart_from_its_lag() {
         zenctl::render::sample_lines(&stamped)[0],
         "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0  [host-a/tc]  in band run 0003, \
          seq 41"
+    );
+    // An event (core 0.101 §7.5's form 4): its time beside its key's stamp
+    // (observer 0.30 §7.3).
+    let event = WatchSample {
+        occurred: Some("time unknown, run 0003, seq 41".into()),
+        ..stamped.clone()
+    };
+    assert_eq!(
+        zenctl::render::sample_lines(&event)[0],
+        "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0  [host-a/tc]  at time unknown, \
+         run 0003, seq 41"
     );
     // A sample that failed its type, off its declared QoS: each its own line,
     // the violation and the axis that differs named.
