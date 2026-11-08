@@ -4,6 +4,15 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — a quiet collection's heartbeats read (#1113)
+
+No rule changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| FRESHNESS · THIS WINDOW'S VIEW: made at an owner's first collection member the lens resolved, a heartbeat before it dropped unseen | made at the owner's first member the lens resolves or at its first heartbeat, through the revision the lens reads that heartbeat's body with; a member heard before its key resolved (a seed that outran the presence read) held and taken in, so a collection whose owner only heartbeats reads vouched | at most 4,096 members held before their view, the earliest forgotten first and counted; shots scene `inspector-freshness-quiet` |
+| — | a heartbeat no revision in hand reads: counted "not read", and the section says "its heartbeats are heard, not read yet: <why>", the lens's word | never dropped (review-bot on #1112) |
+
 ## Unreleased (`main`, zk2) — a heartbeat's collections, vouched, lost or diverged (#990 V6)
 
 No rule changed.

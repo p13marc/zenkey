@@ -163,9 +163,14 @@ fn freshness_section<'a>(owner: &'a crate::freshness::Owner, sp: Spacing) -> Col
         }
     )));
     let Some(last) = &owner.last else {
-        col = col.push(kit::muted(
-            "no heartbeat read yet: its members are heard, its owner's word on them is not",
-        ));
+        col = col.push(kit::muted(match &owner.waiting {
+            // Heartbeats heard, no revision in hand to read them with
+            // (#1113): counted above, never dropped.
+            Some(why) => format!("its heartbeats are heard, not read yet: {why}"),
+            None => "no heartbeat read yet: its members are heard, its owner's word on them \
+                     is not"
+                .to_owned(),
+        }));
         return col;
     };
     col = col.push(kit::caption(format!(
