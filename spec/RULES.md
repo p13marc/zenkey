@@ -51,13 +51,13 @@ The owner, consumer and caller sections each point to them.
 
 | Role | Rules |
 |---|---|
-| [Owner](#owner) | 83 |
-| [Consumer](#consumer) | 28 |
+| [Owner](#owner) | 85 |
+| [Consumer](#consumer) | 31 |
 | [Caller](#caller) | 17 |
 | [Deployment](#deployment) | 18 |
 | [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 83, 27 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 67 |
-| Every rule, once | 268 |
+| Every rule, once | 273 |
 | [Rule ids](#rule-ids) | 85 |
 
 ## Owner
@@ -96,6 +96,13 @@ The owner, consumer and caller sections each point to them.
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§2.4](core.md#24-qos) | An owner MUST publish with it [its contract's QoS]. *Except:* One [an owner] that does not [opt into `reliability`], or whose binding offers no such API, MAY publish reliable, zenoh's default. | `[Sc: types.md §3]` |
+
+### [core §2.6 Events](core.md#26-events)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§2.6](core.md#26-events) | An owner MUST publish each occurrence once, with a one-shot put, on `…/<iface>/events/<template>/<occurrence>`, its last chunk the occurrence chunk (§1.2) of the run and the seq the occurrence took (§4.3). | `[F: keys.json; envelope/vectors.json]` `[Sc: state.md §8]` |
+| [§2.6](core.md#26-events) | **One key per occurrence.** … The owner MUST write the put's payload as an event (§7.5's form 4), with the occurrence's time. | `[F: keys.json; envelope/vectors.json]` `[Sc: state.md §8]` |
 
 ### [core §2.7 The population budget](core.md#27-the-population-budget)
 
@@ -264,6 +271,14 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 [§3.5](observer.md#35-a-session-cut-off), [§3.6](observer.md#36-absence),
 [§3.7](observer.md#37-the-watch-session) and
 [§3.9](observer.md#39-what-a-complete-read-covers).
+
+### [core §2.6 Events](core.md#26-events)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§2.6](core.md#26-events) | A consumer MUST keep a replayed occurrence whose time (§7.5's form 4) is within the retention, and drop one whose time is beyond it. | `[Sc: state.md §8]` |
+| [§2.6](core.md#26-events) | **The filter.** … A consumer MUST NOT judge an unknown time within the retention or beyond it: the storage's `_time` bound alone admitted that occurrence. | `[Sc: state.md §8]` |
+| [§2.6](core.md#26-events) | A consumer MUST deliver a replay in the order of the occurrences' times, then their seqs within one run. | `[Sc: state.md §8]` |
 
 ### [core §3.2 Binding rules](core.md#32-binding-rules)
 

@@ -57,19 +57,9 @@
       "key": "zk2/h-3fa9c2d41b7e/snmp/zs.snmp.v1/@state/devices/core-sw1/ifaces/x-_x45_x54_x480"
     },
     {
-      "expect": {
-        "form": "data",
-        "iface": "modem.v3",
-        "occurrence": null,
-        "resource": [
-          "oper_change",
-          "01j9zk6q6x5m2f4a8c0d3e7b9h"
-        ],
-        "service": "rf0",
-        "system": "h-3fa9c2d41b7e",
-        "token": "events"
-      },
-      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/01j9zk6q6x5m2f4a8c0d3e7b9h"
+      "expect": null,
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/01j9zk6q6x5m2f4a8c0d3e7b9h",
+      "note": "a ULID chunk, 26 characters: no zk2 key since core 0.103, which refuses the ULID"
     },
     {
       "expect": {
@@ -233,19 +223,9 @@
       "key": "zk2/s/svc/blob.v1/@blob/a"
     },
     {
-      "expect": {
-        "form": "data",
-        "iface": "log.v1",
-        "occurrence": null,
-        "resource": [
-          "applied",
-          "01hzx3k5n2m4p6q8r0s2t4v6w8"
-        ],
-        "service": "svc",
-        "system": "s",
-        "token": "events"
-      },
-      "key": "zk2/s/svc/log.v1/events/applied/01hzx3k5n2m4p6q8r0s2t4v6w8"
+      "expect": null,
+      "key": "zk2/s/svc/log.v1/events/applied/01hzx3k5n2m4p6q8r0s2t4v6w8",
+      "note": "a ULID chunk, 26 characters: no zk2 key since core 0.103, which refuses the ULID"
     },
     {
       "expect": null,
@@ -271,19 +251,9 @@
       "key": "zk2/s/svc/@zk/member/media.v1/front/3fa9c2d41b7e0012"
     },
     {
-      "expect": {
-        "form": "data",
-        "iface": "log.v1",
-        "occurrence": null,
-        "resource": [
-          "applied",
-          "8zzzzzzzzzzzzzzzzzzzzzzzzz"
-        ],
-        "service": "svc",
-        "system": "s",
-        "token": "events"
-      },
-      "key": "zk2/s/svc/log.v1/events/applied/8zzzzzzzzzzzzzzzzzzzzzzzzz"
+      "expect": null,
+      "key": "zk2/s/svc/log.v1/events/applied/8zzzzzzzzzzzzzzzzzzzzzzzzz",
+      "note": "a ULID chunk, 26 characters: no zk2 key since core 0.103, which refuses the ULID"
     },
     {
       "expect": {
@@ -435,15 +405,15 @@
       "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002i0009"
     },
     {
-      "note": "9 characters: neither an occurrence chunk nor a ULID",
+      "note": "9 characters: no occurrence chunk",
       "expect": null,
       "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g00090"
     },
     {
-      "note": "7 characters: neither an occurrence chunk nor a ULID",
+      "note": "7 characters: no occurrence chunk",
       "expect": null,
       "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g000"
     }
   ],
-  "description": "zk2 keys (core.md §1.1, §1.2). `expect` is the parse, or null when the key is refused. A key is parsed without a contract, so only the lexical rules apply: a resource chunk is any plain chunk. Every accepted key must build back to exactly the same string. An events key's parse adds `occurrence`: its last chunk's stamp as an occurrence chunk, `{run_width, run, seq}` (core §1.2: a run and a seq in Crockford's base32 in lowercase, 8 characters for a 16-bit run and 12 for a 32-bit one, the first of 12 `0` or `1`), or `null` for a ULID chunk, which this version admits beside it."
+  "description": "zk2 keys (core.md §1.1, §1.2). `expect` is the parse, or null when the key is refused. A key is parsed without a contract, so only the lexical rules apply: a resource chunk is any plain chunk. Every accepted key must build back to exactly the same string. An events key's parse adds `occurrence`: its last chunk's stamp as an occurrence chunk, `{run_width, run, seq}` (core §1.2: a run and a seq in Crockford's base32 in lowercase, 8 characters for a 16-bit run and 12 for a 32-bit one, the first of 12 `0` or `1`). An events key whose last chunk is no occurrence chunk, a ULID's among them, is refused."
 }

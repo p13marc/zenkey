@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.102** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.103** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -131,9 +131,9 @@ to, if any, is resolution's question (§2.2). `[F: keys.json]`
 - **A member value** is a plain chunk: the slugged value of the epoch
   parameter. `<epoch>` is an instance id. `[F: keys.json]`
 - **An occurrence chunk** (events, §2.6) is a run and a seq (§4.3), the
-  run's bits then the seq's 24, in Crockford's base32 in lowercase, the
-  ULID's alphabet (below). Its characters are most significant first, and
-  zero-filled at the top.
+  run's bits then the seq's 24, in Crockford's base32 in lowercase: the
+  digits, and the lowercase letters but `i`, `l`, `o` and `u`. Its
+  characters are most significant first, and zero-filled at the top.
   - A 16-bit run's chunk is 40 bits, in 8 characters.
   - A 32-bit run's chunk is 56 bits, in 12 characters, the first `0` or
     `1`.
@@ -142,14 +142,8 @@ to, if any, is resolution's question (§2.2). `[F: keys.json]`
   `0xdeadbeef` at seq 9 is `1qndqvqg0009`. The decode is exact and reads
   no contract. The fixed width makes the chunk's byte order its seq's
   within one run. `[F: keys.json]`
-- **A ULID chunk** (events, §2.6) is 26 characters of Crockford's base32 in
-  lowercase: digits, and lowercase letters except `i`, `l`, `o`, `u`. The
-  check is lexical and the chunk is never decoded, so the first character
-  has no bound: `8zzzzzzzzzzzzzzzzzzzzzzzzz`, beyond 128 bits, is a ULID
-  chunk. `[F: keys.json]`
-- **An events key's last chunk** is an occurrence chunk or a ULID chunk.
-  This version admits both, while owners move from the ULID to the
-  occurrence chunk (§2.6). A later version will refuse the ULID.
+- **An events key's last chunk** is an occurrence chunk. A key whose last
+  chunk is not one, a 26-character ULID's among them, is not a zk2 key.
   `[F: keys.json]`
 
 ### 1.3 Kind tokens
@@ -415,18 +409,31 @@ not, is §2.7's.
 
 ### 2.6 Events
 
-- **One key per occurrence.** An owner publishes each occurrence once, with
-  a one-shot put, on `…/<iface>/events/<template>/<occurrence>`. The last
-  chunk is a lowercase ULID (§1.2) minted by the owner. A reader strips it
-  before resolving the template, a ULID or an occurrence chunk alike.
-  `[F: keys.json]`
-  - **The occurrence chunk** (§1.2) is the run and the seq the
-    occurrence took (§4.3). The put's payload is then an event (§7.5's
-    form 4), which carries the occurrence's time. The key is unique while
-    S7 holds, orders one run's occurrences, and needs no clock. So an
-    owner whose clock is unknown still keys an occurrence.
-  - This version defines the chunk and the form, and owners still write
-    the ULID. A later version adopts them.
+- **One key per occurrence.** An owner MUST publish each occurrence once,
+  with a one-shot put, on `…/<iface>/events/<template>/<occurrence>`, its
+  last chunk the occurrence chunk (§1.2) of the run and the seq the
+  occurrence took (§4.3). The owner MUST write the put's payload as an
+  event (§7.5's form 4), with the occurrence's time. A reader strips the
+  chunk before resolving the template.
+  `[F: keys.json; envelope/vectors.json]` `[Sc: state.md §8]`
+  - **Why the stamp.** The key is unique while S7 holds, orders one run's
+    occurrences, and needs no clock. So an owner whose clock is unknown
+    still keys an occurrence, and writes its time as unknown.
+  - **An occurrence seen earlier.** An owner that relays one, such as a
+    device's, writes the time it occurred. Its key still takes the
+    owner's next seq, so within one run the relayed occurrences order by
+    their arrival at the owner, and across runs by their times.
+  - **The time** is the owner's clock's, from the deployment epoch
+    (§7.6). It is unknown while §4.3's clock guard holds, as a
+    heartbeat's is, and where the owner does not trust its clock.
+  - **A reused run** mints the same keys: a 16-bit run's record restored
+    from an earlier state, or two 32-bit draws that collide. A union
+    storage then keeps the later occurrence under the earlier one's key,
+    and nothing repairs it, as a later put repairs a state key. §4.3's
+    rules keep it from happening: a run is never reused, and a 16-bit
+    run's record is durable before the first sample written under each
+    run it issues. zenoh 1.10.1's storage manager refuses no put on a key
+    it holds (Appendix B).
 - **`rate`** is `rare` (at most 1/h), `low` (at most 1/min) or `burst(<n>/h)`,
   for each member of the template, within any period that long (§2.7).
   **`retention`** is `<n>` followed by `s`, `m`, `h`, `d` or `w`.
@@ -451,13 +458,19 @@ not, is §2.7's.
   retention. Enforcing the bound needs a time-series backend, or a filter on
   the consumer's side: the storage manager's memory backend ignores `_time`
   (spike S5). `[Sc: state.md §8]`
-  - **An occurrence's time** is its event's (§7.5), or its ULID's 48 bits
-    of milliseconds where its key ends in one. An unknown time is never
-    judged within the retention or beyond it: the storage's `_time` bound
-    alone admitted the occurrence.
-  - **The order** of a replay is the occurrences' times, then their seqs
-    within one run. Two of one time under two runs keep the order they
-    arrived in.
+  - **The filter.** A consumer MUST keep a replayed occurrence whose time
+    (§7.5's form 4) is within the retention, and drop one whose time is
+    beyond it. A consumer MUST NOT judge an unknown time within the
+    retention or beyond it: the storage's `_time` bound alone admitted that
+    occurrence. `[Sc: state.md §8]`
+  - **The order.** A consumer MUST deliver a replay in the order of the
+    occurrences' times, then their seqs within one run. The occurrences of
+    an unknown time come after every one with a time, by seq within one
+    run. `[Sc: state.md §8]`
+    - **Two runs.** Between two runs at one time, and among the unknown
+      times of two runs, the order is unspecified: nothing orders two runs
+      (§4.3). The reference breaks the tie by the run's value, a 16-bit
+      run before a 32-bit one.
 
 ### 2.7 The population budget
 
@@ -485,8 +498,8 @@ presence budget (§8.3) is another. `[F: budget/]`
 
   `[F: budget/bounds.json]`
 - **A member** is one value of the template's parameters: a key, for a
-  stream or a state; for an event, its key without its last chunk, the
-  ULID or the occurrence chunk (§2.6).
+  stream or a state; for an event, its key without its occurrence chunk
+  (§2.6).
 - **The owner's rule.** An owner MUST NOT hold more live members of a
   templated stream, state or event than its bound. A member is **live**:
   - **state:** while its key has a value. A deleted key is not live;
@@ -2229,8 +2242,8 @@ that applies, in this order:
 - a delete whose tag is not 0 (`tag`);
 - a request whose width bit is 1 (`request_run`);
 - an event whose key's last chunk is not an occurrence chunk of CH's
-  width: a ULID chunk, or 8 characters under a width bit of 1, or 12
-  under 0 (`key_stamp`);
+  width: 8 characters under a width bit of 1, or 12 under 0
+  (`key_stamp`);
 - fewer bytes than CH, the run and the seq need, an event's CH, t32 and
   ms16, and an error's byte after them (`short`);
 - a byte after a delete's seq (`trailing`);
@@ -4988,6 +5001,10 @@ Appendix B. These are the ones the rules above cite:
   admin space unobservable, never clean.
 - The storage manager garbage-collects tombstones, not values: an event
   occurrence a union storage holds is never pruned by its retention.
+- The storage manager holds one sample per key, the newest by its
+  timestamp, and refuses no put on a key it holds: a later put replaces
+  what it held (zenoh-plugin-storage-manager's `storages_mgt/service.rs`;
+  §2.6's reused run).
 - A router's admin document (`@/<zid>/router`) lists its sessions, each
   with the peer's zid and `whatami`: `router`, `peer` or `client`.
 - A node's admin space answers its declaration records
@@ -5482,7 +5499,7 @@ section each was written against, whose pointer leads on.
 | `conformance/frame/` | §7.7 |
 | `conformance/catalog/` | §8.6 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
-| `scenarios/state.md` | §4; §1 in-band stamps through a router that stamps nothing and one that stamps, and §8.2's session posture; §7 runs, a record's and a random draw's, the run before the seq wraps, and a consumer's and a tool's late joiner across two runs, after their seed and inside it; §9 an archive within a run and across two; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node; §13 a stream key's seq wrapping, and kept across a takeover; §14 a collection's snapshot in pages, a member read, a page lost, `Latest`'s control, a delete beyond the window and two instances answering; §15 a stray `reply_del`, and an owner on an earlier revision whose state is per key |
+| `scenarios/state.md` | §4; §1 in-band stamps through a router that stamps nothing and one that stamps, and §8.2's session posture; §7 runs, a record's and a random draw's, the run before the seq wraps, and a consumer's and a tool's late joiner across two runs, after their seed and inside it; §8 a replay filtered and ordered by each event's time, an unknown time and a run change among them; §9 an archive within a run and across two; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node; §13 a stream key's seq wrapping, and kept across a takeover; §14 a collection's snapshot in pages, a member read, a page lost, `Latest`'s control, a delete beyond the window and two instances answering; §15 a stray `reply_del`, and an owner on an earlier revision whose state is per key |
 | `scenarios/operations.md` | §5, §6; §9 a call's forms for each kind of type, the as-of mark, an owner's error beside a router's `Timeout`, a querier's and a malformed one, an earlier version's envelope read as the transport's, and a request under another `Encoding` refused |
 | `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip; §7–§9 what a complete presence read is: a session cut off, before a read or while it runs, a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict; §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout; a watch session in no namespace on the wire keys, a round trip through a watch session cut off, and a move unconfirming what a reader holds; a reopen telling every token, the round trip after it waiting for them, and one round trip and one read at a time; step 10's counts, the reader's own sessions'; what a black box is judged on there, at what period its output is sampled, and one that prints nothing while its link is cut; Appendix B |
 | `scenarios/bindings.md` | §3.2; §6 a binding's order kept by the descriptor |
@@ -5595,7 +5612,7 @@ brief:
   is refused.
   - **A data key** parses to `{form: "data", system, service, iface, token,
     resource: [chunks]}`. An events key's adds `occurrence`, its last
-    chunk's stamp `{run_width, run, seq}`, or `null` for a ULID.
+    chunk's stamp `{run_width, run, seq}`.
   - **A control key** parses to `{form: "instance" | "alive" | "member" |
     "contract", …}`, with the fields its form names: `instance`, `iface`,
     `fp16`, `member`, `epoch`, `sha256`.

@@ -7,6 +7,31 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `config.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## config.v2 0.5 — 2026-11-08: editorial: the change event's key ends in its occurrence chunk, no rule changed (#980 C2c)
+
+Core 0.103 has an owner key each occurrence by its run and seq, and
+refuses a key that ends in a ULID. The key table's `change` event now
+ends in `<occurrence>`, core §1.2's chunk.
+
+**Deliberately not changed.**
+- **No rule of this text.** The event and its key are `config.v1` §2.17's,
+  by reference, and the key's last chunk is core §2.6's.
+- **The header** is still written against core 0.99, and restates
+  `config.v1` 0.13's rules: 0.14 changed no rule.
+
+## 0.14 — 2026-11-08: editorial: the change event's key ends in its occurrence chunk, no rule changed (#980 C2c)
+
+Core 0.103 has an owner key each occurrence by its run and seq, and
+refuses a key that ends in a ULID. The key table, §2.17 and Appendix A's
+row for the change event name `events/change/<occurrence>`, core §1.2's
+chunk, where they named a ULID.
+
+**Deliberately not changed.**
+- **No rule of this text.** §2.17's MUST is one event per change, and its
+  key is core §2.6's, whose last chunk core 0.103 settles.
+- **Appendix A's RFC column** keeps the ULID, the key it compares with.
+- **The header** is still written against core 0.99.
+
 ## config.v2 0.4 — 2026-11-07: a query under another `Encoding` in §2.5, and a refused re-mint (#609, #985)
 
 zk2py's round 104 read core 0.99 cold, with the four profile texts that

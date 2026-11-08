@@ -219,9 +219,9 @@ owner declares them (§2.5, core §8.5).
 ## §4 An event that must not cross (§2.7, §2.9)
 
 zenoh-modem's sketch denied its events under their draft-0 keys
-(`…/stream/oper_change/**`), which draft 1's `…/events/<template>/<ulid>`
-no longer match. This section shows the plan's keys hold, and the
-sketch's would not.
+(`…/stream/oper_change/**`), which draft 1's
+`…/events/<template>/<occurrence>` no longer match. This section shows
+the plan's keys hold, and the sketch's would not.
 
 **Steps.**
 1. The owner publishes `change` 5 times and `fault` 5 times, all within
@@ -234,7 +234,7 @@ sketch's would not.
 
 **Expected.**
 1. G receives the 5 occurrences of `fault`, each on its own
-   `…/events/fault/<ulid>` key, none dropped by the 1 s interval, and none
+   `…/events/fault/<occurrence>` key, none dropped by the 1 s interval, and none
    of `change`. L receives all 10.
 2. G receives the 5 occurrences of `change` too: the sketch's deny covers
    no event key.

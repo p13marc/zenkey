@@ -13,6 +13,20 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.32 — 2026-11-08: an event's last chunk, its occurrence chunk (#980 C2d)
+
+Core 0.103 (#980's C2c and C2d) has an owner key each occurrence by its
+run and seq, and refuses a key that ends in a ULID. This version is
+written against core 0.103.
+
+**Changed: §7.5's scope.** An event's last chunk, its occurrence chunk,
+is a wildcard. The ULID it named beside it is no zk2 key's now.
+
+**Deliberately not changed.**
+- **No rule.** §7.3's event bullet already reads the stamp from the key
+  and the time from form 4, and a ULID's key, refused by the grammar, is
+  no key a tool resolves.
+
 ## 0.31 — 2026-11-08: across a face, a refused selector refuses the read, and a device face's plan (#990, #609)
 
 zk2py round 106 read 0.29 cold, and filed F-509 to F-511. None was a

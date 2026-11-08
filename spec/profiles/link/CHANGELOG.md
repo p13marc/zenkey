@@ -7,6 +7,18 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## 0.18 — 2026-11-08: editorial: an event's key ends in its occurrence chunk, no rule changed (#980 C2c)
+
+Core 0.103 has an owner key each occurrence by its run and seq, and
+refuses a key that ends in a ULID. Appendix B's sketch note and
+`scenarios.md` §4 name `…/events/<template>/<occurrence>`, core §1.2's
+chunk, where they named a ULID.
+
+**Deliberately not changed.**
+- **No rule of this text,** and no fixture: the plan denies
+  `zk2/*/*/*/events/**`, which matches either last chunk.
+- **The header** is still written against core 0.32.
+
 ## link.v2 0.11 — 2026-11-07: editorial: `plan.json`'s zenoh-modem cases on catalog `0ff6bf6d`, no rule changed (#990, #609)
 
 #1080 appended `freshness.v2` to zenoh-modem's `catalog.json`, whose id
