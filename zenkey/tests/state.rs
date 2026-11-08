@@ -564,6 +564,23 @@ async fn raw_get(s: &zenoh::Session, selector: &str) -> Vec<Sample> {
         .collect()
 }
 
+/// [`raw_get`] asked again until an owner answers (#1028): a GET under
+/// load can end at its timeout before the owner's reply arrives, which is
+/// no answer, and nothing the owner holds moves meanwhile.
+async fn raw_get_answered(s: &zenoh::Session, selector: &str) -> Vec<Sample> {
+    let deadline = tokio::time::Instant::now() + common::SETTLE;
+    loop {
+        let got = raw_get(s, selector).await;
+        if !got.is_empty() {
+            return got;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no owner answered {selector}"
+        );
+    }
+}
+
 /// A raw GET of `selector`, `All` + `None`: each reply as it arrived, a
 /// snapshot's pages whole.
 async fn raw_pages(s: &zenoh::Session, selector: &str) -> Vec<Sample> {
@@ -669,15 +686,20 @@ async fn in_band_stamps(stamping: bool) {
         r.zid().to_string(),
         "the owner's session is not the router"
     );
+    // Every writer matched before it puts (#1028): a put its session has
+    // no matching subscription for yet is dropped at its source.
+    let control_pub = third.declare_publisher("control/x").await.unwrap();
     eventually("subscribed", || async {
         w.writer().matching().await.unwrap()
+            && status_w.writer().matching().await.unwrap()
+            && control_pub.matching_status().await.unwrap().matching()
     })
     .await;
 
     // 1. v1, v2, the GET after v2, then the delete.
     let v1 = w.put("v1").await.unwrap();
     let v2 = w.put("v2").await.unwrap();
-    let replies = raw_get(&consumer, ORIGIN).await;
+    let replies = raw_get_answered(&consumer, ORIGIN).await;
     assert_eq!(replies.len(), 1, "{through}: one reply");
     assert_eq!(
         &*replies[0].payload().to_bytes(),
@@ -691,7 +713,7 @@ async fn in_band_stamps(stamping: bool) {
     );
     let del = w.delete().await.unwrap();
     // 2. The control: an unstamped put of a third client's.
-    third.put("control/x", "c").await.unwrap();
+    control_pub.put("c").await.unwrap();
     // 3. v3 and v4 back to back.
     let v3 = w.put("v3").await.unwrap();
     let v4 = w.put("v4").await.unwrap();
@@ -771,7 +793,7 @@ async fn in_band_stamps(stamping: bool) {
     for s in &puts {
         assert_eq!(sealed(s).0.run.hex(), run, "{through}: status's run");
     }
-    let reply = raw_get(&consumer, "zk2/ground/fleet-mgr/status.v1/state/status").await;
+    let reply = raw_get_answered(&consumer, "zk2/ground/fleet-mgr/status.v1/state/status").await;
     assert_eq!(
         reply[0].timestamp().map(|t| t.get_id().to_string()),
         Some(owner.zid().to_string()),
