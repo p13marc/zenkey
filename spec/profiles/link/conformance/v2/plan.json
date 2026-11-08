@@ -2579,6 +2579,11 @@
             "contract": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
             "iface": "modem.v3",
             "index": 8
+          },
+          {
+            "contract": "sha256:8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890",
+            "iface": "freshness.v2",
+            "index": 9
           }
         ],
         "epoch": 1767225600,
@@ -2603,6 +2608,10 @@
           {
             "entries": 8,
             "id": "8c808dff"
+          },
+          {
+            "entries": 9,
+            "id": "e3a529fe"
           }
         ]
       },
@@ -2613,7 +2622,7 @@
       ],
       "expect": {
         "binding": "zm-1.10.2-r1",
-        "catalog": "e3a529fe",
+        "catalog": "0ff6bf6d",
         "faces": [
           {
             "attach": {
@@ -2875,7 +2884,7 @@
         ]
       },
       "note": "zenoh-modem's RF router (Appendix B, `examples/zk2/zenoh-modem/faces/`) over modem.v3 3.3, which lists link.v1: what it exposes is its three frame resources over one record of all 73 readings, all packed, so none draws `not_packed` (§2.17); 3.2's nine are deprecated and `host`, so they are denied with the reading subtrees; the face lists `frames/fast` at 60 s, crossing whole with no downsampling, and denies `frames/slow` and `frames/paid` by name (`frame_unlisted`, §2.7); `frames/fast`'s 300 s horizon is liveness evidence; one frame a minute replaces each keep-alive, so no `keep_alive_not_suppressed` (§2.16); the catalog the ground holds lists every crossing revision (§2.18)",
-      "policy": "# zenoh-modem's RF node (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\nbinding  = \"zm-1.10.2-r1\"           # the zenoh fork zenoh-modem's routers run\ncatalog  = \"e3a529fe\"               # catalog.json, which the ground holds\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4            # a keep-alive every 60 s, which a frame a minute replaces\nwait_before_close_ms = 240000       # at least the lease\nsequence             = \"16bit\"\nbatch_bytes          = 222          # the radio's 220 B SDU and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.rf]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000            # 5 %\narq              = false            # no link ARQ on the radio (zenoh-modem's tracker)\nreply_timeout_ms = 15000            # 16 full batches take 11.8 s\nhorizon_s        = 120              # one frame a minute affords a 120 s horizon\n\n[face.rf.frames]\n\"modem.v3/frames/fast\" = { every_s = 60 }\n"
+      "policy": "# zenoh-modem's RF node (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\nbinding  = \"zm-1.10.2-r1\"           # the zenoh fork zenoh-modem's routers run\ncatalog  = \"0ff6bf6d\"               # catalog.json, which the ground holds\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4            # a keep-alive every 60 s, which a frame a minute replaces\nwait_before_close_ms = 240000       # at least the lease\nsequence             = \"16bit\"\nbatch_bytes          = 222          # the radio's 220 B SDU and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.rf]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000            # 5 %\narq              = false            # no link ARQ on the radio (zenoh-modem's tracker)\nreply_timeout_ms = 15000            # 16 full batches take 11.8 s\nhorizon_s        = 120              # one frame a minute affords a 120 s horizon\n\n[face.rf.frames]\n\"modem.v3/frames/fast\" = { every_s = 60 }\n"
     },
     {
       "catalog": {
@@ -2924,6 +2933,11 @@
             "contract": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
             "iface": "modem.v3",
             "index": 8
+          },
+          {
+            "contract": "sha256:8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890",
+            "iface": "freshness.v2",
+            "index": 9
           }
         ],
         "epoch": 1767225600,
@@ -2948,6 +2962,10 @@
           {
             "entries": 8,
             "id": "8c808dff"
+          },
+          {
+            "entries": 9,
+            "id": "e3a529fe"
           }
         ]
       },
@@ -2958,7 +2976,7 @@
       ],
       "expect": {
         "binding": "zm-1.10.2-r1",
-        "catalog": "e3a529fe",
+        "catalog": "0ff6bf6d",
         "faces": [
           {
             "attach": {
@@ -3226,7 +3244,7 @@
         ]
       },
       "note": "zenoh-modem's LoRa router at SF7 (Appendix B): `frames/fast` at 60 s, against a keep-alive interval of 30 s, so the uplink pays a keep-alive between two frames (`keep_alive_not_suppressed`, §2.16); `frames/slow` and `frames/paid` are denied by name (`frame_unlisted`, §2.7)",
-      "policy": "# zenoh-modem's LoRa node at SF7 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"e3a529fe\"\n\n[transport]\nlease_ms             = 120000\nkeep_alive           = 4\nwait_before_close_ms = 120000\nsequence             = \"16bit\"\nbatch_bytes          = 224          # the chip's 222 B frame and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 5469\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nhorizon_s        = 120\n\n[face.lora.frames]\n\"modem.v3/frames/fast\" = { every_s = 60 }\n"
+      "policy": "# zenoh-modem's LoRa node at SF7 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"0ff6bf6d\"\n\n[transport]\nlease_ms             = 120000\nkeep_alive           = 4\nwait_before_close_ms = 120000\nsequence             = \"16bit\"\nbatch_bytes          = 224          # the chip's 222 B frame and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 5469\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nhorizon_s        = 120\n\n[face.lora.frames]\n\"modem.v3/frames/fast\" = { every_s = 60 }\n"
     },
     {
       "catalog": {
@@ -3275,6 +3293,11 @@
             "contract": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
             "iface": "modem.v3",
             "index": 8
+          },
+          {
+            "contract": "sha256:8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890",
+            "iface": "freshness.v2",
+            "index": 9
           }
         ],
         "epoch": 1767225600,
@@ -3299,6 +3322,10 @@
           {
             "entries": 8,
             "id": "8c808dff"
+          },
+          {
+            "entries": 9,
+            "id": "e3a529fe"
           }
         ]
       },
@@ -3309,7 +3336,7 @@
       ],
       "expect": {
         "binding": "zm-1.10.2-r1",
-        "catalog": "e3a529fe",
+        "catalog": "0ff6bf6d",
         "faces": [
           {
             "attach": {
@@ -3578,7 +3605,7 @@
         ]
       },
       "note": "zenoh-modem's LoRa router at SF9 (Appendix B): `frames/fast` at 120 s, asked for a full record every 900 s, which its 15 records reach by a full record every seventh (`keyframe_s`, §2.7); 120 s is the keep-alive interval, so none is paid beside the data (§2.16); its largest frame, 216 B, a delta record that includes every field, is above the 117 B batch (`frame_over_batch`, link.v1 §2.8); `frames/slow` and `frames/paid` are denied by name (`frame_unlisted`, §2.7)",
-      "policy": "# zenoh-modem's LoRa node at SF9 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"e3a529fe\"\n\n[transport]\nlease_ms             = 480000\nkeep_alive           = 4\nwait_before_close_ms = 480000\nsequence             = \"16bit\"\nbatch_bytes          = 117          # the chip's 115 B frame and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 1758\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000            # 16 full batches take 8.5 s\nhorizon_s        = 120\n\n[face.lora.frames]\n\"modem.v3/frames/fast\" = { every_s = 120, keyframe_s = 900 }\n"
+      "policy": "# zenoh-modem's LoRa node at SF9 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"0ff6bf6d\"\n\n[transport]\nlease_ms             = 480000\nkeep_alive           = 4\nwait_before_close_ms = 480000\nsequence             = \"16bit\"\nbatch_bytes          = 117          # the chip's 115 B frame and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 1758\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000            # 16 full batches take 8.5 s\nhorizon_s        = 120\n\n[face.lora.frames]\n\"modem.v3/frames/fast\" = { every_s = 120, keyframe_s = 900 }\n"
     },
     {
       "catalog": {
@@ -3627,6 +3654,11 @@
             "contract": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
             "iface": "modem.v3",
             "index": 8
+          },
+          {
+            "contract": "sha256:8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890",
+            "iface": "freshness.v2",
+            "index": 9
           }
         ],
         "epoch": 1767225600,
@@ -3651,6 +3683,10 @@
           {
             "entries": 8,
             "id": "8c808dff"
+          },
+          {
+            "entries": 9,
+            "id": "e3a529fe"
           }
         ]
       },
@@ -3661,7 +3697,7 @@
       ],
       "expect": {
         "binding": "zm-1.10.2-r1",
-        "catalog": "e3a529fe",
+        "catalog": "0ff6bf6d",
         "faces": [
           {
             "attach": {
@@ -3924,7 +3960,7 @@
         ]
       },
       "note": "zenoh-modem's LoRa router at SF12 (Appendix B): `frames/slow` at 900 s, asked for a full record hourly, which its 4 records reach (`keyframe_s`, §2.7); its 1,800 s horizon is twice its cadence and the face's `horizon_s`, so it is liveness evidence with no `interval_over_horizon` or `horizon_under_face` (§2.12); the 900 s keep-alive interval is the cadence, so none is paid beside the data (§2.16); `frames/fast` and `frames/paid` are denied by name (`frame_unlisted`, §2.7)",
-      "policy": "# zenoh-modem's LoRa node at SF12 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"e3a529fe\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 4\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 224          # the fragment layer's 222 B SDU and 2 B of stream framing\nopen_timeout_ms      = 40000\naccept_timeout_ms    = 40000\ninterests_timeout_ms = 40000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 900\nmax_outage_s     = 3600\nlink_bps         = 293\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 120000\nhorizon_s        = 1800\n\n# frames/slow writes a full record at least every 4 (modem.v3), hourly at\n# one every 15 minutes, as the face asks.\n[face.lora.frames]\n\"modem.v3/frames/slow\" = { every_s = 900, keyframe_s = 3600 }\n"
+      "policy": "# zenoh-modem's LoRa node at SF12 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"0ff6bf6d\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 4\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 224          # the fragment layer's 222 B SDU and 2 B of stream framing\nopen_timeout_ms      = 40000\naccept_timeout_ms    = 40000\ninterests_timeout_ms = 40000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 900\nmax_outage_s     = 3600\nlink_bps         = 293\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 120000\nhorizon_s        = 1800\n\n# frames/slow writes a full record at least every 4 (modem.v3), hourly at\n# one every 15 minutes, as the face asks.\n[face.lora.frames]\n\"modem.v3/frames/slow\" = { every_s = 900, keyframe_s = 3600 }\n"
     },
     {
       "catalog": {
@@ -3973,6 +4009,11 @@
             "contract": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
             "iface": "modem.v3",
             "index": 8
+          },
+          {
+            "contract": "sha256:8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890",
+            "iface": "freshness.v2",
+            "index": 9
           }
         ],
         "epoch": 1767225600,
@@ -3997,6 +4038,10 @@
           {
             "entries": 8,
             "id": "8c808dff"
+          },
+          {
+            "entries": 9,
+            "id": "e3a529fe"
           }
         ]
       },
@@ -4007,7 +4052,7 @@
       ],
       "expect": {
         "binding": "zm-1.10.2-r1",
-        "catalog": "e3a529fe",
+        "catalog": "0ff6bf6d",
         "faces": [
           {
             "attach": {
@@ -4269,7 +4314,7 @@
         ]
       },
       "note": "zenoh-modem's SBD router (Appendix B): the face exposes `frames/paid` alone, every frame a full record, at the keep-alive interval, so a message replaces a keep-alive (§2.16); `frames/fast` and `frames/slow` are denied by name (`frame_unlisted`, §2.7); `frames/paid`'s 3,600 s horizon is the face's `horizon_s`, so the plan lists it as evidence, and liveness across the face is observable (link.v1 §2.12)",
-      "policy": "# zenoh-modem's SBD terminal (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-71c0e2a9d4b3\"\nservices = [\"sat0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"e3a529fe\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 2\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 271          # a message's 270 B, as configs/zenohd-sat0.json5 ships it\nopen_timeout_ms      = 1000000\naccept_timeout_ms    = 1000000\ninterests_timeout_ms = 1000000\n\n[face.sbd]\nfar              = \"ground-gateway\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 1800\nmax_outage_s     = 86400\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 1000000\nhorizon_s        = 3600\n\n[face.sbd.frames]\n\"modem.v3/frames/paid\" = { every_s = 1800 }\n"
+      "policy": "# zenoh-modem's SBD terminal (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-71c0e2a9d4b3\"\nservices = [\"sat0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"0ff6bf6d\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 2\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 271          # a message's 270 B, as configs/zenohd-sat0.json5 ships it\nopen_timeout_ms      = 1000000\naccept_timeout_ms    = 1000000\ninterests_timeout_ms = 1000000\n\n[face.sbd]\nfar              = \"ground-gateway\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 1800\nmax_outage_s     = 86400\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 1000000\nhorizon_s        = 3600\n\n[face.sbd.frames]\n\"modem.v3/frames/paid\" = { every_s = 1800 }\n"
     },
     {
       "contracts": [

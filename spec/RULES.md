@@ -52,12 +52,12 @@ The owner, consumer and caller sections each point to them.
 | Role | Rules |
 |---|---|
 | [Owner](#owner) | 83 |
-| [Consumer](#consumer) | 27 |
+| [Consumer](#consumer) | 28 |
 | [Caller](#caller) | 17 |
 | [Deployment](#deployment) | 18 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 82, 27 of them a reader's |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 83, 27 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 67 |
-| Every rule, once | 267 |
+| Every rule, once | 268 |
 | [Rule ids](#rule-ids) | 85 |
 
 ## Owner
@@ -288,6 +288,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST apply the omission rule when it holds a snapshot complete (§7.5) under run R as of asof A, on a key K that is its collection's snapshot key or a member's key. | `[F: seed/snapshot.json]` `[Sc: state.md §14]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner applies no omission rule over an incomplete snapshot, and SHOULD read the collection again. | `[F: seed/snapshot.json]` `[Sc: state.md §14]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A consumer or a tool MUST NOT merge a snapshot heard on a subscription, nor count it toward a complete snapshot. | `[F: seed/snapshot.json]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | A consumer or a tool MUST NOT merge a stray `reply_del` as a deletion. | `[Sc: state.md §15]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST map a snapshot's collection index with the revision of the interface that the owner's descriptor names (§3.3), never with another revision it holds. | `[F: seed/snapshot.json]` |
 
 ### [core §4.3 Runs and sequence numbers (S7)](core.md#43-runs-and-sequence-numbers-s7)
@@ -477,6 +478,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST apply the omission rule when it holds a snapshot complete (§7.5) under run R as of asof A, on a key K that is its collection's snapshot key or a member's key. | `[F: seed/snapshot.json]` `[Sc: state.md §14]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner applies no omission rule over an incomplete snapshot, and SHOULD read the collection again. | `[F: seed/snapshot.json]` `[Sc: state.md §14]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A consumer or a tool MUST NOT merge a snapshot heard on a subscription, nor count it toward a complete snapshot. | `[F: seed/snapshot.json]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | A consumer or a tool MUST NOT merge a stray `reply_del` as a deletion. | `[Sc: state.md §15]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST map a snapshot's collection index with the revision of the interface that the owner's descriptor names (§3.3), never with another revision it holds. | `[F: seed/snapshot.json]` |
 
 ### [core §5.1 Rules](core.md#51-rules)
@@ -678,7 +680,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 |---|---|---|
 | [§7.5](observer.md#75-reading-across-a-face) | A tool across a constrained face SHOULD subscribe as core §8.5 says, by the scopes the contracts in hand give for the addresses it reads. | `[Sc: constrained.md §7]` `[F: scope/faces.json]` |
 | [§7.5](observer.md#75-reading-across-a-face) | A tool given the face SHOULD NOT declare a scope for a resource the plan keeps off it. | `[F: scope/faces.json]` |
-| [§7.5](observer.md#75-reading-across-a-face) | **A selector given.** … A tool MUST NOT drop silently a selector it was given that meets none of its scopes: it refuses it, and says why. | `[F: scope/faces.json]` |
+| [§7.5](observer.md#75-reading-across-a-face) | **A selector given.** … A tool MUST NOT drop silently a selector it was given that meets none of its scopes: it refuses the read, declaring none of the selectors, and names each such selector and why. | `[F: scope/faces.json]` |
 | [§7.5](observer.md#75-reading-across-a-face) | A tool across a constrained face whose medium repairs no lost frame SHOULD declare a scope again when it has heard nothing on it for two of its horizons while its session's transport stayed up, as core §8.5 says. | `[Sc: constrained.md §9]` |
 | [§7.5](observer.md#75-reading-across-a-face) | **The revision of a key.** … A tool that reads a mutation, a frame or a heartbeat with no descriptor naming the owner's revision MUST read it with the revision chosen in this order. | `[F: envelope/tags.json]` |
 

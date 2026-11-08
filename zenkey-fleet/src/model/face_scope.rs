@@ -16,8 +16,8 @@
 //!
 //! **With a face policy and its face**, the scopes are what the face's plan
 //! lets cross (`link.v2` §2.3), the plan derived from the policy and the
-//! contracts in hand, each service the policy lists taken to implement
-//! them all: to subscribe, each crossing resource and each crossing
+//! contracts in hand, each service the policy lists, and each device of
+//! its faces, taken to implement them all (observer §7.5): to subscribe, each crossing resource and each crossing
 //! heartbeat; to GET, each state resource, since a request crosses by
 //! grant, never by exposure (`link.v1` §2.9). A plan the profile refuses
 //! gives no scope ([`Refusal::Plan`]). Each scope is one declaration across
@@ -389,8 +389,9 @@ fn has_heartbeat(c: &Contract) -> bool {
             .is_empty()
 }
 
-/// The face's plan (`link.v2` §2.3), each owner the policy lists taken to
-/// implement every interface in hand, every revision given read together.
+/// The face's plan (`link.v2` §2.3), each owner the policy lists, and each
+/// device of its faces (`FacePolicy::owners`), taken to implement every
+/// interface in hand, every revision given read together.
 fn plan_of(face: Face<'_>, contracts: &ContractSet) -> Result<FacePlan, Refusal> {
     let mut dep = link::Deployment::default();
     let ifaces: Vec<String> = contracts

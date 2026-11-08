@@ -7110,6 +7110,7 @@ mod tests {
                     at,
                     wall: now,
                     via: AlarmVia::Get,
+                    snapshot_run: None,
                 })
                 .collect(),
         }));

@@ -2625,6 +2625,7 @@ mod tests {
                     at: t0,
                     wall: now,
                     via: AlarmVia::Get,
+                    snapshot_run: None,
                 }],
                 discarded: 0,
                 envelopes: Default::default(),

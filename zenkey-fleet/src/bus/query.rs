@@ -416,10 +416,31 @@ pub(crate) async fn state_get(
 /// mutations shows a refused one undecodable.
 /// No entry carries a Zenoh timestamp: a snapshot carries none.
 pub(crate) fn reply_samples(sample: &zenoh::sample::Sample) -> Vec<zenoh::sample::Sample> {
-    reply_samples_in(sample, None)
+    reply_entries_in(sample, None)
+        .into_iter()
+        .map(|e| e.sample)
+        .collect()
 }
 
-/// [`reply_samples`] for a reader that ages what it reads (`freshness.v2`
+/// One per-key reply a state GET's reply stands for ([`reply_samples`]),
+/// with the run of the snapshot whose page listed it: the run its owner's
+/// instance answered under (core §7.5, §4.2). A reader attributes an entry
+/// by it, never by the entry's own run (`alarms.v1` §2.14 step 5, text
+/// 0.14).
+#[derive(Debug, Clone)]
+pub(crate) struct GetEntry {
+    pub(crate) sample: zenoh::sample::Sample,
+    /// `None` for a reply that is no snapshot's page: a per-key reply, a
+    /// `reply_del`, or a page whose body is refused.
+    pub(crate) snapshot_run: Option<zenkey_model::wire::Run>,
+}
+
+/// [`reply_samples`], each entry with its snapshot's run ([`GetEntry`]).
+pub(crate) fn reply_entries(sample: &zenoh::sample::Sample) -> Vec<GetEntry> {
+    reply_entries_in(sample, None)
+}
+
+/// [`reply_entries`] for a reader that ages what it reads (`freshness.v2`
 /// §2.6, text 0.7): a live entry with a confirmation whose time is known (1
 /// at the snapshot's time, 2 at its conf; core §7.5) carries it as its
 /// Zenoh timestamp, counted from the deployment epoch in force for its
@@ -429,20 +450,20 @@ pub(crate) fn reply_samples(sample: &zenoh::sample::Sample) -> Vec<zenoh::sample
 /// carries no zid. Every other entry carries none, and so does every entry
 /// of an owner whose epoch cannot be had (`unknown_catalog`, or catalogs
 /// that disagree; core §8.6): undated, never dated under another epoch.
-pub(crate) fn reply_samples_aged(
+pub(crate) fn reply_entries_aged(
     sample: &zenoh::sample::Sample,
     epochs: &EntryEpochs,
-) -> Vec<zenoh::sample::Sample> {
-    reply_samples_at(sample, epochs.of(sample.key_expr().as_str()))
+) -> Vec<GetEntry> {
+    reply_entries_in(sample, epochs.of(sample.key_expr().as_str()))
 }
 
-/// [`reply_samples_aged`] under `epoch`, one already resolved for the
+/// [`reply_entries_aged`] under `epoch`, one already resolved for the
 /// reply's owner (a `config.v2` target's); `None` dates nothing.
-pub(crate) fn reply_samples_at(
+pub(crate) fn reply_entries_at(
     sample: &zenoh::sample::Sample,
     epoch: Option<i64>,
-) -> Vec<zenoh::sample::Sample> {
-    reply_samples_in(sample, epoch)
+) -> Vec<GetEntry> {
+    reply_entries_in(sample, epoch)
 }
 
 /// The deployment epoch a reader dates each owner's snapshot entries under
@@ -592,28 +613,148 @@ impl<T> KeyMerge<T> {
     }
 }
 
-/// Whether a `reply_del` on `key` is a stray one, read with `revisions`
-/// (#977's E4; core S2, S3): every revision of the key's interface among
-/// them answers the key by snapshot
-/// ([`zenkey_model::collection::stray_reply_del`]), and at least one is
-/// held. With none of its interface, nothing is judged.
-pub(crate) fn is_stray(revisions: &[&zenkey_model::contract::Contract], key: &str) -> bool {
-    let Some(iface) = interface_of(key) else {
-        return false;
-    };
-    let mut of = revisions.iter().filter(|c| c.iface == iface).peekable();
-    of.peek().is_some() && of.all(|c| zenkey_model::collection::stray_reply_del(c, key))
+/// The revisions a state GET's reader judges a stray `reply_del` with
+/// (core §4.2, "It says which resources are per key, too"; 0.102): per
+/// owner, interface and run, the revision the owner's descriptor stating
+/// the `reply_del`'s run names (`zenkey::answer::owner_revision`), one the
+/// reader holds or retrieved by its fingerprint (§8.4); where no
+/// descriptor reaches the reader, as across a constrained face, the
+/// revisions it holds, the deployment's word, which agree that the key is
+/// answered by snapshot or judge nothing; and a read that failed, or a
+/// revision that cannot be had, none, so the `reply_del` merges as a
+/// deletion. Never from a revision the reader holds alone: an owner on
+/// `health.v1` 1.0 answers its status per key, and its real `reply_del`
+/// is no stray. Only an interface the reader holds a revision of is
+/// judged, and a `reply_del` with no in-band stamp names no run, so it is
+/// not judged either. The seed's state leg reads so too (`bus::seed`).
+/// Each owner's interface and run is asked once.
+pub(crate) struct OwnerRevisions<'a> {
+    session: &'a Session,
+    timeout: Duration,
+    held: &'a [&'a zenkey_model::contract::Contract],
+    store: crate::bus::contracts::BundleStore,
+    asked: std::collections::BTreeMap<(String, String), Owners>,
 }
 
-/// A zk2 data key's interface, a namespace in front skipped.
-fn interface_of(key: &str) -> Option<zenkey_model::grammar::IfaceId> {
+/// What [`OwnerRevisions`] found for one owner's interface under one run.
+#[derive(Clone)]
+enum Owners {
+    /// The revision its descriptor names.
+    Named(std::sync::Arc<zenkey_model::contract::Contract>),
+    /// No descriptor reaches the reader: the revisions it holds.
+    Held,
+    /// No word: nothing is judged.
+    Unread,
+}
+
+impl<'a> OwnerRevisions<'a> {
+    /// Over `session`, each read waiting `timeout`, the reader holding
+    /// `held`; a revision it does not hold is retrieved through `store`,
+    /// where it has one, else through a store of its own.
+    pub(crate) fn new(
+        session: &'a Session,
+        timeout: Duration,
+        held: &'a [&'a zenkey_model::contract::Contract],
+        store: Option<&crate::bus::contracts::BundleStore>,
+    ) -> Self {
+        OwnerRevisions {
+            session,
+            timeout,
+            held,
+            store: store
+                .cloned()
+                .unwrap_or_else(|| crate::bus::contracts::BundleStore::new(timeout)),
+            asked: std::collections::BTreeMap::new(),
+        }
+    }
+
+    /// Whether `sample` is a stray `reply_del`: a deletion on a member of
+    /// a collection that its owner's revision under the deletion's run
+    /// answers by snapshot ([`zenkey_model::collection::stray_reply_del`]).
+    pub(crate) async fn stray(&mut self, sample: &zenoh::sample::Sample) -> bool {
+        use zenkey::answer::OwnerRevision;
+        if sample.kind() != zenoh::sample::SampleKind::Delete {
+            return false;
+        }
+        let key = sample.key_expr().as_str();
+        let Some((prefix, iface)) = owner_interface(key) else {
+            return false;
+        };
+        let ours: Vec<&zenkey_model::contract::Contract> = self
+            .held
+            .iter()
+            .copied()
+            .filter(|c| c.iface == iface)
+            .collect();
+        if ours.is_empty() {
+            return false;
+        }
+        let Some(stamp) = zenkey::inband::read(sample.clone()).stamp() else {
+            return false;
+        };
+        let at = (prefix, stamp.run.to_string());
+        let owners = match self.asked.get(&at) {
+            Some(o) => o.clone(),
+            None => {
+                let o = match zenkey::answer::owner_revision(
+                    self.session,
+                    key,
+                    stamp.run,
+                    &iface,
+                    self.timeout,
+                )
+                .await
+                {
+                    OwnerRevision::Named(fp) => self.named(&iface, &ours, &fp).await,
+                    OwnerRevision::Unreached => Owners::Held,
+                    OwnerRevision::Unread => Owners::Unread,
+                };
+                self.asked.insert(at, o.clone());
+                o
+            }
+        };
+        match owners {
+            Owners::Named(c) => zenkey_model::collection::stray_reply_del(&c, key),
+            Owners::Held => ours
+                .iter()
+                .all(|c| zenkey_model::collection::stray_reply_del(c, key)),
+            Owners::Unread => false,
+        }
+    }
+
+    /// The revision of `iface` whose fingerprint is `fp`: one of `ours`,
+    /// else retrieved; [`Owners::Unread`] where it cannot be had.
+    async fn named(
+        &self,
+        iface: &zenkey_model::grammar::IfaceId,
+        ours: &[&zenkey_model::contract::Contract],
+        fp: &str,
+    ) -> Owners {
+        use zenkey_model::canonical::Fingerprint;
+        if let Some(c) = ours.iter().find(|c| Fingerprint::of(c).to_string() == fp) {
+            return Owners::Named(std::sync::Arc::new((*c).clone()));
+        }
+        let Ok(fp) = Fingerprint::parse(fp) else {
+            return Owners::Unread;
+        };
+        match self.store.contract(self.session, iface, &fp).await {
+            Ok(Some(c)) => Owners::Named(c),
+            _ => Owners::Unread,
+        }
+    }
+}
+
+/// A zk2 data key's text up to its interface, a namespace in front kept,
+/// and its interface.
+fn owner_interface(key: &str) -> Option<(String, zenkey_model::grammar::IfaceId)> {
     let mut rest = Some(key);
     while let Some(k) = rest {
         if k.starts_with("zk2/")
-            && let Ok(zenkey_model::grammar::ZkKey::Data { iface, .. }) =
+            && let Ok(zenkey_model::grammar::ZkKey::Data { addr, iface, .. }) =
                 zenkey_model::grammar::parse(k)
         {
-            return Some(iface);
+            let prefix = &key[..key.len() - k.len()];
+            return Some((format!("{prefix}zk2/{addr}/{iface}"), iface));
         }
         rest = k.split_once('/').map(|(_, r)| r);
     }
@@ -621,25 +762,35 @@ fn interface_of(key: &str) -> Option<zenkey_model::grammar::IfaceId> {
 }
 
 /// A state GET's `replies`, as they came, each read as its `entries`
-/// ([`reply_samples`] or a dated form of it) and [`merged`], each stray
-/// `reply_del` ([`is_stray`]) taken out first, so that it moves nothing:
-/// no owner sends one (#977's E4). Only a reply is judged, never a
+/// ([`reply_entries`] or a dated form of it) and merged per key
+/// ([`KeyMerge`]), each stray `reply_del` (judged by `revisions`,
+/// [`OwnerRevisions::stray`]) taken out first, so that it moves nothing:
+/// no owner sends one (core §4.2). Only a reply is judged, never a
 /// snapshot's tombstone, which its entries read as a delete. Returns the
-/// merged samples, and the first stray of each key nothing else answered,
+/// merged entries, and the first stray of each key nothing else answered,
 /// which its reader counts undecodable as its form, `form`
-/// ([`zenkey_model::collection::STRAY_REPLY_DEL`]). The text names no
-/// reading for one; this is the reference's.
-pub(crate) fn merged_without_strays(
+/// ([`zenkey_model::collection::STRAY_REPLY_DEL`]).
+pub(crate) async fn merged_without_strays(
     replies: impl IntoIterator<Item = zenoh::sample::Sample>,
-    revisions: &[&zenkey_model::contract::Contract],
-    entries: impl Fn(&zenoh::sample::Sample) -> Vec<zenoh::sample::Sample>,
-) -> (Vec<zenoh::sample::Sample>, Vec<zenoh::sample::Sample>) {
-    let (strays, rest): (Vec<_>, Vec<_>) = replies.into_iter().partition(|s| {
-        s.kind() == zenoh::sample::SampleKind::Delete && is_stray(revisions, s.key_expr().as_str())
-    });
-    let kept = merged(rest.iter().flat_map(&entries));
+    revisions: &mut OwnerRevisions<'_>,
+    entries: impl Fn(&zenoh::sample::Sample) -> Vec<GetEntry>,
+) -> (Vec<GetEntry>, Vec<zenoh::sample::Sample>) {
+    let mut strays = Vec::new();
+    let mut merge: KeyMerge<GetEntry> = KeyMerge::default();
+    for s in replies {
+        if revisions.stray(&s).await {
+            strays.push(s);
+            continue;
+        }
+        for e in entries(&s) {
+            let key = e.sample.key_expr().as_str().to_owned();
+            let mark = zenkey::inband::read(e.sample.clone()).mark();
+            merge.offer(&key, mark, e);
+        }
+    }
+    let kept = merge.into_items();
     let answered: std::collections::BTreeSet<&str> =
-        kept.iter().map(|s| s.key_expr().as_str()).collect();
+        kept.iter().map(|e| e.sample.key_expr().as_str()).collect();
     let mut seen = std::collections::BTreeSet::new();
     let strays = strays
         .into_iter()
@@ -664,28 +815,37 @@ pub(crate) fn merged(
     merge.into_items()
 }
 
-fn reply_samples_in(
-    sample: &zenoh::sample::Sample,
-    epoch: Option<i64>,
-) -> Vec<zenoh::sample::Sample> {
+fn reply_entries_in(sample: &zenoh::sample::Sample, epoch: Option<i64>) -> Vec<GetEntry> {
+    let as_came = || {
+        vec![GetEntry {
+            sample: sample.clone(),
+            snapshot_run: None,
+        }]
+    };
     if sample.kind() == zenoh::sample::SampleKind::Delete {
-        return vec![sample.clone()];
+        return as_came();
     }
     let encoding = sample.encoding().to_string();
     let bytes = sample.payload().to_bytes();
     let key = sample.key_expr().as_str();
-    match (
-        crate::model::inband::page(key, Some(&encoding), &bytes),
-        epoch,
-    ) {
-        (Some(Ok(page)), Some(e)) => zenkey::inband::replies_confirmed(sample, &page, e),
-        (Some(Ok(page)), None) => zenkey::inband::replies(sample, &page),
-        _ => vec![sample.clone()],
-    }
+    let Some(Ok(page)) = crate::model::inband::page(key, Some(&encoding), &bytes) else {
+        return as_came();
+    };
+    let entries = match epoch {
+        Some(e) => zenkey::inband::replies_confirmed(sample, &page, e),
+        None => zenkey::inband::replies(sample, &page),
+    };
+    entries
+        .into_iter()
+        .map(|sample| GetEntry {
+            sample,
+            snapshot_run: Some(page.run),
+        })
+        .collect()
 }
 
 /// The id a snapshot's confirmations are stamped under
-/// (`reply_samples_aged`): the owner's clock, named by its address
+/// (`reply_entries_aged`): the owner's clock, named by its address
 /// (`zenkey::inband::owner_clock`).
 pub fn owner_clock(key: &str) -> zenoh::time::TimestampId {
     zenkey::inband::owner_clock(key)

@@ -203,6 +203,16 @@ async fn owner(s: &zenoh::Session, cfg: ServiceConfig) -> (ServiceBuilder, Healt
 
 /// G's GET of `address`'s `health.v1/state/**` (core S2, S4).
 async fn get_state(s: &zenoh::Session, address: &str) -> Vec<Current> {
+    get_state_runs(s, address).await.0
+}
+
+/// [`get_state`], and the run of each snapshot it was answered with, by
+/// its key: the run its instance answered under (core §7.5).
+async fn get_state_runs(
+    s: &zenoh::Session,
+    address: &str,
+) -> (Vec<Current>, BTreeMap<String, String>) {
+    let mut runs = BTreeMap::new();
     let rx = s
         .get(format!("zk2/{address}/health.v1/state/**"))
         .target(QueryTarget::All)
@@ -217,6 +227,11 @@ async fn get_state(s: &zenoh::Session, address: &str) -> Vec<Current> {
         let Ok(sample) = r.into_result() else {
             continue;
         };
+        if let zenkey::inband::Read::Snapshot { page: Ok(page), .. } =
+            zenkey::inband::read(sample.clone())
+        {
+            runs.insert(sample.key_expr().as_str().to_owned(), page.run.to_string());
+        }
         // A snapshot's page is its entries, each live one stamped with its
         // confirmation (core §4.2, freshness.v2 §2.6; #977's E3).
         samples.extend(common::replies_aged(sample));
@@ -234,7 +249,32 @@ async fn get_state(s: &zenoh::Session, address: &str) -> Vec<Current> {
             },
         });
     }
-    out
+    (out, runs)
+}
+
+/// The run of the snapshot that answered `key`, of `runs`
+/// ([`get_state_runs`]).
+fn snapshot_run(runs: &BTreeMap<String, String>, key: &str) -> Option<String> {
+    runs.iter()
+        .find(|(k, _)| {
+            key.strip_prefix(k.as_str())
+                .is_some_and(|r| r.is_empty() || r.starts_with('/'))
+        })
+        .map(|(_, r)| r.clone())
+}
+
+/// The run `address`'s descriptor of `instance` states (core §3.3).
+async fn described_run(
+    tool: &zenoh::Session,
+    address: &str,
+    instance: &zenkey::model::grammar::InstanceId,
+) -> Option<String> {
+    presence::descriptor(tool, &addr(address), instance, T)
+        .await
+        .unwrap()
+        .into_descriptor()
+        .unwrap()
+        .run
 }
 
 /// What G's reply holds: the status, and each check (`None`: a
@@ -447,16 +487,18 @@ async fn s1_bring_up() {
         let k = parse(s.key_expr().as_str()).unwrap();
         match &k {
             ZkKey::Instance { addr: a, .. } if *a == addr(SVC) => {
-                at.push(("instance", get_state(&ts, SVC).await));
+                at.push(("instance", get_state_runs(&ts, SVC).await));
             }
             ZkKey::Alive { addr: a, .. } if *a == addr(SVC) && is_health_token(&k) => {
-                at.push(("alive/health.v1", get_state(&ts, SVC).await));
+                at.push(("alive/health.v1", get_state_runs(&ts, SVC).await));
             }
             _ => {}
         }
     }
+    let stated = described_run(&ts, SVC, svc.instance()).await;
+    assert!(stated.is_some(), "the owner's descriptor states its run");
     let mut first_since = 0;
-    for (when, replies) in at {
+    for (when, (replies, runs)) in at {
         let got = split(replies);
         let (current, status) = got.status.expect(when);
         assert_eq!(
@@ -470,6 +512,13 @@ async fn s1_bring_up() {
             current.clock(),
             Some(zenkey::inband::owner_clock(current.key()).to_string()),
             "confirmed on the owner's clock"
+        );
+        // Scenarios §1 step 1 (text 0.10): in a snapshot under the run the
+        // owner's descriptor states (core §3.3).
+        assert_eq!(
+            snapshot_run(&runs, current.key()),
+            stated,
+            "at the {when} token: a snapshot under the descriptor's run"
         );
         let _ = &owner_zid;
         assert!(got.checks.is_empty());
@@ -1087,13 +1136,23 @@ async fn s4_the_faults_stamp_measured() {
                 .is_none_or(|t| t.get_id().to_string() != os.zid().to_string())),
         "the status put carries no stamp of the owner's, so R1 lets it through: {heard:#?}"
     );
-    let got = split(get_state(&rs, "lab/ahead").await);
+    let (replies, runs) = get_state_runs(&rs, "lab/ahead").await;
+    let got = split(replies);
     let (current, status) = got.status.expect("the owner's GET answers it");
     assert_eq!(status.read(), Read::Level(Level::Ok));
     assert_eq!(
         current.clock(),
         Some(zenkey::inband::owner_clock(current.key()).to_string()),
         "its confirmation, from the owner's clock: a GET reply is never re-stamped (core §4.1)"
+    );
+    // Scenarios §4 step 4 (text 0.10): G's answer lists the status in a
+    // snapshot under the run the owner's descriptor states.
+    let stated = described_run(&rs, "lab/ahead", svc.instance()).await;
+    assert!(stated.is_some(), "the owner's descriptor states its run");
+    assert_eq!(
+        snapshot_run(&runs, current.key()),
+        stated,
+        "a snapshot under the descriptor's run"
     );
     svc.close().await.unwrap();
     drop(r2);

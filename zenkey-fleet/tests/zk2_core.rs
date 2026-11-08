@@ -1203,6 +1203,83 @@ async fn a_state_gets_replies_merge_per_key_whatever_arrives_last() {
     );
 }
 
+/// Core §4.2 at 0.102 (zk2py rounds 105 and 106): whether an alarm is per
+/// key is read from its owner's revision under the `reply_del`'s run, never
+/// from the reader's alone. An owner on `alarms.v1` 1.0, which uses
+/// `freshness.v1`, answers its alarms per key, and its descriptor names
+/// 1.0: the alarms reader, which holds 1.1, retrieves 1.0 and merges the
+/// `reply_del` of a resolved alarm as a deletion with its stamp. By 1.1
+/// alone it would be a stray.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_owner_on_revision_1_0_answers_its_alarm_per_key() {
+    let (_router, ep) = router(None).await;
+    let (owners, tool) = (client(&ep).await, client(&ep).await);
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+        "../spec/profiles/.history/alarms.v1/\
+         95579151aa231d2ba1224eae828083bdfc7f4f9403a80c831c1915decca9e8b6.bundle.json",
+    );
+    let earlier = Implementation::from_bundle(&std::fs::read(path).expect("the bundle"))
+        .expect("alarms.v1 1.0");
+    let mut b = ServiceBuilder::new(&owners, config("lab/al"));
+    let a = b
+        .alarms_with(earlier.clone(), zenkey::alarms::Startup::default())
+        .await
+        .expect("an alarms owner on 1.0");
+    let svc = b.start().await.expect("started");
+    let raised = a
+        .raise(zenkey::alarms::Condition::new(
+            "link_down",
+            zenkey_model::alarms::Severity::Warning,
+            "link down",
+        ))
+        .await
+        .expect("raised");
+    let key = format!("zk2/lab/al/alarms.v1/state/alarms/{}", raised.alert_key);
+    assert!(
+        !zenkey_model::collection::stray_reply_del(earlier.contract(), &key),
+        "by 1.0, per key"
+    );
+    assert!(
+        zenkey_model::collection::stray_reply_del(
+            zenkey::alarms::implementation().contract(),
+            &key
+        ),
+        "by 1.1, answered by snapshot"
+    );
+    a.resolve(&raised.alert_key)
+        .await
+        .expect("resolved")
+        .expect("held");
+    let r = eventually_some_reply(&tool, &key).await;
+    let reply = r.replies.iter().find(|s| s.key == key).expect("its reply");
+    assert!(reply.delete, "a deletion, no stray: {:?}", r.replies);
+    assert!(
+        matches!(r.envelopes.get(&key), Some(Ok(s)) if s.run == svc.minter().run()),
+        "under its stamp: {:?}",
+        r.envelopes.get(&key)
+    );
+    svc.close().await.expect("closed");
+}
+
+/// The alarms reader's GET of `lab/al`, once it answers `key`.
+async fn eventually_some_reply(tool: &zenoh::Session, key: &str) -> zenkey_fleet::AlarmSeedRead {
+    for _ in 0..50 {
+        let r = zenkey_fleet::get_alarms(
+            tool,
+            "zk2/lab/al/alarms.v1/state/alarms/*",
+            std::time::Duration::from_secs(2),
+            &zenkey_fleet::EntryEpochs::default(),
+        )
+        .await
+        .expect("a GET");
+        if r.replies.iter().any(|s| s.key == key && s.delete) {
+            return r;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!("the owner never answered {key} with its deletion")
+}
+
 /// #977's E4: an alarms reader reads a snapshot's tombstone as a deletion
 /// with its stamp, and a `reply_del` on an alarm, which its owner answers
 /// by snapshot, as no owner's answer: a reply undecodable, `form`, never a

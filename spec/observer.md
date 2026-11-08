@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Text version** | 0.30 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.31 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
 | **Written against** | core 0.101 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
@@ -1260,7 +1260,8 @@ reads. `[Sc: constrained.md §7]` `[F: scope/faces.json]`
 - **With a face policy and its face** (`link.v2` §2.1), the scopes are
   what the face's plan lets cross (`link.v2` §2.3). The tool derives the
   plan from the policy and the contracts in hand, as a generator does,
-  each service the policy lists taken to implement them all:
+  each service the policy lists, and each device of its faces (`link.v2`
+  §2.5), taken to implement them all:
   - to subscribe, each resource that crosses the face, and each heartbeat
     that crosses it (`link.v1` §2.7, §2.9; `link.v2` §2.7). On a face
     that lists its frames, those are the frames it lists;
@@ -1274,7 +1275,8 @@ reads. `[Sc: constrained.md §7]` `[F: scope/faces.json]`
   declares, of each selector it was given, each scope the selector
   includes, and the selector itself where it meets a scope it does not
   include. A tool MUST NOT drop silently a selector it was given that
-  meets none of its scopes: it refuses it, and says why.
+  meets none of its scopes: it refuses the read, declaring none of the
+  selectors, and names each such selector and why.
   `[F: scope/faces.json]`
 - **Why the contracts.** No descriptor crosses the face, so the tool
   takes the deployment's word for the addresses and their contracts, as

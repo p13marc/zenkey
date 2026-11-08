@@ -295,6 +295,11 @@ pub struct AlarmSample {
     /// it measures the stamping clock (`freshness.v1` §2.6, ground 2).
     pub wall: SystemTime,
     pub via: AlarmVia,
+    /// For a GET's entry, the run of the snapshot whose page listed it:
+    /// the run the answering instance wrote under, which attributes it
+    /// (§2.14 step 5, text 0.14). `None` for a per-key reply and a
+    /// subscription's delivery.
+    pub snapshot_run: Option<zenkey_model::wire::Run>,
 }
 
 impl AlarmSample {
@@ -314,6 +319,7 @@ impl AlarmSample {
             at: view.received,
             wall: SystemTime::now(),
             via,
+            snapshot_run: None,
         }
     }
 }
@@ -366,6 +372,9 @@ struct InstanceSeen {
     listing: Listing,
     /// Its `meta.zid`, by value; `None` when it carries none.
     zid: Option<String>,
+    /// The run it states (core §3.3), as the descriptor spells it; `None`
+    /// when it states none, which attributes nothing (§2.14 step 5).
+    run: Option<String>,
     /// Its descriptor names the revision of `alarms.v1` the book reads
     /// heartbeats with, which uses `freshness.v2` (text 0.11): its alarms
     /// are confirmed by heartbeat, never re-put.
@@ -412,6 +421,8 @@ struct LatestSample {
     doc: Option<std::result::Result<Alarm, Invalid>>,
     stamp: Option<Timestamp>,
     via: AlarmVia,
+    /// A GET's entry: its snapshot's run ([`AlarmSample::snapshot_run`]).
+    snapshot_run: Option<zenkey_model::wire::Run>,
 }
 
 /// The last GET's reply for one key.
@@ -676,6 +687,7 @@ impl AlarmBook {
                                     token: e.token,
                                 }),
                                 zid: d.meta.get("zid").and_then(|v| v.as_str()).map(zid_value),
+                                run: d.run.clone(),
                                 heartbeats: entry.is_some_and(|e| {
                                     e.contract.strip_prefix("sha256:")
                                         == Some(zenkey::alarms::FINGERPRINT)
@@ -685,6 +697,7 @@ impl AlarmBook {
                         None => InstanceSeen {
                             listing: Listing::Unread,
                             zid: None,
+                            run: None,
                             heartbeats: false,
                         },
                     });
@@ -878,6 +891,7 @@ impl AlarmBook {
             doc,
             stamp: s.stamp,
             via: s.via,
+            snapshot_run: s.snapshot_run,
         });
         let key = s.key.clone();
         Some(self.transition_of(&key, change_of(t), Some(s.via), None, s.at, s.wall))
@@ -1212,6 +1226,17 @@ impl AlarmBook {
             .collect()
     }
 
+    /// The runs `addr`'s present descriptors state (core §3.3), as they
+    /// spell them: under which its instances answer now.
+    fn runs(&self, addr: &Addr) -> BTreeSet<String> {
+        self.owners
+            .get(addr)
+            .into_iter()
+            .flat_map(|o| o.instances.values())
+            .filter_map(|s| s.as_ref()?.run.clone())
+            .collect()
+    }
+
     /// `addr`'s window (§2.15), when a subscription listens: see the module
     /// doc.
     pub fn window(&self, addr: &Addr, now: Instant) -> Option<Window> {
@@ -1338,25 +1363,40 @@ impl AlarmBook {
             Some(Ok(_)) => Latest::Resolved,
             Some(Err(_)) => Latest::Undecodable,
         });
-        let zids = self.zids(&e.owner);
-        // §2.14 step 5 (text 0.11): only a stamp its owner set is
-        // attributed. A freshness.v2 owner's put carries none, so a
-        // subscription's delivery arrives under a router's stamp or none;
-        // a GET's reply carries its last confirmation, the owner's. Since
-        // core 0.100 (#977's E3) that is a snapshot's confirmation, stamped
-        // on the owner's clock named by its address, which no zid is: no
-        // instance's, so unattributed.
+        // §2.14 step 5 (text 0.14). A GET's entry is attributed by the run
+        // of the snapshot that listed it, the answering instance's: under a
+        // run no present descriptor states, an earlier instance answered.
+        // A descriptor stating no run attributes nothing. Never by the
+        // entry's own run, which can be its instance's earlier run.
+        // Otherwise only a stamp its owner set is attributed, by `meta.zid`
+        // (text 0.11): a per-key reply's. A freshness.v2 owner's put
+        // carries none, so a subscription's delivery arrives under a
+        // router's stamp or none, unattributable; and a snapshot's
+        // confirmation is stamped on the owner's clock named by its
+        // address, which no zid is.
         let by_heartbeat = self.confirms_by_heartbeat(&e.owner);
-        let snapshot_clock = crate::bus::query::owner_clock(key);
-        let stamp_id = e
-            .latest
-            .as_ref()
-            .filter(|l| l.doc.is_some())
-            .filter(|l| l.via == AlarmVia::Get || !by_heartbeat)
-            .and_then(|l| l.stamp.as_ref())
-            .filter(|t| *t.get_id() != snapshot_clock)
-            .map(|t| zid_value(&t.get_id().to_string()));
-        let previous_instance = !zids.is_empty() && stamp_id.is_some_and(|id| !zids.contains(&id));
+        let last_doc = e.latest.as_ref().filter(|l| l.doc.is_some());
+        let previous_instance = match last_doc {
+            Some(LatestSample {
+                via: AlarmVia::Get,
+                snapshot_run: Some(run),
+                ..
+            }) => {
+                let runs = self.runs(&e.owner);
+                !runs.is_empty() && !runs.contains(&run.to_string())
+            }
+            Some(l) if l.via == AlarmVia::Get || !by_heartbeat => {
+                let zids = self.zids(&e.owner);
+                let snapshot_clock = crate::bus::query::owner_clock(key);
+                let stamp_id = l
+                    .stamp
+                    .as_ref()
+                    .filter(|t| *t.get_id() != snapshot_clock)
+                    .map(|t| zid_value(&t.get_id().to_string()));
+                !zids.is_empty() && stamp_id.is_some_and(|id| !zids.contains(&id))
+            }
+            _ => false,
+        };
         let held_whole = self.owner_set(&e.owner, now).verdict == SetVerdict::Established;
         let left_out = self.left_out(key, e);
         let severity = e
@@ -1676,6 +1716,7 @@ mod tests {
             at,
             wall: wall(),
             via,
+            snapshot_run: None,
         }
     }
 
@@ -2561,6 +2602,76 @@ mod tests {
         assert!(
             b.reading(A, t0, wall()).unwrap().previous_instance,
             "a reply under another id is another instance's"
+        );
+    }
+
+    /// §2.14 step 5 (text 0.14, zk2py round 105's F-503): a GET's entry is
+    /// attributed by the run of the snapshot that listed it, the answering
+    /// instance's: under the run the present descriptor states, its own;
+    /// under another, an earlier instance's, `previous_instance`; with no
+    /// run stated, unattributable. Never by the entry's own run, which can
+    /// be its instance's earlier run, and never by a snapshot's
+    /// confirmation stamp, which names the owner's clock.
+    #[test]
+    fn a_get_entry_is_attributed_by_its_snapshots_run() {
+        use zenkey_model::wire::{Run, Seq, Stamp};
+        let t0 = Instant::now();
+        let stating = |run: Option<&str>| {
+            let mut o = presence_at(true, Some(ZID), zenkey::alarms::FINGERPRINT);
+            for read in o.descriptors.as_mut().unwrap().values_mut() {
+                if let crate::model::catalog::DescriptorRead::Served(d) = read {
+                    d.run = run.map(str::to_owned);
+                }
+            }
+            o
+        };
+        let entry = |snapshot: Run| {
+            let mut g = put(t0, 5, doc("warning", "firing", 2), AlarmVia::Get);
+            g.stamp = None;
+            g.snapshot_run = Some(snapshot);
+            g
+        };
+        let read = |stated: Option<&str>, snapshot: Run, own: Run| {
+            let mut b = book(true);
+            b.subscribed(t0);
+            b.presence_read(&stating(stated), t0);
+            let mut envelopes = BTreeMap::new();
+            envelopes.insert(
+                A.to_owned(),
+                Ok(Stamp {
+                    run: own,
+                    seq: Seq::new(1).unwrap(),
+                }),
+            );
+            b.seed(
+                SeedRead {
+                    asked_at: t0,
+                    complete: true,
+                    replies: vec![entry(snapshot)],
+                    discarded: 0,
+                    envelopes,
+                },
+                t0,
+                wall(),
+            );
+            b.reading(A, t0, wall()).unwrap().previous_instance
+        };
+        let (now, earlier) = (Run::U16(0x00ab), Run::U16(0x00aa));
+        assert!(
+            !read(Some("00ab"), now, now),
+            "under the run its descriptor states"
+        );
+        assert!(
+            !read(Some("00ab"), now, earlier),
+            "its own run an earlier one of the same instance: still its own"
+        );
+        assert!(
+            read(Some("00ab"), earlier, earlier),
+            "under a run no present descriptor states: an earlier instance's"
+        );
+        assert!(
+            !read(None, earlier, earlier),
+            "a descriptor stating no run attributes nothing"
         );
     }
 

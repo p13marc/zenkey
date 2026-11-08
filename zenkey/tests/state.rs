@@ -1964,6 +1964,97 @@ async fn s14_a_delete_within_the_window_and_beyond_it() {
     assert!(matches!(StateGet::from(empty), StateGet::Answered(v) if v.is_empty()));
 }
 
+/// `health.v1` revision 1.0, as published in
+/// `spec/profiles/.history/health.v1/`: its status confirmed by
+/// `freshness.v1`, so on core §4.3's table, answered per key.
+fn health_v1_0() -> zenkey::Implementation {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+        "../spec/profiles/.history/health.v1/\
+         e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df.bundle.json",
+    );
+    zenkey::Implementation::from_bundle(&std::fs::read(path).unwrap()).unwrap()
+}
+
+/// §15 step 2 (core §4.2, 0.102): whether a member is per key is read from
+/// the owner's revision. The owner serves `status` (ttl 60) under
+/// `health.v1` 1.0, which uses `freshness.v1` and which its descriptor
+/// names; T holds 1.1, which uses `freshness.v2` instead and answers the
+/// status by snapshot. The owner deletes `status`, and T's GET within W
+/// merges its `reply_del` as a deletion: by 1.1 alone it would be a stray.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s15_an_owner_on_an_earlier_revision_answers_per_key() {
+    let (_r1, ep) = router(None).await;
+    let os = client(&ep).await;
+    let ts = client(&ep).await;
+    let earlier = health_v1_0();
+    let later = zenkey::health::implementation();
+    let status = "zk2/lab/svc/health.v1/state/status";
+    // The two revisions read the status apart.
+    assert!(
+        !zenkey::model::collection::stray_reply_del(earlier.contract(), status),
+        "by 1.0, a per-key resource"
+    );
+    assert!(
+        zenkey::model::collection::stray_reply_del(later.contract(), status),
+        "by 1.1, a member answered by snapshot"
+    );
+    let mut b = ServiceBuilder::new(&os, config("lab/svc"));
+    b.implement(earlier.clone()).unwrap();
+    b.expose(&zenkey::health::iface(), zenkey::health::CHECKS)
+        .unwrap()
+        .expose(&zenkey::health::iface(), zenkey::health::FAULTS)
+        .unwrap();
+    let w = b
+        .declare_state_writer(&zenkey::health::iface(), "state/status", &Bindings::new())
+        .await
+        .unwrap();
+    let svc = b.start().await.unwrap();
+    let d: serde_json::Value = serde_json::from_slice(&svc.descriptor_bytes()).unwrap();
+    let named = d["interfaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["iface"] == "health.v1")
+        .map(|e| e["contract"].clone());
+    assert_eq!(
+        named,
+        Some(serde_json::json!(earlier.fingerprint().to_string())),
+        "the descriptor names 1.0"
+    );
+    w.put("serving").await.unwrap();
+    let del = w.delete().await.unwrap();
+    // T, a consumer on 1.1, GETs the interface's state within W.
+    let t =
+        Consumer::for_tool(&ts, later.shared_contract(), &["lab/svc"], &BTreeMap::new()).unwrap();
+    let a = eventually_answered(&t, status).await;
+    assert!(
+        !a.undecodable.contains_key(status),
+        "no stray: the owner's revision answers it per key: {a:?}"
+    );
+    assert!(
+        a.current
+            .iter()
+            .any(|c| c.key() == status && matches!(c, Current::Deleted { .. })),
+        "merged as a deletion: {a:?}"
+    );
+    assert_eq!(a.inband.get(status), Some(&del.stamp), "under its stamp");
+    svc.close().await.unwrap();
+}
+
+/// T's GET of the status, once the owner answers it.
+async fn eventually_answered(t: &Consumer, status: &str) -> StateAnswer {
+    let mut last = None;
+    for _ in 0..50 {
+        let a = t.get_answer("state/status", None, T).await.unwrap();
+        if a.current.iter().any(|c| c.key() == status) || a.undecodable.contains_key(status) {
+            return a;
+        }
+        last = Some(a);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("the owner never answered the status: {last:?}")
+}
+
 /// §10's boundary, at the owner: a snapshot's asof is the last seq the
 /// owner minted, each live entry its member's last put, and a put after the
 /// answer carries a seq above asof, which the omission rule keeps.

@@ -48,13 +48,72 @@ pub(crate) async fn runs_revision(
     }
 }
 
+/// Whether a `reply_del` on `key` under `run` is a stray one (core §4.2,
+/// 0.102): a deletion on a member of a collection that the owner's revision
+/// answers by snapshot ([`zenkey_model::collection::stray_reply_del`]).
+/// Whether a resource is per key is read from the owner's revision, the one
+/// its descriptor stating `run` names ([`owner_revision`]): `contract`
+/// itself where it names it, else that revision retrieved by its
+/// fingerprint (§8.4); where no descriptor reaches the reader, `contract`,
+/// the deployment's word. Never from `contract` alone where the owner names
+/// another: an owner on an earlier revision can answer per key a member a
+/// later revision answers by snapshot, and its real `reply_del` is no
+/// stray. A read that failed, or a revision that cannot be had, judges
+/// nothing, so the `reply_del` merges as a deletion. `asked` holds each
+/// owner's answer under each run, so a GET asks once.
+pub(crate) async fn stray_reply_del(
+    session: &zenoh::Session,
+    key: &str,
+    run: Run,
+    contract: &Contract,
+    timeout: Duration,
+    asked: &mut std::collections::BTreeMap<(String, String), Option<std::sync::Arc<Contract>>>,
+) -> bool {
+    let owner = owner_of(key).map_or_else(String::new, |(prefix, addr)| format!("{prefix}{addr}"));
+    let at = (owner, run.to_string());
+    let theirs = match asked.get(&at) {
+        Some(c) => c.clone(),
+        None => {
+            let c = match owner_revision(session, key, run, &contract.iface, timeout).await {
+                OwnerRevision::Named(fp) if fp == Fingerprint::of(contract).to_string() => {
+                    Some(std::sync::Arc::new(contract.clone()))
+                }
+                OwnerRevision::Named(fp) => retrieved(session, &contract.iface, &fp, timeout).await,
+                OwnerRevision::Unreached => Some(std::sync::Arc::new(contract.clone())),
+                OwnerRevision::Unread => None,
+            };
+            asked.insert(at, c.clone());
+            c
+        }
+    };
+    theirs.is_some_and(|c| zenkey_model::collection::stray_reply_del(&c, key))
+}
+
+/// The revision of `iface` whose fingerprint is `fp`, retrieved (§8.4);
+/// `None` where it cannot be had.
+async fn retrieved(
+    session: &zenoh::Session,
+    iface: &zenkey_model::grammar::IfaceId,
+    fp: &str,
+    timeout: Duration,
+) -> Option<std::sync::Arc<Contract>> {
+    let fp = Fingerprint::parse(fp).ok()?;
+    match crate::retrieval::fetch_bundle(session, iface, &fp, timeout).await {
+        Ok(crate::retrieval::Retrieved::Bundle(b, _)) => {
+            Contract::from_bundle(&b).ok().map(std::sync::Arc::new)
+        }
+        _ => None,
+    }
+}
+
 /// What the owner of a key's descriptors say of the revision of its
 /// interface it runs under a run (core §4.2, "The owner's revision maps
 /// the index"; §3.3): [`owner_revision`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OwnerRevision {
-    /// The fingerprint its descriptor stating the run names, or its only
-    /// descriptor where that states no run, which stands for its instance.
+    /// The fingerprint its descriptor stating the run names: the
+    /// descriptor of the instance whose `run` is the snapshot's (core
+    /// §4.2, 0.102; F-507).
     Named(String),
     /// No descriptor reaches the reader: the GET of its instances' keys ran
     /// to its final reply and none answered, as across a constrained face.
@@ -63,9 +122,10 @@ pub enum OwnerRevision {
     /// A read that failed (review-bot on #1086): a GET that could not be
     /// asked, an error reply (zenoh's at its timeout among them), a
     /// descriptor that does not read, or descriptors none of which names
-    /// the interface under the run. No word: the reader cannot tell the
-    /// revision, and applies no omission rule. The first is logged at
-    /// warning level, the rest at debug.
+    /// the interface under the run, a lone descriptor stating no run among
+    /// them (core 0.102, F-507: §3.3 asks an owner to state one). No word:
+    /// the reader cannot tell the revision, and applies no omission rule.
+    /// The first is logged at warning level, the rest at debug.
     Unread,
 }
 
@@ -134,8 +194,9 @@ pub async fn owner_revision(
     {
         return OwnerRevision::Named(fp.clone());
     }
+    // Descriptors reach the reader and none states the run: no omission
+    // rule applies over that snapshot (core §4.2, 0.102).
     match (named.as_slice(), failed) {
-        ([(None, fp)], None) => OwnerRevision::Named(fp.clone()),
         (_, Some(why)) => {
             unread(key, why);
             OwnerRevision::Unread

@@ -6,6 +6,16 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a GET's alarm attributed by its snapshot's run, and a stray `reply_del` read by the owner's revision (zk2py rounds 105, 106)
+
+Core 0.102 §4.2 and `alarms.v1` 0.14 §2.14 step 5.
+
+| Before | Now | Notes |
+|---|---|---|
+| `alarms`, the doctor's `alarm-*`, `check conform`'s `alarm-*`, the watchdog's `alert-firing`: a GET's alarm, a snapshot's entry, never `previous_instance` | attributed by the run of the snapshot that listed it: under a run no present descriptor of the owner states, `not_asked`, `previous_instance`; a descriptor stating no run attributes nothing | never by the entry's own run; a per-key reply keeps the `meta.zid` rule, and a subscription's delivery stays unattributable. The exit code follows the answer, as before |
+| `alarms`, `health`, `config` (`config.v1` and `config.v2`), `why`, `get state`, `record --on`'s preamble: a `reply_del` judged a stray by the revision the tool holds (the profile's, or `--contracts`) | by the owner's revision under the deletion's run: the one its descriptor stating that run names, retrieved by fingerprint where the tool does not hold it; where no descriptor reaches the tool, the revisions it holds; a read that failed judges nothing | an owner on `health.v1` 1.0 or `alarms.v1` 1.0 answers its members per key, so its `reply_del` is a deletion, no longer `zk2c envelope refused: form` |
+| the omission rule (the seeded watch with contracts, `get state`): a lone descriptor stating no `run` named the owner's revision | no revision: no omission rule over that snapshot, its entries still merging | core §4.2, F-507: the descriptor of the instance whose `run` is the snapshot's |
+
 ## Unreleased (`main`, zk2) — an event's key from its run and seq, read (#980 C2b)
 
 Core 0.101 defines an occurrence chunk, an event key's last chunk from

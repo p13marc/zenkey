@@ -1062,17 +1062,10 @@ impl Store {
     }
 
     /// A delete recorded `age` ago: its tombstone is answered for what is
-    /// left of the window (S3), as a delete made then would be. A covered
-    /// member's (`freshness.v2`) `reply_del` carries `confirmed`, the
-    /// timestamp minted at the delete, its last confirmation (S2, core
-    /// §4.3's "Minting").
-    fn delete_aged(
-        &self,
-        key: &OwnedKeyExpr,
-        stamped: Stamped,
-        age: Duration,
-        confirmed: Option<Timestamp>,
-    ) {
+    /// left of the window (S3), as a delete made then would be. No last
+    /// confirmation is minted at a delete: a tombstone has none, so nothing
+    /// would carry it (core §4.3's "Minting", 0.102; F-506).
+    fn delete_aged(&self, key: &OwnedKeyExpr, stamped: Stamped, age: Duration) {
         let now = Instant::now();
         let mut map = self.map.lock().expect("not poisoned");
         let old = map.insert(
@@ -1082,7 +1075,7 @@ impl Store {
                 attachment: None,
                 stamped,
                 at: now.checked_sub(age).unwrap_or(now),
-                confirmed,
+                confirmed: None,
             },
         );
         let old = old.and_then(|e| e.value.is_some().then_some(e.stamped.stamp));
@@ -1898,8 +1891,7 @@ impl StateWriter {
         // A deleted member is not re-put (`freshness.v1` §2.4).
         held.value = None;
         held.at = tokio::time::Instant::now();
-        self.store
-            .delete_aged(&self.key, stamped, age, self.confirmed_at(&stamped));
+        self.store.delete_aged(&self.key, stamped, age);
         self.minter.settle(stamped.stamp);
         // §2.7: a deleted key is not live, so it frees a member.
         self.writer.release();

@@ -3,6 +3,95 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.102 — 2026-11-08: a stray `reply_del`, and the owner's revision by its run (#977, #609)
+
+zk2py round 105 read 0.100 cold, and #977's E4 (#1089) found two gaps in
+it. This version answers both. `observer.md` moves to text 0.31 for
+round 106 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)), and three
+profiles follow: `alarms.v1` 0.14, `health.v1` 0.10 and `link.v2` 0.11.
+
+**Added: §4.2, "A stray `reply_del`" (E4's first gap).** A stray
+`reply_del` is one on a member of a collection that its owner answers by
+snapshot. No owner sends one: it deletes such a member with a tombstone.
+- **A consumer or a tool MUST NOT merge one as a deletion.** It counts it
+  undecodable, refused as `form`. `[Sc: state.md §15]`
+- **An archive** aligning from the owner drops no key for one. A peer
+  archive answers per key, so its `reply_del` still counts.
+- **The merge's bullet** "A `reply_del` is a deletion" says that a stray
+  one is not.
+- **Why.** 0.100 said nothing of one. A storage that answers an owner's
+  keys (S4), or an owner of an earlier core, can send it. Merged, it would
+  delete a member the owner still holds.
+- **The reference** reads so since E4. `Consumer::get_answer` counts it
+  undecodable, `form`, the archive skips it, and the fleet's readers show
+  it undecodable. `form` is the reference's token for it.
+
+**Changed: §4.2, "The owner's revision maps the index" (F-507, and E4's
+second gap).**
+- **Which descriptor (F-507).** The owner's descriptor is that of the
+  instance whose `run` is the snapshot's run. Two instances can run two
+  revisions (R4), each answering under its own run. Where the owner's
+  descriptors reach the reader and none states the run, no omission rule
+  applies over that snapshot. That is what zk2py's `ByDescriptor` and the
+  fleet's seed (E4) do.
+- **It says which resources are per key (E4's second gap).** Whether a
+  member's resource is per key is read from the owner's revision, for the
+  run of the sample's stamp, never from a revision the reader holds alone.
+  An owner on an earlier revision can answer per key a member that a later
+  one answers by snapshot. `health.v1` 1.0's status is one: it is a
+  `freshness.v1` state. `[Sc: state.md §15]`
+- **No keyword of its own.** It says which `reply_del` the merge's MUST
+  and the stray's MUST NOT reach.
+- **Without the owner's revision**, a reader cannot tell a stray
+  `reply_del`, and merges it as a deletion, as the fleet's seed does.
+  Where no descriptor reaches the reader, the owner's revision is the
+  deployment's word, as for the index: the one revision the catalog
+  lists.
+
+**Changed: §4.3, "Minting" (F-506).** An owner mints a last confirmation
+at each put of a member with a horizon, and at each heartbeat that vouches
+for it. "A delete among them" came from 0.89, when a `reply_del` carried
+that time. Since 0.100 a deleted member is a tombstone, which has no
+confirmation, so a delete's time is carried by nothing.
+
+**The evidence.**
+- **`scenarios/state.md` §15, new.** Step 1 is a stray `reply_del`
+  beside a complete snapshot, which the reference runs as
+  `a_reply_del_on_a_collections_member_is_undecodable`. Step 2 is an
+  owner on a revision whose `status` is per key, read by a reader that
+  holds a later revision too. It is written ahead of the reference.
+- **No fixture case.** `seed/snapshot.json` gives a reader's collections
+  and not which of them are per key, so it cannot state a stray
+  `reply_del`. Its case 43 merges a per-key resource's.
+- **Appendix C** and `scenarios/README.md` name §15.
+
+**Answered: zk2py rounds 105 and 106's F-504, F-506, F-507 and F-508**
+here. None was a blocker.
+- **F-504, minor: `state.md` §14's page size.** Its pages hold at most
+  975 bytes under a 16-bit run, and 977 under a 32-bit run.
+- **F-506 and F-507:** above.
+- **F-508, minor: `seed/snapshot.json`'s description.** A member matches
+  its template with each parameter one chunk, and a rest parameter one or
+  more (§2.2). No case has a rest template, so no case moves.
+- **F-503**, a GET's alarm attributed by its run, is `alarms.v1` 0.14's
+  and `health.v1` 0.10's. **F-505**, `link.v2`'s `plan.json` cases 14 to
+  18 on zenoh-modem's catalog `0ff6bf6d`, is `link.v2` 0.11's. **F-509 to
+  F-511** are observer 0.31's.
+
+**Deliberately not changed.**
+- **§4.4.** Its "positive evidence" names a source's `reply_del`, and a
+  stray one is no owner's answer (§4.2).
+- **§7.5's parse** and its refusals. `form` names a stray `reply_del`'s
+  refusal as a reader counts it, not a refusal of the parse: the
+  attachment parses.
+- **S2 and S3.** An owner sends a `reply_del` only for a per-key
+  resource's member, as 0.100 said.
+- **No section number** and no fingerprint moves.
+
+**The figures.** `RULES.md` lists 268 rules, one more than
+0.101's 267: the stray `reply_del`'s MUST NOT, a consumer's and a tool's
+(consumer 28, observer 83).
+
 ## 0.101 — 2026-11-07: an event's key from its run and seq, defined (#980 C2a)
 
 Epic #975, zk2c, makes the wire bandwidth-first. An occurrence's key ends

@@ -369,13 +369,20 @@ pub async fn get(
         samples.push(sample.clone());
     }
     // One reply a key, the newer by its stamp (S4): the envelopes are
-    // filed by key. A `reply_del` of an alarm, which its owner answers by
+    // filed by key, and each entry keeps its snapshot's run, which
+    // attributes it (§2.14 step 5, text 0.14). A stray `reply_del`, on an
+    // alarm its owner's revision under the deletion's run answers by
     // snapshot, is no owner's answer: a reply undecodable, `form`, never a
-    // deletion (#977's E4).
+    // deletion (core §4.2, 0.102). An owner on revision 1.0 answers per
+    // key, so its `reply_del` is a deletion.
     let alarms = zenkey::alarms::implementation().shared_contract();
-    let (samples, strays) = crate::bus::query::merged_without_strays(samples, &[&*alarms], |s| {
-        crate::bus::query::reply_samples_aged(s, epochs)
-    });
+    let held = [&*alarms];
+    let mut revisions = crate::bus::query::OwnerRevisions::new(session, timeout, &held, None);
+    let (entries, strays) =
+        crate::bus::query::merged_without_strays(samples, &mut revisions, |s| {
+            crate::bus::query::reply_entries_aged(s, epochs)
+        })
+        .await;
     for sample in strays {
         let (mut reply, _) = sample_of(&sample, AlarmVia::Get);
         reply.delete = false;
@@ -385,8 +392,9 @@ pub async fn get(
         );
         out.replies.push(reply);
     }
-    for sample in samples {
-        let (reply, envelope) = sample_of(&sample, AlarmVia::Get);
+    for entry in entries {
+        let (mut reply, envelope) = sample_of(&entry.sample, AlarmVia::Get);
+        reply.snapshot_run = entry.snapshot_run;
         if let Some(e) = envelope {
             out.envelopes.insert(reply.key.clone(), e);
         }
@@ -413,6 +421,7 @@ fn sample_of(sample: &Sample, via: AlarmVia) -> (AlarmSample, crate::model::inba
             at: Instant::now(),
             wall: SystemTime::now(),
             via,
+            snapshot_run: None,
         },
         envelope,
     )
