@@ -20,6 +20,10 @@ policy shapes the tool's scopes and its session's transport, not the path.
 **The reverse** (:func:`run_zenctl`): zk2py's owner read by ``zenctl echo
 --across-face``, its scope by the face's plan, and its revision by tag.
 
+It runs four windows of 35 s, the heartbeat's period's half, and two more
+for the reverse: a live runner, run by hand, never by the walk (``just
+py-conformance``), which is all the per-push lane runs (review-bot on #1090).
+
 Exit 0 when every check passes, 1 when any fails.
 """
 

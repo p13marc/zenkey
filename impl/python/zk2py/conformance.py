@@ -5730,6 +5730,29 @@ def _round107_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  by(k, {"run_width": 16, "run": 8}), ss.per_key_in(new_, k),
                  by.revision(k, 16, 7) is old_],
                 [True, None, [], False, True]))
+    # review-bot on #1090, 2: step 3's order over the catalog's entries of
+    # the key's interface; a fingerprint the catalog lists under another
+    # interface is filtered at step 1, never looked up
+    from . import across, catalog as cat_mod
+
+    tags = _load_json(root / "envelope" / "tags.json")
+    hist = across.load_history(spec.parent / tags["history"])
+    case = next(c for c in tags["cases"] if c.get("expect", {}).get("step") == 3)
+    doc = json.loads(json.dumps(tags["catalogs"][case["catalog"]]))
+    chosen = case["expect"]["revision"]
+    for e in doc["entries"]:
+        if e["contract"] == chosen:
+            e["iface"] = "decoy.v1"
+    doc.setdefault("format", "zk2-catalog/1")
+    try:
+        got = across.revision_of_key(case["key"], int(case["ch"], 16), case["size"],
+                                     {fp: hist[fp] for fp in case["held"]}, cat_mod.read(json.dumps(doc))).expect()
+    except Exception as e:  # noqa: BLE001 - the reading's verdict
+        got = {"raised": f"{type(e).__name__}: {e}"}
+    out.append(("review-bot on #1090, 2 (across.revision_of_key): with the catalog listing step 3's revision under "
+                "another interface, nothing raises; that revision is no longer listed for the key's interface, so "
+                "another is chosen",
+                ["raised" not in got, got.get("revision") != chosen], [True, True]))
     # observer 0.30 to 0.32
     out.append(("observer 0.30 §7.3: a tool reads an event's run and seq from its key and its record after its time, "
                 "and shows the time or that the clock was unknown; 0.32 §7.5: an event's last chunk, its occurrence "

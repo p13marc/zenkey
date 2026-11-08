@@ -124,8 +124,13 @@ def scopes(contracts: list[Any], addresses: list[str], reads: str = "samples", p
     if "refused" in plan:
         return Scopes([], sorted({f["code"] for f in plan["refused"]}))
     if reads == "state":
-        # "to GET, each state resource. A request crosses by grant, never by
-        # exposure"
+        # observer §7.5: "to GET, each state resource. A request crosses by
+        # grant, never by exposure": a GET's scopes take no face check, since
+        # the face's plan governs what crosses unasked, and a request is asked
+        # (link.v1 §2.9, "Requests cross by grant", which link.v2 restates by
+        # reference; review-bot on #1090). Whether the far principal is
+        # granted it is the router's access control (core §11.1), which no
+        # scope reads.
         return Scopes(every)
     fp = next((f for f in plan["faces"] if f["name"] == face_name), None)
     if fp is None:
@@ -350,7 +355,11 @@ def revision_of_key(key: str, ch: int, size: int, held: dict[str, Revision], cat
     forms = {readings[fp][0] for fp in tagged}  # type: ignore[index]
     if catalog is not None and len(forms) == 1:
         order = {c: n for n, (i, c) in enumerate(catalog.entries) if i == iface}
-        return Choice(max(tagged, key=lambda fp: order[fp]), 3, "tag")
+        # every fingerprint left is one the catalog lists under the key's
+        # interface (step 1's filter, ``listed``), so each has an order; .get
+        # keeps a catalog that lists one under another interface from
+        # raising (review-bot on #1090)
+        return Choice(max(tagged, key=lambda fp: order.get(fp, -1)), 3, "tag")
     return Choice(ambiguous=sorted(tagged), shows=shown(kind))
 
 

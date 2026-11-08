@@ -16,6 +16,9 @@ router of the runner's own, its device simulated
    leaves steps 1 and 2 done. The change stays ended, and its event stands";
    the revision stays, and the view and status last put are the ended
    change's.
+4. **Step 1's undo past zk2py's bound** (review-bot on #1090): the wait
+   gives the lock up, the re-mint is refused with the undo in flight, and
+   the change ends when the undo completes.
 
 Exit 0 when every check passes, 1 when any fails.
 """
@@ -128,6 +131,44 @@ def run() -> list[tuple[str, bool, str]]:
                     "refuses to return" in refused and o.core.pending is None and o.instance == inst
                     and "rolled-back" in ev and consistent,
                     f"{refused!r}; events {ev}; revision {rev}; last put consistent {consistent}"))
+        # 4. review-bot on #1090, 1: step 1's undo that does not complete
+        # within zk2py's bound. The wait releases the cv (an RLock, released
+        # whole by Condition.wait), so the timer, the handlers and the act's
+        # own completion take it meanwhile; past the bound the re-mint is
+        # refused with the undo in flight, the instance running on, as one
+        # asked while an act is in flight is (§2.12), and the change ends when
+        # the undo completes, as a cancel's does (§2.10).
+        _pending(o, 40000)
+        inst, events0 = o.instance, len(o.events)
+        o.remint_undo_wait_s = 1.5
+        dev.next_undo.append(cf.HOLD)
+        got = {}
+        th = threading.Thread(target=remint)
+        th.start()
+        time.sleep(0.3)
+        t0 = time.monotonic()
+        took_cv: list[float] = []
+
+        def grab() -> None:
+            with o.cv:
+                took_cv.append(time.monotonic() - t0)
+
+        g = threading.Thread(target=grab)
+        g.start()
+        g.join(5.0)
+        th.join(10.0)
+        in_flight_after = o.core.in_flight is not None
+        ev_before = [e.get("outcome") for e in o.events[events0:]]
+        o.complete("ok")
+        ev = [e.get("outcome") for e in o.events[events0:]]
+        out.append(("4 (review-bot on #1090): step 1's undo held past zk2py's bound: the wait gives up the lock, so "
+                    "another thread takes it at once; the re-mint is refused with the undo in flight and the instance "
+                    "runs on; the change ends, rolled-back, when the undo completes",
+                    bool(took_cv) and took_cv[0] < 1.0 and "still in flight" in got.get("error", "")
+                    and o.instance == inst and in_flight_after and "rolled-back" not in ev_before
+                    and "rolled-back" in ev and o.core.in_flight is None and o.core.pending is None,
+                    f"lock taken after {took_cv}; {got}; in flight {in_flight_after}; events {ev_before} then {ev}"))
+        o.remint_undo_wait_s = cf.ConfigOwner.remint_undo_wait_s
     except Exception as e:  # noqa: BLE001 - a run that could not finish is a failure
         out.append(("the run finished", False, f"{type(e).__name__}: {e}"))
     finally:

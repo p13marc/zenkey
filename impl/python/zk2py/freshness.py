@@ -770,6 +770,8 @@ def reading_of(r: Any, epoch_s: int = 0, complete: bool = True, owner_id: str | 
     if r.deleted:
         return GetReading("delete", r.stamp_ns, r.stamp_id, r.stamp, inband=r.inband)
     if r.refusal is not None:
+        # observer §7.3 (0.14): a refused envelope is undecodable; its bytes
+        # are never read, so the reading holds an empty payload.
         return GetReading("put", r.stamp_ns, r.stamp_id, r.stamp, b"", r.encoding, r.inband)
     return GetReading("put", r.stamp_ns, r.stamp_id, r.stamp, r.payload, r.encoding, r.inband)
 
@@ -793,19 +795,9 @@ def get_reading(session: Any, key: str, timeout: float = 1.0, epoch_s: int = 0,
         if st.snapshots:
             return GetReading(None, snapshot=True, complete=whole, owner_id=owner_id)
         return GetReading(None)
-    r = mine[-1]
-    if r.snapshot_key is not None:
-        t = r.snapshot_time if r.confirmation == "time" else r.conf if r.confirmation == "conf" else None
-        at = None if t is None else ((epoch_s + t["s"]) * 1000 + t["ms"]) * 1_000_000
-        return GetReading("delete" if r.deleted else "put", None, None, None, r.payload, r.encoding, r.inband,
-                          True, whole, at, owner_id, r.snapshot_run)
-    if r.deleted:
-        return GetReading("delete", r.stamp_ns, r.stamp_id, r.stamp, inband=r.inband)
-    if r.refusal is not None:
-        # observer §7.3 (0.14): a refused envelope is undecodable; its bytes
-        # are never read, so the reading holds an empty payload.
-        return GetReading("put", r.stamp_ns, r.stamp_id, r.stamp, b"", r.encoding, r.inband)
-    return GetReading("put", r.stamp_ns, r.stamp_id, r.stamp, r.payload, r.encoding, r.inband)
+    # review-bot on #1090: one reading of a reply, reading_of's, its
+    # snapshot complete or not as this GET heard it
+    return reading_of(mine[-1], epoch_s, whole, owner_id)
 
 
 # -- a tool's verdict on a service's resources (§5, scenarios §6) ------------------
