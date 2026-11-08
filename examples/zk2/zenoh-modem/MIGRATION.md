@@ -1,7 +1,7 @@
 # Migrating zenoh-modem to zk2c (#991)
 
 *This guide is refreshed as each branch it names merges. It was last refreshed at zenkey's `main`
-`e2bdd8ce`.*
+`c89adc63`, with #980's C2c and C2d.*
 
 This is the page a zenoh-modem maintainer reads to move zenoh-modem onto zk2c, the
 bandwidth-first wire of epic #975. It says what modem-mgmt, the backends, the routers and the
@@ -39,7 +39,8 @@ says what it will be.
 | Text, lists and dictionaries in packed records | Missing | #979's B3 |
 | The in-band stamp, a run and a seq | Landed | Core §4.3, §7.5 (#976) |
 | Frames | Landed | Core §7.7; `zenkey::frame::FrameWriter` (#981) |
-| Event keys by run and seq; the compact descriptor; the archive attachment | Missing | #980's C2, C5 and C3 |
+| Event keys by run and seq | Landed on `main` (core 0.103, #980's C2), after 0.21.0 | An occurrence's key ends in its owner's run and seq, 8 or 12 characters where a ULID took 26, and form 4 carries its time. The next release ships it: 0.21.0 still writes ULIDs |
+| The compact descriptor; the archive attachment | Missing | #980's C5 and C3 |
 | **Telemetry,** `telemetry.v2` | Landed | A frame's fields as metric series. The frame writer meters each counter; `zenctl telemetry` and zengui's Series read frames (#983) |
 | **Freshness,** `freshness.v2` | Landed | One heartbeat per interface in place of re-puts. `modem.v3`, `config.v1` and `health.v1` use it (#978). Its standard contract, which every such owner serves, is at index 9 of [`catalog.json`](catalog.json) `0ff6bf6d`, and a heartbeat's time counts from the catalog's epoch, as a frame's does (`freshness.v2` 0.6). Before #1080 (PR #1082), the doctor's `catalog-missing` warned of that contract on every modem owner, and a heartbeat counted Unix seconds |
 | **The catalog,** and keys on a hop | Landed | Core §8.6 and §8.5: `ServiceBuilder::catalog`, `--catalog` on zenctl and zengui, `zk2 catalog`, `zenctl catalog`, zenctl's `--across-face` scope (#980's C1) |
@@ -60,7 +61,7 @@ says what it will be.
 | A new epoch on a running service | Landed | `Service::new_epoch`; on a service that implements `config.v1` or `config.v2`, a restart of its configuration (#1055, #1064) |
 | **Snapshots,** one reply per collection | Landed, PRs #1070, #1078, #1086 and #1089 | Core 0.100: an owner answers a state GET with one snapshot per collection, in pages of `ServiceConfig::snapshot_page_bytes`. Every reader GETs under `None`, merges per key, and applies the omission rule over a complete snapshot. A `reply_del` on a collection's member is no owner's answer. `link.v2` 0.9 floors a window only where a tombstone alone proves a delete (#977's E1 to E5) |
 | **The ground's tools across a face** | Landed, PR #1088 | Observer 0.29 §7.5: a tool's scope is the face's plan, with each crossing heartbeat, and a key's revision among several held is chosen by the catalog and CH's tag. A packed record whose type is not held is never sniffed (§7.3; #990's V1 and V2) |
-| Dated values and `.zrec` version 4 | Drafted, `chunk-v34-text` (text) | The tooling guide's O8, a value dated and bounded, and its §5's version 4, which carries the catalog, the revisions and their bundles. The code is missing (#990's V3 and V4) |
+| Dated values and `.zrec` version 4 | Landed (PR #1092) | The tooling guide's O8: a time dated in UTC under its epoch, named, and a field's bound beside its value. §5's version 4 carries the catalog, the revisions and their bundles, and `zenctl echo --from FILE` reads a capture with nothing beside it (#990's V3 and V4) |
 | The doctor's `packed-refused` and `state-unconfirmed`; `watch`'s lost and diverged heartbeats; zengui and zenwatch across a face; `--face-policy` on `get state`, `watch`, `call` and `telemetry`; `field` over a frame's records | Missing | #990's V5 to V8, and V2's `field` |
 | **The measurement** of W1 and W2 on zk2c | Missing | #989 |
 
@@ -230,9 +231,12 @@ move together.
   - When an endpoint's peer goes, `StateWriter::set_vouched(false)` clears its bit in the
     heartbeat (#978's design, §3).
   - With 3.3, each `packed/…` twin is put beside its JSON document, on the same change.
-  - `events::publish_loop` and `publish_device_loop` write each occurrence on
-    `…/events/<template>/<ulid>` through the event writers. The ULIDs from `clock.rs` keep their
-    shape.
+  - `events::publish_loop` and `publish_device_loop` write each occurrence through the event
+    writers, with no change in their code. Under 0.21 its key ends in a ULID. From the release
+    after it, the runtime keys it by the owner's run and seq and writes its time in form 4 (core
+    0.103, #980's C2): `put_at` carries a relayed occurrence's device time, and a node whose
+    clock is not trusted writes the time as unknown. The records' `event_id` and `at_ms` then
+    repeat the key and form 4, and #991's packed records drop them.
   - Nothing for snapshots: the runtime answers a state GET with one snapshot per collection (core
     0.100, #977). A node whose states are read across a face sets
     `ServiceConfig::snapshot_page_bytes` (`snapshot_page_bytes` in its configuration file) from
@@ -497,17 +501,21 @@ catalog's latest of those that read the sample alike, and `echo` names one chose
 (observer §7.5). A revision no catalog given lists reads no key (`none_left`, `not_listed`), so
 give the catalog that lists the revisions in hand: `0ff6bf6d` lists all four of modem.v3's.
 
-**Reading values.** A frame's `t=`, a heartbeat's time and a packed `time` field show seconds
-from the catalog's epoch, 2026-01-01T00:00:00Z, never dated, until #990's V3. `field` reads a
+**Reading values.** A frame's `t=`, a heartbeat's time and a packed `time` field are dated in
+UTC beside the wire's seconds, the epoch named (`dated`: the catalog's, `0ff6bf6d`'s
+2026-01-01T00:00:00Z, given `--catalog`), and each field shows its bound: `±0.125` for a `fixed`
+field, `(mod 2^24)` for a counter (#990's V3). An assumed epoch is never dated. `field` reads a
 frame's envelope alone, never its records' fields: read the series with `zenctl telemetry`. A
 GET's snapshot entry carries its confirmation, so a reader across RF ages a member without the
 heartbeat, which does not cross while every state is `host` (`freshness.v2` 0.7 §2.6).
 
 **Recording and replay.** Capture across the face with `record --across-face h-3fa9c2d41b7e/rf0
 --face-policy … --face rf --contracts … --catalog …`, whose scope is the plan's. A `.zrec`, at
-version 3, keeps each row's bytes, `Encoding`, attachment and QoS, and no catalog, revision or
-bundle: keep the catalog and the contracts beside the file until version 4 carries them (#990's
-V4). Presence does not replay, so a plain `echo` of a replay stops at `no_provider`. Replay into
+version 4, keeps each row's bytes, `Encoding`, attachment and QoS, and in its header the
+catalog, the revisions that served the scope and their bundles (#990's V4; `--no-bundles` leaves
+the bundles out). Read it offline with `echo --from FILE`, which needs nothing beside it; a
+`--catalog` given must be the header's or a successor. Presence does not replay, so a plain `echo`
+of a replay stops at `no_provider`. Replay into
 a namespace of your own, `replay FILE --namespace NS`, and read it as across a face, `echo
 --across-face h-3fa9c2d41b7e/rf0 --namespace NS --contracts … --catalog …`.
 
@@ -561,11 +569,9 @@ A migration started today would hit each of these.
 | What it hits | What to do meanwhile | Issue |
 |---|---|---|
 | **The readers' `wait_before_close` default** is zenoh 1.10.1's 5 s | Pass `--wait-before-close`, or `--face-policy` where a verb takes it | #1011 |
-| **Event keys are ULIDs.** An event cannot cross on its template's prefix | Keep the four events `host` | #980 (C2) |
+| **Event keys in 0.21 end in a ULID.** `main` keys an occurrence by its run and seq (core 0.103), for the next release | Keep the four events `host` until modem-mgmt takes that release | #980 (C2) |
 | **No text in packed records,** so four backends cannot move to `config.v2` | Text stays in the JSON states, and those backends on `config.v1`. Across RF, a GET of the status by grant; the view is never pushed | #979 (B3) |
 | **zengui and zenwatch have no face scope,** and `get state`, `watch`, `call` and `telemetry` take no `--face-policy` | Set `--selector`, `--zenoh-config`, `--timeout` and `--settle` by hand, and give a zenwatch rule exact keys (§4) | #990 (V7, V8) |
-| **No dated values.** A frame's, a heartbeat's and a packed record's times are seconds from the catalog's epoch, and no field shows its bound | Read them from 2026-01-01T00:00:00Z (§4) | #990 (V3) |
-| **A capture holds no catalog or contracts,** `.zrec` being at version 3 | Keep both beside the file, and read a replay across a face (§4) | #990 (V4) |
 | **The doctor has no `packed-refused` or `state-unconfirmed`,** and `watch` shows no lost heartbeat or divergence | `get state` shows each member's last confirmation, and the watchdog's `invalid-payload` names a layout's refusal on a stream | #990 (V5, V6) |
 | **`field` reads a frame's envelope alone** | Read the series with `zenctl telemetry` | #990 (V2's `field`) |
 | **The transport that never came back** (W2, finding 5) | zenoh-modem's tracker. Keep nothing `block` larger than a batch on a crossing key | #988's design, §1.8 |
