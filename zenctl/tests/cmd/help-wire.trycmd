@@ -135,6 +135,15 @@ Options:
       --last-known <ARCHIVE>
           Read LAST-KNOWN state from this archive (`<system>/<service>`, an `archive.v1` service) instead of asking the owner (S5). Never current, and labelled so in every format. A parameter not given is a wildcard: every member the archive holds (#671)
 
+      --across-face
+          The owner sits across a constrained face (core §8.5), where presence and descriptors do not cross: its revision is the one --contracts holds, the deployment's word, never read from presence (exit 2 when --contracts holds none that the revision names)
+
+      --face-policy <FILE>
+          With --face, the `link.v2` face policy the owner sits across (#990 V8, as #988 L4's verbs): the session runs the face's `[transport]` (`link.v2` §2.16), a key the --zenoh-config file states winning; the default --timeout is the face's `reply_timeout_ms`, and `call`'s a floor under its contract's `timeout_ms` (core §8.1); and `watch` declares each subscriber again after two horizons of silence where the face says `arq = false`. A `link.v1` policy states none of that and is refused, exit 2
+
+      --face <NAME>
+          The face of --face-policy, by its name (`[face.<name>]`)
+
       --contracts <PATH>
           Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
           
@@ -228,6 +237,15 @@ Options:
           
           [default: 0]
 
+      --across-face
+          The owner sits across a constrained face (core §8.5), where presence and descriptors do not cross: its revision is the one --contracts holds, the deployment's word, never read from presence (exit 2 when --contracts holds none that the revision names)
+
+      --face-policy <FILE>
+          With --face, the `link.v2` face policy the owner sits across (#990 V8, as #988 L4's verbs): the session runs the face's `[transport]` (`link.v2` §2.16), a key the --zenoh-config file states winning; the default --timeout is the face's `reply_timeout_ms`, and `call`'s a floor under its contract's `timeout_ms` (core §8.1); and `watch` declares each subscriber again after two horizons of silence where the face says `arq = false`. A `link.v1` policy states none of that and is refused, exit 2
+
+      --face <NAME>
+          The face of --face-policy, by its name (`[face.<name>]`)
+
       --contracts <PATH>
           Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
           
@@ -318,6 +336,15 @@ Options:
 
       --count <N>
           Stop after this many samples (default: until interrupted)
+
+      --across-face
+          The owner sits across a constrained face (core §8.5), where presence and descriptors do not cross: its revision is the one --contracts holds, the deployment's word, never read from presence (exit 2 when --contracts holds none that the revision names)
+
+      --face-policy <FILE>
+          With --face, the `link.v2` face policy the owner sits across (#990 V8, as #988 L4's verbs): the session runs the face's `[transport]` (`link.v2` §2.16), a key the --zenoh-config file states winning; the default --timeout is the face's `reply_timeout_ms`, and `call`'s a floor under its contract's `timeout_ms` (core §8.1); and `watch` declares each subscriber again after two horizons of silence where the face says `arq = false`. A `link.v1` policy states none of that and is refused, exit 2
+
+      --face <NAME>
+          The face of --face-policy, by its name (`[face.<name>]`)
 
       --contracts <PATH>
           Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.

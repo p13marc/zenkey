@@ -595,6 +595,7 @@ async fn a_daemon_with_alerts_publishes_the_alarm_and_its_alarms_check() {
             grace: Duration::from_millis(100),
             clocks_synced: true,
             face: None,
+            catalogs: Default::default(),
         },
         |_| {},
     )

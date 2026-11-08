@@ -30,7 +30,16 @@ use crate::exit::unaskable;
 /// `call <address> <iface>[@fp] <operation> [request]`.
 pub async fn run(cli: crate::cli::CallArgs) -> Result<()> {
     let dep = Deployment::resolve(&cli.ns)?;
+    // #990 V8: across a face's policy, the face's transport and timeout.
+    let dep = zk2::across(
+        dep,
+        cli.face.face_policy.as_deref(),
+        cli.face.face.as_deref(),
+    )?;
     let contracts = zk2::load_contracts(&cli.contracts)?;
+    if cli.face.across_face {
+        zk2::held_across(&contracts, &cli.target)?;
+    }
     // A packed request's `time` fields count from the deployment epoch
     // (core §7.6, §8.6): a `--catalog`'s, the deployment's word, else 0,
     // assumed and said so in the report.
@@ -62,14 +71,18 @@ pub async fn run(cli: crate::cli::CallArgs) -> Result<()> {
         None => dep.session().await?,
     };
     // The caller's timeout, else the contract's recommendation, else the
-    // tool's default (spec §5.1, "The timeout").
-    let timeout = dep
-        .chosen_timeout()
-        .or(plan
-            .operation
-            .timeout_ms
-            .map(std::time::Duration::from_millis))
-        .unwrap_or_else(|| dep.timeout());
+    // tool's default (spec §5.1, "The timeout"); across a face's policy,
+    // the face's `reply_timeout_ms` a floor under the last two (core §8.1).
+    let timeout = match dep.chosen_timeout() {
+        Some(t) => t,
+        None => {
+            let t = plan
+                .operation
+                .timeout_ms
+                .map_or_else(|| dep.timeout(), std::time::Duration::from_millis);
+            dep.far().map_or(t, |f| f.at_least(t))
+        }
+    };
     let report = zenkey_fleet::call_operation(
         &session,
         OperationCall {

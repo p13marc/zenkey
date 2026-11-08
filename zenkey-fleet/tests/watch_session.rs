@@ -261,6 +261,7 @@ async fn instance_gone_is_refused_without_a_watch_session_of_its_own() {
         ticks: Some(1),
         timeout: T,
         clocks_synced: false,
+        catalogs: Default::default(),
     };
     let store = zenkey_fleet::BundleStore::new(T);
     let contracts = zenkey_fleet::ContractSet::new();
@@ -296,7 +297,7 @@ async fn an_alarm_feed_that_listens_needs_a_watch_session_of_its_own() {
     let spec = AlarmSpec::new(T);
     let beside = watch_of(&tool, "");
     for refused in [None, Some(&beside)] {
-        let e = AlarmFeed::open(&tool, refused, AlarmScope::all(), spec, true)
+        let e = AlarmFeed::open(&tool, refused, AlarmScope::all(), spec.clone(), true)
             .await
             .expect_err("refused");
         assert!(e.not_asked().is_some(), "{e}");
@@ -306,7 +307,7 @@ async fn an_alarm_feed_that_listens_needs_a_watch_session_of_its_own() {
         &tool,
         Some(&watch_of(&watch, "")),
         AlarmScope::all(),
-        spec,
+        spec.clone(),
         true,
     )
     .await
@@ -728,6 +729,7 @@ async fn instance_gone_is_unobservable_while_its_round_trip_does_not_stand() {
         ticks: Some(3),
         timeout: T,
         clocks_synced: false,
+        catalogs: Default::default(),
     };
     let store = zenkey_fleet::BundleStore::new(T);
     let contracts = zenkey_fleet::ContractSet::new();

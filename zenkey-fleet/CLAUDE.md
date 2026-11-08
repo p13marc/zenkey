@@ -429,7 +429,22 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   between; `stated` from `named`). `tests/zrec_v4.rs` runs
   `tests/fixtures/zrec/modem-v4.cases.json` whole: the header, the four
   rows' envelopes, resolutions and readings (`dated`, `bound`) and all
-  17 cases with their variants.
+  17 cases with their variants. #990 V4's follow-ups and V8:
+  `TriggerSpec::served` (a header whose catalog, revisions and bundles a
+  trigger capture's header carries), the trigger's preamble keeping a
+  snapshot's pages as they arrived (one row per page, kept once by its
+  bytes), `tape::record::seeded_rows` (`replay`'s `--seed-state` writing
+  a page as its entries and tombstones), `Publication::retire_with` (a
+  replayed delete keeps its attachment), the `get state` paths taking
+  `impl Into<Dating>` (`get_state_in`, `get_state_answer_in`,
+  `last_known_in`), and `bus::consume::watch_across` (a `FarSide`, the
+  runtime's `Consumer::across`). #1087: `AlarmSpec::catalogs` and
+  `HealthSpec::catalogs` (neither `Copy` now), `run_conform`/`observe`'s
+  `catalogs`, and `WatchdogSpec::catalogs`/`TriggerSpec::catalogs` through
+  `RuleAlarms::open` (the `alert-firing` rule) reach `EntryEpochs`, so the
+  health, alarms, conform and watchdog readers date a snapshot's confirmations under the catalog each owner's
+  descriptor names (`tests/catalog_dating.rs`, an owner under
+  zenoh-modem's `0ff6bf6d`).
   A call's forms alone (#985 C4b; C4d, core 0.99, removed the bare
   wire): `model::render`'s `read` reads a `response` or `summary` under
   `zenoh/bytes` as the value form (`Payload::Record`, or `Refused`, never

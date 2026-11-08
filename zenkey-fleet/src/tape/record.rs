@@ -1271,6 +1271,39 @@ fn place(
     }
 }
 
+/// The rows `--seed-state` writes for a preamble `row` (`.zrec` version 4,
+/// #990 V8): a snapshot's page as its entries, each live entry a put of the
+/// mutation it stands for (its envelope and stamp, `zenoh/bytes`) and each
+/// tombstone a delete whose attachment is its envelope (core §7.5), on its
+/// member's key, at the row's axes; any other row as it came.
+fn seeded_rows(row: IngestRow) -> std::result::Result<Vec<IngestRow>, String> {
+    // A row that is no page goes as it came. A page whose body is refused
+    // is malformed: written as it came it would land as an opaque put on
+    // the snapshot key, so it is counted and skipped (review-bot on #1097).
+    let page = match crate::model::inband::page(&row.key, row.encoding.as_deref(), &row.payload) {
+        None => return Ok(vec![row]),
+        Some(Err(refusal)) => {
+            return Err(format!(
+                "{}: a snapshot page whose body is refused ({refusal:?}), not seeded",
+                row.key
+            ));
+        }
+        Some(Ok(page)) => page,
+    };
+    Ok(page
+        .members(&row.key)
+        .into_iter()
+        .map(|m| IngestRow {
+            key: m.key.clone(),
+            payload: m.payload().unwrap_or_default(),
+            encoding: Some(zenkey_model::wire::ENCODING.to_owned()),
+            qos_axes: row.qos_axes,
+            delete: m.is_tombstone(),
+            attachment: m.attachment(),
+        })
+        .collect())
+}
+
 /// Replay a `.zrec` onto a bus — or list what doing so would publish.
 ///
 /// Pacing follows each row's `t` divided by `speed` (must be positive);
@@ -1343,7 +1376,7 @@ pub async fn replay(
     // publishers are undeclared first, and only then does it go back to the
     // caller (#327).
     let mut fatal: Option<Error> = None;
-    while let Some(item) = reader.next().await {
+    'replay: while let Some(item) = reader.next().await {
         let (row, t_us, seeding) = match item {
             Ok(ZrecItem::Sample { row, t_us, .. }) => (row, t_us, false),
             Ok(ZrecItem::Dropped(n)) => {
@@ -1380,98 +1413,118 @@ pub async fn replay(
                 continue;
             }
         };
-        // A put row on a wildcard is refused like a wildcard delete (#504):
-        // a refused row, counted — not the fatal declare error it would
-        // otherwise surface as halfway through the replay.
-        let gate = if row.delete {
-            crate::bus::write::check_retire(&row.key, i_know)
-        } else {
-            crate::bus::write::check_concrete(&row.key, crate::bus::write::WriteAct::Put)
-        };
-        // Where the row goes: as recorded, or moved into `namespace`; and
-        // whether that is where a zk2 owner of the key runs (P3).
-        let placed = place(&base, &row.key, namespace, i_know);
-        let gate = gate.map_err(|e| e.to_string()).and(placed);
-        let (publish_key, wire_key) = match gate {
-            Ok(keys) => keys,
-            Err(reason) => {
-                on_event(ReplayEvent::Refused {
-                    key: row.key.clone(),
-                    reason: reason.clone(),
-                });
-                record_err(&mut report, format!("{}: {reason}", row.key), true);
-                continue;
-            }
-        };
-        // A seeded preamble row is counted as what it is, never as an
-        // observed row (O6 applied to rows); the dry-run listing still names
-        // it as the put it would be.
-        let count_put = |report: &mut ReplayReport, delete: bool| match (seeding, delete) {
-            (true, _) => report.preamble_seeded += 1,
-            (false, true) => report.tombstones += 1,
-            (false, false) => report.published += 1,
-        };
-        match &target {
-            ReplayTarget::DryRun => {
-                if row.delete {
-                    on_event(ReplayEvent::WouldRetire { key: &wire_key });
-                } else {
-                    on_event(ReplayEvent::WouldPut {
-                        key: &wire_key,
-                        bytes: row.payload.len(),
-                        encoding: row.encoding.as_deref(),
+        // A seeded preamble row that is a snapshot's page (`.zrec` version
+        // 4, #990 V8) is written as its entries: each live entry a mutation
+        // with its stamp, each tombstone a delete with its envelope, on its
+        // member's key. Every other row as it came.
+        let rows = if seeding {
+            match seeded_rows(row) {
+                Ok(rows) => rows,
+                Err(reason) => {
+                    on_event(ReplayEvent::Malformed {
+                        reason: reason.clone(),
                     });
+                    record_err(&mut report, reason, false);
+                    continue;
                 }
-                count_put(&mut report, row.delete);
             }
-            ReplayTarget::Bus { session } => {
-                // Original pacing, scaled — the observer's arrival clock is
-                // the only clock a capture has for "when" (tooling guide §5).
-                if let (Some(prev), Some(t)) = (prev_t, t_us)
-                    && t > prev
-                {
-                    let delay = Duration::from_micros(t - prev).div_f64(speed);
-                    tokio::time::sleep(delay).await;
+        } else {
+            vec![row]
+        };
+        for row in rows {
+            // A put row on a wildcard is refused like a wildcard delete (#504):
+            // a refused row, counted — not the fatal declare error it would
+            // otherwise surface as halfway through the replay.
+            let gate = if row.delete {
+                crate::bus::write::check_retire(&row.key, i_know)
+            } else {
+                crate::bus::write::check_concrete(&row.key, crate::bus::write::WriteAct::Put)
+            };
+            // Where the row goes: as recorded, or moved into `namespace`; and
+            // whether that is where a zk2 owner of the key runs (P3).
+            let placed = place(&base, &row.key, namespace, i_know);
+            let gate = gate.map_err(|e| e.to_string()).and(placed);
+            let (publish_key, wire_key) = match gate {
+                Ok(keys) => keys,
+                Err(reason) => {
+                    on_event(ReplayEvent::Refused {
+                        key: row.key.clone(),
+                        reason: reason.clone(),
+                    });
+                    record_err(&mut report, format!("{}: {reason}", row.key), true);
+                    continue;
                 }
-                if t_us.is_some() {
-                    prev_t = t_us;
-                }
-                let publication = match publications.entry(publish_key.clone()) {
-                    std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
-                    std::collections::hash_map::Entry::Vacant(e) => {
-                        // The axes a version-3 row recorded: the QoS the
-                        // owner published with (§2.4). A row that recorded
-                        // none falls to the spec's, which is already typed
-                        // and so cannot fail here.
-                        let qos = row.qos_axes.unwrap_or(default_qos);
-                        let publication = match crate::bus::write::declare_publication(
-                            session,
-                            &publish_key,
-                            qos,
-                            row.encoding.as_deref(),
-                        )
-                        .await
-                        {
-                            Ok(p) => p,
-                            Err(e) => {
-                                fatal = Some(e);
-                                break;
-                            }
-                        };
-                        e.insert(publication)
+            };
+            // A seeded preamble row is counted as what it is, never as an
+            // observed row (O6 applied to rows); the dry-run listing still names
+            // it as the put it would be.
+            let count_put = |report: &mut ReplayReport, delete: bool| match (seeding, delete) {
+                (true, _) => report.preamble_seeded += 1,
+                (false, true) => report.tombstones += 1,
+                (false, false) => report.published += 1,
+            };
+            match &target {
+                ReplayTarget::DryRun => {
+                    if row.delete {
+                        on_event(ReplayEvent::WouldRetire { key: &wire_key });
+                    } else {
+                        on_event(ReplayEvent::WouldPut {
+                            key: &wire_key,
+                            bytes: row.payload.len(),
+                            encoding: row.encoding.as_deref(),
+                        });
                     }
-                };
-                let delete = row.delete;
-                let sent = if delete {
-                    publication.retire().await
-                } else {
-                    publication.send(row.payload, row.attachment).await
-                };
-                match sent {
-                    Ok(()) => count_put(&mut report, delete),
-                    Err(e) => {
-                        fatal = Some(e);
-                        break;
+                    count_put(&mut report, row.delete);
+                }
+                ReplayTarget::Bus { session } => {
+                    // Original pacing, scaled — the observer's arrival clock is
+                    // the only clock a capture has for "when" (tooling guide §5).
+                    if let (Some(prev), Some(t)) = (prev_t, t_us)
+                        && t > prev
+                    {
+                        let delay = Duration::from_micros(t - prev).div_f64(speed);
+                        tokio::time::sleep(delay).await;
+                    }
+                    if t_us.is_some() {
+                        prev_t = t_us;
+                    }
+                    let publication = match publications.entry(publish_key.clone()) {
+                        std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+                        std::collections::hash_map::Entry::Vacant(e) => {
+                            // The axes a version-3 row recorded: the QoS the
+                            // owner published with (§2.4). A row that recorded
+                            // none falls to the spec's, which is already typed
+                            // and so cannot fail here.
+                            let qos = row.qos_axes.unwrap_or(default_qos);
+                            let publication = match crate::bus::write::declare_publication(
+                                session,
+                                &publish_key,
+                                qos,
+                                row.encoding.as_deref(),
+                            )
+                            .await
+                            {
+                                Ok(p) => p,
+                                Err(e) => {
+                                    fatal = Some(e);
+                                    break 'replay;
+                                }
+                            };
+                            e.insert(publication)
+                        }
+                    };
+                    let delete = row.delete;
+                    let sent = if delete {
+                        publication.retire_with(row.attachment).await
+                    } else {
+                        publication.send(row.payload, row.attachment).await
+                    };
+                    match sent {
+                        Ok(()) => count_put(&mut report, delete),
+                        Err(e) => {
+                            fatal = Some(e);
+                            break 'replay;
+                        }
                     }
                 }
             }
@@ -1902,6 +1955,133 @@ mod tests {
         assert_eq!(report.preamble_skipped, 0);
         assert_eq!(report.published, 1, "the observed row, not the seed");
         assert_eq!(would_put, 2, "both rows are listed as puts");
+    }
+
+    /// `.zrec` version 4's preamble keeps a snapshot's pages as they
+    /// arrived (#990 V8): `--seed-state` writes each live entry as the
+    /// mutation it stands for, its envelope and stamp, and each tombstone
+    /// as a delete whose attachment is its envelope, each on its member's
+    /// key; without it the page is skipped whole.
+    #[tokio::test]
+    async fn seed_state_writes_a_pages_entries_and_tombstones() {
+        use zenkey_model::collection::{Confirmation, Entry, Snapshot, Time, Tombstone};
+        use zenkey_model::wire::{Run, Seq, Tag};
+        let seq = |n| Seq::new(n).expect("a seq");
+        let page = Snapshot {
+            tag: Tag::NONE,
+            run: Run::U16(5),
+            asof: seq(9),
+            time: Time::Unknown,
+            coll: 0,
+            live: vec![
+                Entry {
+                    id: "a".into(),
+                    run: None,
+                    seq: seq(3),
+                    confirmation: Confirmation::None,
+                    record: b"{\"x\":1}".to_vec(),
+                },
+                Entry {
+                    id: "b".into(),
+                    run: None,
+                    seq: seq(7),
+                    confirmation: Confirmation::None,
+                    record: b"{\"x\":2}".to_vec(),
+                },
+            ],
+            tombs: vec![Tombstone {
+                id: "c".into(),
+                run: None,
+                seq: seq(8),
+            }],
+        }
+        .paginate(1024)
+        .expect("a page")[0]
+            .write()
+            .expect("written");
+        let key = "zk2/lab/svc/plan.v1/state/plans";
+        let row = serde_json::json!({
+            "key": key, "t": 0, "preamble": true, "encoding": "zenoh/bytes",
+            "bytes": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &page),
+        });
+        let mut h = header();
+        h.zrec = ZREC_VERSION;
+        let body = format!("{}\n{row}\n", serde_json::to_string(&h).unwrap());
+        let spec = |seed_state| ReplaySpec {
+            target: ReplayTarget::DryRun,
+            speed: 1.0,
+            i_know: true,
+            default_qos: crate::bus::write::WireQos::DEFAULT,
+            seed_state,
+            namespace: None,
+        };
+        let mut reader = source_of(&body).await;
+        let mut puts = Vec::new();
+        let mut retires = Vec::new();
+        let report = replay(&mut reader, spec(true), |ev| match ev {
+            ReplayEvent::WouldPut { key, .. } => puts.push(key.to_owned()),
+            ReplayEvent::WouldRetire { key } => retires.push(key.to_owned()),
+            _ => {}
+        })
+        .await
+        .unwrap();
+        assert_eq!(puts, [format!("{key}/a"), format!("{key}/b")]);
+        assert_eq!(retires, [format!("{key}/c")]);
+        assert_eq!(report.preamble_seeded, 3, "each entry and tombstone");
+        let members = seeded_rows(IngestRow {
+            key: key.into(),
+            payload: page.clone(),
+            encoding: Some("zenoh/bytes".into()),
+            qos_axes: None,
+            delete: false,
+            attachment: None,
+        })
+        .unwrap();
+        // Each live entry the mutation it stands for, its stamp in band;
+        // each tombstone a delete carrying its envelope.
+        let a = &members[0];
+        let mutation = zenkey_model::wire::Envelope::mutation(
+            Tag::NONE,
+            zenkey_model::wire::Stamp {
+                run: Run::U16(5),
+                seq: seq(3),
+            },
+            b"{\"x\":1}",
+        )
+        .write();
+        assert_eq!(a.payload, mutation);
+        let c = &members[2];
+        assert!(c.delete);
+        assert_eq!(
+            zenkey_model::wire::read_delete(&c.key, c.attachment.as_deref()),
+            Some(zenkey_model::wire::Stamp {
+                run: Run::U16(5),
+                seq: seq(8)
+            })
+        );
+
+        let mut reader = source_of(&body).await;
+        let report = replay(&mut reader, spec(false), |_| {}).await.unwrap();
+        assert_eq!(report.preamble_skipped, 1, "the page skipped whole");
+        // A page whose body is refused is never written as an opaque put on
+        // the snapshot key: seeding refuses it (review-bot on #1097).
+        let bad = page[..page.len() - 1].to_vec();
+        match crate::model::inband::page(key, Some("zenoh/bytes"), &bad) {
+            Some(Err(_)) => {}
+            other => panic!("a truncated page reads as a refused body, not {other:?}"),
+        }
+        let refused = seeded_rows(IngestRow {
+            key: key.into(),
+            payload: bad,
+            encoding: Some("zenoh/bytes".into()),
+            qos_axes: None,
+            delete: false,
+            attachment: None,
+        });
+        assert!(
+            refused.is_err(),
+            "a refused page is not seeded: {refused:?}"
+        );
     }
 
     /// A retained window written through `new_at` keeps its real pacing

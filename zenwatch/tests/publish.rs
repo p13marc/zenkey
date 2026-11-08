@@ -113,6 +113,7 @@ async fn health_of(tool: &zenoh::Session, at: &Addr) -> zenkey_fleet::report::He
             grace: Duration::from_millis(100),
             clocks_synced: true,
             face: None,
+            catalogs: Default::default(),
         },
         |_| {},
     )
@@ -381,6 +382,7 @@ async fn zenwatch_passes_its_own_conformance() {
         let report = zenkey_fleet::run_conform(
             &bus.bus,
             &zenkey_fleet::ContractSet::new(),
+            &zenkey_fleet::Catalogs::default(),
             addr(ADDRESS),
             iface.parse().unwrap(),
             None,

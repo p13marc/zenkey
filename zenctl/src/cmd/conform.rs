@@ -53,6 +53,7 @@ pub async fn run(cli: CheckConformArgs) -> Result<()> {
         wait_before_close,
     ));
     let offline = ASKING.ask(zk2::load_contracts(&contracts));
+    let catalogs = ASKING.ask(zk2::load_catalogs(&contracts));
     let spec = ConformSpec {
         timeout: dep.timeout(),
         window,
@@ -83,9 +84,12 @@ pub async fn run(cli: CheckConformArgs) -> Result<()> {
         namespace: dep.namespace().to_owned(),
         watch: Some(ASKING.ask(dep.watch_session().await)),
     };
+    // #1087: a GET's entries dated under the catalog each owner's
+    // descriptor names, read through `--catalog`.
     let mut report = zenkey_fleet::run_conform(
         &bus,
         &offline,
+        &catalogs,
         address,
         target.iface,
         target.fingerprint,

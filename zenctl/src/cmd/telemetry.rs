@@ -108,10 +108,14 @@ pub async fn run(cli: TelemetryArgs) -> Result<()> {
         wait_before_close,
         across_face,
         settle,
+        face_policy,
+        face,
         contracts,
         ns,
     } = cli;
     let dep = ASKING.ask(Deployment::resolve(&ns));
+    // #990 V8: across a face's policy, the face's transport and timeout.
+    let dep = ASKING.ask(zk2::across(dep, face_policy.as_deref(), face.as_deref()));
     let offline = ASKING.ask(zk2::load_contracts(&contracts));
     let scope = match &selector {
         Some(s) => ASKING.ask(TelemetryScope::parse(s).map_err(|why| unaskable!("{why}"))),

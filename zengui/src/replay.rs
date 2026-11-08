@@ -67,6 +67,12 @@ pub struct ReplayLens {
     /// #990 V4): the window's `--catalog`, else a version-4 header's own,
     /// the recorder's word; none, and its epoch is assumed.
     pub catalogs: Arc<zenkey_fleet::Catalogs>,
+    /// A version-4 header read in presence's place (the tooling guide's
+    /// §5, #990 V4's follow-up): the revisions that served the capture's
+    /// scope and the bundles it carried, each verified by its fingerprint
+    /// (`zenkey_fleet::model::recorded`), the offline contracts beside it.
+    /// `None` for a file that states no revision, and the retained window.
+    pub recorded: Option<Arc<zenkey_fleet::model::recorded::Recorded>>,
     /// The declared keyspace from this lens alone — every revision held
     /// under a symbolic `{system}/{service}`, nothing placed by presence.
     pub skeleton: Arc<Skeleton>,
@@ -98,8 +104,23 @@ impl ReplayLens {
             contracts,
             store,
             catalogs: Arc::default(),
+            recorded: None,
             skeleton,
         }
+    }
+
+    /// The same lens reading `header`'s revisions and bundles in
+    /// presence's place, where it states any (`.zrec` version 4): a key
+    /// of a pair it lists resolves through the revisions that served it,
+    /// any other through the offline contracts, as before.
+    pub fn with_header(mut self, header: &zenkey_fleet::ZrecHeader) -> ReplayLens {
+        if header.revisions.is_some() {
+            self.recorded = Some(Arc::new(zenkey_fleet::model::recorded::Recorded::of(
+                header,
+                (*self.contracts).clone(),
+            )));
+        }
+        self
     }
 
     /// The same lens reading its times under `catalogs` (`--catalog`).
@@ -108,10 +129,14 @@ impl ReplayLens {
         self
     }
 
-    /// The lens: catalog `None`, the offline contracts.
+    /// The lens: catalog `None`, the header's revisions where it states
+    /// them, the offline contracts.
     pub fn lens(&self) -> zenkey_fleet::Lens<'_> {
-        zenkey_fleet::Lens::new(&self.namespace, None, &self.store)
-            .offline(&self.contracts)
+        let lens = match &self.recorded {
+            Some(r) => zenkey_fleet::Lens::new(&self.namespace, None, &**r).recorded(r),
+            None => zenkey_fleet::Lens::new(&self.namespace, None, &self.store),
+        };
+        lens.offline(&self.contracts)
             .held(self.contracts.len())
             .catalogs(&self.catalogs)
     }
@@ -126,6 +151,7 @@ impl ReplayLens {
             generation: 0,
             feed: None,
             catalogs: Arc::clone(&self.catalogs),
+            recorded: self.recorded.clone(),
         }
     }
 }
@@ -595,7 +621,11 @@ impl ReplayState {
             ),
             (None, None) => Arc::default(),
         };
-        self.lens = ReplayLens::offline(&namespace, contracts).with_catalogs(catalogs);
+        let lens = ReplayLens::offline(&namespace, contracts).with_catalogs(catalogs);
+        self.lens = match header {
+            Some(h) => lens.with_header(h),
+            None => lens,
+        };
         // What was resolved under the lens it replaces is resolved again
         // under this one (#614, FL7): the rows fed so far, in order.
         self.identity = IdentityCache::default();
@@ -787,6 +817,54 @@ mod tests {
             .lens()
             .identity("spray/zk2/robot1/nav/nav.v2/stream/position");
         assert!(identity.unresolved.is_none(), "{identity:?}");
+    }
+
+    /// #990 V4's follow-up: a version-4 header is read in presence's
+    /// place, so a key of a pair it lists resolves through the revision
+    /// that served it, the bundle it carried, with no contract held.
+    #[test]
+    fn a_v4_header_resolves_through_its_revisions_and_bundles() {
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2/walkthrough");
+        let (set, _) = ContractSet::load_path(&dir);
+        let iface: zenkey_model::grammar::IfaceId = "nav.v2".parse().unwrap();
+        let rev = set
+            .of_iface(&iface)
+            .next()
+            .expect("nav.v2 in the walkthrough");
+        let header = zenkey_fleet::ZrecHeader::capture(vec!["**".into()], "spray").served_by(
+            None,
+            vec![zenkey_fleet::report::ZrecRevision {
+                address: "robot1/nav".into(),
+                iface: iface.to_string(),
+                fingerprint: rev.fingerprint().to_string(),
+                named: Some(None),
+            }],
+            Some(vec![(rev.fingerprint().clone(), rev.bundle().to_bytes())]),
+        );
+        let position = "spray/zk2/robot1/nav/nav.v2/stream/position";
+        let f = format!(
+            "{}\n{{\"key\":\"{position}\",\"t\":0,\"bytes\":\"\",\"qos_axes\":\"data/drop/reliable\"}}",
+            serde_json::to_string(&header).unwrap()
+        );
+        let mut state = ReplayState::load("v4.zrec", f.as_bytes()).unwrap();
+        state.resolve_offline("", None, None);
+        assert!(state.lens.recorded.is_some(), "the header read");
+        let identity = state.lens.lens().identity(position);
+        assert!(
+            identity.unresolved.is_none(),
+            "resolved through the header's revision: {identity:?}"
+        );
+        assert!(
+            state
+                .lens
+                .inputs()
+                .lens()
+                .identity(position)
+                .unresolved
+                .is_none(),
+            "a task's lens reads the header too"
+        );
     }
 
     /// #614 (FL7): the replay's identities follow its fold. A row is

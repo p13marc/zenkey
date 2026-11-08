@@ -108,6 +108,7 @@ pub(crate) fn refuse_across_face(
 pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
     let dep = Deployment::resolve(&cli.ns)?;
     let contracts = zk2::load_contracts(&cli.contracts)?;
+    let catalogs = zk2::load_catalogs(&cli.contracts)?;
     let crate::cli::WatchdogArgs {
         rules,
         face: across_args,
@@ -187,6 +188,9 @@ pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
         ticks: count,
         timeout: dep.timeout(),
         clocks_synced,
+        // #1087: an `alert-firing` rule's confirmations dated under the
+        // catalog each owner's descriptor names, read through `--catalog`.
+        catalogs,
     };
 
     eprintln!(

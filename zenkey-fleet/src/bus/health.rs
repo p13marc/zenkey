@@ -111,7 +111,7 @@ pub struct AcrossFace {
 }
 
 /// What a reading asks.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct HealthSpec {
     /// Each read's timeout: presence, a descriptor, a GET, an archive.
     pub timeout: Duration,
@@ -127,6 +127,11 @@ pub struct HealthSpec {
     pub clocks_synced: bool,
     /// The service sits across a constrained face (§2.8).
     pub face: Option<AcrossFace>,
+    /// The deployment catalogs given (`--catalog`, core §8.6): a GET's
+    /// entry is dated under the epoch of the catalog its owner's descriptor
+    /// names, read through these (`bus::query::EntryEpochs`; #1087). With
+    /// none, an owner naming a catalog leaves its confirmations undated.
+    pub catalogs: crate::model::deployment::Catalogs,
 }
 
 /// A stamp's time, and the id of the clock that issued it (core §4.1).
@@ -500,12 +505,13 @@ pub async fn observe(
         ),
     };
     let selector = target.state_selector();
-    // A reading holds no catalog (`HealthSpec` names none): an owner's
-    // entries are dated under the catalog its descriptor names only where
-    // that is none, 0, and an owner naming one goes undated; with no
-    // descriptor in hand, 0 is the deployment's word.
+    // An owner's entries are dated under the catalog its descriptor
+    // names, read through the catalogs given, 0 where it names none; with
+    // no descriptor in hand, as across a face, the catalogs' own (the
+    // deployment's word), else 0. Undated where it names one none given is
+    // or succeeds (#1087).
     let epochs = crate::bus::query::EntryEpochs::of_presence(
-        &crate::model::deployment::Catalogs::default(),
+        &spec.catalogs,
         presence.as_ref().and_then(|p| p.as_ref().ok()),
     );
     let epochs = &epochs;

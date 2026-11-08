@@ -5043,6 +5043,7 @@ mod tests {
                     grace: WINDOW,
                     clocks_synced: synced,
                     face: None,
+                    catalogs: Default::default(),
                 },
                 presence: Some(Ok(p)),
                 first: Ok(first),

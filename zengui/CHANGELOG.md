@@ -4,6 +4,14 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — the catalog in health, a replay by its header (#1087, #990 V4's follow-ups)
+
+| Before | Now | Notes |
+|---|---|---|
+| the Workbench's health reading: no catalog, its status's confirmation undated for an owner naming one | dated under the window's `--catalog` | #1087 |
+| a replay of a version-4 `.zrec`: its catalog alone | also its `revisions` and `bundles`, read in presence's place (`ReplayLens::recorded`); a pair the header does not list through the offline contracts, as before | the tooling guide's §5 |
+| the Inspector's S4 dates: the epoch alone | name the catalog too | O8 |
+
 ## Unreleased (`main`, zk2) — an event keyed by its run and seq, and the ULID refused (#980 C2c, C2d)
 
 Core 0.103: an owner keys each occurrence by the run and the seq it took,

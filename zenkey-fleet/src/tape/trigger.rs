@@ -120,6 +120,15 @@ pub struct TriggerSpec {
     /// is read for the lens, since no descriptor crosses: keys resolve
     /// through `contracts` alone.
     pub across_face: bool,
+    /// What served the capture's scope as it was armed (`.zrec` version 4,
+    /// the tooling guide's §5): a header whose `catalog`, `revisions` and
+    /// `bundles` the file's header carries, as plain `record`'s does. `None`
+    /// states none.
+    pub served: Option<ZrecHeader>,
+    /// The deployment catalogs given (`--catalog`, core §8.6): an
+    /// `alert-firing` rule's reader dates a GET's confirmations under the
+    /// catalog each owner's descriptor names, read through these (#1087).
+    pub catalogs: crate::model::deployment::Catalogs,
 }
 
 /// What a trigger capture reports as it runs — the frontend renders these;
@@ -236,8 +245,9 @@ pub fn state_projection(namespace: &str, selector: &str) -> Option<String> {
 
 /// The owners' current state under `selector` (S4): target `All`,
 /// consolidation `None`, each reply on a concrete key (R6), a snapshot's
-/// page read as its entries (core §4.2; #977's E3), merged per key by the
-/// tool's merge (observer §4.1, `bus::query::KeyMerge`). A deletion within
+/// page kept as it arrived, once (core §4.2; `.zrec` version 4, #990 V8),
+/// every other reply merged per key by the tool's merge (observer §4.1,
+/// `bus::query::KeyMerge`). A deletion within
 /// an owner's window is not a value: it orders the key's later replies,
 /// and keeps no row. A stray `reply_del`, on a member of a collection
 /// its owner's revision under the deletion's run answers by snapshot
@@ -270,6 +280,7 @@ async fn state_get(
     let mut revisions = crate::bus::query::OwnerRevisions::new(session, timeout, &held, None);
     let mut errors = 0u64;
     let mut kept = 0usize;
+    let mut pages: Vec<SampleView> = Vec::new();
     // A deletion's item is `None`: it holds the key's mark, no row.
     let mut merge: crate::bus::query::KeyMerge<Option<SampleView>> = Default::default();
     while let Ok(reply) = replies.recv_async().await {
@@ -292,6 +303,21 @@ async fn state_get(
         if revisions.stray(&s).await {
             continue;
         }
+        // A snapshot's page is kept as it arrived (`.zrec` version 4, #990
+        // V8): a reader reads its entries from it, each with its stamp, and
+        // its tombstones, and `replay --seed-state` writes them so; a page
+        // heard twice is kept once.
+        let page = SampleView::of(&s);
+        let bytes = page.payload.to_bytes();
+        if let Some(Ok(_)) = crate::model::inband::page(&page.key, Some(&page.encoding), &bytes) {
+            if !pages
+                .iter()
+                .any(|p: &SampleView| p.key == page.key && p.payload.to_bytes() == bytes)
+            {
+                pages.push(page);
+            }
+            continue;
+        }
         for s in crate::bus::query::reply_samples(&s) {
             let view = SampleView::of(&s);
             let mark = view.mark();
@@ -300,7 +326,13 @@ async fn state_get(
             merge.offer(&key, mark, item);
         }
     }
-    Ok((merge.into_items().into_iter().flatten().collect(), errors))
+    Ok((
+        pages
+            .into_iter()
+            .chain(merge.into_items().into_iter().flatten())
+            .collect(),
+        errors,
+    ))
 }
 
 /// The watch set: every selector asked for, minus any that another one in
@@ -418,6 +450,7 @@ where
             &rules,
             spec.timeout,
             spec.clocks_synced,
+            &spec.catalogs,
         )
         .await
     } else {
@@ -678,13 +711,36 @@ where
         // deltas that led to it. Each GET kept one value per key; two
         // overlapping selectors could still both hold one, kept once.
         let in_ring: BTreeSet<&str> = ring.iter().map(|v| v.key.as_str()).collect();
+        // A page is kept whole, as it arrived, and once by its bytes, since
+        // a snapshot's pages share its key; a per-key reply once by its
+        // key. Under `absent_from_window` a page is kept when it lists a
+        // member the ring does not hold, or none at all (the owner's word
+        // that it has none): its entries carry their stamps, which order
+        // them against the pre-roll rows.
         let mut seen = BTreeSet::new();
         let rows: Vec<Arc<SampleView>> = values
             .into_iter()
-            .filter(|view| seen.insert(view.key.clone()))
-            .filter(|view| match semantics {
-                PreambleSemantics::AbsentFromWindow => !in_ring.contains(view.key.as_str()),
-                PreambleSemantics::Full => true,
+            .filter(|view| {
+                let bytes = view.payload.to_bytes();
+                let page = crate::model::inband::page(&view.key, Some(&view.encoding), &bytes);
+                let members: Option<Vec<String>> = match page {
+                    Some(Ok(p)) => Some(p.members(&view.key).into_iter().map(|m| m.key).collect()),
+                    _ => None,
+                };
+                let first = seen.insert((
+                    view.key.clone(),
+                    members.is_some().then(|| bytes.into_owned()),
+                ));
+                first
+                    && match (semantics, members) {
+                        (PreambleSemantics::Full, _) => true,
+                        (PreambleSemantics::AbsentFromWindow, Some(m)) => {
+                            m.is_empty() || m.iter().any(|k| !in_ring.contains(k.as_str()))
+                        }
+                        (PreambleSemantics::AbsentFromWindow, None) => {
+                            !in_ring.contains(view.key.as_str())
+                        }
+                    }
             })
             .map(Arc::new)
             .collect();
@@ -716,12 +772,17 @@ where
     }
 
     // ── the file ──────────────────────────────────────────────────────────
-    let header = ZrecHeader {
+    let mut header = ZrecHeader {
         captured_at,
         preamble: preamble_info.clone(),
         pre_roll: Some(pre_roll.clone()),
         ..ZrecHeader::capture(watched.clone(), namespace)
     };
+    if let Some(served) = &spec.served {
+        header.catalog.clone_from(&served.catalog);
+        header.revisions.clone_from(&served.revisions);
+        header.bundles.clone_from(&served.bundles);
+    }
     // Opened only now: a run that never fires leaves nothing behind. The
     // open itself is the caller's (it names the path) and async, so a
     // `create` can go through `tokio::fs` (#332); the broadcast's own

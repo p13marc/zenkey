@@ -49,6 +49,9 @@ Options:
           - granted: The face grants this reader a GET of the alarms (link.v1 §2.9)
           - denied:  It does not: every question is unobservable across it
 
+      --catalog <PATH>
+          The deployment catalog (core §8.6), repeatable: a `zk2-catalog/1` file the deployment provisions. A snapshot's confirmations are dated under the epoch of the catalog an owner's descriptor names, read through these; without one, an owner naming a catalog leaves them undated, so its members read unconfirmed by time. A file that is not a catalog is refused (exit 2)
+
       --namespace <NS>
           The deployment namespace: the session is opened in it.
           

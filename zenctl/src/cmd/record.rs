@@ -115,7 +115,25 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
             "--on needs --pre <SECS>: a trigger capture is the retained window"
         ));
     };
+    // The one catalog given: what an `alert-firing` rule dates under (#1087).
+    let catalogs = zenkey_fleet::Catalogs::new(catalog.iter().cloned().collect());
+    // What served the scope as the capture is armed (`.zrec` version 4),
+    // as plain `record` reads it: one presence read, or across a face the
+    // contracts in hand; the catalog and the bundles beside.
+    let served_by = served(
+        &dep,
+        &selectors,
+        face.as_ref(),
+        &Served {
+            catalog,
+            contracts: &contracts,
+            bundles: !no_bundles,
+        },
+    )
+    .await?;
     let triggered = Triggered {
+        served: served_by,
+        catalogs,
         contracts,
         rules: on,
         pre: super::positive_secs("--pre", pre)?,
@@ -382,6 +400,10 @@ struct Triggered {
     /// The capture's selectors are a face's scope (core §8.5): the rules'
     /// own are not watched beside them, and no presence is read.
     across_face: bool,
+    /// What served the scope as it was armed (`.zrec` version 4).
+    served: ZrecHeader,
+    /// The catalogs given: an `alert-firing` rule's dates (#1087).
+    catalogs: zenkey_fleet::Catalogs,
 }
 
 async fn run_triggered(
@@ -441,6 +463,8 @@ async fn run_triggered(
         max_samples: t.max_samples,
         max_replies: zenkey_fleet::DEFAULT_MAX_REPLIES,
         across_face: t.across_face,
+        served: Some(t.served),
+        catalogs: t.catalogs,
     };
 
     eprintln!(

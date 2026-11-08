@@ -127,11 +127,12 @@ pub async fn get_state(session: &Session, read: StateRead<'_>) -> Result<StateRe
 }
 
 /// [`get_state`], a packed record's `time` fields read under `epoch`, the
-/// epoch in force for the owner (core §8.6).
+/// epoch in force for the owner (core §8.6): an [`Epoch`], or a
+/// [`Dating`] whose catalog each date then names (O8).
 pub async fn get_state_in(
     session: &Session,
     read: StateRead<'_>,
-    epoch: Epoch,
+    epoch: impl Into<Dating>,
 ) -> Result<StateReport> {
     get_state_answer_in(session, read, epoch)
         .await
@@ -152,8 +153,9 @@ pub async fn get_state_answer(
 pub async fn get_state_answer_in(
     session: &Session,
     read: StateRead<'_>,
-    epoch: Epoch,
+    epoch: impl Into<Dating>,
 ) -> Result<(StateReport, bool)> {
+    let epoch: Dating = epoch.into();
     let StateRead {
         revision,
         owner,
@@ -204,6 +206,7 @@ pub async fn get_state_answer_in(
     // confirmation, both on the owner's clock from the deployment epoch.
     let confirmations = got.confirmations;
     let at_epoch = epoch
+        .epoch
         .given()
         .unwrap_or(zenkey_model::catalog::EPOCH_WITHOUT_CATALOG);
     let confirmation_of = |key: &str| {
@@ -306,13 +309,15 @@ pub async fn last_known(
 }
 
 /// [`last_known`], a packed record's `time` fields read under `epoch`, the
-/// epoch in force for the owner the archive recorded (core §8.6).
+/// epoch in force for the owner the archive recorded (core §8.6): an
+/// [`Epoch`], or a [`Dating`] whose catalog each date then names (O8).
 pub async fn last_known_in(
     session: &Session,
     read: StateRead<'_>,
     archive: &Addr,
-    epoch: Epoch,
+    epoch: impl Into<Dating>,
 ) -> Result<StateReport> {
+    let epoch: Dating = epoch.into();
     let StateRead {
         revision,
         owner,
@@ -361,7 +366,7 @@ async fn last_known_pattern(
     values: &Bindings,
     archive: &Addr,
     timeout: Duration,
-    epoch: Epoch,
+    epoch: Dating,
 ) -> Result<StateReport> {
     let name = zenkey::implementation::resource_name(r);
     let address = owner.to_string();
@@ -410,7 +415,7 @@ async fn last_known_pattern(
 /// One archive record as a state row: last-known, with whether alignment
 /// confirmed it, its type identity (§4.4), and the bytes it recorded
 /// (#765).
-fn last_known_row(revision: &Revision, lk: zenkey::archive::LastKnown, epoch: Epoch) -> StateRow {
+fn last_known_row(revision: &Revision, lk: zenkey::archive::LastKnown, epoch: Dating) -> StateRow {
     let (value, bytes) = match lk.value {
         Some(bytes) => {
             let encoding = lk.encoding.as_ref().map(ToString::to_string);
@@ -559,6 +564,23 @@ pub async fn watch_in(
     values: &Bindings,
     epoch: impl Into<Dating>,
 ) -> Result<Watch> {
+    watch_across(session, revision, target, r, values, epoch, None).await
+}
+
+/// [`watch_in`] across `far`, the face the target sits across (#990 V8):
+/// the consumer's reads floored at the face's reply timeout, and where the
+/// face says `arq = false` each subscriber with a horizon declared again
+/// after two horizons of silence (`zenkey::consumer::Consumer::across`,
+/// core §8.5). `None`: no face.
+pub async fn watch_across(
+    session: &Session,
+    revision: &Revision,
+    target: &Target,
+    r: &Resource,
+    values: &Bindings,
+    epoch: impl Into<Dating>,
+    far: Option<&zenkey_model::link::FarSide>,
+) -> Result<Watch> {
     // The epoch in force and its catalog, which a date names (O8).
     let epoch: Dating = epoch.into();
     let name = zenkey::implementation::resource_name(r);
@@ -591,6 +613,10 @@ pub async fn watch_in(
     )
     .map_err(|e| runtime("subscribe", address, e))?
     .with_refused(on_refused);
+    let consumer = match far {
+        Some(f) => consumer.across(f),
+        None => consumer,
+    };
     let selectors = consumer
         .selectors(&name)
         .map_err(|e| runtime("subscribe", address, e))?

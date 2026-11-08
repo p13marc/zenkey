@@ -98,6 +98,7 @@ fn a_health_reading_lands_only_on_the_selected_address_in_this_namespace() {
                     grace: std::time::Duration::from_secs(1),
                     clocks_synced: false,
                     face: None,
+                    catalogs: Default::default(),
                 },
                 presence: None,
                 first: Err("no session".into()),

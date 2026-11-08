@@ -409,18 +409,22 @@ impl AlarmRules {
     /// tokens followed on `watch`, a watch session of its own (#830, #875).
     /// Returns, per reader, the transitions its first reading made — each
     /// alarm found, raised or resolved as a late reader reads it (§2.6) —
-    /// for [`Self::baseline`].
+    /// for [`Self::baseline`]. A GET's entries are dated under the
+    /// catalog each owner's descriptor names, read through `catalogs`, the
+    /// config's `catalog` (#1087).
     pub async fn open(
         &mut self,
         session: &zenoh::Session,
         watch: Option<&zenkey_fleet::WatchSession>,
         timeout: Duration,
         clocks_synced: bool,
+        catalogs: &zenkey_fleet::Catalogs,
     ) -> Vec<Vec<AlarmTransition>> {
         let mut out = Vec::new();
         for r in &mut self.readers {
             let mut spec = AlarmSpec::new(timeout);
             spec.clocks_synced = clocks_synced;
+            spec.catalogs = catalogs.clone();
             // What fires is the owners' word; an archive's last-known is
             // never part of a verdict (core S6).
             spec.archives = false;

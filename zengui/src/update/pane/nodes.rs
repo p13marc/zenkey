@@ -195,11 +195,17 @@ pub(crate) fn health(
         return Task::none();
     };
     v.nodes.asking(addr.clone());
+    let catalogs = dep
+        .contracts
+        .as_ref()
+        .map(|c| (*c.catalogs).clone())
+        .unwrap_or_default();
     services::sweep::health(
         session,
         dep.namespace().to_string(),
         addr,
         v.nodes.clocks_synced,
         dep.timeout(),
+        catalogs,
     )
 }

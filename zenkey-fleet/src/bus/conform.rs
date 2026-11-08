@@ -435,12 +435,13 @@ impl ConformObservation {
 pub async fn run_conform(
     bus: &DoctorBus,
     offline: &ContractSet,
+    catalogs: &crate::model::deployment::Catalogs,
     address: Addr,
     iface: IfaceId,
     asked_fp: Option<String>,
     spec: ConformSpec,
 ) -> crate::report::ConformReport {
-    let obs = observe(bus, offline, address, iface, asked_fp, spec).await;
+    let obs = observe(bus, offline, catalogs, address, iface, asked_fp, spec).await;
     crate::judge::conform::judge(&obs)
 }
 
@@ -449,10 +450,14 @@ pub async fn run_conform(
 /// `bus.raw`, in none (S1, §4.2, 0.17). When a descriptor of the service
 /// lists `health.v1`, its health is read over the same window, beside the
 /// suite (#721, PF); when one lists `config.v1`, its configuration is read
-/// and probed over it too (#768, CC).
+/// and probed over it too (#768, CC). A GET's entries (alarms, health,
+/// config) are dated under the catalog each owner's descriptor names, read
+/// through `catalogs`, the `--catalog` given (`bus::query::EntryEpochs`;
+/// #1087).
 pub async fn observe(
     bus: &DoctorBus,
     offline: &ContractSet,
+    catalogs: &crate::model::deployment::Catalogs,
     address: Addr,
     iface: IfaceId,
     asked_fp: Option<String>,
@@ -492,6 +497,7 @@ pub async fn observe(
             grace: crate::judge::doctor::DEFAULT_GRACE,
             clocks_synced: spec.clocks_synced,
             face: None,
+            catalogs: catalogs.clone(),
         };
         let target = crate::bus::health::HealthTarget::One(address.clone());
         Some(
@@ -511,7 +517,9 @@ pub async fn observe(
             return None;
         };
         if crate::model::config::listing(o, &address) == crate::report::ConfigPremise::Listed {
-            return Some(config_suite(session, &bus.namespace, &address, o, None, spec).await);
+            return Some(
+                config_suite(session, &bus.namespace, &address, o, None, spec, catalogs).await,
+            );
         }
         // config.v2 (#985 G3): asked of the config interface itself.
         if crate::model::config::listing_v2(o, &address) != crate::report::ConfigPremise::Listed {
@@ -527,7 +535,18 @@ pub async fn observe(
         if target.as_ref().is_ok_and(|t| t.iface != iface) {
             return None;
         }
-        Some(config_suite(session, &bus.namespace, &address, o, Some(target), spec).await)
+        Some(
+            config_suite(
+                session,
+                &bus.namespace,
+                &address,
+                o,
+                Some(target),
+                spec,
+                catalogs,
+            )
+            .await,
+        )
     };
     let alarms = async {
         let Ok(o) = &presence else {
@@ -548,12 +567,9 @@ pub async fn observe(
             return None;
         }
         let scope = crate::model::alarms::AlarmScope::of(&address);
-        // No catalog is given to `check conform`: 0 where the owner's
-        // descriptor names none, and undated where it names one.
-        let epochs = crate::bus::query::EntryEpochs::observed(
-            &crate::model::deployment::Catalogs::default(),
-            o,
-        );
+        // Dated under the catalog the owner's descriptor names, read
+        // through the catalogs given, 0 where it names none (#1087).
+        let epochs = crate::bus::query::EntryEpochs::observed(catalogs, o);
         Some(crate::bus::alarms::get(session, scope.alarms_selector(), t, &epochs).await)
     };
     let telemetry = async {
@@ -1595,6 +1611,7 @@ async fn config_suite(
     presence: &Observed,
     v2: Option<std::result::Result<crate::model::config::V2Target, crate::model::config::V2Unread>>,
     spec: ConformSpec,
+    catalogs: &crate::model::deployment::Catalogs,
 ) -> ConfigConform {
     let t = spec.timeout;
     let target = v2.as_ref().and_then(|v| v.as_ref().ok());
@@ -1602,11 +1619,8 @@ async fn config_suite(
         None => {
             let selector =
                 crate::bus::config::ConfigTarget::One(address.clone()).state_selector(false);
-            // No catalog is given to `check conform` (see the alarms').
-            let epochs = crate::bus::query::EntryEpochs::observed(
-                &crate::model::deployment::Catalogs::default(),
-                presence,
-            );
+            // Dated under the catalogs given (see the alarms').
+            let epochs = crate::bus::query::EntryEpochs::observed(catalogs, presence);
             crate::bus::config::get(session, &selector, t, &epochs).await
         }
         Some(Ok(target)) => {

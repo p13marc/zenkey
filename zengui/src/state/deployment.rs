@@ -316,6 +316,7 @@ impl Deployment {
                 .as_ref()
                 .map(|c| Arc::clone(&c.catalogs))
                 .unwrap_or_default(),
+            recorded: None,
         }
     }
 

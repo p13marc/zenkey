@@ -37,7 +37,17 @@ use crate::render::{Mode, Sink};
 /// `watch <address> <iface>[@fp] <resource> [--for S] [--count N]`.
 pub async fn run(cli: crate::cli::WatchArgs) -> Result<()> {
     let dep = Deployment::resolve(&cli.ns)?;
+    // #990 V8: across a face's policy, the face's transport and timeout,
+    // and where it repairs no lost frame each subscriber declared again.
+    let dep = zk2::across(
+        dep,
+        cli.face.face_policy.as_deref(),
+        cli.face.face.as_deref(),
+    )?;
     let contracts = zk2::load_contracts(&cli.contracts)?;
+    if cli.face.across_face {
+        zk2::held_across(&contracts, &cli.target)?;
+    }
     // Core §8.6: the catalogs given, the deployment's word for the epoch,
     // and the catalog a date names (the tooling guide's O8).
     let epoch = zk2::load_catalogs(&cli.contracts)?.dating(zenkey_fleet::CatalogStated::Unread);
@@ -67,8 +77,16 @@ pub async fn run(cli: crate::cli::WatchArgs) -> Result<()> {
         Some(s) => s,
         None => dep.session().await?,
     };
-    let mut watch =
-        zenkey_fleet::watch_resource_in(&session, &revision, &target, r, &values, epoch).await?;
+    let mut watch = zenkey_fleet::watch_resource_across(
+        &session,
+        &revision,
+        &target,
+        r,
+        &values,
+        epoch,
+        dep.far(),
+    )
+    .await?;
 
     let mode = Mode::of(dep.format());
     let (mut out, mut err) = (std::io::stdout(), std::io::stderr());

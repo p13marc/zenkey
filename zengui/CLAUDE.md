@@ -138,7 +138,8 @@ Claude Code loads this file when working in `zengui/`; the root `CLAUDE.md` is t
   the fleet does: `tc.netif.v1`'s interfaces since #978 F5). History
   rows stay structural, as for every type.
   **The Workbench**: nodes per address from presence (health read once per
-  selection, a "clocks synced" toggle), and `redundancy.v1` read beside
+  selection, a "clocks synced" toggle, its confirmations dated under the
+  window's `--catalog`, #1087), and `redundancy.v1` read beside
   health once per selection (#841, RC: `nodes::RedundancyState`,
   `services::sweep::redundancy` over `run_redundancy`, on the namespaced
   session and the window's store, asked 300 ms after a selection settles,
@@ -162,7 +163,10 @@ Claude Code loads this file when working in `zengui/`; the root `CLAUDE.md` is t
   resolves through an offline `ReplayLens` (no presence, the offline
   contracts, the capture's namespace; since #990 V4 its `catalogs`, the
   window's `--catalog`, else a version-4 header's catalog, the
-  recorder's word) with a replay-scoped identity cache,
+  recorder's word; and its `recorded`, the header's revisions and bundles
+  in presence's place, `ReplayLens::with_header`,
+  `LensInputs::recorded`, a pair it does not list through the offline
+  contracts) with a replay-scoped identity cache,
   and publish, call, record, why, fields and consumers are refused in every
   window while it runs. Files: `.zrec` v4 (v1/v2 rows read "QoS not
   recorded"), `.zsnap` v2, echo exports zk2's `SampleRow` with `identity`.

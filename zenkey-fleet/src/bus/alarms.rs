@@ -85,7 +85,7 @@ const ARCHIVE: &str = "archive.v1";
 pub const QUEUE: usize = 1024;
 
 /// What a reading asks.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct AlarmSpec {
     /// Each read's timeout: presence, a descriptor, the GET, an archive.
     pub timeout: Duration,
@@ -110,6 +110,11 @@ pub struct AlarmSpec {
     pub face: Option<bool>,
     /// Read every archive's last-known documents of the scope (S6).
     pub archives: bool,
+    /// The deployment catalogs given (`--catalog`, core §8.6): a GET's
+    /// entry is dated under the epoch of the catalog its owner's descriptor
+    /// names, read through these (`bus::query::EntryEpochs`; #1087). With
+    /// none, an owner naming a catalog leaves its confirmations undated.
+    pub catalogs: crate::model::deployment::Catalogs,
 }
 
 impl AlarmSpec {
@@ -124,6 +129,7 @@ impl AlarmSpec {
             wait_before_close: zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE,
             face: None,
             archives: true,
+            catalogs: crate::model::deployment::Catalogs::default(),
         }
     }
 
@@ -300,12 +306,13 @@ impl AlarmRefresh {
                 },
             )),
         };
-        // The reader holds no catalog (`AlarmSpec` names none): an owner's
-        // entries are dated under 0 where its descriptor names no catalog,
-        // or no descriptor is in hand (the deployment's word), and go
-        // undated where it names one.
+        // An owner's entries are dated under the catalog its descriptor
+        // names, read through the catalogs given, 0 where it names none;
+        // with no descriptor in hand, the catalogs' own (the deployment's
+        // word), else 0. Undated where it names one none given is or
+        // succeeds (#1087).
         let epochs = crate::bus::query::EntryEpochs::of_presence(
-            &crate::model::deployment::Catalogs::default(),
+            &self.spec.catalogs,
             presence.as_ref().and_then(|(_, p)| p.as_ref().ok()),
         );
         let seed = match &cut {
@@ -674,7 +681,7 @@ impl AlarmFeed {
         AlarmRefresh {
             session: self.session.clone(),
             scope: self.book.scope().clone(),
-            spec: self.spec,
+            spec: self.spec.clone(),
             barrier: self.barrier.clone(),
         }
     }
@@ -959,7 +966,8 @@ pub async fn observe(
     listening: impl FnOnce() + Send,
 ) -> AlarmObservation {
     let selector = scope.selector().to_owned();
-    let opened = AlarmFeed::open(session, watch, scope, spec, spec.window.is_some()).await;
+    let windowed = spec.window.is_some();
+    let opened = AlarmFeed::open(session, watch, scope, spec.clone(), windowed).await;
     let mut feed = match opened {
         Ok((feed, _)) => feed,
         Err(e) => {

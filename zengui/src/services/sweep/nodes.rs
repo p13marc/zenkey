@@ -23,13 +23,16 @@ pub const HEALTH_GRACE: Duration = Duration::from_secs(1);
 /// apart. No window: a subscription long enough to measure a clock (31 s)
 /// is no reading for a click, so the clock's ground is the operator's word
 /// or none — and with none, a reply's age is unobservable, which the pane
-/// says (freshness.v1 §2.6).
+/// says (freshness.v1 §2.6). A snapshot's confirmation is dated under the
+/// catalog the owner's descriptor names, read through `catalogs`, the
+/// window's `--catalog` (#1087).
 pub fn health(
     session: zenoh::Session,
     namespace: String,
     addr: Addr,
     clocks_synced: bool,
     timeout: Duration,
+    catalogs: zenkey_fleet::Catalogs,
 ) -> Task<Message> {
     Task::perform(
         async move {
@@ -39,6 +42,7 @@ pub fn health(
                 grace: HEALTH_GRACE,
                 clocks_synced,
                 face: None,
+                catalogs,
             };
             let report = zenkey_fleet::run_health(
                 &session,
