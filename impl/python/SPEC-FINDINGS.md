@@ -26170,3 +26170,175 @@ beyond what the changelogs state.** zk2py reads `faces.json` 17 of 17 and
   - F-503 to F-511.
 
   F-365 stays open as #965's.
+
+## At core 0.103 (#980 C2)
+
+Round 107 read core 0.101 to 0.103 (#980 C2a, C2c, C2d; rounds 105 and
+106 answered, with #977 E4's two gaps) and observer 0.30 to 0.32, with
+alarms.v1 0.14, health.v1 0.10, link.v2 0.11 and the wording of
+config.v1 0.14, config.v2 0.5, link.v1 0.18 and freshness.v1 0.6, at main
+ede440e2, then d5a83804 (#1099, modem.v3 3.4). It read cold core §1.2,
+§2.6, §4.2 and §7.5's form 4 whole, Appendix B's new fact, and observer
+0.30 to 0.32's entries. zk2py diffed `spec/` and `examples/zk2/` between
+514056a9 and d5a83804. **No rule changed beyond what the changelogs
+state.** #1099 moved link.v1's and link.v2's `plan.json` and
+`scope/faces.json` cases 0 to 3 with the example, in no changelog, as an
+example's fixtures; zk2py reads every one.
+
+**The answers hold**, F-503 to F-511, but one in part:
+- **F-503** (alarms.v1 0.14, health.v1 0.10): a GET's entry is attributed
+  by its snapshot's run (`alarms.attribute_entry`). alarms' scenarios §1,
+  §3 and §5 pass with zk2py's owner and the owner example, 26 of 26 each,
+  and health's §1 and §4, 11 of 11.
+- **F-504, F-507, F-508** (core 0.102): zk2py's `ByDescriptor` dropped its
+  fallback to a lone descriptor; `snapshot_live` 40 of 40.
+- **F-505** (link.v2 0.11): the cases follow the faces, onto 29bf7d47
+  since #1099.
+- **F-506** (core 0.102) holds in core §4.3, and not in `freshness.v2`
+  §2.4 (F-515).
+- **F-509 to F-511** (observer 0.31): the readings re-keyed; zk2py's
+  echo tool already refused the read and planned the devices.
+
+### F-512 · gap · observer §7.5's "The revision of a key" names no event, which carries its type's tag since core 0.101
+
+> Observer §7.5: "A tool that reads a mutation, a frame or a heartbeat
+> with no descriptor naming the owner's revision MUST read it with the
+> revision chosen in this order." Step 2: "those whose tag is CH's: the
+> type's for a mutation (§7.3), the frame form's for a frame (core §7.7),
+> and the revision's own for a heartbeat". Core §7.5 (0.101): "An event's
+> tag is its record's type's, as a mutation's is". link.v1 §2.9: "An
+> exposed event crosses whole, every occurrence".
+
+- **The gap.** Since core 0.103 an events key carries form 4, never a
+  mutation. A tool across a face holds no descriptor, so it must choose
+  a revision to read an event's record with, its tag checked. The rule
+  does not name the event, so a tool need not choose at all.
+- **The example.** modem.v3 3.4 (#1099) adds three `face/` events that
+  cross every zenoh-modem face, two of them packed.
+- **The evidence.** `envelope/tags.json`'s one event case,
+  `events/oper_change/002g0009`, gives CH `0x00`, a mutation. No owner
+  writes that on an events key since core 0.103.
+- **What zk2py does:** it reads an event through the same three steps,
+  its tag its record's type's (`echo_tool.row_of`, `across.revision_of_key`).
+- **Fix:** "a mutation, an event, a frame or a heartbeat", with step 2
+  "the type's for a mutation or an event". Move `tags.json`'s event case
+  to form 4's CH, `0x80`.
+- **Changes:** whether a tool across a face decodes an event's record by
+  its type.
+
+### F-513 · ambiguity · core §2.6: within one run, does a replay order relayed occurrences by time or by arrival?
+
+> Core §2.6, "An occurrence seen earlier": "Its key still takes the
+> owner's next seq, so within one run the relayed occurrences order by
+> their arrival at the owner, and across runs by their times." "The
+> order. A consumer MUST deliver a replay in the order of the
+> occurrences' times, then their seqs within one run."
+
+- **Two readings.** Say an owner relays a device's occurrence dated
+  T − 10 s at seq 5, after its own dated T − 5 s at seq 4. By the MUST,
+  the relayed one comes first, by its time. By the bullet, the two
+  "order by their arrival" within one run, seq 4 first.
+- **What zk2py does:** it delivers by time first, the MUST
+  (`live.replay_order`). It reads the bullet as the order the keys take.
+- **Fix:** "so within one run the relayed occurrences' keys order by
+  their arrival at the owner. A replay still delivers them by their
+  times (below)."
+- **Changes:** the order a consumer delivers a relayed occurrence in.
+
+### F-514 · gap · core §2.6's replay says nothing of a sample on an events key that is no event
+
+> Core §2.6: "A consumer MUST keep a replayed occurrence whose time
+> (§7.5's form 4) is within the retention". `envelope/carries.json`:
+> "a mutation on an occurrence chunk's key, as an owner writes until a
+> later version" → `{"reads": "mutation"}`. Core 0.103: "The owner MUST
+> write the put's payload as an event".
+
+- **The gap.** A mutation on an events key parses: §7.5 refuses no
+  form there but a frame and a snapshot. It has no time, so the filter
+  cannot keep it or drop it. An unknown time is kept, but that is an
+  event's time. A storage, or an owner of an earlier core, can still
+  answer one.
+- **A stale note.** "As an owner writes until a later version" is
+  0.101's. Since 0.103 no owner writes it.
+- **What zk2py does:** its replay counts such a reply undecodable,
+  `not_event`, and never delivers it (`live.replay_events`).
+- **Fix:** "A replayed sample on an events key that carries no event is
+  undecodable, refused as `form`", as §4.2's stray `reply_del` is. Re-word
+  `carries.json`'s note.
+- **Changes:** what a consumer does with a mutation it replays.
+
+### F-515 · minor · `freshness.v2` §2.4 still mints a member's times "at each mutation", which F-506's answer narrowed to each put
+
+> `freshness.v2` 0.7 §2.4: "The times are minted at each mutation of
+> the member, at each heartbeat that vouches for it and as the owner
+> builds the snapshot (core §4.3, "Minting")." Core 0.102 §4.3: "An
+> owner mints a last confirmation at each put of such a member … A
+> delete's would be carried by nothing".
+
+- **The error.** A delete is a mutation. F-506 quoted both sentences,
+  and core 0.102 changed only the core's.
+- **What zk2py does:** it mints at each put and each heartbeat, as the
+  core says.
+- **Fix:** "at each put of the member".
+- **Changes:** wording.
+
+### F-516 · minor · `state.md` §8 dates its occurrences "by `put_at`", which no text defines
+
+> `scenarios/state.md` §8, step 1: "The owner publishes 1,000
+> occurrences, dated by `put_at`." Core §2.6: "An owner that relays one,
+> such as a device's, writes the time it occurred."
+
+- **The error.** `put_at` is the reference's writer. An implementation
+  from `spec/` alone finds what it means in §2.6's "An occurrence seen
+  earlier".
+- **What zk2py does:** `Owner.occur(…, at_ms=…)`.
+- **Fix:** "each written with the time it occurred (core §2.6, an
+  occurrence seen earlier)", and name `put_at` in the italic note.
+- **Changes:** wording.
+
+### F-517 · minor · Appendix B: the storage manager keeps "the newest by its timestamp" and "refuses no put"
+
+> Core 0.103 Appendix B: "The storage manager holds one sample per key,
+> the newest by its timestamp, and refuses no put on a key it holds: a
+> later put replaces what it held". §2.6: "zenoh 1.10.1's storage manager
+> refuses no put on a key it holds (Appendix B)."
+
+- **The error.** Keeping the newest by timestamp refuses a put whose
+  timestamp is older than the one held. "Refuses no put" reads as every
+  put replacing. §2.6's reused run needs only the second, since the
+  later occurrence is put later. zk2py runs no storage manager, so it
+  cannot measure which is meant.
+- **What zk2py does:** its union storage stand-in replaces the held
+  sample at every put (`events_live.UnionStorage`).
+- **Fix:** "and refuses no put on a key it holds for holding it: a put
+  stamped later replaces what it held".
+- **Changes:** wording.
+
+### F-518 · minor · `snapshot/README.md` calls modem.v3 3.3 "the example's head"
+
+> `conformance/snapshot/README.md`: "In 3.3, the example's head, it is
+> 11." `examples/zk2/zenoh-modem/modem.v3.toml` (#1099): minor 4, and
+> `catalog.json`'s index 10 is 3.4.
+
+- **The error.** Since #1099 the head is 3.4. The index is 11 there too,
+  since 3.4 adds events alone, so no case moves. This is F-505's and
+  F-509's drift, in a third file.
+- **What zk2py does:** its reading checks 11 in 3.3 and in 3.4.
+- **Fix:** "In 3.3 and later it is 11", which no new revision moves.
+- **Changes:** a fixture's README.
+
+### Counts at core 0.103 (#980 C2)
+
+518 entries.
+- **New: F-512 to F-518:**
+  - two gaps: F-512 and F-514;
+  - an ambiguity: F-513;
+  - four minor errors: F-515 to F-518.
+  None is a blocker.
+- **Answered this round:** F-503 to F-511, F-506 in part (F-515).
+- **Open:**
+  - F-436 (not re-run);
+  - F-437 to F-441;
+  - F-512 to F-518.
+
+  F-365 stays open as #965's.

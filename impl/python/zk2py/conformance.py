@@ -5753,6 +5753,37 @@ def _round107_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "another interface, nothing raises; that revision is no longer listed for the key's interface, so "
                 "another is chosen",
                 ["raised" not in got, got.get("revision") != chosen], [True, True]))
+    # Round 107's findings, each text as it quotes it, so an answer moves it
+    car = _load_json(root / "envelope" / "carries.json")
+    fv2 = flat("profiles/freshness/v2.md")
+    snap_readme = flat("conformance/snapshot/README.md")
+    ev_case = next(c for c in tags["cases"] if "/events/" in c["key"])
+    out.append(("F-512 (open): observer §7.5's revision of a key names a mutation, a frame or a heartbeat, no event; "
+                "tags.json's one event case gives CH 0x00, a mutation",
+                missing(obs, "A tool that reads a mutation, a frame or a heartbeat with no descriptor naming the "
+                             "owner's revision MUST read it with the revision chosen in this order.")
+                + [ev_case["ch"]], ["0x00"]))
+    out.append(("F-513 (open): core §2.6 orders one run's relayed occurrences by their arrival, and the replay's MUST "
+                "by their times",
+                missing(core, "so within one run the relayed occurrences order by their arrival at the owner, and "
+                              "across runs by their times.",
+                        "A consumer MUST deliver a replay in the order of the occurrences' times, then their seqs "
+                        "within one run."), []))
+    out.append(("F-514 (open): core §2.6's replay names no sample on an events key that is no event; carries.json "
+                "reads a mutation there, \"as an owner writes until a later version\"",
+                [any(c["note"] == "a mutation on an occurrence chunk's key, as an owner writes until a later version"
+                     and c["expect"] == {"reads": "mutation"} for c in car["reads"])]
+                + [q for q in ("A replayed sample on an events key that carries no event",) if q in core], [True]))
+    out.append(("F-515 (open): freshness.v2 §2.4 mints the times \"at each mutation of the member\", where core 0.102 "
+                "§4.3 mints at each put",
+                missing(fv2, "The times** are minted at each mutation of the member, at each heartbeat that vouches "
+                             "for it and as the owner builds the snapshot"), []))
+    out.append(("F-516 (open): state.md §8 dates its occurrences by put_at, the reference's writer",
+                missing(st, "1. The owner publishes 1,000 occurrences, dated by `put_at`."), []))
+    out.append(("F-517 (open): Appendix B keeps the newest by its timestamp and refuses no put",
+                missing(core, "the newest by its timestamp, and refuses no put on a key it holds"), []))
+    out.append(("F-518 (open): snapshot/README.md calls modem.v3 3.3 the example's head, which is 3.4 since #1099",
+                missing(snap_readme, "In 3.3, the example's head, it is 11."), []))
     # observer 0.30 to 0.32
     out.append(("observer 0.30 §7.3: a tool reads an event's run and seq from its key and its record after its time, "
                 "and shows the time or that the clock was unknown; 0.32 §7.5: an event's last chunk, its occurrence "
