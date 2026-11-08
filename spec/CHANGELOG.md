@@ -3,6 +3,101 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.105 — 2026-11-08: a delete on an events key, the count of a sample that carries no event, and 0.104's note on the reference (#609, #980)
+
+zk2py round 108 read 0.104 cold, beside `link.v2` 0.12, observer 0.33
+and `freshness.v2` 0.8. It filed F-519 to F-523, none a blocker. This
+version answers the core's three, F-521 to F-523. `link.v2` 0.14
+answers F-519 and F-520
+([`profiles/link/CHANGELOG.md`](profiles/link/CHANGELOG.md)), and
+`observer.md` stays 0.33.
+
+**Changed: §2.6, a delete on an events key (F-522, a gap).**
+- **Before:** a consumer MUST NOT deliver a put on an events key whose
+  payload is no event. The rule named puts alone, and §7.5's parse
+  refuses no delete there. So a consumer could deliver a delete, as an
+  occurrence gone, or drop it uncounted.
+- **Now:** the MUST NOT names a delete on an events key too, heard or
+  replayed. The bullet is "A sample that carries no event".
+  `[Sc: state.md §8]`
+- **Why.** No owner deletes an occurrence. It writes each once, with a
+  one-shot put, and an event key is never an owner's state (§4.4). So a
+  delete there is no owner's word, and a consumer that delivered one
+  would tell its application of an occurrence gone.
+- **Where one comes from.** A broken writer, heard live, or a queryable
+  that answers a replay's GET with a `reply_del`.
+- **Its count** is a put's (below). A refused attachment is counted by
+  its refusal, and one that reads as a delete, or none, as `form`.
+- **The reference** delivers none, from the merge that brought this
+  version. Before it, its subscription handed a delete to the callback,
+  and `Consumer::replay` kept a `reply_del` as an unknown time. Now both
+  count it undecodable, by its attachment's refusal where §7.5's parse
+  refuses it and else `form`, and hand it to `Consumer::with_refused`'s
+  callback, as they do a put that carries no event.
+
+**Stated: §2.6, the count (F-521, an ambiguity).**
+- **Before:** "It counts it undecodable, refused as `form`", while
+  observer §7.3 names a refused envelope by its refusal. A JSON document
+  under `zenoh/bytes` on an events key read both ways. Its `{`, `0x7b`,
+  reads as form 3, which a put does not carry, so the parse refuses it
+  `sample_kind`. And it carries no event.
+- **Now:** where §7.5's parse refuses the sample's envelope, the count
+  names that refusal, such as `short`, `sample_kind` or `key_stamp`. Any
+  other is `form`: its envelope reads as another form, such as a
+  mutation, a heartbeat or a delete, or it carries none.
+- **Why.** The parse comes before any reading of the record (§7.5), and
+  its refusal says the most. `form` says what is left: the bytes read,
+  and they are no event.
+- **The reference** counts so, from the merge that brought this
+  version. Its subscription and `Consumer::replay` ask one helper,
+  `inband::admit_event`: the parse's refusal first, then `form` for a
+  sample that carries no event, and only then an event's record by its
+  layout.
+  - **Before it, it differed in three cases.** A heartbeat on an events
+    key was counted `heartbeat`. On a packed event, a sample with no
+    envelope was counted `tag`, and a mutation whose record the layout
+    refuses by that refusal.
+- **zk2py** counts so. It counts a delete `form` whatever its attachment
+  holds, where the text names a refused attachment's refusal.
+
+**Erratum: 0.104's note on the reference (F-523, minor).** 0.104's
+entry said the reference delivers both of `state.md` §8 step 4's puts,
+and that its evidence was written ahead of the reference.
+- **The code half landed** in the merge that brought 0.104 (#1104). The
+  subscription and `Consumer::replay` deliver neither
+  (`inband::Undecodable::NoEvent`, token `form`), and `s8_events_replay`
+  runs step 4. So §8's note held, and the entry's "today" did not.
+- **Both lines are corrected** in 0.104's entry, which says that they
+  were.
+
+**The evidence.** `scenarios/state.md` §8's step 4 also deletes a third
+key of the event, its attachment a delete (§7.5's form 1). Expected 5
+says none of the three is delivered, live or replayed, each counted
+`form`. Expected 2 counts the backend's 1,005 puts. The reference runs
+the delete in `s8_events_replay`, and `inband.rs`'s unit tests count
+each case above.
+
+**Migration.** A consumer of this version drops a delete on an events
+key, which one of 0.104 could deliver. No owner writes one, so only a
+broken writer or a stray `reply_del` meets the change. A count that
+named `form` for a refused envelope now names its refusal.
+
+**Deliberately not changed.**
+- **§7.5's parse.** A delete on an events key still reads as a delete,
+  and a mutation as a mutation. As for a stray `reply_del`, `form` names
+  the consumer's count, not a refusal of the parse.
+- **No owner rule on a delete.** §2.6's one-shot put and §4.4's "never
+  an owner's state" leave an owner no delete to write. The reference's
+  event writer has none.
+- **No scenario puts a refused envelope** on an events key. Its count is
+  §7.5's refusal, which `envelope/carries.json` and `vectors.json` state.
+- **Observer §7.3.** A tool still shows a delete on an events key as
+  the delete it is: the rule binds a consumer.
+- **No section number** and no fingerprint moves.
+
+**The figures.** `RULES.md` lists 274 rules, as 0.104 did: the
+consumer's MUST NOT is widened in place (consumer 32).
+
 ## 0.104 — 2026-11-08: a put that carries no event, a replay's two orders, and the storage manager's newest put (#609, #980)
 
 zk2py round 107 read 0.101 to 0.103 cold, and filed F-512 to F-518. None
@@ -25,9 +120,10 @@ and `freshness.v2` to 0.8 for F-515.
 - **The subscription too.** zk2py's fix named the replay alone. A put the
   replay refuses would otherwise be delivered live, as an occurrence with
   no time.
-- **The reference** delivers both today. `Consumer::replay` keeps such a
-  put as an unknown time, and the subscription delivers it. The code half
-  is listed for a Rust lane.
+- **The reference** delivers neither, from the merge that brought this
+  version (#1104). Its subscription counts such a put undecodable, `form`,
+  and `Consumer::replay` skips it. This bullet said it delivered both
+  until 0.105's erratum (F-523).
 
 **Changed: §2.6 and §7.5, the two orders (F-513, an ambiguity).**
 - **Before:** "within one run the relayed occurrences order by their
@@ -61,7 +157,8 @@ and `freshness.v2` to 0.8 for F-515.
   - **New step 4** puts a mutation and a JSON document with no envelope
     on the event's keys, while the consumer subscribes. Neither is
     delivered, by the subscription or by the replay (F-514).
-  - **Written ahead of the reference**, which delivers both.
+  - **The reference runs it** in `s8_events_replay`. This line said it
+    was written ahead of the reference until 0.105's erratum (F-523).
 - **`envelope/carries.json`.** Read 36's note says that the parse reads a
   mutation on an events key, and that a consumer counts it undecodable.
   The description says no case states that count. No case moves.

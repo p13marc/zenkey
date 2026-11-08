@@ -286,11 +286,12 @@ impl Delivery {
     }
 }
 
-/// A sample a subscription refused as undecodable (core §7.5, §7.6): its
-/// envelope refused, or a packed record its type's layout refuses. Never
+/// A sample a subscription or a replay refused as undecodable (core §7.5,
+/// §7.6, §2.6): its envelope refused, a packed record its type's layout
+/// refuses, or a sample on an events key that carries no event. Never
 /// delivered nor ordered, and counted ([`Subscription::undecodable`]);
 /// handed to [`Consumer::with_refused`]'s callback, for a tool that shows
-/// it with its refusal named (observer §7.3).
+/// it with its refusal named (observer §7.3), and for a replay's count.
 #[derive(Debug, Clone)]
 pub struct Refused {
     /// The provider whose key carried it.
@@ -306,7 +307,7 @@ pub struct Refused {
     /// Why it is undecodable.
     pub why: crate::inband::Undecodable,
     /// When it arrived, on this host's monotonic clock, read in the
-    /// subscriber's callback.
+    /// subscriber's callback, or as the replay read its reply.
     pub arrival: Instant,
 }
 
@@ -648,10 +649,12 @@ impl Consumer {
 
     /// Hands `on_refused` each sample this consumer's subscriptions refuse
     /// as undecodable ([`Refused`]), beside its count
-    /// ([`Subscription::undecodable`]), from the subscriber's callback. A
-    /// tool that shows samples shows such a one, its refusal named, and
-    /// never drops it silently (observer §7.3). Without it the sample is
-    /// counted alone.
+    /// ([`Subscription::undecodable`]), from the subscriber's callback, and
+    /// each occurrence [`Consumer::replay`] skips as undecodable, from the
+    /// replay's task: a replay's count (core §2.6, "It counts it
+    /// undecodable"). A tool that shows samples shows such a one, its
+    /// refusal named, and never drops it silently (observer §7.3). Without
+    /// it a subscription's sample is counted alone, and a replay's logged.
     #[must_use]
     pub fn with_refused(mut self, on_refused: impl Fn(Refused) + Send + Sync + 'static) -> Self {
         self.refused = Some(Arc::new(on_refused));
@@ -990,12 +993,11 @@ impl Consumer {
                 };
                 // Core §7.5, §7.6: a refused envelope, or a packed
                 // record its layout refuses, is undecodable, never
-                // delivered, never an arrival; so is a put on an events
-                // key that carries no event (§2.6).
+                // delivered, never an arrival; so is a sample on an
+                // events key that carries no event, a delete among them
+                // (§2.6).
                 let occurred = crate::inband::event_time(&sample);
-                let no_event = r.kind == Kind::Event
-                    && sample.kind() == zenoh::sample::SampleKind::Put
-                    && occurred.is_none();
+                let no_event = r.kind == Kind::Event && occurred.is_none();
                 let read = crate::inband::read(sample);
                 let (inband, tag) = (read.stamp(), read.tag());
                 // Core §7.7: a frame resource's put is a frame, read
@@ -1018,9 +1020,11 @@ impl Consumer {
                             }
                         })
                     }),
-                    None => crate::inband::admit(&read, layout.as_deref())
-                        .and(crate::inband::no_event(no_event))
-                        .map(|()| None),
+                    None if r.kind == Kind::Event => {
+                        crate::inband::admit_event(&read, layout.as_deref(), no_event)
+                            .map(|()| None)
+                    }
+                    None => crate::inband::admit(&read, layout.as_deref()).map(|()| None),
                 };
                 let frame = match admitted {
                     Ok(frame) => frame,
@@ -1296,9 +1300,13 @@ impl Consumer {
     ///
     /// - **Its time** (core §2.6; #980's C2b, C2c) is its event's (§7.5's
     ///   form 4), counted from this consumer's deployment epoch. An unknown
-    ///   time, or a payload that is no event, is never judged within the
-    ///   retention or beyond it: the storage's `_time` bound alone admitted
-    ///   it.
+    ///   time is never judged within the retention or beyond it: the
+    ///   storage's `_time` bound alone admitted it.
+    /// - **A sample that carries no event** (core §2.6), a mutation, a
+    ///   heartbeat, a payload with no envelope or a `reply_del`, is never
+    ///   replayed, nor one whose envelope or record is refused: each is
+    ///   handed to [`Consumer::with_refused`]'s callback, counted as
+    ///   [`crate::inband::admit_event`] counts it.
     /// - **The order**: the occurrences with a time by their times, then
     ///   each of one time by its run's value and its seq; those with none
     ///   after them, by run value, then the seq. So one run's occurrences
@@ -1371,15 +1379,24 @@ impl Consumer {
                 let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
                 if let Some(values) = r.template.matches(&refs) {
                     let occurred = crate::inband::event_time(&sample);
-                    // Core §2.6: a put that carries no event, a mutation
-                    // or a sample with no envelope, is never replayed.
-                    let no_event =
-                        sample.kind() == zenoh::sample::SampleKind::Put && occurred.is_none();
+                    // Core §2.6: a sample that carries no event, a
+                    // mutation, a heartbeat, a sample with no envelope or a
+                    // `reply_del`, is never replayed.
                     let read = crate::inband::read(sample);
-                    if let Err(why) = crate::inband::admit(&read, layout.as_deref())
-                        .and(crate::inband::no_event(no_event))
+                    if let Err(why) =
+                        crate::inband::admit_event(&read, layout.as_deref(), occurred.is_none())
                     {
                         tracing::warn!(key = %read.sample().key_expr(), reason = %why.reason(), "an undecodable occurrence is not replayed");
+                        if let Some(f) = &self.refused {
+                            f(Refused {
+                                provider: addr,
+                                resource: name.clone(),
+                                values,
+                                read,
+                                why,
+                                arrival: Instant::now(),
+                            });
+                        }
                         continue;
                     }
                     let (inband, tag) = (read.stamp(), read.tag());

@@ -533,21 +533,32 @@ impl StatedTransport {
     /// configuration runs, `router` where it states none, as zenohd runs; a
     /// mode the value leaves out, or no value, at zenoh 1.10.1's default,
     /// on for a router and off for a peer and a client.
+    ///
+    /// A `null` is read as zenoh 1.10.1 reads it, as left out: each value
+    /// is an `Option` it fills with its default (`zenoh-config`'s
+    /// `ModeValues`, `unwrap_or_default!`). So is a `mode` of `null`. Any
+    /// other value that is no boolean, or a `mode` that is no string, is
+    /// one zenoh refuses to load ("bool or mode dependent bool"): no router
+    /// runs it, and it is read at the default too.
     #[must_use]
     pub fn stamps(&self) -> bool {
-        let mode = self
-            .0
-            .get("mode")
-            .and_then(Value::as_str)
-            .unwrap_or("router");
+        let mode = match self.0.get("mode") {
+            Some(Value::String(mode)) => mode.as_str(),
+            // Unstated or `null`, as zenohd runs; any other, refused by
+            // zenoh.
+            None | Some(_) => "router",
+        };
         let default = mode == "router";
-        match self.0.get("timestamping/enabled") {
+        let read = |value: Option<&Value>| match value {
             Some(Value::Bool(b)) => *b,
-            Some(Value::Object(per_mode)) => per_mode
-                .get(mode)
-                .and_then(Value::as_bool)
-                .unwrap_or(default),
-            _ => default,
+            // Left out, or `null`, which zenoh reads as left out.
+            None | Some(Value::Null) => default,
+            // A value zenoh refuses to load.
+            Some(_) => default,
+        };
+        match self.0.get("timestamping/enabled") {
+            Some(Value::Object(per_mode)) => read(per_mode.get(mode)),
+            value => read(value),
         }
     }
 
@@ -4874,6 +4885,21 @@ mod tests {
         }));
         assert!(!written.stamps());
         assert_eq!(TIMESTAMPING_OFF.len(), 2);
+        // A `null`, as zenoh reads it: left out, at the mode's default.
+        assert!(stamps(Some("router"), Some(serde_json::Value::Null)));
+        assert!(stamps(
+            Some("router"),
+            Some(serde_json::json!({"router": null, "peer": false}))
+        ));
+        assert!(!stamps(
+            Some("peer"),
+            Some(serde_json::json!({"router": false, "peer": null}))
+        ));
+        let null_mode = StatedTransport::read(&serde_json::json!({
+            "mode": null,
+            "timestamping": {"enabled": {"peer": false}},
+        }));
+        assert!(null_mode.stamps(), "a `null` mode runs as a router");
     }
 
     /// The keep-alive interval in words: exact, or "about" where the lease

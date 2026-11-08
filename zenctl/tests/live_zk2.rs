@@ -8231,14 +8231,10 @@ impl Reopening {
     }
 
     async fn reopened_since(&self, before: u64) {
-        let deadline = Instant::now() + Duration::from_secs(30);
-        while self.accepted.load(Ordering::SeqCst) <= before {
-            assert!(
-                Instant::now() < deadline,
-                "B never opened its transport again"
-            );
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        settles("B opens its transport again", || async {
+            self.accepted.load(Ordering::SeqCst) > before
+        })
+        .await;
     }
 
     /// Drops the link and waits for B's next transport through it.
@@ -8248,32 +8244,48 @@ impl Reopening {
         self.reopened_since(before).await;
     }
 
-    /// Cuts the link for `silence`, longer than the lease, so that each
-    /// end closes the transport at its lease, then restores it and waits
-    /// for B's next transport.
-    async fn cut_for(&self, silence: Duration) {
-        let before = self.accepted.load(Ordering::SeqCst);
+    /// Cuts the link: what either end sends is discarded until
+    /// [`Reopening::heal`], so each end closes the transport at its lease.
+    fn cut(&self) {
         self.cut.store(true, Ordering::Relaxed);
-        tokio::time::sleep(silence).await;
+    }
+
+    /// Restores a cut link: B's next transport through it crosses.
+    fn heal(&self) {
         self.cut.store(false, Ordering::Relaxed);
-        self.reopened_since(before).await;
     }
 }
 
-/// #1109: a `config set` on a `config.v2` owner, made from a router whose
-/// link to the owner's router opened again before it, reaches the owner
-/// and is answered with the record, as one made before the reopen is: once
-/// after the link drops, and once after a cut past both ends' leases, the
-/// shape of the wire baseline's W2 reconnect. A and B are peers, as its
-/// routers run; the owner is a client of A, zenctl a client of B. The
-/// sets that drew silence there did so because nothing crossed A->B after
-/// the radio's reopen (#1109's write-up), not for anything `config set`
-/// does after one.
+/// Polls `f` until it holds, failing after [`SETTLE`].
+async fn settles<F, Fut>(what: &str, mut f: F)
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    let deadline = Instant::now() + SETTLE;
+    while !f().await {
+        assert!(Instant::now() < deadline, "never: {what}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// #1109, a control that does not reproduce it: a `config set` on a
+/// `config.v2` owner, made from a router whose link to the owner's router
+/// opened again before it, reaches the owner and is answered with the
+/// record, as one made before the reopen is: once after the link drops,
+/// and once after a cut past both ends' leases, the shape of the wire
+/// baseline's W2 reconnect. A and B are peers, as its routers run; the
+/// owner is a client of A, zenctl a client of B. The reference crosses a
+/// reopen: the sets that drew silence in W2 did so because nothing crossed
+/// A->B after the radio's reopen, in zenoh-modem's router or its driver
+/// (#1109's write-up, zenoh-modem#210), not for anything `config set` or
+/// zenoh does after one.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn config_v2_set_after_the_link_opens_again() {
     let face = std::env::temp_dir().join(format!("zk-reopen-face-{}.sock", std::process::id()));
     let _ = std::fs::remove_file(&face);
-    // A 2-s lease on both ends, so that a cut of 3 s closes the transport.
+    // A 2-s lease on both ends, so that a cut closes the transport soon:
+    // the test waits on each close and each reopen, not on the lease.
     let lease = |c: &mut zenoh::Config| {
         c.insert_json5("transport/link/tx/lease", "2000").unwrap();
         c.insert_json5("transport/link/tx/keep_alive", "4").unwrap();
@@ -8342,12 +8354,11 @@ async fn config_v2_set_after_the_link_opens_again() {
                 .unwrap()
         }
     };
-    // Before: through B, a set answered with the record.
+    // Before: through B, a set answered with the record, rerun until the
+    // owner's presence reaches B, within [`SETTLE`].
+    let deadline = Instant::now() + SETTLE;
     let mut before = set("20000").await;
-    for _ in 0..50 {
-        if before.code == 0 {
-            break;
-        }
+    while before.code != 0 && Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(200)).await;
         before = set("20000").await;
     }
@@ -8356,20 +8367,25 @@ async fn config_v2_set_after_the_link_opens_again() {
     // The link drops and opens again, and a set made at once after it;
     // then a cut past the lease, which both ends' leases close, as W2's
     // reconnect was, and a set after B's next transport.
-    let a_zid = bus._router.zid();
+    let (a_zid, b_zid) = (bus._router.zid(), b.zid());
     for (i, value) in ["30000", "40000"].into_iter().enumerate() {
         if i == 0 {
             link.reopen().await;
         } else {
-            link.cut_for(Duration::from_secs(3)).await;
+            link.cut();
+            settles("each end closes the transport at its lease", || async {
+                !b.info().peers_zid().await.any(|z| z == a_zid)
+                    && !bus._router.info().peers_zid().await.any(|z| z == b_zid)
+            })
+            .await;
+            link.heal();
         }
-        // B's transport to A is up again: a connection R accepted during
-        // the cut carried a handshake R discarded.
-        let deadline = Instant::now() + Duration::from_secs(30);
-        while !b.info().peers_zid().await.any(|z| z == a_zid) {
-            assert!(Instant::now() < deadline, "B never reached A again");
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        // B's transport to A is up again: a connection the relay accepted
+        // during the cut carried a handshake it discarded.
+        settles("B reaches A again", || async {
+            b.info().peers_zid().await.any(|z| z == a_zid)
+        })
+        .await;
         let after = set(value).await;
         exits(&after, 0);
         let doc = after.json();

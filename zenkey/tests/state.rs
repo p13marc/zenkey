@@ -35,7 +35,9 @@ use zenoh::sample::{Sample, SampleKind};
 type Stored = Arc<Mutex<BTreeMap<String, (Vec<u8>, Encoding)>>>;
 
 /// A union storage on `zk2/*/*/*/events/**` whose backend ignores `_time`,
-/// like the storage manager's memory backend (spike S5).
+/// like the storage manager's memory backend (spike S5). A delete removes
+/// its key, as the storage manager's tombstone does: a GET's reply holds
+/// nothing for it.
 async fn union_storage(
     s: &zenoh::Session,
 ) -> (
@@ -48,6 +50,10 @@ async fn union_storage(
     let sub = s
         .declare_subscriber("zk2/*/*/*/events/**")
         .callback(move |smp: Sample| {
+            if smp.kind() == SampleKind::Delete {
+                w.lock().unwrap().remove(smp.key_expr().as_str());
+                return;
+            }
             // As a storage keeps a sample: its bytes, envelope included,
             // and its Encoding.
             w.lock().unwrap().insert(
@@ -81,13 +87,16 @@ async fn union_storage(
 /// T; one of an unknown time; then the owner restarts under a new run and
 /// publishes two dated T − 100.5 s and T − 0.5 s. Every key ends in its
 /// run and seq, and its payload is an event (§7.5's form 4). Step 4 (core
-/// 0.104, F-514): another session puts a mutation under `zenoh/bytes`
-/// and a JSON document with no envelope on two keys of the event no
-/// occurrence took. The backend ignores `_time`, so the storage holds all
-/// 1,005, and the consumer's replay keeps 503 by each event's time: the
-/// 502 with a time in time order across the run change, then the unknown
-/// one. Neither of step 4's puts is delivered, by the subscription or the
-/// replay, and the subscription counts both undecodable, `form`.
+/// 0.104, F-514; 0.105, F-522): another session puts a mutation under
+/// `zenoh/bytes` and a JSON document with no envelope on two keys of the
+/// event no occurrence took, then deletes a third, its attachment a
+/// delete's envelope. The backend ignores `_time`, so the storage holds
+/// all 1,005 puts, and the consumer's replay keeps 503 by each event's
+/// time: the 502 with a time in time order across the run change, then the
+/// unknown one. None of step 4's three samples is delivered, by the
+/// subscription or the replay. The subscription counts all three
+/// undecodable, `form`, and the replay the two puts the storage answers
+/// (it holds nothing for the deleted key).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s8_events_replay() {
     let (_r1, ep) = router(None).await;
@@ -140,7 +149,8 @@ async fn s8_events_replay() {
     );
     b.require("journal", journal.clone(), false);
     let auditor = b.start().await.unwrap();
-    // Each refusal the subscription makes, by key and why (step 4).
+    // Each refusal, by key and why: the subscription's (step 4) and the
+    // replay's.
     let refused: Arc<Mutex<Vec<(String, zenkey::inband::Undecodable)>>> = Arc::default();
     let r = Arc::clone(&refused);
     let consumer = auditor
@@ -150,13 +160,15 @@ async fn s8_events_replay() {
             let key = x.read.sample().key_expr().as_str().to_owned();
             r.lock().unwrap().push((key, x.why));
         });
-    let heard: Arc<Mutex<Vec<String>>> = Arc::default();
+    // Each delivery's key and record: a delete's payload is empty.
+    let heard: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
     let h = Arc::clone(&heard);
     let sub = consumer
         .subscribe("events/entries", move |d: zenkey::consumer::Delivery| {
-            h.lock()
-                .unwrap()
-                .push(String::from_utf8_lossy(&d.sample.payload().to_bytes()).into_owned());
+            h.lock().unwrap().push((
+                d.sample.key_expr().as_str().to_owned(),
+                String::from_utf8_lossy(&d.sample.payload().to_bytes()).into_owned(),
+            ));
         })
         .await
         .unwrap();
@@ -181,11 +193,12 @@ async fn s8_events_replay() {
     })
     .await;
     eventually("the subscription hears step 3's", || async {
-        heard.lock().unwrap().iter().any(|r| r == "run2-b")
+        heard.lock().unwrap().iter().any(|(_, r)| r == "run2-b")
     })
     .await;
-    // Step 4: two puts that carry no event, on occurrence chunks of a
-    // 16-bit run no instance took (each instance's is a 32-bit draw).
+    // Step 4: two puts and a delete that carry no event, on occurrence
+    // chunks of a 16-bit run no instance took (each instance's is a 32-bit
+    // draw).
     let stray = client(&ep).await;
     let stray_key = |seq: u32| {
         let e = wire::Event {
@@ -199,11 +212,11 @@ async fn s8_events_replay() {
         };
         format!("zk2/lab/journal/journal.v1/events/entries/{}", e.chunk())
     };
-    let (mutation_key, json_key) = (stray_key(1), stray_key(2));
+    let (mutation_key, json_key, delete_key) = (stray_key(1), stray_key(2), stray_key(3));
     // Each a key the consumer reads (review-bot on #1104): an events key
     // whose last chunk is a 16-bit run's occurrence chunk, run 0x7777 and
     // its seq, so a refusal below is the payload's, never the key's.
-    for (key, seq) in [(&mutation_key, 1), (&json_key, 2)] {
+    for (key, seq) in [(&mutation_key, 1), (&json_key, 2), (&delete_key, 3)] {
         assert!(
             matches!(
                 zenkey::model::grammar::parse(key),
@@ -241,25 +254,43 @@ async fn s8_events_replay() {
         .encoding(Encoding::APPLICATION_JSON)
         .await
         .unwrap();
+    stray
+        .delete(&delete_key)
+        .attachment(
+            DeleteStamp {
+                stamp: InBand {
+                    run: Run::U16(0x7777),
+                    seq: wire::Seq::new(3).unwrap(),
+                },
+            }
+            .write(),
+        )
+        .await
+        .unwrap();
     eventually("the storage holds 1,005", || async {
         store.lock().unwrap().len() == 1005
     })
     .await;
-    // Expected 5, the subscription's half: neither delivered, both counted
-    // undecodable.
-    eventually("both counted undecodable", || async {
-        sub.undecodable() == 2
+    // Expected 5, the subscription's half: none delivered, all three
+    // counted undecodable.
+    eventually("all three counted undecodable", || async {
+        sub.undecodable() == 3
     })
     .await;
-    // Each refused for carrying no event, token `form` (core §2.6).
+    // Each refused for carrying no event, token `form` (core §2.6). The
+    // callback runs just after the count.
+    eventually("all three handed to `with_refused`", || async {
+        refused.lock().unwrap().len() == 3
+    })
+    .await;
     let mut why = refused.lock().unwrap().clone();
     why.sort_by(|a, b| a.0.cmp(&b.0));
-    let mut expected = vec![mutation_key.clone(), json_key.clone()];
+    let mut expected = vec![mutation_key.clone(), json_key.clone(), delete_key.clone()];
     expected.sort();
     assert_eq!(
         why.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>(),
         expected,
-        "step 4's two keys, each refused once"
+        "step 4's three keys, each refused once"
     );
     assert!(
         why.iter()
@@ -267,11 +298,15 @@ async fn s8_events_replay() {
         "{why:?}"
     );
     assert!(
-        heard.lock().unwrap().iter().all(|r| r != "{}"),
-        "no put that carries no event is delivered"
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|(k, r)| r != "{}" && *k != delete_key),
+        "no sample that carries no event is delivered, a delete among them"
     );
     // Expected 1: each key ends in its run and seq, its payload an event;
-    // step 4's two carry none.
+    // step 4's two puts carry none.
     let mut runs = std::collections::HashSet::new();
     for (key, (bytes, _)) in store.lock().unwrap().iter() {
         if *key == mutation_key || *key == json_key {
@@ -302,6 +337,29 @@ async fn s8_events_replay() {
         "the recent ones, step 2's and step 3's; neither of step 4's (Expected 5)"
     );
     assert!(records.iter().all(|r| !r.starts_with("old") && r != "{}"));
+    // Expected 5, counted: the subscription's three and the replay's two
+    // (the storage answers nothing for the delete's key), each `NoEvent`,
+    // token `form`.
+    let all = refused.lock().unwrap().clone();
+    assert!(
+        all.iter()
+            .all(|(_, w)| *w == zenkey::inband::Undecodable::NoEvent && w.token() == "form"),
+        "{all:?}"
+    );
+    let mut counted: Vec<String> = all.into_iter().map(|(k, _)| k).collect();
+    counted.sort();
+    let mut expected = vec![
+        delete_key.clone(),
+        json_key.clone(),
+        json_key.clone(),
+        mutation_key.clone(),
+        mutation_key.clone(),
+    ];
+    expected.sort();
+    assert_eq!(
+        counted, expected,
+        "the subscription's three, the replay's two"
+    );
     // Expected 3: time order across the run change.
     let times: Vec<_> = got[..502]
         .iter()

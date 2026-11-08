@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.104** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.105** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -480,18 +480,28 @@ not, is §2.7's.
       times of two runs, the order is unspecified: nothing orders two runs
       (§4.3). The reference breaks the tie by the run's value, a 16-bit
       run before a 32-bit one.
-- **A put that carries no event.** An owner writes every occurrence as an
-  event (above). A consumer MUST NOT deliver a put on an events key whose
-  payload is no event, such as a mutation or a payload with no envelope,
-  whether a subscription heard it or a replay returned it. It counts it
-  undecodable, refused as `form`, as §4.2 counts a stray `reply_del`.
+- **A sample that carries no event.** An owner writes every occurrence as
+  an event, with a one-shot put (above), and deletes none. A consumer MUST
+  NOT deliver a put on an events key whose payload is no event, such as a
+  mutation or a payload with no envelope, or a delete on an events key,
+  whether a subscription heard it or a replay returned it.
   `[Sc: state.md §8]`
-  - **Why.** §7.5's parse refuses no mutation on an events key. But a
-    mutation carries no time, so the filter could neither keep it nor
+  - **Its count.** The consumer counts it undecodable. Where §7.5's parse
+    refuses its envelope, the count names that refusal, such as `short`,
+    `sample_kind` or `key_stamp`, as observer §7.3 names one. Any other is
+    refused as `form`, as §4.2 counts a stray `reply_del`: its envelope
+    reads as another form, or it carries none.
+  - **Why a put.** §7.5's parse refuses no mutation on an events key. But
+    a mutation carries no time, so the filter could neither keep it nor
     drop it. An unknown time is an owner's word in an event, and a
     mutation says nothing of its time.
-  - **Where one comes from.** A storage can still answer one, put by an
-    owner of an earlier core or by a broken writer.
+  - **Why a delete.** No owner deletes an occurrence, and an event key is
+    never an owner's state (§4.4). So a delete there is no owner's word.
+    Delivered, it would tell an application that an occurrence is gone,
+    which no owner says.
+  - **Where one comes from.** A storage can still answer a put, put by an
+    owner of an earlier core or by a broken writer. A delete comes from a
+    broken writer, or from a queryable that answers with a `reply_del`.
 
 ### 2.7 The population budget
 
