@@ -607,6 +607,9 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `freshness.v2` revision) to `freshness.v2`'s standard revision,
   `zenkey::heartbeat::BUNDLE` (`lens::standard_revision`), never
   `none_left`; a recorded header and a descriptor keep their own word.
+  `Lens::heartbeat_revision(wire, tag)` (#1113) is the revision
+  `check_sample` reads a heartbeat's body with, for a window that makes
+  its own view of the covered interface at a heartbeat (zengui's book).
   #990 V2c: `judge::field::run_field_over` reads each sample through the
   window's `model::frame::Readers` (`Lens::check_frames`), a frame's
   records each a document sample (`frame_records`, `FieldObservation::
@@ -616,5 +619,8 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   (`PathStats::absent`/`unknown`, `FieldRow::absent`/`unknown`, omitted at
   zero) and accounted for, so `judge_vanished` measures from
   `PathStats::last_accounted` and never reads either as missing; a sample
-  that is no frame reads its document as before.
+  that is no frame reads its document as before. `first_at_s` and
+  `last_at_s` are presence alone (review-bot on #1112): a path first met
+  absent or unknown takes its first value's time, so `field-stuck`'s span
+  holds values only.
   `tests/first_hop.rs` is constrained.md §10 from the tools' side.
