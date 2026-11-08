@@ -550,6 +550,23 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   (`Redeclaring::failed`, `Subscription::redeclare_failed`) and warned of
   once a horizon per slot; its unit test refuses declarations through a
   `cfg(test)` counter (`Inner::refuse`).
+  #1028 (the suite's timing windows): a step waits for its condition,
+  never a longer sleep. A put before its writer matches is dropped at its
+  source (`Writer::matching`, a publisher's `matching_status`), and a
+  call to a queryable declared a moment before reaches none (`operations.rs`'
+  `routed`, a querier's `matching_status`); a GET can
+  end at its timeout before the owner's reply under load, so `state.rs`'
+  `answer` and `raw_get_answered` ask again within `SETTLE`; an order the
+  spec states at the source is read on the owner's own session, whose
+  local subscribers see it as made, never at a reader past a router,
+  which can carry a token's declaration ahead of a put on another
+  priority (`profile_telemetry_v2.rs`' device reset); a deadline a step
+  is not about is `SETTLE`; and a session reconnected
+  is one whose GET crossed to its router, never one with a link alone:
+  zenoh 1.10.1 lists a reopened transport's link before the router's face
+  exists, and a GET asked between the two ends at once with no reply
+  (`presence.rs`' s10 step 9 reads a token past the router; the window
+  #914's `OPEN_MARGIN` waits out for the runtime's barrier).
   `common::lossy_link_to` + `Link::lose_up(text)` / `lose_next_up()` drop
   the next batch the dialler sends holding `text`, or the next but a
   keep-alive (stream-link framing), for `constrained.rs`'s §9; §8 is a 1.5 s raw queryable against
