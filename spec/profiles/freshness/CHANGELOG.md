@@ -5,6 +5,29 @@ entry naming its text. Each entry records what changed, what deliberately
 did not, and why. A breaking change is a new major, a new file, never an
 entry here ([`../README.md`](../README.md)).
 
+## `v2.md` 0.8 — 2026-11-08: editorial: a member's times minted at each put, no rule changed (#609)
+
+zk2py round 107 read core 0.103 cold. Its F-515 found that this text
+still minted a member's times at each mutation. Core 0.102 narrowed its
+§4.3, "Minting", to each put, and this text did not follow.
+
+**Answered: zk2py round 107's F-515, minor.**
+- **§2.4's "The times"** are minted at each put of the member, at each
+  heartbeat that vouches for it, and as the owner builds the snapshot.
+- **§0's "Last confirmation"** is the later of a member's last put and
+  the last heartbeat that vouched for it. It said "last mutation", the
+  same error: §0's confirmation already counts no delete.
+- **Why.** A delete is a mutation, and a tombstone carries no
+  confirmation. So a delete's time is carried by nothing, as core §4.3
+  says.
+
+**Deliberately not changed.**
+- **No rule of this text.** An owner already minted at each put. A time
+  minted at a delete reaches no reader, since no sample carries it.
+- **The header** is still written against core 0.100: core 0.102's
+  minting is what this wording restates, and nothing else here reads a
+  later core.
+
 ## `v1.md` 0.6 — 2026-11-08: editorial: an occurrence's age is its event's time, no rule changed (#980 C2c)
 
 Core 0.103 has an owner key each occurrence by its run and seq and carry
