@@ -9,7 +9,8 @@
 //!    catalog was given, the ones it lists. One left is the owner's
 //!    revision ([`Step::Deployment`]).
 //! 2. **The tag.** Of several left, those whose tag is CH's: the type's for
-//!    a mutation (a packed type's own, 0 for any other kind), the frame
+//!    a mutation or an event (a packed type's own, 0 for any other kind;
+//!    observer §7.5 reads an event's revision as a mutation's), the frame
 //!    form's for a frame, the revision's own for a heartbeat. One left is
 //!    the revision ([`Step::Tag`]).
 //! 3. **The latest.** Several still left, a catalog given, and each reading

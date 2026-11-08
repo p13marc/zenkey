@@ -990,8 +990,12 @@ impl Consumer {
                 };
                 // Core §7.5, §7.6: a refused envelope, or a packed
                 // record its layout refuses, is undecodable, never
-                // delivered, never an arrival.
+                // delivered, never an arrival; so is a put on an events
+                // key that carries no event (§2.6).
                 let occurred = crate::inband::event_time(&sample);
+                let no_event = r.kind == Kind::Event
+                    && sample.kind() == zenoh::sample::SampleKind::Put
+                    && occurred.is_none();
                 let read = crate::inband::read(sample);
                 let (inband, tag) = (read.stamp(), read.tag());
                 // Core §7.7: a frame resource's put is a frame, read
@@ -1014,7 +1018,9 @@ impl Consumer {
                             }
                         })
                     }),
-                    None => crate::inband::admit(&read, layout.as_deref()).map(|()| None),
+                    None => crate::inband::admit(&read, layout.as_deref())
+                        .and(crate::inband::no_event(no_event))
+                        .map(|()| None),
                 };
                 let frame = match admitted {
                     Ok(frame) => frame,
@@ -1365,8 +1371,14 @@ impl Consumer {
                 let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
                 if let Some(values) = r.template.matches(&refs) {
                     let occurred = crate::inband::event_time(&sample);
+                    // Core §2.6: a put that carries no event, a mutation
+                    // or a sample with no envelope, is never replayed.
+                    let no_event =
+                        sample.kind() == zenoh::sample::SampleKind::Put && occurred.is_none();
                     let read = crate::inband::read(sample);
-                    if let Err(why) = crate::inband::admit(&read, layout.as_deref()) {
+                    if let Err(why) = crate::inband::admit(&read, layout.as_deref())
+                        .and(crate::inband::no_event(no_event))
+                    {
                         tracing::warn!(key = %read.sample().key_expr(), reason = %why.reason(), "an undecodable occurrence is not replayed");
                         continue;
                     }

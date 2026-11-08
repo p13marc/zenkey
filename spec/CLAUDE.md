@@ -489,7 +489,16 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   refusals). `state.md` §8 is 1,003 occurrences across a restart.
   `config.v1` 0.14, `config.v2` 0.5, `link.v1` 0.18 and `freshness.v1`
   0.6 name the occurrence chunk, no rule changed. 273 rules (owner 85,
-  consumer 31).
+  consumer 31). Core 0.104 and observer 0.33 answer zk2py round 107's
+  F-512 to F-518 (`freshness.v2` 0.8 F-515): §2.6, a consumer MUST NOT
+  deliver a put on an events key that carries no event, heard or
+  replayed, counted undecodable as `form` (`state.md` §8 step 4, the
+  reference's `s8_events_replay`, `inband::Undecodable::NoEvent`); a
+  run's seqs are its write order and a replay delivers by time first;
+  Appendix B's storage manager keeps the newest by Zenoh timestamp under
+  `History::Latest` and skips an older put; observer §7.5 reads an
+  event's revision as a mutation's, `tags.json` 36 cases with 3.4's
+  `face/` events and catalog `29bf7d47` inline. 274 rules (consumer 32).
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`

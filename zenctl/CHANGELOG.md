@@ -6,6 +6,15 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a put that carries no event (zk2py round 107)
+
+Core 0.104 §2.6 (F-514): a consumer delivers no put on an events key
+whose payload is no event.
+
+| Before | Now | Notes |
+|---|---|---|
+| `watch` on an event: a mutation, or a sample with no envelope, on its key delivered as an occurrence of an unknown time | an undecodable row, its refusal named ("a put on an events key whose payload is no event (form 4) …", token `form`), never a sample | a storage can still answer one, put by an owner of an earlier core or a broken writer; a delete is unchanged |
+
 ## Unreleased (`main`, zk2) — a link.v2 face lists the events it carries (#1098)
 
 `link.v2` 0.12 §2.7: a face's `events = [...]`, as its `frames`.

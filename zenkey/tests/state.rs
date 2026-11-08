@@ -80,10 +80,14 @@ async fn union_storage(
 /// hour, a second apart, the newest at T, and 500 two hours and more before
 /// T; one of an unknown time; then the owner restarts under a new run and
 /// publishes two dated T − 100.5 s and T − 0.5 s. Every key ends in its
-/// run and seq, and its payload is an event (§7.5's form 4). The backend
-/// ignores `_time`, so the storage holds all 1,003, and the consumer's
-/// replay keeps 503 by each event's time: the 502 with a time in time
-/// order across the run change, then the unknown one.
+/// run and seq, and its payload is an event (§7.5's form 4). Step 4 (core
+/// 0.104, F-514): another session puts a mutation under `zenoh/bytes`
+/// and a JSON document with no envelope on two keys of the event no
+/// occurrence took. The backend ignores `_time`, so the storage holds all
+/// 1,005, and the consumer's replay keeps 503 by each event's time: the
+/// 502 with a time in time order across the run change, then the unknown
+/// one. Neither of step 4's puts is delivered, by the subscription or the
+/// replay, and the subscription counts both undecodable, `form`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s8_events_replay() {
     let (_r1, ep) = router(None).await;
@@ -127,6 +131,28 @@ async fn s8_events_replay() {
         store.lock().unwrap().len() == 1001
     })
     .await;
+    // The consumer, subscribed from here on (step 4 asks it subscribed):
+    // step 3's deliveries show its subscriber is routed before step 4's
+    // puts.
+    let mut b = ServiceBuilder::new(
+        &reader,
+        config("lab/auditor").bind("journal", &["lab/journal"]),
+    );
+    b.require("journal", journal.clone(), false);
+    let auditor = b.start().await.unwrap();
+    let consumer = auditor
+        .consumer("journal", Arc::new(contract("journal.v1")))
+        .unwrap();
+    let heard: Arc<Mutex<Vec<String>>> = Arc::default();
+    let h = Arc::clone(&heard);
+    let sub = consumer
+        .subscribe("events/entries", move |d: zenkey::consumer::Delivery| {
+            h.lock()
+                .unwrap()
+                .push(String::from_utf8_lossy(&d.sample.payload().to_bytes()).into_owned());
+        })
+        .await
+        .unwrap();
     svc.close().await.unwrap();
     // Step 3: a new instance, under a new run.
     let owner = client(&ep).await;
@@ -147,9 +173,66 @@ async fn s8_events_replay() {
         store.lock().unwrap().len() == 1003
     })
     .await;
-    // Expected 1: each key ends in its run and seq, its payload an event.
+    eventually("the subscription hears step 3's", || async {
+        heard.lock().unwrap().iter().any(|r| r == "run2-b")
+    })
+    .await;
+    // Step 4: two puts that carry no event, on occurrence chunks of a
+    // 16-bit run no instance took (each instance's is a 32-bit draw).
+    let stray = client(&ep).await;
+    let stray_key = |seq: u32| {
+        let e = wire::Event {
+            tag: wire::Tag::NONE,
+            stamp: InBand {
+                run: Run::U16(0x7777),
+                seq: wire::Seq::new(seq).unwrap(),
+            },
+            time: zenkey::model::collection::Time::Unknown,
+            record: b"",
+        };
+        format!("zk2/lab/journal/journal.v1/events/entries/{}", e.chunk())
+    };
+    let (mutation_key, json_key) = (stray_key(1), stray_key(2));
+    let mutation = Envelope::mutation(
+        wire::Tag::NONE,
+        InBand {
+            run: Run::U16(0x7777),
+            seq: wire::Seq::new(1).unwrap(),
+        },
+        b"{}",
+    )
+    .write();
+    stray
+        .put(&mutation_key, mutation)
+        .encoding(Encoding::ZENOH_BYTES)
+        .await
+        .unwrap();
+    stray
+        .put(&json_key, b"{}".to_vec())
+        .encoding(Encoding::APPLICATION_JSON)
+        .await
+        .unwrap();
+    eventually("the storage holds 1,005", || async {
+        store.lock().unwrap().len() == 1005
+    })
+    .await;
+    // Expected 5, the subscription's half: neither delivered, both counted
+    // undecodable.
+    eventually("both counted undecodable", || async {
+        sub.undecodable() == 2
+    })
+    .await;
+    assert!(
+        heard.lock().unwrap().iter().all(|r| r != "{}"),
+        "no put that carries no event is delivered"
+    );
+    // Expected 1: each key ends in its run and seq, its payload an event;
+    // step 4's two carry none.
     let mut runs = std::collections::HashSet::new();
     for (key, (bytes, _)) in store.lock().unwrap().iter() {
+        if *key == mutation_key || *key == json_key {
+            continue;
+        }
         let chunk = key.rsplit('/').next().unwrap();
         assert!(matches!(chunk.len(), 8 | 12), "{key}");
         let e = wire::read_event(key, bytes)
@@ -160,15 +243,6 @@ async fn s8_events_replay() {
     }
     assert_eq!(runs.len(), 2, "one run per instance");
 
-    let mut b = ServiceBuilder::new(
-        &reader,
-        config("lab/auditor").bind("journal", &["lab/journal"]),
-    );
-    b.require("journal", journal, false);
-    let auditor = b.start().await.unwrap();
-    let consumer = auditor
-        .consumer("journal", Arc::new(contract("journal.v1")))
-        .unwrap();
     let got = consumer
         .replay("events/entries", Duration::from_secs(3600), T)
         .await
@@ -178,8 +252,12 @@ async fn s8_events_replay() {
         .iter()
         .map(|d| String::from_utf8(d.sample.payload().to_bytes().into_owned()).unwrap())
         .collect();
-    assert_eq!(records.len(), 503, "the recent ones, step 2's and step 3's");
-    assert!(records.iter().all(|r| !r.starts_with("old")));
+    assert_eq!(
+        records.len(),
+        503,
+        "the recent ones, step 2's and step 3's; neither of step 4's (Expected 5)"
+    );
+    assert!(records.iter().all(|r| !r.starts_with("old") && r != "{}"));
     // Expected 3: time order across the run change.
     let times: Vec<_> = got[..502]
         .iter()

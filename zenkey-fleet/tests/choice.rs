@@ -7,11 +7,13 @@
 //!
 //! A catalog is named by its id, mapped to a document or a file, and its
 //! id is checked. `e3a529fe`, zenoh-modem's catalog of nine entries, is an
-//! inline document since the fixture's answer to zk2py round 106:
-//! `examples/zk2/zenoh-modem/catalog.json` succeeds it, `0ff6bf6d` since
-//! #1080 and `29bf7d47`, modem.v3 3.4 at index 10, since #991. A file whose id is not the one named is read through its
-//! lineage (core §8.6): the predecessor the lineage names, its entries the
-//! first it counts, is rebuilt and its id checked.
+//! inline document since the fixture's answer to zk2py round 106, and
+//! `29bf7d47` (modem.v3 3.4 at index 10, #991), `examples/zk2/zenoh-modem/
+//! catalog.json` copied whole with its lineage, since round 107's: cases 31
+//! to 35 read 3.4's `face/` events through it. A file whose id is not the
+//! one named is read through its lineage (core §8.6): the predecessor the
+//! lineage names, its entries the first it counts, is rebuilt and its id
+//! checked.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -81,7 +83,7 @@ fn every_case_of_tags_json() {
     let (set, problems) = ContractSet::load_history(history_root);
     assert!(problems.is_empty(), "{problems:?}");
     let cases = doc["cases"].as_array().expect("cases");
-    assert_eq!(cases.len(), 31, "the fixture's cases");
+    assert_eq!(cases.len(), 36, "the fixture's cases");
     let mut failures = Vec::new();
     for (i, case) in cases.iter().enumerate() {
         let note = case["note"].as_str().unwrap_or_default();
