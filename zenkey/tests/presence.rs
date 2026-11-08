@@ -1746,6 +1746,15 @@ async fn s10_a_round_trip_at_a_population_and_the_interests_timeout() {
     // at the cut with the final reply alone.
     let link9 = common::link_to(&ep1).await;
     let watch = common::retrying_client(link9.endpoint()).await;
+    // A token past the router, so a GET that reached it tells one (#1028):
+    // zenoh 1.10.1 lists a reopened transport's link before the router's
+    // face exists, and a GET asked between the two ends at once with no
+    // reply ("Client region is empty"), so a link alone is no reconnection.
+    let marked = "zk2/s10/step9/@zk/instance/0000000000000009";
+    let marker = client(&ep1).await;
+    let _mark = marker.liveliness().declare_token(marked).await.unwrap();
+    let routed =
+        async || !presence::cut_off(&watch).await && raw_barrier(&watch, marked, T).await.1 == 1;
     let (_sub, _) = listen(&watch, false).await;
     assert!(presence::settle(&watch, INSTANCES, T).await.unwrap());
     link9.cut();
@@ -1764,10 +1773,7 @@ async fn s10_a_round_trip_at_a_population_and_the_interests_timeout() {
         "and is not asked"
     );
     link9.heal();
-    eventually("the watch session reconnected", || async {
-        !presence::cut_off(&watch).await
-    })
-    .await;
+    eventually("the watch session reconnected", routed).await;
     let mut ended = Vec::new();
     for reference in [false, true] {
         link9.stall();
@@ -1796,10 +1802,7 @@ async fn s10_a_round_trip_at_a_population_and_the_interests_timeout() {
         );
         ended.push((reference, stood, took));
         link9.heal();
-        eventually("the watch session reconnected", || async {
-            !presence::cut_off(&watch).await
-        })
-        .await;
+        eventually("the watch session reconnected", routed).await;
     }
     eprintln!("§10 step 9: (the reference, no error reply / stands, took) {ended:?}");
     assert!(

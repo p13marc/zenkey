@@ -55,7 +55,9 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   trip after a reopen waits for the population, 4 s beside 10,000 tokens
   in a release build, and zenoh answers a GET its caller drops in full,
   `docs/zk2/upstream/liveliness-get-dropped-is-answered-in-full.md`; the
-  same for zenwatch's `TokenFeed`; `tests/watch_reopen.rs`); a read cut
+  same for zenwatch's `TokenFeed`; `tests/watch_reopen.rs`, whose s10
+  counts the recovery once svc7 also reads up again, its status folding
+  with the read and sometimes on the next `next()`, #1028); a read cut
   off while it runs is a seed possibly incomplete, said
   beside `complete` as `cut_off_during` in every presence report but the
   doctor's, which zenwatch.v1 pins, and the feed counts the reads it makes,

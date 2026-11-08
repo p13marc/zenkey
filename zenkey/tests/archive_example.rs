@@ -268,3 +268,113 @@ async fn the_archive_example_drops_what_the_owners_complete_snapshot_omits() {
         .unwrap()
         .unwrap();
 }
+
+/// #1101 (zk2py round 107, `state.md` §5 through the example): the owner
+/// behind a router link the test cuts and heals, the archive example on
+/// its **default** watch session, in `namespace` or none. The owner deletes
+/// `b` while the link is down; when its instance token returns over the
+/// healed link, the archive aligns by itself, with no `align` asked, and
+/// records `b`'s tombstone from the owner's snapshot. Before the fix the
+/// example's only handle on its watch session was dropped with
+/// `ArchiveConfig`, closing it, and the archive heard nothing.
+async fn aligns_after_a_link_cut(namespace: Option<&str>) {
+    let (_r1, ep1) = router(None).await;
+    let link = common::link_to(&ep1).await;
+    let (_r2, ep2) = common::router_via(&link).await;
+    let owner_s = common::client_ns(&ep1, namespace).await;
+    let (_mgr, w) = fleet_mgr(&owner_s, &["a", "b"]).await;
+    w["a"].put("pa").await.unwrap();
+    w["b"].put("pb").await.unwrap();
+    let contract =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/contracts/mission_plan.v1.toml");
+    let mut args: Vec<String> = [
+        "--connect",
+        &ep2,
+        "--system",
+        "vehicle-01",
+        "--service",
+        "archive",
+        "--record",
+        "ground/fleet-mgr",
+        &format!("{PLANS}/*"),
+        &contract.display().to_string(),
+    ]
+    .iter()
+    .map(|s| (*s).to_owned())
+    .collect();
+    if let Some(ns) = namespace {
+        args.extend(["--namespace".to_owned(), ns.to_owned()]);
+    }
+    let opts = archive_ex::Options::parse(&args).unwrap();
+    assert!(opts.watch, "the default watch session");
+    let (out, lines) = flume::unbounded::<String>();
+    let say: archive_ex::Say = Arc::new(move |l: String| {
+        let _ = out.send(l);
+    });
+    let (commands, input) = flume::unbounded::<String>();
+    let run = tokio::spawn(archive_ex::run_with(
+        opts,
+        say,
+        input,
+        std::future::pending::<()>(),
+    ));
+    let b = format!("{PLANS}/b");
+    until(&lines, "b held, confirmed", |l| {
+        l == format!("held {b} confirmed=true")
+    })
+    .await;
+    // The vehicle side's own view of the owner: gone once the cut is felt.
+    let looker = common::client_ns(&ep2, namespace).await;
+    let owner_seen = |present: bool| {
+        let looker = looker.clone();
+        async move {
+            common::eventually(
+                if present {
+                    "the owner seen again"
+                } else {
+                    "the owner gone"
+                },
+                || async {
+                    zenkey::presence::liveliness_keys(
+                        &looker,
+                        "zk2/ground/fleet-mgr/@zk/instance/*",
+                        common::T,
+                    )
+                    .await
+                    .is_ok_and(|k| k.is_empty() != present)
+                },
+            )
+            .await;
+        }
+    };
+    link.cut();
+    owner_seen(false).await;
+    w["b"].delete().await.unwrap();
+    link.heal();
+    owner_seen(true).await;
+    // No `align` is asked: the token's return on the watch session is the
+    // signal (core §4.4).
+    // The owner's snapshot holds `b`'s tombstone within its window: the
+    // alignment records it (core §4.4, S3), its held line saying so.
+    let tombstone = format!("held {b} ");
+    until(&lines, "b's tombstone recorded after the heal", |l| {
+        l.starts_with(&tombstone) && l.ends_with(" tombstone")
+    })
+    .await;
+    commands.send("quit".to_owned()).unwrap();
+    tokio::time::timeout(SETTLE, run)
+        .await
+        .expect("quit stops it")
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_archive_example_aligns_after_a_link_cut() {
+    aligns_after_a_link_cut(None).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_archive_example_aligns_after_a_link_cut_in_a_namespace() {
+    aligns_after_a_link_cut(Some("site")).await;
+}

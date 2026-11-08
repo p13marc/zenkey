@@ -1404,6 +1404,34 @@ async fn a_config_v2_owners_device_reset_is_a_new_instance() {
     // O: meterframe.v1's frames, and config.v2 over rfcfg.v1 on the owner
     // example's simulated device.
     let session = client(&ep).await;
+    // O's order at its source (§2.3), on O's own session: zenoh hands a
+    // session's own puts and token declarations to its local subscribers
+    // as each is made, so their order there is O's. R's arrivals through
+    // the router can carry a token's declaration ahead of a put made
+    // before it, the two on different priorities (#1028).
+    let at_source: Log<String> = Arc::default();
+    let (l1, l2) = (Arc::clone(&at_source), Arc::clone(&at_source));
+    let _local_tokens = session
+        .liveliness()
+        .declare_subscriber("zk2/lab/meterframe/@zk/instance/*")
+        .callback(move |x: Sample| {
+            if x.kind() == zenoh::sample::SampleKind::Put {
+                l1.lock().unwrap().push(x.key_expr().as_str().to_owned());
+            }
+        })
+        .await
+        .unwrap();
+    let local_record = i.clone();
+    let _local_records = session
+        .declare_subscriber("zk2/lab/meterframe/rfcfg.v1/state/config")
+        .callback(move |x: Sample| {
+            let bytes = x.payload().to_bytes();
+            let e = Envelope::parse(&bytes).unwrap();
+            let st = local_record.read_record(e.tag.get(), e.record, 0).unwrap();
+            l2.lock().unwrap().push(format!("record {}", st.instance));
+        })
+        .await
+        .unwrap();
     let mut b = ServiceBuilder::new(&session, config(SVC));
     b.implement(Implementation::new((*rfcfg).clone())).unwrap();
     let startup = sim::rfcfg_startup(10, Duration::from_secs(1), false);
@@ -1523,14 +1551,18 @@ async fn a_config_v2_owners_device_reset_is_a_new_instance() {
     })
     .await;
     eventually("R sees I2's token", || async { token_at(&new).is_some() }).await;
-    let first = records()
-        .into_iter()
-        .find(|(_, s)| s.instance == i2)
-        .unwrap()
-        .0;
+    let order = at_source.lock().unwrap().clone();
+    let record_at = order
+        .iter()
+        .position(|e| *e == format!("record {i2}"))
+        .unwrap_or_else(|| panic!("I2's record at its source: {order:?}"));
+    let token_at_source = order
+        .iter()
+        .position(|e| e.ends_with(&format!("/{new}")))
+        .unwrap_or_else(|| panic!("I2's token at its source: {order:?}"));
     assert!(
-        first < token_at(&new).unwrap(),
-        "I2's record before its token (§2.3)"
+        record_at < token_at_source,
+        "I2's record before its token (§2.3): {order:?}"
     );
 
     // A late confirm of I1's token names nothing (§2.6); I2 mints its own,

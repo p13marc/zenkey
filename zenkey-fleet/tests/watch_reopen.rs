@@ -234,7 +234,13 @@ async fn s10_step10_a_reader_after_a_reopen_beside_the_crowd() {
                 _ = feed.next() => {}
                 _ = wake.tick() => {}
             }
-            if *feed.last_seed() == SeedOutcome::Complete && monitor.settled() == Some(true) {
+            // Recovered once the read is complete, the round trip stands
+            // and svc7 reads up again: the status lands with the fold of
+            // the read, which can be the next `next()` (#1028).
+            if *feed.last_seed() == SeedOutcome::Complete
+                && monitor.settled() == Some(true)
+                && feed.presence().status(&svc7) == zenkey_fleet::AddressStatus::Up
+            {
                 return healed.elapsed();
             }
         }

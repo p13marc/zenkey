@@ -140,9 +140,16 @@ async fn s8_events_replay() {
     );
     b.require("journal", journal.clone(), false);
     let auditor = b.start().await.unwrap();
+    // Each refusal the subscription makes, by key and why (step 4).
+    let refused: Arc<Mutex<Vec<(String, zenkey::inband::Undecodable)>>> = Arc::default();
+    let r = Arc::clone(&refused);
     let consumer = auditor
         .consumer("journal", Arc::new(contract("journal.v1")))
-        .unwrap();
+        .unwrap()
+        .with_refused(move |x: zenkey::consumer::Refused| {
+            let key = x.read.sample().key_expr().as_str().to_owned();
+            r.lock().unwrap().push((key, x.why));
+        });
     let heard: Arc<Mutex<Vec<String>>> = Arc::default();
     let h = Arc::clone(&heard);
     let sub = consumer
@@ -193,6 +200,28 @@ async fn s8_events_replay() {
         format!("zk2/lab/journal/journal.v1/events/entries/{}", e.chunk())
     };
     let (mutation_key, json_key) = (stray_key(1), stray_key(2));
+    // Each a key the consumer reads (review-bot on #1104): an events key
+    // whose last chunk is a 16-bit run's occurrence chunk, run 0x7777 and
+    // its seq, so a refusal below is the payload's, never the key's.
+    for (key, seq) in [(&mutation_key, 1), (&json_key, 2)] {
+        assert!(
+            matches!(
+                zenkey::model::grammar::parse(key),
+                Ok(zenkey::model::grammar::ZkKey::Data { .. })
+            ),
+            "{key}: a zk2 data key"
+        );
+        let chunk = key.rsplit('/').next().unwrap();
+        assert_eq!(chunk.len(), 8, "{key}: a 16-bit run's chunk");
+        assert_eq!(
+            zenkey::model::chunk::occurrence(chunk),
+            Some(InBand {
+                run: Run::U16(0x7777),
+                seq: wire::Seq::new(seq).unwrap(),
+            }),
+            "{key}"
+        );
+    }
     let mutation = Envelope::mutation(
         wire::Tag::NONE,
         InBand {
@@ -222,6 +251,21 @@ async fn s8_events_replay() {
         sub.undecodable() == 2
     })
     .await;
+    // Each refused for carrying no event, token `form` (core §2.6).
+    let mut why = refused.lock().unwrap().clone();
+    why.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut expected = vec![mutation_key.clone(), json_key.clone()];
+    expected.sort();
+    assert_eq!(
+        why.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>(),
+        expected,
+        "step 4's two keys, each refused once"
+    );
+    assert!(
+        why.iter()
+            .all(|(_, w)| *w == zenkey::inband::Undecodable::NoEvent && w.token() == "form"),
+        "{why:?}"
+    );
     assert!(
         heard.lock().unwrap().iter().all(|r| r != "{}"),
         "no put that carries no event is delivered"
@@ -483,12 +527,23 @@ async fn executor(s: &zenoh::Session, own_slice: bool) -> (Service, Consumer) {
 
 /// The owner's answer with its in-band stamps (S2): what orders each key.
 async fn answer(c: &Consumer, values: Option<&Bindings>) -> StateAnswer {
-    let a = c
-        .get_answer("state/plans/{vehicle}", values, T)
-        .await
-        .unwrap();
-    assert!(!a.current.is_empty(), "the owner did not answer");
-    a
+    // Asked again until the owner answers (#1028): under load a GET can
+    // end at its timeout before the owner's reply arrives, which is no
+    // answer, and nothing the owner holds moves meanwhile.
+    let deadline = tokio::time::Instant::now() + common::SETTLE;
+    loop {
+        let a = c
+            .get_answer("state/plans/{vehicle}", values, T)
+            .await
+            .unwrap();
+        if !a.current.is_empty() {
+            return a;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the owner did not answer"
+        );
+    }
 }
 
 /// Every sample a raw subscriber on `selector` hears, as it arrived: its
@@ -518,6 +573,23 @@ async fn raw_get(s: &zenoh::Session, selector: &str) -> Vec<Sample> {
             _ => vec![smp],
         })
         .collect()
+}
+
+/// [`raw_get`] asked again until an owner answers (#1028): a GET under
+/// load can end at its timeout before the owner's reply arrives, which is
+/// no answer, and nothing the owner holds moves meanwhile.
+async fn raw_get_answered(s: &zenoh::Session, selector: &str) -> Vec<Sample> {
+    let deadline = tokio::time::Instant::now() + common::SETTLE;
+    loop {
+        let got = raw_get(s, selector).await;
+        if !got.is_empty() {
+            return got;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no owner answered {selector}"
+        );
+    }
 }
 
 /// A raw GET of `selector`, `All` + `None`: each reply as it arrived, a
@@ -625,15 +697,20 @@ async fn in_band_stamps(stamping: bool) {
         r.zid().to_string(),
         "the owner's session is not the router"
     );
+    // Every writer matched before it puts (#1028): a put its session has
+    // no matching subscription for yet is dropped at its source.
+    let control_pub = third.declare_publisher("control/x").await.unwrap();
     eventually("subscribed", || async {
         w.writer().matching().await.unwrap()
+            && status_w.writer().matching().await.unwrap()
+            && control_pub.matching_status().await.unwrap().matching()
     })
     .await;
 
     // 1. v1, v2, the GET after v2, then the delete.
     let v1 = w.put("v1").await.unwrap();
     let v2 = w.put("v2").await.unwrap();
-    let replies = raw_get(&consumer, ORIGIN).await;
+    let replies = raw_get_answered(&consumer, ORIGIN).await;
     assert_eq!(replies.len(), 1, "{through}: one reply");
     assert_eq!(
         &*replies[0].payload().to_bytes(),
@@ -647,7 +724,7 @@ async fn in_band_stamps(stamping: bool) {
     );
     let del = w.delete().await.unwrap();
     // 2. The control: an unstamped put of a third client's.
-    third.put("control/x", "c").await.unwrap();
+    control_pub.put("c").await.unwrap();
     // 3. v3 and v4 back to back.
     let v3 = w.put("v3").await.unwrap();
     let v4 = w.put("v4").await.unwrap();
@@ -727,7 +804,7 @@ async fn in_band_stamps(stamping: bool) {
     for s in &puts {
         assert_eq!(sealed(s).0.run.hex(), run, "{through}: status's run");
     }
-    let reply = raw_get(&consumer, "zk2/ground/fleet-mgr/status.v1/state/status").await;
+    let reply = raw_get_answered(&consumer, "zk2/ground/fleet-mgr/status.v1/state/status").await;
     assert_eq!(
         reply[0].timestamp().map(|t| t.get_id().to_string()),
         Some(owner.zid().to_string()),
@@ -1371,6 +1448,13 @@ async fn s7_late_joiners_across_runs() {
             ..Up::default()
         },
         &["vehicle-01"],
+    )
+    .await;
+    // The new instance's writer matched before it puts (#1028): a put its
+    // session has no matching subscription for yet is dropped at source.
+    eventually(
+        "the new instance's writer matches the subscription",
+        || async { w["vehicle-01"].writer().matching().await.unwrap() },
     )
     .await;
     let rev11 = w["vehicle-01"].put("rev11").await.unwrap();
