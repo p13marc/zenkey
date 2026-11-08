@@ -1,5 +1,5 @@
-"""``link.v2``, text 0.1 to 0.4 (``spec/profiles/link/v2.md``, experimental,
-written against core 0.77 to 0.91; #988 L1 to L4): a constrained face, and the transport it
+"""``link.v2``, text 0.1 to 0.12 (``spec/profiles/link/v2.md``, draft,
+written against core 0.77 to 0.100; #988 L1 to L4, #1098): a constrained face, and the transport it
 runs. Read cold by zk2py in round 96 (#609).
 
 It restates ``link.v1`` by reference (§0), and :mod:`zk2py.link` keeps those
@@ -31,6 +31,14 @@ rules. This module holds what the text adds:
 
 **Text 0.4** (#988 L4) adds §2.20 and §2.21, which point at core §8.1 and
 §8.5: :mod:`zk2py.far_side` reads them.
+
+**Text 0.12** (#1098; round 108), a face's ``events`` (§2.1, §2.7): read as
+one value (:func:`event_name`), only with ``expose = "link"``; on a face
+with ``events``, :meth:`FaceReading.denies` lets an event resource of a
+listed interface cross only when the face lists it and its contract exposes
+it ``link``, the rest denied by name by ``link.v1``'s carve-out; an entry
+naming no event resource is ``event_unknown``. A link.v1 policy's
+``events`` is :mod:`zk2py.link`'s ``unknown_field``.
 
 The fixtures are ``conformance/v2/`` (``lints.json``, ``plan.json``,
 ``exposure.json``, ``transport.json``).
@@ -79,7 +87,7 @@ DEFAULTS = {
                      "interests_timeout_ms": 10_000},
 }
 FACE_KEYS = ("far", "attach", "region", "select", "class", "expose", "interval_s", "max_outage_s", "link_bps",
-             "loss_ppm", "arq", "reply_timeout_ms", "frames", "horizon_s", "devices")
+             "loss_ppm", "arq", "reply_timeout_ms", "frames", "events", "horizon_s", "devices")
 #: §2.1 (0.3): an entry of ``frames``'s own keys.
 FRAME_KEYS = ("every_s", "keyframe_s")
 MOVED = ("lease_ms", "batch_bytes")
@@ -106,6 +114,10 @@ class FaceV2:
     #: §2.5 (0.7): a device face's devices, ``<system>/<service>``; None on
     #: any other face.
     devices: list[str] | None = None
+    #: §2.7 (0.12, #1098): the event resource each entry names,
+    #: ``<iface>/events/<template>``; None for a face with no ``events``,
+    #: which keeps link.v1's rule. An empty ``events`` lists none.
+    events: list[str] | None = None
 
 
 @dataclass
@@ -354,6 +366,7 @@ def _face(name: str, body: dict[str, Any], protocols_of: list[str] | None, trans
     elif type(body["arq"]) is not bool:
         bad("arq")
     frames = _frames(body, expose, bad)
+    events = _events(body, expose, bad)
     horizon = body.get("horizon_s")
     if "horizon_s" in body and (not _int_in(horizon, 1, U32_MAX) or expose == "none"):
         # "frames and horizon_s on a face whose expose is "none" are
@@ -386,7 +399,43 @@ def _face(name: str, body: dict[str, Any], protocols_of: list[str] | None, trans
         return None, protocols
     f = link.Face(name, far, attach, region, protocols or [], expose, interval if expose == "link" else None,
                   body["max_outage_s"], t["batch_bytes"], bps, t["lease_ms"])
-    return FaceV2(f, loss, body["arq"], rt, frames, horizon, list(devices) if attach == "device" else None), protocols
+    return FaceV2(f, loss, body["arq"], rt, frames, horizon, list(devices) if attach == "device" else None,
+                  events), protocols
+
+
+def _events(body: dict[str, Any], expose: Any, bad: Any) -> list[str] | None:
+    """§2.1 (0.12): a face's ``events``. "events is one value. An entry that
+    is not a string, or not an interface id, / and a template (core §2.2),
+    and an entry repeated are each bad_value at events, reported once. An
+    empty events lists no event." On a face whose ``expose`` is ``"none"`` it
+    is ``bad_value``, as its ``interval_s`` is. Each entry is read as the
+    event resource it names (§2.7)."""
+    if "events" not in body:
+        return None
+    entries = body["events"]
+    if type(entries) is not list or expose == "none":
+        bad("events")
+        return None
+    names = [event_name(e) for e in entries]
+    if any(n is None for n in names) or len(set(names)) != len(names):
+        bad("events")
+        return None
+    return [n for n in names if n is not None]
+
+
+def event_name(entry: Any) -> str | None:
+    """§2.7 (0.12): "An entry <iface>/<template> names the event resource
+    <iface>/events/<template>, its template as the contract writes it,
+    parameters included." None for an entry of another form (§2.1)."""
+    from . import templates
+    from .lexical import is_interface_id
+
+    if type(entry) is not str or "/" not in entry:
+        return None
+    iface, _, template = entry.partition("/")
+    if not is_interface_id(iface) or not templates.is_template(template):
+        return None
+    return f"{iface}/events/{template}"
 
 
 def _frames(body: dict[str, Any], expose: Any, bad: Any) -> dict[str, dict[str, int]] | None:
@@ -487,6 +536,13 @@ class FaceReading:
         downsampled, so its deadline denies nothing."""
         if r.frame is not None:
             return not self.listed(r)
+        if r.token == "events" and self.f.events is not None:
+            # §2.7 (0.12): "On a face with events, a generator MUST let an
+            # event resource of a listed interface cross only when the face
+            # lists it and its contract exposes it link. The rest are denied
+            # by name, as an unlisted frame is"; "An empty events, events =
+            # [], lists none, and no event crosses the face."
+            return r.name not in self.f.events
         return r.token in ("stream", "@stream") and r.timed
 
     def cadence_ms(self, r: link.Resource) -> int | None:
@@ -689,10 +745,20 @@ def _lets_cross(rd: FaceReading, r: link.Resource) -> bool:
 
 def _face_errors(policy: PolicyV2, readings: list[FaceReading], listed: list[str],
                  faces: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """§2.7's refusals per face, ``frame_unknown`` and
-    ``keyframe_unreachable``, and its ``frame_unlisted`` warning, added to
-    the face's plan."""
+    """§2.7's refusals per face, ``frame_unknown``, ``keyframe_unreachable``
+    and (0.12) ``event_unknown``, and its ``frame_unlisted`` warning, added
+    to the face's plan. An exposed event no face lists draws none: "Its
+    owner still publishes it for the readers on its own side"."""
     errors = []
+    for rd in readings:
+        if rd.f.events is None:
+            continue
+        # §2.7 (0.12): "A generator refuses an entry that names no event
+        # resource of a listed interface (event_unknown)." One the face lists
+        # and its contract does not expose is denied, not refused ("Listed and
+        # not exposed").
+        events_of = {r.name for i in listed for r in rd.res.get(i, []) if r.token == "events"}
+        errors += [link.finding("event_unknown", rd.name, name) for name in rd.f.events if name not in events_of]
     for rd, fp in zip(readings, faces):
         if rd.f.frames is None:
             continue
