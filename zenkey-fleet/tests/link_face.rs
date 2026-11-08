@@ -2889,13 +2889,16 @@ async fn v2_s3_the_near_router_stamps_nothing() {
     let (stamp, _, findings) = stamped_across(&block, "v2-s3-n").await;
     assert_eq!(stamp, None, "a put across the face carries no timestamp");
     assert!(findings.is_empty(), "{findings:?}");
-    // 4. Control: the block without its timestamping.
-    let unstamped: String = block
-        .lines()
-        .filter(|l| !l.trim_start().starts_with("timestamping:"))
-        .map(|l| format!("{l}\n"))
+    // 4. Control: the block without its timestamping: the key removed from
+    // its parsed tree, and every other key written back (the block's
+    // comments, which state nothing, with none).
+    let mut rest = tree;
+    let keys = rest.as_object_mut().expect("the block is an object");
+    assert!(keys.remove("timestamping").is_some());
+    let unstamped: String = keys
+        .iter()
+        .map(|(k, v)| format!("{}: {v},\n", serde_json::Value::from(k.as_str())))
         .collect();
-    assert_ne!(unstamped, block);
     let (stamp, zid, findings) = stamped_across(&unstamped, "v2-s3-control").await;
     let stamp = stamp.expect("a default router stamps what it routes");
     assert_eq!(stamp.get_id().to_string(), zid, "N's own timestamp");

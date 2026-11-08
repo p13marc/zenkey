@@ -3140,7 +3140,17 @@ fn transport_json5(
         "routing: {{ interests: {{ timeout: {} }} }},  // ms",
         v(K::InterestsTimeout)
     );
-    let [(_, router), (_, peer)] = link::TIMESTAMPING_OFF;
+    // Each mode's value by its key, whatever the constant's order.
+    let off = |path: &str| {
+        link::TIMESTAMPING_OFF
+            .iter()
+            .find_map(|&(p, v)| (p == path).then_some(v))
+            .expect("TIMESTAMPING_OFF holds a router's and a peer's")
+    };
+    let (router, peer) = (
+        off("timestamping/enabled/router"),
+        off("timestamping/enabled/peer"),
+    );
     let _ = writeln!(
         out,
         "// zenoh stamps every unstamped put a router routes, and the stamp crosses the face:\n\
