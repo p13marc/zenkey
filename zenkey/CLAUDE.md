@@ -134,7 +134,10 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   `state.rs`'s `s7_late_joiners_across_runs`); `Consumer::get` returns
   every reply at the GET's end, so inside a seed a consumer holds the
   value of the run that answered until the key's next value (core 0.69,
-  `s7_late_joiners_across_runs_inside_the_seed`). `archive` is a
+  `s7_late_joiners_across_runs_inside_the_seed`). `examples/archive.rs`
+  (#977) is its black box, driven from its `--help` (`--record`, `ready`,
+  `aligned`, `held`/`gone`, stdin `align`/`last-known`/`quit`;
+  `tests/archive_example.rs`). `archive` is a
   minimal `archive.v1` (§4.4): records, refuses outdated puts, aligns on
   positive evidence only, and `last_known` reads it as last-known, never
   current (`LastKnown::inband` and `mark()`, its in-band stamp, A3; the
