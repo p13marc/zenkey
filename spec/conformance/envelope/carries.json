@@ -1,5 +1,5 @@
 {
-  "description": "core §7.5 and observer §7.3, which sample carries a zk2c envelope. Written by hand from the texts, checked, never blessed. Each case is a key, as a session hears it (base-relative, or with a namespace in front when the session is in none), and the sample's Encoding as zenoh writes it → `expect`: whether the sample carries an envelope. It does when the key is a zk2 data key whose kind is a stream, state or an event (`stream`, `@stream`, `state`, `@state`, `events`), by the grammar alone, and the Encoding is exactly `zenoh/bytes`. A key with a namespace in front is read from its first `zk2` chunk from which the grammar parses a zk2 key. An operation (`@op`), every control key (`@zk`), a foreign key and a key the grammar refuses carry none, and neither does a sample under any other Encoding, a schema suffix on `zenoh/bytes` included. `reads`: a key, as a session hears it, and a put's payload in hex under `zenoh/bytes` → how the put reads (core §7.5): `{\"reads\": \"plain\"}` when the sample carries no envelope, `{\"reads\": form}` for an envelope accepted, its form's name, or `{\"refused\": token}`, the first in §7.5's order. A frame on a key whose kind token is not `stream` (`state`, `@state`, `events`, `@stream`) is `key_kind`, after `form` and `sample_kind` and before `short`, and so is a snapshot on a key whose kind token is neither `state` nor `@state` (`stream`, `@stream`, `events`).",
+  "description": "core §7.5 and observer §7.3, which sample carries a zk2c envelope. Written by hand from the texts, checked, never blessed. Each case is a key, as a session hears it (base-relative, or with a namespace in front when the session is in none), and the sample's Encoding as zenoh writes it → `expect`: whether the sample carries an envelope. It does when the key is a zk2 data key whose kind is a stream, state or an event (`stream`, `@stream`, `state`, `@state`, `events`), by the grammar alone, and the Encoding is exactly `zenoh/bytes`. A key with a namespace in front is read from its first `zk2` chunk from which the grammar parses a zk2 key. An operation (`@op`), every control key (`@zk`), a foreign key and a key the grammar refuses carry none, and neither does a sample under any other Encoding, a schema suffix on `zenoh/bytes` included. `reads`: a key, as a session hears it, and a put's payload in hex under `zenoh/bytes` → how the put reads (core §7.5): `{\"reads\": \"plain\"}` when the sample carries no envelope, `{\"reads\": form}` for an envelope accepted, its form's name, or `{\"refused\": token}`, the first in §7.5's order. A frame on a key whose kind token is not `stream` (`state`, `@state`, `events`, `@stream`) is `key_kind`, after `form` and `sample_kind` and before `short`, and so is a snapshot on a key whose kind token is neither `state` nor `@state` (`stream`, `@stream`, `events`), and an event (form 4) on a key whose kind token is not `events`. An event on an `events` key whose last chunk is not an occurrence chunk of CH's width, a ULID's among them, is `key_stamp`, after `key_kind` and before `short`: its stamp is its key's (core §1.2, §7.5, observer §7.3).",
   "cases": [
     {
       "note": "a stream under zenoh/bytes",
@@ -138,6 +138,18 @@
       "key": "prod/zk2/vehicle-01/nav/nav.v2/state/mode",
       "encoding": "application/json",
       "expect": false
+    },
+    {
+      "note": "an event key ending in an occurrence chunk, under zenoh/bytes",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g0009",
+      "encoding": "zenoh/bytes",
+      "expect": true
+    },
+    {
+      "note": "an event key ending in an uppercase occurrence chunk: no zk2 key",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002G0009",
+      "encoding": "zenoh/bytes",
+      "expect": false
     }
   ],
   "reads": [
@@ -222,11 +234,11 @@
       }
     },
     {
-      "note": "a reserved form, 4, on a state key: form before key_kind",
+      "note": "an event on a state key: key_kind",
       "key": "zk2/rf0/modem/modem.v3/state/link",
       "hex": "800001000007",
       "expect": {
-        "refused": "form"
+        "refused": "key_kind"
       }
     },
     {
@@ -363,6 +375,70 @@
       "hex": "e0000100000900000e1000fa00000000",
       "expect": {
         "reads": "plain"
+      }
+    },
+    {
+      "note": "an event on an occurrence chunk's key",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g0009",
+      "hex": "8000000e1000fa7b7d",
+      "expect": {
+        "reads": "event"
+      }
+    },
+    {
+      "note": "an event under a 32-bit run's chunk",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/1qndqvqg0009",
+      "hex": "9000000e1000fa7b7d",
+      "expect": {
+        "reads": "event"
+      }
+    },
+    {
+      "note": "an event on an event key with a namespace in front",
+      "key": "prod/zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g0009",
+      "hex": "8000000e1000fa7b7d",
+      "expect": {
+        "reads": "event"
+      }
+    },
+    {
+      "note": "an event on a stream key",
+      "key": "zk2/rf0/modem/modem.v3/stream/frames/link",
+      "hex": "8000000e1000fa7b7d",
+      "expect": {
+        "refused": "key_kind"
+      }
+    },
+    {
+      "note": "an event on an explicit stream key",
+      "key": "zk2/vehicle-01/camera/camera.v1/@stream/frames/front",
+      "hex": "8000000e1000fa7b7d",
+      "expect": {
+        "refused": "key_kind"
+      }
+    },
+    {
+      "note": "an event's CH alone on a state key: key_kind before short",
+      "key": "zk2/rf0/modem/modem.v3/state/link",
+      "hex": "80",
+      "expect": {
+        "refused": "key_kind"
+      }
+    },
+    {
+      "note": "an event on a key that ends in a ULID: key_stamp",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/01j9zk6q6x5m2f4a8c0d3e7b9h",
+      "hex": "8000000e1000fa7b7d",
+      "expect": {
+        "refused": "key_stamp"
+      }
+    },
+    {
+      "note": "a mutation on an occurrence chunk's key, as an owner writes until a later version",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g0009",
+      "hex": "0000050000097b7d",
+      "expect": {
+        "reads": "mutation"
       }
     }
   ]

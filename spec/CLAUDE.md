@@ -263,7 +263,7 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   expression declared on it for a prefix of its key, and on a constrained
   face only the far side's own subscriptions declare one, so a consumer
   there SHOULD subscribe by exact keys and a template's literal prefix
-  (its key with each parameter, and an event's ULID, a wildcard) and
+  (its key with each parameter, and an event's last chunk, a wildcard) and
   SHOULD NOT use a wider selector; Appendix B's "Keys across a face" holds
   zenoh 1.10.1's six facts with file and line (drafts
   `docs/zk2/upstream/router-prefix-keeps-cached-routes.md` and

@@ -1,5 +1,5 @@
 {
-  "description": "core §7.5, the zk2c envelope, a call's forms and a snapshot's envelope. Written by hand from the text, checked, never blessed. `headers`: one byte in hex → CH's three fields: `form` (bits 7–5, the code's name), `run_width` (bit 4: 0 is 16, 1 is 32) and `tag` (bits 3–0). Every byte reads as a header, a reserved form's included, and writes back to the same byte. `cases`: an envelope's or a form's bytes in hex, and `sample`, what carries them (`put`: a put's payload, or a GET reply's that represents a put or carries a snapshot; `delete`: a delete's attachment, or a `reply_del`'s; `query`, `reply` and `reply_err`: a call's query, reply and reply error, each one's payload) → `expect`, the parse, or `{\"refused\": token}`. A parse is `form`, `run_width`, `run` and `seq` (integers, each big-endian on the wire; a snapshot's `seq` is its asof), `tag`, and `record`: the bytes after the seq in hex (a mutation's or a value's record, a heartbeat's, a frame's or a snapshot's body), or after a request's CH, or `null` for a delete and an error. A request, a value on a query, has `run_width`, `run` and `seq` `null`. An error's parse adds `error`: `code` and `cause` (§5.2's names, `cause` `null` for none), `message` (a string, or `null` when its bit is 0) and `detail` (the bytes after the message in hex, or `null` when its bit is 0). A refusal is the first that applies, in §7.5's order: `short` (no CH), `form` (a reserved form, 4), `sample_kind` (a form its sample does not carry: a put carries a mutation, a heartbeat, a frame or a snapshot, a delete's attachment a delete, a query and a reply a value, a reply_err an error), `tag` (a delete whose tag is not 0), `request_run` (a request whose width bit is 1), `short` (fewer bytes than CH, the run and the seq need, and an error's byte after them), `trailing` (a byte after a delete's seq), then on an error's byte and what follows it: `cause` (a cause on a code other than `unavailable`, or none on it), `detail` (a detail on a code other than `app`), `extension` (bit 0 set), `short` (a message with no length byte, or fewer bytes than it states), `utf8` (a message that is not UTF-8), and `trailing` (a byte after the message, or after the error's byte without one, where no detail follows). The parse reads no contract and no key, so the tag of every form but a delete is reported, never checked against a type, a revision or a declaration, and a frame and a snapshot are parsed whatever their key: `key_kind`, which reads the key, is `carries.json`'s `reads`. An error's detail is never read, and neither is a snapshot's body, which `snapshot/bodies.json` reads. Every accepted case writes back to its bytes.",
+  "description": "core §7.5, the zk2c envelope, a call's forms and a snapshot's envelope. Written by hand from the text, checked, never blessed. `headers`: one byte in hex → CH's three fields: `form` (bits 7–5, the code's name), `run_width` (bit 4: 0 is 16, 1 is 32) and `tag` (bits 3–0). Every byte reads as a header, a reserved form's included, and writes back to the same byte. `cases`: an envelope's or a form's bytes in hex, and `sample`, what carries them (`put`: a put's payload, or a GET reply's that represents a put or carries a snapshot; `delete`: a delete's attachment, or a `reply_del`'s; `query`, `reply` and `reply_err`: a call's query, reply and reply error, each one's payload) → `expect`, the parse, or `{\"refused\": token}`. A parse is `form`, `run_width`, `run` and `seq` (integers, each big-endian on the wire; a snapshot's `seq` is its asof), `tag`, and `record`: the bytes after the seq in hex (a mutation's or a value's record, a heartbeat's, a frame's or a snapshot's body), or after a request's CH, or `null` for a delete and an error. A request, a value on a query, has `run_width`, `run` and `seq` `null`. An error's parse adds `error`: `code` and `cause` (§5.2's names, `cause` `null` for none), `message` (a string, or `null` when its bit is 0) and `detail` (the bytes after the message in hex, or `null` when its bit is 0). A refusal is the first that applies, in §7.5's order: `short` (no CH), `form` (a reserved form: this version reserves none, so no case draws it), `sample_kind` (a form its sample does not carry: a put carries a mutation, an event, a heartbeat, a frame or a snapshot, a delete's attachment a delete, a query and a reply a value, a reply_err an error), `tag` (a delete whose tag is not 0), `request_run` (a request whose width bit is 1), `key_stamp` (an event whose key's last chunk is not an occurrence chunk of CH's width), `short` (fewer bytes than CH, the run and the seq need, an event's CH, t32 and ms16, and an error's byte after them), `trailing` (a byte after a delete's seq), `time` (an event whose ms16 is above 999, or above 0 under a t32 of all ones), then on an error's byte and what follows it: `cause` (a cause on a code other than `unavailable`, or none on it), `detail` (a detail on a code other than `app`), `extension` (bit 0 set), `short` (a message with no length byte, or fewer bytes than it states), `utf8` (a message that is not UTF-8), and `trailing` (a byte after the message, or after the error's byte without one, where no detail follows). An event (form 4) is a put's payload `CH · t32 · ms16 · record` on an `events` key whose last chunk is an occurrence chunk (core §1.2), and its stamp is that chunk's: an event's case carries its `key`, and its parse adds `time`, `{s, ms}` from the deployment epoch or `\"unknown\"` for a t32 of all ones (its `run` and `seq` read from the key). Every other case's parse reads no contract and no key, so the tag of every form but a delete is reported, never checked against a type, a revision or a declaration, and a frame and a snapshot are parsed whatever their key: `key_kind`, which reads the key, is `carries.json`'s `reads`. An error's detail is never read, and neither is a snapshot's body, which `snapshot/bodies.json` reads. Every accepted case writes back to its bytes.",
   "headers": [
     {
       "note": "a mutation with a 16-bit run",
@@ -414,12 +414,13 @@
       }
     },
     {
-      "note": "event, reserved",
+      "note": "an event one byte short of its time: CH and 5 bytes",
       "sample": "put",
       "hex": "800001000007",
       "expect": {
-        "refused": "form"
-      }
+        "refused": "short"
+      },
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g0009"
     },
     {
       "note": "a frame on a put: form 5, its tag reported and its body not read",
@@ -877,11 +878,11 @@
       }
     },
     {
-      "note": "an event, reserved",
+      "note": "an event: a put carries an event, and nothing else does",
       "sample": "query",
       "hex": "80",
       "expect": {
-        "refused": "form"
+        "refused": "sample_kind"
       }
     },
     {
@@ -1043,11 +1044,11 @@
       }
     },
     {
-      "note": "an event on a reply, reserved",
+      "note": "an event on a reply: a put carries an event, and nothing else does",
       "sample": "reply",
       "hex": "800001000007",
       "expect": {
-        "refused": "form"
+        "refused": "sample_kind"
       }
     },
     {
@@ -1719,11 +1720,11 @@
       }
     },
     {
-      "note": "an event on a reply_err, reserved",
+      "note": "an event on a reply_err: a put carries an event, and nothing else does",
       "sample": "reply_err",
       "hex": "800001000007",
       "expect": {
-        "refused": "form"
+        "refused": "sample_kind"
       }
     },
     {
@@ -1872,11 +1873,193 @@
       }
     },
     {
-      "note": "a snapshot's body under form 4's CH: an event, reserved",
+      "note": "a snapshot's page under form 4's CH, on an event key: t32 0x00010000, then ms16 0x0900, unused",
       "sample": "put",
       "hex": "80000100000900000e1000fa00000000",
       "expect": {
-        "refused": "form"
+        "refused": "time"
+      },
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g0009"
+    },
+    {
+      "note": "an event: CH, t32 3600 and ms16 250, then the record `{}`; its run 5 and seq 9 are its key's",
+      "sample": "put",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g0009",
+      "hex": "8000000e1000fa7b7d",
+      "expect": {
+        "form": "event",
+        "run_width": 16,
+        "run": 5,
+        "seq": 9,
+        "tag": 0,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "record": "7b7d"
+      }
+    },
+    {
+      "note": "the same under a 32-bit run's chunk: CH's width bit set, and still 7 bytes over the record",
+      "sample": "put",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/1qndqvqg0009",
+      "hex": "9000000e1000fa7b7d",
+      "expect": {
+        "form": "event",
+        "run_width": 32,
+        "run": 3735928559,
+        "seq": 9,
+        "tag": 0,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "record": "7b7d"
+      }
+    },
+    {
+      "note": "an event with no record",
+      "sample": "put",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g0009",
+      "hex": "8000000e1000fa",
+      "expect": {
+        "form": "event",
+        "run_width": 16,
+        "run": 5,
+        "seq": 9,
+        "tag": 0,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "record": ""
+      }
+    },
+    {
+      "note": "an unknown time: t32 all ones and ms16 0",
+      "sample": "put",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g0009",
+      "hex": "80ffffffff00007b7d",
+      "expect": {
+        "form": "event",
+        "run_width": 16,
+        "run": 5,
+        "seq": 9,
+        "tag": 0,
+        "time": "unknown",
+        "record": "7b7d"
+      }
+    },
+    {
+      "note": "a packed record's tag, 3, in CH",
+      "sample": "put",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g0009",
+      "hex": "8300000e1003e7",
+      "expect": {
+        "form": "event",
+        "run_width": 16,
+        "run": 5,
+        "seq": 9,
+        "tag": 3,
+        "time": {
+          "s": 3600,
+          "ms": 999
+        },
+        "record": ""
+      }
+    },
+    {
+      "note": "a 32-bit run's CH on a 16-bit run's chunk",
+      "sample": "put",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g0009",
+      "hex": "9000000e1000fa7b7d",
+      "expect": {
+        "refused": "key_stamp"
+      }
+    },
+    {
+      "note": "a 16-bit run's CH on a 32-bit run's chunk",
+      "sample": "put",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/1qndqvqg0009",
+      "hex": "8000000e1000fa7b7d",
+      "expect": {
+        "refused": "key_stamp"
+      }
+    },
+    {
+      "note": "an event on a key that ends in a ULID",
+      "sample": "put",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/01j9zk6q6x5m2f4a8c0d3e7b9h",
+      "hex": "8000000e1000fa7b7d",
+      "expect": {
+        "refused": "key_stamp"
+      }
+    },
+    {
+      "note": "CH alone on a ULID's key: key_stamp before short",
+      "sample": "put",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/01j9zk6q6x5m2f4a8c0d3e7b9h",
+      "hex": "80",
+      "expect": {
+        "refused": "key_stamp"
+      }
+    },
+    {
+      "note": "CH alone on an occurrence chunk's key",
+      "sample": "put",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g0009",
+      "hex": "80",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "ms16 of 1000",
+      "sample": "put",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g0009",
+      "hex": "8000000e1003e8",
+      "expect": {
+        "refused": "time"
+      }
+    },
+    {
+      "note": "ms16 of 1 under a t32 of all ones",
+      "sample": "put",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g0009",
+      "hex": "80ffffffff0001",
+      "expect": {
+        "refused": "time"
+      }
+    },
+    {
+      "note": "a time cut short: short before time",
+      "sample": "put",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g0009",
+      "hex": "80ffffffff00",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a mutation on an occurrence chunk's key: a mutation, its own stamp",
+      "sample": "put",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g0009",
+      "hex": "0000050000097b7d",
+      "expect": {
+        "form": "mutation",
+        "run_width": 16,
+        "run": 5,
+        "seq": 9,
+        "tag": 0,
+        "record": "7b7d"
+      }
+    },
+    {
+      "note": "an event as a delete's attachment",
+      "sample": "delete",
+      "hex": "8000000e1000fa",
+      "expect": {
+        "refused": "sample_kind"
       }
     }
   ]

@@ -60,6 +60,7 @@
       "expect": {
         "form": "data",
         "iface": "modem.v3",
+        "occurrence": null,
         "resource": [
           "oper_change",
           "01j9zk6q6x5m2f4a8c0d3e7b9h"
@@ -235,6 +236,7 @@
       "expect": {
         "form": "data",
         "iface": "log.v1",
+        "occurrence": null,
         "resource": [
           "applied",
           "01hzx3k5n2m4p6q8r0s2t4v6w8"
@@ -272,6 +274,7 @@
       "expect": {
         "form": "data",
         "iface": "log.v1",
+        "occurrence": null,
         "resource": [
           "applied",
           "8zzzzzzzzzzzzzzzzzzzzzzzzz"
@@ -294,7 +297,153 @@
         "token": "stream"
       },
       "key": "zk2/s/svc/nav.v2/stream/x-eth0"
+    },
+    {
+      "note": "an occurrence chunk of a 16-bit run: run 5 at seq 9, 8 characters",
+      "expect": {
+        "form": "data",
+        "iface": "modem.v3",
+        "occurrence": {
+          "run": 5,
+          "run_width": 16,
+          "seq": 9
+        },
+        "resource": [
+          "oper_change",
+          "002g0009"
+        ],
+        "service": "rf0",
+        "system": "h-3fa9c2d41b7e",
+        "token": "events"
+      },
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g0009"
+    },
+    {
+      "note": "an occurrence chunk of a 32-bit run: 0xdeadbeef at seq 9, 12 characters",
+      "expect": {
+        "form": "data",
+        "iface": "modem.v3",
+        "occurrence": {
+          "run": 3735928559,
+          "run_width": 32,
+          "seq": 9
+        },
+        "resource": [
+          "oper_change",
+          "1qndqvqg0009"
+        ],
+        "service": "rf0",
+        "system": "h-3fa9c2d41b7e",
+        "token": "events"
+      },
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/1qndqvqg0009"
+    },
+    {
+      "note": "a 32-bit run's chunk starting `0`: 0x12345678 at seq 0x9abcde",
+      "expect": {
+        "form": "data",
+        "iface": "modem.v3",
+        "occurrence": {
+          "run": 305419896,
+          "run_width": 32,
+          "seq": 10140894
+        },
+        "resource": [
+          "oper_change",
+          "04hmasw9nf6y"
+        ],
+        "service": "rf0",
+        "system": "h-3fa9c2d41b7e",
+        "token": "events"
+      },
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/04hmasw9nf6y"
+    },
+    {
+      "note": "the greatest 16-bit run and seq",
+      "expect": {
+        "form": "data",
+        "iface": "modem.v3",
+        "occurrence": {
+          "run": 65535,
+          "run_width": 16,
+          "seq": 16777215
+        },
+        "resource": [
+          "oper_change",
+          "zzzzzzzz"
+        ],
+        "service": "rf0",
+        "system": "h-3fa9c2d41b7e",
+        "token": "events"
+      },
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/zzzzzzzz"
+    },
+    {
+      "note": "the greatest 32-bit run and seq: the first of 12 characters is `1`",
+      "expect": {
+        "form": "data",
+        "iface": "modem.v3",
+        "occurrence": {
+          "run": 4294967295,
+          "run_width": 32,
+          "seq": 16777215
+        },
+        "resource": [
+          "oper_change",
+          "1zzzzzzzzzzz"
+        ],
+        "service": "rf0",
+        "system": "h-3fa9c2d41b7e",
+        "token": "events"
+      },
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/1zzzzzzzzzzz"
+    },
+    {
+      "note": "a templated event's member, then run 0 at seq 0",
+      "expect": {
+        "form": "data",
+        "iface": "log.v1",
+        "occurrence": {
+          "run": 0,
+          "run_width": 16,
+          "seq": 0
+        },
+        "resource": [
+          "fault",
+          "lane-2",
+          "00000000"
+        ],
+        "service": "svc",
+        "system": "s",
+        "token": "events"
+      },
+      "key": "zk2/s/svc/log.v1/events/fault/lane-2/00000000"
+    },
+    {
+      "note": "12 characters starting `2`: 57 bits or more, no 32-bit run and seq",
+      "expect": null,
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/2qndqvqg0009"
+    },
+    {
+      "note": "an occurrence chunk in uppercase: not a plain chunk",
+      "expect": null,
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002G0009"
+    },
+    {
+      "note": "`i` is outside Crockford's base32",
+      "expect": null,
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002i0009"
+    },
+    {
+      "note": "9 characters: neither an occurrence chunk nor a ULID",
+      "expect": null,
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g00090"
+    },
+    {
+      "note": "7 characters: neither an occurrence chunk nor a ULID",
+      "expect": null,
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g000"
     }
   ],
-  "description": "zk2 keys (core.md §1.1, §1.2). `expect` is the parse, or null when the key is refused. A key is parsed without a contract, so only the lexical rules apply: a resource chunk is any plain chunk. Every accepted key must build back to exactly the same string."
+  "description": "zk2 keys (core.md §1.1, §1.2). `expect` is the parse, or null when the key is refused. A key is parsed without a contract, so only the lexical rules apply: a resource chunk is any plain chunk. Every accepted key must build back to exactly the same string. An events key's parse adds `occurrence`: its last chunk's stamp as an occurrence chunk, `{run_width, run, seq}` (core §1.2: a run and a seq in Crockford's base32 in lowercase, 8 characters for a 16-bit run and 12 for a 32-bit one, the first of 12 `0` or `1`), or `null` for a ULID chunk, which this version admits beside it."
 }
