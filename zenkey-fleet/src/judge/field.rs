@@ -144,7 +144,11 @@ pub struct KeyFields {
 pub struct PathStats {
     /// Document samples in which the path was present.
     pub seen: u64,
-    /// Window-relative seconds of first / last presence.
+    /// Window-relative seconds of first / last presence. A frame record
+    /// that carries the path absent, or whose reader cannot tell its value,
+    /// moves neither: it is accounted for (`last_accounted`), never a
+    /// presence, so `field-stuck`'s span holds values alone and the report
+    /// reads no "last seen" from them (review-bot on #1112).
     pub first_at_s: f64,
     pub last_at_s: f64,
     /// The key's document-sample index at last presence — what "absent since"
@@ -239,6 +243,11 @@ impl PathStats {
     }
 
     fn observe(&mut self, at_s: f64, sample: u64, value: &Value) {
+        // A path first met absent or unknown in a frame record was made
+        // there: its first presence is its first value.
+        if self.seen == 0 {
+            self.first_at_s = at_s;
+        }
         self.seen += 1;
         self.last_at_s = at_s;
         self.last_seen_sample = sample;
@@ -1123,6 +1132,28 @@ mod tests {
         );
         let (_, fields) = plain.iter().next().unwrap();
         assert!(judge_vanished(&fields.paths["rssi"], fields.documents));
+    }
+
+    /// A path first carried absent spans from its first value (review-bot
+    /// on #1112): ten records with `rssi` absent, then three equal values a
+    /// second apart. Its presence runs 10 s to 12 s, too short for
+    /// `field-stuck` at a 1 s ttl (3 × ttl), and an absent record after
+    /// them moves neither end.
+    #[test]
+    fn a_path_first_carried_absent_spans_from_its_first_value() {
+        let mut obs = FieldObservation::new(64);
+        let v = json!(-71);
+        let fields = std::iter::repeat_n(RecordField::Absent, 10)
+            .chain(std::iter::repeat_n(RecordField::Value(&v), 3))
+            .chain(std::iter::once(RecordField::Absent));
+        for (i, rssi) in fields.enumerate() {
+            obs.observe_record("k", i as f64, &[("rssi", rssi)]);
+        }
+        let (_, fields) = obs.iter().next().unwrap();
+        let rssi = &fields.paths["rssi"];
+        assert_eq!((rssi.seen, rssi.absent), (3, 11));
+        assert_eq!((rssi.first_at_s, rssi.last_at_s), (10.0, 12.0));
+        assert!(!judge_stuck(rssi, Some(1)), "2 s of values, under 3 × ttl");
     }
 
     /// A frame's reading is read record by record (#990 V2c): each field by

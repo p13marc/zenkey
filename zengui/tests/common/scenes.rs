@@ -353,6 +353,16 @@ pub const ALL: &[Scene] = &[
         build: inspector_freshness,
         landmark: "diverged from this window's view",
     },
+    // A quiet collection (#1113): site-a/rf0's `state/oper` heard before
+    // the window held a revision of modem.v3, and from then on its owner
+    // only heartbeats. The first heartbeat makes the view through the
+    // lens, the member held taken in, and every section in step.
+    Scene {
+        name: "inspector-freshness-quiet",
+        size: DESKTOP,
+        build: inspector_freshness_quiet,
+        landmark: "vouched · 1 member(s) confirmed",
+    },
     Scene {
         name: "inspector-metric-counter",
         size: DESKTOP,
@@ -1641,6 +1651,67 @@ fn inspector_freshness(theme: ThemeChoice) -> Zengui {
             "zenoh/bytes",
         )],
     );
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::Reveal(beat.into())),
+    );
+    send(
+        &mut app,
+        Message::Subject(SubjectMsg::Select(Subject::Key(beat.into()))),
+    );
+    preset(&mut app, LayoutPreset::Explore);
+    app
+}
+
+fn inspector_freshness_quiet(theme: ThemeChoice) -> Zengui {
+    use zenkey_model::heartbeat::{Digest, Heartbeat, Layout, Members, Section, Time};
+    use zenkey_model::wire::{Envelope, Form, Run, Seq, Stamp, Tag};
+    let oper = "zk2/site-a/rf0/modem.v3/state/oper";
+    let beat = "zk2/site-a/rf0/freshness.v2/stream/heartbeat/modem.v3";
+    let stamp = |run: u16, seq: u32| Stamp {
+        run: Run::U16(run),
+        seq: Seq::new(seq).expect("a seq"),
+    };
+    let mut app = window(prefs(theme));
+    let mut world = World::metered();
+    // The seed's answer, before the window holds a revision to resolve it
+    // with: the book holds it.
+    let put = Envelope {
+        form: Form::Mutation,
+        tag: Tag::NONE,
+        stamp: stamp(3, 5),
+        record: br#"{"status":"up"}"#,
+    }
+    .write();
+    world.tick_samples(&mut app, &[(oper, put, "zenoh/bytes")]);
+    world.connect(&mut app);
+    world.tick(&mut app);
+    let revision = world
+        .resolve(oper)
+        .resolved
+        .expect("site-a/rf0's oper resolves")
+        .revision;
+    let layout = Layout::of(revision.contract());
+    let held = Digest::of([(oper, stamp(3, 5))]);
+    // From then on, heartbeats alone, each in step.
+    for seq in 1..=3 {
+        let heartbeat = Heartbeat {
+            time: Time::Unknown,
+            sections: layout
+                .collections
+                .iter()
+                .map(|c| {
+                    (c.resource() == "state/oper").then_some(Section {
+                        digest: held,
+                        members: Members::One { vouched: true },
+                    })
+                })
+                .collect(),
+        }
+        .envelope(&layout, stamp(9, seq))
+        .expect("a heartbeat");
+        world.tick_samples(&mut app, &[(beat, heartbeat, "zenoh/bytes")]);
+    }
     send(
         &mut app,
         Message::Workspace(WorkspaceMsg::Reveal(beat.into())),

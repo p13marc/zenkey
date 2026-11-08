@@ -400,6 +400,22 @@ impl Deployment {
         }
     }
 
+    /// The lens over this deployment's inputs, borrowed: what
+    /// [`Deployment::lens_inputs`] builds for a task, with no clone, for a
+    /// read on the update thread (the freshness book's heartbeats, #1113).
+    pub(crate) fn lens(&self) -> zenkey_fleet::Lens<'_> {
+        let lens = zenkey_fleet::Lens::new(
+            &self.settings.namespace,
+            self.catalog.as_deref(),
+            &self.store,
+        )
+        .at_generation(self.lens_generation);
+        match &self.contracts {
+            Some(c) => lens.held(c.set.len()).catalogs(&c.catalogs).offline(&c.set),
+            None => lens,
+        }
+    }
+
     /// The epoch in force for `addr`'s packed `time` fields (core §8.6), as
     /// the lens over this deployment's inputs reads it; a replay's lens
     /// holds no catalog, so its caller assumes it.
