@@ -137,6 +137,8 @@ fn a_doctor_run_spells_every_verdict_pole_apart_in_every_medium() {
 ✓  arbitration-declaration (arbitration.v1 §2.14)  clean — 1 arbitrated role(s) of running consumers, each declaration valid and each binding of exact entries, none shadowed
 ✓  catalog-missing (§8.6)                          clean — 3 running revision(s), each in the catalog it is judged against (catalog 0a90fd61)
 ✓  first-hop-token (§8.1)                          clean — 1 device(s) the face policy lists, 1 instance(s) of them present, none holding an interface token or a contract queryable that reached this reader (a device face's carve denies both on ingress, link.v2 §2.6)
+✓  packed-refused (§7.6)                           clean — 4 packed state value(s) from 1 owner interface(s), each read by its layout under CH's tag
+—  state-unconfirmed (freshness.v2 §2.6)           not asked
 
 "#]]
     );
@@ -4271,6 +4273,9 @@ fn a_watch_keeps_r6_discards_apart_from_its_lag() {
         qos_mismatched: 0,
         nonconforming: 0,
         lagged: 3,
+        heartbeats: 0,
+        heartbeats_lost: 0,
+        heartbeats_diverged: 0,
         elapsed_s: 2.0,
         ended: WatchEnd::Window,
     };
@@ -4278,6 +4283,21 @@ fn a_watch_keeps_r6_discards_apart_from_its_lag() {
     assert_eq!(lines.len(), 3, "{lines:#?}");
     assert!(lines[1].starts_with("10 sample(s)") && lines[1].contains("(R6)"));
     assert!(lines[2].starts_with("3 sample(s)") && lines[2].contains("lower bound"));
+    // #990 V6: the heartbeats read, a line of their own, the loss and
+    // divergence the reader's word.
+    let beats = WatchSummary {
+        heartbeats: 4,
+        heartbeats_lost: 1,
+        heartbeats_diverged: 2,
+        ..summary.clone()
+    };
+    let beat_lines = zenctl::render::summary_lines(&beats);
+    assert_eq!(beat_lines.len(), 4, "{beat_lines:#?}");
+    assert!(
+        beat_lines[2].starts_with("4 heartbeat(s) read: 1 after one lost, 2 diverged")
+            && beat_lines[2].contains("no finding about the owner"),
+        "after the R6 discards, before the lag: {beat_lines:#?}"
+    );
     // #671's unresolved, §2.4's QoS and §7's types: three more counts, each
     // its own line, none folded into another.
     let counted = WatchSummary {
@@ -4519,4 +4539,40 @@ a set that drew nothing started nothing a tool can name: resent without an idemp
         );
     }
     assert!(ndjson(&fx::config_act_refused()).contains("<redacted>"));
+}
+
+/// #990 V6: a heartbeat row says a heartbeat lost before it and a
+/// divergence, each the reader's word (`freshness.v2` §5), and confirms
+/// nothing where it diverged.
+#[test]
+fn a_heartbeat_row_says_lost_and_diverged() {
+    let c = zenkey_fleet::report::WatchConfirmation {
+        provider: "lab/n1".into(),
+        key: "zk2/lab/n1/freshness.v2/stream/heartbeat/hb.v1".into(),
+        heartbeat: zenkey_fleet::report::InbandStamp {
+            run: "0007".into(),
+            seq: 5,
+        },
+        confirmed: Vec::new(),
+        lost: true,
+        diverged: true,
+        absent: false,
+    };
+    let lines = zenctl::render::confirmation_lines(&c);
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains("a heartbeat lost before it")),
+        "{lines:#?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains("diverged") && l.contains("no finding about the owner")),
+        "{lines:#?}"
+    );
+    assert!(
+        !lines.iter().any(|l| l.contains("confirmed by heartbeat")),
+        "{lines:#?}"
+    );
 }

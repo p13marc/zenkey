@@ -24,8 +24,11 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   `--last-known <archive>`, never shown as current) beside the raw `get
   <selector>`, `watch` (R6 discards counted apart), `replay --namespace`;
   `pub` refuses a key a zk2 service owns (P3), and `retire` is gone.
-  FJ6's `doctor` judges a zk2 deployment against the core: thirty-five
-  checks since #982's H3, `catalog-missing` asked only with `doctor
+  FJ6's `doctor` judges a zk2 deployment against the core: thirty-seven
+  checks since #990 V5 (`packed-refused`, an error, and
+  `state-unconfirmed`, a warning, both `--deep` and read off
+  `state-stamp-foreign`'s GET, the second only with `--clocks-synced`),
+  `catalog-missing` asked only with `doctor
   --catalog` and `first-hop-token` only with `doctor --face-policy`
   (`service list|show --face-policy` list each device of a device face,
   its link `up`, `link_closed` or `unobservable`, never down, `first_hop`
@@ -205,7 +208,15 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   `revision <fp> by tag (step N, observer §7.5)` saying steps 2 and 3,
   `none_left` naming the step that left none, and a record under a tag
   other than 0 with no type held shown `<packed record, tag t, n bytes>`,
-  never sniffed; #988 L4: `--face-policy F
+  never sniffed (a heartbeat's own key, `freshness.v2` not given, resolves
+  to the standard revision every tool holds compiled in, since #990,
+  never `none_left`); #990 V6: `watch` over a collection prints every
+  heartbeat its view reads (`zenkey::consumer::subscribe_heartbeats`),
+  each row's `lost` (its key's seqs skipped) and `diverged` (its section
+  not the view's, nothing confirmed; `absent`, its map bit 0, omitted
+  when false), and the summary's `heartbeats`, `heartbeats_lost` and
+  `heartbeats_diverged`, each the reader's word, no finding about the
+  owner (`freshness.v2` §5); #988 L4: `--face-policy F
   --face NAME` in `AcrossFaceArgs` (`zk2::far_side`, a `link.v2` face, exit
   2 otherwise), `FaceScope::deployment` → `Deployment::across` (the face's
   `reply_timeout_ms` the default `--timeout` below a flag or context, every

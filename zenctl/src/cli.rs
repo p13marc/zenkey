@@ -494,7 +494,8 @@ pub(crate) struct DoctorArgs {
     /// ms), as the deployment keeps them: a health.v1 status reply's stamp
     /// is then aged against this clock (freshness.v1 §2.6). The doctor
     /// listens to no status, so without it the health-* checks of every
-    /// service implementing health.v1 are unobservable.
+    /// service implementing health.v1 are unobservable, and
+    /// state-unconfirmed is not asked.
     #[arg(long)]
     pub(crate) clocks_synced: bool,
     /// How long a desired.v1 target may be "not yet" converged on a version
@@ -984,7 +985,7 @@ pub(crate) enum Command {
     Why(WhyArgs),
     /// Judge a zk2 deployment against the core: one verdict per check.
     ///
-    /// Thirty-three checks, each a question whose finding is the yes:
+    /// Thirty-seven checks, each a question whose finding is the yes:
     /// split-brain (§6; of an interface redundancy.v1 governs, its first
     /// question's split, whatever the holders' marks), binding-unsatisfied
     /// (§3.2), contract-drift (§9.8), contract-unavailable (§8.4),
@@ -1027,7 +1028,12 @@ pub(crate) enum Command {
     /// running consumer's role carrying arbitration.policy, read from its
     /// descriptor and contracts over every revision of the required
     /// interface in hand: an error when its declaration is invalid, a
-    /// warning when its binding has a wildcard or a shadowed entry). A
+    /// warning when its binding has a wildcard or a shadowed entry); and,
+    /// with --deep, off state-stamp-foreign's GET, packed-refused (§7.6, an
+    /// error: a packed state value its layout refuses under CH's tag, the
+    /// refusal named) and freshness.v2's state-unconfirmed (a warning: a
+    /// collection's member last confirmed longer ago than its horizon, read
+    /// only with --clocks-synced, dated through --catalog). A
     /// standby is never token-missing, and
     /// hostid-duplicate does not count a recognised one. The deployment is
     /// read through a session in its namespace; the routers' admin space and

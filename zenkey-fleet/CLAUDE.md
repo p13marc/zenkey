@@ -578,4 +578,25 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   not asked without one): an interface token, or a contract key a device's
   own session answers (`HeldBundles`, replier zid against `meta.zid`, every
   GET at once).
+  #990 V5: the doctor's `packed-refused` (core §7.6, an error) and
+  `state-unconfirmed` (`freshness.v2` §2.6, a warning; `NotAsked` without
+  `DoctorSpec::clocks_synced`, the judge's own gate, as `catalog-missing`'s
+  is), 37 checks, both `reads_data` (`--deep`) and read off
+  `state-stamp-foreign`'s GET: `state_stamps` takes the `EntryEpochs` and
+  fills `StateStamps::packed_read`/`packed_refused` (each Put entry's
+  record of a packed type, `Layout::check` under CH's tag, the token
+  named) and `confirmations` (`EntryConfirmed`: each live member of a
+  `freshness.v2` collection with a horizon, its last confirmation aged at
+  this host's clock under its owner's epoch, `None` when undated, which
+  leaves the owner unjudged); `StateStamps::revision` says whether the
+  owner's revision was in hand. No high-water-seq check.
+  #990 V6: `watch_across` reads every heartbeat the view reads
+  (`Consumer::subscribe_heartbeats`), each `WatchConfirmation` with `lost`,
+  `diverged` and `absent`, and `WatchSummary::heartbeats`,
+  `heartbeats_lost`, `heartbeats_diverged` (zenctl counts them); health
+  keeps `subscribe_confirmed`, in-step heartbeats alone. The lens resolves
+  a heartbeat's own key offline (no presence, `--contracts` giving no
+  `freshness.v2` revision) to `freshness.v2`'s standard revision,
+  `zenkey::heartbeat::BUNDLE` (`lens::standard_revision`), never
+  `none_left`; a recorded header and a descriptor keep their own word.
   `tests/first_hop.rs` is constrained.md §10 from the tools' side.

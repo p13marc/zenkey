@@ -418,6 +418,40 @@ pub struct Confirmation {
     pub owner_time: Option<zenkey_model::heartbeat::Time>,
 }
 
+/// One heartbeat a subscription's view read for its collection
+/// (`freshness.v2` §2.5, §5; #990 V6): what its section did, and whether
+/// a heartbeat was lost before it. Both are the reader's word: a
+/// divergence says the reader's view and the owner's digest differ, no
+/// finding about the owner (§5).
+#[derive(Debug, Clone)]
+pub struct HeartbeatRead {
+    pub provider: Addr,
+    /// The heartbeat key's run and seq.
+    pub heartbeat: zenkey_model::wire::Stamp,
+    /// Read in the subscriber's callback, on this host's monotonic clock.
+    pub arrival: Instant,
+    /// The owner's clock when it wrote it (`None`: unknown).
+    pub owner_time: Option<zenkey_model::heartbeat::Time>,
+    /// Its key's seqs skipped since the last heartbeat this view read:
+    /// one or more were lost.
+    pub lost: bool,
+    /// What its section did to the collection.
+    pub section: HeartbeatSection,
+}
+
+/// What a heartbeat's section did to a followed collection
+/// (`zenkey_model::freshness::SectionRead`, without `not_followed`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HeartbeatSection {
+    /// Its digest was the view's: these members, vouched for, confirmed,
+    /// base-relative in key order (none when it vouches for none).
+    Confirmed(Vec<String>),
+    /// Its digest or live count was not the view's: nothing confirmed.
+    Diverged,
+    /// Its map bit was 0: the collection not available, nothing confirmed.
+    Absent,
+}
+
 /// A collection a subscription follows by heartbeats: the revision's
 /// layout, and the collection's index in it.
 struct Followed {
@@ -802,7 +836,41 @@ impl Consumer {
         C: Fn(Delivery) + Send + Sync + 'static,
         F: Fn(Confirmation) + Send + Sync + 'static,
     {
-        self.subscribe_inner(resource, callback, |_| {}, on_confirm)
+        self.subscribe_inner(
+            resource,
+            callback,
+            |_| {},
+            move |h: HeartbeatRead| {
+                if let HeartbeatSection::Confirmed(keys) = h.section {
+                    on_confirm(Confirmation {
+                        provider: h.provider,
+                        keys,
+                        heartbeat: h.heartbeat,
+                        arrival: h.arrival,
+                        owner_time: h.owner_time,
+                    });
+                }
+            },
+        )
+        .await
+    }
+
+    /// [`Consumer::subscribe`], handing `on_heartbeat` every heartbeat its
+    /// view read for the collection subscribed (#990 V6): confirmed,
+    /// diverged or absent, and whether one was lost before it
+    /// ([`HeartbeatRead`]). [`Consumer::subscribe_confirmed`] hands over
+    /// only the confirmations.
+    pub async fn subscribe_heartbeats<C, F>(
+        &self,
+        resource: &str,
+        callback: C,
+        on_heartbeat: F,
+    ) -> Result<Subscription>
+    where
+        C: Fn(Delivery) + Send + Sync + 'static,
+        F: Fn(HeartbeatRead) + Send + Sync + 'static,
+    {
+        self.subscribe_inner(resource, callback, |_| {}, on_heartbeat)
             .await
     }
 
@@ -837,7 +905,7 @@ impl Consumer {
     where
         C: Fn(Delivery) + Send + Sync + 'static,
         T: Fn(TimingEvent) + Send + Sync + 'static,
-        F: Fn(Confirmation) + Send + Sync + 'static,
+        F: Fn(HeartbeatRead) + Send + Sync + 'static,
     {
         let r = self.resource(resource)?.clone();
         let name = format!("{}/{}", r.token, r.template);
@@ -1084,7 +1152,8 @@ impl Consumer {
 
     /// One heartbeat subscriber per bound provider, on the key of its
     /// heartbeat covering this interface: each heartbeat folded into the
-    /// provider's view, what it confirmed handed to `on_confirm`.
+    /// provider's view, what it did to the collection handed to
+    /// `on_confirm`.
     ///
     /// Through `redeclaring` across a face (core §8.5), each is declared
     /// again after two of the heartbeat's horizons of silence, where the
@@ -1097,7 +1166,7 @@ impl Consumer {
         redeclaring: Option<&crate::redeclare::Redeclaring>,
     ) -> Result<Vec<Subscriber<()>>>
     where
-        F: Fn(Confirmation) + Send + Sync + 'static,
+        F: Fn(HeartbeatRead) + Send + Sync + 'static,
     {
         let horizon = redeclaring.and(zenkey_model::link::redeclare_heartbeat_horizon(
             &self.contract,
@@ -1174,8 +1243,8 @@ impl Consumer {
                         timeout,
                     ));
                 }
-                let sections = match applied {
-                    Applied::Read { sections, .. } => sections,
+                let (lost, sections) = match applied {
+                    Applied::Read { gap, sections } => (gap, sections),
                     Applied::Older => return,
                     Applied::Revision | Applied::Refused(_) => {
                         unread();
@@ -1183,15 +1252,20 @@ impl Consumer {
                     }
                 };
                 seen.heartbeats.fetch_add(1, Ordering::Relaxed);
-                if let Some(SectionRead::Confirmed(keys)) = sections.get(f.index) {
-                    on_confirm(Confirmation {
-                        provider: addr,
-                        keys: keys.clone(),
-                        heartbeat: stamp,
-                        arrival,
-                        owner_time,
-                    });
-                }
+                let section = match sections.get(f.index) {
+                    Some(SectionRead::Confirmed(keys)) => HeartbeatSection::Confirmed(keys.clone()),
+                    Some(SectionRead::Diverged) => HeartbeatSection::Diverged,
+                    Some(SectionRead::Absent) => HeartbeatSection::Absent,
+                    Some(SectionRead::NotFollowed) | None => return,
+                };
+                on_confirm(HeartbeatRead {
+                    provider: addr,
+                    heartbeat: stamp,
+                    arrival,
+                    owner_time,
+                    lost,
+                    section,
+                });
             });
             match (redeclaring, horizon) {
                 (Some(rd), Some(h)) => {

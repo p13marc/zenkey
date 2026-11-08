@@ -385,6 +385,12 @@ pub fn doctor_report() -> DoctorReport {
                  an interface token or a contract queryable that reached this reader (a device \
                  face's carve denies both on ingress, link.v2 §2.6)",
             ),
+            clean(
+                CheckId::PackedRefused,
+                "4 packed state value(s) from 1 owner interface(s), each read by its layout \
+                 under CH's tag",
+            ),
+            CheckReport::not_asked(CheckId::StateUnconfirmed),
         ],
         unobservable: None,
     }

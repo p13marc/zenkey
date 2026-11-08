@@ -223,6 +223,121 @@ async fn a_subscription_folds_a_heartbeat_into_its_freshness() {
     );
 }
 
+/// Every heartbeat the view reads is handed over (#990 V6): one in step
+/// confirms, one after a gap in its key's seqs says a heartbeat was lost
+/// before it, one whose digest the view does not hold diverged and
+/// confirms nothing, and one whose map bit is 0 has its collection absent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn every_heartbeat_read_is_handed_over_with_its_loss_and_divergence() {
+    use zenkey::consumer::{HeartbeatRead, HeartbeatSection};
+    let (_r1, ep) = router(None).await;
+    let os = client(&ep).await;
+    let rs = client(&ep).await;
+    let mut b = ServiceBuilder::new(&os, config("lab/beacon"));
+    b.implement(imp("beacon.v1")).unwrap();
+    let status = b
+        .declare_state_writer(&beacon(), STATUS, &Bindings::new())
+        .await
+        .unwrap();
+    status.set_refresh(false);
+    let none = Bindings::new();
+    let _intent = b
+        .declare_state_writer(&beacon(), "state/intent", &none)
+        .await
+        .unwrap();
+    let _note = b
+        .declare_state_writer(&beacon(), "state/note", &none)
+        .await
+        .unwrap();
+    let _level = b
+        .declare_writer(&beacon(), "stream/level", &none)
+        .await
+        .unwrap();
+    let _svc = b.start().await.unwrap();
+
+    let c = Consumer::for_tool(
+        &rs,
+        Arc::new(contract("beacon.v1")),
+        &["lab/beacon"],
+        &Default::default(),
+    )
+    .unwrap();
+    let delivered: Arc<Mutex<Vec<Stamp>>> = Arc::default();
+    let read: Arc<Mutex<Vec<HeartbeatRead>>> = Arc::default();
+    let (d, k) = (Arc::clone(&delivered), Arc::clone(&read));
+    let _sub = c
+        .subscribe_heartbeats(
+            STATUS,
+            move |x: Delivery| d.lock().unwrap().extend(x.inband),
+            move |x: HeartbeatRead| k.lock().unwrap().push(x),
+        )
+        .await
+        .unwrap();
+    eventually("the status is matched", || async {
+        status.writer().matching().await.unwrap()
+    })
+    .await;
+    status.put("up").await.unwrap();
+    eventually("the put is delivered", || async {
+        !delivered.lock().unwrap().is_empty()
+    })
+    .await;
+    let stamp = delivered.lock().unwrap()[0];
+    let layout = Layout::of(&contract("beacon.v1"));
+    let hb_key = zenkey::model::heartbeat::key("lab", "beacon", &beacon());
+    let held = Digest::of([(KEY, stamp)]);
+    let missed = Digest::of([(
+        KEY,
+        Stamp {
+            seq: Seq::new(stamp.seq.get() + 1).unwrap(),
+            ..stamp
+        },
+    )]);
+    let absent = Heartbeat {
+        time: Time::Unknown,
+        sections: vec![None; layout.collections.len()],
+    }
+    .envelope(
+        &layout,
+        Stamp {
+            run: Run::U16(9),
+            seq: Seq::new(4).unwrap(),
+        },
+    )
+    .unwrap();
+    // seq 0 in step; seq 2 after 1 was lost; seq 3 diverged; seq 4 absent.
+    for (n, bytes) in [
+        heartbeat(&layout, held, true, 0),
+        heartbeat(&layout, held, true, 2),
+        heartbeat(&layout, missed, true, 3),
+        absent,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        os.put(&hb_key, bytes).await.unwrap();
+        eventually("the heartbeat is handed over", || async {
+            read.lock().unwrap().len() == n + 1
+        })
+        .await;
+    }
+    let read = read.lock().unwrap();
+    let got: Vec<(u32, bool, HeartbeatSection)> = read
+        .iter()
+        .map(|h| (h.heartbeat.seq.get(), h.lost, h.section.clone()))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            (0, false, HeartbeatSection::Confirmed(vec![KEY.to_owned()])),
+            (2, true, HeartbeatSection::Confirmed(vec![KEY.to_owned()])),
+            (3, false, HeartbeatSection::Diverged),
+            (4, false, HeartbeatSection::Absent),
+        ]
+    );
+    assert!(read.iter().all(|h| h.provider.to_string() == "lab/beacon"));
+}
+
 /// `freshness.v2` under a namespace (#978's F3): an owner of `beacon.v2`
 /// and its readers, each a session in `site`, so the heartbeat travels on
 /// `site/zk2/…/freshness.v2/stream/heartbeat/beacon.v2`; a late joiner that

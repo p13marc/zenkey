@@ -4,6 +4,13 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — two doctor checks, and a heartbeat's own key held (#990 V5)
+
+| Before | Now | Notes |
+|---|---|---|
+| the doctor pane: thirty-five checks | thirty-seven: `packed-refused` (an error) and `state-unconfirmed` (a warning, only with "clocks synced"), both on a deep run | |
+| a replay's heartbeat key whose pair the header does not list, `freshness.v2` not among the offline contracts: `none left (not held)` | its identity is `freshness.v2`'s standard revision, the one every tool holds compiled in; its body still reads with the covered revision | |
+
 ## Unreleased (`main`, zk2) — the catalog in health, a replay by its header (#1087, #990 V4's follow-ups)
 
 | Before | Now | Notes |

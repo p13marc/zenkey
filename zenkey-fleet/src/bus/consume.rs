@@ -626,20 +626,29 @@ pub async fn watch_across(
     let (rev, lag, res) = (revision.clone(), Arc::clone(&lagged), r.clone());
     let (ctx, confirmations) = tokio::sync::mpsc::channel(WATCH_BUFFER);
     let covered = revision.iface().clone();
-    let on_confirm = move |c: zenkey::consumer::Confirmation| {
+    let on_confirm = move |h: zenkey::consumer::HeartbeatRead| {
+        use zenkey::consumer::HeartbeatSection;
+        let (confirmed, diverged, absent) = match h.section {
+            HeartbeatSection::Confirmed(keys) => (keys, false, false),
+            HeartbeatSection::Diverged => (Vec::new(), true, false),
+            HeartbeatSection::Absent => (Vec::new(), false, true),
+        };
         let _ = ctx.try_send(crate::report::WatchConfirmation {
             key: zenkey_model::heartbeat::key(
-                c.provider.system.as_str(),
-                c.provider.service.as_str(),
+                h.provider.system.as_str(),
+                h.provider.service.as_str(),
                 &covered,
             ),
-            provider: c.provider.to_string(),
-            heartbeat: InbandStamp::from(c.heartbeat),
-            confirmed: c.keys,
+            provider: h.provider.to_string(),
+            heartbeat: InbandStamp::from(h.heartbeat),
+            confirmed,
+            lost: h.lost,
+            diverged,
+            absent,
         });
     };
     let sub = consumer
-        .subscribe_confirmed(
+        .subscribe_heartbeats(
             &name,
             move |d: zenkey::consumer::Delivery| {
                 let key = d.sample.key_expr().as_str().to_owned();

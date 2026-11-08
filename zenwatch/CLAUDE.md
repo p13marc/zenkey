@@ -100,7 +100,8 @@ Claude Code loads this file when working in `zenwatch/`; the root `CLAUDE.md` is
   clean stop; and it caches no discovery: it is not the noun
   `docs/redesign-2026-07.md` §6.1 rejected. **The scheduled
   doctor** (#390, `doctor.rs`): a `doctor` block runs zk2's `run_doctor`
-  (`deep`, thirty-five checks since #982's H3, `first-hop-token` not asked
+  (`deep`, thirty-seven checks since #990 V5, `state-unconfirmed` only
+  under `clocks_synced`, `first-hop-token` not asked
   since zenwatch takes no face policy, `arbitration-declaration`
   and `catalog-missing` among them; top-level `clocks_synced` for the
   `health-*` checks, which a `doctor` rule reads too; top-level `catalog`,

@@ -7,6 +7,14 @@ names where its question went, or that nothing on `main` asks it yet. No
 aliases and no shims, except where the two spellings were always one fact
 (`base` and `namespace`).
 
+## Unreleased (`main`, zk2) — the doctor's `packed-refused` and `state-unconfirmed` (#990 V5)
+
+No rule changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| the scheduled doctor: thirty-five checks | thirty-seven: `packed-refused` (an error: a packed state value its layout refuses under CH's tag) and `state-unconfirmed` (a warning: a `freshness.v2` member last confirmed longer ago than its horizon), both read off `state-stamp-foreign`'s GET | `state-unconfirmed` is asked only under the top-level `clocks_synced`, and dates through the top-level `catalog`; the `zenwatch.v1` schema's check id stays an open string |
+
 ## Unreleased (`main`, zk2) — `alerts` rules read the deployment catalog (#1087)
 
 | Before | Now | Notes |
