@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.105** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.106** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -491,6 +491,10 @@ not, is §2.7's.
     `sample_kind` or `key_stamp`, as observer §7.3 names one. Any other is
     refused as `form`, as §4.2 counts a stray `reply_del`: its envelope
     reads as another form, or it carries none.
+    - **A delete** carries its envelope in its attachment (§7.5). One with
+      no attachment carries none, so it is `form`. An empty attachment is
+      still one, which zenoh tells from none (Appendix B): the parse finds
+      no byte at all, and refuses it `short`.
   - **Why a put.** §7.5's parse refuses no mutation on an events key. But
     a mutation carries no time, so the filter could neither keep it nor
     drop it. An unknown time is an owner's word in an event, and a
@@ -3228,7 +3232,9 @@ the owner sets where its session would add one anyway.
     zenoh's storage manager, which refuses to start without it
     (Appendix B). Nor can it serve as a clock guard's reference (§4.3,
     "Ahead"), since it stamps nothing.
-  - Nothing checks this posture at this version.
+  - **What checks it.** [`link.v2`](profiles/link/v2.md) §2.19's
+    `face_timestamping` does, for a router whose face policy is
+    `link.v2`'s. Nothing checks a router under a `link.v1` policy.
 
 ### 8.3 The presence budget
 
@@ -4985,6 +4991,12 @@ Appendix B. These are the ones the rules above cite:
   Encoding's 1 were measured in a put on zenoh-modem's simulated radio
   link (`docs/zk2/measurements/wire-baseline/`, "W1 on RF", finding 3).
   §7.5 compares the envelope with them.
+- A put's or a delete's attachment is an optional extension, sent
+  whenever one is given, an empty one too (zenoh-protocol's
+  `zenoh/del.rs` and `zenoh/put.rs`, `ext_attachment`; zenoh-codec's
+  `zenoh/del.rs`). So a receiver tells an empty attachment from none.
+  Measured by the second implementation on zenoh-python, which reads
+  `b""` for one and `None` for the other. §2.6 counts a delete by it.
 - A node with its HLC enabled updates it with the stamp of every put it
   routes, a put a session receives for its own subscriber included. Its
   clock moves to a later stamp, and a stamp more than its delta ahead of

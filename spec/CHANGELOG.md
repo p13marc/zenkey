@@ -3,6 +3,70 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.106 — 2026-11-08: editorial: a delete with no attachment on an events key, `state.md` §8's replay count, and §8.2's posture checked, no rule changed (#609, #980, #1106)
+
+zk2py round 109 read 0.105 cold, beside `link.v2` 0.13 and 0.14. It
+filed F-524 to F-528, none a blocker. This version answers the core's
+three, F-526 to F-528. `link.v2` 0.16 answers F-524 and F-525
+([`profiles/link/CHANGELOG.md`](profiles/link/CHANGELOG.md)), and
+`observer.md` stays 0.33.
+
+**Stated: §2.6, a delete with no attachment (F-527, an ambiguity).**
+- **Before:** a sample that carries no event is `form` where "it carries
+  none". A delete has zenoh's default `Encoding`, `zenoh/bytes`, and
+  observer §7.3 tells an enveloped sample by its key and its `Encoding`.
+  So a delete with no attachment read two ways. Its envelope held no
+  byte, `short`. Or it carried none, `form`, as 0.105's entry said.
+- **Now:** a delete carries its envelope in its attachment (§7.5). One
+  with no attachment carries none, so it is `form`. An empty attachment
+  is still one: the parse finds no byte at all, and refuses it `short`.
+- **Why.** §7.5 puts a delete's envelope in its attachment, and gives no
+  delete a payload. §4.2 already reads a state delete with no attachment
+  as a sample with no envelope, one that broke S1. Observer §7.3 tells an
+  envelope in a put's payload.
+- **Appendix B** gains the fact this rests on: zenoh sends an attachment
+  whenever one is given, an empty one too. So a receiver tells an empty
+  attachment from none, as zk2py measured on zenoh-python.
+- **The reference** counts so already. `inband::admit_event` parses a
+  delete's attachment where it has one, and counts a delete with none
+  `form`. Its unit test counts `form` for a delete with none and for one
+  with a delete's envelope, and `trailing` for a byte after the seq.
+  zk2py counts so too.
+
+**Changed: `state.md` §8 Expected 5, the replay's count (F-528, minor).**
+- **Before:** "The consumer counts each undecodable". Read per path, it
+  asked the replay to count step 4's delete too. But the storage holds
+  no value under the deleted key, so a GET returns nothing of it.
+- **Now:** the subscription counts all three, `form`. The replay returns
+  step 4's two puts alone, and counts each of the two so.
+- **The reference** asserts so already: `s8_events_replay` counts the
+  subscription's three and the replay's two. So does zk2py.
+
+**Changed: §8.2, "A router on a constrained face" (F-526, minor).**
+- **Before:** "Nothing checks this posture at this version." Since
+  `link.v2` 0.13, its §2.19's `face_timestamping` checks it, and the
+  reference's `zenctl check face` reports it.
+- **Now:** `link.v2` §2.19 checks it, for a router whose face policy is
+  `link.v2`'s. Nothing checks a router under a `link.v1` policy.
+
+**Deliberately not changed.**
+- **No rule.** §2.6's MUST NOT and §8.2's SHOULD are as they were. The
+  count is stated with no keyword.
+- **§7.5's parse.** It parses the bytes a sample carries. A delete with
+  no attachment gives it none to parse, so it carries no envelope, and
+  the parse refuses nothing.
+- **Observer §7.3.** Its "envelope first" reads a put's payload, and a
+  delete has none.
+- **A state key's delete with no attachment** is still §4.2's sample
+  with no envelope, one that broke S1, as the reference reads it. F-527
+  notes that zk2py's state readers count one `short`, where §4.2 reads
+  no refusal.
+- **No scenario step.** `state.md` §8 step 4's delete keeps its
+  attachment, a delete's envelope.
+- **No section number** and no fingerprint moves.
+
+**The figures.** `RULES.md` lists 274 rules, as 0.105 did (consumer 32).
+
 ## 0.105 — 2026-11-08: a delete on an events key, the count of a sample that carries no event, and 0.104's note on the reference (#609, #980)
 
 zk2py round 108 read 0.104 cold, beside `link.v2` 0.12, observer 0.33
