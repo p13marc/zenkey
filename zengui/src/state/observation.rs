@@ -129,6 +129,11 @@ sub_state! {
         /// The longest gap between two live ticks (#614, FL7): the
         /// window's reader stall against core §2.7's bound (0.27).
         pub(crate) tick_gap: crate::budget::TickGap,
+        /// The window's own `freshness.v2` views (#990 V6), one per owner
+        /// interface, fed by the live ticks: what the Inspector says of a
+        /// heartbeat's collections, vouched, lost or diverged, the
+        /// reader's word (freshness.v2 §5).
+        pub(crate) freshness: crate::freshness::Book,
     }
 }
 
@@ -157,6 +162,7 @@ impl Default for Observation {
             budgets: None,
             watch_since: std::collections::BTreeMap::new(),
             tick_gap: crate::budget::TickGap::default(),
+            freshness: crate::freshness::Book::default(),
         }
     }
 }
@@ -185,5 +191,7 @@ impl Observation {
         self.budgets = None;
         self.watch_since.clear();
         self.tick_gap = crate::budget::TickGap::default();
+        // The views described the departing deployment's members.
+        self.freshness = crate::freshness::Book::default();
     }
 }

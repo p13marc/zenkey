@@ -121,6 +121,13 @@ pub(crate) fn apply_tick(
         // through an offline lens).
         if work.replay.replay.is_none() {
             dep.ensure_identity(&sample.key);
+            // The window's freshness.v2 views (#990 V6): a member into its
+            // owner's, a heartbeat applied to the interface it covers.
+            let resolved = dep
+                .identity
+                .get(&sample.key)
+                .and_then(|r| r.resolved.as_ref());
+            obs.freshness.observe(sample, resolved, sample.received);
         }
         work.echo.echo.push(sample);
         // A replayed row that recorded no wire axes (a version-1/2 `.zrec`,

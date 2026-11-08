@@ -139,6 +139,8 @@ fn a_fields_spark_carries_the_unit_of_a_metrics_value() {
         max: Some(50.0),
         last: Some(50.0),
         values: None,
+        absent: 0,
+        unknown: 0,
     };
     let report = FieldReport {
         selector: common::FRAMES.into(),

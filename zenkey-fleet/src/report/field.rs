@@ -45,6 +45,20 @@ pub struct FieldRow {
     /// outgrew the cap (stated, never silently partial).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub values: Option<Vec<String>>,
+    /// Frame records that carried the field absent, its presence bit 0
+    /// (core §7.6, observer §7.6; #990 V2c): the owner's word, never a
+    /// vanished field. Omitted at zero, so a row of no frame keeps its
+    /// shape.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub absent: u64,
+    /// Frame records whose reader could not tell the field's value
+    /// (observer §7.6): neither present nor absent. Omitted at zero.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub unknown: u64,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 /// What a field finding says (#223), on the wire as its id.
@@ -160,6 +174,8 @@ mod tests {
                 max: Some(1500.0),
                 last: Some(1500.0),
                 values: Some(vec!["1500".into()]),
+                absent: 0,
+                unknown: 0,
             }],
             findings: vec![FieldFinding {
                 severity: DoctorSeverity::Warning,

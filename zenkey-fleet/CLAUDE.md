@@ -600,4 +600,14 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `freshness.v2` revision) to `freshness.v2`'s standard revision,
   `zenkey::heartbeat::BUNDLE` (`lens::standard_revision`), never
   `none_left`; a recorded header and a descriptor keep their own word.
+  #990 V2c: `judge::field::run_field_over` reads each sample through the
+  window's `model::frame::Readers` (`Lens::check_frames`), a frame's
+  records each a document sample (`frame_records`, `FieldObservation::
+  observe_record`, `RecordField::{Value, Absent, Unknown}`): a field known
+  or within its deadband a path with its value, one the record carries
+  absent or whose value its reader cannot tell counted apart
+  (`PathStats::absent`/`unknown`, `FieldRow::absent`/`unknown`, omitted at
+  zero) and accounted for, so `judge_vanished` measures from
+  `PathStats::last_accounted` and never reads either as missing; a sample
+  that is no frame reads its document as before.
   `tests/first_hop.rs` is constrained.md §10 from the tools' side.

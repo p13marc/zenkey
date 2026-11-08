@@ -63,6 +63,8 @@ fn the_fields_section_states_its_window_and_its_bounds() {
             max: Some(1000.0),
             last: Some(1000.0),
             values: None,
+            absent: 0,
+            unknown: 0,
         }],
         findings: vec![],
     })));

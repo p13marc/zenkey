@@ -2065,6 +2065,40 @@ impl World {
         send(app, Message::Bus(BusMsg::Tick(Arc::new(tick))));
     }
 
+    /// One tick carrying `samples` alone, each `(key, payload, encoding)`
+    /// at the tick's instant, beside no feed of the world's: what a scene
+    /// that hand-writes a heartbeat and its members sends (#990 V6).
+    pub fn tick_samples(&mut self, app: &mut Zengui, samples: &[(&str, Vec<u8>, &str)]) {
+        let n = self.ticks;
+        let at = self.t0 + Duration::from_millis(250) * (n + 1);
+        let views: Vec<Arc<SampleView>> = samples
+            .iter()
+            .map(|(key, body, encoding)| {
+                self.stats.record(key, body.len(), None, at, None, None);
+                sample(key, body, encoding, at)
+            })
+            .collect();
+        let tick = BusTick {
+            tree: Arc::new(KeyTreeSnapshot::build(&self.stats)),
+            samples: views,
+            lagged: 0,
+            coalesced: 0,
+            keys: samples.len(),
+            keys_evicted: 0,
+            keys_unwatched: 0,
+            watched: Arc::from(vec!["**".to_string()]),
+            seeded: Vec::new(),
+            merge_evicted: 0,
+            totals: WatchedTotals {
+                samples: samples.len() as u64,
+                bytes: samples.iter().map(|s| s.1.len() as u64).sum(),
+                rate_hz: 4.0,
+            },
+        };
+        self.ticks += 1;
+        send(app, Message::Bus(BusMsg::Tick(Arc::new(tick))));
+    }
+
     pub fn ticks(&mut self, app: &mut Zengui, n: u32) {
         for _ in 0..n {
             self.tick(app);

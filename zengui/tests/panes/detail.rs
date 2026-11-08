@@ -840,6 +840,7 @@ fn inspector<'a>(
         fields: Box::leak(Box::default()),
         why: Box::leak(Box::default()),
         consumers: Box::leak(Box::default()),
+        freshness: None,
         sp: sp(),
     }
 }

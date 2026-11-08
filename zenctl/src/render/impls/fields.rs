@@ -55,6 +55,18 @@ impl Render for FieldReport {
                 // Absent = the domain outgrew the cap — stated, not blank.
                 None => detail.push("values: not a small domain".to_string()),
             }
+            // A frame record's field carried absent, or unknown to its
+            // reader (observer §7.6; #990 V2c): accounted for, never
+            // vanished.
+            if r.absent > 0 {
+                detail.push(format!(
+                    "absent in {} record(s), its owner's word",
+                    r.absent
+                ));
+            }
+            if r.unknown > 0 {
+                detail.push(format!("unknown in {} record(s) to this reader", r.unknown));
+            }
             grid.row([
                 Cell::text(format!("{}/{}", r.seen, r.documents)),
                 Cell::text(format!("{} · {}", r.key, r.path)),

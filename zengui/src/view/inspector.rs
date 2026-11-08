@@ -105,6 +105,10 @@ pub struct InspectorData<'a> {
     pub why: &'a super::why::WhyState,
     /// The roles bound to the subject (#224; R3 since #614, FL8b).
     pub consumers: &'a super::consumers::ConsumersState,
+    /// The window's `freshness.v2` view of the subject key's owner
+    /// interface (#990 V6): a heartbeat's, or a collection member's; `None`
+    /// where it follows none, and during a replay.
+    pub freshness: Option<&'a crate::freshness::Owner>,
     /// The dock's resolved spacing grid (#192) — Comfortable by default: a
     /// form wants air.
     pub sp: Spacing,
@@ -133,6 +137,64 @@ fn nothing_selected<'a>() -> Column<'a, Message> {
              its own.",
         ),
     ]
+}
+
+/// The window's `freshness.v2` view of an owner interface (#990 V6;
+/// freshness.v2 §2.5, §5): its heartbeats read, how many after one lost and
+/// how many diverged, and at the latest, each collection vouched (with how
+/// many members), diverged from this window's view, or absent. Every line
+/// is the reader's word, never a finding about the owner.
+fn freshness_section<'a>(owner: &'a crate::freshness::Owner, sp: Spacing) -> Column<'a, Message> {
+    use crate::freshness::Section;
+    let mut col = Column::new().spacing(sp.xs);
+    col = col.push(kit::eyebrow(
+        "FRESHNESS · THIS WINDOW'S VIEW (freshness.v2)",
+    ));
+    col = col.push(kit::muted(format!(
+        "{} heartbeat(s) read: {} after one lost, {} diverged from this window's view{} — \
+         the reader's word, no finding about the owner (freshness.v2 §5)",
+        owner.heartbeats,
+        owner.lost,
+        owner.diverged,
+        if owner.unread > 0 {
+            format!("; {} not read", owner.unread)
+        } else {
+            String::new()
+        }
+    )));
+    let Some(last) = &owner.last else {
+        col = col.push(kit::muted(
+            "no heartbeat read yet: its members are heard, its owner's word on them is not",
+        ));
+        return col;
+    };
+    col = col.push(kit::caption(format!(
+        "latest heartbeat: run {}, seq {}{}",
+        last.stamp.run.hex(),
+        last.stamp.seq.get(),
+        if last.lost {
+            " — a heartbeat lost before it (freshness.v2 §2.5)"
+        } else {
+            ""
+        }
+    )));
+    for (resource, section) in &last.sections {
+        let word = match section {
+            Section::Vouched(n) => kit::data_chip(format!("vouched · {n} member(s) confirmed")),
+            Section::Diverged => kit::status_chip(
+                crate::view::theme::Tone::Caution,
+                "diverged from this window's view",
+            ),
+            Section::Absent => kit::data_chip("absent · not available"),
+            Section::NotFollowed => kit::data_chip("not followed"),
+        };
+        col = col.push(
+            iced::widget::row![kit::caption(resource.clone()).font(face::MONO), word]
+                .spacing(sp.xs)
+                .align_y(iced::Alignment::Center),
+        );
+    }
+    col
 }
 
 /// A prefix names a subtree, and a subtree has no value, no history and no
@@ -179,6 +241,11 @@ fn key_sections<'a>(key: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> 
     // #614, FL8a) — the type-subject arm the contract answers.
     if let Some(section) = type_section(d) {
         col = col.push(section);
+    }
+    // The window's freshness.v2 view of the key's owner (#990 V6): each
+    // collection vouched, diverged or absent at its latest heartbeat.
+    if let Some(owner) = d.freshness {
+        col = col.push(freshness_section(owner, d.sp));
     }
 
     // The bounded field observation (#223) and the why ladder (#214): both

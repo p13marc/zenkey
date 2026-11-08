@@ -58,6 +58,17 @@ Claude Code loads this file when working in `zengui/`; the root `CLAUDE.md` is t
   `--timeout` the face's `reply_timeout_ms`; shots scene `across-face`
   (`World::across`, a world publishing what the scope reaches, no presence
   sent);
+  the window's own `freshness.v2` reading (#990 V6, freshness.v2 §2.5,
+  §5): `zengui::freshness::Book` on `Observation::freshness`, one
+  `freshness::View` per owner interface (made at its first collection
+  member the lens resolves to a revision that uses the profile, following
+  every collection, at most `MAX_OWNERS`), fed by each live tick's samples
+  at their arrival (`update::bus::apply_tick`, after `ensure_identity`), a
+  heartbeat applied to the interface it covers; the Inspector of a
+  heartbeat or a member key (`InspectorData::freshness`, none in a replay)
+  says the heartbeats read, lost and diverged, and each collection vouched,
+  "diverged from this window's view" or absent at the latest, the reader's
+  word; shots scene `inspector-freshness` (`World::tick_samples`);
   `--registry` is refused by name, exit 2, and a context's stored
   `registry` rides a save untouched. **Presence** runs on a monitor of its
   own on a watch session of its own, in no namespace on the wire keys (`presence_link.rs`, the zenwatch pattern,

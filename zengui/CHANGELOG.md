@@ -4,6 +4,14 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — a heartbeat's collections, vouched, lost or diverged (#990 V6)
+
+No rule changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| the Inspector of a heartbeat or a collection member: the heartbeat's body as its value | also FRESHNESS · THIS WINDOW'S VIEW: the heartbeats read, how many after one lost and how many diverged, and at the latest each collection vouched (with its members confirmed), "diverged from this window's view", absent or not followed | the window's own `freshness.v2` view per owner interface, fed by the live ticks (`zengui::freshness::Book`); the reader's word, no finding about the owner (freshness.v2 §5); none during a replay; shots scene `inspector-freshness` |
+
 ## Unreleased (`main`, zk2) — across a constrained face (#990 V7)
 
 No rule changed.

@@ -336,6 +336,13 @@ fn inspector<'a>(
         fields: &slot.fields,
         why: &slot.why,
         consumers: &slot.consumers,
+        // The live window's views (#990 V6): a replay's capture is another
+        // world than they describe.
+        freshness: slot
+            .current
+            .key()
+            .filter(|_| work.replay.replay.is_none())
+            .and_then(|k| obs.freshness.of_key(k)),
         sp,
     })
 }
