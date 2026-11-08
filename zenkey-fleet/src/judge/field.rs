@@ -170,8 +170,32 @@ pub struct PathStats {
     /// The domain outgrew the cap (or carried values too large to track) —
     /// the set above is then cleared, not silently partial.
     pub distinct_overflow: bool,
+    /// Frame records that carried the field absent: its owner's word, its
+    /// presence bit 0 (core §7.6, observer §7.6; #990 V2c). Accounted for,
+    /// never missing: a field a record carries absent has not vanished.
+    pub absent: u64,
+    /// Frame records whose reader could not tell the field's value (a
+    /// frame lost before it, a run change, a deadband with no value yet;
+    /// observer §7.6): neither present nor absent, and never vanished.
+    pub unknown: u64,
+    /// The key's document-sample index at the last record that carried the
+    /// field absent or unknown: accounted for, so vanished is measured
+    /// from here too.
+    last_accounted_sample: u64,
     /// Fingerprint of the last observed value, for change detection.
     last_fingerprint: Option<u64>,
+}
+
+/// One field of one frame record, as its reader read it (observer §7.6;
+/// #990 V2c): what [`FieldObservation::observe_record`] folds.
+#[derive(Debug, Clone, Copy)]
+pub enum RecordField<'v> {
+    /// Known, or within its deadband: its value.
+    Value(&'v Value),
+    /// Carried absent by the record (its presence bit 0).
+    Absent,
+    /// Its value unknown to the reader.
+    Unknown,
 }
 
 impl PathStats {
@@ -190,8 +214,28 @@ impl PathStats {
             all_integral: true,
             distinct: BTreeSet::new(),
             distinct_overflow: false,
+            absent: 0,
+            unknown: 0,
+            last_accounted_sample: sample,
             last_fingerprint: None,
         }
+    }
+
+    /// A frame record that carried the field absent, or whose reader could
+    /// not tell its value: accounted for at `sample`, never missing.
+    fn account(&mut self, sample: u64, field: RecordField<'_>) {
+        match field {
+            RecordField::Absent => self.absent += 1,
+            RecordField::Unknown => self.unknown += 1,
+            RecordField::Value(_) => return,
+        }
+        self.last_accounted_sample = sample;
+    }
+
+    /// The key's document-sample index the path was last present or
+    /// accounted for at: what "absent since" is measured against.
+    pub fn last_accounted(&self) -> u64 {
+        self.last_seen_sample.max(self.last_accounted_sample)
     }
 
     fn observe(&mut self, at_s: f64, sample: u64, value: &Value) {
@@ -278,6 +322,36 @@ impl FieldObservation {
                 }
                 // The bound: refused, counted, exemplified — never silent.
                 None => self.dropped.push_with(|| format!("{key} · {path}")),
+            }
+        }
+    }
+
+    /// Feed one frame record of `key` (core §7.7, observer §7.6; #990 V2c):
+    /// a document sample whose paths are its fields, each as its reader
+    /// read it. A field with a value is observed as a path; one the record
+    /// carries absent, or whose value the reader cannot tell, is accounted
+    /// for and counted apart ([`PathStats::absent`], [`PathStats::unknown`]),
+    /// so it is never read as missing, and never vanished.
+    pub fn observe_record(&mut self, key: &str, at_s: f64, fields: &[(&str, RecordField<'_>)]) {
+        let entry = self.keys.entry(key.to_string()).or_default();
+        entry.documents += 1;
+        let sample = entry.documents;
+        for (path, field) in fields {
+            if !entry.paths.contains_key(*path) {
+                // The bound: refused, counted, exemplified — never silent.
+                if self.paths >= self.max_paths {
+                    self.dropped.push_with(|| format!("{key} · {path}"));
+                    continue;
+                }
+                self.paths += 1;
+                entry
+                    .paths
+                    .insert((*path).to_owned(), PathStats::new(at_s, sample));
+            }
+            let stats = entry.paths.get_mut(*path).expect("held or inserted");
+            match field {
+                RecordField::Value(v) => stats.observe(at_s, sample, v),
+                other => stats.account(sample, *other),
             }
         }
     }
@@ -615,7 +689,7 @@ pub struct KeyFieldContext {
 /// consecutive trailing document samples. A path never seen is not vanished
 /// — that would be rendering "not asked" as "no" (O4).
 pub fn judge_vanished(stats: &PathStats, key_documents: u64) -> bool {
-    stats.seen > 0 && key_documents.saturating_sub(stats.last_seen_sample) >= VANISHED_MIN_ABSENT
+    stats.seen > 0 && key_documents.saturating_sub(stats.last_accounted()) >= VANISHED_MIN_ABSENT
 }
 
 /// `field-stuck`: a purely numeric path, zero changes, observed at least
@@ -668,7 +742,7 @@ pub fn judge_fields(
                          optional validates without it by construction",
                         stats.seen,
                         fields.documents,
-                        fields.documents - stats.last_seen_sample
+                        fields.documents - stats.last_accounted()
                     ),
                 });
             }
@@ -762,6 +836,9 @@ pub async fn run_field_over(
     // declares (O6: bounded with the path table's keys).
     let mut ctx: BTreeMap<String, KeyFieldContext> = BTreeMap::new();
     let mut declared_cache: BTreeMap<(String, String), Option<DeclaredPaths>> = BTreeMap::new();
+    // One reader per frame key for the window (observer §7.6; #990 V2c): a
+    // frame lost before another turns the fields it omits unknown.
+    let mut readers = crate::model::frame::Readers::new();
 
     // One timer for the whole window, not one per iteration (#346).
     let window_over = tokio::time::sleep_until(deadline);
@@ -788,7 +865,21 @@ pub async fn run_field_over(
                     continue;
                 }
                 let encoding = (!s.encoding.is_empty()).then_some(s.encoding.as_str());
-                let checked = lens.check(&s.key, Member::Type, encoding, &bytes);
+                let checked =
+                    lens.check_frames(&s.key, Member::Type, encoding, &bytes, None, &mut readers);
+                // A frame (core §7.7): each record a document sample, its
+                // fields as its reader read them (#990 V2c).
+                if let Some(records) = frame_records(&checked.rendering.rendered) {
+                    let at_s = opened.elapsed().as_secs_f64();
+                    for fields in &records {
+                        obs.observe_record(&s.key, at_s, fields);
+                    }
+                    if !ctx.contains_key(s.key.as_str()) {
+                        let c = context_of(lens, &s.key, &mut declared_cache);
+                        ctx.insert(s.key.clone(), c);
+                    }
+                    continue;
+                }
                 let doc = match &checked.rendering.rendered {
                     Rendered::Value { value, .. } => Some(value.clone()),
                     Rendered::Structural { value, .. } => {
@@ -832,6 +923,8 @@ pub async fn run_field_over(
                 // `None` = the domain outgrew the cap; `Some` is total.
                 values: (!stats.distinct_overflow)
                     .then(|| stats.distinct.iter().cloned().collect()),
+                absent: stats.absent,
+                unknown: stats.unknown,
             });
         }
     }
@@ -853,6 +946,49 @@ pub async fn run_field_over(
         rows,
         findings,
     })
+}
+
+/// A frame's reading (core §7.7, observer §7.6; #990 V2c), each record's
+/// fields as its reader read them: a value where known or within its
+/// deadband, absent where the record carries it absent, unknown where the
+/// reader cannot tell. `None` for any rendering that is no frame's.
+fn frame_records(rendered: &Rendered) -> Option<Vec<Vec<(&str, RecordField<'_>)>>> {
+    let Rendered::Value {
+        declared, value, ..
+    } = rendered
+    else {
+        return None;
+    };
+    if !crate::model::frame::is_frame_declared(declared) {
+        return None;
+    }
+    let records = value.get("records")?.as_array()?;
+    Some(
+        records
+            .iter()
+            .map(|rec| {
+                rec.get("fields")
+                    .and_then(Value::as_object)
+                    .map(|fields| {
+                        fields
+                            .iter()
+                            .map(|(name, f)| {
+                                let read = match (
+                                    f.get("state").and_then(Value::as_str),
+                                    f.get("value"),
+                                ) {
+                                    (Some("known" | "within"), Some(v)) => RecordField::Value(v),
+                                    (Some("absent"), _) => RecordField::Absent,
+                                    _ => RecordField::Unknown,
+                                };
+                                (name.as_str(), read)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            })
+            .collect(),
+    )
 }
 
 /// One key's judge context: its declared type and the paths that type
@@ -934,6 +1070,102 @@ mod tests {
         obs.observe("k", 1.0, Some(&json!({"f00": 9})));
         let (_, fields) = obs.iter().next().unwrap();
         assert_eq!(fields.paths["f00"].seen, 2);
+    }
+
+    /// #990 V2c (observer §7.6): `rssi` known in two records, then carried
+    /// absent in four and unknown to the reader in four. Each is accounted
+    /// for, counted apart, and never read as missing: not vanished, where
+    /// four documents without it would be.
+    #[test]
+    fn a_frame_records_absent_or_unknown_field_never_vanishes() {
+        let mut obs = FieldObservation::new(64);
+        let v = json!(-71);
+        let seq = json!(1);
+        let mut at = 0.0;
+        for rssi in [RecordField::Value(&v), RecordField::Value(&v)]
+            .into_iter()
+            .chain(std::iter::repeat_n(RecordField::Absent, 4))
+            .chain(std::iter::repeat_n(RecordField::Unknown, 4))
+        {
+            obs.observe_record(
+                "k",
+                at,
+                &[("seq", RecordField::Value(&seq)), ("rssi", rssi)],
+            );
+            at += 1.0;
+        }
+        let (_, fields) = obs.iter().next().unwrap();
+        let rssi = &fields.paths["rssi"];
+        assert_eq!((rssi.seen, rssi.absent, rssi.unknown), (2, 4, 4));
+        assert_eq!(fields.documents, 10, "each record a document sample");
+        assert!(
+            !judge_vanished(rssi, fields.documents),
+            "a field a record carries absent, or its reader cannot tell, has not vanished"
+        );
+        let findings = judge_fields(&obs, 10.0, &BTreeMap::new());
+        assert!(
+            findings.iter().all(|f| f.check != FieldCheck::Vanished),
+            "{findings:?}"
+        );
+        // The same field missing from four documents of no frame vanishes.
+        let mut plain = FieldObservation::new(64);
+        observe_docs(
+            &mut plain,
+            "k",
+            &[
+                (0.0, json!({"seq": 1, "rssi": -71})),
+                (1.0, json!({"seq": 2, "rssi": -71})),
+                (2.0, json!({"seq": 3})),
+                (3.0, json!({"seq": 4})),
+                (4.0, json!({"seq": 5})),
+                (5.0, json!({"seq": 6})),
+            ],
+        );
+        let (_, fields) = plain.iter().next().unwrap();
+        assert!(judge_vanished(&fields.paths["rssi"], fields.documents));
+    }
+
+    /// A frame's reading is read record by record (#990 V2c): each field by
+    /// its state, a value where known or within, absent, else unknown; a
+    /// rendering that is no frame's keeps the document reading.
+    #[test]
+    fn a_frame_reading_is_read_record_by_record() {
+        let reading = json!({
+            "run": "0003", "seq": 9, "follows": "gap", "lost": 2,
+            "records": [
+                {"seq": 9, "time": "measured", "fields": {
+                    "rssi": {"state": "known", "value": -71},
+                    "snr": {"state": "within", "value": "7.5", "delta": "1"},
+                    "lane": {"state": "absent"},
+                    "queue": {"state": "unknown", "why": "gap"}
+                }}
+            ]
+        });
+        let frame = Rendered::Value {
+            declared: "zk2c frame of packed:Readings".into(),
+            value: reading.clone(),
+            epoch_assumed: None,
+            dated: None,
+            bounds: None,
+        };
+        let records = frame_records(&frame).expect("a frame's reading");
+        assert_eq!(records.len(), 1);
+        let by: BTreeMap<&str, RecordField<'_>> = records[0].iter().copied().collect();
+        assert!(matches!(by["rssi"], RecordField::Value(v) if v == &json!(-71)));
+        assert!(matches!(by["snr"], RecordField::Value(v) if v == &json!("7.5")));
+        assert!(matches!(by["lane"], RecordField::Absent));
+        assert!(matches!(by["queue"], RecordField::Unknown));
+        let record = Rendered::Value {
+            declared: "packed:Readings".into(),
+            value: reading,
+            epoch_assumed: None,
+            dated: None,
+            bounds: None,
+        };
+        assert!(
+            frame_records(&record).is_none(),
+            "no frame's: the document reading"
+        );
     }
 
     /// Vanished needs SEEN then absent: a path never observed is not a

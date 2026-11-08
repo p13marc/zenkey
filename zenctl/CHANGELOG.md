@@ -6,6 +6,15 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `field` over a frame's records (#990 V2c)
+
+No rule changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| `field` on a frame resource: the frame's reading as one document, its records an array the path table never entered | each record a document sample, read through one reader per key for the window (observer §7.6): each field a path, its value where known or within its deadband | a sample that is no frame reads as before |
+| — | a path row's `absent` (records that carried the field absent, its presence bit 0) and `unknown` (records whose reader could not tell its value, after a lost frame or a run change), each omitted at zero; the table says "absent in n record(s), its owner's word" and "unknown in n record(s) to this reader" | neither is ever read as missing: `field-vanished` measures from the last record that carried the field, whatever its state |
+
 ## Unreleased (`main`, zk2) — a put that carries no event (zk2py round 107)
 
 Core 0.104 §2.6 (F-514): a consumer delivers no put on an events key

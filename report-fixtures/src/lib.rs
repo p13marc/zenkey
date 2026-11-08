@@ -1703,6 +1703,8 @@ pub fn field_report() -> FieldReport {
                 max: Some(1500.0),
                 last: Some(1500.0),
                 values: Some(vec!["1500".into()]),
+                absent: 0,
+                unknown: 0,
             },
             FieldRow {
                 key: key.clone(),
@@ -1717,6 +1719,8 @@ pub fn field_report() -> FieldReport {
                 max: None,
                 last: None,
                 values: Some(vec!["\"e1000\"".into(), "\"virtio\"".into()]),
+                absent: 0,
+                unknown: 0,
             },
         ],
         findings: vec![FieldFinding {
