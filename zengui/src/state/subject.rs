@@ -167,7 +167,7 @@ impl SubjectSlot {
     pub(crate) fn refresh_series(
         &mut self,
         identities: &crate::keyfacts::IdentityCache,
-        epoch_of: &dyn Fn(&zenkey_model::grammar::Addr) -> zenkey_fleet::DeploymentEpoch,
+        epoch_of: &dyn Fn(&zenkey_model::grammar::Addr) -> zenkey_fleet::model::deployment::Dating,
     ) {
         self.advance_metric(identities);
         self.series = self.series_data(identities, epoch_of);
@@ -218,7 +218,7 @@ impl SubjectSlot {
     fn series_data(
         &self,
         identities: &crate::keyfacts::IdentityCache,
-        epoch_of: &dyn Fn(&zenkey_model::grammar::Addr) -> zenkey_fleet::DeploymentEpoch,
+        epoch_of: &dyn Fn(&zenkey_model::grammar::Addr) -> zenkey_fleet::model::deployment::Dating,
     ) -> Option<view::detail::SeriesData> {
         let rec = self.history.as_ref()?;
         let resolved = identities.get(&rec.key).and_then(|r| r.resolved.as_ref());
@@ -422,7 +422,7 @@ impl SubjectState {
     pub(crate) fn pin_current(
         &mut self,
         identities: &crate::keyfacts::IdentityCache,
-        epoch_of: &dyn Fn(&zenkey_model::grammar::Addr) -> zenkey_fleet::DeploymentEpoch,
+        epoch_of: &dyn Fn(&zenkey_model::grammar::Addr) -> zenkey_fleet::model::deployment::Dating,
     ) -> SlotId {
         let id = self.next_slot;
         self.next_slot = self.next_slot.next();
@@ -507,7 +507,9 @@ mod tests {
         sub.follow.current = Subject::Key(key.into());
         sub.follow.history = Some(crate::history::HistoryRecorder::new(key, 10));
 
-        let pin = sub.pin_current(&dep.identity, &|_| zenkey_fleet::DeploymentEpoch::Assumed);
+        let pin = sub.pin_current(&dep.identity, &|_| {
+            zenkey_fleet::DeploymentEpoch::Assumed.into()
+        });
         assert!(pin.is_pin());
         let pinned = sub.slot(pin).expect("just minted");
         assert_eq!(pinned.current.key(), Some(key));
@@ -532,9 +534,13 @@ mod tests {
     fn slot_ids_are_not_reused() {
         let dep = dep();
         let mut sub = SubjectState::default();
-        let first = sub.pin_current(&dep.identity, &|_| zenkey_fleet::DeploymentEpoch::Assumed);
+        let first = sub.pin_current(&dep.identity, &|_| {
+            zenkey_fleet::DeploymentEpoch::Assumed.into()
+        });
         assert!(sub.unpin(first));
-        let second = sub.pin_current(&dep.identity, &|_| zenkey_fleet::DeploymentEpoch::Assumed);
+        let second = sub.pin_current(&dep.identity, &|_| {
+            zenkey_fleet::DeploymentEpoch::Assumed.into()
+        });
         assert_ne!(first, second);
         assert!(sub.slot(first).is_none());
     }

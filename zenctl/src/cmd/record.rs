@@ -5,7 +5,7 @@
 //! tooling guide's O6). Progress rides stderr; the final counts are the
 //! report's job.
 //!
-//! The capture is `.zrec` version 3 (the guide's §5): taken on a session in
+//! The capture is `.zrec` version 4 (the guide's §5): taken on a session in
 //! no namespace, so rows keep their full wire keys; the header carries the
 //! namespace the operator stated (`--namespace`, alias `--base`: zk2's base
 //! is the namespace), the exact selectors, and the verbatim chunks none of
@@ -13,7 +13,10 @@
 //! `<ns>/zk2/**`, and says what that excludes; `--explicit` adds the
 //! explicit kinds by name, `<ns>/zk2/*/*/*/@stream/**` and
 //! `<ns>/zk2/*/*/*/@state/**` (#924), and the header's `selectors` and
-//! `excluded` say so.
+//! `excluded` say so. Version 4's header states what served the scope as
+//! the capture began (#990 V4): one presence read's revisions, each with
+//! the catalog its descriptor names, or across a face the contracts in
+//! hand; their bundles unless `--no-bundles`; and the one `--catalog`.
 //!
 //! `--on <RULE> --pre <SECS>` (#218) is the triggered form: nothing is
 //! written until a rule fires, and then the file carries the state
@@ -56,19 +59,27 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
         preamble,
         clocks_synced,
         overwrite,
+        no_bundles,
         contracts,
         ns: _,
     } = cli;
     // Before anything else that could take time: an existing capture is
     // refused unless --overwrite (#514), and no session opens to find out.
     let mode = super::output_mode(&out, overwrite)?;
+    // One catalog, stated in the header (`.zrec` version 4): an owner
+    // writes under one (core §8.6), so two are refused.
+    let catalog = zk2::load_catalogs(&contracts)?
+        .one()
+        .map_err(|e| crate::exit::unaskable!("record --catalog: {e}"))?
+        .cloned();
     // The contracts are read by the rules `--on` judges, and across a face
     // by the scope itself; a plain capture keeps payloads as bytes.
-    let contracts = if on.is_empty() && across.across_face.is_empty() {
-        zenkey_fleet::ContractSet::new()
-    } else {
-        zk2::load_contracts(&contracts)?
-    };
+    let contracts =
+        if on.is_empty() && across.across_face.is_empty() && contracts.contracts.is_empty() {
+            zenkey_fleet::ContractSet::new()
+        } else {
+            zk2::load_contracts(&contracts)?
+        };
     let face = zk2::FaceScope::of(&across, &contracts, dep.namespace(), zk2::Reads::Samples)?;
     let dep = match &face {
         Some(f) => f.deployment(dep),
@@ -79,7 +90,22 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
         eprintln!("{}", face.note(&selectors));
     }
     if on.is_empty() {
-        return run_inner(&selectors, &out, mode, for_secs, count, &dep, face.as_ref()).await;
+        let served = Served {
+            catalog,
+            contracts: &contracts,
+            bundles: !no_bundles,
+        };
+        return run_inner(
+            &selectors,
+            &out,
+            mode,
+            for_secs,
+            count,
+            &dep,
+            face.as_ref(),
+            served,
+        )
+        .await;
     }
     // `requires = "on"` on `--pre`, and `requires = "pre"` on `--on`: clap
     // has already refused one without the other, so this is the type's
@@ -151,6 +177,110 @@ fn off_namespace_hint(sel: &str, namespace: &str) -> Option<String> {
     })
 }
 
+/// What a version-4 header states of the capture (the tooling guide's
+/// §5): the catalog given, and where the revisions and bundles come from.
+struct Served<'a> {
+    catalog: Option<zenkey_fleet::DeploymentCatalog>,
+    contracts: &'a zenkey_fleet::ContractSet,
+    bundles: bool,
+}
+
+/// The revisions that served the capture's scope as it began, and their
+/// bundles (§5): across a face, the contracts in hand for each address
+/// read, no descriptor naming a catalog; else one presence read, each
+/// instance its scope reaches with its descriptor's revisions and catalog,
+/// each bundle retrieved and verified (core §8.4), one that could not be
+/// left out.
+async fn served(
+    dep: &Deployment,
+    selectors: &[String],
+    face: Option<&zk2::FaceScope>,
+    served: &Served<'_>,
+) -> Result<ZrecHeader> {
+    use zenkey_fleet::report::ZrecRevision;
+    let mut revisions = Vec::new();
+    let mut bundles = Vec::new();
+    match face {
+        Some(face) => {
+            for addr in face.addrs() {
+                for r in served.contracts.iter() {
+                    revisions.push(ZrecRevision {
+                        address: addr.to_string(),
+                        iface: r.iface().to_string(),
+                        fingerprint: r.fingerprint().to_string(),
+                        named: None,
+                    });
+                    bundles.push((r.fingerprint().clone(), r.bundle().to_bytes()));
+                }
+            }
+        }
+        None => {
+            let ns_session = dep.session().await?;
+            let store = zk2::store(dep, served.contracts);
+            let lens = zk2::read_lens(dep, &ns_session, &store).await;
+            if lens.is_none() {
+                eprintln!(
+                    "  presence did not read: the header names no revision, so this capture \
+                     reads offline only with --contracts (tooling guide §5)"
+                );
+            }
+            if let Some(catalog) = lens {
+                let reached = |addr: &str| {
+                    let key =
+                        zenkey_fleet::with_namespace(dep.namespace(), format!("zk2/{addr}/**"));
+                    zenoh::key_expr::KeyExpr::new(key).is_ok_and(|k| {
+                        selectors.iter().any(|s| {
+                            zenoh::key_expr::KeyExpr::new(s.as_str())
+                                .is_ok_and(|s| s.intersects(&k))
+                        })
+                    })
+                };
+                let mut wanted = Vec::new();
+                for d in catalog.descriptors().filter(|d| reached(&d.service)) {
+                    for e in &d.interfaces {
+                        revisions.push(ZrecRevision {
+                            address: d.service.clone(),
+                            iface: e.iface.clone(),
+                            fingerprint: e.contract.clone(),
+                            named: Some(d.catalog.clone()),
+                        });
+                        if let (Ok(i), Ok(f)) = (
+                            e.iface.parse::<zenkey_model::grammar::IfaceId>(),
+                            zenkey_model::canonical::Fingerprint::parse(&e.contract),
+                        ) {
+                            wanted.push((i, f));
+                        }
+                    }
+                }
+                wanted.sort();
+                wanted.dedup();
+                for (state, (_, fp)) in store
+                    .fetch_all(&ns_session, &wanted)
+                    .await
+                    .into_iter()
+                    .zip(&wanted)
+                {
+                    if let Ok(zenkey_fleet::ContractState::Held(r)) = state {
+                        bundles.push((fp.clone(), r.bundle().to_bytes()));
+                    } else if served.bundles {
+                        eprintln!(
+                            "  bundle {fp} was not retrieved: it is left out, and a reader \
+                             needs it from --contracts (tooling guide §5)"
+                        );
+                    }
+                }
+            }
+        }
+    }
+    let header = ZrecHeader::capture(selectors.to_vec(), dep.namespace());
+    Ok(header.served_by(
+        served.catalog.as_ref(),
+        revisions,
+        served.bundles.then_some(bundles),
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn run_inner(
     selectors: &[String],
     out: &str,
@@ -159,16 +289,19 @@ async fn run_inner(
     count: u64,
     dep: &Deployment,
     face: Option<&zk2::FaceScope>,
+    served_by: Served<'_>,
 ) -> Result<()> {
     let duration = match for_secs {
         Some(secs) => Some(super::positive_secs("--for", secs)?),
         None => None,
     };
-    let header = ZrecHeader::capture(selectors.to_vec(), dep.namespace());
     // The session first (#514): a bus that never answered leaves no file
     // behind — a header-only capture would only be refused by the re-run.
     // In no namespace: the rows keep their wire keys whole.
     let session = dep.link().session().await?;
+    // What served the scope as it began (`.zrec` version 4): presence read
+    // once, or the contracts across a face.
+    let header = served(dep, selectors, face, &served_by).await?;
     // Both halves off the runtime (#332): the create through `tokio::fs`,
     // and every row after it on the blocking pool behind the sink's queue.
     // Never over an existing capture (#514): `output_mode` refused one

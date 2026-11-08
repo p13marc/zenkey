@@ -344,6 +344,15 @@ pub(crate) struct EchoArgs {
     /// Stop after this many samples (0 = run until interrupted).
     #[arg(long, value_name = "N", default_value_t = 0)]
     pub(crate) count: usize,
+    /// Print a `.zrec` capture through the offline lens, opening no session
+    /// (the tooling guide's §5): a version-4 file resolves its keys through
+    /// its header's revisions and bundles, and dates its times under its
+    /// catalog, or under --catalog when that is the header's or a successor
+    /// of it (else refused, exit 2). --contracts holds what the header does
+    /// not carry; with --across-face a key no revision of the header serves
+    /// reads through them, as across a face.
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["selector", "explicit", "rate"])]
+    pub(crate) from: Option<PathBuf>,
     #[command(flatten)]
     pub(crate) contracts: ContractArgs,
     #[command(flatten)]
@@ -778,7 +787,7 @@ pub(crate) enum Command {
     Field(FieldArgs),
     /// Capture wire selectors' traffic to a .zrec file.
     ///
-    /// A capture (`.zrec` version 3, the tooling guide's §5), taken through
+    /// A capture (`.zrec` version 4, the tooling guide's §5), taken through
     /// the Monitor on a session in no namespace, so rows keep their full wire
     /// keys and their payloads lossless (base64 `bytes`), with the QoS axes
     /// they rode with and the stamp they carried, informatively. The header
@@ -2825,8 +2834,15 @@ pub(crate) struct RecordArgs {
     /// --clocks-synced`. Without it, those rules read unobservable.
     #[arg(long, requires = "on")]
     pub(crate) clocks_synced: bool,
-    /// With --on: revisions known offline, for the rules that judge a
-    /// payload or a QoS against its contract.
+    /// Leave the revisions' bundles out of the header (`.zrec` version 4):
+    /// a reader of the file then needs --contracts to decode it.
+    #[arg(long)]
+    pub(crate) no_bundles: bool,
+    /// Revisions known offline: across a face, the scope and the header's
+    /// revisions and bundles; with --on, for the rules that judge a payload
+    /// or a QoS against its contract. --catalog (one) is stated in the
+    /// header, the catalog the capture's times count from (`.zrec` version
+    /// 4); two are refused.
     #[command(flatten)]
     pub(crate) contracts: ContractArgs,
     #[command(flatten)]

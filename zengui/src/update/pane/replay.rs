@@ -398,12 +398,15 @@ fn open(
     work.echo.echo.clear();
     for slot in sub.all_mut() {
         slot.history = None;
-        // A replay's lens holds no catalog: its epoch is assumed.
-        slot.refresh_series(&dep.identity, &|_| zenkey_fleet::DeploymentEpoch::Assumed);
+        // Until the replay's lens lands its catalogs, its epoch is assumed.
+        slot.refresh_series(&dep.identity, &|_| {
+            zenkey_fleet::DeploymentEpoch::Assumed.into()
+        });
     }
     state.resolve_offline(
         dep.namespace(),
         dep.contracts.as_ref().map(|c| Arc::clone(&c.set)),
+        dep.contracts.as_ref().map(|c| Arc::clone(&c.catalogs)),
     );
     tree.replay_skeleton = Some(Arc::clone(&state.lens.skeleton));
     tree.replay_namespace = Some(state.lens.namespace.clone());

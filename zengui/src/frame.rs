@@ -93,7 +93,7 @@ pub fn read(
     resolved: &Resolved,
     key: &str,
     ring: &HistoryRing,
-    epoch: zenkey_fleet::DeploymentEpoch,
+    epoch: zenkey_fleet::model::deployment::Dating,
 ) -> Option<FrameRead> {
     let contract = resolved.revision.contract();
     let resource = resolved.resource();

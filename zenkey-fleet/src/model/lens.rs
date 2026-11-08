@@ -39,8 +39,9 @@ use zenkey_model::template::{Bindings, resolve};
 
 use crate::model::catalog::{Catalog, ContractSet, ContractState, Contracts, Revision, zid_value};
 use crate::model::choice::{Choice, Heard, Target};
-use crate::model::deployment::{Catalogs, Epoch, Stated};
+use crate::model::deployment::{Catalogs, Dating, Epoch, Stated};
 use crate::model::inband;
+use crate::model::recorded::Recorded;
 use crate::model::render::Member;
 use crate::model::structural::{structural, structural_value};
 use crate::report::{
@@ -59,6 +60,8 @@ pub struct Lens<'a> {
     generation: u64,
     /// The deployment catalogs given (`--catalog`, core §8.6).
     deployment: Option<&'a Catalogs>,
+    /// A `.zrec` version-4 header in presence's place (§5).
+    recorded: Option<&'a Recorded>,
 }
 
 /// A key resolved down to its resource (rungs 1–6).
@@ -134,7 +137,18 @@ impl<'a> Lens<'a> {
             held: 0,
             generation: 0,
             deployment: None,
+            recorded: None,
         }
+    }
+
+    /// A capture's header in presence's place (the tooling guide's §5,
+    /// version 4): the address and interface pairs it lists have the
+    /// revisions it names, and a pair it does not list has no provider,
+    /// unless [`Lens::offline`] reads it across a face. Its owners' named
+    /// catalogs say their epochs ([`Lens::dating_of`]).
+    pub fn recorded(mut self, recorded: &'a Recorded) -> Lens<'a> {
+        self.recorded = Some(recorded);
+        self
     }
 
     /// The deployment catalogs the tool was given (`--catalog`, core
@@ -155,11 +169,20 @@ impl<'a> Lens<'a> {
     /// when they name none; with no descriptor in hand, the catalogs'
     /// epoch, the deployment's word; else 0, assumed.
     pub fn epoch_of(&self, addr: &Addr) -> Epoch {
-        let stated = self
-            .catalog
-            .map_or(Stated::Unread, |c| Stated::of(&c.stated_catalogs(addr)));
+        self.dating_of(addr).epoch
+    }
+
+    /// [`Lens::epoch_of`], with the catalog it is read from (the tooling
+    /// guide's O8): what a date says beside a time. A capture read offline
+    /// states its owners' catalogs in its header (§5, version 4).
+    pub fn dating_of(&self, addr: &Addr) -> Dating {
+        let stated = match (self.catalog, self.recorded) {
+            (Some(c), _) => Stated::of(&c.stated_catalogs(addr)),
+            (None, Some(r)) => r.stated(addr),
+            (None, None) => Stated::Unread,
+        };
         self.deployment
-            .map_or_else(|| Catalogs::default().epoch(stated), |d| d.epoch(stated))
+            .map_or_else(|| Catalogs::default().dating(stated), |d| d.dating(stated))
     }
 
     /// Revisions known offline (`--contracts`): without a presence read, an
@@ -426,17 +449,53 @@ impl<'a> Lens<'a> {
                     }
                 }
             }
-            None => {
-                let Some(set) = self.offline else {
-                    return Err(Unresolved::PresenceNotRead);
-                };
-                let held: Vec<Arc<Revision>> = set.of_iface(iface).cloned().collect();
-                let choice = crate::model::choice::choose(&held, target, self.deployment, heard);
-                return match choice {
-                    Choice::Chosen { revision, step } => Ok((revision, step.said())),
-                    other => Err(other.unresolved().expect("no revision chosen")),
-                };
-            }
+            // A capture's header in presence's place (§5): its pairs have
+            // their revisions, as the live window saw them.
+            None => match self.recorded.and_then(|rec| {
+                rec.revisions_of(addr, iface).map(|fps| {
+                    let only = if fps.len() == 1 {
+                        fps.iter().next().cloned()
+                    } else {
+                        None
+                    };
+                    (rec, fps, only)
+                })
+            }) {
+                Some((_, _, Some(fp))) => fp,
+                Some((rec, fps, None)) if rec.named(addr) => {
+                    return Err(Unresolved::Ambiguous {
+                        fingerprints: fps.iter().map(ToString::to_string).collect(),
+                    });
+                }
+                // Given by --contracts across a face at record time: chosen
+                // as across a face (observer §7.5).
+                Some((rec, fps, None)) => {
+                    let held = rec.held_among(iface, fps);
+                    let choice =
+                        crate::model::choice::choose(&held, target, self.deployment, heard);
+                    return match choice {
+                        Choice::Chosen { revision, step } => Ok((revision, step.said())),
+                        other => Err(other.unresolved().expect("no revision chosen")),
+                    };
+                }
+                // A pair the header does not list has no provider, unless
+                // the reader reads it across a face.
+                None if self.recorded.is_some() && self.offline.is_none() => {
+                    return Err(Unresolved::NoProvider);
+                }
+                None => {
+                    let Some(set) = self.offline else {
+                        return Err(Unresolved::PresenceNotRead);
+                    };
+                    let held: Vec<Arc<Revision>> = set.of_iface(iface).cloned().collect();
+                    let choice =
+                        crate::model::choice::choose(&held, target, self.deployment, heard);
+                    return match choice {
+                        Choice::Chosen { revision, step } => Ok((revision, step.said())),
+                        other => Err(other.unresolved().expect("no revision chosen")),
+                    };
+                }
+            },
         };
         match self.contracts.state(iface, &fp) {
             Some(ContractState::Held(revision)) => Ok((revision, None)),
@@ -609,9 +668,9 @@ impl<'a> Lens<'a> {
         };
         match &resolution.resolved {
             Some(r) => {
-                let epoch = self.epoch_of(&r.address);
+                let dating = self.dating_of(&r.address);
                 let (rendering, conformance) =
-                    check_resolved(r, member, encoding, bytes, attachment, tag, epoch);
+                    check_resolved(r, member, encoding, bytes, attachment, tag, dating);
                 Checked {
                     identity: resolution.identity,
                     rendering,
@@ -688,7 +747,7 @@ impl<'a> Lens<'a> {
             payload,
             size,
             reader,
-            self.epoch_of(&r.address),
+            self.dating_of(&r.address),
         )
     }
 
@@ -750,7 +809,7 @@ impl<'a> Lens<'a> {
             Ok((rev, chosen)) => {
                 let layout = zenkey_model::heartbeat::Layout::of(rev.contract());
                 let (rendering, conformance) =
-                    inband::heartbeat_check(key, &layout, stamp, tag, body);
+                    inband::heartbeat_check(key, &layout, stamp, tag, body, self.dating_of(&addr));
                 (rendering, conformance, chosen)
             }
             Err(why) => {
@@ -895,6 +954,8 @@ impl<'a> Lens<'a> {
                     declared,
                     value,
                     epoch_assumed: None,
+                    dated: None,
+                    bounds: None,
                 },
             },
             conformance,
@@ -1060,7 +1121,7 @@ fn check_resolved(
     bytes: &[u8],
     attachment: Option<&[u8]>,
     tag: Option<zenkey_model::wire::Tag>,
-    epoch: Epoch,
+    epoch: Dating,
 ) -> (PayloadRendering, Conformance) {
     let resource = r.resource();
     let name = r.resource_name();
@@ -1100,11 +1161,16 @@ fn check_resolved(
             };
             // A packed record's `time` fields, under the epoch in force,
             // or one assumed and said so (core §7.6, §8.6).
+            // The reading's promises beside it (O8): a packed record's
+            // dated `time` fields and its bounds.
+            let (dated, bounds) = crate::model::render::packed_promises(bundle, ty, &value, epoch);
             (
                 Rendered::Value {
                     declared,
                     value,
                     epoch_assumed,
+                    dated,
+                    bounds,
                 },
                 conformance,
             )
@@ -1718,7 +1784,7 @@ mod tests {
             matches!(&ok.rendering.rendered,
                 Rendered::Value { declared, value, .. } if declared == "zk2c heartbeat (m.v1)"
                     && value == &json!({"covers": "m.v1", "run": "0007", "seq": 1,
-                                        "time": null, "sections": {}})),
+                                        "time": null, "sections": {}, "covered": fp})),
             "{:?}",
             ok.rendering.rendered
         );
@@ -1880,6 +1946,9 @@ mod tests {
             excluded: None,
             preamble: None,
             pre_roll: None,
+            catalog: None,
+            revisions: None,
+            bundles: None,
         };
         let mut sink = Vec::new();
         let mut w = ZrecWriter::new(&mut sink, &header).expect("a writer");

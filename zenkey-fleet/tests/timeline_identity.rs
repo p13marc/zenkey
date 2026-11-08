@@ -116,6 +116,9 @@ fn live_window(epoch: Instant) -> (Vec<Arrival>, ZrecHeader) {
         excluded: Some(zenkey_fleet::zrec_excluded(&["acme/zk2/**".to_owned()])),
         preamble: None,
         pre_roll: None,
+        catalog: None,
+        revisions: None,
+        bundles: None,
     };
     (items, header)
 }

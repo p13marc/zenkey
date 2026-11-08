@@ -1,5 +1,5 @@
-//! Trigger capture over a real bus (#218; `.zrec` version 3 since #612,
-//! FJ8a): a rule fires, and one file carries the preamble, the pre-roll,
+//! Trigger capture over a real bus (#218; `.zrec` version 4 since #990
+//! V4): a rule fires, and one file carries the preamble, the pre-roll,
 //! the trigger record and the post-roll — in that order, with the kinds
 //! counted apart.
 //!
@@ -224,13 +224,13 @@ async fn capture(semantics: PreambleSemantics) -> (zenkey_fleet::RecordReport, V
 
     let bytes = buf.0.lock().expect("buffer lock").clone();
     let mut reader = ZrecReader::new(bytes.as_slice()).expect("a .zrec header");
-    assert_eq!(reader.header().zrec, 3, "the file is version 3");
+    assert_eq!(reader.header().zrec, 4, "the file is version 4");
     let mut lines = Vec::new();
     while let Some(item) = reader.next() {
         lines.push(match item.expect("a well-formed line") {
             ZrecItem::Preamble { row, .. } => Line::Preamble(row.key),
             ZrecItem::Sample { row, t_us, .. } => {
-                assert!(row.qos_axes.is_some(), "version 3 rows carry their axes");
+                assert!(row.qos_axes.is_some(), "version 4 rows carry their axes");
                 Line::Sample(row.key, t_us.expect("t"))
             }
             ZrecItem::Trigger(t) => Line::Trigger(t.rule.clone(), t.to),
@@ -240,7 +240,7 @@ async fn capture(semantics: PreambleSemantics) -> (zenkey_fleet::RecordReport, V
     (report, lines)
 }
 
-/// The acceptance case: one file, in order — header (version 3, the
+/// The acceptance case: one file, in order — header (version 4, the
 /// preamble and what the selectors exclude stated) → preamble row (the
 /// held key, `t: 0`) → pre-roll rows (the spoken key, ascending `t`, none
 /// marked preamble) → the trigger record (`silent-for`, to `firing`) → the

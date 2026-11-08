@@ -526,6 +526,64 @@ mod tests {
         assert_eq!(state.selectors(), [key("hop.v1/state/mode")]);
     }
 
+    /// A plan's heartbeat crosses where a collection crosses, read across
+    /// every revision held; a scope declares one only for an interface
+    /// with a `freshness.v2` revision that has a collection (review-bot on
+    /// #1088). Here minor 0 has the collection and uses freshness.v1, and
+    /// minor 1 uses freshness.v2 and declares no collection: the plan's
+    /// heartbeat crosses, and no scope is declared for it.
+    #[test]
+    fn a_crossing_heartbeat_with_no_freshness_v2_collection_declares_none() {
+        let v1 = "[interface]\nname = \"hop\"\nmajor = 1\nminor = 0\n\
+             uses = [\"freshness.v1\", \"link.v1\"]\n\
+             [resources.mode]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n\
+             annotations = { \"freshness.ttl_s\" = 30, \"link.exposure\" = \"link\" }\n";
+        let v2 = "[interface]\nname = \"hop\"\nmajor = 1\nminor = 1\n\
+             uses = [\"freshness.v2\", \"link.v1\"]\n\
+             [resources.level]\nkind = \"stream\"\ntype = { raw = \"text/plain\" }\n\
+             annotations = { \"link.exposure\" = \"link\" }\n";
+        let mut both = set(v1);
+        both.extend(set(v2));
+        assert_eq!(both.len(), 2);
+        let policy = zenkey_model::link::parse(
+            "profile = \"link.v2\"\nsystem = \"v\"\nservices = [\"hop\"]\n\
+             binding = \"zenoh-1.10.1\"\n\
+             [transport]\nlease_ms = 240000\nkeep_alive = 4\n\
+             wait_before_close_ms = 240000\nsequence = \"16bit\"\nbatch_bytes = 222\n\
+             [face.rf]\nfar = \"ground\"\nattach = \"client\"\n\
+             select = { link_protocols = [\"tcp\"] }\nclass = \"constrained\"\n\
+             expose = \"link\"\ninterval_s = 60\nmax_outage_s = 3600\nlink_bps = 2400\n\
+             loss_ppm = 50000\narq = false\nreply_timeout_ms = 15000\n",
+        )
+        .policy
+        .expect("the policy reads");
+        let face = Face {
+            policy: &policy,
+            name: "rf",
+        };
+        let plan = plan_of(face, &both).expect("the plan");
+        assert!(
+            plan.heartbeat_crosses("hop.v1"),
+            "the plan's heartbeat crosses"
+        );
+        let addr: Addr = "v/hop".parse().unwrap();
+        let scope = FaceScope::of(&[addr], &both, "", Reads::Samples, Some(face)).unwrap();
+        assert!(
+            !scope.selectors().iter().any(|s| s.contains("heartbeat")),
+            "{:?}",
+            scope.selectors()
+        );
+        let mut got = scope.selectors().to_vec();
+        got.sort();
+        assert_eq!(
+            got,
+            [
+                "zk2/v/hop/hop.v1/state/mode",
+                "zk2/v/hop/hop.v1/stream/level"
+            ]
+        );
+    }
+
     /// Of the selectors given, each scope one includes, itself where it
     /// meets one it does not include, and the unmet named, never dropped.
     #[test]

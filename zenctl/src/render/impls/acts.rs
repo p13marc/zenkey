@@ -49,6 +49,7 @@ pub fn rendered_text(r: &Rendered, size: usize) -> String {
             let frame = zenkey_fleet::model::frame::is_frame_declared(declared)
                 .then(|| zenkey_fleet::model::frame::reading_lines(value))
                 .flatten();
+            let is_frame = frame.is_some();
             let line = match frame {
                 Some(lines) => format!("{declared}: {}", lines.join(" | ")),
                 None => format!(
@@ -56,7 +57,13 @@ pub fn rendered_text(r: &Rendered, size: usize) -> String {
                     serde_json::to_string(value).unwrap_or_default()
                 ),
             };
-            match r.epoch_note() {
+            let line = match r.epoch_note() {
+                Some(note) => format!("{line}  ({note})"),
+                None => line,
+            };
+            // What the value promises (the tooling guide's O8): a frame's
+            // dates and bounds ride its reading's lines.
+            match r.promise_note().filter(|_| !is_frame) {
                 Some(note) => format!("{line}  ({note})"),
                 None => line,
             }

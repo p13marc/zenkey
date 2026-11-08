@@ -264,7 +264,7 @@ fn select(
     let replaying = work.replay.replay.is_some();
     sub.refresh_series(work.replay.identity_cache(&dep.identity), &|a| {
         if replaying {
-            zenkey_fleet::DeploymentEpoch::Assumed
+            zenkey_fleet::DeploymentEpoch::Assumed.into()
         } else {
             dep.epoch_of(a)
         }

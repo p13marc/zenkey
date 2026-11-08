@@ -397,6 +397,8 @@ mod tests {
                     declared: "json:DiagnosticsRequest".into(),
                     value: json!({}),
                     epoch_assumed: None,
+                    dated: None,
+                    bounds: None,
                 },
             },
             metadata: Some(CallMetadataView {

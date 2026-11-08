@@ -39,28 +39,34 @@ pub struct KeyIdentity {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unresolved: Option<Unresolved>,
     /// How the revision was chosen where no descriptor names the owner's
-    /// and CH's tag chose it (observer §7.5's steps 2 and 3, across a face
-    /// or a capture read offline): the tool's reading of CH, never the
-    /// deployment's word. Absent where a descriptor named it, or the
-    /// revisions held and the catalog given left one (step 1).
+    /// (observer §7.5, across a face or a capture read offline): by CH's
+    /// tag (steps 2 and 3), the tool's reading of CH and never the
+    /// deployment's word; or `any` of several step 1 left, where no record
+    /// was read. Absent where a descriptor named it, or the revisions held
+    /// and the catalog given left one (step 1).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chosen: Option<ChosenByTag>,
 }
 
-/// A revision chosen by tag (observer §7.5): `by` is always `tag`, `step`
-/// 2 (one left carries CH's tag) or 3 (several that read the sample alike,
-/// the catalog's latest).
+/// A revision chosen by tag (observer §7.5): `by` `tag` at `step` 2 (one
+/// left carries CH's tag) or 3 (several that read the sample alike, the
+/// catalog's latest); or `any` at step 1, one of several left with no
+/// record read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChosenByTag {
     pub by: ByTag,
     pub step: u8,
 }
 
-/// The one way a [`ChosenByTag`] was chosen.
+/// How a [`ChosenByTag`] was chosen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ByTag {
+    /// By CH's tag: observer §7.5's steps 2 and 3.
     Tag,
+    /// Any of several step 1 left, where no record was read (a key's
+    /// identity alone, a delete): a guess, never the deployment's word.
+    Any,
 }
 
 impl KeyIdentity {

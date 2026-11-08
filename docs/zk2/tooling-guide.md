@@ -177,6 +177,64 @@ complete, is normative in observer §5.2.
 **O7, pooling.** A tool never pools measurements from different stampers
 into one distribution: a pooled median describes neither clock.
 
+**O8. A value says what it promises** (#990, V3). A tool shows a decoded
+value with what its declaration and its epoch promise about it. These ride
+beside the wire's number, never in its place.
+- **A time is dated in UTC.** This covers a frame record's time, a
+  heartbeat's time and a packed record's `time` field. The date is RFC 3339
+  UTC at the wire's precision: milliseconds where the field carries them.
+  - **The number stays.** A frame's `at` and a heartbeat's `time` stay
+    `{s, ms}` from the deployment epoch, as `frame/apply.json` and
+    `heartbeat/bodies.json` spell them. A `time` field stays core §7.6's
+    JSON reading, milliseconds since the Unix epoch.
+  - **Whose clock.** Each is the owner's clock (observer §8.3). A
+    scheduled record's time stays an instant and a bound, with its
+    `jitter_ms` beside it (observer §7.6).
+- **The epoch is named.** A date says which epoch it counts from (core
+  §8.6), with the fleet's three words for it:
+  - `stated`: the owner's descriptor names a catalog that the tool holds,
+    or holds a successor of. A descriptor that names none states 0;
+  - `deployment`: no descriptor is in hand, as across a face, or in a
+    capture recorded across one (§5). The tool reads the catalog it holds:
+    the one it was given, or the `.zrec` header's;
+  - `assumed`: nothing states it, and the tool holds no catalog, so 0.
+- **An assumed epoch is never dated.** Its number is shown alone, marked
+  assumed (`epoch_assumed`). A date counted from an assumed 0 would put a
+  catalog's 2026 in 1970, and still look exact.
+- **Nor is a refused one.** An owner may name a catalog that the tool
+  neither holds nor holds a successor of (`unknown_catalog`), or its
+  instances may name two (`ambiguous`). Then a frame's and a heartbeat's
+  times show their numbers alone, with the refusal. A packed record that
+  holds a `time` field is undecodable, as today.
+- **A value shows its bound.** What core §7.6 makes part of the
+  declaration is shown beside the value:
+  - a `fixed` field reads back within half its `resolution` of the value
+    written, so it shows ±`resolution`/2;
+  - a `within` field shows its `delta` already (observer §7.6). A fixed
+    one shows its half resolution too;
+  - a `counter` is its count modulo 2^`width`, a declared loss, so it
+    shows its width. A fall in its value may be a wrap;
+  - `int`, `enum`, `bool` and `time` read back exactly, and show none.
+    Neither does a reserved code, which is a name.
+- **The spelling** adds two members to a report, and replaces none.
+  - **`dated`** sits beside a time:
+    `{"utc": "2026-11-07T14:49:16.523Z", "epoch": "stated", "catalog": "e3a529fe"}`.
+    An owner that names no catalog has no `catalog` member. An assumed
+    epoch has `{"epoch": "assumed"}`, with no `utc`. A refused one names its
+    refusal: `{"epoch": "unknown_catalog", "catalog": …}`, or
+    `{"epoch": "ambiguous"}`.
+  - **`bound`** sits beside a frame field's value:
+    `{"half_resolution": "0.125"}`, or `{"width": 24}`.
+  - **A packed record's reading** holds both by field name, as `dated`
+    and `bounds`.
+  - **A person reads** the date after the number, and the bound after the
+    value: `t=26837356.523 (2026-11-07T14:49:16.523Z, catalog e3a529fe)`,
+    `radio_snr -9.75 ±0.125`, `sdu_tx_bytes_total 24 (mod 2^24)`.
+- **Where.** `watch`, `echo` and zengui's Inspector show them live, and so
+  does a `.zrec` read offline (§5), all from the fleet's one spelling.
+  `zenkey-fleet/tests/fixtures/zrec/modem-v4.cases.json` spells each
+  case.
+
 ## 4. Tools do not write what they do not own
 
 P3 (core §6, §11.1): a key is written only by the service that owns it.
@@ -210,17 +268,18 @@ v1's `.zrec` format minimum (RFC 13 §4.1, on the `v1` branch) carries over:
 - **Timestamps** are re-stamped on replay, deliberately: a replay is new
   traffic, and says so. The recorded stamp rides along, informatively.
 
-zenctl's `.zrec` is version 3 (#612, FJ8a). Its header adds `excluded`: the
-verbatim chunks (`@stream`, `@state`, `@op`, `@zk`, `@adv`) that no selector
-of the capture names, so the file cannot contain them whatever the bus
-carried (observer §8.2). A capture taken with `--explicit` lists all three
+Version 3 of zenctl's `.zrec` (#612, FJ8a) is zk2's. Its header adds
+`excluded`: the verbatim chunks (`@stream`, `@state`, `@op`, `@zk`, `@adv`)
+that no selector of the capture names, so the file cannot contain them
+whatever the bus carried (observer §8.2). A capture taken with `--explicit` lists all three
 of observer §8.2's selectors, and its `excluded` names only `@op`, `@zk`
 and `@adv` (#924). Each row adds `qos_axes`, the sample's priority,
 congestion control, reliability and express as received, which a replay
 honours. Versions 1 and 2 still read; their rows' v1 QoS profile names do
 not (#612, FJ9), so such a row replays on the axes the operator gives.
+Version 4 (below) adds what reading a capture offline needs.
 
-What version 2 added (#218), and version 3 keeps:
+What version 2 added (#218), and versions 3 and 4 keep:
 - **A state preamble.** Rows marked `"preamble": true`, at `t` 0, before
   the first observed row: state fetched when a triggered capture began.
   The header's `preamble` names the fetch: its row count, the span it was
@@ -234,6 +293,126 @@ What version 2 added (#218), and version 3 keeps:
   (observer §8.2).
 - **An unknown version is refused,** never guessed at. A reader reads
   every version up to its own, and refuses the next.
+
+**Version 4** (#990, V4) keeps the revisions that served a capture's keys,
+their bundles, and the catalog their times count from. A version-3 file
+names none of them. So an offline reader resolves its keys only through
+`--contracts`, as across a face, and reads its times under an epoch the file
+does not state. Version 4's rows are version 3's. Its header is this
+object, one JSON line:
+
+| Member | Since | Value |
+|---|---|---|
+| `zrec` | 1 | The version: 4. |
+| `selectors` | 1 | The wire selectors the capture watched (observer §8.2). |
+| `base` | 1 | The namespace the operator stated, possibly empty. Keys are recorded whole and never re-derived from it (O3). |
+| `captured_at` | 1 | When the capture began, RFC 3339 UTC: provenance, not pacing. |
+| `excluded` | 3 | The verbatim chunks no selector names (O5). |
+| `preamble` | 2 | A triggered capture's state preamble: `count`, `collected_over_s`, `selectors`, `semantics` (`absent_from_window` or `full`), `incomplete` and `failed`; since 4, `pages` (below). Absent when none was asked. |
+| `pre_roll` | 2 | The retained window: `asked_s`, `covered_s`, `watched`, `evicted` and `expired`. Absent on a live capture. |
+| `catalog` | 4 | The catalog `record` was given (`--catalog`): `id`, its 8 hex digits; `epoch`, the deployment epoch; and `lineage`, the catalog's own, where it has one (core §8.6). One object: an owner writes under one catalog. Absent when `record` was given none. |
+| `revisions` | 4 | One item for each address, interface and fingerprint that served the capture's scope when it began: `address` (`<system>/<service>`), `iface` and `fingerprint` (core §1.2). `named` is the catalog id the instance's descriptor names, or `null` where it names none. Across a face they come from `--contracts`, with no `named`, since no descriptor crosses (core §8.5). |
+| `bundles` | 4 | One item for each fingerprint `revisions` names: `fingerprint`, and `bytes`, the bundle's bytes (core §9.6) in base64 (RFC 4648 §4). Absent with `record --no-bundles`. |
+
+```json
+{"zrec":4,"selectors":["zk2/h-3fa9c2d41b7e/rf0/**"],"base":"","captured_at":"2026-11-07T14:49:15Z",
+ "excluded":["@stream","@state","@op","@zk","@adv"],
+ "catalog":{"id":"e3a529fe","epoch":1767225600,"lineage":[{"entries":3,"id":"0a90fd61"},…]},
+ "revisions":[{"address":"h-3fa9c2d41b7e/rf0","iface":"modem.v3","fingerprint":"sha256:71f55126…","named":"e3a529fe"},…],
+ "bundles":[{"fingerprint":"sha256:71f55126…","bytes":"eyJjb250cmFjdCI6…"},…]}
+```
+
+It is one line in the file; it is broken here to be read.
+- **Why `named`.** The epoch in force is each owner's (core §8.6). An owner
+  whose descriptor names no catalog counts its times from 0, whatever
+  catalog `record` was given. Without `named`, an offline reader would date
+  it under the header's epoch, 56 years off.
+- **Why `lineage`.** A descriptor may name a catalog that the given one
+  succeeds. The lineage lets an offline reader read that id through the
+  header's catalog, as core §8.6 reads it.
+- **Why whole bundles.** A JSON or a protobuf record needs its bundle as
+  much as a packed one needs its layout. modem.v3 3.3's bundle is 120 KB,
+  against 1.0 MB for 40 s of its traffic (#990's run). `--no-bundles` leaves
+  them out, and a reader then needs `--contracts`.
+
+**What `record` writes.**
+- **Presence, once.** It reads presence once, when the capture begins: the
+  instances its scope reaches, their descriptors' revisions and catalogs.
+  An owner that appears later has no revision in the file. Its keys then
+  read as a live reader's do with no token: no provider (O2's rung 3).
+- **Bundles by fingerprint.** It retrieves each revision's bundle (core
+  §8.4) and verifies it. One it could not retrieve is left out of
+  `bundles`.
+- **One catalog.** It takes one `--catalog`. Two are refused (exit 2).
+- **Across a face** (`--across-face`), it reads no presence. Its
+  revisions are those `--contracts` holds for the addresses it reads, and
+  their bundles are built from them.
+
+**What a reader does with the header**, before any row, in this order:
+1. **It checks the header.** A member that the version does not define, or
+   a value that breaks the table above, refuses the file (`header`). So
+   does a `catalog` that is not one object holding `id` and `epoch`, a
+   revision listed twice, and a bundle that no revision names or that is
+   listed twice.
+2. **It takes its catalog.** Given `--catalog`, it reads through that
+   catalog, which must be the header's (the same id) or succeed it (its
+   `lineage` holds the header's id). One that is neither is refused
+   (`unknown_catalog`). One whose lineage holds the header's id at another
+   epoch is refused too (`epoch_moved`), since succession never moves the
+   epoch (core §8.6). Given none, it reads through the header's `catalog`,
+   the recorder's word, and says so.
+3. **It verifies each bundle** by core §9.6's twelve steps, step 12's
+   fingerprint the item's. A tool never decodes with an unverified bundle
+   (§2). A refused bundle is named by its tag, and the file still reads.
+
+**Resolving a row** walks O2's ladder, with the header in presence's place.
+So a capture read later resolves as the live window did.
+- **Rungs 3 and 4.** An address and interface the header lists have a
+  provider, and its fingerprint is the revision. A pair the header does
+  not list has no provider, unless the reader reads it across a face, with
+  `--contracts`.
+- **Two fingerprints for one pair** are read as the live lens reads them.
+  Where descriptors named them (`named` present), the key is ambiguous.
+  Where `--contracts` gave them, the reader chooses as across a face
+  (#990's V2).
+- **Rung 5.** The header's verified bundle, else the reader's `--contracts`
+  where they hold that fingerprint. With neither, the bundle is
+  unavailable: refused by its tag, or not carried. A file without
+  `bundles` (`--no-bundles`) leaves it not held, and the note asks for
+  `--contracts` (O4).
+- **Rungs 6 and 7** are the live lens's.
+- **Times** count from the epoch in force, named as O8 says. Where an
+  address's revisions carry `named`, that owner states its epoch (core
+  §8.6, through the catalog held). Where none does, as across a face, the
+  reader takes the held catalog's, the deployment's word. With no catalog
+  held, it assumes 0 and dates nothing. Two `named` values for one address
+  are ambiguous.
+
+**Versions and readers.**
+- **A version-4 reader** reads versions 1 to 4. A version-3 file still
+  reads. It names no revision, so its keys have no provider (O2's rung 3)
+  until the reader reads them across a face, with `--contracts` and
+  `--catalog`, as a re-publishing replay is read.
+- **A version-3 reader** refuses version 4, by the rule it already has.
+- **The readers.** `echo --from FILE` prints a capture through the offline
+  lens, and zengui's replay takes `--catalog`. `replay` publishes as before:
+  the header adds nothing to what it publishes.
+- **The fixture.** `zenkey-fleet/tests/fixtures/zrec/` holds a version-4
+  capture of four modem.v3 rows, and its cases: the header, each row's
+  resolution and reading, and the refusals. Two independent readings wrote
+  and checked it, never blessed.
+
+**A snapshot's pages** (#977, E3). Once a state GET can be answered with a
+snapshot (core §7.5's form 7), a triggered capture's preamble keeps its
+pages, not per-key replies.
+- **Each page is a preamble row** as it arrived: its reply's key, its
+  payload in `bytes`, and `"preamble": true`. Its CH reads form 7.
+- **The header's `preamble` counts them apart**, in `pages`, never in
+  `count` (O6).
+- **A reader reads such a row** as a snapshot's page (core §7.5), never as
+  a put.
+- **A replayer** never publishes a page as one. #990's V8 says how
+  `replay --seed-state` writes a snapshot's live entries and tombstones.
 
 **The replay etiquette**, which zenctl enforces:
 - **A dry run first.** `replay --dry-run` lists every put a replay would

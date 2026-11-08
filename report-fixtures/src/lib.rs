@@ -1868,6 +1868,9 @@ fn header() -> zenkey_fleet::ZrecHeader {
         excluded: None,
         preamble: None,
         pre_roll: None,
+        catalog: None,
+        revisions: None,
+        bundles: None,
     }
 }
 

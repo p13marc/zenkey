@@ -385,6 +385,50 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `tests/choice.rs` runs `spec/conformance/envelope/tags.json` whole (31
   cases; its `e3a529fe` read through `catalog.json`'s lineage, the file
   `0ff6bf6d` since #1080) and the lens end to end.
+  Step 3 orders by one index, two revisions at the same index (two
+  unrelated catalogs) ambiguous, and `Step::Any` is said
+  `{"by": "any", "step": 1}` (`ByTag::Any`; review-bot on #1088).
+  #990 V3 (the tooling guide's O8): `model::deployment::Dating` (the
+  `Epoch` and the catalog it is read from; `Catalogs::dating`,
+  `Lens::dating_of`, `From<Epoch>` with no catalog, `dated_from` for a
+  wire number from the deployment epoch, `dated_unix` for a value read
+  under it, `rfc3339_ms`) gives `report::Dated` (`utc`, `epoch`
+  `stated`/`deployment`/`assumed`/`unknown_catalog`/`ambiguous`,
+  `catalog`; an assumed or refused epoch never dated) and
+  `report::Bound` (`half_resolution`, `width`; `model::frame::bound_of`
+  over a field, `Decimal::half`): a frame record's `dated` and each
+  valued field's `bound` in the reading (`frame::applied_rendering`, its
+  person's lines `t=… (<date>, catalog …)`, `±0.125`, `(mod 2^24)`), a
+  heartbeat's `dated`, `covered` and a templated section's `form`
+  (`inband::heartbeat_value`), and a packed record's `Rendered::Value::
+  {dated, bounds}` by field name (`render::packed_promises`, in
+  `decode_under`'s callers and the lens's `check_resolved`;
+  `Rendered::promise_note`), `SampleRow::{dated, bounds}`. The render
+  functions take `impl Into<Dating>`, so a caller holding an `Epoch`
+  passes it; `bus::consume::watch_in` takes one (a small change: its
+  helpers carry `Dating`). #990 V4 (§5's `.zrec` version 4,
+  `ZREC_VERSION` 4, `ZREC_READS` 1–4): `report::ZrecHeader::{catalog,
+  revisions, bundles}` (`ZrecCatalog`, `ZrecAncestor`, `ZrecRevision`
+  with `named` absent, `null` or an id, `ZrecBundle`),
+  `tape::record::read_header(line, reads)` (`HeaderRefusal`: `version`,
+  `header` for a member the version does not define or a value its table
+  refuses, a revision or bundle twice, a bundle no revision names),
+  `reader_catalogs(header, given)` (the given catalog the header's or a
+  successor at its epoch, else `unknown_catalog` or `epoch_moved`; none
+  given, the header's as `RecordedCatalog`, held by id, epoch and lineage
+  in `Catalogs::recorded`, listing no revision, so `Catalogs::
+  lists_entries` gates the chooser's step 1), `ZrecHeader::served_by`
+  (what `record` writes), and `model::recorded::Recorded` (the header in
+  presence's place: `Lens::recorded`, a listed pair's revisions, two
+  named ones ambiguous and two unnamed chosen as across a face, an
+  unlisted pair no provider unless `Lens::offline`; each bundle verified
+  by core §9.6 with its fingerprint, `Bundled`; as `Contracts`, a
+  refused bundle unavailable by its tag, one listed and not carried
+  unavailable, none carried not held, the reader's `--contracts`
+  between; `stated` from `named`). `tests/zrec_v4.rs` runs
+  `tests/fixtures/zrec/modem-v4.cases.json` whole: the header, the four
+  rows' envelopes, resolutions and readings (`dated`, `bound`) and all
+  17 cases with their variants.
   A call's forms alone (#985 C4b; C4d, core 0.99, removed the bare
   wire): `model::render`'s `read` reads a `response` or `summary` under
   `zenoh/bytes` as the value form (`Payload::Record`, or `Refused`, never

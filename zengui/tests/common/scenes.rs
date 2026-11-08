@@ -305,7 +305,7 @@ pub const ALL: &[Scene] = &[
         name: "inspector-frame-scheduled",
         size: DESKTOP,
         build: frame_scheduled,
-        landmark: "#25 t=7450.000 scheduled ±500 ms",
+        landmark: "#25 t=7450.000 (1970-01-01T02:04:10.000Z, the owner's epoch) scheduled ±500 ms",
     },
     // telemetry.v2 in the Inspector (#983 T2): a frame's fields as metric
     // series, one chart per field, one point per record. `dropped` is a
@@ -778,6 +778,8 @@ fn origin_value() -> zenkey_fleet::report::OperationAnswer {
                     "altitudeM": 56.0
                 }),
                 epoch_assumed: None,
+                dated: None,
+                bounds: None,
             },
         },
         mark: None,

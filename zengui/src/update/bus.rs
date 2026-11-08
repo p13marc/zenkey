@@ -189,7 +189,7 @@ pub(crate) fn apply_tick(
             if live {
                 dep.epoch_of(a)
             } else {
-                zenkey_fleet::DeploymentEpoch::Assumed
+                zenkey_fleet::DeploymentEpoch::Assumed.into()
             }
         });
     }

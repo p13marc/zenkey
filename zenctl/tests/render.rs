@@ -3692,6 +3692,8 @@ mod actfx {
                 declared: "json:DiagnosticsResponse".into(),
                 value,
                 epoch_assumed: None,
+                dated: None,
+                bounds: None,
             },
         }
     }
@@ -3771,6 +3773,8 @@ mod actfx {
                         declared: "json:TcError".into(),
                         value: json!({"kind": "kernel"}),
                         epoch_assumed: None,
+                        dated: None,
+                        bounds: None,
                     }),
                     mark: None,
                 },
@@ -3870,6 +3874,8 @@ mod actfx {
                             declared: "json:NetworkInterface".into(),
                             value: json!({"is_up": true}),
                             epoch_assumed: None,
+                            dated: None,
+                            bounds: None,
                         },
                         ..reply(
                             key,

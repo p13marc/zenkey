@@ -142,7 +142,10 @@ async fn a_watch_shows_each_frame_as_its_keys_reader_read_it() {
         (json!("gap"), json!(1))
     );
     let f = &v["records"][0]["fields"];
-    assert_eq!(f["dropped"], json!({"state": "known", "value": 9}));
+    assert_eq!(
+        f["dropped"],
+        json!({"state": "known", "value": 9, "bound": {"width": 32}})
+    );
     assert_eq!(f["queue_depth"], json!({"state": "unknown", "why": "gap"}));
     assert_eq!(
         f["duty_available"],
@@ -173,7 +176,7 @@ async fn a_watch_shows_each_frame_as_its_keys_reader_read_it() {
     let line = &zenkey_fleet::model::frame::reading_lines(&v).unwrap()[2];
     assert!(
         line.starts_with("#31 t=7210.000 scheduled ±500 ms: ")
-            && line.contains("temperature \"22\"")
+            && line.contains("temperature 22 ±0.25")
             && line.contains("mode absent"),
         "{line}"
     );

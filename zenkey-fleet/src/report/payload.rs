@@ -64,6 +64,16 @@ pub enum Rendered {
         /// other value.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         epoch_assumed: Option<i64>,
+        /// A packed record's `time` fields dated, by field name (the
+        /// tooling guide's O8): each a [`Dated`], beside the value, which
+        /// keeps core §7.6's JSON reading. Absent where the record holds
+        /// no `time` field, and for every other type.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dated: Option<serde_json::Value>,
+        /// A packed record's bounded fields' bounds, by field name (O8):
+        /// each a [`Bound`]. Absent where none is bounded.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bounds: Option<serde_json::Value>,
     },
     /// A raw type: its media type (for a family like `video/*`, the
     /// concrete one the sample's `Encoding` carries). The bytes are not
@@ -95,6 +105,122 @@ impl Rendered {
                 ..
             } => Some(format!("epoch {e} assumed, #980")),
             _ => None,
+        }
+    }
+
+    /// What a person reads beside a value of what it promises (the tooling
+    /// guide's O8): a packed record's dated `time` fields and its bounds, a
+    /// heartbeat's dated time. `None` where it promises nothing more.
+    #[must_use]
+    pub fn promise_note(&self) -> Option<String> {
+        let Rendered::Value {
+            value,
+            dated,
+            bounds,
+            ..
+        } = self
+        else {
+            return None;
+        };
+        let mut parts = Vec::new();
+        if let Some(d) = value.get("dated").and_then(Dated::read) {
+            parts.push(format!("time {}", d.words()));
+        }
+        for (name, d) in dated.iter().flat_map(|d| d.as_object()).flatten() {
+            if let Some(d) = Dated::read(d) {
+                parts.push(format!("{name} {}", d.words()));
+            }
+        }
+        for (name, b) in bounds.iter().flat_map(|b| b.as_object()).flatten() {
+            if let Ok(b) = serde_json::from_value::<Bound>(b.clone()) {
+                parts.push(format!("{name} {}", b.words()));
+            }
+        }
+        (!parts.is_empty()).then(|| parts.join("; "))
+    }
+}
+
+/// A time's date, beside the wire's number (the tooling guide's O8): RFC
+/// 3339 UTC at the wire's precision, and the epoch it counts from, named.
+/// An assumed epoch and a refused one date nothing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Dated {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub utc: Option<String>,
+    pub epoch: DatedEpoch,
+    /// The catalog the epoch is read from: the one the owner's descriptor
+    /// names, or with no descriptor the one the tool holds. Absent for an
+    /// owner that names none, and where nothing states the epoch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog: Option<String>,
+}
+
+/// Which epoch a [`Dated`] counts from: the fleet's `Epoch` words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DatedEpoch {
+    /// The owner's descriptor names a catalog the tool holds, or a
+    /// successor of; or names none, and counts from 0.
+    Stated,
+    /// No descriptor in hand: the catalog the tool holds, the deployment's
+    /// word.
+    Deployment,
+    /// Nothing states it, and the tool holds no catalog: 0, never dated.
+    Assumed,
+    /// The owner names a catalog the tool neither holds nor holds a
+    /// successor of: never dated.
+    UnknownCatalog,
+    /// The owner's instances name two catalogs, or the catalogs held state
+    /// two epochs: never dated.
+    Ambiguous,
+}
+
+impl Dated {
+    /// A `dated` member read back, `None` where it is no [`Dated`].
+    pub fn read(v: &serde_json::Value) -> Option<Dated> {
+        serde_json::from_value(v.clone()).ok()
+    }
+
+    /// A person's words for it: the date and whose catalog, or why none.
+    pub fn words(&self) -> String {
+        let catalog = self.catalog.as_deref();
+        match (self.epoch, &self.utc) {
+            (DatedEpoch::Stated, Some(utc)) => match catalog {
+                Some(c) => format!("{utc}, catalog {c}"),
+                None => format!("{utc}, the owner's epoch"),
+            },
+            (DatedEpoch::Deployment, Some(utc)) => match catalog {
+                Some(c) => format!("{utc}, the deployment's catalog {c}"),
+                None => format!("{utc}, the deployment's epoch"),
+            },
+            (DatedEpoch::UnknownCatalog, _) => format!(
+                "undated: catalog {} is not held (unknown_catalog)",
+                catalog.unwrap_or("?")
+            ),
+            (DatedEpoch::Ambiguous, _) => "undated: two catalogs disagree".to_owned(),
+            (_, _) => "undated: the epoch is assumed".to_owned(),
+        }
+    }
+}
+
+/// What a decoded value's declaration bounds it by (core §7.6; the tooling
+/// guide's O8): a `fixed` field reads back within half its resolution, a
+/// `counter` modulo 2^width.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Bound {
+    /// ±resolution/2, an exact decimal.
+    HalfResolution(String),
+    /// The count modulo 2^width: a fall may be a wrap.
+    Width(u32),
+}
+
+impl Bound {
+    /// A person's words for it: `±0.125`, `(mod 2^24)`.
+    pub fn words(&self) -> String {
+        match self {
+            Bound::HalfResolution(h) => format!("±{h}"),
+            Bound::Width(w) => format!("(mod 2^{w})"),
         }
     }
 }
@@ -287,6 +413,8 @@ mod tests {
                 declared: "json:BandwidthUpdate".into(),
                 value: json!({"rx_bps": 1, "tx_bps": 2}),
                 epoch_assumed: None,
+                dated: None,
+                bounds: None,
             },
         };
         assert_eq!(

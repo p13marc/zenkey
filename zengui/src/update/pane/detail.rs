@@ -35,7 +35,7 @@ pub(crate) fn update(
             slot.series_leaf = Some(path);
             slot.refresh_series(replay.identity_cache(&dep.identity), &|a| {
                 if replaying {
-                    zenkey_fleet::DeploymentEpoch::Assumed
+                    zenkey_fleet::DeploymentEpoch::Assumed.into()
                 } else {
                     dep.epoch_of(a)
                 }

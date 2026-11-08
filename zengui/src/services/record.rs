@@ -77,6 +77,9 @@ async fn capture(
         captured_at: zenkey_fleet::rfc3339_now(),
         preamble: None,
         pre_roll: None,
+        catalog: None,
+        revisions: None,
+        bundles: None,
     };
     // Off the runtime, both halves (#332): iced drives this task on the same
     // runtime the monitor's drain runs on, so a blocking write per sample
@@ -180,6 +183,9 @@ pub(crate) fn write_window(
         captured_at: zenkey_fleet::rfc3339_now(),
         preamble: None,
         pre_roll: None,
+        catalog: None,
+        revisions: None,
+        bundles: None,
     };
     let mut writer =
         zenkey_fleet::ZrecWriter::new_at(out, &header, epoch).map_err(ServiceError::of)?;
@@ -377,7 +383,7 @@ mod tests {
             panic!("a loaded file is a file");
         };
         assert_eq!(header.selectors, vec!["v1/**".to_string()]);
-        assert_eq!(header.zrec, 3, "a window saves as `.zrec` version 3");
+        assert_eq!(header.zrec, 4, "a window saves as `.zrec` version 4");
         assert_eq!(
             header.excluded.as_deref(),
             Some(&zenkey_fleet::VERBATIM.map(String::from)[..]),

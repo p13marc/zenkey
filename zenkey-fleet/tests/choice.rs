@@ -313,3 +313,59 @@ fn the_lens_reads_a_record_with_the_revision_chtag_chooses() {
         "tag 0 is sniffed: {c:?}"
     );
 }
+
+/// Step 3 orders only by one index: two revisions at the same index, as
+/// two unrelated catalogs given together can place them, are ambiguous,
+/// never the last one seen (review-bot on #1088).
+#[test]
+fn two_revisions_at_one_index_are_ambiguous() {
+    use zenkey_fleet::model::deployment::DeploymentCatalog;
+    use zenkey_model::canonical::Fingerprint;
+    let (set, problems) = ContractSet::load_history(&root().join("examples/zk2/.history"));
+    assert!(problems.is_empty(), "{problems:?}");
+    let iface: zenkey_model::grammar::IfaceId = "modem.v3".parse().unwrap();
+    let pick = |prefix: &str| {
+        set.of_iface(&iface)
+            .find(|r| r.fingerprint().to_string().starts_with(prefix))
+            .cloned()
+            .expect("a revision")
+    };
+    let (x, y) = (pick("sha256:a584"), pick("sha256:71f5"));
+    let at_three = |rev: &Revision, filler: char| {
+        let mut c = DeploymentCatalog::new(1_767_225_600).unwrap();
+        for n in 0..3 {
+            let fp = Fingerprint::parse(&format!(
+                "sha256:{}",
+                filler.to_string().repeat(63) + &n.to_string()
+            ))
+            .unwrap();
+            c.push(format!("filler{n}.v1").parse().unwrap(), fp)
+                .unwrap();
+        }
+        c.push(rev.iface().clone(), rev.fingerprint().clone())
+            .unwrap();
+        c
+    };
+    let both = Catalogs::new(vec![at_three(&x, 'a'), at_three(&y, 'b')]);
+    let chunks = vec!["oper".to_owned()];
+    let target = Target::Data {
+        kind: zenkey_model::grammar::KindToken::State,
+        chunks: &chunks,
+    };
+    let heard = Heard::Put {
+        form: zenkey_model::wire::Form::Mutation,
+        tag: zenkey_model::wire::Tag::NONE,
+    };
+    match choose(&[x.clone(), y.clone()], target, Some(&both), heard) {
+        Choice::Ambiguous(fps) => assert_eq!(fps.len(), 2, "{fps:?}"),
+        other => panic!("two at index 3 chose one: {other:?}"),
+    }
+    // One catalog orders them: its latest.
+    let one = Catalogs::new(vec![
+        Catalogs::load(&root().join("examples/zk2/zenoh-modem/catalog.json")).unwrap(),
+    ]);
+    assert!(matches!(
+        choose(&[x, y.clone()], target, Some(&one), heard),
+        Choice::Chosen { step: Step::Latest, revision } if revision.fingerprint() == y.fingerprint()
+    ));
+}

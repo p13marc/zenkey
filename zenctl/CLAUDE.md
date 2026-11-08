@@ -142,8 +142,21 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   counter or histogram never decreasing, so the runtime's checked writer
   accepts it, #819 TB). `bench call` times each reply where it arrives and
   attributes it by key, envelopes and silence counted apart. `.zrec` is
-  version 3 (header `excluded`, `@op`, `@zk` and `@adv` alone under
-  `--explicit`; rows `qos_axes`; 1 and 2 still read), and
+  version 4 since #990 V4 (version 3's header `excluded`, `@op`, `@zk`
+  and `@adv` alone under `--explicit`; rows `qos_axes`; plus the header's
+  `catalog`, the one `--catalog`, two refused, exit 2; `revisions`, one
+  presence read as the capture begins with each descriptor's `named`
+  catalog, or across a face the contracts in hand, no `named`; and
+  `bundles`, base64, `--no-bundles` leaving them out; `record --on`'s
+  header names no revision yet; 1 to 3 still read), `echo --from FILE`
+  prints one through the offline lens with no session (the header in
+  presence's place, `zenkey_fleet::model::recorded`; `--catalog` the
+  header's or a successor, else exit 2, `unknown_catalog` or
+  `epoch_moved`; none, the header's, said so; `--contracts` beside;
+  `--across-face` reading a pair the header lists no revision for), and
+  every date beside its number (O8: `dated`, `bounds`, the table's
+  `t=… (<date>, catalog …)`, `±0.125`, `(mod 2^24)`; `watch` under the
+  catalogs' `Dating`), and
   `record --on` refuses the rules that judge v1.
   FJ8b's observers and checks: the raw observers (`echo`, `rate`, `field`,
   `timeline`, `snapshot`, `watchdog`, `record --on`; `watchdog`, `record

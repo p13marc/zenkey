@@ -53,6 +53,76 @@ pub struct ZrecHeader {
     /// eviction kinds kept apart (O6). Absent on a live capture.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pre_roll: Option<PreRollInfo>,
+    /// Version 4 (the tooling guide's §5; #990 V4): the catalog `record`
+    /// was given, its id, epoch and lineage. One object: an owner writes
+    /// under one catalog (core §8.6). Absent when it was given none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog: Option<ZrecCatalog>,
+    /// Version 4: each address, interface and fingerprint that served the
+    /// capture's scope when it began, and the catalog its descriptor named.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revisions: Option<Vec<ZrecRevision>>,
+    /// Version 4: each revision's bundle (core §9.6), in base64. Absent with
+    /// `record --no-bundles`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundles: Option<Vec<ZrecBundle>>,
+}
+
+/// A `.zrec` header's catalog (version 4): the catalog `record` was given.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ZrecCatalog {
+    /// Its 8 hex digits (core §8.6).
+    pub id: String,
+    /// The deployment epoch, seconds since the Unix epoch.
+    pub epoch: i64,
+    /// The catalog's own lineage, where it has one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lineage: Vec<ZrecAncestor>,
+}
+
+/// One step of a [`ZrecCatalog`]'s lineage (core §8.6).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ZrecAncestor {
+    pub entries: u16,
+    pub id: String,
+}
+
+/// One revision that served a capture's scope (version 4).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ZrecRevision {
+    /// `<system>/<service>`.
+    pub address: String,
+    pub iface: String,
+    /// `sha256:…` (core §1.2).
+    pub fingerprint: String,
+    /// The catalog id the instance's descriptor names, `Some(None)` where
+    /// it names none (`null`), and `None` across a face, where no
+    /// descriptor crosses (absent).
+    #[serde(
+        default,
+        deserialize_with = "named_member",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub named: Option<Option<String>>,
+}
+
+/// `named` read so that `null` and an absent member stay two answers.
+fn named_member<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<Option<String>>, D::Error> {
+    Ok(Some(Option::deserialize(d)?))
+}
+
+/// One revision's bundle (version 4): its fingerprint and its bytes (core
+/// §9.6) in base64 (RFC 4648 §4).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ZrecBundle {
+    pub fingerprint: String,
+    pub bytes: String,
 }
 
 /// What a version-2 preamble is a snapshot *of* (tooling guide §5's pre-roll
@@ -262,6 +332,14 @@ pub struct SampleRow {
     /// round-trip a binary payload, and tooling guide §5 says so.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<serde_json::Value>,
+    /// A packed record's `time` fields dated, by field name, beside its
+    /// value (the tooling guide's O8). A frame's and a heartbeat's ride in
+    /// their reading.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dated: Option<serde_json::Value>,
+    /// A packed record's bounded fields' bounds, by field name (O8).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bounds: Option<serde_json::Value>,
     /// True payload size, whatever the rendering above shows.
     ///
     /// Deliberately not spelled `bytes`: that key has meant the base64

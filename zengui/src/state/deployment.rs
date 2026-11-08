@@ -325,8 +325,8 @@ impl Deployment {
     pub(crate) fn epoch_of(
         &self,
         addr: &zenkey_model::grammar::Addr,
-    ) -> zenkey_fleet::DeploymentEpoch {
-        self.lens_inputs().lens().epoch_of(addr)
+    ) -> zenkey_fleet::model::deployment::Dating {
+        self.lens_inputs().lens().dating_of(addr)
     }
 
     /// Resolve `wire` into the identity cache, through the lens over this
