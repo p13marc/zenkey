@@ -1990,9 +1990,12 @@ fn entry_confirmations(
         return;
     };
     let epoch = epochs.of(key);
+    // A clock before the Unix epoch dates nothing: the member is left
+    // undated, never aged at zero (review-bot on #1102).
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as i128);
+        .ok()
+        .map(|d| d.as_millis() as i128);
     for m in page.members(key) {
         if m.is_tombstone() {
             continue;
@@ -2007,9 +2010,12 @@ fn entry_confirmations(
             Confirmation::AtTime => page.time,
             Confirmation::At(t) => t,
         };
-        let age = epoch.and_then(|e| time.unix_ms(e)).map(|at| {
-            Duration::from_millis(u64::try_from((now_ms - at).max(0)).unwrap_or(u64::MAX))
-        });
+        let age = epoch
+            .and_then(|e| time.unix_ms(e))
+            .zip(now_ms)
+            .map(|(at, now_ms)| {
+                Duration::from_millis(u64::try_from((now_ms - at).max(0)).unwrap_or(u64::MAX))
+            });
         out.confirmations.push(EntryConfirmed {
             key: m.key,
             horizon,
