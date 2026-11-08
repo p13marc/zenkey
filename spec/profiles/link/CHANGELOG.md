@@ -7,6 +7,73 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.12 — 2026-11-08: §2.7, a face lists the events it carries (#1098)
+
+`modem.v3` 3.4 exposes three events for a face (#991). A face listed its
+frames and never its events, so every face that exposes let each exposed
+event cross, whatever its medium could carry: SBD's plan and LoRa at
+SF12's, where even one `rare` event exceeds the budget beside the frames,
+let all three across.
+
+**Added: §2.7, a face's `events`.** An array of entries `<iface>/<template>`,
+each naming the event resource `<iface>/events/<template>`.
+- **On a face with `events`**, a generator MUST let an event resource of
+  a listed interface cross only when the face lists it and its contract
+  exposes it `link`. The rest are denied by name, as an unlisted frame is.
+- **A face with no `events`** keeps `link.v1`'s rule, and `events = []`
+  lists none.
+- **A listed event crosses whole**, never downsampled (`link.v1` §2.9).
+- **Listed and not exposed**: it does not cross, as a listed frame its
+  contract does not expose does not.
+- **`event_unknown`**, an error, refuses an entry that names no event
+  resource of a listed interface (§2.3's table).
+
+**Changed: §2.1.** The face's table gains `events`, only with
+`expose = "link"`. `events` is one value: a bad or repeated entry is
+`bad_value` at `events`, once. A link.v1 policy's `events` is
+`unknown_field`.
+
+**Changed: §0, §5, Appendix A and Appendix B.** §0 defines a listed
+event, §5 asks whether an event crosses a face, Appendix A has the row,
+and Appendix B says what each of zenoh-modem's faces lists: RF the three,
+LoRa at SF7 and SF9 the two `rare` ones, LoRa at SF12 and SBD none.
+`face/device_fault` crosses RF alone, so RF's plan alone warns
+`not_packed`, where Appendix B said no plan did.
+
+**Deliberately not changed.**
+- **No warning for an exposed event no face lists**, where a frame draws
+  `frame_unlisted`: an event's owner publishes it for its own side's
+  readers too.
+- **No `events` in the plan's output.** A listed event has no cadence:
+  the denies say what crosses, and a tool reads the plan's crossing
+  resources (observer §7.5).
+- **The header** is still written against core 0.100.
+
+**The evidence.** `v2/plan.json` gains three cases, 40 in all: a face that
+lists one event of two, an empty `events`, and an entry that names no
+event (`event_unknown`). Its zenoh-modem cases list their events, as
+their files do: SF7's and SF9's plans deny `face/device_fault` by name,
+and SF12's and SBD's deny every event whole, `not_packed` left to RF's.
+`v2/lints.json` gains six cases, 69 in all: `events` read, empty,
+refused as one value and on a face that exposes none, and a link.v1
+policy's `unknown_field`. `scope/faces.json` (observer §7.5) gains two,
+19 in all: across lora0 at SF7, the events given narrowed to the two the
+face lists, and `face/device_fault` refused; SF12's and SBD's scopes hold
+their frame alone again. Each new case was written from the text, and
+the reference reads it as written.
+
+## 0.19 — 2026-11-08: editorial: rf0's plan denies modem.v3's JSON events by name, no rule changed (#1098)
+
+Since `modem.v3` 3.4 exposes three events for a face (#991), the RF
+face's plan carves `events:modem.v3`, its four JSON events by name, where
+§2.9 and Appendix B said it denied `zk2/*/*/*/events/**`. §2.9's example,
+Appendix B's plan and its note on the sketch say so.
+
+**Deliberately not changed.**
+- **No rule of this text.** A link.v1 face lists no events, so every
+  exposed event crosses one that exposes: the three cross rf0's here.
+- **The header** is still written against core 0.32.
+
 ## 0.18 — 2026-11-08: editorial: an event's key ends in its occurrence chunk, no rule changed (#980 C2c)
 
 Core 0.103 has an owner key each occurrence by its run and seq, and

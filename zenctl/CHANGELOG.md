@@ -6,6 +6,16 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a link.v2 face lists the events it carries (#1098)
+
+`link.v2` 0.12 §2.7: a face's `events = [...]`, as its `frames`.
+
+| Before | Now | Notes |
+|---|---|---|
+| `acl gen --face-policy`: every event exposed `link` crosses each face that exposes | on a face with `events`, only the listed ones cross; each other exposed event is denied by name | a face with no `events` keeps link.v1's rule; `events = []` lists none |
+| `acl gen`, `check face`: an `events` key on a face | read; an entry that names no event resource of a listed interface refuses the plan, `event_unknown` | a bad or repeated entry is `bad_value` at `events`, once; in a link.v1 policy, `unknown_field` |
+| `--across-face` with `--face-policy`: an exposed event in the scope on every face | in the scope only where the face lists it (observer §7.5 reads the plan) | |
+
 ## Unreleased (`main`, zk2) — a heartbeat's loss and divergence, two doctor checks, and a heartbeat's own key held (#990 V6, V5)
 
 No rule changed.
