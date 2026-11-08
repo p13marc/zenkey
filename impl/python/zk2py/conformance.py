@@ -5684,6 +5684,52 @@ def _round107_readings(root: Path) -> list[tuple[str, Any, Any]]:
                           "It publishes two occurrences, dated T − 100.5 s and T − 0.5 s.",
                           "2. The replay holds 503 occurrences",
                           "4. Step 2's comes last."), []))
+    # zk2py's consumer over §2.6's filter and order, offline
+    from . import alarms, live
+    from . import seed_snapshot as ss
+
+    def occ(width: int, run: int, seq: int, at: int | None) -> Any:
+        return live.Occurrence(f"zk2/s/v/a.v1/events/x/{occurrence_chunk(width, run, seq)}",
+                               zk2c.InBand(width, run, seq), None if at is None else {"s": at // 1000,
+                                                                                       "ms": at % 1000}, at, b"")
+    now = 10_000_000
+    xs = [occ(16, 1, 5, now - 2000), occ(16, 1, 6, None), occ(32, 9, 0, now - 3000), occ(16, 1, 4, now - 2000),
+          occ(16, 2, 0, None), occ(16, 1, 7, now - 3_700_000), occ(16, 1, 1, None), occ(32, 1, 3, now - 2000)]
+    kept, dropped = live.replay_filter(xs, 3600, now)
+    order = [(o.stamp.width, o.stamp.run, o.stamp.seq) for o in live.replay_order(kept)]
+    out.append(("core 0.103 §2.6, zk2py's consumer (live.replay_filter, replay_order): an unknown time kept, never "
+                "judged; one beyond the retention dropped; by time, then seq within one run; the unknown times last "
+                "by seq within a run; two runs at one time by the run's value, a 16-bit run first, as the reference "
+                "breaks the tie",
+                [len(kept), [(o.stamp.run, o.stamp.seq) for o in dropped], order],
+                [7, [(1, 7)], [(32, 9, 0), (16, 1, 4), (16, 1, 5), (32, 1, 3), (16, 1, 1), (16, 1, 6), (16, 2, 0)]]))
+    # alarms.v1 0.14 §2.14 step 5, the attribution of a GET's entry
+    entry = live.StateReply("k", False, b"", zk2c.ENCODING, None, None, snapshot_key="k",
+                            snapshot_run=zk2c.InBand(16, 7, 3), inband=zk2c.InBand(16, 2, 1))
+    per_key_reply = live.StateReply("k", False, b"", zk2c.ENCODING, None, None, inband=zk2c.InBand(16, 7, 1))
+    out.append(("alarms.v1 0.14 §2.14 step 5 (alarms.attribute_entry): a GET's entry by its snapshot's run, never the "
+                "entry's own: own under a run a present descriptor states, previous_instance under one none states, "
+                "unattributable with none stated; a per-key reply is read by meta.zid",
+                [alarms.attribute_entry(entry, ["0007"]), alarms.attribute_entry(entry, ["0002"]),
+                 alarms.attribute_entry(entry, []), alarms.attribute_entry(per_key_reply, ["0007"])],
+                ["own", "previous_instance", None, None]))
+    # core 0.102 §4.2, the owner's revision by its run, no lone fallback
+    from .contract import load_contract
+
+    old_ = load_contract(spec.parent / "impl/python/interop/state/zk2py_stray.v1.toml")
+    new_ = load_contract(spec.parent / "impl/python/interop/state/zk2py_stray.v1-1.toml")
+    by = ss.ByDescriptor([old_, new_])
+    by.descriptors["lab/s"] = [{"service": "lab/s", "run": "0007",
+                                "interfaces": [{"iface": "zk2py_stray.v1", "contract": old_.fingerprint}]}]
+    k = "zk2/lab/s/zk2py_stray.v1/state/status"
+    out.append(("core 0.102 §4.2 (seed_snapshot.ByDescriptor): the owner's revision is the one the descriptor whose "
+                "run is the sample's names; a lone descriptor stating another run names none (F-507's answer), so "
+                "no omission rule and no per-key reading; status is per key by 1.0 (freshness.v1) and by 1.1 "
+                "(freshness.v2) a collection answered by snapshot",
+                [by.per_key(k, zk2c.InBand(16, 7, 1)), by.per_key(k, zk2c.InBand(16, 8, 1)),
+                 by(k, {"run_width": 16, "run": 8}), ss.per_key_in(new_, k),
+                 by.revision(k, 16, 7) is old_],
+                [True, None, [], False, True]))
     # observer 0.30 to 0.32
     out.append(("observer 0.30 §7.3: a tool reads an event's run and seq from its key and its record after its time, "
                 "and shows the time or that the clock was unknown; 0.32 §7.5: an event's last chunk, its occurrence "
@@ -9049,6 +9095,9 @@ def _round89_readings(root: Path) -> list[tuple[str, Any, Any]]:
     ev = "zk2/lab/probe/zk2py_probe.v1/events/changed"
     o = ow.Owner("lab", "probe", [probe], budget=False)
     o.session = Fake()  # type: ignore[assignment]
+    # the fake session has no clock: its occurrences carry the unknown time
+    # (core 0.103 §2.6), which this reading of their QoS never reads
+    o.clock_untrusted = be_untrusted = True
     o._declare_member("zk2/lab/probe/zk2py_probe.v1/@stream/lanes/a")
     o.occur(ev, b"{}")
     o.occur(ev, b"{}")
@@ -9057,11 +9106,13 @@ def _round89_readings(root: Path) -> list[tuple[str, Any, Any]]:
     next(r for r in probe_be.canonical["resources"] if r["template"] == "changed")["reliability"] = "best_effort"
     be = ow.Owner("lab", "probe", [probe_be])
     be.session = Fake()  # type: ignore[assignment]
+    be.clock_untrusted = be_untrusted
     be.occur(ev, b"{}")
     # a session that refuses: nothing is put, so nothing is counted, and the
     # member's rate ("low", one an hour) refuses no second attempt (§2.7)
     failing = ow.Owner("lab", "probe", [probe])
     failing.session = Fake(fail=True)  # type: ignore[assignment]
+    failing.clock_untrusted = True
     raised = []
     for _ in range(2):
         try:

@@ -250,20 +250,24 @@ def section1(report: Report) -> None:
         def status_of(st) -> list[tuple[dict | None, int | None]]:
             return [(_status(x.payload), _zid(x.stamp_id)) for x in st.replies if x.key.endswith("/state/status")]
 
-        # core 0.100 (round 105): status, a freshness.v2 state, is answered by
-        # snapshot, its entry with no Zenoh timestamp; "stamped by the owner's
-        # session" is read by its in-band run, the one the owner's descriptor
-        # states (F-503: the scenario reads a stamp's session)
+        # health.v1 0.10 (F-503's answer, round 107): "Both of T's GETs answer
+        # the status: UNSPECIFIED, "starting", in a snapshot under the run
+        # the owner's descriptor states (core §3.3), its entry with its
+        # confirmation (freshness.v2 §2.4)"
         run = o.owner.run_hex()
-        got = [[(_status(x.payload), x.inband.run_hex() if x.inband is not None else None, x.stamp_id)
+        got = [[(_status(x.payload), x.inband.run_hex() if x.inband is not None else None, x.stamp_id,
+                 x.snapshot_run.run_hex() if getattr(x, "snapshot_run", None) is not None else None,
+                 x.confirmation)
                 for x in st.replies if x.key.endswith("/state/status")]
                for k in ("lab/svc instance", "lab/svc alive") for st, _ in answers.get(k, [])]
         report.check(sec, "step 1: both of T's GETs, at the instance token and at the alive/health.v1 token, "
-                          "answer the status UNSPECIFIED \"starting\", a snapshot's entry under the owner's run "
-                          "(its in-band stamp; no Zenoh timestamp, F-503): put before the tokens (§2.3)",
+                          "answer the status UNSPECIFIED \"starting\" in a snapshot under the run the owner's "
+                          "descriptor states, its entry with its confirmation and no Zenoh timestamp: put before the "
+                          "tokens (§2.3; health.v1 0.10)",
                      len(got) == 2 and all(len(x) == 1 and x[0][0] is not None and x[0][0]["level"] == h.UNSPECIFIED
                                            and x[0][0]["reason"] == "starting" and x[0][1] == run
-                                           and x[0][2] is None for x in got),
+                                           and x[0][2] is None and x[0][3] == run and x[0][4] in ("time", "conf")
+                                           for x in got),
                      f"{got}; run {run}")
         # Step 2.
         bus.owner("lab/quiet", level=h.OK, reason="serving", tokenless={"health.v1", "freshness.v2"})
@@ -751,14 +755,17 @@ def section4m(report: Report) -> None:
     gets = [(x.stamp_id, h.decode_status(x.payload)) for x in b["get"]]
     report.check(sec, "step 4: under drop_future_timestamp, S receives no fault: R1 dropped it; the status puts "
                       "carry no Zenoh timestamp of the owner's (freshness.v2 §2.4), so R1 stamps them and S receives "
-                      "them, step 2's after the detection included; G's reply holds the status under the owner's "
-                      "stamp, since a router never drops or re-stamps a reply (core §4.1); its readers have only "
+                      "them, step 2's after the detection included; G's answer lists the status in a snapshot under the "
+                      "run the owner's descriptor states, its times from the owner's clock, ahead, which no router "
+                      "reads (core §4.1, §4.3; health.v1 0.10); its readers have only "
                       "the heartbeat's time unknown to go on, which answers no clock question alone (0.9)",
                  b["ahead"] and not b["faults"] and len(b["puts"]) == 2
                  and all(_zid(x.stamp_id) == _zid(b["r1"]) for x in b["puts"]) and len(gets) == 1
-                 # core 0.100 (round 105): the status is a snapshot's entry, under
-                 # the owner's run in band, with no Zenoh timestamp (F-503)
+                 # health.v1 0.10 (F-503's answer, round 107): "G's answer lists
+                 # the status in a snapshot under the run the owner's descriptor
+                 # states", with no Zenoh timestamp
                  and gets[0][0] is None and b["get"][0].snapshot_key is not None and b["get"][0].inband is not None
+                 and getattr(b["get"][0], "snapshot_run", None) is not None
                  and gets[0][1] is not None and gets[0][1]["level"] == h.OK
                  and b["clock"] == ("unobservable", "time_unknown"),
                  f"ahead {b['ahead']}, {len(b['faults'])} faults, {len(b['puts'])} status puts; GET {gets}; owner "

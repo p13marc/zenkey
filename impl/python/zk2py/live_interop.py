@@ -1874,31 +1874,39 @@ def run_python_016(report: Report) -> None:
         finally:
             tool.close()
         # §2.6 (0.16): the replay bound is the consumer's. A stand-in for a
-        # union storage answers every occurrence, ignoring `_time`.
+        # union storage answers every occurrence, ignoring `_time`. Core
+        # 0.103 (round 107): each on its occurrence chunk's key, its payload
+        # form 4, dated: the consumer filters by each event's time.
+        from . import zk2c
+        from .lexical import occurrence_chunk
+
         helper = live.open_client(r1_endpoint)
         consumer = live.open_client(r1_endpoint)
         try:
             now = int(time.time() * 1000)
             base = "zk2/py-site/sensor/zk2py_ev.v1/events/alarm"
-            keys = [f"{base}/{live.new_ulid(now - k * 5000)}" for k in range(1, 501)] + \
-                   [f"{base}/{live.new_ulid(now - 3_660_000 - k * 5000)}" for k in range(1, 501)]
+            dated = [(now - k * 5000) for k in range(1, 501)] + [(now - 3_660_000 - k * 5000) for k in range(1, 501)]
+            occ = [(f"{base}/{occurrence_chunk(16, 7, i)}", zk2c.event(16, {"s": t // 1000, "ms": t % 1000},
+                                                                       b"occurrence")) for i, t in enumerate(dated)]
 
             def answer(q) -> None:
-                for k in keys:
-                    q.reply(k, b"occurrence")
+                for k, wire in occ:
+                    q.reply(k, wire, encoding=zk2c.ENCODING)
 
             q = helper.declare_queryable("zk2/py-site/sensor/zk2py_ev.v1/events/**", zenoh.handlers.Callback(answer),
                                          complete=False)
             time.sleep(0.3)
             try:
-                kept, dropped = live.replay_events(consumer, "zk2/*/*/*/events/**", 3600, now_ms=now)
+                rp = live.replay_events(consumer, "zk2/*/*/*/events/**", 3600, now_ms=now)
             finally:
                 q.undeclare()
-            report.check(run, "§2.6 (0.16): retention is the consumer's bound on replay: against a storage that "
-                              "prunes and filters nothing, the consumer keeps the 500 occurrences within 1 h by "
-                              "their ULID's time (state.md §8)",
-                         sorted(kept) == sorted(keys[:500]) and sorted(dropped) == sorted(keys[500:]),
-                         f"kept {len(kept)}, dropped {len(dropped)} of {len(keys)}")
+            keys = [k for k, _ in occ]
+            report.check(run, "§2.6 (0.16, 0.103): retention is the consumer's bound on replay: against a storage "
+                              "that prunes and filters nothing, the consumer keeps the 500 occurrences within 1 h "
+                              "by each event's time (state.md §8)",
+                         sorted(o.key for o in rp.delivered) == sorted(keys[:500])
+                         and sorted(o.key for o in rp.dropped) == sorted(keys[500:]) and not rp.undecodable,
+                         f"kept {len(rp.delivered)}, dropped {len(rp.dropped)} of {len(keys)}")
         finally:
             helper.close()
             consumer.close()

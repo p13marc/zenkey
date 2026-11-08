@@ -733,6 +733,9 @@ class GetReading:
     complete: bool = False
     confirmed_ns: int | None = None
     owner_id: str | None = None
+    #: the run of the snapshot that listed it (:attr:`zk2py.live.StateReply.snapshot_run`),
+    #: by which ``alarms.v1`` 0.14 attributes a GET's entry (F-503's answer)
+    snapshot_run: Any = None
 
     def observation(self, trust: ClockTrust, now_utc_ns: int | None = None) -> Observation:
         if self.snapshot:
@@ -763,7 +766,7 @@ def reading_of(r: Any, epoch_s: int = 0, complete: bool = True, owner_id: str | 
         t = r.snapshot_time if r.confirmation == "time" else r.conf if r.confirmation == "conf" else None
         at = None if t is None else ((epoch_s + t["s"]) * 1000 + t["ms"]) * 1_000_000
         return GetReading("delete" if r.deleted else "put", None, None, None, r.payload, r.encoding, r.inband,
-                          True, complete, at, owner_id)
+                          True, complete, at, owner_id, getattr(r, "snapshot_run", None))
     if r.deleted:
         return GetReading("delete", r.stamp_ns, r.stamp_id, r.stamp, inband=r.inband)
     if r.refusal is not None:
@@ -795,7 +798,7 @@ def get_reading(session: Any, key: str, timeout: float = 1.0, epoch_s: int = 0,
         t = r.snapshot_time if r.confirmation == "time" else r.conf if r.confirmation == "conf" else None
         at = None if t is None else ((epoch_s + t["s"]) * 1000 + t["ms"]) * 1_000_000
         return GetReading("delete" if r.deleted else "put", None, None, None, r.payload, r.encoding, r.inband,
-                          True, whole, at, owner_id)
+                          True, whole, at, owner_id, r.snapshot_run)
     if r.deleted:
         return GetReading("delete", r.stamp_ns, r.stamp_id, r.stamp, inband=r.inband)
     if r.refusal is not None:

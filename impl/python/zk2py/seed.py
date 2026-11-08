@@ -683,6 +683,15 @@ class LateJoiner:
             self.applied.append(Applied(key, via, deleted, stamp, "undecodable", self.merge.rule, None,
                                         read.refusal))
             return
+        per_key = getattr(self.collections, "per_key", None)
+        if deleted and via == "reply" and per_key is not None and per_key(key, read.stamp) is False:
+            # core 0.102 §4.2: a stray reply_del "is no owner's answer … A
+            # consumer or a tool MUST NOT merge a stray reply_del as a
+            # deletion. It counts it undecodable, refused as form"
+            self.undecodable.append((key, via, "form"))
+            self.applied.append(Applied(key, via, deleted, stamp, "undecodable", self.merge.rule, read.stamp,
+                                        "form"))
+            return
         record = b"" if deleted else (read.record if read.record is not None else payload)
         # A consumer by §4.3's consumer rule from its first value on, its
         # seed's replies included; a tool by §4.2's merge for as long as it
