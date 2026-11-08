@@ -279,7 +279,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§2.6](core.md#26-events) | A consumer MUST keep a replayed occurrence whose time (§7.5's form 4) is within the retention, and drop one whose time is beyond it. | `[Sc: state.md §8]` |
 | [§2.6](core.md#26-events) | **The filter.** … A consumer MUST NOT judge an unknown time within the retention or beyond it: the storage's `_time` bound alone admitted that occurrence. | `[Sc: state.md §8]` |
 | [§2.6](core.md#26-events) | A consumer MUST deliver a replay in the order of the occurrences' times, then their seqs within one run. | `[Sc: state.md §8]` |
-| [§2.6](core.md#26-events) | **A put that carries no event.** … A consumer MUST NOT deliver a put on an events key whose payload is no event, such as a mutation or a payload with no envelope, whether a subscription heard it or a replay returned it. | `[Sc: state.md §8]` |
+| [§2.6](core.md#26-events) | **A sample that carries no event.** … A consumer MUST NOT deliver a put on an events key whose payload is no event, such as a mutation or a payload with no envelope, or a delete on an events key, whether a subscription heard it … | `[Sc: state.md §8]` |
 
 ### [core §3.2 Binding rules](core.md#32-binding-rules)
 

@@ -252,7 +252,8 @@ time of step 1.
    samples on keys of `events/entries` whose occurrence chunks no
    occurrence took. One is a mutation (§7.5's form 0) under
    `zenoh/bytes`. The other is a JSON document under `application/json`,
-   with no envelope.
+   with no envelope. It then deletes a third such key, its attachment a
+   delete (§7.5's form 1).
 5. The consumer replays the event.
 
 **Expected.**
@@ -260,8 +261,8 @@ time of step 1.
    16-bit run, or 12 under a 32-bit one. Its payload carries its time,
    or the unknown time for step 2's.
 2. The replay holds 503 occurrences: step 1's 500 recent ones, step 2's
-   and both of step 3's. The backend kept all 1,005, step 4's two among
-   them. The consumer dropped the 500 beyond the retention, by each
+   and both of step 3's. The backend kept all 1,005 puts, step 4's two
+   among them. The consumer dropped the 500 beyond the retention, by each
    event's time.
 3. The 502 with a time come in the order of their times, across the run
    change and against the seqs. So step 1's recent ones come oldest
@@ -270,13 +271,14 @@ time of step 1.
    second between T − 1 s and T.
 4. Step 2's comes last. An unknown time is never judged within the
    retention or beyond it, and comes after every known one.
-5. Neither of step 4's puts is delivered, by the subscription or by the
-   replay. The consumer counts each undecodable, refused as `form`: it
-   carries no event (core §2.6).
+5. None of step 4's three samples is delivered, by the subscription or
+   by the replay. The consumer counts each undecodable, refused as
+   `form`: each carries no event, in an envelope §7.5's parse accepts or
+   in none (core §2.6).
 
 *Spike S5: the union replay returned 1,000 in 4 ms; the memory backend
 ignored the `_time` bound. The reference runs §8 in `zenkey/tests/state.rs`
-(`s8_events_replay`).*
+(`s8_events_replay`). Step 4's delete is written ahead of the reference.*
 
 ## §9 An archive's backend refuses an outdated put (§4.4)
 
