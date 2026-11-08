@@ -2908,6 +2908,202 @@ async fn v2_s3_the_near_router_stamps_nothing() {
     );
 }
 
+/// link.v2 scenarios §4's face: the scenarios' policy on a `south-region`
+/// face, region `ground`, whose far principal `ground-router` is a user name
+/// of the enrollment.
+fn v2_south_policy() -> String {
+    let p = V2_POLICY.replace(
+        "far              = \"ground\"\nattach           = \"client\"\n",
+        "far              = \"ground-router\"\nattach           = \"south-region\"\nregion           = \"ground\"\n",
+    );
+    assert_ne!(p, V2_POLICY);
+    p
+}
+
+/// N for link.v2 scenarios §4: a router running `block`, listening on the
+/// near side and on the face, presenting `router`, its dictionary every
+/// user of [`USERS`]; connecting to `connect` too when given.
+async fn v2_near(
+    block: &str,
+    name: &str,
+    connect: Option<&str>,
+) -> (Near, zenoh::session::ZenohId) {
+    let dict = scratch(&format!("{name}.txt"));
+    std::fs::write(
+        &dict,
+        USERS
+            .iter()
+            .map(|u| format!("{u}:{u}-pw\n"))
+            .collect::<String>(),
+    )
+    .unwrap();
+    let sock = scratch(&format!("{name}.sock"));
+    let face = format!("unixsock-stream/{}", sock.display());
+    let mut keys = vec![
+        ("mode", "\"router\"".to_owned()),
+        (
+            "listen/endpoints",
+            format!("[\"{}\", \"{face}\"]", util::ANY_PORT),
+        ),
+        (
+            "transport/auth/usrpwd",
+            format!(
+                "{{ user: \"router\", password: \"router-pw\", dictionary_file: {:?} }}",
+                dict.display().to_string()
+            ),
+        ),
+    ];
+    if let Some(c) = connect {
+        keys.push(("connect/endpoints", format!("[\"{c}\"]")));
+    }
+    let router = zenoh::open(config_of(block, &keys))
+        .await
+        .expect("N runs the block");
+    let tcp = util::bound(&router).await;
+    let zid = router.zid();
+    (
+        Near {
+            _router: router,
+            tcp,
+            face,
+            tls: None,
+            files: vec![dict, sock],
+        },
+        zid,
+    )
+}
+
+/// F for link.v2 scenarios §4: a far router run from the far end's block,
+/// region `ground`, with the password of the user the block names and a
+/// dictionary of its own (`ground`, `router`), listening on the near side
+/// and on a unix socket of its own; connecting to `connect` when given.
+async fn v2_far(far_block: &str, name: &str, connect: Option<&str>) -> (Far, String) {
+    let dict = scratch(&format!("{name}.txt"));
+    std::fs::write(&dict, "ground:ground-pw\nrouter:router-pw\n").unwrap();
+    let sock = scratch(&format!("{name}.sock"));
+    let face = format!("unixsock-stream/{}", sock.display());
+    let mut keys = vec![
+        ("mode", "\"router\"".to_owned()),
+        ("region_name", "\"ground\"".to_owned()),
+        (
+            "listen/endpoints",
+            format!("[\"{}\", \"{face}\"]", util::ANY_PORT),
+        ),
+        (
+            "transport/auth/usrpwd/password",
+            "\"ground-router-pw\"".to_owned(),
+        ),
+        (
+            "transport/auth/usrpwd/dictionary_file",
+            format!("{:?}", dict.display().to_string()),
+        ),
+    ];
+    if let Some(c) = connect {
+        keys.push(("connect/endpoints", format!("[\"{c}\"]")));
+    }
+    let router = zenoh::open(config_of(far_block, &keys))
+        .await
+        .expect("F runs the far end's block");
+    let tcp = util::bound(&router).await;
+    (
+        Far {
+            _router: router,
+            tcp,
+            dict,
+        },
+        face,
+    )
+}
+
+/// link.v2 scenarios §4: on a face whose far principal is a user name, F,
+/// run from the far end's block, opens the link and N binds it, so G, a
+/// client of F, reads `oper` across; F asks a user of every session that
+/// opens to it; a policy whose near router opens the face is refused
+/// (`near_opens_user`); and N opening the link to F binds it to no subject,
+/// so under `deny` nothing crosses (link.v2 §2.5, §2.18).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn v2_s4_the_far_end_opens_a_face_bound_by_a_user_name() {
+    let south = v2_south_policy();
+    let plan = plan(&south);
+    let block = acl_plan_json5(&plan);
+    let far_block = acl_far_json5(&plan).expect("the far end's block");
+    // 1. F's block names ground-router's user, its password and
+    //    dictionary placeholders.
+    let tree = RouterConfig::stated_tree(
+        &format!("{{\n{far_block}}}"),
+        zenkey_fleet::ConfigDialect::Json5,
+    )
+    .unwrap();
+    assert_eq!(
+        tree["transport"]["auth"],
+        serde_json::json!({"usrpwd": {
+            "user": "ground-router",
+            "password": "<ground-router's password>",
+            "dictionary_file": "<the far end's dictionary>",
+        }}),
+        "{far_block}"
+    );
+    // 2. F opens the link to N; G reads `oper` across.
+    let oper = "zk2/lab/radio-a/radio.v1/state/oper";
+    let (n, _) = v2_near(&block, "v2-s4-n", None).await;
+    let o = owner(&n.tcp, "radio-a").await;
+    let (f, _) = v2_far(&far_block, "v2-s4-f", Some(&n.face)).await;
+    let g = client(&f.tcp, "ground").await;
+    let r = subscribed(&g, vec![oper.to_owned()]).await;
+    let (o_ref, seen) = (&o, &r.seen);
+    eventually("G reads oper across the face F opened", || async move {
+        if seen.puts(oper) > 0 {
+            return true;
+        }
+        o_ref.put("state/oper", "up").await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        false
+    })
+    .await;
+    // 3. A session that presents no user is refused at F's handshake.
+    let mut c = base("client");
+    c.insert_json5("connect/endpoints", &format!("[\"{}\"]", f.tcp))
+        .unwrap();
+    assert!(
+        zenoh::open(c).await.is_err(),
+        "F asks a user of every session that opens to it"
+    );
+    drop((r, g, f, o, n));
+    // 4. The near router opening a face to a user name is refused.
+    let near_opens = south.replace(
+        "reply_timeout_ms = 1000\n",
+        "reply_timeout_ms = 1000\nopens            = \"near\"\n",
+    );
+    let refused = plan_acl(
+        &enrollment(),
+        &contracts(),
+        &AclOptions {
+            default_permission: AclPermission::Deny,
+            face_policy: Some(link::parse(&near_opens)),
+            ..AclOptions::default()
+        },
+    )
+    .expect_err("near_opens_user refuses the plan");
+    assert!(refused.to_string().contains("near_opens_user"), "{refused}");
+    // 5. Control: N opens the link to F, which lets N in. N binds it to no
+    //    subject: G reads nothing across.
+    let (f, f_face) = v2_far(&far_block, "v2-s4-f2", None).await;
+    let (n, n_zid) = v2_near(&block, "v2-s4-n2", Some(&f_face)).await;
+    let o = owner(&n.tcp, "radio-a").await;
+    let g = client(&f.tcp, "ground").await;
+    let r = subscribed(&g, vec![oper.to_owned()]).await;
+    eventually("F holds a transport N opened", || async {
+        f._router.info().routers_zid().await.any(|z| z == n_zid)
+    })
+    .await;
+    let until = Instant::now() + SILENCE;
+    while Instant::now() < until {
+        o.put("state/oper", "up").await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(r.seen.puts(oper), 0, "nothing crosses a link N opened");
+}
+
 /// link.v2 scenarios §2's deployment: `lab/probe-a` implements `probe.v1`,
 /// and the console, run by `local` and `ground`, binds every stream, state
 /// and event of it.

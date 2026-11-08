@@ -153,3 +153,36 @@ timestamping off (core §8.2). F attaches to N over the face directly.
 3. The tool reports no finding.
 4. In the control, F's sample carries a timestamp, N's own, its id N's
    zid. The tool reports `face_timestamping` at `timestamping`.
+
+## §4 The far end opens a face bound by a user name (§2.5, §2.18)
+
+**Setup.** N and the owner as §3 runs them, under `deny`. The face is a
+`south-region` face, `region = "ground"`, whose far principal is
+`ground-router`, a user name of the enrollment, which N's dictionary
+holds. F is a far router naming its region `ground`, listening on
+`tcp/127.0.0.1:<port>` and on a unix socket of its own. G is a client
+session of F, as `ground`.
+
+**Steps.**
+1. The generator compiles N's block and F's block. N starts with its
+   block. F starts with its block, `ground-router`'s password and a
+   `dictionary_file` that holds `ground` and `router`, and connects to N
+   over the face.
+2. G subscribes to `zk2/lab/radio-a/radio.v1/state/oper`, a state the
+   face lets cross. The owner puts `oper` until G receives it.
+3. A session that presents no user opens a link to F.
+4. **Control:** the face states `opens = "near"`, and the generator
+   compiles the policy again.
+5. **Control:** N starts again from step 1's block, presenting
+   `router`, and connects to F's unix socket. F starts from step 1's
+   configuration and connects to nothing. Step 2 runs again, for the
+   silence.
+
+**Expected.**
+1. F's block names `ground-router` as its usrpwd user, its password and
+   dictionary placeholders.
+2. G receives `oper`: N bound F's link to `ground-router`.
+3. F refuses it at its handshake.
+4. The generator refuses the policy: `near_opens_user` at `opens`.
+5. F lets N in, and holds a transport to N. G receives nothing: N bound
+   the link it opened to no subject, and under `deny` grants it nothing.

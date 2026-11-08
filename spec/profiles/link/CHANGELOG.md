@@ -7,6 +7,87 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.15 — 2026-11-08: §2.5, the end that opens, and the far end's user; §2.19, a `null` read as left out (#1107)
+
+#989's zk2c runs found that a face whose far principal is a user name
+binds only when the far end opens the link. With the near router
+opening, the ground's router refused the handshake ("Recv InitSyn.
+Expected extension"). And credentials on the ground's router made it ask
+a user of every session that opened to it, the ground's own tools
+among them. The face policy, this text and the far end's block said
+none of this.
+
+**zenoh's usrpwd, read.** `zenoh-transport`'s
+`unicast/establishment/ext/auth/usrpwd.rs`, at 1.10.1 and at
+`zm-1.10.2-r1`, which are the same:
+- **An opener** that holds credentials sends its user and an HMAC of its
+  password, keyed by the acceptor's nonce. One with none sends nothing.
+- **An acceptor** that holds credentials or a dictionary asks this of
+  every opener. It refuses one that sends none ("Expected extension"),
+  or a user its dictionary does not hold ("Invalid user"). It binds the
+  link to the opener's user.
+- **No acceptor presents a user.** A link a router opened carries no
+  user name (`UsrPwdId(None)`), so no subject selected by a user name
+  matches the session over it. mTLS differs: each end reads the other's
+  certificate's CN.
+
+**Added: §2.1, a face's `opens`.** `"far"`, the default, or `"near"`,
+only on a `south-region` face. `"near"` on a `client` or device face is
+`bad_value`: their far end is a client of the near router, which opens
+its link. A link.v1 policy's `opens` is `unknown_field`.
+
+**Added: §2.5, the end that opens.**
+- **The MUST.** A generator refuses a deployment whose face the near
+  router opens while it binds the face's far principal by a user name:
+  `near_opens_user`, an error at `opens` (§2.3's table). The near router
+  would bind the far end's link to no subject, and under `deny` grant it
+  nothing.
+- **The far end's credentials.** The far end opens with the far
+  principal's user and password. With them, it asks a user of every
+  session that opens to it, so its own sessions each need one in its
+  dictionary.
+
+**Added: §2.18, the far end's credentials.** Where the faces other than
+device faces share one far principal, and the deployment binds it by a
+user name, the far end's block names it: `transport.auth.usrpwd.user`.
+Its `password` and `dictionary_file` are placeholders. zenoh refuses a
+user with no password, and the far end opens neither unfilled.
+
+**Stated: §2.19, a `null`.** A `null` `timestamping/enabled`, a `null`
+at a mode and a `null` `mode` are read as left out, as zenoh 1.10.1
+reads an absent optional value. The reference read them so already.
+review-bot's note on #1114.
+
+**Changed: §5 and Appendix B.** §5 asks whether the near router can
+bind the far principal by its user name. Appendix B says the ground
+opens each of zenoh-modem's faces, whose far principals are user names.
+
+**Deliberately not changed.**
+- **No check of who connects.** A router's `connect` and `listen`
+  endpoints are the deployment's, beside the block: a tool reads no
+  direction from them. zk2c's RF face ran `client` with the node
+  connecting, against the shape, and no file says so.
+- **The near router's dictionary** is not written. Its users and their
+  passwords are the deployment's, as they were.
+- **No subject by link protocol** spares a session the far end's
+  handshake: zenoh asks a user of every opener, over every link.
+- **The header** is still written against core 0.100.
+
+**The evidence.**
+- `v2/lints.json` gains six cases, 75 in all: `opens` on a `south-region`
+  face and stated `"far"` on a `client` one, `"near"` refused on a client
+  and a device face, two values refused, and a link.v1 policy's
+  `unknown_field`.
+- `v2/plan.json` gains three, 44 in all. A case may give `users`, the
+  principals the deployment binds by a user name. `near_opens_user`
+  refuses the near router opening a face to `ground-router`; the same
+  face to a CN, and the far end opening it, are planned.
+- `v2/transport.json` gains three, 24 in all: a `null` at the router's
+  mode, a `null` value with a `null` mode, and a `null` at a peer's mode.
+- `scenarios-v2.md` gains §4: the generated pair opens from the far end
+  and binds, a session with no user is refused by the far router, and the
+  near router opening binds nothing.
+
 ## link.v2 0.14 — 2026-11-08: editorial: §5 asks of a face with no `frames` or no `events`, and 0.12's evidence counted, no rule changed (#609, #1098)
 
 zk2py round 108 read 0.12 cold, and filed F-519 and F-520 against this

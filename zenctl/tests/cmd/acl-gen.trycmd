@@ -663,6 +663,14 @@ transport: {
     },
   },
   unicast: { open_timeout: 10000, accept_timeout: 10000 },  // ms
+  // The far principal's credentials (link.v2 §2.5): zenoh's usrpwd authenticates the end
+  // that opens a link to the end that accepts it, never the other way, so the far end opens the
+  // face's links as "ground". Fill in its password, the one the near router's dictionary
+  // holds for it, and the far end's own dictionary_file: with credentials, the far end asks a user of
+  // every session that opens to it, and refuses one the file does not hold. Give each
+  // session of the far side a user of its own there, its local tools among them. zenoh
+  // loads no user without a password, and opens no dictionary it cannot read.
+  auth: { usrpwd: { user: "ground", password: "<ground's password>", dictionary_file: "<the far end's dictionary>" } },
 },
 routing: { interests: { timeout: 10000 } },  // ms
 // zenoh stamps every unstamped put a router routes, and the stamp crosses the face:

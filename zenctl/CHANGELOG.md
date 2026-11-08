@@ -6,6 +6,16 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — the far end opens a face bound by a user name (#1107)
+
+`link.v2` 0.15 §2.1, §2.5, §2.18.
+
+| Before | Now | Notes |
+|---|---|---|
+| a face policy's `opens`: `unknown_field` | `opens = "far"` (the default) or `"near"`, `"near"` only on a `south-region` face | a link.v1 policy's `opens` is still `unknown_field` |
+| `acl gen --face-policy`, `check face`: a face the near router opens, its far principal a user name, planned | refused, exit 2: `near_opens_user` at `opens` | zenoh's usrpwd binds a user name to the end that opens a link alone; bind the far principal by a CN, or have the far end open |
+| `acl gen --far-config`: no credentials | `transport: { auth: { usrpwd: { user: "<far principal>", password: "<…>", dictionary_file: "<…>" } } }` where the enrollment binds the far principal by a user name, the password and the dictionary placeholders | fill in the password, and a `dictionary_file` with a user for each session that opens to the far end, its local tools among them; zenoh loads no user without a password |
+
 ## Unreleased (`main`, zk2) — a face router stamps nothing (#1106)
 
 `link.v2` 0.13 §2.18, §2.19; core §8.2.

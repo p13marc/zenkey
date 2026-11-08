@@ -1325,6 +1325,70 @@
           "severity": "error"
         }
       ]
+    },
+    {
+      "note": "`opens = \"near\"` on a `south-region` face: the near router connects to the far router, and no finding (§2.1, §2.5). Written by reading link.v2 0.15",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"south-region\"\nregion           = \"ground\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\nopens            = \"near\"\n",
+      "expect": []
+    },
+    {
+      "note": "`opens = \"far\"` on a `client` face, the default stated: no finding (§2.1, §2.5). Written by reading link.v2 0.15",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\nopens            = \"far\"\n",
+      "expect": []
+    },
+    {
+      "note": "`opens = \"near\"` on a `client` face: `bad_value`, since a client session opens its links to the near router (§2.1, §2.5). Written by reading link.v2 0.15",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\nopens            = \"near\"\n",
+      "expect": [
+        {
+          "at": "opens",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        }
+      ]
+    },
+    {
+      "note": "`opens = \"near\"` on a device face: `bad_value`, as on a `client` face (§2.1, §2.5). Written by reading link.v2 0.15",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"probe-a\"\nattach           = \"device\"\ndevices          = [\"lab/probe-a\"]\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\nopens            = \"near\"\n",
+      "expect": [
+        {
+          "at": "opens",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        }
+      ]
+    },
+    {
+      "note": "an `opens` that is neither `\"far\"` nor `\"near\"`, and one that is no string: `bad_value` (§2.1). Written by reading link.v2 0.15",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.lane]\nfar              = \"ground-b\"\nattach           = \"south-region\"\nregion           = \"ground-b\"\nselect           = { link_protocols = [\"serial\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\nopens            = 1\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"south-region\"\nregion           = \"ground\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\nopens            = \"both\"\n",
+      "expect": [
+        {
+          "at": "opens",
+          "code": "bad_value",
+          "face": "lane",
+          "severity": "error"
+        },
+        {
+          "at": "opens",
+          "code": "bad_value",
+          "face": "radio",
+          "severity": "error"
+        }
+      ]
+    },
+    {
+      "note": "a link.v1 policy knows no `opens`: `unknown_field` (§2.1). Written by reading link.v2 0.15",
+      "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\nopens        = \"far\"\n",
+      "expect": [
+        {
+          "at": "opens",
+          "code": "unknown_field",
+          "face": "radio",
+          "severity": "error"
+        }
+      ]
     }
   ],
   "description": "link.v2's linter (v2.md §2.1, §2.4, §2.10, §2.11, §2.16), a face's `frames`, `events` and `horizon_s` among it. Each case is a face policy, `policy`, and `expect`, every finding of it, sorted by face (none first), `at`, then `code`, as link.v1's lints.json writes them. A policy with no `profile` is link.v1's, read finding for finding as link.v1 §2.1 says. A device face (§2.5) is `attach = \"device\"` with `devices`. A case may carry link.v1's `block`, read as link.v1's lints.json reads it, `zk_not_denied` on a device face read as §2.15 says. The device cases, from case 40, and the `events` cases, from case 63, were written by reading the text, not derived by the reference. A case may give a deployment and its windows as link.v1's lints.json does (`implements`, `contracts` or `interfaces`, `windows`): the plan is derived, and `window_under_outage` reads §2.11's floor."

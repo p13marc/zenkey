@@ -1051,6 +1051,10 @@ pub enum Code {
     /// `epoch`: its member tokens cross the face at each transport, and the
     /// face denies them (v2 §2.5).
     EpochOnDevice,
+    /// A face the near router opens (`opens = "near"`) whose far principal
+    /// the deployment binds by a user name: zenoh's usrpwd binds a user
+    /// name only to a link the router accepted (v2 §2.5).
+    NearOpensUser,
 }
 
 impl Code {
@@ -1113,6 +1117,7 @@ impl Code {
             Self::DeviceListed => "device_listed",
             Self::PresenceRequired => "presence_required",
             Self::EpochOnDevice => "epoch_on_device",
+            Self::NearOpensUser => "near_opens_user",
         }
     }
 
@@ -1256,6 +1261,19 @@ impl Attach {
     }
 }
 
+/// Which end of a face opens its links (v2 §2.1, §2.5): connects, where
+/// the other accepts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Opens {
+    /// The far end: the far side's session, gateway or router connects to
+    /// the near router. Every shape's default, and `client`'s and
+    /// `device`'s only.
+    #[default]
+    Far,
+    /// The near router connects to the far router: `south-region` only.
+    Near,
+}
+
 /// One constrained face of a router (§2.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Face {
@@ -1296,6 +1314,9 @@ pub struct Face {
     /// link.v2's `horizon_s` (v2 §2.12): the shortest horizon the face
     /// affords a crossing heartbeat or frame resource.
     pub horizon_s: Option<u64>,
+    /// link.v2's `opens` (v2 §2.1, §2.5): which end opens the face's links.
+    /// [`Opens::Far`] in a `link.v1` policy, and where it states none.
+    pub opens: Opens,
 }
 
 /// A listed frame's cadence on a face (v2 §2.7): the deployment's word to
@@ -1968,6 +1989,7 @@ const FACE_KEYS_V2: &[&str] = &[
     "frames",
     "events",
     "devices",
+    "opens",
 ];
 
 /// What a face's `attach` names, when it is valid (§2.1; v2 §2.1).
@@ -2190,6 +2212,22 @@ fn parse_face(
     if attach == Some(AttachKind::Device) && !t.contains_key("devices") {
         bad(out, Code::MissingField, "devices");
     }
+    // `opens` (v2 §2.1, §2.5): `"near"` only with `south-region`, checked
+    // against `attach` only when `attach` is valid. A link.v1 face's is
+    // `unknown_field`, above.
+    let opens = match t.get("opens") {
+        Some(v) if v2 => match v.as_str() {
+            Some("far") => Some(Opens::Far),
+            Some("near") if !matches!(attach, Some(AttachKind::Client | AttachKind::Device)) => {
+                Some(Opens::Near)
+            }
+            _ => {
+                bad(out, Code::BadValue, "opens");
+                None
+            }
+        },
+        _ => Some(Opens::Far),
+    };
     let link_protocols = match t.get("select") {
         None => {
             bad(out, Code::MissingField, "select");
@@ -2366,6 +2404,7 @@ fn parse_face(
             frames: frames?,
             events: events?,
             horizon_s,
+            opens: opens?,
         });
     }
     let batch_bytes = int("batch_bytes", 1, MAX_BATCH, true);
@@ -2411,6 +2450,7 @@ fn parse_face(
         frames: None,
         events: None,
         horizon_s: None,
+        opens: Opens::Far,
     })
 }
 
@@ -2847,6 +2887,10 @@ pub struct Deployment {
     /// The interface ids a revision given of which uses `redundancy.v1`:
     /// a device implementing one is `presence_required` (v2 §2.5).
     pub governed: BTreeSet<String>,
+    /// The principals the deployment binds by a usrpwd user name (core
+    /// §11.1): a face the near router opens binds none of them, so a
+    /// link.v2 plan refuses one whose far principal is (v2 §2.5).
+    pub users: BTreeSet<String>,
 }
 
 impl Deployment {
@@ -3165,6 +3209,12 @@ pub fn plan(policy: &FacePolicy, deployment: &Deployment) -> Result<Vec<FacePlan
                     }
                 }
             }
+        }
+    }
+    // A face the near router opens binds no user name (v2 §2.5).
+    for (name, face) in &policy.faces {
+        if face.opens == Opens::Near && deployment.users.contains(&face.far) {
+            errors.push(Finding::new(Code::NearOpensUser, Some(name), "opens"));
         }
     }
     if !errors.is_empty() {
@@ -4664,6 +4714,7 @@ mod tests {
             frames: None,
             events: None,
             horizon_s: None,
+            opens: Opens::Far,
         }
     }
 
