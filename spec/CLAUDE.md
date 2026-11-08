@@ -499,6 +499,14 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   `History::Latest` and skips an older put; observer §7.5 reads an
   event's revision as a mutation's, `tags.json` 36 cases with 3.4's
   `face/` events and catalog `29bf7d47` inline. 274 rules (consumer 32).
+  Core 0.105 answers zk2py round 108's F-521 to F-523 (`link.v2` 0.14
+  F-519, F-520: §5 asks of a face with no `frames` or no `events`):
+  §2.6, a consumer MUST NOT deliver a delete on an events key either,
+  heard or replayed (`state.md` §8 step 4's delete, the reference's
+  `s8_events_replay`), and counts a sample that carries no event by
+  §7.5's refusal where the parse refuses its envelope, else `form`
+  (`inband::admit_event`); 0.104's note on the reference corrected (its
+  code landed with it). 274 rules (consumer 32).
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`

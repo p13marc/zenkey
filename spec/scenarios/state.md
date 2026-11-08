@@ -278,7 +278,7 @@ time of step 1.
 
 *Spike S5: the union replay returned 1,000 in 4 ms; the memory backend
 ignored the `_time` bound. The reference runs §8 in `zenkey/tests/state.rs`
-(`s8_events_replay`). Step 4's delete is written ahead of the reference.*
+(`s8_events_replay`).*
 
 ## §9 An archive's backend refuses an outdated put (§4.4)
 

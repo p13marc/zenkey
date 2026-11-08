@@ -28,10 +28,12 @@ answers F-519 and F-520
   that answers a replay's GET with a `reply_del`.
 - **Its count** is a put's (below). A refused attachment is counted by
   its refusal, and one that reads as a delete, or none, as `form`.
-- **The reference,** at this version's writing, delivers one. Its
-  subscription hands a delete to the callback, and `Consumer::replay`
-  keeps a `reply_del` as an unknown time. The code half is listed for a
-  Rust lane.
+- **The reference** delivers none, from the merge that brought this
+  version. Before it, its subscription handed a delete to the callback,
+  and `Consumer::replay` kept a `reply_del` as an unknown time. Now both
+  count it undecodable, by its attachment's refusal where §7.5's parse
+  refuses it and else `form`, and hand it to `Consumer::with_refused`'s
+  callback, as they do a put that carries no event.
 
 **Stated: §2.6, the count (F-521, an ambiguity).**
 - **Before:** "It counts it undecodable, refused as `form`", while
@@ -46,13 +48,15 @@ answers F-519 and F-520
 - **Why.** The parse comes before any reading of the record (§7.5), and
   its refusal says the most. `form` says what is left: the bytes read,
   and they are no event.
-- **The reference** keeps the parse's refusal. Its subscription and
-  `Consumer::replay` ask `inband::admit` first, and `Result::and` keeps
-  that refusal before `Undecodable::NoEvent`.
-  - **It differs in three cases,** each listed for a Rust lane. A
-    heartbeat on an events key is counted `heartbeat`. On a packed event,
-    a sample with no envelope is counted `tag`, and a mutation whose
-    record the layout refuses by that refusal.
+- **The reference** counts so, from the merge that brought this
+  version. Its subscription and `Consumer::replay` ask one helper,
+  `inband::admit_event`: the parse's refusal first, then `form` for a
+  sample that carries no event, and only then an event's record by its
+  layout.
+  - **Before it, it differed in three cases.** A heartbeat on an events
+    key was counted `heartbeat`. On a packed event, a sample with no
+    envelope was counted `tag`, and a mutation whose record the layout
+    refuses by that refusal.
 - **zk2py** counts so. It counts a delete `form` whatever its attachment
   holds, where the text names a refused attachment's refusal.
 
@@ -69,8 +73,9 @@ and that its evidence was written ahead of the reference.
 **The evidence.** `scenarios/state.md` §8's step 4 also deletes a third
 key of the event, its attachment a delete (§7.5's form 1). Expected 5
 says none of the three is delivered, live or replayed, each counted
-`form`. Expected 2 counts the backend's 1,005 puts. §8's note says step
-4's delete is written ahead of the reference.
+`form`. Expected 2 counts the backend's 1,005 puts. The reference runs
+the delete in `s8_events_replay`, and `inband.rs`'s unit tests count
+each case above.
 
 **Migration.** A consumer of this version drops a delete on an events
 key, which one of 0.104 could deliver. No owner writes one, so only a

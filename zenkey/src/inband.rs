@@ -331,9 +331,10 @@ pub enum Undecodable {
     /// reader does not read its entries; with its body's refusal when the
     /// body is refused, which a GET's reader reports too.
     Snapshot(Option<BodyRefusal>),
-    /// A put on an events key whose payload is no event (core §2.6, "A put
-    /// that carries no event"): a mutation, or a sample with no envelope,
-    /// heard or replayed. Refused as `form`, as a stray `reply_del` is.
+    /// A sample on an events key that carries no event (core §2.6, "A
+    /// sample that carries no event"): a mutation, a heartbeat, a sample
+    /// with no envelope, or a delete, heard or replayed. Refused as `form`
+    /// ([`admit_event`]).
     NoEvent,
 }
 
@@ -422,23 +423,48 @@ pub const SNAPSHOT_AS_RECORD: &str =
 pub const MUTATION_ON_FRAME: &str =
     "a record that came in no frame, on a frame resource: it has no reading";
 
-/// Why a put on an events key that carries no event is undecodable (core
-/// §2.6): no time to judge it by, and no owner writes one.
-pub const NO_EVENT: &str = "a put on an events key whose payload is no event (form 4): a \
-     mutation, or a sample with no envelope, carries no time (core §2.6)";
+/// Why a sample on an events key that carries no event is undecodable
+/// (core §2.6): no time to judge it by, and no owner writes one.
+pub const NO_EVENT: &str = "a sample on an events key that is no event (form 4): a mutation, a \
+     heartbeat, a sample with no envelope or a delete carries no time (core §2.6)";
 
-/// [`Undecodable::NoEvent`] where `no_event`, a put on an events key that
-/// carries no event (core §2.6), else admitted: what a reader asks after
-/// [`admit`], so a refused envelope keeps its own refusal.
+/// Admits a read sample of an event resource (core §2.6, §7.5), `layout`
+/// its type's when it is packed, `no_event` where it carries no event (no
+/// time an event's form gives it: a mutation, a heartbeat, a sample with no
+/// envelope, or a delete). Where §7.5's parse refuses its envelope, the
+/// refusal names it, such as `short`, `sample_kind`, `key_kind` or a
+/// delete's `trailing`; any other that carries no event is
+/// [`Undecodable::NoEvent`], `form`, whatever its envelope reads as or its
+/// record holds; an event is [`admit`]ted, its record checked by `layout`.
+/// The subscription and `Consumer::replay` both ask it.
+///
+/// A delete's attachment is parsed here as §7.5 parses it: [`read`] reads
+/// one that does not parse as a delete with no envelope, since on a state
+/// key an archive's or a profile's attachment is never refused
+/// ([`wire::read_delete`]), and on an events key no owner deletes.
 ///
 /// # Errors
-/// [`Undecodable::NoEvent`] where `no_event`.
-pub fn no_event(no_event: bool) -> Result<(), Undecodable> {
-    if no_event {
-        Err(Undecodable::NoEvent)
-    } else {
-        Ok(())
+/// The [`Undecodable`] refusal.
+pub fn admit_event(
+    read: &Read,
+    layout: Option<&Layout>,
+    no_event: bool,
+) -> Result<(), Undecodable> {
+    match read.refusal().or_else(|| delete_refusal(read.sample())) {
+        Some(r) => Err(Undecodable::Envelope(r)),
+        None if no_event => Err(Undecodable::NoEvent),
+        None => admit(read, layout),
     }
+}
+
+/// The refusal of §7.5's parse of a delete's attachment, where it carries
+/// one the parse refuses: `None` for a put, a delete with no attachment,
+/// and one whose attachment is a delete's envelope.
+fn delete_refusal(sample: &Sample) -> Option<Refusal> {
+    if sample.kind() != SampleKind::Delete {
+        return None;
+    }
+    wire::DeleteStamp::parse(&sample.attachment()?.to_bytes()).err()
 }
 
 /// Admits a read sample of a frame resource, `layout` its frame layout
@@ -657,8 +683,128 @@ pub fn refusal(sample: &Sample) -> Option<Refusal> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Read, Undecodable, admit, read};
+    use super::{Read, Undecodable, admit, admit_event, event_time, read};
+    use zenkey_model::wire::{self, Run, Seq, Stamp, Tag};
+    use zenoh::bytes::Encoding;
     use zenoh::sample::{Sample, SampleBuilder};
+
+    /// An event resource's key, its last chunk the occurrence chunk of
+    /// `stamp`, and a stamp.
+    fn event_key(stamp: Stamp) -> String {
+        format!(
+            "zk2/lab/a/packed.v1/events/fault/{}",
+            zenkey_model::chunk::write_occurrence(stamp)
+        )
+    }
+
+    fn stamp() -> Stamp {
+        Stamp {
+            run: Run::U16(0x7777),
+            seq: Seq::new(3).unwrap(),
+        }
+    }
+
+    /// One bool field: a 1-byte record, `0x80` for true.
+    fn layout() -> zenkey_model::packed::Layout {
+        zenkey_model::packed::layout_in(
+            &serde_json::json!({"types": {"T": {"fields": [{"name": "b", "type": "bool"}]}}}),
+            "T",
+        )
+        .unwrap()
+    }
+
+    /// What an event resource's reader counts a sample as (core §2.6):
+    /// `admit_event`'s token, its `no_event` the subscription's.
+    fn counted(sample: Sample, layout: Option<&zenkey_model::packed::Layout>) -> Option<String> {
+        let no_event = event_time(&sample).is_none();
+        admit_event(&read(sample), layout, no_event)
+            .err()
+            .map(|u| u.token().to_owned())
+    }
+
+    /// Core 0.105 §2.6's count (F-521, F-522): a refused envelope by its
+    /// refusal, any other sample that carries no event `form`, whatever it
+    /// reads as, a delete among them; an event admitted, its record by the
+    /// layout.
+    #[test]
+    fn a_sample_that_carries_no_event_is_counted_by_its_refusal_or_form() {
+        let l = layout();
+        // The type's tag, which a packed record's check reads first.
+        let tag = Tag::new(l.tag()).unwrap();
+        let key = event_key(stamp());
+        let ke = |k: &str| zenoh::key_expr::KeyExpr::try_from(k.to_owned()).unwrap();
+        let put = |payload: Vec<u8>, enc: Encoding| -> Sample {
+            SampleBuilder::put(ke(&key), payload).encoding(enc).into()
+        };
+        // An event: admitted, its record checked by the layout.
+        let event = |record: &[u8]| {
+            wire::Event {
+                tag,
+                stamp: stamp(),
+                time: zenkey_model::collection::Time::Unknown,
+                record,
+            }
+            .write()
+            .unwrap()
+        };
+        assert_eq!(
+            counted(put(event(&[0x80]), Encoding::ZENOH_BYTES), Some(&l)),
+            None
+        );
+        assert_eq!(
+            counted(put(event(&[0x80, 0x00]), Encoding::ZENOH_BYTES), Some(&l)).as_deref(),
+            Some("length"),
+            "an event's record its layout refuses keeps the layout's refusal"
+        );
+        // A heartbeat on an events key: read, no event, `form` (not
+        // `heartbeat`).
+        let heartbeat = wire::Envelope {
+            form: wire::Form::Heartbeat,
+            tag: Tag::NONE,
+            stamp: stamp(),
+            record: &[0x00],
+        }
+        .write();
+        assert_eq!(
+            counted(put(heartbeat, Encoding::ZENOH_BYTES), None).as_deref(),
+            Some("form")
+        );
+        // On a packed event, a put with no envelope: `form` (not `tag`).
+        assert_eq!(
+            counted(put(b"{}".to_vec(), Encoding::APPLICATION_JSON), Some(&l)).as_deref(),
+            Some("form")
+        );
+        // A mutation, its record refused by the layout or accepted: `form`.
+        for record in [vec![0x80, 0x00], vec![0x80]] {
+            let m = wire::Envelope::mutation(tag, stamp(), &record).write();
+            assert_eq!(
+                counted(put(m, Encoding::ZENOH_BYTES), Some(&l)).as_deref(),
+                Some("form"),
+                "{record:?}"
+            );
+        }
+        // A JSON document under `zenoh/bytes`: its `{` reads as a form a put
+        // does not carry, the parse's refusal.
+        assert_eq!(
+            counted(put(b"{\"x\":1}".to_vec(), Encoding::ZENOH_BYTES), Some(&l)).as_deref(),
+            Some("sample_kind")
+        );
+        // A delete, with a delete's envelope or none: `form`; with one the
+        // parse refuses, that refusal.
+        let deleted = wire::DeleteStamp { stamp: stamp() }.write();
+        for (attachment, token) in [
+            (Some(deleted.clone()), "form"),
+            (None, "form"),
+            (Some([deleted, vec![0x00]].concat()), "trailing"),
+        ] {
+            let mut b = SampleBuilder::delete(ke(&key));
+            if let Some(a) = attachment {
+                b = b.attachment(a);
+            }
+            let d: Sample = b.into();
+            assert_eq!(counted(d, Some(&l)).as_deref(), Some(token), "{token}");
+        }
+    }
 
     /// An empty or short put on an enveloped key (zenoh's default Encoding,
     /// `zenoh/bytes`) is refused `short` before anything indexes its bytes,
