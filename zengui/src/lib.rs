@@ -48,6 +48,7 @@ pub mod doctor;
 pub mod echo;
 pub mod expansion;
 pub mod frame;
+pub mod freshness;
 pub mod history;
 pub mod keyfacts;
 pub mod link;

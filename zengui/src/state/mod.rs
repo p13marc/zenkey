@@ -187,6 +187,10 @@ mod tests {
                     // and its reader's stall, observed like the rest.
                     "watch_since",
                     "tick_gap",
+                    // #990 V6: the window's freshness.v2 views, what the
+                    // live ticks heard of each owner's members and
+                    // heartbeats.
+                    "freshness",
                 ],
             ),
             // The subjects: the follow slot the tree drives, plus one slot
@@ -423,6 +427,7 @@ mod tests {
         // key it is of, a lag and the latest tick's instant — 99. Then #983
         // (T2): a slot's telemetry.v2 fold of its frames — 100. Then #990
         // (V7): the scope across a face and the strip's words for it — 102.
-        assert_eq!(leaves, 102, "the split must place every field exactly once");
+        // Then #990 (V6): the window's freshness.v2 views — 103.
+        assert_eq!(leaves, 103, "the split must place every field exactly once");
     }
 }

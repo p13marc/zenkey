@@ -344,6 +344,15 @@ pub const ALL: &[Scene] = &[
         build: across_face,
         landmark: "across a face",
     },
+    // The window's freshness.v2 view (#990 V6): site-a/rf0's `state/oper`
+    // heard, then two heartbeats of modem.v3, the second after one lost
+    // and out of step with the window's view.
+    Scene {
+        name: "inspector-freshness",
+        size: DESKTOP,
+        build: inspector_freshness,
+        landmark: "diverged from this window's view",
+    },
     Scene {
         name: "inspector-metric-counter",
         size: DESKTOP,
@@ -1564,6 +1573,82 @@ fn across_face(theme: ThemeChoice) -> Zengui {
         Message::Subject(SubjectMsg::Select(Subject::Key(TX_BYTES.into()))),
     );
     world.ticks(&mut app, 12);
+    preset(&mut app, LayoutPreset::Explore);
+    app
+}
+
+/// `site-a/rf0`'s heartbeat selected (#990 V6): its `state/oper` put in its
+/// envelope (run 3, seq 5), then heartbeat seq 1 vouching for it in step,
+/// then seq 3, one lost before it, whose digest the window's view does not
+/// hold. The Inspector says so per collection, the reader's word.
+fn inspector_freshness(theme: ThemeChoice) -> Zengui {
+    use zenkey_model::heartbeat::{Digest, Heartbeat, Layout, Members, Section, Time};
+    use zenkey_model::wire::{Envelope, Form, Run, Seq, Stamp, Tag};
+    let oper = "zk2/site-a/rf0/modem.v3/state/oper";
+    let beat = "zk2/site-a/rf0/freshness.v2/stream/heartbeat/modem.v3";
+    let mut app = window(prefs(theme));
+    let mut world = World::metered();
+    world.connect(&mut app);
+    world.tick(&mut app);
+    let revision = world
+        .resolve(oper)
+        .resolved
+        .expect("site-a/rf0's oper resolves")
+        .revision;
+    let layout = Layout::of(revision.contract());
+    let stamp = |run: u16, seq: u32| Stamp {
+        run: Run::U16(run),
+        seq: Seq::new(seq).expect("a seq"),
+    };
+    let put = Envelope {
+        form: Form::Mutation,
+        tag: Tag::NONE,
+        stamp: stamp(3, 5),
+        record: br#"{"status":"up"}"#,
+    }
+    .write();
+    let heartbeat = |seq: u32, digest: Digest| {
+        Heartbeat {
+            time: Time::Unknown,
+            sections: layout
+                .collections
+                .iter()
+                .map(|c| {
+                    (c.resource() == "state/oper").then_some(Section {
+                        digest,
+                        members: Members::One { vouched: true },
+                    })
+                })
+                .collect(),
+        }
+        .envelope(&layout, stamp(9, seq))
+        .expect("a heartbeat")
+    };
+    world.tick_samples(&mut app, &[(oper, put, "zenoh/bytes")]);
+    world.tick_samples(
+        &mut app,
+        &[(
+            beat,
+            heartbeat(1, Digest::of([(oper, stamp(3, 5))])),
+            "zenoh/bytes",
+        )],
+    );
+    world.tick_samples(
+        &mut app,
+        &[(
+            beat,
+            heartbeat(3, Digest::of([(oper, stamp(3, 6))])),
+            "zenoh/bytes",
+        )],
+    );
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::Reveal(beat.into())),
+    );
+    send(
+        &mut app,
+        Message::Subject(SubjectMsg::Select(Subject::Key(beat.into()))),
+    );
     preset(&mut app, LayoutPreset::Explore);
     app
 }
