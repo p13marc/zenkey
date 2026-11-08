@@ -1722,6 +1722,10 @@ pub(crate) enum CheckCmd {
     ///   peer_differs               with --peer-config: the far end's lease
     ///                              or keep_alive not the router's (a
     ///                              warning: neither is negotiated)
+    ///   face_timestamping          the router stamps what it routes onto
+    ///                              the face, read at its mode, `router`
+    ///                              where the FILE states none (a warning,
+    ///                              core §8.2; link.v2 0.13)
     ///   catalog_mismatch           with --catalog: the catalog the far side
     ///                              holds is not the policy's
     ///
@@ -4277,14 +4281,15 @@ pub(crate) struct AclGenArgs {
     /// and contract grants; its crossing streams get one downsampling rule
     /// per key; a south region gets `gateway.south` and the declarations of
     /// every queryable it may query. Router to router is refused. A
-    /// `link.v2` policy adds the router's `transport` and `routing` blocks
-    /// (link.v2 §2.18). Given one --catalog, the far side's, a `link.v2`
+    /// `link.v2` policy adds the router's `transport` and `routing` blocks,
+    /// and its timestamping off (link.v2 §2.18). Given one --catalog, the far side's, a `link.v2`
     /// plan refuses a crossing revision it does not list (link.v2 §2.18).
     #[arg(long, value_name = "FILE")]
     pub(crate) face_policy: Option<PathBuf>,
-    /// Emit the far end's `transport` and `routing` blocks on stdout, for
-    /// the far router's config or the gateway client's session config, so
-    /// that both ends run one lease and keep_alive (link.v2 §2.16, §2.18).
+    /// Emit the far end's `transport` and `routing` blocks on stdout, and
+    /// its timestamping off, for the far router's config or the gateway
+    /// client's session config, so that both ends run one lease and
+    /// keep_alive (link.v2 §2.16, §2.18).
     /// Needs a `link.v2` --face-policy. A foreign schema, zenoh's.
     #[arg(long, requires = "face_policy", conflicts_with_all = ["json5", "check", "explain"])]
     pub(crate) far_config: bool,

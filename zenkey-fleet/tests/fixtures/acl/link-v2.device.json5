@@ -165,6 +165,9 @@ transport: {
   unicast: { open_timeout: 10000, accept_timeout: 10000 },  // ms
 },
 routing: { interests: { timeout: 10000 } },  // ms
+// zenoh stamps every unstamped put a router routes, and the stamp crosses the face:
+// this router stamps none, in either mode (core §8.2, link.v2 §2.18).
+timestamping: { enabled: { router: false, peer: false } },
 // Face radio: each device (lab/radio-a), an owner on a first hop, attaches as a client of
 // this router, its far principal radio-a (link.v2 §2.5): its instance token and
 // descriptor cross toward this side on its Own grant's pairs, and the carved `zk`

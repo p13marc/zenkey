@@ -403,10 +403,14 @@ it leaves out. The other warnings differ:
 
 - **`zenctl acl gen --face-policy F --json5`** writes the router's `access_control`, its
   `transport` and its `routing` blocks (`link.v2` §2.18). Step 8 gives the full line.
+  - Since `link.v2` 0.13 (#1106) it also writes `timestamping: { enabled: { router: false,
+    peer: false } }`. zenoh stamps every unstamped put a router routes by default, and each
+    stamp, 26 B, crossed the face: #989's zk2c runs set it off by hand. A router whose
+    configuration already holds a `timestamping` object merges the two.
   - Given one `--catalog`, the plan refuses a crossing revision the catalog lacks
     (`catalog_missing`).
-  - `--far-config` writes the far end's `transport` and `routing`, for the far router or a
-    gateway client's session.
+  - `--far-config` writes the far end's `transport`, `routing` and `timestamping`, for the
+    far router or a gateway client's session.
   - `--default-permission` is `deny` by default. zenoh-modem's routers run `allow` today, under
     which each grant compiles into denies of its complement (spec §11.2; README gaps 12 and 13).
   - Since #977, a grant on a state template a binding leaves unbound is its collection read,
@@ -419,6 +423,10 @@ it leaves out. The other warnings differ:
   defaults.
   - `transport_differs`: a key the router runs at another value. `wait_under_lease`: a
     `wait_before_close` below the lease, whatever the policy says.
+  - `face_timestamping`, a warning (`link.v2` 0.13): the router stamps what it routes, read at
+    its `mode`, `router` where the file states none. `configs/zenohd-rf0.json5` runs `peer`,
+    which stamps nothing by default; run as a router from the generated block alone, it stamps
+    nothing either.
   - `--peer-config <FAR>`: `peer_differs`, a warning, when the far end's lease or keep-alives
     differ.
   - `--catalog`: `catalog_mismatch`, when the ground's catalog is not the policy's.

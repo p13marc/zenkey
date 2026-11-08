@@ -2283,7 +2283,8 @@ fn link_v2_plan() {
     }
 }
 
-/// A case's stated transport keys, as `transport.json` writes them.
+/// A case's stated transport keys, as `transport.json` writes them: zenoh's
+/// transport keys, and the mode and `timestamping/enabled` beside them.
 fn stated_transport(v: &Value) -> link::StatedTransport {
     link::StatedTransport(
         v.as_object()
@@ -2291,8 +2292,9 @@ fn stated_transport(v: &Value) -> link::StatedTransport {
             .iter()
             .map(|(k, v)| {
                 assert!(
-                    link::TransportKey::of_path(k).is_some(),
-                    "{k} is one of zenoh's transport keys"
+                    link::TransportKey::of_path(k).is_some()
+                        || link::POSTURE_PATHS.contains(&k.as_str()),
+                    "{k} is one of zenoh's transport keys, or the mode or timestamping"
                 );
                 (k.clone(), v.clone())
             })
@@ -2313,6 +2315,7 @@ fn link_v2_transport() {
         let policy = parsed
             .policy
             .unwrap_or_else(|| panic!("{what}: the policy is refused: {:?}", parsed.findings));
+        // The eight keys, then timestamping off for a router and a peer.
         let emit: Vec<Value> = policy
             .transport
             .iter()
@@ -2320,21 +2323,43 @@ fn link_v2_transport() {
                 link::TransportKey::ALL
                     .into_iter()
                     .map(move |k| json!({"key": k.at(), "path": k.path(), "value": t.value(k)}))
+                    .chain(link::TIMESTAMPING_OFF.into_iter().map(
+                        |(path, on)| json!({"key": "timestamping", "path": path, "value": on}),
+                    ))
             })
             .collect();
         let router = stated_transport(&case["router"]);
-        // What the generator writes reads back as the policy's, with no
-        // finding (§2.18).
+        // What the generator writes reads back as the policy's, stamping
+        // nothing, with no finding of either (§2.18).
         if let Some(t) = &policy.transport {
-            let written = link::StatedTransport(
-                link::TransportKey::ALL
-                    .into_iter()
-                    .map(|k| (k.path().to_owned(), t.value(k)))
-                    .collect(),
-            );
+            let mut tree = json!({});
+            for e in &emit {
+                let mut node = &mut tree;
+                for part in e["path"].as_str().unwrap().split('/') {
+                    node = node
+                        .as_object_mut()
+                        .unwrap()
+                        .entry(part)
+                        .or_insert_with(|| json!({}));
+                }
+                *node = e["value"].clone();
+            }
+            let written = link::StatedTransport::read(&tree);
+            for k in link::TransportKey::ALL {
+                assert_eq!(
+                    written.runs(k, &policy.binding.defaults()),
+                    t.value(k),
+                    "{what}"
+                );
+            }
             let back: Vec<link::Finding> = link::check_transport(&policy, &written, None)
                 .into_iter()
-                .filter(|f| f.code == link::Code::TransportDiffers)
+                .filter(|f| {
+                    matches!(
+                        f.code,
+                        link::Code::TransportDiffers | link::Code::FaceTimestamping
+                    )
+                })
                 .collect();
             assert!(back.is_empty(), "{what}: {back:?}");
         }

@@ -6,6 +6,15 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a face router stamps nothing (#1106)
+
+`link.v2` 0.13 §2.18, §2.19; core §8.2.
+
+| Before | Now | Notes |
+|---|---|---|
+| `acl gen --face-policy --json5`, `--far-config`: the `transport` and `routing` blocks | and `timestamping: { enabled: { router: false, peer: false } }` | zenoh stamps every unstamped put a router routes by default, and the stamp crossed the face; merge it into a configuration that holds a `timestamping` object |
+| `check face`: a router's timestamping not read | `face_timestamping`, a warning at `timestamping`, where the router stamps what it routes, read at its `mode` (`router` where the file states none) | a configuration written before 0.13 draws it; a `peer` that states none does not |
+
 ## Unreleased (`main`, zk2) — `field` over a frame's records (#990 V2c)
 
 No rule changed.

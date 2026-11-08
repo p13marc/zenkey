@@ -21,4 +21,7 @@ transport: {
   unicast: { open_timeout: 10000, accept_timeout: 10000 },  // ms
 },
 routing: { interests: { timeout: 10000 } },  // ms
+// zenoh stamps every unstamped put a router routes, and the stamp crosses the face:
+// the far end stamps none, in either mode (core §8.2, link.v2 §2.18).
+timestamping: { enabled: { router: false, peer: false } },
 }

@@ -7,6 +7,52 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.13 — 2026-11-08: §2.18, the near router's timestamping off; §2.19, `face_timestamping` (#1106)
+
+zenoh enables timestamping by default for a router, and a router with it
+enabled stamps every unstamped put it routes. Core §8.2 says a deployment
+SHOULD turn it off on a router that forwards onto a constrained face, and
+the block a generator wrote said nothing of it. The zk2c runs of #989,
+which ran zenoh-modem's RF router from the generated block, set it off by
+hand: in a loopback check, every put through a default router carried the
+router's 26-B timestamp.
+
+**Added: §2.18, timestamping off.** A generator MUST write the near
+router's timestamping off beside the transport, for a router and for a
+peer, `timestamping: { enabled: { router: false, peer: false } }`.
+- **Both modes,** since a deployment runs the near router as either, and
+  zenoh reads the value for the mode the process runs.
+- **The far end's block** holds it too: a far router routes onto the
+  face from its side.
+
+**Added: §2.19, `face_timestamping`.** A warning, with no face, `at`
+`timestamping`: the router stamps what it routes, read at the mode it
+runs. A tool reads the configuration's `mode`, `router` where it states
+none, as zenohd runs. It reads `timestamping/enabled` as a boolean,
+whatever the mode, or as a value per mode. A mode it leaves out is at
+its default: on for a router, off for a peer and a client. It is a
+warning, as core §8.2's SHOULD.
+
+**Changed: §5.** It asks whether the router stamps what it routes onto
+the face.
+
+**Deliberately not changed.**
+- **The far end's configuration is not checked** for its timestamping.
+  It may be a client session's, whose mode the file need not state.
+- **No policy key.** Timestamping is no setting a face chooses: every
+  face router runs it off.
+- **The header** is still written against core 0.100.
+
+**The evidence.** `v2/transport.json` gains five cases, 21 in all: the
+generator's block with its timestamping removed, a peer stamping by a
+boolean, a peer that states none, a router whose value names the peer
+alone, and a boolean `false`. Every case's `emit` writes timestamping off
+for a router and a peer, and each router stated as the generator writes
+it states that too. The three routers that state nothing gain
+`face_timestamping`. `scenarios-v2.md` gains §3: a router run from the
+block alone stamps no put onto the face, and the same block without its
+timestamping stamps each with its own.
+
 ## link.v2 0.12 — 2026-11-08: §2.7, a face lists the events it carries (#1098)
 
 `modem.v3` 3.4 exposes three events for a face (#991). A face listed its

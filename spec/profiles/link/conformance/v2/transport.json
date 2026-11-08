@@ -42,6 +42,16 @@
             "key": "transport.interests_timeout_ms",
             "path": "routing/interests/timeout",
             "value": 10000
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/router",
+            "value": false
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/peer",
+            "value": false
           }
         ],
         "findings": []
@@ -50,6 +60,10 @@
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n",
       "router": {
         "routing/interests/timeout": 10000,
+        "timestamping/enabled": {
+          "peer": false,
+          "router": false
+        },
         "transport/link/tx/batch_size": 222,
         "transport/link/tx/keep_alive": 4,
         "transport/link/tx/lease": 240000,
@@ -101,9 +115,25 @@
             "key": "transport.interests_timeout_ms",
             "path": "routing/interests/timeout",
             "value": 10000
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/router",
+            "value": false
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/peer",
+            "value": false
           }
         ],
         "findings": [
+          {
+            "at": "timestamping",
+            "code": "face_timestamping",
+            "face": null,
+            "severity": "warning"
+          },
           {
             "at": "transport.batch_bytes",
             "code": "transport_differs",
@@ -136,7 +166,7 @@
           }
         ]
       },
-      "note": "a configuration that states no transport runs zenoh 1.10.1's defaults: four keys differ, and its 5 s `wait_before_close` is below its 10 s lease (§2.19)",
+      "note": "a configuration that states no transport runs zenoh 1.10.1's defaults: four keys differ, its 5 s `wait_before_close` is below its 10 s lease, and a router stamps what it routes, `face_timestamping` (§2.19)",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n",
       "router": {}
     },
@@ -182,6 +212,16 @@
             "key": "transport.interests_timeout_ms",
             "path": "routing/interests/timeout",
             "value": 10000
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/router",
+            "value": false
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/peer",
+            "value": false
           }
         ],
         "findings": [
@@ -203,6 +243,10 @@
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n",
       "router": {
         "routing/interests/timeout": 10000,
+        "timestamping/enabled": {
+          "peer": false,
+          "router": false
+        },
         "transport/link/tx/batch_size": 222,
         "transport/link/tx/keep_alive": 4,
         "transport/link/tx/lease": 240000,
@@ -254,11 +298,28 @@
             "key": "transport.interests_timeout_ms",
             "path": "routing/interests/timeout",
             "value": 10000
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/router",
+            "value": false
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/peer",
+            "value": false
           }
         ],
-        "findings": []
+        "findings": [
+          {
+            "at": "timestamping",
+            "code": "face_timestamping",
+            "face": null,
+            "severity": "warning"
+          }
+        ]
       },
-      "note": "the fork's router, its configuration stating nothing: it runs the fork's 10 s `wait_before_close`, the policy's, no finding (§2.19)",
+      "note": "the fork's router, its configuration stating nothing: it runs the fork's 10 s `wait_before_close`, the policy's, and stamps what it routes, the fork's default for a router too: `face_timestamping` alone (§2.19)",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zm-1.10.2-r1\"\n\n[transport]\nlease_ms             = 10000\nkeep_alive           = 4\nwait_before_close_ms = 10000\nsequence             = \"32bit\"\nbatch_bytes          = 65535\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 0\narq              = false\nreply_timeout_ms = 4000000\n",
       "router": {}
     },
@@ -304,9 +365,25 @@
             "key": "transport.interests_timeout_ms",
             "path": "routing/interests/timeout",
             "value": 10000
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/router",
+            "value": false
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/peer",
+            "value": false
           }
         ],
         "findings": [
+          {
+            "at": "timestamping",
+            "code": "face_timestamping",
+            "face": null,
+            "severity": "warning"
+          },
           {
             "at": "transport.wait_before_close_ms",
             "code": "transport_differs",
@@ -321,7 +398,7 @@
           }
         ]
       },
-      "note": "the same configuration under `zenoh-1.10.1`: 5 s, below the policy's 10 s and the lease (§2.19)",
+      "note": "the same configuration under `zenoh-1.10.1`: 5 s, below the policy's 10 s and the lease, and `face_timestamping` (§2.19)",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 10000\nkeep_alive           = 4\nwait_before_close_ms = 10000\nsequence             = \"32bit\"\nbatch_bytes          = 65535\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 0\narq              = false\nreply_timeout_ms = 4000000\n",
       "router": {}
     },
@@ -367,6 +444,16 @@
             "key": "transport.interests_timeout_ms",
             "path": "routing/interests/timeout",
             "value": 10000
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/router",
+            "value": false
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/peer",
+            "value": false
           }
         ],
         "findings": []
@@ -379,6 +466,10 @@
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n",
       "router": {
         "routing/interests/timeout": 10000,
+        "timestamping/enabled": {
+          "peer": false,
+          "router": false
+        },
         "transport/link/tx/batch_size": 222,
         "transport/link/tx/keep_alive": 4,
         "transport/link/tx/lease": 240000,
@@ -430,6 +521,16 @@
             "key": "transport.interests_timeout_ms",
             "path": "routing/interests/timeout",
             "value": 10000
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/router",
+            "value": false
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/peer",
+            "value": false
           }
         ],
         "findings": [
@@ -446,6 +547,10 @@
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n",
       "router": {
         "routing/interests/timeout": 10000,
+        "timestamping/enabled": {
+          "peer": false,
+          "router": false
+        },
         "transport/link/tx/batch_size": 222,
         "transport/link/tx/keep_alive": 4,
         "transport/link/tx/lease": 240000,
@@ -497,6 +602,16 @@
             "key": "transport.interests_timeout_ms",
             "path": "routing/interests/timeout",
             "value": 10000
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/router",
+            "value": false
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/peer",
+            "value": false
           }
         ],
         "findings": [
@@ -516,6 +631,10 @@
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n",
       "router": {
         "routing/interests/timeout": 10000,
+        "timestamping/enabled": {
+          "peer": false,
+          "router": false
+        },
         "transport/link/tx/batch_size": 222,
         "transport/link/tx/keep_alive": 4,
         "transport/link/tx/lease": 240000,
@@ -578,6 +697,16 @@
             "key": "transport.interests_timeout_ms",
             "path": "routing/interests/timeout",
             "value": 10000
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/router",
+            "value": false
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/peer",
+            "value": false
           }
         ],
         "findings": []
@@ -586,6 +715,10 @@
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\ncatalog  = \"feb61e3d\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n",
       "router": {
         "routing/interests/timeout": 10000,
+        "timestamping/enabled": {
+          "peer": false,
+          "router": false
+        },
         "transport/link/tx/batch_size": 222,
         "transport/link/tx/keep_alive": 4,
         "transport/link/tx/lease": 240000,
@@ -659,6 +792,16 @@
             "key": "transport.interests_timeout_ms",
             "path": "routing/interests/timeout",
             "value": 10000
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/router",
+            "value": false
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/peer",
+            "value": false
           }
         ],
         "findings": [
@@ -674,6 +817,10 @@
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\ncatalog  = \"feb61e3d\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n",
       "router": {
         "routing/interests/timeout": 10000,
+        "timestamping/enabled": {
+          "peer": false,
+          "router": false
+        },
         "transport/link/tx/batch_size": 222,
         "transport/link/tx/keep_alive": 4,
         "transport/link/tx/lease": 240000,
@@ -736,6 +883,16 @@
             "key": "transport.interests_timeout_ms",
             "path": "routing/interests/timeout",
             "value": 10000
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/router",
+            "value": false
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/peer",
+            "value": false
           }
         ],
         "findings": [
@@ -751,6 +908,10 @@
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n",
       "router": {
         "routing/interests/timeout": 10000,
+        "timestamping/enabled": {
+          "peer": false,
+          "router": false
+        },
         "transport/link/tx/batch_size": 222,
         "transport/link/tx/keep_alive": 4,
         "transport/link/tx/lease": 240000,
@@ -802,6 +963,16 @@
             "key": "transport.interests_timeout_ms",
             "path": "routing/interests/timeout",
             "value": 10000
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/router",
+            "value": false
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/peer",
+            "value": false
           }
         ],
         "findings": [
@@ -823,6 +994,10 @@
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n",
       "router": {
         "routing/interests/timeout": 10000,
+        "timestamping/enabled": {
+          "peer": false,
+          "router": false
+        },
         "transport/link/tx/batch_size": 222,
         "transport/link/tx/keep_alive": 4,
         "transport/link/tx/lease": 240000,
@@ -874,6 +1049,16 @@
             "key": "transport.interests_timeout_ms",
             "path": "routing/interests/timeout",
             "value": 10000
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/router",
+            "value": false
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/peer",
+            "value": false
           }
         ],
         "findings": [
@@ -889,6 +1074,10 @@
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n",
       "router": {
         "routing/interests/timeout": 10000,
+        "timestamping/enabled": {
+          "peer": false,
+          "router": false
+        },
         "transport/link/tx/batch_size": 222,
         "transport/link/tx/keep_alive": 4,
         "transport/link/tx/lease": 240000,
@@ -940,6 +1129,16 @@
             "key": "transport.interests_timeout_ms",
             "path": "routing/interests/timeout",
             "value": 10000
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/router",
+            "value": false
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/peer",
+            "value": false
           }
         ],
         "findings": [
@@ -955,6 +1154,10 @@
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n",
       "router": {
         "routing/interests/timeout": 10000,
+        "timestamping/enabled": {
+          "peer": false,
+          "router": false
+        },
         "transport/link/tx/batch_size": 222,
         "transport/link/tx/keep_alive": 4,
         "transport/link/tx/lease": "240000",
@@ -1006,6 +1209,16 @@
             "key": "transport.interests_timeout_ms",
             "path": "routing/interests/timeout",
             "value": 10000
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/router",
+            "value": false
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/peer",
+            "value": false
           }
         ],
         "findings": [
@@ -1021,6 +1234,10 @@
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n",
       "router": {
         "routing/interests/timeout": 10000,
+        "timestamping/enabled": {
+          "peer": false,
+          "router": false
+        },
         "transport/link/tx/batch_size": 222,
         "transport/link/tx/keep_alive": 4,
         "transport/link/tx/lease": 240000,
@@ -1038,7 +1255,381 @@
       "note": "a link.v1 policy states no transport: nothing is written, and nothing checked (§2.19)",
       "policy": "system   = \"lab\"\nservices = [\"radio-a\"]\n\n[face.radio]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 1\nmax_outage_s = 6\nbatch_bytes  = 1000\nlink_bps     = 1000000\n",
       "router": {}
+    },
+    {
+      "expect": {
+        "emit": [
+          {
+            "key": "transport.lease_ms",
+            "path": "transport/link/tx/lease",
+            "value": 240000
+          },
+          {
+            "key": "transport.keep_alive",
+            "path": "transport/link/tx/keep_alive",
+            "value": 4
+          },
+          {
+            "key": "transport.wait_before_close_ms",
+            "path": "transport/link/tx/queue/congestion_control/block/wait_before_close",
+            "value": 240000000
+          },
+          {
+            "key": "transport.sequence",
+            "path": "transport/link/tx/sequence_number_resolution",
+            "value": "16bit"
+          },
+          {
+            "key": "transport.batch_bytes",
+            "path": "transport/link/tx/batch_size",
+            "value": 222
+          },
+          {
+            "key": "transport.open_timeout_ms",
+            "path": "transport/unicast/open_timeout",
+            "value": 10000
+          },
+          {
+            "key": "transport.accept_timeout_ms",
+            "path": "transport/unicast/accept_timeout",
+            "value": 10000
+          },
+          {
+            "key": "transport.interests_timeout_ms",
+            "path": "routing/interests/timeout",
+            "value": 10000
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/router",
+            "value": false
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/peer",
+            "value": false
+          }
+        ],
+        "findings": [
+          {
+            "at": "timestamping",
+            "code": "face_timestamping",
+            "face": null,
+            "severity": "warning"
+          }
+        ]
+      },
+      "note": "the generator's block with its `timestamping` removed: a router stamps every unstamped put it routes by default, and the stamp crosses the face, `face_timestamping` (§2.18, §2.19; core §8.2)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n",
+      "router": {
+        "routing/interests/timeout": 10000,
+        "transport/link/tx/batch_size": 222,
+        "transport/link/tx/keep_alive": 4,
+        "transport/link/tx/lease": 240000,
+        "transport/link/tx/queue/congestion_control/block/wait_before_close": 240000000,
+        "transport/link/tx/sequence_number_resolution": "16bit",
+        "transport/unicast/accept_timeout": 10000,
+        "transport/unicast/open_timeout": 10000
+      }
+    },
+    {
+      "expect": {
+        "emit": [
+          {
+            "key": "transport.lease_ms",
+            "path": "transport/link/tx/lease",
+            "value": 240000
+          },
+          {
+            "key": "transport.keep_alive",
+            "path": "transport/link/tx/keep_alive",
+            "value": 4
+          },
+          {
+            "key": "transport.wait_before_close_ms",
+            "path": "transport/link/tx/queue/congestion_control/block/wait_before_close",
+            "value": 240000000
+          },
+          {
+            "key": "transport.sequence",
+            "path": "transport/link/tx/sequence_number_resolution",
+            "value": "16bit"
+          },
+          {
+            "key": "transport.batch_bytes",
+            "path": "transport/link/tx/batch_size",
+            "value": 222
+          },
+          {
+            "key": "transport.open_timeout_ms",
+            "path": "transport/unicast/open_timeout",
+            "value": 10000
+          },
+          {
+            "key": "transport.accept_timeout_ms",
+            "path": "transport/unicast/accept_timeout",
+            "value": 10000
+          },
+          {
+            "key": "transport.interests_timeout_ms",
+            "path": "routing/interests/timeout",
+            "value": 10000
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/router",
+            "value": false
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/peer",
+            "value": false
+          }
+        ],
+        "findings": [
+          {
+            "at": "timestamping",
+            "code": "face_timestamping",
+            "face": null,
+            "severity": "warning"
+          }
+        ]
+      },
+      "note": "`timestamping.enabled` true on a peer: a boolean holds whatever the mode, `face_timestamping` (§2.19)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n",
+      "router": {
+        "mode": "peer",
+        "routing/interests/timeout": 10000,
+        "timestamping/enabled": true,
+        "transport/link/tx/batch_size": 222,
+        "transport/link/tx/keep_alive": 4,
+        "transport/link/tx/lease": 240000,
+        "transport/link/tx/queue/congestion_control/block/wait_before_close": 240000000,
+        "transport/link/tx/sequence_number_resolution": "16bit",
+        "transport/unicast/accept_timeout": 10000,
+        "transport/unicast/open_timeout": 10000
+      }
+    },
+    {
+      "expect": {
+        "emit": [
+          {
+            "key": "transport.lease_ms",
+            "path": "transport/link/tx/lease",
+            "value": 240000
+          },
+          {
+            "key": "transport.keep_alive",
+            "path": "transport/link/tx/keep_alive",
+            "value": 4
+          },
+          {
+            "key": "transport.wait_before_close_ms",
+            "path": "transport/link/tx/queue/congestion_control/block/wait_before_close",
+            "value": 240000000
+          },
+          {
+            "key": "transport.sequence",
+            "path": "transport/link/tx/sequence_number_resolution",
+            "value": "16bit"
+          },
+          {
+            "key": "transport.batch_bytes",
+            "path": "transport/link/tx/batch_size",
+            "value": 222
+          },
+          {
+            "key": "transport.open_timeout_ms",
+            "path": "transport/unicast/open_timeout",
+            "value": 10000
+          },
+          {
+            "key": "transport.accept_timeout_ms",
+            "path": "transport/unicast/accept_timeout",
+            "value": 10000
+          },
+          {
+            "key": "transport.interests_timeout_ms",
+            "path": "routing/interests/timeout",
+            "value": 10000
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/router",
+            "value": false
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/peer",
+            "value": false
+          }
+        ],
+        "findings": []
+      },
+      "note": "a peer that states no timestamping: zenoh 1.10.1 stamps nothing for a peer by default, no finding (§2.19)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n",
+      "router": {
+        "mode": "peer",
+        "routing/interests/timeout": 10000,
+        "transport/link/tx/batch_size": 222,
+        "transport/link/tx/keep_alive": 4,
+        "transport/link/tx/lease": 240000,
+        "transport/link/tx/queue/congestion_control/block/wait_before_close": 240000000,
+        "transport/link/tx/sequence_number_resolution": "16bit",
+        "transport/unicast/accept_timeout": 10000,
+        "transport/unicast/open_timeout": 10000
+      }
+    },
+    {
+      "expect": {
+        "emit": [
+          {
+            "key": "transport.lease_ms",
+            "path": "transport/link/tx/lease",
+            "value": 240000
+          },
+          {
+            "key": "transport.keep_alive",
+            "path": "transport/link/tx/keep_alive",
+            "value": 4
+          },
+          {
+            "key": "transport.wait_before_close_ms",
+            "path": "transport/link/tx/queue/congestion_control/block/wait_before_close",
+            "value": 240000000
+          },
+          {
+            "key": "transport.sequence",
+            "path": "transport/link/tx/sequence_number_resolution",
+            "value": "16bit"
+          },
+          {
+            "key": "transport.batch_bytes",
+            "path": "transport/link/tx/batch_size",
+            "value": 222
+          },
+          {
+            "key": "transport.open_timeout_ms",
+            "path": "transport/unicast/open_timeout",
+            "value": 10000
+          },
+          {
+            "key": "transport.accept_timeout_ms",
+            "path": "transport/unicast/accept_timeout",
+            "value": 10000
+          },
+          {
+            "key": "transport.interests_timeout_ms",
+            "path": "routing/interests/timeout",
+            "value": 10000
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/router",
+            "value": false
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/peer",
+            "value": false
+          }
+        ],
+        "findings": [
+          {
+            "at": "timestamping",
+            "code": "face_timestamping",
+            "face": null,
+            "severity": "warning"
+          }
+        ]
+      },
+      "note": "a router whose `timestamping.enabled` states the peer's value alone: the router's mode is left at its default, on, `face_timestamping` (§2.19)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n",
+      "router": {
+        "mode": "router",
+        "routing/interests/timeout": 10000,
+        "timestamping/enabled": {
+          "peer": false
+        },
+        "transport/link/tx/batch_size": 222,
+        "transport/link/tx/keep_alive": 4,
+        "transport/link/tx/lease": 240000,
+        "transport/link/tx/queue/congestion_control/block/wait_before_close": 240000000,
+        "transport/link/tx/sequence_number_resolution": "16bit",
+        "transport/unicast/accept_timeout": 10000,
+        "transport/unicast/open_timeout": 10000
+      }
+    },
+    {
+      "expect": {
+        "emit": [
+          {
+            "key": "transport.lease_ms",
+            "path": "transport/link/tx/lease",
+            "value": 240000
+          },
+          {
+            "key": "transport.keep_alive",
+            "path": "transport/link/tx/keep_alive",
+            "value": 4
+          },
+          {
+            "key": "transport.wait_before_close_ms",
+            "path": "transport/link/tx/queue/congestion_control/block/wait_before_close",
+            "value": 240000000
+          },
+          {
+            "key": "transport.sequence",
+            "path": "transport/link/tx/sequence_number_resolution",
+            "value": "16bit"
+          },
+          {
+            "key": "transport.batch_bytes",
+            "path": "transport/link/tx/batch_size",
+            "value": 222
+          },
+          {
+            "key": "transport.open_timeout_ms",
+            "path": "transport/unicast/open_timeout",
+            "value": 10000
+          },
+          {
+            "key": "transport.accept_timeout_ms",
+            "path": "transport/unicast/accept_timeout",
+            "value": 10000
+          },
+          {
+            "key": "transport.interests_timeout_ms",
+            "path": "routing/interests/timeout",
+            "value": 10000
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/router",
+            "value": false
+          },
+          {
+            "key": "timestamping",
+            "path": "timestamping/enabled/peer",
+            "value": false
+          }
+        ],
+        "findings": []
+      },
+      "note": "`timestamping.enabled` false, whatever the mode: no finding (§2.19)",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n",
+      "router": {
+        "routing/interests/timeout": 10000,
+        "timestamping/enabled": false,
+        "transport/link/tx/batch_size": 222,
+        "transport/link/tx/keep_alive": 4,
+        "transport/link/tx/lease": 240000,
+        "transport/link/tx/queue/congestion_control/block/wait_before_close": 240000000,
+        "transport/link/tx/sequence_number_resolution": "16bit",
+        "transport/unicast/accept_timeout": 10000,
+        "transport/unicast/open_timeout": 10000
+      }
     }
   ],
-  "description": "link.v2's transport block and its checks (v2.md §2.18, §2.19). Each case is a face policy, `policy`; `router`, the transport keys a router's configuration states, by zenoh 1.10.1's configuration key, a key it omits read at the binding's default; optionally `peer`, the far end's, read alike; and optionally `catalog`, the deployment catalog the far side holds, a document core §8.6 reads, its id §8.6's. `expect.emit` is what a generator writes, each key at zenoh's key with zenoh's value (`wait_before_close` in µs), in the policy's order; `expect.findings` is every finding, sorted as the linter sorts them."
+  "description": "link.v2's transport block and its checks (v2.md §2.18, §2.19). Each case is a face policy, `policy`; `router`, the transport keys a router's configuration states, by zenoh 1.10.1's configuration key, a key it omits read at the binding's default, and its `mode` and `timestamping/enabled` where it states them; optionally `peer`, the far end's, read alike; and optionally `catalog`, the deployment catalog the far side holds, a document core §8.6 reads, its id §8.6's. `expect.emit` is what a generator writes, each key at zenoh's key with zenoh's value (`wait_before_close` in µs), in the policy's order, then timestamping off for a router and a peer; `expect.findings` is every finding, sorted as the linter sorts them."
 }

@@ -266,6 +266,40 @@ the catalog not asked: pass --catalog <FILE>, the catalog the far side holds (li
 
 ```
 
+The same router as written before `link.v2` 0.13, with no `timestamping`:
+in `router` mode, zenoh's default, it stamps every unstamped put it routes,
+and each stamp crosses the face (`face_timestamping`, a warning; core §8.2).
+Exit 1.
+
+```console
+$ zenctl check face tests/cmd/fixtures/link/router-rf-stamps.json5 --face-policy ../examples/zk2/link/media/rf.face.toml --enrollment ../examples/zk2/link/radio.enrollment.toml --contracts ../examples/zk2/link/radio.v1.toml --format table
+? 1
+radio: no_arq at arq: the medium repairs no lost frame, and zenoh repairs no lost declaration: a lost subscriber or queryable stays lost while the transport stays up (link.v2 §2.1) (link.v2 §2.1, §2.10, §2.16)
+face radio: not_packed radio.v1/@stream/frames: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
+face radio: not_packed radio.v1/events/fault: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
+face radio: not_packed radio.v1/state/oper: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
+face radio: interval_over_horizon radio.v1/stream/air/dropped_total: a crossing stream whose horizon is below twice the interval: the far side can judge it stale between two samples (§2.12)
+face radio: not_packed radio.v1/stream/air/dropped_total: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
+tests/cmd/fixtures/link/router-rf-stamps.json5: face radio (far ground): 8 deny rule(s) across subject(s) ground; 2 downsampling rule(s) on its transports
+  ✗ face_timestamping  face -  timestamping
+transport (link.v2 §2.19), an omitted key read at zenoh-1.10.1's default:
+    transport.lease_ms              planned 240000     runs 240000
+    transport.keep_alive            planned 4          runs 4
+    transport.wait_before_close_ms  planned 240000000  runs 240000000
+    transport.sequence              planned "16bit"    runs "16bit"
+    transport.batch_bytes           planned 222        runs 222
+    transport.open_timeout_ms       planned 10000      runs 10000
+    transport.accept_timeout_ms     planned 10000      runs 10000
+    transport.interests_timeout_ms  planned 10000      runs 10000
+FAIL
+face_timestamping timestamping: the router stamps every unstamped put it routes, read at its mode: each frame crosses the face with the router's 26-B timestamp (core §8.2, link.v2 §2.19)
+judged against the config file tests/cmd/fixtures/link/router-rf-stamps.json5 through zenoh's own loader: what a router runs is not observable on the bus, so a file that differs from what it was started with is invisible here (core §11.3, link.v1 §2.14)
+tombstone windows not asked: pass --window ADDRESS=SECS for each listed owner of state (link.v1 §2.11)
+the far end not asked: pass --peer-config <FAR-CONFIG>, the far router's or the gateway client's config, to compare its lease and keep_alive, which are not negotiated (link.v2 §2.16, §2.19)
+the catalog not asked: pass --catalog <FILE>, the catalog the far side holds (link.v2 §2.19)
+
+```
+
 A ground side left at zenoh's defaults runs a 10 s lease (`peer_differs`,
 a warning), and the catalog it holds is one the RF policy does not name
 (`catalog_mismatch`). Exit 1.
