@@ -12,7 +12,7 @@ aliases and no shims, except where the two spellings were always one fact
 | Before | Now | Notes |
 |---|---|---|
 | `alarms` rules and `alert-firing`: a GET's alarm, a snapshot's entry, never read as an earlier instance's | under a run no present descriptor of the owner states, `previous_instance`, not asked | `alarms.v1` 0.14 §2.14 step 5; a subscription's delivery stays unattributable |
-| the scheduled doctor's `alarm-*`, `health` and `config` reads: a `reply_del` judged a stray by the profile's head revision | by the owner's revision under the deletion's run (core 0.101 §4.2) | an owner on `health.v1` 1.0 answers per key: its `reply_del` is a deletion |
+| the scheduled doctor's `alarm-*`, `health` and `config` reads: a `reply_del` judged a stray by the profile's head revision | by the owner's revision under the deletion's run (core 0.102 §4.2) | an owner on `health.v1` 1.0 answers per key: its `reply_del` is a deletion |
 
 ## Unreleased (`main`, zk2) — a failed read for the tokenless refusal is said (#1074)
 

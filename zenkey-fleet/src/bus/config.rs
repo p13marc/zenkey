@@ -227,7 +227,7 @@ pub async fn get(
     }
     // A stray `reply_del` of the view or the status, where its owner's
     // revision under the deletion's run answers it by snapshot, is no
-    // owner's answer: undecodable, `form` (core §4.2, 0.101).
+    // owner's answer: undecodable, `form` (core §4.2, 0.102).
     let config = zenkey::config_v1::implementation().shared_contract();
     let held = [&*config];
     let mut revisions = crate::bus::query::OwnerRevisions::new(session, timeout, &held, None);
@@ -696,7 +696,7 @@ pub async fn get_records(
         }
         // A stray `reply_del` of the record, where its owner's revision
         // under the deletion's run answers it by snapshot, is no owner's
-        // answer: undecodable, `form` (core §4.2, 0.101).
+        // answer: undecodable, `form` (core §4.2, 0.102).
         let held = [&*target.contract];
         let mut revisions = crate::bus::query::OwnerRevisions::new(session, timeout, &held, None);
         let (entries, strays) =

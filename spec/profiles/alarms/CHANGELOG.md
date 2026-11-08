@@ -41,7 +41,7 @@ snapshots:
   with its confirmation.
 - **§3, Expected 2:** a tombstone, with the delete's in-band stamp and no
   time. It said "the timestamp the owner minted at the delete", which no
-  answer carries since 0.100 (core 0.101's F-506).
+  answer carries since 0.100 (core 0.102's F-506).
 - **§5, Expected 3 and 4:** snapshots under the new instance's run, the
   one its descriptor states, A and B put again under it and R's and P's
   keys deleted under it; G judges A firing, never `previous_instance`.

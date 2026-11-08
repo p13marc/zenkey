@@ -1203,7 +1203,7 @@ async fn a_state_gets_replies_merge_per_key_whatever_arrives_last() {
     );
 }
 
-/// Core §4.2 at 0.101 (zk2py rounds 105 and 106): whether an alarm is per
+/// Core §4.2 at 0.102 (zk2py rounds 105 and 106): whether an alarm is per
 /// key is read from its owner's revision under the `reply_del`'s run, never
 /// from the reader's alone. An owner on `alarms.v1` 1.0, which uses
 /// `freshness.v1`, answers its alarms per key, and its descriptor names

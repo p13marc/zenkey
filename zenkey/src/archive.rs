@@ -631,7 +631,7 @@ fn snapshots_of(
 /// and is left out too, undecodable (core §4.2); whether the member is per
 /// key is read from the owner's revision under the deletion's run, the one
 /// its descriptor names, `contract` where no descriptor reaches the
-/// archive (`answer::stray_reply_del`, 0.101). A per-key resource's, one
+/// archive (`answer::stray_reply_del`, 0.102). A per-key resource's, one
 /// whose owner's revision cannot be had, and every peer's, is a deletion.
 /// Every other reply as it came.
 async fn entries_of(

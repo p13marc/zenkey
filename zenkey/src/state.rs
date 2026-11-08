@@ -1064,7 +1064,7 @@ impl Store {
     /// A delete recorded `age` ago: its tombstone is answered for what is
     /// left of the window (S3), as a delete made then would be. No last
     /// confirmation is minted at a delete: a tombstone has none, so nothing
-    /// would carry it (core §4.3's "Minting", 0.101; F-506).
+    /// would carry it (core §4.3's "Minting", 0.102; F-506).
     fn delete_aged(&self, key: &OwnedKeyExpr, stamped: Stamped, age: Duration) {
         let now = Instant::now();
         let mut map = self.map.lock().expect("not poisoned");

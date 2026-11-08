@@ -1525,7 +1525,7 @@ impl Consumer {
                     // never merged as a deletion. Which resources are per
                     // key is read from the owner's revision under the
                     // deletion's run, never from this consumer's alone
-                    // (0.101): an owner on an earlier revision answers its
+                    // (0.102): an owner on an earlier revision answers its
                     // member per key. A snapshot's tombstone is no
                     // `reply_del` here.
                     if !from_page

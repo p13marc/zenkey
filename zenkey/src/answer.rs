@@ -49,7 +49,7 @@ pub(crate) async fn runs_revision(
 }
 
 /// Whether a `reply_del` on `key` under `run` is a stray one (core §4.2,
-/// 0.101): a deletion on a member of a collection that the owner's revision
+/// 0.102): a deletion on a member of a collection that the owner's revision
 /// answers by snapshot ([`zenkey_model::collection::stray_reply_del`]).
 /// Whether a resource is per key is read from the owner's revision, the one
 /// its descriptor stating `run` names ([`owner_revision`]): `contract`
@@ -113,7 +113,7 @@ async fn retrieved(
 pub enum OwnerRevision {
     /// The fingerprint its descriptor stating the run names: the
     /// descriptor of the instance whose `run` is the snapshot's (core
-    /// §4.2, 0.101; F-507).
+    /// §4.2, 0.102; F-507).
     Named(String),
     /// No descriptor reaches the reader: the GET of its instances' keys ran
     /// to its final reply and none answered, as across a constrained face.
@@ -123,7 +123,7 @@ pub enum OwnerRevision {
     /// asked, an error reply (zenoh's at its timeout among them), a
     /// descriptor that does not read, or descriptors none of which names
     /// the interface under the run, a lone descriptor stating no run among
-    /// them (core 0.101, F-507: §3.3 asks an owner to state one). No word:
+    /// them (core 0.102, F-507: §3.3 asks an owner to state one). No word:
     /// the reader cannot tell the revision, and applies no omission rule.
     /// The first is logged at warning level, the rest at debug.
     Unread,
@@ -195,7 +195,7 @@ pub async fn owner_revision(
         return OwnerRevision::Named(fp.clone());
     }
     // Descriptors reach the reader and none states the run: no omission
-    // rule applies over that snapshot (core §4.2, 0.101).
+    // rule applies over that snapshot (core §4.2, 0.102).
     match (named.as_slice(), failed) {
         (_, Some(why)) => {
             unread(key, why);

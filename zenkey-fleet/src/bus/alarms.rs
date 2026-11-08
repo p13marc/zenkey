@@ -373,7 +373,7 @@ pub async fn get(
     // attributes it (§2.14 step 5, text 0.14). A stray `reply_del`, on an
     // alarm its owner's revision under the deletion's run answers by
     // snapshot, is no owner's answer: a reply undecodable, `form`, never a
-    // deletion (core §4.2, 0.101). An owner on revision 1.0 answers per
+    // deletion (core §4.2, 0.102). An owner on revision 1.0 answers per
     // key, so its `reply_del` is a deletion.
     let alarms = zenkey::alarms::implementation().shared_contract();
     let held = [&*alarms];

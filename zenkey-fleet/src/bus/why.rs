@@ -312,7 +312,7 @@ fn reply_of(sample: &zenoh::sample::Sample) -> KeyReply {
 /// from two instances, merge by their stamps, never the first to arrive
 /// kept (core S4); a stray `reply_del`, judged by the revision its
 /// owner's descriptor names under the deletion's run, else `revisions`
-/// where no descriptor reaches the tool (core §4.2, 0.101), moves
+/// where no descriptor reaches the tool (core §4.2, 0.102), moves
 /// nothing, and is the answer only where nothing else answered.
 async fn state_answer(
     session: &Session,

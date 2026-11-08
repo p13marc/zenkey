@@ -8,7 +8,7 @@ sitting.
 
 ## Unreleased (`main`, zk2) — a GET's alarm attributed by its snapshot's run, and a stray `reply_del` read by the owner's revision (zk2py rounds 105, 106)
 
-Core 0.101 §4.2 and `alarms.v1` 0.14 §2.14 step 5.
+Core 0.102 §4.2 and `alarms.v1` 0.14 §2.14 step 5.
 
 | Before | Now | Notes |
 |---|---|---|

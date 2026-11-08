@@ -22,7 +22,7 @@ version re-keys them, and two rows beside them, written against core
 - **§2, Expected 1 and 3:** G's entry carries the status's confirmation,
   and goes stale when that is more than 60.5 s old. They said "stamp".
 - **§3, Expected 4:** `checks/net` is a tombstone in G's answer. It said
-  a `reply_del`, which core 0.101 calls a stray one for a collection's
+  a `reply_del`, which core 0.102 calls a stray one for a collection's
   member.
 
 **The reference** asserts each entry's confirmation on the owner's

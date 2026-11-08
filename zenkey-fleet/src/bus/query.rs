@@ -614,7 +614,7 @@ impl<T> KeyMerge<T> {
 }
 
 /// The revisions a state GET's reader judges a stray `reply_del` with
-/// (core §4.2, "It says which resources are per key, too"; 0.101): per
+/// (core §4.2, "It says which resources are per key, too"; 0.102): per
 /// owner, interface and run, the revision the owner's descriptor stating
 /// the `reply_del`'s run names (`zenkey::answer::owner_revision`), one the
 /// reader holds or retrieved by its fingerprint (§8.4); where no

@@ -1975,7 +1975,7 @@ fn health_v1_0() -> zenkey::Implementation {
     zenkey::Implementation::from_bundle(&std::fs::read(path).unwrap()).unwrap()
 }
 
-/// §15 step 2 (core §4.2, 0.101): whether a member is per key is read from
+/// §15 step 2 (core §4.2, 0.102): whether a member is per key is read from
 /// the owner's revision. The owner serves `status` (ttl 60) under
 /// `health.v1` 1.0, which uses `freshness.v1` and which its descriptor
 /// names; T holds 1.1, which uses `freshness.v2` instead and answers the

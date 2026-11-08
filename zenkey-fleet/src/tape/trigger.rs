@@ -244,7 +244,7 @@ pub fn state_projection(namespace: &str, selector: &str) -> Option<String> {
 /// (`bus::query::OwnerRevisions`: the revision its descriptor names, else
 /// every revision of its interface in `contracts` where no descriptor
 /// reaches the tool), is no owner's answer, and orders nothing (core §4.2,
-/// 0.101). Returns the values,
+/// 0.102). Returns the values,
 /// in the order their keys first arrived, and the error replies counted.
 ///
 /// **The bound** is `max_replies` replies, as [`TriggerSpec::max_replies`]
@@ -287,7 +287,7 @@ async fn state_get(
         }
         kept += 1;
         // A stray `reply_del`, judged on the reply by its owner's revision
-        // under the deletion's run (core §4.2, 0.101), never on a
+        // under the deletion's run (core §4.2, 0.102), never on a
         // snapshot's tombstone, which its entries read as a delete.
         if revisions.stray(&s).await {
             continue;

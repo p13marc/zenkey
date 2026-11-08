@@ -609,7 +609,7 @@ pub async fn get(
     }
     // A stray `reply_del` of the status or a check, where its owner's
     // revision under the deletion's run answers it by snapshot, is no
-    // owner's answer: undecodable, `form` (core §4.2, 0.101). An owner on
+    // owner's answer: undecodable, `form` (core §4.2, 0.102). An owner on
     // revision 1.0 confirms its status by `freshness.v1`, so it answers per
     // key, and its `reply_del` is a deletion.
     let health = zenkey::health::implementation().shared_contract();

@@ -76,7 +76,7 @@ here. None was a blocker.
 - **F-503**, a GET's alarm attributed by its run, is `alarms.v1` 0.14's
   and `health.v1` 0.10's. **F-505**, `link.v2`'s `plan.json` cases 14 to
   18 on zenoh-modem's catalog `0ff6bf6d`, is `link.v2` 0.11's. **F-509 to
-  F-511** are observer 0.30's.
+  F-511** are observer 0.31's.
 
 **Deliberately not changed.**
 - **§4.4.** Its "positive evidence" names a source's `reply_del`, and a
