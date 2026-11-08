@@ -1,7 +1,7 @@
 # Migrating zenoh-modem to zk2c (#991)
 
 *This guide is refreshed as each branch it names merges. It was last refreshed at zenkey's `main`
-`c89adc63`, with #980's C2c and C2d.*
+`67eac08c`, for 0.22.0.*
 
 This is the page a zenoh-modem maintainer reads to move zenoh-modem onto zk2c, the
 bandwidth-first wire of epic #975. It says what modem-mgmt, the backends, the routers and the
@@ -30,8 +30,8 @@ says what it will be.
 
 | Piece | State | What there is, and where |
 |---|---|---|
-| **The runtime and codegen** | Landed | `zenkey` and `zenkey-build` 0.21: `ServiceBuilder`, the generated `Server`, `Consumer` and `Client`, packed structs, typed frame writers ([`docs/zk2/codegen.md`](../../../docs/zk2/codegen.md)) |
-| A published release | Landed, 0.21.0 | `zenkey-model`, `zenkey`, `zenkey-build` and `zenkey-fleet` are on crates.io: 0.20.0 first (PR #1072, #929), then 0.21.0, which this guide follows. 0.21's state GETs are answered by snapshot, which 0.20 does not read (step 2). No release tag of them exists: the release tags end at v1's `0.14.0` |
+| **The runtime and codegen** | Landed | `zenkey` and `zenkey-build` 0.22: `ServiceBuilder`, the generated `Server`, `Consumer` and `Client`, packed structs, typed frame writers ([`docs/zk2/codegen.md`](../../../docs/zk2/codegen.md)) |
+| A published release | Landed, 0.22.0 | `zenkey-model`, `zenkey`, `zenkey-build` and `zenkey-fleet` are on crates.io: 0.20.0 first (PR #1072, #929), then 0.21.0 (PR #1091), then 0.22.0, which this guide follows. 0.21's state GETs are answered by snapshot, which 0.20 does not read, and 0.22's events are keyed by run and seq, which 0.21 does not read (step 2). No release tag of them exists: the release tags end at v1's `0.14.0` |
 | `modem-contract` as a zk2 contract crate | Missing: zenoh-modem's to build | [`contract-crate.md`](contract-crate.md) is its design |
 | **The contract, `modem.v3` 3.4** | Landed, #991 | Three events for a face, under `face/`, beside the four JSON events, each without `event_id` and `at_ms`, which the key and form 4 carry: `face/oper_change` and `face/identity_change` packed, `face/device_fault` JSON; exposed `link`, each gated `config:device.events.<name>` and listed by the faces that carry it (`link.v2` 0.12, #1098); the JSON four stay `host`, and keep both fields until modem.v4 ([link.md](link.md), "Events"); [`catalog.json`](catalog.json) `29bf7d47`, index 10 |
 | `modem.v3` 3.3 | Landed, PR #1059 | Ranges taken from zenoh-modem's code; `frames/fast`, `frames/slow` and `frames/paid` over one record of all 73 readings, the largest frame 216 B; 3.2's nine frames deprecated and `host`; the seven states' packed twins under `packed/`; `uses` `telemetry.v2`, `freshness.v2` and `link.v1`; [`catalog.json`](catalog.json) `0ff6bf6d`, index 8, where `e3a529fe` appended it. The faces list one frame each, SF9's lease is 480 s and SF12's 3,600 s, and `link.v2`'s plans are derived from 3.3 (#991) |
@@ -40,7 +40,7 @@ says what it will be.
 | Text, lists and dictionaries in packed records | Missing | #979's B3 |
 | The in-band stamp, a run and a seq | Landed | Core §4.3, §7.5 (#976) |
 | Frames | Landed | Core §7.7; `zenkey::frame::FrameWriter` (#981) |
-| Event keys by run and seq | Landed on `main` (core 0.103, #980's C2), after 0.21.0 | An occurrence's key ends in its owner's run and seq, 8 or 12 characters where a ULID took 26, and form 4 carries its time. The next release ships it: 0.21.0 still writes ULIDs |
+| Event keys by run and seq | Landed in 0.22, PRs #1093 and #1095 | Core 0.103 (#980's C2): an occurrence's key ends in its owner's run and seq, 8 or 12 characters where a ULID took 26, and form 4 carries its time. 0.22 refuses a key that ends in a ULID, which 0.21.0 still writes. Since core 0.105 (PRs #1104 and #1117) a put or a delete on an events key that carries no event is never delivered, and is counted undecodable |
 | The compact descriptor; the archive attachment | Missing | #980's C5 and C3 |
 | **Telemetry,** `telemetry.v2` | Landed | A frame's fields as metric series. The frame writer meters each counter; `zenctl telemetry` and zengui's Series read frames (#983) |
 | **Freshness,** `freshness.v2` | Landed | One heartbeat per interface in place of re-puts. `modem.v3`, `config.v1` and `health.v1` use it (#978). Its standard contract, which every such owner serves, is at index 9 of [`catalog.json`](catalog.json) `29bf7d47`, and a heartbeat's time counts from the catalog's epoch, as a frame's does (`freshness.v2` 0.6). Before #1080 (PR #1082), the doctor's `catalog-missing` warned of that contract on every modem owner, and a heartbeat counted Unix seconds |
@@ -54,6 +54,8 @@ says what it will be.
 | `config.v2`'s tools | Landed, PR #1067 | `zenctl config` reads and drives a `config.v2` owner, with `--face-policy F --face NAME` across a face. The doctor's `config-*` checks, `check conform` and zengui's Config tool read its record (#985's G3) |
 | `sx1262_config.v1` and its binding | Landed | [`config.v2-binding.md`](config.v2-binding.md), [`config/sx1262_config.v1.toml`](config/sx1262_config.v1.toml), linted clean on `config.v2` 0.1; catalog `8c808dff`, index 7. `zenkey/tests/zenoh_modem_config.rs` runs the binding's §15 round trip, byte for byte (#985's G4) |
 | **The link,** `link.v2` | Landed | The policies in [`faces/`](faces/); `zenctl acl gen --face-policy … --catalog …` and `--far-config`; `zenctl check face` with `--peer-config` and `--catalog` (#988) |
+| A face's `events` | Landed, PR #1104 | `link.v2` 0.12 §2.7: a face lists the events it carries, as it lists its frames. The plan denies by name each exposed event the face does not list, and an entry that names no event of a listed interface is `event_unknown`. zenoh-modem's five policies list theirs (#1098) |
+| A face router stamps nothing | Landed, PR #1114 | `link.v2` 0.13 §2.18 and §2.19: `acl gen` writes the near router's and the far end's `timestamping` off, and `check face` warns `face_timestamping` where a router stamps what it routes (#1106, §3.2) |
 | The far side across a face | Landed | `Consumer::across`, `Client::across`, `FacePolicy::far_side`, and zenctl's `--face-policy F --face NAME`: the face's timeout, transport and re-declaration (#988's L4). A re-declare holds no lock across the network, and a failed one is retried at every check and warned of once a horizon (#1047, PR #1056) |
 | `check face` on the fork's binding | Landed | `check face` with its `--peer-config`, and `acl gen --check`, read a `zm-1.10.2-r1` router config as data, in zenoh 1.10.1's shapes and the binding's link protocols. zenoh-modem's five router blocks pass unedited (#1044, PR #1056) |
 | The readers' `wait_before_close` per binding | Missing | zenctl's defaults are zenoh 1.10.1's 5 s, and the fork's is 10 s (#1011, item 3) |
@@ -61,10 +63,10 @@ says what it will be.
 | A first hop holds its instance token alone | Landed, PRs #1068 and #1073 | Core 0.96, and `link.v2` 0.7's device face (H1). `ServiceConfig::first_hop` declares the instance token alone, and no interface token or contract queryable (H2). `zenctl service list`, `service show` and `doctor` take `--face-policy`: a device on a device face reads `link_closed`, never down, and the doctor asks `first-hop-token` (#982's H3) |
 | A new epoch on a running service | Landed | `Service::new_epoch`; on a service that implements `config.v1` or `config.v2`, a restart of its configuration (#1055, #1064) |
 | **Snapshots,** one reply per collection | Landed, PRs #1070, #1078, #1086 and #1089 | Core 0.100: an owner answers a state GET with one snapshot per collection, in pages of `ServiceConfig::snapshot_page_bytes`. Every reader GETs under `None`, merges per key, and applies the omission rule over a complete snapshot. A `reply_del` on a collection's member is no owner's answer. `link.v2` 0.9 floors a window only where a tombstone alone proves a delete (#977's E1 to E5) |
-| **The ground's tools across a face** | Landed, PR #1088 | Observer 0.29 §7.5: a tool's scope is the face's plan, with each crossing heartbeat, and a key's revision among several held is chosen by the catalog and CH's tag. A packed record whose type is not held is never sniffed (§7.3; #990's V1 and V2) |
+| **The ground's tools across a face** | Landed, PR #1088; #990 closed | Observer 0.29 §7.5: a tool's scope is the face's plan, with each crossing heartbeat, and a key's revision among several held is chosen by the catalog and CH's tag. A packed record whose type is not held is never sniffed (§7.3; #990's V1 and V2) |
 | Dated values and `.zrec` version 4 | Landed (PR #1092) | The tooling guide's O8: a time dated in UTC under its epoch, named, and a field's bound beside its value. §5's version 4 carries the catalog, the revisions and their bundles, and `zenctl echo --from FILE` reads a capture with nothing beside it (#990's V3 and V4) |
-| The doctor's `packed-refused` and `state-unconfirmed`; `watch`'s lost and diverged heartbeats, and zengui's Inspector per collection; zengui and zenwatch across a face; `--face-policy` on `get state`, `watch`, `call` and `telemetry`; `field` over a frame's records | Landed (PRs #1097, #1102 and #990's last two) | #990's V5 to V8, and V2's `field`: a field a frame's record carries absent, or its reader cannot tell, is counted apart and never vanished |
-| **The measurement** of W1 and W2 on zk2c | Missing | #989 |
+| The doctor's `packed-refused` and `state-unconfirmed`; `watch`'s lost and diverged heartbeats, and zengui's Inspector per collection; zengui and zenwatch across a face; `--face-policy` on `get state`, `watch`, `call` and `telemetry`; `field` over a frame's records | Landed, PRs #1097, #1102, #1105 and #1112 | #990's V5 to V8, and V2's `field`: a field a frame's record carries absent, or its reader cannot tell, is counted apart and never vanished |
+| **The measurement** of W1 and W2 on zk2c | Landed on RF and LoRa SF7, PR #1111 | On RF, W2 measured 669 KB a day, 2.6 % of the channel, where today's wire takes 64 %; W1-73's frames 207 KB. At LoRa SF7, W1-73 takes 474 s of uplink, 55 % of the duty. LoRa SF9 and SF12, W2 on LoRa and SBD are still to run (#989). The runs filed #1106, landed, and #1107 to #1110 (§6) |
 
 ## 2. The order to migrate in
 
@@ -75,7 +77,7 @@ move together.
 | Step | What | Needs |
 |---|---|---|
 | 1 | The routers' transport | nothing of zk2 |
-| 2 | Build on zenkey 0.21 | 0.21.0 on crates.io, or a git dependency on `main` |
+| 2 | Build on zenkey 0.22 | 0.22.0 on crates.io, or a git dependency on `main` |
 | 3 | `modem-contract` becomes a contract crate | step 2 |
 | 4 | modem-mgmt serves each device as a zk2 service | step 3 |
 | 5 | Telemetry crosses as frames | step 4; 3.3's frames, never 3.2's |
@@ -105,13 +107,14 @@ move together.
   govern the node's loopback links (#988's design, risk 1). Neither end negotiates them, so both
   ends move at once.
 
-### Step 2. Build on zenkey 0.21
+### Step 2. Build on zenkey 0.22
 
 - **Changes.** In the workspace `Cargo.toml`:
-  - `zenkey` and `zenkey-build` move from `0.11` to zk2's 0.21, from crates.io. Add
-    `zenkey-model` for the `zk2` contract tool in CI. Take 0.21, never 0.20: a 0.20 service and a
-    0.21 one do not understand each other's state GETs (#977), and 0.21 removed the bare wire's
-    API (each crate's README, "Changes since 0.20").
+  - `zenkey` and `zenkey-build` move from `0.11` to zk2's 0.22, from crates.io. Add
+    `zenkey-model` for the `zk2` contract tool in CI. Take 0.22, never 0.21 or 0.20: a 0.21
+    service and a 0.22 one do not understand each other's events (#980's C2), and a 0.20 one
+    does not read a later one's state GETs (#977). 0.22 removed `zenkey::writer::ulid` (each
+    crate's README, "Changes since 0.21").
   - `[patch.crates-io]` keeps the fork's `zenoh`, and gains its `zenoh-ext`, both at
     `zm-1.10.2-r1`. zenkey takes `zenoh-ext` under `unstable`, and crates.io's `zenoh-ext` pins
     its `zenoh` exactly. #1011's readiness run patched it so.
@@ -130,7 +133,7 @@ move together.
   - `schemas/modem.json` is schemars' output from `src/documents.rs`, committed;
   - the packed files are hand-written: [`schemas/modem-frames.json`](schemas/modem-frames.json)
     for 3.2's deprecated frames, and 3.3's `modem-readings.json` and `modem-states.json`;
-  - `build.rs` runs zenkey-build 0.21, and `contracts/.history/` holds the published bundles;
+  - `build.rs` runs zenkey-build 0.22, and `contracts/.history/` holds the published bundles;
   - `registry/` (`modem.toml` and `types.toml`), the three `.lock` files, `src/schema.rs`
     (`SchemaSet`, `verify_total`), `PROFILE` and `PRODUCER` go;
   - `src/config.rs` converts `modem_device::config` into `zenkey_model::config`'s types,
@@ -233,11 +236,14 @@ move together.
     heartbeat (#978's design, §3).
   - With 3.3, each `packed/…` twin is put beside its JSON document, on the same change.
   - `events::publish_loop` and `publish_device_loop` write each occurrence through the event
-    writers, with no change in their code. Under 0.21 its key ends in a ULID. From the release
-    after it, the runtime keys it by the owner's run and seq and writes its time in form 4 (core
-    0.103, #980's C2): `put_at` carries a relayed occurrence's device time, and a node whose
-    clock is not trusted writes the time as unknown. The records' `event_id` and `at_ms` then
-    repeat the key and form 4.
+    writers. With no change in their code, 0.22 keys each by the owner's run and next seq, 8 or
+    12 characters where 0.21's ULID took 26, and writes its time in form 4, counted from the
+    catalog's epoch (core 0.103, #980's C2). `put` writes the clock's time, unknown while the
+    clock guard holds, and `put_at` a relayed occurrence's device time, each under the next seq.
+    A reader replays them by that time, then by run and seq, and never delivers a put or a delete
+    on an events key that carries no event (core 0.105). Only a node whose clock is never trusted
+    changes its calls, to `put_untimed`, which writes the time as unknown. The records'
+    `event_id` and `at_ms` repeat the key and form 4.
   - With 3.4, each occurrence a device's face carries is also written to its `face/` twin, on
     a device whose `[[device]]` lists it in its `events` (`config:device.events.<name>`), as its
     face policy lists it (`link.v2` 0.12 §2.7, #1098): rf0 the three, lora0 at SF7 or SF9
@@ -362,7 +368,7 @@ move together.
   with `modem-contract`, default features off, and the catalog. It subscribes by exact key, waits
   the face's reply timeout, and declares a silent subscription again where the radio repairs
   nothing. It GETs each state collection whole, under `None`, and merges its snapshot's entries
-  per key (§4). It runs 0.21, as the node does (step 2).
+  per key (§4). It runs 0.22, as the node does (step 2).
 - **Uses.** `zenkey_model::link::FacePolicy::far_side`, `Consumer::across`, `Client::across`,
   `FarSide::session_keys` for the session's transport. zenctl's `--across-face`, `--face-policy`,
   `--face`, `--catalog` and `--contracts`.
@@ -415,7 +421,7 @@ it leaves out. The other warnings differ:
     which each grant compiles into denies of its complement (spec §11.2; README gaps 12 and 13).
   - Since #977, a grant on a state template a binding leaves unbound is its collection read,
     `…/state/sdu/endpoint/**`, where it was `…/endpoint/*`, which leaves the snapshot key out and
-    so denies the snapshot silently (core §11.1). Write each block with 0.21's `acl gen`. Under
+    so denies the snapshot silently (core §11.1). Write each block with 0.22's `acl gen`. Under
     `link.v2` 0.9, the plan's `windows` lists only an owner whose deletes a tombstone alone
     proves, so `rf0` keeps its 60 s window (§2.11).
 - **`zenctl check face <ROUTER-CONFIG> --face-policy F --enrollment … --contracts …`** compares
@@ -587,7 +593,9 @@ A migration started today would hit each of these.
 | What it hits | What to do meanwhile | Issue |
 |---|---|---|
 | **The readers' `wait_before_close` default** is zenoh 1.10.1's 5 s | Pass `--wait-before-close`, or `--face-policy` where a verb takes it | #1011 |
-| **Event keys in 0.21 end in a ULID.** `main` keys an occurrence by its run and seq (core 0.103), for the next release | Keep the four events `host`, and publish no `face/` twin, until modem-mgmt takes that release | #980 (C2) |
 | **No text in packed records,** so four backends cannot move to `config.v2` | Text stays in the JSON states, and those backends on `config.v1`. Across RF, a GET of the status by grant; the view is never pushed | #979 (B3) |
-| **The transport that never came back** (W2, finding 5) | zenoh-modem's tracker. Keep nothing `block` larger than a batch on a crossing key | #988's design, §1.8 |
-| **The bytes are modelled.** zk2c's run of W1 and W2 on the fake media has not happened | Read every unmarked figure here as a model | #989 |
+| **The link that never comes back** (W2, finding 5). After a reopen over RF, router A sent nothing A→B for a whole lease, at 0 % loss too, so both of W2's `config set` calls drew silence, `no_token_visible` | zenoh-modem's tracker holds the cause, in its driver or its fork: zenkey's reference crosses a reopen (#1114). Keep nothing `block` larger than a batch on a crossing key | zenoh-modem#210; #1109 |
+| **`freshness.v2`'s heartbeat is one put per interface:** on W2 it cost 238 KB a day, where the model folded it into 52 KB | Count a heartbeat for each crossing interface that uses `freshness.v2`, at its own horizon, until the maintainer picks one per owner, one riding a frame, or longer horizons per face | #1110 |
+| **A face's subjects by user name bind only when the far side opens the lane,** and credentials on the far router make the ground's own tools present one too | Let the far side open the lane, as `attach = "client"` plans, and give the ground's tools a user of their own: neither the policy nor `--far-config`'s block says so yet | #1107 |
+| **Frames spare fewer keep-alives at LoRa SF7** than `link.v2` §2.16 expects: one uplink keep-alive in four, 2,160 a day, where §2.16 counts 1,440 | Budget SF7's uplink at the measured count | #1108 |
+| **The bytes off RF and LoRa SF7 are modelled.** W1-73 at SF9 and SF12, W2 on LoRa and SBD have not run on zk2c | Read every unmarked figure for those media as a model | #989 |
