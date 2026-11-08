@@ -594,6 +594,46 @@
         "occurrences"
       ]
     },
+    "DeviceFaultEvent": {
+      "description": "event `face/device_fault`, since revision 3.4: `DeviceFault` without `event_id` and `at_ms`, which the key's occurrence chunk and form 4's time carry (core sections 2.6, 7.5). JSON, not packed: `detail` is the medium's own words, free text, which a packed record cannot hold (core section 7.6).",
+      "type": "object",
+      "properties": {
+        "device": {
+          "type": "string"
+        },
+        "lane": {
+          "description": "The lane it concerns; explicitly null when device-wide.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "edge": {
+          "description": "`raised` or `cleared`: edge-triggered, never a repeat.",
+          "type": "string"
+        },
+        "detail": {
+          "description": "The medium's own words.",
+          "type": "string"
+        },
+        "occurrences": {
+          "description": "Transitions this event stands for, itself included.",
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "device",
+        "lane",
+        "edge",
+        "detail",
+        "occurrences"
+      ]
+    },
     "ParamValue": {
       "description": "One parameter value, untagged: the configuration plane's three kinds (zenkey::config::ParamValue). Duplicated from config.v1's schema: draft 0 cannot reference another interface's types (README gap 18).",
       "anyOf": [

@@ -323,9 +323,10 @@ them: exit 0.
 ```console
 $ zenctl check face tests/cmd/fixtures/link/router-zm-rf0.json5 --face-policy ../examples/zk2/zenoh-modem/faces/zenohd-rf0.face.toml --enrollment ../examples/zk2/zenoh-modem/faces/zenoh-modem.enrollment.toml --contracts ../examples/zk2/zenoh-modem --contracts ../spec/profiles/config/config.v1.toml --contracts ../spec/profiles/health/health.v1.toml --catalog ../examples/zk2/zenoh-modem/catalog.json --peer-config tests/cmd/fixtures/link/far-zm-rf0.json5 --format table
 rf: no_arq at arq: the medium repairs no lost frame, and zenoh repairs no lost declaration: a lost subscriber or queryable stays lost while the transport stays up (link.v2 §2.1) (link.v2 §2.1, §2.10, §2.16)
+face rf: not_packed modem.v3/events/face/device_fault: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
 face rf: frame_unlisted modem.v3/stream/frames/paid: an exposed frame resource the face's frames leaves out, which no face of the policy lets cross: its owner writes it for no far side (link.v2 §2.7)
 face rf: frame_unlisted modem.v3/stream/frames/slow: an exposed frame resource the face's frames leaves out, which no face of the policy lets cross: its owner writes it for no far side (link.v2 §2.7)
-tests/cmd/fixtures/link/router-zm-rf0.json5: face rf (far ground): 11 deny rule(s) across subject(s) ground; 0 downsampling rule(s) on its transports
+tests/cmd/fixtures/link/router-zm-rf0.json5: face rf (far ground): 13 deny rule(s) across subject(s) ground; 0 downsampling rule(s) on its transports
 transport (link.v2 §2.19), an omitted key read at zm-1.10.2-r1's default:
     transport.lease_ms              planned 240000     runs 240000     far end 240000
     transport.keep_alive            planned 4          runs 4          far end 4
@@ -335,7 +336,7 @@ transport (link.v2 §2.19), an omitted key read at zm-1.10.2-r1's default:
     transport.open_timeout_ms       planned 10000      runs 10000      far end 10000
     transport.accept_timeout_ms     planned 10000      runs 10000      far end 10000
     transport.interests_timeout_ms  planned 10000      runs 10000      far end 10000
-catalog: the far side holds 0ff6bf6d, the policy names 0ff6bf6d
+catalog: the far side holds 29bf7d47, the policy names 29bf7d47
 PASS
 judged against the config file tests/cmd/fixtures/link/router-zm-rf0.json5 read as data, in zenoh 1.10.1's shapes and zm-1.10.2-r1's link protocols: what a router runs is not observable on the bus, so a file that differs from what it was started with is invisible here (core §11.3, link.v1 §2.14)
 stock zenoh's loader refuses zm-1.10.2-r1's link protocols, so no zenoh loaded the file: whether the router's own loader accepts it is not checked (link.v2 §2.4)

@@ -1,0 +1,29 @@
+{
+  "description": "modem.v3's events as packed records for a constrained face (core section 7.6; #991), since revision 3.4: the payload of form 4, the event (core section 7.5), whose key is the occurrence's run and seq and whose time form 4 carries, so no record repeats event_id or at_ms. Each holds what a packed field can (enums, numbers, bits); the text stays in the JSON event of the host bus, and each record ends with an extension marker, so a later minor appends optional fields.",
+  "types": {
+    "OperChangeRecord": {
+      "description": "event `face/oper_change`: the status after the change, and the transitions it stands for (OperChange, modem-contract documents.rs). Its `reason`, the driver's or the device's words, is text, and stays in the JSON `oper_change` and the `oper` state; the device is the key's service",
+      "fields": [
+        {"name": "status", "type": "enum", "values": ["up", "down", "notPresent", "unknown"], "escape": true},
+        {"name": "occurrences", "type": "int", "minimum": 0, "maximum": 65534, "reserved": ["out_of_range"]},
+        "..."
+      ]
+    },
+    "IdentityChangeRecord": {
+      "description": "event `face/identity_change`: which of the device's identity fields changed, a bit each, and its equipment identifier before and after, an IMEI's 15 digits (3GPP TS 23.003), where it has one (IdentityChange, modem-contract documents.rs). The RFC 8348 names, serial and revisions are text, and stay in the JSON `identity_change`; the device is the key's service",
+      "fields": [
+        {"name": "mfg_name_changed", "type": "bool"},
+        {"name": "model_name_changed", "type": "bool"},
+        {"name": "serial_num_changed", "type": "bool"},
+        {"name": "hardware_rev_changed", "type": "bool"},
+        {"name": "firmware_rev_changed", "type": "bool"},
+        {"name": "software_rev_changed", "type": "bool"},
+        {"name": "imei_changed", "type": "bool"},
+        {"name": "imei_before", "type": "int", "minimum": 0, "maximum": 999999999999999, "optional": true},
+        {"name": "imei_after", "type": "int", "minimum": 0, "maximum": 999999999999999, "optional": true},
+        {"name": "occurrences", "type": "int", "minimum": 0, "maximum": 65534, "reserved": ["out_of_range"]},
+        "..."
+      ]
+    }
+  }
+}

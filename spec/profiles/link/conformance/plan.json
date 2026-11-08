@@ -201,9 +201,42 @@
                   "egress",
                   "ingress"
                 ],
-                "id": "events",
+                "id": "events:config.v1",
                 "key_exprs": [
-                  "zk2/*/*/*/events/**"
+                  "zk2/*/*/config.v1/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events:health.v1",
+                "key_exprs": [
+                  "zk2/*/*/health.v1/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events:modem.v3",
+                "key_exprs": [
+                  "zk2/*/*/modem.v3/events/action_event/**",
+                  "zk2/*/*/modem.v3/events/device_fault/**",
+                  "zk2/*/*/modem.v3/events/identity_change/**",
+                  "zk2/*/*/modem.v3/events/oper_change/**"
                 ],
                 "messages": [
                   "put",
@@ -242,7 +275,7 @@
           "health.v1"
         ]
       },
-      "note": "zenoh-modem's RF face, modem.v3 3.3: its JSON streams denied in seven subtrees and 3.2's nine deprecated frames by name, frames/fast, frames/slow and frames/paid crossing whole with no downsampling rule, each liveness evidence by its horizon, everything else of the management plane denied, its events under events/ (link.v1 §2.7, §2.8, §2.12, Appendix B; the sketch's defect fixed)",
+      "note": "zenoh-modem's RF face, modem.v3 3.4: its JSON streams denied in seven subtrees and 3.2's nine deprecated frames by name, frames/fast, frames/slow and frames/paid crossing whole with no downsampling rule, each liveness evidence by its horizon, everything else of the management plane denied, its four JSON events by name under events/ (link.v1 §2.7, §2.8, §2.12, Appendix B; the sketch's defect fixed); 3.4's three `face/` events cross whole, never downsampled (§2.9)",
       "policy": "# zenoh-modem's RF node (link.v1 Appendix B)\nsystem   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 60\nmax_outage_s = 3600\nbatch_bytes  = 220\nlink_bps     = 2400\n"
     },
     {

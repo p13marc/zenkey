@@ -4,9 +4,9 @@
 > policies, in [`faces/`](faces/) (#988 L5).** One router per medium, as that profile requires
 > (its §2.16): zenoh reads the lease, the keep-alives, the batch, `wait_before_close` and the
 > timeouts once per router, for every link it holds. Each policy names the zenoh its router runs,
-> `zm-1.10.2-r1`, and the catalog the ground holds, [`catalog.json`](catalog.json)'s `0ff6bf6d`
-> (`freshness.v2` at index 9, #1080, after `modem.v3` 3.3 at index 8, #991, and
-> `sx1262_config.v1` at index 7, #985 G4).
+> `zm-1.10.2-r1`, and the catalog the ground holds, [`catalog.json`](catalog.json)'s `29bf7d47`
+> (`modem.v3` 3.4 at index 10, #991, after `freshness.v2` at index 9, #1080, `modem.v3` 3.3 at
+> index 8, #991, and `sx1262_config.v1` at index 7, #985 G4).
 > [`faces/zenoh-modem.enrollment.toml`](faces/zenoh-modem.enrollment.toml) gives the routers'
 > principals, and `link.v2`'s `conformance/v2/plan.json` holds each face's plan (its Appendix B).
 >
@@ -120,6 +120,44 @@
 >
 > With every reading present and 24 of them moving, RF carries 177 KB a day, LoRa spends 376 s,
 > 534 s and 785 s of its 864 s at SF7, SF9 and SF12, and SBD 96 messages a day, as idle.
+
+> **Events, since `modem.v3` 3.4 (#991, after #980's C2).** Since core 0.103 an occurrence's key
+> ends in its run and seq, and its payload is form 4, the event, which carries its time (core
+> §2.6, §7.5). The four JSON events stay `host`: their records repeat both as `event_id` and
+> `at_ms`, and removing a required property is breaking within the major (core §9.8,
+> `required_removed`). Revision 3.4 adds three twins for a face, under `face/`, exposed `link`:
+> `face/oper_change` (packed, 3 B), `face/identity_change` (packed, at most 16 B) and
+> `face/device_fault` (JSON, its words free text). `action_event`'s `burst(600/h)` fits no radio
+> face, and it has no twin.
+> - **What crosses.** An exposed event crosses whole, every occurrence, never downsampled
+>   (`link.v1` §2.9). Each plan denies the four JSON events by name, `events:modem.v3`, and lets
+>   the three twins cross. `face/device_fault` draws `not_packed` on every face (`link.v2` §2.17).
+> - **Which face carries which.** A face policy lists frames, never events (`link.v2` §2.7), so
+>   every face that exposes lets all three cross. Which a device publishes is its owner's
+>   configuration, `config:device.events.<name>`, as its frames' cadence is: rf0 the three,
+>   lora0 at SF7 or SF9 the two `rare` ones, lora0 at SF12 and sat0 none.
+> - **The cadence check** (#991's per-medium budgets; `zenkey-fleet/tests/acl_plans.rs`,
+>   `zenoh_modem_events_fit_each_face_budget`). The wire model of 3.3's figures (README, "What each
+>   face spends"), for one occurrence alone in its SDU: a put on the scope the far reader's
+>   template-prefix subscription declares, its suffix `/` and an 8-character chunk (a 16-bit run;
+>   12 characters add 4 B), the QoS extension (reliable, `block`), form 4's 7 B and the record;
+>   then the frame's 5 B and the lean stack's 16 B. Each at its rate's worst case: `rare` 24 a day,
+>   `low` 1,440. `face/device_fault`'s record is taken at 221 B of JSON, a 16-character lane and
+>   128 B of the medium's words.
+>
+> | Event, its SDU | RF: bytes a day | SF7: s of air | SF9 | SF12 | SBD: messages |
+> |---|---:|---:|---:|---:|---:|
+> | `face/oper_change`, 47 B | 1,128 | 2.2 | 7.4 | 79.0 (2 tiles) | 24 |
+> | `face/identity_change`, 60 B | 1,440 | 2.7 | 8.9 | 90.8 | 24 |
+> | `face/device_fault`, 220 + 68 B (115 B SDUs at SF9) | 414,720 | 679 | 2,423 | 22,496 | 1,440 |
+> | 3.3's frames, all 73 readings | 177,000 | 376 | 534 | 785 | 96 |
+> | **Carried** | the three: **594,288**, 2.3 % of 25.9 MB | two: **381**, 44 % of 864 | two: **550**, 64 % | none: **785**, 91 % | none: **96**, as idle |
+>
+> What each leaves out would not fit: `face/device_fault` takes LoRa past its duty at every
+> spreading factor (1,060 s at SF7); at SF12 `face/oper_change` alone reaches 864.04 s, beside
+> frames/slow's 785 s, and each event on SBD is a paid message of its own. With lora0's own
+> readings, 434 s at SF12, the two `rare` events would fit there (604 s): a choice for lora0's
+> owner, which the check does not take.
 
 zenoh-modem carries stock Zenoh over radios where every byte is billed in airtime:
 - 220 B MTU at 2,400 bit/s on RF;

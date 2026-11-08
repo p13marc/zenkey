@@ -28,6 +28,9 @@
           "zk2/h-3fa9c2d41b7e/rf0/health.v1/stream/faults",
           "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/action_event/*",
           "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/device_fault/*",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/device_fault/*",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/identity_change/*",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/oper_change/*",
           "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/identity_change/*",
           "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/*",
           "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/destination/*",
@@ -133,7 +136,7 @@
       }
     },
     {
-      "note": "rf0 through its face: frames/fast alone crosses; no collection crosses, so no heartbeat does",
+      "note": "rf0 through its face: frames/fast and modem.v3 3.4's three `face/` events cross, each event's last chunk a wildcard; no collection crosses, so no heartbeat does",
       "contracts": [
         "examples/zk2/zenoh-modem/modem.v3.toml",
         "spec/profiles/config/config.v1.toml",
@@ -148,12 +151,15 @@
       "typed": null,
       "expect": {
         "selectors": [
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/device_fault/*",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/identity_change/*",
+          "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/oper_change/*",
           "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast"
         ]
       }
     },
     {
-      "note": "lora0 at SF12 through its face: frames/slow alone",
+      "note": "lora0 at SF12 through its face: frames/slow, and the three `face/` events its plan lets cross, published or not (a face lists frames, never events)",
       "contracts": [
         "examples/zk2/zenoh-modem/modem.v3.toml",
         "spec/profiles/config/config.v1.toml",
@@ -168,12 +174,15 @@
       "typed": null,
       "expect": {
         "selectors": [
+          "zk2/h-c2a95e41d7f0/lora0/modem.v3/events/face/device_fault/*",
+          "zk2/h-c2a95e41d7f0/lora0/modem.v3/events/face/identity_change/*",
+          "zk2/h-c2a95e41d7f0/lora0/modem.v3/events/face/oper_change/*",
           "zk2/h-c2a95e41d7f0/lora0/modem.v3/stream/frames/slow"
         ]
       }
     },
     {
-      "note": "sat0 through its SBD face: frames/paid alone",
+      "note": "sat0 through its SBD face: frames/paid, and the three `face/` events its plan lets cross, published or not",
       "contracts": [
         "examples/zk2/zenoh-modem/modem.v3.toml",
         "spec/profiles/config/config.v1.toml",
@@ -188,6 +197,9 @@
       "typed": null,
       "expect": {
         "selectors": [
+          "zk2/h-71c0e2a9d4b3/sat0/modem.v3/events/face/device_fault/*",
+          "zk2/h-71c0e2a9d4b3/sat0/modem.v3/events/face/identity_change/*",
+          "zk2/h-71c0e2a9d4b3/sat0/modem.v3/events/face/oper_change/*",
           "zk2/h-71c0e2a9d4b3/sat0/modem.v3/stream/frames/paid"
         ]
       }

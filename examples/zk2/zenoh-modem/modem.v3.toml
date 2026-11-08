@@ -13,13 +13,17 @@
 # - `sensor`, `describe`, `introspect` and the two `alive` tokens: the descriptor, the contract
 #   bundle and the instance/interface tokens (r3 §3.10).
 #
-# Counts: 105 resources (85 streams, 14 states, 4 events, 2 operations); 99 of them optional.
+# Counts: 108 resources (85 streams, 14 states, 7 events, 2 operations); 102 of them optional.
 # v1's 86 are 73 streams, 7 states, 4 events and 2 operations, 80 of them optional with a
 # `capability:` gate; with config.v1's 8, that is v1's 88 gated entries. Revision 3.2 adds the
 # 9 frame resources, each optional with a `config:` gate (#983 T4). Revision 3.3 (#991) adds 3
 # frame resources over one record of all 73 readings, whose ranges are zenoh-modem's, and
 # deprecates 3.2's 9, whose layouts it cannot change within the major (core §9.8); and it adds
-# the 7 states again as packed records, under `packed/`, beside the JSON states.
+# the 7 states again as packed records, under `packed/`, beside the JSON states. Revision 3.4
+# (#991, after #980's C2) adds 3 events for a constrained face, under `face/`, beside the four
+# JSON events, without `event_id` and `at_ms`, which an occurrence's key and form 4 now carry:
+# `face/oper_change` and `face/identity_change` packed, `face/device_fault` JSON (its words are
+# text). Each is exposed `link`, gated per device (`config:device.events.<name>`).
 #
 # QoS comes from the interface defaults (draft 1, D2; README gap 4), expanded before
 # canonicalization, so writing a value out per resource would not change the fingerprint:
@@ -30,24 +34,28 @@
 #   revision 3.1, #978's F5): a reader that lost a put sees its collection's digest diverge and
 #   re-reads it, and the owner's GET is the truth (S2);
 # - the events keep v1's `transition` profile: reliable, block, data, the events kind's built-ins
-#   (D3: each occurrence on …/events/<template>/<ulid>, cardinality = rate x retention).
+#   (D3: each occurrence on its own key, cardinality = rate x retention; since core 0.103 the
+#   key's last chunk is its occurrence chunk, the run and the seq it took, and its payload is
+#   form 4, the event, which carries its time: core §2.6, §7.5).
 #
 # Exposure: link.v1's default is `host` (never crosses a constrained face). Only the frame
 # resources say otherwise, since revision 3.2 (#983 T4): the four v1 `exposure = "link"` streams
 # are `host` again, their readings crossing in a frame. Since revision 3.3 (#991) only
 # `frames/fast`, `frames/slow` and `frames/paid` are `link`; 3.2's 9 are deprecated and `host`.
-# The faces, the frames each lists and their cadences are deployment (link.md, faces/).
+# Since revision 3.4 (#991) the three `face/` events are `link` too, and the four JSON events
+# stay `host`. The faces, the frames each lists and their cadences are deployment (link.md,
+# faces/), and so is which `face/` event a device's owner publishes.
 
 [interface]
 name    = "modem"
 major   = 3
-minor   = 3
+minor   = 4
 summary = "One modem device on a host: what its medium carries and loses, what it measures, what it is"
 uses    = ["telemetry.v2", "freshness.v2", "link.v1"]
 
 [schemas]
 jsonschema = ["schemas/modem.json"]
-packed     = ["schemas/modem-frames.json", "schemas/modem-readings.json", "schemas/modem-states.json"]
+packed     = ["schemas/modem-frames.json", "schemas/modem-readings.json", "schemas/modem-states.json", "schemas/modem-events.json"]
 
 [defaults.stream]
 priority = "data_low"
@@ -1439,9 +1447,12 @@ annotations = { "freshness.ttl_s" = 60 }
 doc         = "`radio` packed: registration and access technology"
 
 # --- events ------------------------------------------------------------------------------------
-# Unchanged by revision 3.3 (#991). Each template is a literal, so a far reader that subscribes
-# to `…/events/<template>/*` declares `…/events/<template>`, and each put carries its ULID chunk
-# alone: the shortest suffix core §8.5 (#980 C1b) allows. None is exposed, so none crosses a face.
+# The four JSON events, on the host bus, as revision 3.3 declared them (#991): none is exposed, so
+# none crosses a face. Since core 0.103 each occurrence's key ends in its occurrence chunk, the
+# run and the seq it took, and its payload is form 4, which carries the occurrence's time (core
+# §2.6, §7.5): their `event_id` and `at_ms` repeat both. They stay, since removing a required
+# property is breaking within the major (core §9.8, `required_removed`): modem.v4 drops them.
+# Revision 3.4's `face/` events below carry each that a radio face can afford without them.
 # event (D3): a reader that arrives after the radio died must still learn it, and when (v1
 # RFC 04 §1.3). v1 rate = "rare": at most 1/h, the rest folded into `occurrences`, so 7d holds
 # at most 168 per device.
@@ -1484,6 +1495,58 @@ retention   = "1d"
 optional    = true
 gate        = "capability:actions"
 doc         = "an operator action ran or was refused: the action, its arguments, the outcome, what it cost, and the caller-claimed attribution"
+
+# --- events for a constrained face (since revision 3.4; #991) ----------------------------------
+# Three events beside the JSON ones, for the faces: an occurrence the owner publishes on the host
+# bus as its JSON event, it also publishes here, on a device whose face carries it. Neither repeats
+# `event_id` or `at_ms`: the key's occurrence chunk and form 4's time carry both (core §2.6,
+# §7.5), and the device is the key's service.
+# - `face/oper_change` and `face/identity_change` are packed (schemas/modem-events.json): the
+#   status, or which identity fields changed and the IMEI before and after, and the occurrences
+#   folded in, in 3 B and at most 16 B. Their text, a reason or a name, stays in the JSON event.
+# - `face/device_fault` is JSON, `DeviceFaultEvent`: its `detail` is the medium's own words, free
+#   text, which a packed record cannot hold (core §7.6; #979's B3 adds none here). A link.v2
+#   face's plan warns `not_packed` for it.
+# - Exposed `link`, so each crosses every face that exposes, whole and never downsampled
+#   (link.v1 §2.9). A face policy lists frames, never events (link.v2 §2.7), so which of them a
+#   face carries is its device's owner's configuration, `config:device.events.<name>` (a
+#   `[[device]]`'s `events` list in zenoh-modem's file), as a frame's cadence is: on RF all three,
+#   on LoRa the two `rare` ones at SF7 and SF9 and none at SF12, whose frames/slow leaves too
+#   little of the duty, and none on SBD, one paid message a keyframe (link.md, "Events").
+# - `face/device_fault` stays off LoRa: at `low`, 60 an hour, its worst case is more air than
+#   SF7's, SF9's or SF12's duty leaves beside the frames. `action_event` has no twin: its
+#   `burst(600/h)` fits no radio face, and it stays `host`.
+# - Optional, as any resource a minor adds, each with its JSON twin's rate and retention.
+
+[resources."face/oper_change"]
+kind        = "event"
+type        = "packed:modem-events#OperChangeRecord"
+rate        = "rare"
+retention   = "7d"
+optional    = true
+gate        = "config:device.events.oper_change"
+annotations = { "link.exposure" = "link" }
+doc         = "`oper_change` for a constrained face: the status after the change, and the transitions folded into it"
+
+[resources."face/identity_change"]
+kind        = "event"
+type        = "packed:modem-events#IdentityChangeRecord"
+rate        = "rare"
+retention   = "7d"
+optional    = true
+gate        = "config:device.events.identity_change"
+annotations = { "link.exposure" = "link" }
+doc         = "`identity_change` for a constrained face: which identity fields changed, and the IMEI before and after"
+
+[resources."face/device_fault"]
+kind        = "event"
+type        = "json:DeviceFaultEvent"
+rate        = "low"
+retention   = "1d"
+optional    = true
+gate        = "config:device.events.device_fault"
+annotations = { "link.exposure" = "link" }
+doc         = "`device_fault` for a constrained face: the medium's own words, without the key's and form 4's facts"
 
 # --- operations --------------------------------------------------------------------------------
 # v1's `describe` and `introspect` are the contract bundle (zk2/@zk/contract/modem.v3/<sha256>),

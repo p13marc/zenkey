@@ -525,6 +525,224 @@ fn zenoh_modem_faces_pass_their_own_checks() {
     }
 }
 
+/// The wire model of `docs/zk2/constrained-overhead-review.md`'s Appendix A,
+/// as much of it as an event's put needs (#991's cadence check): a varint's
+/// bytes, a put on a declared scope, the SDUs zenoh's batches become under
+/// zenoh-modem's lean stack, Semtech's time on air and SF10-12's 51 B tiles.
+mod wire {
+    pub const LEAN: usize = 16;
+    const FRAME: usize = 1 + 4;
+    const FIRST_FRAG: usize = 1;
+    const QOS: usize = 2;
+    const SCOPE: usize = 1;
+
+    pub fn vle(x: usize) -> usize {
+        let bits = usize::BITS - x.max(1).leading_zeros();
+        (1 + (bits as usize - 1) / 7).min(9)
+    }
+
+    /// A put on the scope a far reader's template-prefix subscription
+    /// declared (core §8.5), its suffix `/<chunk>`, reliable and `block`, so
+    /// with the QoS extension, under `zenoh/bytes`, so with no Encoding.
+    pub fn event_put(payload: usize, suffix: usize) -> usize {
+        1 + SCOPE + (1 + suffix) + QOS + 1 + vle(payload) + payload
+    }
+
+    /// Each SDU's size, `messages` packed into batches of `mtu` less the
+    /// stack and the frame, a message too large fragmented.
+    pub fn sdus(messages: &[usize], mtu: usize) -> Vec<usize> {
+        let cap = mtu - LEAN - FRAME;
+        let (mut out, mut used): (Vec<usize>, Option<usize>) = (Vec::new(), None);
+        for &m in messages {
+            if m > cap {
+                let mut rest = (m + FIRST_FRAG) as isize;
+                while rest > 0 {
+                    out.push((rest as usize).min(cap) + FRAME + LEAN);
+                    rest -= cap as isize;
+                }
+                used = None;
+                continue;
+            }
+            if used.is_none_or(|u| u + m > cap) {
+                out.push(FRAME + LEAN);
+                used = Some(0);
+            }
+            *out.last_mut().unwrap() += m;
+            used = used.map(|u| u + m);
+        }
+        out
+    }
+
+    /// Semtech's time on air of one LoRa frame, zenoh-modem's simulator's
+    /// parameters: 125 kHz, CR 4/5, an 8-symbol preamble, a CRC.
+    pub fn lora_toa_s(pl: usize, sf: u32) -> f64 {
+        let de = if sf >= 11 { 1.0 } else { 0.0 };
+        let tsym = f64::from(1u32 << sf) / 125_000.0;
+        let steps = ((8.0 * pl as f64 - 4.0 * f64::from(sf) + 28.0 + 16.0)
+            / (4.0 * (f64::from(sf) - 2.0 * de)))
+            .ceil();
+        (8.0 + 4.25 + 8.0 + (steps * 5.0).max(0.0)) * tsym
+    }
+
+    /// One SDU's air: whole frames up to SF9, 51 B fragment tiles at SF10-12.
+    pub fn lora_air_s(sdu: usize, sf: u32) -> f64 {
+        if sf <= 9 {
+            return lora_toa_s(sdu, sf);
+        }
+        let body = 51 - 2;
+        let tiles = (sdu + 4).div_ceil(body);
+        let last = sdu + 4 - (tiles - 1) * body + 2;
+        (tiles - 1) as f64 * lora_toa_s(51, sf) + lora_toa_s(last, sf)
+    }
+}
+
+/// #991's third done-when, the per-medium cadences against their budgets,
+/// for modem.v3 3.4's `face/` events (link.md, "Events"). Each face's plan
+/// lets the three cross (exposed `link`, link.v1 §2.9) and denies the four
+/// JSON events by name. What a face carries is its device's owner's
+/// configuration (`config:device.events.<name>`), since a face lists
+/// frames, never events: each event a face carries, at its rate's worst
+/// case, beside 3.3's frames' figure for all 73 readings (README, "What
+/// each face spends"), fits the medium's budget, and each it leaves out
+/// would not.
+#[test]
+fn zenoh_modem_events_fit_each_face_budget() {
+    use zenkey_model::contract::{Body, Rate};
+    let modem =
+        zenkey_model::contract::load_path(&root().join("examples/zk2/zenoh-modem/modem.v3.toml"))
+            .contract
+            .expect("modem.v3 loads");
+    assert_eq!(modem.minor, Some(4));
+    // Each exposed event's put, its record at its largest: a packed one's
+    // every optional field present; `face/device_fault`'s JSON at a lane of
+    // 16 characters and the medium's words in 128 B, 221 B.
+    const FAULT_JSON: usize = 221;
+    const CHUNK: usize = 8; // a 16-bit run's occurrence chunk, as 3.3's frames' figures
+    let mut events: Vec<(String, usize, usize)> = Vec::new();
+    for r in &modem.resources {
+        let Body::Data(d) = &r.body else { continue };
+        if r.kind != zenkey_model::authoring::Kind::Event
+            || r.annotations.get("link.exposure").and_then(|v| v.as_str()) != Some("link")
+        {
+            continue;
+        }
+        let record = match modem.packed_layout(&d.type_).unwrap() {
+            Some(l) => usize::try_from(l.max_bits().div_ceil(8)).unwrap(),
+            None => FAULT_JSON,
+        };
+        let per_day = match d.rate.expect("an event's rate") {
+            Rate::Rare => 24,
+            Rate::Low => 24 * 60,
+            Rate::Burst(n) => 24 * n as usize,
+        };
+        // Form 4: CH, t32 and ms16 before the record (core §7.5).
+        events.push((
+            r.template.as_str().to_owned(),
+            wire::event_put(7 + record, 1 + CHUNK),
+            per_day,
+        ));
+    }
+    let names: Vec<&str> = events.iter().map(|e| e.0.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "face/device_fault",
+            "face/identity_change",
+            "face/oper_change"
+        ]
+    );
+    assert_eq!(
+        events.iter().map(|e| e.1).collect::<Vec<_>>(),
+        [245, 39, 26],
+        "the puts: 221 B of JSON, 16 B and 3 B packed"
+    );
+    // Each face: its medium, its SDU, 3.3's frames' figure and the budget,
+    // in bytes a day on RF, seconds of air a day on LoRa (1 % of every
+    // hour), messages a day on SBD; and the events its owner publishes.
+    enum Medium {
+        Rf,
+        Lora(u32),
+        Sbd,
+    }
+    let faces = [
+        (
+            "rf0",
+            Medium::Rf,
+            220,
+            177_000.0,
+            25_920_000.0,
+            &[
+                "face/oper_change",
+                "face/identity_change",
+                "face/device_fault",
+            ][..],
+        ),
+        (
+            "lora0-sf7",
+            Medium::Lora(7),
+            222,
+            376.0,
+            864.0,
+            &["face/oper_change", "face/identity_change"][..],
+        ),
+        (
+            "lora0-sf9",
+            Medium::Lora(9),
+            115,
+            534.0,
+            864.0,
+            &["face/oper_change", "face/identity_change"][..],
+        ),
+        ("lora0-sf12", Medium::Lora(12), 222, 785.0, 864.0, &[][..]),
+        ("sat0", Medium::Sbd, 270, 96.0, 96.0, &[][..]),
+    ];
+    for (face, medium, mtu, frames, budget, carried) in faces {
+        // The plan lets each `face/` event cross, and denies the JSON four.
+        let plan = modem_plan(face, AclPermission::Deny);
+        let denied: Vec<&String> = plan.faces[0]
+            .deny
+            .iter()
+            .filter(|d| d.id == "events:modem.v3")
+            .flat_map(|d| &d.key_exprs)
+            .collect();
+        assert_eq!(
+            denied,
+            [
+                "zk2/*/*/modem.v3/events/action_event/**",
+                "zk2/*/*/modem.v3/events/device_fault/**",
+                "zk2/*/*/modem.v3/events/identity_change/**",
+                "zk2/*/*/modem.v3/events/oper_change/**",
+            ],
+            "{face}"
+        );
+        let cost = |put: usize, per_day: usize| -> f64 {
+            let s = wire::sdus(&[put], mtu);
+            per_day as f64
+                * match medium {
+                    Medium::Rf => s.iter().sum::<usize>() as f64,
+                    Medium::Lora(sf) => s.iter().map(|&b| wire::lora_air_s(b, sf)).sum(),
+                    Medium::Sbd => s.len() as f64,
+                }
+        };
+        let spent = frames
+            + events
+                .iter()
+                .filter(|e| carried.contains(&e.0.as_str()))
+                .map(|e| cost(e.1, e.2))
+                .sum::<f64>();
+        assert!(spent <= budget, "{face}: {spent} of {budget}");
+        for (name, put, per_day) in &events {
+            if !carried.contains(&name.as_str()) {
+                assert!(
+                    spent + cost(*put, *per_day) > budget,
+                    "{face} could carry {name}: {} of {budget}",
+                    spent + cost(*put, *per_day)
+                );
+            }
+        }
+    }
+}
+
 /// `config.v1`'s acts, each its own grant (config.v1 §2.21; #768, CC): the
 /// standard contract alone, as `--contracts spec/profiles/config` gives it.
 fn config_plan(default_permission: AclPermission) -> AclPlan {

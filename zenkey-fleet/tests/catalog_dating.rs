@@ -2,7 +2,8 @@
 //! confirmations under the epoch of the catalog an owner's descriptor
 //! names, read through the catalogs given (`--catalog`, core §8.6;
 //! `freshness.v2` §2.6; `bus::query::EntryEpochs`). Each test runs an
-//! owner under zenoh-modem's catalog, `0ff6bf6d`, whose epoch is
+//! owner under zenoh-modem's catalog (`catalog.json`'s head, `29bf7d47`
+//! since modem.v3 3.4), whose epoch is
 //! 2026-01-01T00:00:00Z, confirmed: given that catalog, the reader dates the
 //! confirmation at about now; given none, it leaves it undated, never
 //! dated under 0.
@@ -73,7 +74,7 @@ fn about_now_text(rfc3339: &str) -> bool {
     (unix_of(rfc3339) - i64::try_from(now).expect("a time")).abs() < 60
 }
 
-/// An owner under zenoh-modem's catalog, its descriptor naming `0ff6bf6d`,
+/// An owner under zenoh-modem's catalog, its descriptor naming its head,
 /// implementing `health.v1` (status `OK`) and `alarms.v1` (one alarm
 /// firing), both on revision 1.1, which `freshness.v2` confirms.
 async fn modem_owner(owners: &zenoh::Session) -> (Service, String) {

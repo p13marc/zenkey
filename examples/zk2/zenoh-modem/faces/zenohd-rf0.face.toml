@@ -24,11 +24,18 @@
 # frames/paid are LoRa SF12's and SBD's, and draw `frame_unlisted` here: rf0
 # does not publish them. The radio repairs no lost frame, so the linter
 # warns `no_arq`.
+#
+# Events (modem.v3 3.4, #991): the plan lets the three `face/` events cross,
+# whole, and denies the four JSON ones by name; `face/device_fault`, JSON,
+# draws `not_packed`. A face lists frames, never events (link.v2 §2.7):
+# rf0's owner publishes all three (`config:device.events.<name>`), their
+# worst case 417 KB a day beside the frames' 177 KB, 2.3 % of the radio's
+# 25.9 MB (link.md, "Events").
 profile  = "link.v2"
 system   = "h-3fa9c2d41b7e"
 services = ["rf0"]
 binding  = "zm-1.10.2-r1"           # the zenoh fork zenoh-modem's routers run
-catalog  = "0ff6bf6d"               # catalog.json, which the ground holds
+catalog  = "29bf7d47"               # catalog.json, which the ground holds
 
 [transport]
 lease_ms             = 240000

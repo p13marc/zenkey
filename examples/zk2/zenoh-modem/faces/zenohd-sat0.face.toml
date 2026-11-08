@@ -16,11 +16,16 @@
 # observable, as it was not under 3.2's frames/message. The plan warns
 # `frame_unlisted` of frames/fast and frames/slow: sat0 does not publish
 # them.
+#
+# Events (modem.v3 3.4, #991): the plan lets the three `face/` events cross,
+# and `face/device_fault` draws `not_packed`, but sat0's owner publishes
+# none: each occurrence would be a paid message of its own, beside the 96 a
+# day the frames and the keep-alives already take (link.md, "Events").
 profile  = "link.v2"
 system   = "h-71c0e2a9d4b3"
 services = ["sat0"]
 binding  = "zm-1.10.2-r1"
-catalog  = "0ff6bf6d"
+catalog  = "29bf7d47"
 
 [transport]
 lease_ms             = 3600000
