@@ -22,12 +22,12 @@ default `zenoh` feature, this crate builds with no zenoh crate but
 
 ```toml
 [dependencies]
-zenkey = "0.20"
+zenkey = "0.21"
 zenoh = "1.10"
 tokio = { version = "1", features = ["full"] }
 
 [build-dependencies]
-zenkey-build = "0.20"
+zenkey-build = "0.21"
 ```
 
 Take `zenkey` and `zenkey-build` at the same 0.x: the generated code is
@@ -84,21 +84,65 @@ The walkthrough is the worked example: its contracts are in
 and `examples/owner.rs` is a service to interoperate with, driven from
 its standard input.
 
-## What 0.20 does not promise
+## Changes since 0.20
 
-0.20 is the first zk2 release. Two things under it are still moving, and
-a 0.21 may break either:
+- **The wire breaks 0.20's: a 0.20 service and a 0.21 one do not
+  understand each other's state GETs.** Move a deployment's owners and
+  readers together.
+  - An owner answers a state GET by snapshot (core 0.100,
+    [#977](https://git.marcpardo.eu/marcpardo/zenkey/issues/977)): one per
+    collection, in pages of `ServiceConfig::snapshot_page_bytes` (1,024 B
+    unless set), a live entry with a horizon carrying its confirmation.
+    Only a per-key resource still answers a reply per key.
+  - Every state GET, the generated `Consumer`'s, `last_known`, the
+    freshness re-read and an archive's alignment among them, is read under
+    consolidation `None`. Its replies merge per key, and the omission rule
+    applies over a complete snapshot (`state::StateAnswer::{snapshots,
+    confirmations, omitted}`). A complete snapshot of no entry is
+    `StateGet::Answered` with no key, never `Silent`. A `reply_del` on a
+    member of a collection answered by snapshot is undecodable, never a
+    deletion.
+  - A call is read in its forms alone (core 0.99,
+    [#985](https://git.marcpardo.eu/marcpardo/zenkey/issues/985)'s C4d). An
+    owner refuses a request under any `Encoding` but `zenoh/bytes` with
+    `invalid_request`, before any handler runs. A caller reads a value
+    under another `Encoding` as malformed, and an error under one as the
+    transport's, which is silence.
+  - A `freshness.v2` heartbeat's time counts from the catalog's epoch, as
+    a frame's does (`freshness.v2` 0.6,
+    [#1080](https://git.marcpardo.eu/marcpardo/zenkey/issues/1080)).
+- **Removed, and what to use instead:**
+  - `call::Malformed`, `Outcome::Malformed`, `ReplyKind::Malformed`,
+    `client::ErrorReply::Malformed` and `Replies::malformed`: a reply
+    error that is no error form is `Transport`, silence.
+  - `OpError::envelope`, `OpError::into_envelope`, `From<Envelope> for
+    OpError` and `Refusal::of_envelope`: `OpError::{code, message, cause,
+    detail}`. `Refusal` holds `code`, `message`, `cause` and `detail` as
+    its own fields, where it dereferenced to an envelope.
+  - `Answer::record_encoding` and `Call::record_encoding`: a record has
+    no `Encoding` of its own now. `Answer::record` fails with a
+    `FormRefusal`, `ReplyForm::Bare` is `ReplyForm::NoForm`, and
+    `Call::request_tag` is a `Tag`, no longer an `Option`.
+  - `heartbeat::EPOCH`: the epoch is the catalog's, given by
+    `ServiceBuilder::catalog` (`Service::deployment_epoch`), and 0 with
+    none.
 
-- **The wire.** zk2c, the bandwidth-first wire (epic
-  [#975](https://git.marcpardo.eu/marcpardo/zenkey/issues/975)), is being
-  specified: one snapshot per collection in place of a reply per key
-  ([#977](https://git.marcpardo.eu/marcpardo/zenkey/issues/977)). A 0.20
-  service and a 0.21 one may not understand each other.
+## What 0.21 does not promise
+
+zk2c, the bandwidth-first wire (epic
+[#975](https://git.marcpardo.eu/marcpardo/zenkey/issues/975)), is not
+finished. Two things under 0.21 are still moving, and a 0.22 may break
+either:
+
+- **The wire.** An event's key is to end in its run and seq in place of
+  a ULID ([#980](https://git.marcpardo.eu/marcpardo/zenkey/issues/980)'s
+  C2), and the rest of #975 follows. A 0.21 service and a 0.22 one may
+  not understand each other.
 - **The authoring format** and the canonical form a fingerprint is taken
-  over. A contract that builds under 0.20 may need editing under
-  0.21, and its fingerprint may change.
+  over. Neither moved from 0.20 to 0.21, but a contract that builds under
+  0.21 may need editing under 0.22, and its fingerprint may change.
 
-A 0.20.x patch release changes neither. The rules are the spec's
+A 0.21.x patch release changes neither. The rules are the spec's
 ([`spec/core.md`](https://git.marcpardo.eu/marcpardo/zenkey/src/branch/main/spec/core.md),
 its version in its header), and a release implements the spec as it
 stood when it was cut.
@@ -134,6 +178,6 @@ which is stable.
   The GitHub repository is a mirror.
 
 zenkey 0.11.x on crates.io is v1, the keyspace-v2 convention, maintained
-on the `v1` branch. 0.20 shares its name and nothing else.
+on the `v1` branch. 0.20 and later share its name and nothing else.
 
 MIT.

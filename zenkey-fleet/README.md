@@ -18,7 +18,7 @@ something is *wrong* (`judge/`), does it turn a stream into a recording or
 back (`tape/`)? A new serde-pinned struct is not a module question at all —
 it goes to `report/`, by the rule that module's docs state.
 
-It reads a deployment through the zk2 runtime (`zenkey` 0.20) and its
+It reads a deployment through the zk2 runtime (`zenkey` 0.21) and its
 session-free model (`zenkey-model`): presence from instance and interface
 tokens, descriptors, contract bundles retrieved by fingerprint, and every
 payload rendered through the contract that declares it. **`main` is the zk2
@@ -132,20 +132,61 @@ Explorer *configuration* — named connection contexts, `~/.config`, the
 completion cache — is not here; it lives in `zenkey-explorer-config`, so a
 library consumer of this crate does not pay for `dirs` and `toml`.
 
-## What 0.20 does not promise
+## Changes since 0.20
 
-0.20 is the first zk2 release. Two things under it are still moving, and
-a 0.21 may break either:
+- **The wire breaks 0.20's** (core 0.100,
+  [#977](https://git.marcpardo.eu/marcpardo/zenkey/issues/977)). Every
+  state GET, `bus::query::state_get`'s and the seed's, the doctor's,
+  `check conform`'s, `.zsnap`'s and the profiles' readers' among them, is
+  under consolidation `None`. Each snapshot's page reads as its entries,
+  merged per key by its stamp, and the seed applies the omission rule
+  where the contracts are in hand (`seed_subscribe_with`,
+  `Monitor::watch_seeded_with`). A `reply_del` on a member of a
+  collection answered by snapshot is undecodable, `form`. A call's reply
+  under any `Encoding` but `zenoh/bytes` renders undecodable (core 0.99,
+  [#985](https://git.marcpardo.eu/marcpardo/zenkey/issues/985)'s C4d).
+- **Across a face** (observer 0.29,
+  [#990](https://git.marcpardo.eu/marcpardo/zenkey/issues/990)'s V1 and
+  V2): `FaceScope` is a tool's scope, the face's plan when a face policy
+  is given, with each heartbeat; `model::choice` picks a key's revision
+  among several held by the catalog and CH's tag (`KeyIdentity::chosen`,
+  and `Unresolved::NoneLeft` naming the step that left none). A record
+  under a CH tag other than 0 whose type is not held renders as a packed
+  record, never sniffed. `LensFeed::runs_in` and `on_runs` ask each
+  address's run once, outside the lens's lock
+  ([#1079](https://git.marcpardo.eu/marcpardo/zenkey/issues/1079)).
+- **Removed:** `OperationAnswer::Malformed`, `ConfigActAnswer::Malformed`,
+  `MalformedReply`, `RepliesView::malformed`, `BenchReport::malformed` and
+  `bus::conform::FanoutSeen::malformed`. A reply error that is no error
+  form is the transport's, silence, and a value with no form is
+  undecodable.
+- **Changed:**
+  - `bus::{alarms, config, health}::get` take an `&EntryEpochs`, the epoch
+    each entry's confirmation is dated under (`EntryEpochs::of_catalogs`,
+    `observed`);
+  - `ConfigRefusal::message` is an `Option<String>`, and
+    `ConfigRefusal::error` a `ConfigAppError`, `V1(ConfigError)` or
+    `config.v2`'s `V2 { code }`;
+  - `CheckId::ALL` holds 35 checks, `first-hop-token` among them, and
+    `AddressStatus` gains `LinkClosed`
+    ([#982](https://git.marcpardo.eu/marcpardo/zenkey/issues/982)'s H3).
 
-- **The wire.** zk2c, the bandwidth-first wire (epic
-  [#975](https://git.marcpardo.eu/marcpardo/zenkey/issues/975)), is being
-  specified: one snapshot per collection
-  ([#977](https://git.marcpardo.eu/marcpardo/zenkey/issues/977)). What
-  the readers decode, and how they order it, moves with it.
+## What 0.21 does not promise
+
+zk2c, the bandwidth-first wire (epic
+[#975](https://git.marcpardo.eu/marcpardo/zenkey/issues/975)), is not
+finished. Two things under 0.21 are still moving, and a 0.22 may break
+either:
+
+- **The wire.** An event's key is to end in its run and seq in place of
+  a ULID ([#980](https://git.marcpardo.eu/marcpardo/zenkey/issues/980)'s
+  C2), and the rest of #975 follows. What the readers decode, and how
+  they order it, moves with it.
 - **The authoring format** and the canonical form a fingerprint is taken
-  over, which the lens and the contract retrieval read.
+  over, which the lens and the contract retrieval read. Neither moved
+  from 0.20 to 0.21.
 
-A 0.20.x patch release changes neither.
+A 0.21.x patch release changes neither.
 
 ## Zenoh's unstable API
 

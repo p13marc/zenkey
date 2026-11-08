@@ -167,7 +167,7 @@ rcgen = "0.14"
 # member links the v1 libraries: zenctl and the in-tree zenkey-fleet left
 # them at FJ9 (#612), zenwatch at FL3 and zengui at FL11b (#614). The v1
 # sources (`zenkey`, `zenkey-build`, the `fixture-tests` corpus) live on the
-# `v1` branch, which releases 0.14.x patches. zk2 reuses the crate names at
+# `v1` branch, which releases 0.14.x patches. zk2 reuses the crate names from
 # 0.20.0, and every member takes them by path, so this table pins none.
 zenkey-explorer-config = { version = "0.1.0", path = "zenkey-explorer-config" }
 zenkey-report-fixtures = { path = "report-fixtures" }
