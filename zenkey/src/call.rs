@@ -87,6 +87,27 @@ impl CallMetadata {
     }
 }
 
+/// A fresh request id for the call metadata (O7): a lowercase ULID, 48
+/// bits of `at`'s milliseconds since the Unix epoch, then 80 random ones,
+/// in Crockford's base32. O7 takes any string; this one sorts by time, and
+/// two calls never draw one in practice. No key ends in it: an event's key
+/// ends in its occurrence chunk (core §1.2).
+#[cfg(feature = "zenoh")]
+#[must_use]
+pub fn request_id(at: std::time::SystemTime) -> String {
+    const CROCKFORD: &[u8; 32] = b"0123456789abcdefghjkmnpqrstvwxyz";
+    let ms = at
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        & ((1 << 48) - 1);
+    let random: u128 = rand::random::<u128>() & ((1 << 80) - 1);
+    let v = (ms << 80) | random;
+    (0..26)
+        .map(|i| CROCKFORD[((v >> (125 - 5 * i)) & 31) as usize] as char)
+        .collect()
+}
+
 /// A failed call, as its owner refuses it (O3): §5.2's error, its code,
 /// message, cause and detail. The runtime writes it in §7.5's error form,
 /// its detail in the operation's `error` type's own bytes.

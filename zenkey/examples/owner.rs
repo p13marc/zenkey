@@ -123,9 +123,10 @@
 //! takes its value's `/`-separated chunks): a stamped state put, a stream
 //! sample, or one event occurrence, each of the bytes `ok`, which is a
 //! value only of a raw type. It is answered `put <key>`, an occurrence's
-//! key with its ULID. `delete` deletes a state member, answered `deleted
-//! <key>`. `fill` puts members `m0` to `m<n−1>` (every parameter bound to
-//! `m<i>`), stopping at the first refusal, answered `filled <n>`. A write
+//! key with its occurrence chunk. `delete` deletes a state member,
+//! answered `deleted <key>`. `fill` puts members `m0` to `m<n−1>` (every
+//! parameter bound to `m<i>`), stopping at the first refusal, answered
+//! `filled <n>`. A write
 //! the runtime refuses — a new member while the live members are at the
 //! bound, an occurrence beyond the member's rate — is answered `refused
 //! <command>: <why>`, `why` naming the resource, the bound and whose it is

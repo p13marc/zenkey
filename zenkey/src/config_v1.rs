@@ -35,7 +35,7 @@
 //! | §2.14 idempotency keys | [`Owner::set`] keeps each first answer 300 s; a restart forgets them |
 //! | §2.15 sensitive values | the model's view, status, replies and edits; each request logged by [`log_request`], the device's words logged by [`device_words`] |
 //! | §2.16 the startup allowlist | each group's [`GroupDecl::writable`] in [`Startup::schema`]; a group outside it answered `unavailable`, cause `config`, by the handler (core §5.1, 0.28) |
-//! | §2.17 one event per change; the rate | each event [`Owner`] ends a change with, on `events/change/<ulid>`; the rate kept by row 12, from [`Startup::events`] |
+//! | §2.17 one event per change; the rate | each event [`Owner`] ends a change with, on `events/change/<occurrence>`; the rate kept by row 12, from [`Startup::events`] |
 //! | §2.18 desired state | [`Configuration::set_desired`]: [`Owner::converge`] in the timer's task, one `set` per group, the report in the view and the status |
 //! | §2.18 fed through `desired.v1` (text 0.4, 0.5; `desired.v1` §2.16) | [`crate::ServiceBuilder::desired_config`]: each act `desired.v1`'s reader starts converges its document whatever the revision, and a delete reverts each parameter a non-refused document named to its startup value ([`Owner::baseline_document`]), the view and the status carrying no `desired` after it |
 //!

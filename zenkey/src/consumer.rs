@@ -233,10 +233,9 @@ pub struct Delivery {
     /// them (core §7.7): `None` for a sample of any other resource, and
     /// for a delete. `sample`'s payload is then the frame's body.
     pub frame: Option<FrameRead>,
-    /// An event's time (core 0.101 §7.5's form 4; #980's C2b), from the
+    /// An event's time (core §7.5's form 4; #980's C2b), from the
     /// deployment epoch, known or unknown: `None` for every sample that is
-    /// no event, an occurrence an owner wrote on a ULID key among them,
-    /// whose time is its key's ([`crate::writer::ulid_time`]).
+    /// no event.
     pub occurred: Option<zenkey_model::collection::Time>,
 }
 
@@ -712,7 +711,8 @@ impl Consumer {
 
     /// The key expressions a subscription on `resource` uses: one per
     /// bound provider, with R2's parameter bindings applied and every other
-    /// parameter a wildcard. An event's selector ends in `*`, the ULID. A
+    /// parameter a wildcard. An event's selector ends in `*`, its
+    /// occurrence chunk. A
     /// state GET's are [`Consumer::get_selectors`].
     pub fn selectors(&self, resource: &str) -> Result<Vec<OwnedKeyExpr>> {
         let r = self.resource(resource)?;
@@ -1214,12 +1214,11 @@ impl Consumer {
     /// each occurrence's time on this side, because a storage backend may
     /// ignore `_time` (spike S5: the memory backend does).
     ///
-    /// - **Its time** (core 0.101 §2.6; #980's C2b) is its event's (§7.5's
-    ///   form 4), counted from this consumer's deployment epoch, where its
-    ///   key ends in an occurrence chunk; or its ULID's, where its key ends
-    ///   in one. An unknown time, or an occurrence chunk's key whose payload
-    ///   is no event, is never judged within the retention or beyond it:
-    ///   the storage's `_time` bound alone admitted it.
+    /// - **Its time** (core §2.6; #980's C2b, C2c) is its event's (§7.5's
+    ///   form 4), counted from this consumer's deployment epoch. An unknown
+    ///   time, or a payload that is no event, is never judged within the
+    ///   retention or beyond it: the storage's `_time` bound alone admitted
+    ///   it.
     /// - **The order**: the occurrences with a time by their times, then
     ///   each of one time by its run's value and its seq; those with none
     ///   after them, by run value, then the seq. So one run's occurrences
@@ -1275,18 +1274,15 @@ impl Consumer {
                 else {
                     continue;
                 };
-                let Some(last) = chunks.pop() else {
+                // The occurrence chunk, which the grammar checked; the
+                // event's time, `None` where it is unknown.
+                if chunks.pop().is_none() {
                     continue;
-                };
-                // A ULID's time, or the event's: `None` is unknown.
-                let at = if zenkey_model::chunk::is_occurrence(&last) {
-                    crate::inband::event_time(&sample)
-                        .and_then(|t| t.unix_ms(self.epoch))
-                        .and_then(|ms| u64::try_from(ms).ok())
-                        .map(|ms| std::time::UNIX_EPOCH + Duration::from_millis(ms))
-                } else {
-                    crate::writer::ulid_time(&last)
-                };
+                }
+                let at = crate::inband::event_time(&sample)
+                    .and_then(|t| t.unix_ms(self.epoch))
+                    .and_then(|ms| u64::try_from(ms).ok())
+                    .map(|ms| std::time::UNIX_EPOCH + Duration::from_millis(ms));
                 if at.is_some_and(|at| at < since)
                     || !self.providers.iter().any(|p| p.matches(&addr))
                 {

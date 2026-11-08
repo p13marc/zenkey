@@ -290,7 +290,9 @@ impl Recorder {
             .into_iter()
             .filter(|r| r.key.contains(&format!("/{IFACE}/events/change/")))
             .map(|r| {
-                let e = Envelope::parse(&r.payload).expect("an event under its stamp");
+                let e = zenkey::model::wire::read_event(&r.key, &r.payload)
+                    .expect("an event")
+                    .expect("an event under its key's stamp");
                 serde_json::from_slice(e.record).expect("a change event")
             })
             .collect()

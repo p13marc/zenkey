@@ -76,49 +76,89 @@ async fn union_storage(
     (sub, q, store)
 }
 
-/// §8: 1,000 occurrences, 500 inside the retention; a replay bounded by the
-/// retention returns exactly the 500, filtering by ULID time because the
-/// backend ignores `_time`.
+/// §8 (core §2.6): 1,000 occurrences dated by `put_at`, 500 within the
+/// hour, a second apart, the newest at T, and 500 two hours and more before
+/// T; one of an unknown time; then the owner restarts under a new run and
+/// publishes two dated T − 100.5 s and T − 0.5 s. Every key ends in its
+/// run and seq, and its payload is an event (§7.5's form 4). The backend
+/// ignores `_time`, so the storage holds all 1,003, and the consumer's
+/// replay keeps 503 by each event's time: the 502 with a time in time
+/// order across the run change, then the unknown one.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s8_events_replay() {
     let (_r1, ep) = router(None).await;
-    let owner = client(&ep).await;
     let storage = client(&ep).await;
     let reader = client(&ep).await;
     let journal: IfaceId = "journal.v1".parse().unwrap();
     let (_ssub, _sq, store) = union_storage(&storage).await;
-
+    // The storage's subscriber must be known before an owner's puts.
+    let subscribed = |s: zenoh::Session| async move {
+        let probe = s
+            .declare_publisher("zk2/lab/journal/journal.v1/events/entries/002g0009")
+            .await
+            .unwrap();
+        eventually("the storage subscribes", || async {
+            probe.matching_status().await.unwrap().matching()
+        })
+        .await;
+    };
+    let owner = client(&ep).await;
+    let mut b = ServiceBuilder::new(&owner, config("lab/journal"));
+    b.implement(imp("journal.v1")).unwrap();
+    let events = b
+        .event_writer(&journal, "events/entries", &Bindings::new())
+        .unwrap();
+    let svc = b.start().await.unwrap();
+    subscribed(owner.clone()).await;
+    // Steps 1 and 2.
+    let t = SystemTime::now();
+    for i in 0..500u64 {
+        events
+            .put_at(format!("new{i}"), t - Duration::from_secs(i))
+            .await
+            .unwrap();
+        events
+            .put_at(format!("old{i}"), t - Duration::from_secs(7200 + i))
+            .await
+            .unwrap();
+    }
+    events.put_untimed("unknown").await.unwrap();
+    eventually("the storage holds 1,001", || async {
+        store.lock().unwrap().len() == 1001
+    })
+    .await;
+    svc.close().await.unwrap();
+    // Step 3: a new instance, under a new run.
+    let owner = client(&ep).await;
     let mut b = ServiceBuilder::new(&owner, config("lab/journal"));
     b.implement(imp("journal.v1")).unwrap();
     let events = b
         .event_writer(&journal, "events/entries", &Bindings::new())
         .unwrap();
     let _svc = b.start().await.unwrap();
-    // The storage's subscriber must be known before the puts.
-    let probe = owner
-        .declare_publisher("zk2/lab/journal/journal.v1/events/entries/x")
-        .await
-        .unwrap();
-    eventually("the storage subscribes", || async {
-        probe.matching_status().await.unwrap().matching()
-    })
-    .await;
-    drop(probe);
-    let now = SystemTime::now();
-    for i in 0..500u64 {
+    subscribed(owner.clone()).await;
+    for (record, ago) in [("run2-a", 100_500), ("run2-b", 500)] {
         events
-            .put_at(format!("new{i}"), now - Duration::from_secs(i))
-            .await
-            .unwrap();
-        events
-            .put_at(format!("old{i}"), now - Duration::from_secs(7200 + i))
+            .put_at(record, t - Duration::from_millis(ago))
             .await
             .unwrap();
     }
-    eventually("the storage holds 1,000", || async {
-        store.lock().unwrap().len() == 1000
+    eventually("the storage holds 1,003", || async {
+        store.lock().unwrap().len() == 1003
     })
     .await;
+    // Expected 1: each key ends in its run and seq, its payload an event.
+    let mut runs = std::collections::HashSet::new();
+    for (key, (bytes, _)) in store.lock().unwrap().iter() {
+        let chunk = key.rsplit('/').next().unwrap();
+        assert!(matches!(chunk.len(), 8 | 12), "{key}");
+        let e = wire::read_event(key, bytes)
+            .expect("an event")
+            .expect("read");
+        assert_eq!(e.chunk(), chunk, "its stamp is its key's");
+        runs.insert(e.stamp.run);
+    }
+    assert_eq!(runs.len(), 2, "one run per instance");
 
     let mut b = ServiceBuilder::new(
         &reader,
@@ -133,24 +173,51 @@ async fn s8_events_replay() {
         .replay("events/entries", Duration::from_secs(3600), T)
         .await
         .unwrap();
-    assert_eq!(got.len(), 500, "exactly the recent ones");
-    assert!(
-        got.iter()
-            .all(|d| d.sample.payload().to_bytes().starts_with(b"new"))
+    // Expected 2: the 503, dropped by each event's time.
+    let records: Vec<String> = got
+        .iter()
+        .map(|d| String::from_utf8(d.sample.payload().to_bytes().into_owned()).unwrap())
+        .collect();
+    assert_eq!(records.len(), 503, "the recent ones, step 2's and step 3's");
+    assert!(records.iter().all(|r| !r.starts_with("old")));
+    // Expected 3: time order across the run change.
+    let times: Vec<_> = got[..502]
+        .iter()
+        .map(|d| match d.occurred {
+            Some(zenkey::model::collection::Time::Known { s, ms }) => (s, ms),
+            other => panic!("a known time, not {other:?}"),
+        })
+        .collect();
+    assert!(times.is_sorted(), "by time");
+    let at = |r: &str| records.iter().position(|x| x == r).unwrap();
+    assert_eq!(
+        (at("new101") + 1, at("run2-a"), at("new100") - 1),
+        (at("run2-a"), at("run2-a"), at("run2-a"))
+    );
+    assert_eq!(
+        (at("new1") + 1, at("run2-b"), at("new0") - 1),
+        (at("run2-b"), at("run2-b"), at("run2-b"))
+    );
+    // Expected 4: the unknown time last, never judged.
+    assert_eq!(records[502], "unknown");
+    assert_eq!(
+        got[502].occurred,
+        Some(zenkey::model::collection::Time::Unknown)
     );
 }
 
-/// #980's C2b (core 0.101 §2.6): a replay reads both last chunks while
-/// owners move from the ULID to the occurrence chunk. Its storage answers,
-/// in no order: a ULID key 100 s old, and five events on occurrence chunks
-/// (§7.5's form 4) of run 7, at seq 1 80 s old, seq 3 50 s old, seq 2 of
-/// an unknown time, seq 4 two hours old, and run 9's seq 1 of an unknown
-/// time. The two-hour-old one is beyond the retention; the unknown times
-/// are never judged so, and come after every known time, run 7's before
-/// run 9's (the order the runs were first heard in), then by seq. Each
-/// delivery's in-band stamp is its key's chunk, or the ULID mutation's.
+/// #980's C2b and C2d (core §2.6): a replay's order. Its storage answers,
+/// in no order, five events on occurrence chunks (§7.5's form 4) of run 7,
+/// at seq 1 80 s old, seq 3 50 s old, seq 2 of an unknown time, seq 4 two
+/// hours old, and run 9's seq 1 of an unknown time, and a put on a key
+/// that ends in a ULID, which is no zk2 key. The two-hour-old one is
+/// beyond the retention; the unknown times are never judged so, and come
+/// after every known time, by seq within a run, run 7's before run 9's
+/// (the order between two runs is unspecified, and the reference breaks
+/// the tie by the run's value). Each delivery's in-band stamp is its key's
+/// chunk.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_replay_reads_ulid_and_occurrence_keys_in_order() {
+async fn a_replay_orders_by_time_then_by_run_and_seq() {
     use zenkey::model::collection::Time;
     use zenkey::model::wire::{Event, Seq, Tag};
     let (_r1, ep) = router(None).await;
@@ -180,14 +247,13 @@ async fn a_replay_reads_ulid_and_occurrence_keys_in_order() {
         };
         (format!("{base}/{}", e.chunk()), e.write().unwrap())
     };
-    let ulid = zenkey::writer::ulid(now - Duration::from_secs(100));
     let answers: Vec<(String, Vec<u8>)> = vec![
         event(7, 3, at(50), b"seq 3"),
         event(9, 1, Time::Unknown, b"run 9"),
         event(7, 4, at(7200), b"too old"),
         event(7, 2, Time::Unknown, b"unknown"),
         (
-            format!("{base}/{ulid}"),
+            format!("{base}/01j9zk6q6x5m2f4a8c0d3e7b9h"),
             Envelope::mutation(Tag::NONE, stamp(1, 10), b"ulid").write(),
         ),
         event(7, 1, at(80), b"seq 1"),
@@ -217,7 +283,7 @@ async fn a_replay_reads_ulid_and_occurrence_keys_in_order() {
             .replay("events/entries", Duration::from_secs(3600), T)
             .await
             .unwrap();
-        if got.len() == 5 {
+        if got.len() == 4 {
             break;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -226,12 +292,15 @@ async fn a_replay_reads_ulid_and_occurrence_keys_in_order() {
         .iter()
         .map(|d| String::from_utf8(d.sample.payload().to_bytes().into_owned()).unwrap())
         .collect();
-    assert_eq!(records, ["ulid", "seq 1", "seq 3", "unknown", "run 9"]);
+    assert_eq!(
+        records,
+        ["seq 1", "seq 3", "unknown", "run 9"],
+        "no ULID's key"
+    );
     let stamps: Vec<Option<InBand>> = got.iter().map(|d| d.inband).collect();
     assert_eq!(
         stamps,
         [
-            Some(stamp(1, 10)),
             Some(stamp(7, 1)),
             Some(stamp(7, 3)),
             Some(stamp(7, 2)),
@@ -1418,7 +1487,8 @@ async fn s7_late_joiners_across_runs_inside_the_seed() {
 /// heartbeat, detects the drift and stops the state writes that carry a
 /// Zenoh timestamp (core §4.3, "Ahead"; #978's F6): `status.v1`'s status,
 /// a `freshness.v1` state with a horizon on §4.3's table, is refused, put
-/// and delete; `plans/{vehicle}`, on no row, goes on.
+/// and delete; `plans/{vehicle}`, on no row, goes on, and so does an event,
+/// its time unknown (core §2.6, #980's C2c).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s7_an_owner_ahead_stops_its_timed_state_writes() {
     let (_r1, ep) = router(None).await;
@@ -1429,6 +1499,19 @@ async fn s7_an_owner_ahead_stops_its_timed_state_writes() {
     let mut b = ServiceBuilder::new(&s, cfg);
     b.implement(imp("mission_plan.v1")).unwrap();
     b.implement(status_v1()).unwrap();
+    b.implement(imp("journal.v1")).unwrap();
+    let events = b
+        .event_writer(
+            &"journal.v1".parse().unwrap(),
+            "events/entries",
+            &Bindings::new(),
+        )
+        .unwrap();
+    let heard = s
+        .declare_subscriber("zk2/ground/fleet-mgr/journal.v1/events/entries/*")
+        .with(flume::unbounded())
+        .await
+        .unwrap();
     b.minter().simulate_offset(2000);
     let w = b
         .declare_state_writer(&plan(), "state/plans/{vehicle}", &vehicle("vehicle-01"))
@@ -1464,6 +1547,17 @@ async fn s7_an_owner_ahead_stops_its_timed_state_writes() {
         .expect("an untimed state write goes on");
     assert!(put.time.is_none(), "it carries no Zenoh timestamp");
     w.delete().await.expect("and so does its delete");
+    let key = events.put("ahead").await.expect("an event goes on");
+    let sample = tokio::time::timeout(T, heard.recv_async())
+        .await
+        .expect("the event is heard")
+        .unwrap();
+    assert_eq!(sample.key_expr().as_str(), key);
+    assert_eq!(
+        zenkey::inband::event_time(&sample),
+        Some(zenkey::model::collection::Time::Unknown),
+        "its time unknown while the guard holds"
+    );
     assert!(mgr.minter().is_ahead(), "the guard still holds");
 }
 
