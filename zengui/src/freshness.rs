@@ -26,7 +26,7 @@
 //! Session-free, and bounded: [`MAX_OWNERS`] interfaces and [`MAX_HELD`]
 //! members held before their view, the rest counted.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::Instant;
 
 use zenkey_fleet::SampleView;
@@ -100,12 +100,78 @@ struct Held {
     order: u64,
 }
 
+/// The members held before their owners' views stood (#1120): by key,
+/// in the order heard, and by owner, so the earliest goes in O(log n) and
+/// an owner's are found without a scan.
+#[derive(Debug, Clone, Default)]
+struct HeldSet {
+    /// By base-relative key.
+    by_key: HashMap<String, Held>,
+    /// Each held key by its place in the order heard.
+    by_order: BTreeMap<u64, String>,
+    /// Each owner's held keys.
+    by_owner: HashMap<String, BTreeSet<String>>,
+}
+
+impl HeldSet {
+    fn len(&self) -> usize {
+        self.by_key.len()
+    }
+
+    fn get(&self, key: &str) -> Option<&Held> {
+        self.by_key.get(key)
+    }
+
+    fn insert(&mut self, key: String, held: Held) {
+        self.remove(&key);
+        self.by_order.insert(held.order, key.clone());
+        self.by_owner
+            .entry(held.owner.clone())
+            .or_default()
+            .insert(key.clone());
+        self.by_key.insert(key, held);
+    }
+
+    fn remove(&mut self, key: &str) -> Option<Held> {
+        let held = self.by_key.remove(key)?;
+        self.by_order.remove(&held.order);
+        if let Some(keys) = self.by_owner.get_mut(&held.owner) {
+            keys.remove(key);
+            if keys.is_empty() {
+                self.by_owner.remove(&held.owner);
+            }
+        }
+        Some(held)
+    }
+
+    /// The earliest held, taken out.
+    fn pop_earliest(&mut self) -> Option<(String, Held)> {
+        let key = self.by_order.first_key_value()?.1.clone();
+        let held = self.remove(&key)?;
+        Some((key, held))
+    }
+
+    /// Every member held of `owner`, taken out in the order heard.
+    fn take_owner(&mut self, owner: &str) -> Vec<(String, Held)> {
+        let keys = self.by_owner.remove(owner).unwrap_or_default();
+        let mut taken: Vec<(String, Held)> = keys
+            .into_iter()
+            .filter_map(|k| {
+                let held = self.by_key.remove(&k)?;
+                self.by_order.remove(&held.order);
+                Some((k, held))
+            })
+            .collect();
+        taken.sort_by_key(|(_, h)| h.order);
+        taken
+    }
+}
+
 /// The window's views, one per owner interface (`<system>/<service>/<iface>`).
 #[derive(Debug, Clone, Default)]
 pub struct Book {
     owners: BTreeMap<String, Owner>,
-    /// By base-relative key.
-    held: BTreeMap<String, Held>,
+    held: HeldSet,
     heard: u64,
     forgotten: u64,
     refused: u64,
@@ -147,29 +213,30 @@ impl Book {
         };
         let name = format!("{addr}/{iface}");
         let deleted = sample.kind == zenoh::sample::SampleKind::Delete;
-        if !self.owners.get(&name).is_some_and(|o| o.view.is_some()) {
+        let view = if self.owners.get(&name).is_some_and(|o| o.view.is_some()) {
+            self.owners.get_mut(&name).and_then(|o| o.view.as_mut())
+        } else {
             match resolved {
-                Some(r) => {
-                    let contract = r.revision.contract();
-                    if !zenkey_model::freshness::uses_v2(contract)
-                        || !self.make_view(&name, contract)
-                    {
-                        return;
-                    }
+                Some(r) if zenkey_model::freshness::uses_v2(r.revision.contract()) => {
+                    self.make_view(&name, r.revision.contract())
+                }
+                // Its revision uses no freshness.v2: no view will be made,
+                // so what was held of it goes (#1120).
+                Some(_) => {
+                    self.held.take_owner(&name);
+                    None
                 }
                 // Not resolved yet: held for the view its owner's first
                 // readable sample makes.
                 None => {
                     self.hold(key, name, sample.inband(), deleted, at);
-                    return;
+                    None
                 }
             }
-        }
-        let view = self
-            .owners
-            .get_mut(&name)
-            .and_then(|o| o.view.as_mut())
-            .expect("held or made");
+        };
+        let Some(view) = view else {
+            return;
+        };
         if deleted {
             view.delete(key, sample.inband(), at);
         } else {
@@ -203,7 +270,7 @@ impl Book {
                                 .is_empty()
                             {
                                 Some("its revision holds no collection".to_owned())
-                            } else if self.make_view(&name, contract) {
+                            } else if self.make_view(&name, contract).is_some() {
                                 None
                             } else {
                                 // Past the bound: counted in `refused`.
@@ -233,33 +300,30 @@ impl Book {
     }
 
     /// Makes `name`'s view of `contract`'s collections, following each,
-    /// and takes in what the book held of it, in the order heard; `false`
-    /// when the contract has none, or past [`MAX_OWNERS`].
-    fn make_view(&mut self, name: &str, contract: &zenkey_model::contract::Contract) -> bool {
+    /// and takes in what the book held of it, in the order heard; `None`
+    /// when the contract has none, or past [`MAX_OWNERS`], when what was
+    /// held of it goes too.
+    fn make_view(
+        &mut self,
+        name: &str,
+        contract: &zenkey_model::contract::Contract,
+    ) -> Option<&mut View<Instant>> {
         let layout = zenkey_model::heartbeat::Layout::of(contract);
         if layout.collections.is_empty() {
-            return false;
+            self.held.take_owner(name);
+            return None;
         }
         if !self.owners.contains_key(name) && self.owners.len() >= MAX_OWNERS {
             self.refused += 1;
-            return false;
+            self.held.take_owner(name);
+            return None;
         }
         let n = layout.collections.len();
         let mut view = View::new(layout);
         for i in 0..n {
             view.follow(i);
         }
-        let mut held: Vec<(String, Held)> = Vec::new();
-        self.held.retain(|k, h| {
-            if h.owner == name {
-                held.push((k.clone(), h.clone()));
-                false
-            } else {
-                true
-            }
-        });
-        held.sort_by_key(|(_, h)| h.order);
-        for (key, h) in held {
+        for (key, h) in self.held.take_owner(name) {
             if h.deleted {
                 view.delete(&key, h.stamp, h.at);
             } else {
@@ -269,7 +333,7 @@ impl Book {
         let owner = self.owners.entry(name.to_owned()).or_default();
         owner.view = Some(view);
         owner.waiting = None;
-        true
+        owner.view.as_mut()
     }
 
     /// Holds a member of `owner` heard before its view stood, as the view
@@ -282,15 +346,10 @@ impl Book {
         {
             return;
         }
-        if !self.held.contains_key(key)
+        if self.held.get(key).is_none()
             && self.held.len() >= MAX_HELD
-            && let Some(earliest) = self
-                .held
-                .iter()
-                .min_by_key(|(_, h)| h.order)
-                .map(|(k, _)| k.clone())
+            && self.held.pop_earliest().is_some()
         {
-            self.held.remove(&earliest);
             self.forgotten += 1;
         }
         self.heard += 1;
@@ -522,6 +581,83 @@ mod tests {
         assert_eq!((owner.heartbeats, owner.unread), (1, 1));
         assert!(owner.waiting.is_none());
         assert!(owner.last.is_some());
+    }
+
+    /// #1120: a member held before its key resolved goes once its owner's
+    /// revision resolves to one that uses no freshness.v2 (`radio.v1`, on
+    /// freshness.v1), since no view will be made of it.
+    #[test]
+    fn a_non_v2_owners_held_members_go_once_its_revision_resolves() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../examples/zk2/link/radio.v1.toml");
+        let (set, problems) = zenkey_fleet::ContractSet::load_path(&path);
+        assert!(problems.is_empty(), "{problems:?}");
+        let lens = zenkey_fleet::Lens::new("", None, &set).offline(&set);
+        let oper = "zk2/lab/radio-a/radio.v1/state/oper";
+        let resolution = lens.resolve(oper);
+        let resolved = resolution.resolved.as_ref().expect("radio.v1's oper");
+        assert!(!zenkey_model::freshness::uses_v2(
+            resolved.revision.contract()
+        ));
+        let mut book = Book::default();
+        let at = Instant::now();
+        book.observe(&view(oper, oper_put(5)), None, &lens, at);
+        assert_eq!(book.held.len(), 1, "held while unresolved");
+        book.observe(&view(oper, oper_put(6)), Some(resolved), &lens, at);
+        assert_eq!(book.held.len(), 0, "gone once its revision says no view");
+        assert!(book.of_key(oper).is_none());
+    }
+
+    /// #1120: past [`MAX_HELD`] the earliest held goes first, in the order
+    /// heard, and a member heard again moves to the back.
+    #[test]
+    fn the_held_set_forgets_its_earliest_first() {
+        let set = modem();
+        let lens = zenkey_fleet::Lens::new("", None, &set).offline(&set);
+        let key = |i: usize| format!("zk2/site-{i}/rf0/modem.v3/state/oper");
+        let mut book = Book::default();
+        let at = Instant::now();
+        for i in 0..MAX_HELD {
+            book.observe(&view(&key(i), oper_put(1)), None, &lens, at);
+        }
+        assert_eq!((book.held.len(), book.forgotten()), (MAX_HELD, 0));
+        // The first heard again, a later seq: now the last in order.
+        book.observe(&view(&key(0), oper_put(2)), None, &lens, at);
+        assert_eq!((book.held.len(), book.forgotten()), (MAX_HELD, 0));
+        // One more: the earliest, now the second heard, goes.
+        book.observe(&view(&key(MAX_HELD), oper_put(1)), None, &lens, at);
+        assert_eq!((book.held.len(), book.forgotten()), (MAX_HELD, 1));
+        assert!(book.held.get(&key(0)).is_some(), "heard again, kept");
+        assert!(book.held.get(&key(1)).is_none(), "the earliest, forgotten");
+        assert!(book.held.get(&key(MAX_HELD)).is_some());
+        let orders: Vec<u64> = book.held.by_order.keys().copied().collect();
+        assert!(orders.windows(2).all(|w| w[0] < w[1]));
+        assert_eq!(book.held.by_order.len(), MAX_HELD, "one place per key");
+    }
+
+    /// #1120: a resolved member of a new owner past [`MAX_OWNERS`] is
+    /// refused and counted, makes no view and leaves nothing held.
+    #[test]
+    fn a_member_past_the_owners_bound_is_refused_and_counted() {
+        let set = modem();
+        let lens = zenkey_fleet::Lens::new("", None, &set).offline(&set);
+        let key = |i: usize| format!("zk2/site-{i}/rf0/modem.v3/state/oper");
+        let mut book = Book::default();
+        let at = Instant::now();
+        for i in 0..=MAX_OWNERS {
+            let k = key(i);
+            if i == MAX_OWNERS {
+                // Held first, as before its key resolved.
+                book.observe(&view(&k, oper_put(1)), None, &lens, at);
+                assert_eq!(book.held.len(), 1);
+            }
+            let r = lens.resolve(&k);
+            book.observe(&view(&k, oper_put(2)), r.resolved.as_ref(), &lens, at);
+        }
+        assert_eq!(book.refused(), 1);
+        assert!(book.of_key(&key(MAX_OWNERS - 1)).is_some());
+        assert!(book.of_key(&key(MAX_OWNERS)).is_none(), "no view");
+        assert_eq!(book.held.len(), 0, "nothing held for it");
     }
 
     /// A member heard, then a heartbeat whose `state/oper` section is in

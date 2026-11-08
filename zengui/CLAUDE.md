@@ -66,7 +66,12 @@ Claude Code loads this file when working in `zengui/`; the root `CLAUDE.md` is t
   reads it with over `Deployment::lens`; following every collection, at
   most `MAX_OWNERS`; a state member heard before its key resolved held,
   at most `MAX_HELD` by the order heard, `Book::forgotten`, and taken in
-  when the view is made, so a quiet collection reads vouched; a heartbeat
+  when the view is made, so a quiet collection reads vouched; since #1120
+  the held set is by key, by order and by owner (`HeldSet`, the earliest
+  out in O(log n)), an owner's dropped once its revision resolves to one
+  with no freshness.v2 or its view is refused, and the interfaces refused
+  past `MAX_OWNERS` a caution chip on the status strip
+  (`status::freshness_text`, `Status::freshness_refused`); a heartbeat
   no revision reads counted `unread`, `Owner::waiting` the lens's word),
   fed by each live tick's samples
   at their arrival (`update::bus::apply_tick`, after `ensure_identity`), a

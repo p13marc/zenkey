@@ -50,6 +50,7 @@ fn preferences_are_visible_and_a_broken_file_says_so() {
         prefs_note: Some("zengui.toml does not parse (bad) — using defaults"),
         replaying: false,
         retention: None,
+        freshness_refused: 0,
     }));
     assert!(
         ui.find("preferences: zengui.toml does not parse (bad) — using defaults")

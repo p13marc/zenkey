@@ -142,6 +142,7 @@ fn the_strip_reports_replay_over_the_link() {
         prefs_note: None,
         replaying: true,
         retention: None,
+        freshness_refused: 0,
     }));
     assert!(ui.find("REPLAY — live link off").is_ok());
     assert!(

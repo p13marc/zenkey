@@ -371,6 +371,7 @@ fn strip(identity: (usize, u64), keys: (usize, u64)) -> iced::Element<'static, M
         prefs_note: None,
         replaying: false,
         retention: None,
+        freshness_refused: 0,
     })
 }
 
