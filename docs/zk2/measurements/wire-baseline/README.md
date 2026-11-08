@@ -737,15 +737,22 @@ above). The corrected model, Appendix A §10, says 674 KB.
   in two SDUs (a put, then the delete), against §6's 8-B transition: alarms.v1
   has no packed record. Re-puts are gone (the heartbeat confirms), so at 10
   transitions a day it is 2 KB.
-- **The link came back after a 245-s cut** under W2's load, where phase 2's
-  never did (W2 finding 5): each reconnect cost 1.2 KB A->B (the handshake,
-  presence and the device's declarations) and 1.4 KB B->A (the six readers'
-  and the author's subscriptions again), against §6's 0.8 KB and 0.1 KB.
+- **After a 245-s cut the link opened again, and then A->B carried
+  nothing.** The reopen's handshake and declarations crossed: 1.2 KB A->B
+  (presence and the device's declarations) and 1.4 KB B->A (the six
+  readers' and the author's subscriptions again), against §6's 0.8 KB and
+  0.1 KB. After them nothing crossed A->B, no frame, heartbeat or
+  keep-alive, until the lease closed the transport. This is phase 2's W2
+  finding 5 at zk2c's load, and #1109 reproduced it at 0 % loss: router A's
+  routing waits in a push begun while it re-declares toward the new face,
+  and driver A sends nothing more. The reconnect element is costed from the
+  reopen alone.
 - **The two config changes drew silence.** After the reconnect, both
   `zenctl config set` on rfcfg.v1 (config.v2) exited 2 with `"silence"`,
-  presence `no_token_visible`, after their 30 s; router B logged "Route reply:
-  Query not found!" as the late replies came back. Phase 2's sets drew
-  silence too (W2 finding 7). The config element is not measured.
+  presence `no_token_visible`, after their 30 s: router A, which sent
+  nothing back, never answered the tool's liveliness read (#1109). Phase 2's
+  sets drew silence too (W2 finding 7). The config element is not
+  measured.
 - **Compression does nothing for zk2c.** The lean run's compress layer
   stored 221 of 245 SDUs A->B and saved 69 B in 35 minutes, and stored
   every keep-alive: zk2c's records leave it nothing, as the report says
@@ -857,7 +864,11 @@ router B opened a new transport 3.9 s after the restore. Its reopen cost
 6. **At LoRa SF7, frames a minute apart spared one uplink keep-alive in
    four**, where link.v2 §2.16 has them spare every other one; on RF at a
    60-s interval they spared all.
-7. **Not measured:** W2's config changes (they drew silence), the `rare`
+7. **After W2's reconnect, A->B carried nothing but the reopen's
+   declarations** until the lease closed the transport, as in phase 2
+   (#1109 reproduced it at 0 % loss); the rf0-face honesty run's link came
+   back after its cut.
+8. **Not measured:** W2's config changes (they drew silence), the `rare`
    modem.v3 events (none in a window), W2 across a face, LoRa SF9 and SF12,
    SBD.
 
