@@ -808,6 +808,8 @@ none.
 | `arbitration-declaration` | does a running consumer hold a role carrying `arbitration.policy` whose declaration is invalid over every revision of the required interface in hand (error: its consumer cannot start on it), or whose binding has a wildcard or a shadowed entry, a priority nobody chose (warning)? | arbitration.v1 §2.14 |
 | `catalog-missing` | does a running instance list a revision the deployment's catalog lacks (the one its descriptor names, or every `--catalog` where it names none), or name a catalog no `--catalog` is or succeeds? (warning; asked only with `doctor --catalog <file>`, since a catalog is provisioned, never served) | §8.6 |
 | `first-hop-token` | does a device a `link.v2` face policy lists on a device face hold an interface token or a contract queryable, beyond the instance token alone an owner on a first hop holds? (warning; asked only with `doctor --face-policy <file>`, since only the deployment knows which owners are on a first hop) | §8.1 |
+| `packed-refused` | does an owner answer a state GET with a packed value its layout refuses under CH's tag: its tag, its length, a code or the pad? The refusal is named by its token (`--deep`; error) | §7.6 |
+| `state-unconfirmed` | does a `freshness.v2` member's last confirmation lie further back than its horizon, dated under its owner's epoch? A reader's word, no finding about the owner (`--deep --clocks-synced`; warning) | freshness.v2 §2.6 |
 
 ```
 $ zenctl doctor --namespace acme -c tcp/127.0.0.1:7447
