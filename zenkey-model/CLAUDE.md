@@ -81,7 +81,9 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   `frame_unknown`, `keyframe_unreachable`, `catalog_missing` and
   warnings `not_packed`, `timed_downsampled`, `frame_unlisted` (read
   across the policy's faces), `horizon_under_face`, `block_over_batch`,
-  `keep_alive_not_suppressed`; a v1 policy's plan is unchanged; link.v2
+  `keep_alive_not_suppressed` (at cadence × `keep_alive` ≥ `lease_ms`
+  since link.v2 0.17, #1108: at the interval each keep-alive races a
+  batch); a v1 policy's plan is unchanged; link.v2
   0.12, #1098: `Face::events` (`parse_events`, one value, names
   `<iface>/events/<template>`), `crossing_v2` denying an exposed event a
   face's `events` leaves out (`Reason::Unlisted`, which warns

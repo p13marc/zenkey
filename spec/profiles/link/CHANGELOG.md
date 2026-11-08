@@ -7,6 +7,82 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.17 — 2026-11-08: §2.16, what a face's keep-alives cost beside its frames, as zenoh's timer counts them, and `keep_alive_not_suppressed` at the interval (#1108)
+
+The zk2c runs of #989 measured a face's keep-alives beside its frames.
+At LoRa SF7, a 30-s interval and a frame a minute, the uplink sent 2,160
+keep-alives a day. §2.16's arithmetic expected one between two frames,
+1,440. On RF, the interval and the cadence both 60 s, it sent none bare
+and 336 a day under the lean stack, where §2.16 expected none.
+
+**Read: zenoh 1.10.1's keep-alive timer** (`io/zenoh-transport/src/unicast/universal/link.rs`).
+- **A batch sent resets it.** The transmit task resets the timer once it
+  has sent a batch (`write_loop`, line 337).
+- **The timer task** sleeps until the last reset plus the interval, and
+  sends a keep-alive only when no batch was sent meanwhile. It then
+  counts the next interval from that keep-alive (`TimeoutTracker::new`,
+  lines 559 to 574).
+- **Nothing else counts.** A keep-alive does not reset the timer, and
+  nothing received does. The fork `zm-1.10.2-r1`'s file is the same,
+  byte for byte.
+
+**Changed: §2.16, "Data spares the keep-alives".**
+- **Before:** "A batch sent resets its end's keep-alive interval. So an
+  uplink that sends data at least once an interval sends no
+  keep-alive."
+- **Now:** an end sends a keep-alive one interval I after the later of
+  the last batch it sent and its last keep-alive; what it receives does
+  not count. Between two batches a cadence C apart it sends ⌈C/I⌉ − 1
+  where C is no whole multiple of I.
+  Where C is a whole multiple of I, the last falls due when the next
+  batch does, and goes first when that batch is later on its schedule
+  than the one before: between C/I − 1 and C/I a gap.
+- **A cadence equal to the interval** is that case, so a batch spares
+  the keep-alive only when it is no later on its schedule than the one
+  before. A face that is to spare them all runs an interval above its
+  cadence by more than its batches' lateness.
+- **Why the measurements differ.** At SF7 the second keep-alive of each
+  gap raced the next frame, and went first in half the gaps. On RF the
+  one keep-alive a gap raced the frame, and went first in 23 % of them
+  under the lean stack.
+
+**Changed: `keep_alive_not_suppressed` follows §2.16.** It warns of a
+face whose shortest crossing cadence is the keep-alive interval or above
+it: cadence × `keep_alive` ≥ `lease_ms`, where it was >. At the interval
+itself each keep-alive races a batch, so the uplink pays keep-alives
+beside its data as its batches' lateness falls.
+- **Who draws it now.** zenoh-modem's RF, SF9, SF12 and SBD faces, each
+  at its frame's cadence, and every probe face at 60 s with a 60-s
+  interval.
+- **The message** `acl gen` prints says "the keep-alive interval or
+  above it".
+
+**Changed: Appendix B.** "Keep-alives beside frames" holds zenoh's
+timer with file and line, and both measurements. The RF, SF9, SF12 and
+SBD faces' notes say a keep-alive goes before each frame later than the
+one before, and name the warning, where they said the frames paid
+none.
+
+**Deliberately not changed.**
+- **No rule's keyword.** §2.16 states how zenoh's keep-alives fall, as
+  it did; what a face pays beside its frames is its arithmetic.
+- **zenoh-modem's faces** keep their intervals: they are the adopter's,
+  and §2.16 now prices them.
+- **The idle figure.** 2 × 86,400 × `keep_alive` / (`lease_ms` / 1,000)
+  a day holds, and measured exactly.
+- **The header** is still written against core 0.100.
+
+**The evidence.**
+- **`scenarios-v2.md` gains §5:** N's keep-alives beside puts at half
+  the interval (none), one and a half (one a gap), two (one a gap, and
+  one more before each put later than the one before) and one (that race
+  alone), at a 250-ms interval. The reference runs it as
+  `zenkey-fleet/tests/link_face.rs`' `v2_s5_data_spares_the_keep_alives`.
+- **`v2/plan.json` gains case 44** (from 0): case 5's face with its frame
+  every 45 s, below the 60-s interval, which draws no
+  `keep_alive_not_suppressed`. Cases 5, 8, 9, 12, 14, 16, 17, 18, 20, 22
+  and 23 draw it now, each at its interval; 5, 14, 16, 17 and 18 say so.
+
 ## link.v2 0.16 — 2026-11-08: editorial: `scenarios-v2.md` §3 hears an event no owner stamps, and §2.18's block is three objects, no rule changed (#609, #1106)
 
 zk2py round 109 read 0.13 and 0.14 cold, beside core 0.105. It filed

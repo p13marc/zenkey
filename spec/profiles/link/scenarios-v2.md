@@ -192,3 +192,31 @@ session of F, as `ground`.
 4. The generator refuses the policy: `near_opens_user` at `opens`.
 5. F lets N in, and holds a transport to N. G receives nothing: N bound
    the link it opened to no subject, and under `deny` grants it nothing.
+
+## §5 Data spares the keep-alives (§2.16)
+
+**Setup.** N, the owner and F as §3 runs them, with N's lease 1,000 ms,
+so its keep-alive interval I is 250 ms. F attaches to N through R and
+subscribes to `zk2/lab/radio-a/radio.v1/state/oper`, a state the face
+lets cross whole. The owner puts `oper` until F receives it.
+
+**Steps.** In each step the owner puts `oper` 17 times, the k-th put due
+a cadence C × k after the first. R counts N's keep-alives toward F
+between the first put and the last, over 16 gaps.
+1. C is 125 ms, half the interval. Each put is sent on its schedule.
+2. C is 375 ms, one and a half intervals. Each put is sent on its
+   schedule.
+3. C is 500 ms, two intervals. Each put is sent late on its schedule by
+   0, 60, 30, 0, 30, 60, 0, 60, 30, 60, 0, 30, 0, 60, 30, 0 and 60 ms in
+   turn: 8 of the 16 later than the put before.
+4. C is 250 ms, one interval, each put late as in step 3.
+
+**Expected.**
+1. No keep-alive. A batch less than an interval after the last spares
+   it.
+2. 16, one a gap. N's keep-alive falls due an interval after each put,
+   and the next put half an interval later.
+3. 24: one a gap, and one more before each of the 8 later puts. N's
+   second keep-alive falls due two intervals after a put, when the next
+   is due, and goes first when the next is later on its schedule.
+4. 8, one before each later put, and none before the others.

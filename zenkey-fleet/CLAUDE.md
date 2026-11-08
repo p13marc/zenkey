@@ -553,7 +553,13 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   that needs row 1 reads `zenkey/tests/contracts/beacon.v1.toml` or runs
   `tc.netif.v1`'s published revision 1.0 from its bundle
   (`zk2_observe`'s timeline); `tests/link_face.rs`' `v2_s1_the_router_runs_the_block` runs
-  link.v2 scenarios §1 over a relay that counts keep-alives.
+  link.v2 scenarios §1 over a relay that counts keep-alives, and
+  `v2_s5_data_spares_the_keep_alives` §5 (#1108, link.v2 0.17): N's
+  keep-alives beside puts at 0.5, 1.5, 2 and 1 intervals, the last two
+  each put late by a seeded 0, 30 or 60 ms, counted to the model (zenoh
+  counts each interval from the last batch sent or keep-alive, so at a
+  whole multiple a keep-alive goes before each put later than the one
+  before), each within one.
   A device face (link.v2 0.7, #982 H1): `plan_faces` names each device
   in `implements` by its enrollment address, on any system; `face_rule`
   maps the carve's three ids to `FacePresence` (`CITE_FACE_CARVE`), the

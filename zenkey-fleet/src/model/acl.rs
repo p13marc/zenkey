@@ -2542,8 +2542,9 @@ pub fn link_says(code: link::Code) -> &'static str {
              within wait_before_close closes the transport (link.v2 §2.16)"
         }
         C::KeepAliveNotSuppressed => {
-            "the face's shortest crossing cadence is above the keep-alive interval: the \
-             uplink pays keep-alives beside its data (link.v2 §2.16)"
+            "the face's shortest crossing cadence is the keep-alive interval or above it: \
+             the uplink pays keep-alives beside its data, at the interval one before each \
+             batch later than the one before (link.v2 §2.16)"
         }
         C::TimedDownsampled => {
             "a timed stream, which a downsampling rule would make miss its deadline: it is \

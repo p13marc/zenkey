@@ -785,7 +785,16 @@ window, `face/device_fault` denied.
   keep-alives"). The uplink kept its 30-s cadence (keep-alives at +0.13 s,
   +60.13 s, +90.13 s with frames at +30.4 s and +90.2 s), 37 s of air a day
   more than the model. On RF, at a 60-s interval, the frames spared every
-  one. Not investigated.
+  one.
+  - **Why (#1108).** zenoh 1.10.1's transmit task, and the fork's, counts
+    each keep-alive interval from the last batch it sent or its last
+    keep-alive. Nothing received counts. Between frames a minute apart at a
+    30-s interval, the first keep-alive is certain, and the second falls
+    due when the next frame does. It goes first when that frame is later on
+    its schedule than the one before, which happened in half the gaps here.
+  - **RF's 60-s interval** is the same race with one keep-alive a gap: none
+    went first bare, 336 a day under the lean stack.
+  - link.v2 0.17 §2.16 states it, and its scenarios' §5 runs it in process.
 
 ### The honesty checks, across the face
 
@@ -862,8 +871,11 @@ router B opened a new transport 3.9 s after the restore. Its reopen cost
    named), but `watch` and the doctor only fall silent or unobservable past a
    horizon (#990's V5 and V6 are not on this branch).
 6. **At LoRa SF7, frames a minute apart spared one uplink keep-alive in
-   four**, where link.v2 §2.16 has them spare every other one; on RF at a
-   60-s interval they spared all.
+   four**, where link.v2 §2.16 had them spare every other one; on RF at a
+   60-s interval they spared all bare. zenoh counts each interval from the
+   last batch sent, so where the cadence is a whole multiple of the
+   interval the last keep-alive races the next frame (#1108, link.v2
+   0.17).
 7. **After W2's reconnect, A->B carried nothing but the reopen's
    declarations** until the lease closed the transport, as in phase 2
    (#1109 reproduced it at 0 % loss); the rf0-face honesty run's link came

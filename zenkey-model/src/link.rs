@@ -1032,8 +1032,8 @@ pub enum Code {
     /// A crossing `block` resource whose longest put is above the batch
     /// (v2 §2.16).
     BlockOverBatch,
-    /// A face whose shortest crossing cadence is above the keep-alive
-    /// interval (v2 §2.16).
+    /// A face whose shortest crossing cadence is the keep-alive interval
+    /// or above it (v2 §2.16).
     KeepAliveNotSuppressed,
     /// A timed stream, denied rather than downsampled (v2 §2.8).
     TimedDownsampled,
@@ -3665,9 +3665,11 @@ fn plan_face(
             }
         }
         // Data more often than the keep-alive interval spares the uplink
-        // its keep-alives (v2 §2.16).
+        // its keep-alives; at the interval itself each keep-alive races
+        // the next batch, and goes first when that batch is late (v2
+        // §2.16, #1108).
         if let (Some(t), Some(c)) = (&policy.transport, cadences.iter().min())
-            && u128::from(*c) * u128::from(t.keep_alive) > u128::from(t.lease_ms)
+            && u128::from(*c) * u128::from(t.keep_alive) >= u128::from(t.lease_ms)
         {
             findings.push(Finding::new(
                 Code::KeepAliveNotSuppressed,
