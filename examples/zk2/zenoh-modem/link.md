@@ -58,6 +58,14 @@
 >   the keep-alives are negotiated. `zenctl check face --peer-config` compares the two ends.
 >   zenoh-modem's shipped `configs/zenohd-*.json5` still run their own values, RF's 10 s lease
 >   among them, which are zenoh-modem's to move.
+> - **The ground opens each face** (`link.v2` 0.15 §2.5, #1107). Every far principal, `ground`
+>   and SBD's `ground-gateway`, is a user name, and zenoh's usrpwd binds a user name to the end
+>   that opens a link alone: the device's router binds the ground's link only when the ground
+>   opens it. #989's zk2c runs opened RF from the node at first, and the ground's router refused
+>   the handshake. `--far-config` now names the far principal's user in the ground end's
+>   `transport.auth.usrpwd`, its password and dictionary placeholders to fill in. With credentials, the ground's router asks a user of
+>   every session that opens to it, so the ground's own tools need one each in its
+>   `dictionary_file`.
 >
 > **Why `modem.v3` still lists `link.v1`.** A face policy is the deployment's, never on the bus
 > (`link.v2` §3). A contract lists `link.v2` only to take its packed requirement (its §1 and

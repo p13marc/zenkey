@@ -4283,13 +4283,18 @@ pub(crate) struct AclGenArgs {
     /// every queryable it may query. Router to router is refused. A
     /// `link.v2` policy adds the router's `transport` and `routing` blocks,
     /// and its timestamping off (link.v2 §2.18). Given one --catalog, the far side's, a `link.v2`
-    /// plan refuses a crossing revision it does not list (link.v2 §2.18).
+    /// plan refuses a crossing revision it does not list (link.v2 §2.18). A face the near
+    /// router opens (`opens = "near"`) to a far principal bound by a user name is refused:
+    /// zenoh's usrpwd binds a user name to the end that opens a link alone (link.v2 §2.5).
     #[arg(long, value_name = "FILE")]
     pub(crate) face_policy: Option<PathBuf>,
     /// Emit the far end's `transport` and `routing` blocks on stdout, and
     /// its timestamping off, for the far router's config or the gateway
     /// client's session config, so that both ends run one lease and
-    /// keep_alive (link.v2 §2.16, §2.18).
+    /// keep_alive (link.v2 §2.16, §2.18). Where the enrollment binds the
+    /// far principal by a user name, the block names it as the usrpwd user
+    /// the far end opens the face with, beside placeholders for its
+    /// password and the far end's dictionary (link.v2 §2.5).
     /// Needs a `link.v2` --face-policy. A foreign schema, zenoh's.
     #[arg(long, requires = "face_policy", conflicts_with_all = ["json5", "check", "explain"])]
     pub(crate) far_config: bool,

@@ -530,7 +530,16 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   false, peer: false } }` into both ends' blocks, and `check_transport`'s
   `face_timestamping` reads the file's mode and timestamping;
   `tests/link_face.rs`' `v2_s3_the_near_router_stamps_nothing` shows no
-  timestamp onto the face from the block, and N's own without it. `tests/acl_plans.rs`
+  timestamp onto the face from the block, and N's own without it. Since
+  0.15 (#1107) `plan_faces` fills `Deployment::users` from the
+  enrollment's `user`s (`near_opens_user`, explained by `link_says`), and
+  `far_json5` names the far principal's user inside `transport`
+  (`auth.usrpwd.user`, its `password` and `dictionary_file` placeholders,
+  since zenoh loads no user without a password; `far_user`: one far principal across
+  the faces that are no device faces, bound by a user name);
+  `v2_s4_the_far_end_opens_a_face_bound_by_a_user_name` runs the pair: F
+  from the far block opens and N binds it, F refuses a session with no
+  user, and N opening to F carries nothing under `deny`. `tests/acl_plans.rs`
   pins the four media of `examples/zk2/link/media/`
   (`link-v2.<medium>.json5`) and flags a hand-edited `wait_before_close`
   on each, self-checks zenoh-modem's five fork-binding faces read as data

@@ -8563,6 +8563,580 @@
       },
       "note": "a face's `events` that lists an event its contract does not expose `link` (`probe.v1/fault`, host): the entry names an event resource, so no `event_unknown`; the event is denied, as an unexposed frame a face lists is; `change`, exposed but unlisted, is denied too, so no event crosses and the face denies `events/**` whole, with no finding (\u00a72.7)",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 2\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 271\nopen_timeout_ms      = 1000000\naccept_timeout_ms    = 1000000\ninterests_timeout_ms = 1000000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 1800\nmax_outage_s     = 86400\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 1000000\nevents           = [\"probe.v1/fault\"]\n"
+    },
+    {
+      "contracts": [
+        "examples/zk2/link/radio.v1.toml"
+      ],
+      "expect": {
+        "refused": [
+          {
+            "at": "opens",
+            "code": "near_opens_user",
+            "face": "radio",
+            "severity": "error"
+          }
+        ]
+      },
+      "implements": {
+        "radio-a": [
+          "radio.v1"
+        ]
+      },
+      "note": "a `south-region` face the near router opens (`opens = \"near\"`), whose far principal `ground-router` the deployment binds by a user name: zenoh's usrpwd binds a user name only to a link the router accepted, so the plan is refused (`near_opens_user`, §2.5). Written by reading link.v2 0.15",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground-router\"\nattach           = \"south-region\"\nregion           = \"ground\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nopens            = \"near\"\n",
+      "users": [
+        "ground-router",
+        "local",
+        "radio-a"
+      ]
+    },
+    {
+      "contracts": [
+        "examples/zk2/link/radio.v1.toml"
+      ],
+      "expect": {
+        "binding": "zenoh-1.10.1",
+        "catalog": null,
+        "faces": [
+          {
+            "attach": {
+              "gateway": {
+                "south": [
+                  {
+                    "filters": [
+                      {
+                        "modes": [
+                          "peer",
+                          "client"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "filters": [
+                      {
+                        "region_names": [
+                          "ground"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              "region": "ground",
+              "shape": "south-region"
+            },
+            "deny": [
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "zk",
+                "key_exprs": [
+                  "zk2/**/@zk/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "adv",
+                "key_exprs": [
+                  "zk2/**/@adv/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "admin",
+                "key_exprs": [
+                  "@/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:radio.v1",
+                "key_exprs": [
+                  "zk2/*/*/radio.v1/stream/air/frames_total/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@stream:radio.v1",
+                "key_exprs": [
+                  "zk2/*/*/radio.v1/@stream/raw/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "state:radio.v1",
+                "key_exprs": [
+                  "zk2/*/*/radio.v1/state/peers/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@state",
+                "key_exprs": [
+                  "zk2/*/*/*/@state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events:radio.v1",
+                "key_exprs": [
+                  "zk2/*/*/radio.v1/events/change/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              }
+            ],
+            "downsampling": {
+              "flows": [
+                "egress"
+              ],
+              "id": "radio",
+              "link_protocols": [
+                "unixsock-stream"
+              ],
+              "messages": [
+                "put"
+              ],
+              "rules": [
+                {
+                  "freq": 0.016666666666666666,
+                  "key_expr": "zk2/lab/radio-a/radio.v1/@stream/frames"
+                },
+                {
+                  "freq": 0.016666666666666666,
+                  "key_expr": "zk2/lab/radio-a/radio.v1/stream/air/dropped_total"
+                }
+              ]
+            },
+            "far": "ground-router",
+            "findings": [
+              {
+                "at": "radio.v1/@stream/frames",
+                "code": "not_packed",
+                "face": "radio",
+                "severity": "warning"
+              },
+              {
+                "at": "radio.v1/events/fault",
+                "code": "not_packed",
+                "face": "radio",
+                "severity": "warning"
+              },
+              {
+                "at": "radio.v1/state/oper",
+                "code": "not_packed",
+                "face": "radio",
+                "severity": "warning"
+              },
+              {
+                "at": "radio.v1/stream/air/dropped_total",
+                "code": "interval_over_horizon",
+                "face": "radio",
+                "severity": "warning"
+              },
+              {
+                "at": "radio.v1/stream/air/dropped_total",
+                "code": "not_packed",
+                "face": "radio",
+                "severity": "warning"
+              }
+            ],
+            "liveness": [
+              {
+                "evidence": [
+                  "radio.v1/state/oper",
+                  "radio.v1/stream/air/dropped_total"
+                ],
+                "service": "lab/radio-a"
+              }
+            ],
+            "name": "radio",
+            "reply_timeout_ms": 15000,
+            "windows": [
+              {
+                "min_s": 3600,
+                "service": "lab/radio-a"
+              }
+            ]
+          }
+        ],
+        "transport": {
+          "accept_timeout_ms": 10000,
+          "batch_bytes": 222,
+          "interests_timeout_ms": 10000,
+          "keep_alive": 4,
+          "lease_ms": 240000,
+          "open_timeout_ms": 10000,
+          "sequence": "16bit",
+          "wait_before_close_ms": 240000
+        }
+      },
+      "implements": {
+        "radio-a": [
+          "radio.v1"
+        ]
+      },
+      "note": "the same face, its far principal bound by a CN (not among `users`): the near router may open it, and the plan is the one the far end opening gets (§2.5). Written by reading link.v2 0.15",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground-router\"\nattach           = \"south-region\"\nregion           = \"ground\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nopens            = \"near\"\n",
+      "users": [
+        "local",
+        "radio-a"
+      ]
+    },
+    {
+      "contracts": [
+        "examples/zk2/link/radio.v1.toml"
+      ],
+      "expect": {
+        "binding": "zenoh-1.10.1",
+        "catalog": null,
+        "faces": [
+          {
+            "attach": {
+              "gateway": {
+                "south": [
+                  {
+                    "filters": [
+                      {
+                        "modes": [
+                          "peer",
+                          "client"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "filters": [
+                      {
+                        "region_names": [
+                          "ground"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              "region": "ground",
+              "shape": "south-region"
+            },
+            "deny": [
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "zk",
+                "key_exprs": [
+                  "zk2/**/@zk/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "adv",
+                "key_exprs": [
+                  "zk2/**/@adv/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "admin",
+                "key_exprs": [
+                  "@/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:radio.v1",
+                "key_exprs": [
+                  "zk2/*/*/radio.v1/stream/air/frames_total/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@stream:radio.v1",
+                "key_exprs": [
+                  "zk2/*/*/radio.v1/@stream/raw/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "state:radio.v1",
+                "key_exprs": [
+                  "zk2/*/*/radio.v1/state/peers/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@state",
+                "key_exprs": [
+                  "zk2/*/*/*/@state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events:radio.v1",
+                "key_exprs": [
+                  "zk2/*/*/radio.v1/events/change/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              }
+            ],
+            "downsampling": {
+              "flows": [
+                "egress"
+              ],
+              "id": "radio",
+              "link_protocols": [
+                "unixsock-stream"
+              ],
+              "messages": [
+                "put"
+              ],
+              "rules": [
+                {
+                  "freq": 0.016666666666666666,
+                  "key_expr": "zk2/lab/radio-a/radio.v1/@stream/frames"
+                },
+                {
+                  "freq": 0.016666666666666666,
+                  "key_expr": "zk2/lab/radio-a/radio.v1/stream/air/dropped_total"
+                }
+              ]
+            },
+            "far": "ground-router",
+            "findings": [
+              {
+                "at": "radio.v1/@stream/frames",
+                "code": "not_packed",
+                "face": "radio",
+                "severity": "warning"
+              },
+              {
+                "at": "radio.v1/events/fault",
+                "code": "not_packed",
+                "face": "radio",
+                "severity": "warning"
+              },
+              {
+                "at": "radio.v1/state/oper",
+                "code": "not_packed",
+                "face": "radio",
+                "severity": "warning"
+              },
+              {
+                "at": "radio.v1/stream/air/dropped_total",
+                "code": "interval_over_horizon",
+                "face": "radio",
+                "severity": "warning"
+              },
+              {
+                "at": "radio.v1/stream/air/dropped_total",
+                "code": "not_packed",
+                "face": "radio",
+                "severity": "warning"
+              }
+            ],
+            "liveness": [
+              {
+                "evidence": [
+                  "radio.v1/state/oper",
+                  "radio.v1/stream/air/dropped_total"
+                ],
+                "service": "lab/radio-a"
+              }
+            ],
+            "name": "radio",
+            "reply_timeout_ms": 15000,
+            "windows": [
+              {
+                "min_s": 3600,
+                "service": "lab/radio-a"
+              }
+            ]
+          }
+        ],
+        "transport": {
+          "accept_timeout_ms": 10000,
+          "batch_bytes": 222,
+          "interests_timeout_ms": 10000,
+          "keep_alive": 4,
+          "lease_ms": 240000,
+          "open_timeout_ms": 10000,
+          "sequence": "16bit",
+          "wait_before_close_ms": 240000
+        }
+      },
+      "implements": {
+        "radio-a": [
+          "radio.v1"
+        ]
+      },
+      "note": "the same face with no `opens`, its far principal bound by a user name: the far end opens, every shape's default, and the plan is derived (§2.1, §2.5). Written by reading link.v2 0.15",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground-router\"\nattach           = \"south-region\"\nregion           = \"ground\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n",
+      "users": [
+        "ground-router",
+        "local",
+        "radio-a"
+      ]
     }
   ],
   "description": "link.v2's plan (v2.md \u00a72.3, \u00a72.4, \u00a72.7, \u00a72.8, \u00a72.11, \u00a72.12, \u00a72.16, \u00a72.17, \u00a72.18). Each case is a face policy, `policy`, and a deployment as link.v1's plan.json writes it (`implements`, `contracts` loaded from the repository's root, or `interfaces` inline). `expect` is `{refused}`, the findings that refuse it (a policy's linter's, warnings included, or a deployment's errors alone, link.v1 \u00a72.3), or the plan: `binding`, `catalog` (null when the policy names none), `transport` (null for a link.v1 policy) and `faces`, each face as link.v1's plan.json writes it with `reply_timeout_ms` for a link.v2 face. A face's plan carries `frames` for a link.v2 face with `frames`: each listed frame that crosses, `{resource, every_s, keyframe_s}`, and none for an empty `frames` (\u00a72.3). A case's own `catalog`, where it gives one, is the core \u00a78.6 catalog the far side holds (\u00a72.18); an inline revision has no fingerprint, so a case about the catalog loads contracts. An inline resource may state `type`, its type's kind: `packed` is packed, and any other or none is not (\u00a72.17). `narrow` names principals: `expect.narrowed` gives, for each, the link protocols a subject bound to it is selected by (link.v1 \u00a72.4 over the binding's list), null when no face excludes any. A device face (\u00a72.5) names its devices by address: `implements` maps a listed service's name, or a device's `<system>/<service>`, to its interfaces, and its plan's `attach` is `{shape: \"device\", devices}`. An inline interface may state `uses`, which a device's `presence_required` reads for `redundancy.v1`, and an inline resource `epoch`, the parameter its template declares as its epoch (`epoch_on_device`). The device cases, from case 22, were written by reading the text, not derived by the reference. A link.v2 face's `windows` is \u00a72.11's floor: each listed service that owns a state or @state resource whose deletes only a tombstone proves, a per-key resource (core \u00a74.2) or a template whose first chunk is a parameter, read from its revisions' kinds, templates, resolved annotations and `uses`. A device's address is its window's `service`, as it is a listed service's. An inline revision uses what its `uses` lists, and none where it states none."

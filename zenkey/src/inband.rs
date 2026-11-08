@@ -435,8 +435,9 @@ pub const NO_EVENT: &str = "a sample on an events key that is no event (form 4):
 /// refusal names it, such as `short`, `sample_kind`, `key_kind` or a
 /// delete's `trailing`; any other that carries no event is
 /// [`Undecodable::NoEvent`], `form`, whatever its envelope reads as or its
-/// record holds; an event is [`admit`]ted, its record checked by `layout`.
-/// The subscription and `Consumer::replay` both ask it.
+/// record holds, and a delete is, whatever `no_event` says; an event is
+/// [`admit`]ted, its record checked by `layout`. The subscription and
+/// `Consumer::replay` both ask it.
 ///
 /// A delete's attachment is parsed here as §7.5 parses it: [`read`] reads
 /// one that does not parse as a delete with no envelope, since on a state
@@ -452,7 +453,8 @@ pub fn admit_event(
 ) -> Result<(), Undecodable> {
     match read.refusal().or_else(|| delete_refusal(read.sample())) {
         Some(r) => Err(Undecodable::Envelope(r)),
-        None if no_event => Err(Undecodable::NoEvent),
+        // A delete carries no event, whatever `no_event` says (core §2.6).
+        None if no_event || read.sample().kind() == SampleKind::Delete => Err(Undecodable::NoEvent),
         None => admit(read, layout),
     }
 }
@@ -790,19 +792,33 @@ mod tests {
             Some("sample_kind")
         );
         // A delete, with a delete's envelope or none: `form`; with one the
-        // parse refuses, that refusal.
+        // parse refuses, that refusal: an event's bytes, which a delete's
+        // attachment does not carry, among them.
         let deleted = wire::DeleteStamp { stamp: stamp() }.write();
-        for (attachment, token) in [
-            (Some(deleted.clone()), "form"),
-            (None, "form"),
-            (Some([deleted, vec![0x00]].concat()), "trailing"),
-        ] {
+        let delete = |attachment: Option<Vec<u8>>| -> Sample {
             let mut b = SampleBuilder::delete(ke(&key));
             if let Some(a) = attachment {
                 b = b.attachment(a);
             }
-            let d: Sample = b.into();
-            assert_eq!(counted(d, Some(&l)).as_deref(), Some(token), "{token}");
+            b.into()
+        };
+        for (attachment, token) in [
+            (Some(deleted.clone()), "form"),
+            (None, "form"),
+            (Some([deleted.clone(), vec![0x00]].concat()), "trailing"),
+            (Some(event(&[0x80])), "sample_kind"),
+        ] {
+            assert_eq!(
+                counted(delete(attachment), Some(&l)).as_deref(),
+                Some(token),
+                "{token}"
+            );
+        }
+        // Never admitted, whatever its caller's `no_event` says: the rule
+        // does not lean on `event_time` alone.
+        for (attachment, token) in [(Some(deleted), "form"), (None, "form")] {
+            let refused = admit_event(&read(delete(attachment)), Some(&l), false).err();
+            assert_eq!(refused.map(|u| u.token()), Some(token));
         }
     }
 

@@ -416,7 +416,10 @@ it leaves out. The other warnings differ:
   - Given one `--catalog`, the plan refuses a crossing revision the catalog lacks
     (`catalog_missing`).
   - `--far-config` writes the far end's `transport`, `routing` and `timestamping`, for the
-    far router or a gateway client's session.
+    far router or a gateway client's session. Since `link.v2` 0.15 (#1107) its `transport`
+    also names the far principal's usrpwd `user`, `ground` or `ground-gateway`, beside
+    placeholders: fill in the password, and a `dictionary_file` holding a user for each session
+    that opens to the ground's router, its own tools among them (§3.4).
   - `--default-permission` is `deny` by default. zenoh-modem's routers run `allow` today, under
     which each grant compiles into denies of its complement (spec §11.2; README gaps 12 and 13).
   - Since #977, a grant on a state template a binding leaves unbound is its collection read,
@@ -476,6 +479,13 @@ policy runs `sequence = "16bit"`, and `wait_before_close` equals the lease.
   both ends of the radio, and sat0's router is itself a client of the ground's. Each medium's
   shape is zenoh-modem's to settle against §2.5 before the generated blocks replace its configs
   (§5).
+- **The ground opens every face** (`link.v2` 0.15 §2.5, #1107). Each far principal is a user
+  name, and zenoh's usrpwd binds a user name to the end that opens a link alone. So the node's
+  router accepts and the ground connects: a node router that connects to the ground binds the
+  ground's link to no subject, and the ground's router, which holds credentials, refuses a node
+  that presents none ("Recv InitSyn. Expected extension", #989's zk2c runs). A face whose node
+  router must connect needs a far principal bound by a CN, over mTLS, and a `south-region`
+  attach with `opens = "near"`.
 - **The enrollment** ([`faces/zenoh-modem.enrollment.toml`](faces/zenoh-modem.enrollment.toml))
   gives each device service `modem.v3`, `config.v1` and `health.v1`. `config.v2`'s owner is on
   `main`, and `sx1262_config.v1` with it (G4): `lora0` implements it there in `config.v1`'s place.

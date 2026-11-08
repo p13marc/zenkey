@@ -1910,6 +1910,11 @@ fn link_deployment(case: &Value) -> Option<link::Deployment> {
     let implements = case.get("implements")?;
     let mut d = link::Deployment {
         implements: serde_json::from_value(implements.clone()).expect("implements"),
+        // The principals bound by a user name (link.v2 §2.5).
+        users: case
+            .get("users")
+            .map(|u| serde_json::from_value(u.clone()).expect("users"))
+            .unwrap_or_default(),
         ..link::Deployment::default()
     };
     for p in case

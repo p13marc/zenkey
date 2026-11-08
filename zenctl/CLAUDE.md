@@ -122,6 +122,8 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   `link.v2` face policy (#988 L2) adds
   the router's transport: `--json5` writes its `transport`, `routing` and
   (link.v2 0.13, #1106) `timestamping` blocks after the access control, `acl gen --far-config` the far end's
+  (with the far principal's usrpwd `user` where the enrollment binds it by one, link.v2 0.15, #1107; a
+  face the near router opens to a user name is refused, exit 2, `near_opens_user`)
   alone (`zenkey_fleet::acl_far_json5`; refused for a `link.v1` policy,
   exit 2), and `check face` reads each of its eight keys from the file,
   an omitted one at the binding's default (`cmd::acl::load_against` reads

@@ -2211,6 +2211,12 @@ fn plan_faces(
 ) -> Result<Vec<FacePlan>> {
     let mut dep = link::Deployment {
         catalog: catalog.cloned(),
+        // The principals bound by a usrpwd user name (link.v2 §2.5).
+        users: enrollment
+            .principal
+            .iter()
+            .filter_map(|p| nonempty(&p.user).map(str::to_owned))
+            .collect(),
         ..link::Deployment::default()
     };
     for s in &enrollment.service {
@@ -2559,6 +2565,13 @@ pub fn link_says(code: link::Code) -> &'static str {
         C::EpochOnDevice => {
             "a device's template declares an epoch: its member tokens cross the face at each \
              transport, and the face denies them (link.v2 §2.5)"
+        }
+        C::NearOpensUser => {
+            "the near router opens the face, and the enrollment binds its far principal by a \
+             user name: zenoh's usrpwd authenticates the end that opens a link to the end that \
+             accepts it, never the other way, so the near router would bind no user to the \
+             far end's link. Have the far end open it (opens = \"far\"), or bind the far \
+             principal by a CN (link.v2 §2.5)"
         }
         _ => "the face policy's linter refuses it (§2.1)",
     }
@@ -3048,7 +3061,7 @@ pub fn to_json5(plan: &AclPlan) -> String {
         let _ = writeln!(out, "}},");
     }
     if let (Some(t), Some(b)) = (&plan.transport, plan.binding) {
-        transport_json5(&mut out, t, Some(b), "this router");
+        transport_json5(&mut out, t, Some(b), "this router", None);
     }
     for f in &plan.faces {
         match &f.attach {
@@ -3086,12 +3099,16 @@ pub fn to_json5(plan: &AclPlan) -> String {
 /// `TimestampingConf`), the values in zenoh's units, `wait_before_close` in
 /// µs. All eight are written, the defaults of absent ones included, and
 /// timestamping off for a router and a peer ([`link::TIMESTAMPING_OFF`]),
-/// so that `end` stamps no put it routes onto the face (core §8.2).
+/// so that `end` stamps no put it routes onto the face (core §8.2). With
+/// `user`, the far end's block also carries the credentials its far
+/// principal opens the face with: the user, and placeholders for the
+/// password and the far end's dictionary (`link.v2` §2.5, §2.18).
 fn transport_json5(
     out: &mut String,
     t: &link::Transport,
     binding: Option<link::Binding>,
     end: &str,
+    user: Option<&str>,
 ) {
     use link::TransportKey as K;
     use std::fmt::Write as _;
@@ -3134,6 +3151,19 @@ fn transport_json5(
         v(K::OpenTimeout),
         v(K::AcceptTimeout)
     );
+    if let Some(user) = user {
+        let _ = writeln!(
+            out,
+            "  // The far principal's credentials (link.v2 §2.5): zenoh's usrpwd authenticates the end\n  \
+             // that opens a link to the end that accepts it, never the other way, so {end} opens the\n  \
+             // face's links as {user:?}. Fill in its password, the one the near router's dictionary\n  \
+             // holds for it, and {end}'s own dictionary_file: with credentials, {end} asks a user of\n  \
+             // every session that opens to it, and refuses one the file does not hold. Give each\n  \
+             // session of the far side a user of its own there, its local tools among them. zenoh\n  \
+             // loads no user without a password, and opens no dictionary it cannot read.\n  \
+             auth: {{ usrpwd: {{ user: {user:?}, password: \"<{user}'s password>\", dictionary_file: \"<{end}'s dictionary>\" }} }},"
+        );
+    }
     let _ = writeln!(out, "}},");
     let _ = writeln!(
         out,
@@ -3198,8 +3228,29 @@ pub fn far_json5(plan: &AclPlan) -> Option<String> {
                 .join(", ")
         }
     );
-    transport_json5(&mut out, t, None, "the far end");
+    transport_json5(&mut out, t, None, "the far end", far_user(plan).as_deref());
     Some(out)
+}
+
+/// The user name the far end opens its faces with (`link.v2` §2.5): the
+/// far principal's, where every face that is no device face has one far
+/// principal and the plan binds it by a user name. A device face's far
+/// ends are its devices' sessions, each its own principal's; a far
+/// principal bound by a CN presents no user.
+fn far_user(plan: &AclPlan) -> Option<String> {
+    let mut fars = plan
+        .faces
+        .iter()
+        .filter(|f| !face_is_device(f))
+        .map(|f| f.far.as_str());
+    let far = fars.next()?;
+    if fars.any(|f| f != far) {
+        return None;
+    }
+    plan.subjects
+        .iter()
+        .any(|s| s.usernames.iter().any(|u| u == far))
+        .then(|| far.to_owned())
 }
 
 // ── --check ───────────────────────────────────────────────────────────────
