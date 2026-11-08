@@ -13,6 +13,61 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.33 — 2026-11-08: an event's revision across a face (#609, #980)
+
+zk2py round 107 read 0.30 to 0.32 cold, and filed F-512 against §7.5.
+Core 0.104 answers the round's other findings
+([`CHANGELOG.md`](CHANGELOG.md)).
+
+**Answered: zk2py round 107's F-512, a gap: §7.5's revision of a key
+named no event.**
+- **Before:** a tool that read "a mutation, a frame or a heartbeat" with
+  no descriptor chose its revision by §7.5's steps. Since core 0.103 an
+  events key carries form 4, never a mutation, so the rule missed an
+  event.
+- **Now:** "a mutation, an event, a frame or a heartbeat". Step 2's tag
+  is the type's for a mutation or an event.
+- **A bullet** says that an event's key gives a revision a resource once
+  its occurrence chunk is stripped. Its tag is its record's type's, as a
+  mutation's is (core §7.5).
+- **Why it matters.** `modem.v3` 3.4 adds three `face/` events that
+  cross every zenoh-modem face, two of them packed. A tool across a face
+  holds no descriptor.
+- **The reference** reads so already. The fleet's lens reads an event's
+  record as a mutation's, and `model::choice` gives a put of any form but
+  a frame its type's tag. zk2py reads so too.
+
+**The evidence: `envelope/tags.json`, 36 cases.**
+- **Case 9**, the JSON event `oper_change`, carries form 4's CH, `0x80`,
+  where it carried a mutation's. Its expectation stands: index 8, by tag.
+- **Cases 31 to 35** read 3.4's `face/` events.
+  - `face/oper_change` is packed, `OperChangeRecord`, tag 11 (CH
+    `0x8b`). Through the deployment's catalog, step 1 leaves 3.4.
+  - Under tag 0 it is read with 3.4 and refused `tag`.
+  - Through `e3a529fe`, from before 3.4, it is `not_listed`, and shown
+    as a packed record by its tag and size.
+  - `face/identity_change`, tag 3, under a 32-bit run's chunk (CH
+    `0x93`), with nothing held, is a packed record too.
+  - `face/device_fault`, a JSON event, with only the four earlier
+    revisions held, is `no_resource`, and sniffed.
+- **The catalogs** gain `29bf7d47`, the example's catalog since 3.4,
+  inline, so the fixture does not move with the example. The history
+  already held 3.4's bundle, at index 10.
+- **`size`** is the bytes after an event's time.
+- **The tags** come from an independent reading of core §7.6's layout
+  form. It gives `OperRecord` the 4 that case 2 expects.
+
+**Deliberately not changed.**
+- **Steps 1 and 3**, and what a tool says. Step 3's "read alike" already
+  covers an event's type: a packed type's layout form, or a type's kind
+  and name on its `encoding`.
+- **§7.3.** Its event bullet already reads the record after the time,
+  and "Not its type's tag" holds of a record in any envelope.
+- **`RULES.md`** counts 274 rules with core 0.104's, 83 of them the
+  observer's: the MUST's object is widened, its role unchanged.
+- **The header** is still written against core 0.103: nothing here reads
+  0.104.
+
 ## 0.32 — 2026-11-08: an event's last chunk, its occurrence chunk (#980 C2d)
 
 Core 0.103 (#980's C2c and C2d) has an owner key each occurrence by its

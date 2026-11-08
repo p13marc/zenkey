@@ -1,7 +1,98 @@
 {
-  "description": "observer §7.3 (CH's tag) and §7.5 (the revision of a key): which revision a tool reads a sample with where no descriptor names the owner's, and what it shows of a record whose type it does not hold. Written by hand from the text, checked by a second, independent reading over the bundles, never blessed. `history` is the directory of every revision a case can hold, each a bundle named by its fingerprint: zenoh-modem's four published revisions of modem.v3, at indices 0, 5, 6 and 8 of its catalog. `catalogs` maps a catalog's id to its document, so a reader checks each id: e3a529fe, zenoh-modem's catalog of nine entries, which `examples/zk2/zenoh-modem/catalog.json`'s 0ff6bf6d succeeds, and two of its predecessors in its lineage. Each case: `key`, base-relative; `sample`, `put` where it is absent, or `reply` for a call's value; `ch`, the sample's header byte (core §7.5), its form, run width and tag; `size`, the bytes after the seq, a record's or a body's (the bytes themselves are not given: no case decodes); `held`, the revisions of the key's interface the tool holds; `catalog`, the id of the catalog it was given, or null. A heartbeat's key names the interface it covers, and its revisions are those of that interface whose contracts use freshness.v2 (`uses`), its tag the low four bits of the fingerprint's last byte. `expect`, for a put: `revision`, the fingerprint the tool reads the sample with, `step`, the step that chose it (1, 2 or 3), and `by`, `deployment` for step 1 or `tag` for steps 2 and 3; with `refused: tag` where CH's tag is not the chosen resource's type's (a packed type's own, 0 for any other kind, a frame form's for a frame). Or `revision: null` with `none`, the step that left none (`not_held`, `no_resource`, `not_listed`, `tag`), or `ambiguous`, the fingerprints left, sorted; and `shows`, what the tool shows: `{packed: {tag, size}}` for a record under a tag other than 0, `sniffed` for one under tag 0, `envelope` for a frame or a heartbeat. For a reply, `shows` alone: §7.5's steps read puts. Two revisions read a sample alike when each gives its key the same packed layout form, the same frame form, the same collections, or a type of another kind with the same kind and name on the same encoding.",
+  "description": "observer §7.3 (CH's tag) and §7.5 (the revision of a key): which revision a tool reads a sample with where no descriptor names the owner's, and what it shows of a record whose type it does not hold. Written by hand from the text, checked by a second, independent reading over the bundles, never blessed. `history` is the directory of every revision a case can hold, each a bundle named by its fingerprint: zenoh-modem's five published revisions of modem.v3, at indices 0, 5, 6, 8 and 10 of its catalog. `catalogs` maps a catalog's id to its document, so a reader checks each id: e3a529fe, zenoh-modem's catalog of nine entries, which `examples/zk2/zenoh-modem/catalog.json`'s 0ff6bf6d succeeds, and two of its predecessors in its lineage; and 29bf7d47, that file's catalog of eleven entries since modem.v3 3.4, whose lineage ends at 0ff6bf6d. Each case: `key`, base-relative; `sample`, `put` where it is absent, or `reply` for a call's value; `ch`, the sample's header byte (core §7.5), its form, run width and tag, an event's form 4 with its key's occurrence chunk of CH's width; `size`, the bytes after the seq, or after an event's time, a record's or a body's (the bytes themselves are not given: no case decodes); `held`, the revisions of the key's interface the tool holds; `catalog`, the id of the catalog it was given, or null. An event's key gives a revision a resource once its occurrence chunk is stripped, and its tag is its record's type's, as a mutation's is. A heartbeat's key names the interface it covers, and its revisions are those of that interface whose contracts use freshness.v2 (`uses`), its tag the low four bits of the fingerprint's last byte. `expect`, for a put: `revision`, the fingerprint the tool reads the sample with, `step`, the step that chose it (1, 2 or 3), and `by`, `deployment` for step 1 or `tag` for steps 2 and 3; with `refused: tag` where CH's tag is not the chosen resource's type's (a packed type's own, 0 for any other kind, a frame form's for a frame). Or `revision: null` with `none`, the step that left none (`not_held`, `no_resource`, `not_listed`, `tag`), or `ambiguous`, the fingerprints left, sorted; and `shows`, what the tool shows: `{packed: {tag, size}}` for a record under a tag other than 0, `sniffed` for one under tag 0, `envelope` for a frame or a heartbeat. For a reply, `shows` alone: §7.5's steps read puts. Two revisions read a sample alike when each gives its key the same packed layout form, the same frame form, the same collections, or a type of another kind with the same kind and name on the same encoding.",
   "history": "examples/zk2/.history/modem.v3",
   "catalogs": {
+    "29bf7d47": {
+      "entries": [
+        {
+          "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+          "iface": "modem.v3",
+          "index": 0
+        },
+        {
+          "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1",
+          "iface": "config.v1",
+          "index": 1
+        },
+        {
+          "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df",
+          "iface": "health.v1",
+          "index": 2
+        },
+        {
+          "contract": "sha256:4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501",
+          "iface": "config.v1",
+          "index": 3
+        },
+        {
+          "contract": "sha256:60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f",
+          "iface": "health.v1",
+          "index": 4
+        },
+        {
+          "contract": "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+          "iface": "modem.v3",
+          "index": 5
+        },
+        {
+          "contract": "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+          "iface": "modem.v3",
+          "index": 6
+        },
+        {
+          "contract": "sha256:dc7c01069bffc9dc5a966c93cfe2444eca0391e71f051bc9bf6d2b2b54d4317b",
+          "iface": "sx1262_config.v1",
+          "index": 7
+        },
+        {
+          "contract": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+          "iface": "modem.v3",
+          "index": 8
+        },
+        {
+          "contract": "sha256:8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890",
+          "iface": "freshness.v2",
+          "index": 9
+        },
+        {
+          "contract": "sha256:04836e1785402629a03f27d3ff0f07158942460564facde5731f4467020467ca",
+          "iface": "modem.v3",
+          "index": 10
+        }
+      ],
+      "epoch": 1767225600,
+      "format": "zk2-catalog/1",
+      "lineage": [
+        {
+          "entries": 3,
+          "id": "0a90fd61"
+        },
+        {
+          "entries": 5,
+          "id": "ea268fad"
+        },
+        {
+          "entries": 6,
+          "id": "36c25c0f"
+        },
+        {
+          "entries": 7,
+          "id": "ab76ec37"
+        },
+        {
+          "entries": 8,
+          "id": "8c808dff"
+        },
+        {
+          "entries": 9,
+          "id": "e3a529fe"
+        },
+        {
+          "entries": 10,
+          "id": "0ff6bf6d"
+        }
+      ]
+    },
     "e3a529fe": {
       "entries": [
         {
@@ -312,9 +403,9 @@
       }
     },
     {
-      "note": "an event every revision declares alike, its occurrence chunk stripped: index 8, by tag",
+      "note": "an event every revision declares alike, form 4 under tag 0 (a JSON type's), its occurrence chunk stripped: index 8, by tag",
       "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g0009",
-      "ch": "0x00",
+      "ch": "0x80",
       "size": 57,
       "held": [
         "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
@@ -698,6 +789,105 @@
       "held": [],
       "catalog": null,
       "expect": {
+        "shows": "sniffed"
+      }
+    },
+    {
+      "note": "a packed event only 3.4 declares, face/oper_change (OperChangeRecord, tag 11), as it crosses a face, all five held and the deployment's catalog given: step 1 leaves 3.4",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/oper_change/002g000a",
+      "ch": "0x8b",
+      "size": 3,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+        "sha256:04836e1785402629a03f27d3ff0f07158942460564facde5731f4467020467ca"
+      ],
+      "catalog": "29bf7d47",
+      "expect": {
+        "revision": "sha256:04836e1785402629a03f27d3ff0f07158942460564facde5731f4467020467ca",
+        "step": 1,
+        "by": "deployment"
+      }
+    },
+    {
+      "note": "the same under tag 0, a JSON type's: the revision step 1 leaves is read, and OperChangeRecord's tag is 11 (observer §7.3, not its type's tag)",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/oper_change/002g000a",
+      "ch": "0x80",
+      "size": 3,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+        "sha256:04836e1785402629a03f27d3ff0f07158942460564facde5731f4467020467ca"
+      ],
+      "catalog": "29bf7d47",
+      "expect": {
+        "revision": "sha256:04836e1785402629a03f27d3ff0f07158942460564facde5731f4467020467ca",
+        "step": 1,
+        "by": "deployment",
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "the same packed event through e3a529fe, a catalog from before 3.4: none it lists gives the key a resource, and the record is shown by its tag and size, never sniffed",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/oper_change/002g000a",
+      "ch": "0x8b",
+      "size": 3,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+        "sha256:04836e1785402629a03f27d3ff0f07158942460564facde5731f4467020467ca"
+      ],
+      "catalog": "e3a529fe",
+      "expect": {
+        "revision": null,
+        "none": "not_listed",
+        "shows": {
+          "packed": {
+            "tag": 11,
+            "size": 3
+          }
+        }
+      }
+    },
+    {
+      "note": "face/identity_change (IdentityChangeRecord, tag 3) under a 32-bit run's chunk, CH 0x93, no revision of modem.v3 in hand: a packed record by its tag and size",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/identity_change/1qndqvqg000b",
+      "ch": "0x93",
+      "size": 4,
+      "held": [],
+      "catalog": null,
+      "expect": {
+        "revision": null,
+        "none": "not_held",
+        "shows": {
+          "packed": {
+            "tag": 3,
+            "size": 4
+          }
+        }
+      }
+    },
+    {
+      "note": "face/device_fault, a JSON event of 3.4, with only the four revisions before it held: none gives the key a resource, and tag 0 is sniffed",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/device_fault/002g000c",
+      "ch": "0x80",
+      "size": 52,
+      "held": [
+        "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+        "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+        "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+        "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf"
+      ],
+      "catalog": "e3a529fe",
+      "expect": {
+        "revision": null,
+        "none": "no_resource",
         "shows": "sniffed"
       }
     }
