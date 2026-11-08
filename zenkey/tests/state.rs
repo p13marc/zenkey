@@ -527,12 +527,23 @@ async fn executor(s: &zenoh::Session, own_slice: bool) -> (Service, Consumer) {
 
 /// The owner's answer with its in-band stamps (S2): what orders each key.
 async fn answer(c: &Consumer, values: Option<&Bindings>) -> StateAnswer {
-    let a = c
-        .get_answer("state/plans/{vehicle}", values, T)
-        .await
-        .unwrap();
-    assert!(!a.current.is_empty(), "the owner did not answer");
-    a
+    // Asked again until the owner answers (#1028): under load a GET can
+    // end at its timeout before the owner's reply arrives, which is no
+    // answer, and nothing the owner holds moves meanwhile.
+    let deadline = tokio::time::Instant::now() + common::SETTLE;
+    loop {
+        let a = c
+            .get_answer("state/plans/{vehicle}", values, T)
+            .await
+            .unwrap();
+        if !a.current.is_empty() {
+            return a;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the owner did not answer"
+        );
+    }
 }
 
 /// Every sample a raw subscriber on `selector` hears, as it arrived: its
@@ -1437,6 +1448,13 @@ async fn s7_late_joiners_across_runs() {
             ..Up::default()
         },
         &["vehicle-01"],
+    )
+    .await;
+    // The new instance's writer matched before it puts (#1028): a put its
+    // session has no matching subscription for yet is dropped at source.
+    eventually(
+        "the new instance's writer matches the subscription",
+        || async { w["vehicle-01"].writer().matching().await.unwrap() },
     )
     .await;
     let rev11 = w["vehicle-01"].put("rev11").await.unwrap();
