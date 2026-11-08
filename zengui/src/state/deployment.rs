@@ -208,6 +208,15 @@ impl Deployment {
         self.settings.across.is_some()
     }
 
+    /// The face scope's selectors (#990 V7), `None` with no scope: what a
+    /// rebuild compares, so the pump watches again only when they moved.
+    pub(crate) fn face_selectors(&self) -> Option<Vec<String>> {
+        match &self.face_scope {
+            Some(Ok(scope)) => Some(scope.selectors().to_vec()),
+            _ => None,
+        }
+    }
+
     /// Rebuild [`Self::face_scope`] from the contracts held and the
     /// namespace (#990 V7): what a contracts load and a namespace move
     /// call. No scope without `--across-face`.
@@ -217,32 +226,28 @@ impl Deployment {
             self.across_note.clear();
             return;
         };
-        let scope =
-            match &self.contracts {
-                None => Err("the contracts are not loaded yet".to_owned()),
-                Some(c) => {
-                    across
-                        .policy()
-                        .map_err(|e| e.to_string())
-                        .and_then(|policy| {
-                            let face = policy.as_ref().zip(across.face.as_ref()).map(
-                                |(policy, (_, name))| zenkey_fleet::model::face_scope::Face {
-                                    policy,
-                                    name: name.as_str(),
-                                },
-                            );
-                            zenkey_fleet::FaceScope::of(
-                                &across.addresses,
-                                &c.set,
-                                &self.settings.namespace,
-                                zenkey_fleet::model::face_scope::Reads::Samples,
-                                face,
-                            )
-                            .map(Arc::new)
-                            .map_err(|e| e.to_string())
-                        })
-                }
-            };
+        let scope = match &self.contracts {
+            None => Err("the contracts are not loaded yet".to_owned()),
+            Some(c) => {
+                // The policy read and linted once, at launch.
+                let face = across
+                    .face
+                    .as_ref()
+                    .map(|f| zenkey_fleet::model::face_scope::Face {
+                        policy: &f.policy,
+                        name: f.name.as_str(),
+                    });
+                zenkey_fleet::FaceScope::of(
+                    &across.addresses,
+                    &c.set,
+                    &self.settings.namespace,
+                    zenkey_fleet::model::face_scope::Reads::Samples,
+                    face,
+                )
+                .map(Arc::new)
+                .map_err(|e| e.to_string())
+            }
+        };
         let addresses = across
             .addresses
             .iter()

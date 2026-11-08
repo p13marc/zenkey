@@ -231,61 +231,84 @@ pub struct Settings {
 
 /// The owners `--across-face` names, and the face `--face-policy` and
 /// `--face` give (#990 V7): what the window's scope and sessions are built
-/// from, with no presence read (observer §7.5).
+/// from, with no presence read (observer §7.5). Checked once, at launch.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AcrossFace {
     /// Each `SYSTEM/SERVICE`, checked at launch.
     pub addresses: Vec<zenkey_model::grammar::Addr>,
-    /// The `link.v2` policy and the face's name, when given.
-    pub face: Option<(PathBuf, String)>,
+    /// The `link.v2` policy and the face, when given: read and linted at
+    /// launch, its far side read.
+    pub face: Option<FaceGiven>,
+}
+
+/// A face policy and its face (#990 V7), read and linted once, at launch.
+/// Compared and hashed by the path and the face's name it was read from.
+#[derive(Debug, Clone)]
+pub struct FaceGiven {
+    pub path: PathBuf,
+    pub name: String,
+    pub policy: std::sync::Arc<zenkey_model::link::FacePolicy>,
+    /// The face's far side (#988 L4): its transport, reply timeout and
+    /// whether its medium repairs a lost frame.
+    pub far: zenkey_model::link::FarSide,
+}
+
+impl PartialEq for FaceGiven {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path && self.name == other.name
+    }
+}
+
+impl Eq for FaceGiven {}
+
+impl std::hash::Hash for FaceGiven {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.path.hash(state);
+        self.name.hash(state);
+    }
 }
 
 impl AcrossFace {
-    /// The face's far side (#988 L4): its transport, reply timeout and
-    /// whether its medium repairs a lost frame. `None` without a face.
+    /// The face's far side, `None` without a face.
+    #[must_use]
+    pub fn far(&self) -> Option<&zenkey_model::link::FarSide> {
+        self.face.as_ref().map(|f| &f.far)
+    }
+}
+
+impl FaceGiven {
+    /// `path`'s policy read and linted, and its face `name`'s far side.
     ///
     /// # Errors
     /// A policy that cannot be read, that the linter refuses, a `link.v1`
     /// one, or a face it does not name.
-    pub fn far(&self) -> anyhow::Result<Option<zenkey_model::link::FarSide>> {
-        let Some((path, face)) = &self.face else {
-            return Ok(None);
-        };
-        let policy = self.policy()?.expect("a face names its policy");
-        policy
-            .far_side(face)
-            .map(Some)
-            .map_err(|e| anyhow::anyhow!("--face-policy {} --face {face}: {e}", path.display()))
-    }
-
-    /// The face policy, read and linted, when one was given.
-    ///
-    /// # Errors
-    /// A file that cannot be read, or a policy the linter refuses.
-    pub fn policy(&self) -> anyhow::Result<Option<zenkey_model::link::FacePolicy>> {
-        let Some((path, _)) = &self.face else {
-            return Ok(None);
-        };
-        let text = std::fs::read_to_string(path)
+    pub fn read(path: PathBuf, name: String) -> anyhow::Result<FaceGiven> {
+        let text = std::fs::read_to_string(&path)
             .map_err(|e| anyhow::anyhow!("--face-policy {}: {e}", path.display()))?;
         let parsed = zenkey_model::link::parse(&text);
-        match parsed.policy {
-            Some(p) => Ok(Some(p)),
-            None => {
-                let errors: Vec<String> = parsed
-                    .findings
-                    .iter()
-                    .filter(|f| f.is_error())
-                    .map(ToString::to_string)
-                    .collect();
-                anyhow::bail!(
-                    "--face-policy {}: the linter refuses it ({}); `zenctl check face` names \
-                     every finding",
-                    path.display(),
-                    errors.join("; ")
-                )
-            }
-        }
+        let Some(policy) = parsed.policy else {
+            let errors: Vec<String> = parsed
+                .findings
+                .iter()
+                .filter(|f| f.is_error())
+                .map(ToString::to_string)
+                .collect();
+            anyhow::bail!(
+                "--face-policy {}: the linter refuses it ({}); `zenctl check face` names every \
+                 finding",
+                path.display(),
+                errors.join("; ")
+            )
+        };
+        let far = policy
+            .far_side(&name)
+            .map_err(|e| anyhow::anyhow!("--face-policy {} --face {name}: {e}", path.display()))?;
+        Ok(FaceGiven {
+            path,
+            name,
+            policy: std::sync::Arc::new(policy),
+            far,
+        })
     }
 }
 
@@ -310,12 +333,11 @@ fn across_face(
             })
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
-    let across = AcrossFace {
-        addresses,
-        face: policy.zip(face),
+    let face = match policy.zip(face) {
+        Some((path, name)) => Some(FaceGiven::read(path, name)?),
+        None => None,
     };
-    across.far()?;
-    Ok(Some(across))
+    Ok(Some(AcrossFace { addresses, face }))
 }
 
 /// The words a `--registry` is refused with: the flag is v1's, and the zk2
@@ -432,14 +454,12 @@ impl Cli {
         let contracts = contracts(self.contracts, &prefs.contracts)?;
         let catalogs = paths("--catalog", self.catalog, &prefs.catalogs)?;
         let across = across_face(self.across_face, self.face_policy, self.face)?;
-        // Across a face its `reply_timeout_ms` is the default: a flag or a
-        // context still wins (core §8.1).
+        // Across a face its `reply_timeout_ms` is the default, at least a
+        // second: a flag or a context still wins (core §8.1).
         let face_timeout = across
             .as_ref()
-            .map(AcrossFace::far)
-            .transpose()?
-            .flatten()
-            .map(|far| far.reply_timeout_ms.div_ceil(1000));
+            .and_then(AcrossFace::far)
+            .map(|far| far.reply_timeout_ms.div_ceil(1000).max(1));
         Ok(Settings {
             namespace,
             connect: if self.connect.is_empty() {
@@ -1064,7 +1084,7 @@ mod tests {
         assert_eq!(a.addresses[0].to_string(), "h-3fa9c2d41b7e/rf0");
         assert!(a.face.is_none());
         assert_eq!(s.timeout_secs, 5, "no face: the default");
-        assert!(a.far().unwrap().is_none());
+        assert!(a.far().is_none());
 
         let e = parse(&["--across-face", "*/rf0"]).unwrap_err().to_string();
         assert!(e.contains("--across-face */rf0"), "{e}");
@@ -1078,13 +1098,7 @@ mod tests {
             "rf",
         ])
         .unwrap();
-        let far = s
-            .across
-            .as_ref()
-            .unwrap()
-            .far()
-            .unwrap()
-            .expect("a far side");
+        let far = s.across.as_ref().unwrap().far().expect("a far side");
         assert_eq!(far.face, "rf");
         assert_eq!(s.timeout_secs, 15, "the face's reply_timeout_ms, 15 000");
         let s = parse(&[

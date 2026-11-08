@@ -185,14 +185,13 @@ pub fn load_checked(path: &Path, dep: &DeploymentArgs) -> Result<Loaded> {
         return Err(refuse(path, &problems));
     }
     let mut bus = bus::resolve(&cfg.bus, dep.context.as_deref(), dep.namespace.as_deref())?;
+    // `load_config` above refused `config::check`'s problems, the block's
+    // static half among them; this is what needs the contracts loaded.
     let across = match &cfg.across_face {
         None => None,
         Some(a) => {
-            let across = across_face(a, &cfg, &contracts, &bus.namespace, &mut problems);
-            if !problems.is_empty() {
-                return Err(refuse(path, &problems));
-            }
-            let across = across.expect("no problem, so a scope");
+            let across = across_face(a, &cfg, &contracts, &bus.namespace)
+                .map_err(|problems| refuse(path, &problems))?;
             // Core §8.1: a reply across the face takes at least its
             // `reply_timeout_ms`.
             if let Some(far) = across.scope.far() {
@@ -237,23 +236,32 @@ pub fn load_checked(path: &Path, dep: &DeploymentArgs) -> Result<Loaded> {
 /// to it (#990 V7): refused, as a problem by where it was named, a policy
 /// that cannot be read or that the linter refuses, a face the far side
 /// does not read, a scope the fleet refuses (no contract, the plan's
-/// errors, nothing in it), and an engine rule whose selector meets none of
-/// the scope (observer §7.5: never dropped silently).
+/// errors, nothing in it), an address that is no `SYSTEM/SERVICE`, and an
+/// engine rule whose selector meets none of the scope (observer §7.5:
+/// never dropped silently).
 fn across_face(
     a: &config::AcrossFaceConfig,
     cfg: &config::Config,
     contracts: &ContractSet,
     namespace: &str,
-    problems: &mut Vec<ConfigProblem>,
-) -> Option<Across> {
+) -> std::result::Result<Across, Vec<ConfigProblem>> {
+    let mut problems = Vec::new();
     let mut problem = |path: &str, message: String| {
         problems.push(ConfigProblem {
             path: path.to_owned(),
             message,
         });
     };
-    let addresses: Vec<zenkey_model::grammar::Addr> =
-        a.addresses.iter().filter_map(|s| s.parse().ok()).collect();
+    let mut addresses: Vec<zenkey_model::grammar::Addr> = Vec::new();
+    for (i, s) in a.addresses.iter().enumerate() {
+        match s.parse() {
+            Ok(addr) => addresses.push(addr),
+            Err(e) => problem(
+                &format!("across_face.addresses[{i}]"),
+                format!("{s:?}: {e}. Name one service, SYSTEM/SERVICE, each a plain chunk"),
+            ),
+        }
+    }
     let policy = match &a.policy {
         None => None,
         Some(p) => {
@@ -261,7 +269,7 @@ fn across_face(
                 Ok(t) => t,
                 Err(e) => {
                     problem("across_face.policy", format!("{}: {e}", p.display()));
-                    return None;
+                    return Err(problems);
                 }
             };
             let parsed = zenkey_model::link::parse(&text);
@@ -283,7 +291,7 @@ fn across_face(
                             errors.join("; ")
                         ),
                     );
-                    return None;
+                    return Err(problems);
                 }
             }
         }
@@ -302,7 +310,7 @@ fn across_face(
         Ok(s) => s,
         Err(e) => {
             problem("across_face", e.to_string());
-            return None;
+            return Err(problems);
         }
     };
     // Each engine rule's selector, a wire key as the scope's are, narrowed
@@ -335,7 +343,11 @@ fn across_face(
             }
         }
     }
-    Some(Across { scope, selectors })
+    if problems.is_empty() {
+        Ok(Across { scope, selectors })
+    } else {
+        Err(problems)
+    }
 }
 
 /// The contracts `sources` name, loaded once (spec §9.7, §8.5): a path

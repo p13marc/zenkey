@@ -30,15 +30,8 @@ pub struct Transport {
 impl Transport {
     /// The transport half of the settings in force.
     pub fn of(s: &crate::config::Settings) -> Transport {
-        // Checked at launch (`config::across_face`): a policy that has
-        // since gone unreadable is said, and the sessions open as without.
-        let far = s.across.as_ref().and_then(|a| match a.far() {
-            Ok(far) => far,
-            Err(e) => {
-                tracing::warn!("{e}: the sessions open without the face's transport");
-                None
-            }
-        });
+        // Read once, at launch (`config::FaceGiven::read`).
+        let far = s.across.as_ref().and_then(|a| a.far().cloned());
         Transport {
             zenoh_config: s.zenoh_config.clone(),
             connect: s.connect.clone(),

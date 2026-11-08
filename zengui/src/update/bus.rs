@@ -393,11 +393,25 @@ pub(crate) fn update(
             // it.
             let scope_due = dep.across_face()
                 && (!unchanged || dep.face_scope.as_ref().is_some_and(|s| s.is_err()));
-            if scope_due {
+            let watch_face = if scope_due {
+                use super::deployment::{FaceRewatch, face_rewatch};
+                let before = dep.face_selectors();
                 dep.refresh_face_scope();
-            }
-            let watch_face = if scope_due && obs.scope_watches.is_empty() {
-                super::deployment::watch_scope(dep, obs)
+                let after = dep.face_selectors();
+                match face_rewatch(
+                    before.as_deref(),
+                    after.as_deref(),
+                    !obs.scope_watches.is_empty(),
+                ) {
+                    FaceRewatch::Keep => Task::none(),
+                    FaceRewatch::Watch => super::deployment::watch_scope(dep, obs),
+                    // The scope moved: its old watches go, its new ones come.
+                    FaceRewatch::Rewatch => {
+                        let release = super::deployment::unwatch_scope(obs);
+                        let acquire = super::deployment::watch_scope(dep, obs);
+                        Task::batch([release, acquire])
+                    }
+                }
             } else {
                 Task::none()
             };

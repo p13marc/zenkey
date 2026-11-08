@@ -637,13 +637,6 @@ pub fn parse(text: &str) -> Result<Config, json5::Error> {
     json5::from_str(text)
 }
 
-/// Everything `run` would refuse that the parser cannot: each returned
-/// problem is one reason for exit 2. Empty means the config is runnable.
-///
-/// Secrets are **resolved here** (and their values discarded): an unset env
-/// var or an unreadable file is a config problem at check time, not a
-/// delivery failure at 3am. The contracts and the state file are read by
-/// [`crate::load_checked`], which knows the flags.
 /// The `across_face` block's static half (#990 V7): at least one plain
 /// `SYSTEM/SERVICE`, `policy` and `face` together, and no rule that reads
 /// presence or the doctor, which do not cross a constrained face (core
@@ -712,6 +705,13 @@ fn check_across_face(problem: &mut impl FnMut(String, String), cfg: &Config, a: 
     }
 }
 
+/// Everything `run` would refuse that the parser cannot: each returned
+/// problem is one reason for exit 2. Empty means the config is runnable.
+///
+/// Secrets are **resolved here** (and their values discarded): an unset env
+/// var or an unreadable file is a config problem at check time, not a
+/// delivery failure at 3am. The contracts and the state file are read by
+/// [`crate::load_checked`], which knows the flags.
 pub fn check(cfg: &Config) -> Vec<ConfigProblem> {
     let mut out = Vec::new();
     let mut problem = |path: String, message: String| out.push(ConfigProblem { path, message });

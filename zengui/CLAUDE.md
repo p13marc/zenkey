@@ -43,12 +43,14 @@ Claude Code loads this file when working in `zengui/`; the root `CLAUDE.md` is t
   across a constrained face (`--across-face SYSTEM/SERVICE`, `--face-policy
   F --face N`; #990 V7, core §8.5, observer §7.5) `Settings::across`
   (`config::AcrossFace`, checked at launch: a plain address, the policy
-  linted and its far side read) means no presence monitor and no lens feed
+  read, linted and its far side read once, `config::FaceGiven`) means no presence monitor and no lens feed
   (`update::bus::start_presence` returns early), `Deployment::face_scope`
   (the fleet's `FaceScope` over the contracts held and the namespace,
   rebuilt at each contracts load and namespace move, `across_note` the
   strip's words), the pump's scope watched whole at the monitor's start or
-  the contracts' landing (`update::deployment::watch_scope` →
+  the contracts' landing, and released and watched again when a load moves
+  its selectors (`update::deployment::face_rewatch`;
+  `update::deployment::watch_scope` →
   `services::watch::scope_across`: unseeded, `Monitor::watch_across` by a
   selector's horizon where the face says `arq = false`), a custom scope's
   selectors narrowed to it, no subtree watch, every session opened by the
