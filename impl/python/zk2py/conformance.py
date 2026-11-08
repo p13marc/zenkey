@@ -5852,6 +5852,45 @@ def _round109_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 [int(every.group(1)) if every else None, counts.get("Consumer"),
                  "or a delete on an events key, whether a subscription heard it" in rules],
                 [274, "32", True]))
+    # Round 109's findings, each text as it quotes it, so an answer moves it
+    from .contract import load_contract
+    from .owner import keeps_timestamp
+
+    radio = load_contract(spec.parent / "examples" / "zk2" / "link" / "radio.v1.toml")
+    oper = next(r for r in radio.canonical["resources"] if r["token"] == "state" and r["template"] == "oper")
+    clog = flat("CHANGELOG.md")
+    out.append(("F-524 (open): scenarios-v2.md §3 has F hear oper with no timestamp, and N's in the control, where "
+                "core §4.3's table has its owner stamp each mutation: radio.v1 uses freshness.v1, and oper declares "
+                "freshness.ttl_s",
+                missing(sc2, "2. F subscribes to `zk2/lab/radio-a/radio.v1/state/oper`, a state the face lets cross "
+                             "whole.", "2. F's sample of `oper` carries no timestamp.",
+                        "In the control, F's sample carries a timestamp, N's own, its id N's zid.")
+                + missing(core, "| A state whose contract declares `freshness.ttl_s` above 0, and does not use "
+                                "`freshness.v2` |")
+                + ["freshness.v1" in radio.canonical["uses"], keeps_timestamp(radio, oper)], [True, True]))
+    out.append(("F-525 (open): link.v2 §2.18 says the block is the transport and routing objects, and merges a "
+                "router's own transport alone, where 0.13 adds a third, timestamping, and counts three",
+                missing(l2, "The block is the router's top-level `transport` and `routing` objects.",
+                        "merges the two: a JSON5 object holds one `transport` key.",
+                        "a generator writes the same three objects for the far end"), []))
+    out.append(("F-526 (open): core §8.2 says nothing checks a face router's timestamping, which link.v2 0.13's "
+                "face_timestamping checks",
+                missing(core, "Nothing checks this posture at this version.")
+                + missing(l2, "where core §8.2 says a deployment SHOULD stamp none (§2.18)."), []))
+    out.append(("F-527 (open): core §2.6 counts a sample that carries no envelope form, and §7.5's parse refuses no "
+                "byte at all short: a delete on an events key with no attachment reads either way; 0.105's entry "
+                "says form, zk2py's reading, where its state readers say short",
+                missing(core, "Any other is refused as `form`, as §4.2 counts a stray `reply_del`: its envelope reads "
+                              "as another form, or it carries none.", "no byte at all, so no CH (`short`)")
+                + missing(clog, "A refused attachment is counted by its refusal, and one that reads as a delete, or "
+                                "none, as `form`.")
+                + [live.no_event(k, live.delete_read(k, zk2c.ENCODING, None), deleted=True),
+                   zk2c.read_delete(k, zk2c.ENCODING, None).refusal], ["form", "short"]))
+    out.append(("F-528 (open): state.md §8 Expected 5 counts each of step 4's three by the subscription or by the "
+                "replay, where the backend keeps no delete to replay",
+                missing(st, "The backend kept all 1,005 puts, step 4's two among them.",
+                        "5. None of step 4's three samples is delivered, by the subscription or by the replay. The "
+                        "consumer counts each undecodable, refused as `form`"), []))
     return out
 
 

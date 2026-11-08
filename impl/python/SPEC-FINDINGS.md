@@ -26481,3 +26481,197 @@ as link.v2 0.12's entry says.
   - F-519 to F-523.
 
   F-365 stays open as #965's.
+
+## At core 0.105 and link.v2 0.14
+
+Round 109 read link.v2 0.13 (#1106, a face router stamps nothing) and
+0.14 (round 108's F-519 and F-520 answered), and core 0.105 (F-521 to
+F-523 answered), at main 67eac08c. It read cold link.v2 §2.18 and §2.19
+whole, with §5's rows, and `scenarios-v2.md` §3; core §2.6's "A sample
+that carries no event", with §7.5's parse and §8.2's session posture
+beside it; and `state.md` §8 whole. zk2py diffed `spec/` and
+`examples/zk2/` between round 108's 889e84e9 and 67eac08c. **No rule
+changed beyond what the changelogs state:** `RULES.md` widens the
+consumer's MUST NOT in place, 274 rules still, consumer 32;
+`v2/transport.json` gains five cases, 21 in all; under `examples/zk2/`
+only zenoh-modem's `MIGRATION.md` moves, in prose.
+
+**The answers hold**, F-519 to F-523:
+- **F-519** (link.v2 0.14): 0.12's entry counts four cases, 41 in all,
+  names the fourth, and says that it was corrected.
+- **F-520** (link.v2 0.14): §5's rows ask of a face with no `frames` and
+  no `events`, so §2.1's "An empty `events` lists no event" and §2.7
+  agree with them.
+- **F-521** (core 0.105): the count names §7.5's refusal first, and
+  `form` for the rest. zk2py already counted a put so.
+- **F-522** (core 0.105): the MUST NOT names a delete on an events key,
+  heard or replayed. zk2py delivered none already. It counted every one
+  `form`, as the entry notes, and now counts one by its attachment's
+  refusal where the parse refuses it (`live.sample_no_event`). `state.md`
+  §8 step 4's delete passes live, from zk2py and replayed by `zenctl
+  replay`, whose capture keeps the delete's attachment.
+- **F-523** (core 0.105): 0.104's entry says the reference delivers
+  neither, each corrected line saying that it was. Not observable here:
+  no black box consumes an event.
+
+**link.v2 0.13's claims, checked.** The five new cases are the ones the
+entry names. The three routers that state nothing under a link.v2
+policy warn `face_timestamping`, and so do three of the five. Every
+`emit` ends with timestamping off but link.v1's case 15, which emits
+nothing, as §2.18's "beside the transport" says. On zenoh-python
+(zenoh 1.10.1), a router stamps by default, `{ peer: false }` leaves it
+stamping, `{ router: false, peer: false }` and `false` stop it, and a
+peer stamps only when told, as §2.19's table and cases 16 to 20 say.
+The stamp is 26 bytes on the face, as §2.18 says: measured on the batch
+of one event, 44 B under the block and 70 B in the control.
+
+**F-436, re-run** (`packed_live`, black boxes of 67eac08c): the
+reference's fix holds. `zenctl watch` rows each record the `Ties` layout
+refuses, its summary counting three `nonconforming`, and holding
+`packed-wide` or `packed-collide` it rows each of zk2py's sensor records
+undecodable, its refusal named, delivering none. `zenctl echo` renders
+each as its size and declared type, the one-byte record as `"<1 B that
+do not decode as packed:Ties: …>"`. zk2py's checks pinned the older
+format, and are re-keyed. F-436 is closed.
+
+### F-524 · contradiction · link.v2 `scenarios-v2.md` §3 beside core §4.3: `oper` carries its owner's timestamp, whatever N does
+
+> `scenarios-v2.md` §3, step 2: "F subscribes to
+> `zk2/lab/radio-a/radio.v1/state/oper`, a state the face lets cross
+> whole. The owner puts `oper` until F receives it." Expected 2: "F's
+> sample of `oper` carries no timestamp." Expected 4: "In the control,
+> F's sample carries a timestamp, N's own, its id N's zid." Core §4.3,
+> "The Zenoh timestamps kept": "Only these resources carry a Zenoh
+> timestamp the owner sets … A state among them carries one on each
+> mutation and reply (S1, S2)". Its first row: "A state whose contract
+> declares `freshness.ttl_s` above 0, and does not use `freshness.v2`".
+> `radio.v1.toml`: `uses = ["link.v1", "freshness.v1"]`, and `oper`'s
+> `annotations = { "link.exposure" = "link", "freshness.ttl_s" = 4 }`.
+
+- **The contradiction.** A conforming owner of `radio.v1` sets a Zenoh
+  timestamp on every put of `oper`, its id the owner's zid. A router
+  stamps only a put that carries none. So F's sample of `oper` carries
+  the owner's timestamp under the block, and the owner's again in the
+  control, never N's. Neither expected can be observed with a
+  conforming owner.
+- **Observed** (`stamp_live`):
+  - zk2py's owner's `oper` reached F with its own timestamp under both
+    blocks, in batches of one size;
+  - the owner example, on the far side, stamped `oper` too, its id
+    neither router's;
+  - `fault`, an event that crosses whole and that no owner stamps,
+    carried no timestamp under the block, and N's in the control.
+- **What zk2py does:** it runs §3 as written. It judges `oper`'s
+  timestamp by core §4.3, the owner's with none of N's, and N's stamping
+  by `fault`'s occurrences.
+- **Fix:** have F subscribe to a resource no owner stamps, such as
+  `…/radio.v1/events/fault/*`, an event that crosses whole. Or keep
+  `oper`, and expect the owner's timestamp alone, never N's.
+- **Changes:** what §3 observes.
+
+### F-525 · minor · link.v2 §2.18: "The block is the router's top-level `transport` and `routing` objects", which hold a third since 0.13
+
+> §2.18, "The transport block": "The block is the router's top-level
+> `transport` and `routing` objects. A router configuration that already
+> holds a `transport` object (its authentication, its TLS) merges the
+> two: a JSON5 object holds one `transport` key." Its next bullet (0.13):
+> "A generator MUST write the near router's timestamping off beside the
+> transport … `timestamping: { enabled: { router: false, peer: false }
+> }`." And: "a generator writes the same three objects for the far end".
+
+- **The error.** Since 0.13 the block is three top-level objects, as
+  the far end's bullet counts them, and the merge names `transport`
+  alone. A near router's configuration can already hold a
+  `timestamping` object, its `drop_future_timestamp` (health.v1's
+  scenarios §4 sets one). A JSON5 object holds one `timestamping` key
+  too. zenoh-modem's `MIGRATION.md` says the reference merges the two.
+- **What zk2py does:** it merges each object into the router's
+  configuration key by key, the block's value winning
+  (`stamp_live._merge`).
+- **Fix:** "The block is the router's top-level `transport`, `routing`
+  and `timestamping` objects. A router configuration that already holds
+  one of them merges the two".
+- **Changes:** wording, and what a generator does with a router's own
+  `timestamping` object.
+
+### F-526 · minor · core §8.2: "Nothing checks this posture at this version", which link.v2 0.13's `face_timestamping` checks
+
+> Core §8.2, "A router on a constrained face": "A deployment SHOULD run
+> a router that forwards puts onto a constrained face (§8.5) with
+> timestamping disabled. … Nothing checks this posture at this version."
+> link.v2 §2.19 (0.13): "`face_timestamping` (warning, `at`
+> `timestamping`): the router stamps the puts it routes, read at the mode
+> it runs. Its stamps cross the face, where core §8.2 says a deployment
+> SHOULD stamp none (§2.18)."
+
+- **The error.** Since link.v2 0.13 a tool checks it, for a router whose
+  face policy is link.v2's, and `zenctl check face` reports it. Core
+  0.105 kept the sentence.
+- **What zk2py does:** it checks the posture as link.v2 §2.19 says
+  (`link_v2.check_transport`), and for a link.v1 policy not at all.
+- **Fix:** "`link.v2` §2.19's `face_timestamping` checks it, for a
+  router whose face policy is link.v2's."
+- **Changes:** wording.
+
+### F-527 · ambiguity · core §2.6: a delete on an events key with no attachment, `short` or `form`?
+
+> Core §2.6, "Its count": "Where §7.5's parse refuses its envelope, the
+> count names that refusal, such as `short`, `sample_kind` or `key_stamp`
+> … Any other is refused as `form` …: its envelope reads as another form,
+> or it carries none." §7.5: "A delete has no payload, so its envelope is
+> its attachment", and the parse refuses "no byte at all, so no CH
+> (`short`)". Observer §7.3: a tool "tells such a sample by its key and
+> its `Encoding` alone". `CHANGELOG.md`, 0.105: "A refused attachment is
+> counted by its refusal, and one that reads as a delete, or none, as
+> `form`."
+
+- **Two readings.** A delete has zenoh's default `Encoding`,
+  `zenoh/bytes`. So by observer §7.3 a delete on an events key carries
+  an envelope, and the parse, given no attachment, has no byte at all:
+  `short`. By §7.5's "its envelope is its attachment", a delete with
+  none carries none: `form`, as the entry says.
+- **Where one comes from.** A plain zenoh `delete` has no attachment, so
+  it is the delete a broken writer most likely sends. `state.md` §8 step
+  4's has one. zenoh keeps no attachment apart from an empty one:
+  zenoh-python reads `None` for the first and `b""` for the second.
+- **What zk2py does:** it follows the entry: no attachment is `form`,
+  and an empty one `short` (`live.delete_read`). Its state readers count
+  a delete with no attachment `short`, as before.
+- **Fix:** "A delete with no attachment carries none: it is `form`", in
+  §2.6, or in §7.5 for every delete.
+- **Changes:** which reason a consumer's count names.
+
+### F-528 · minor · `state.md` §8 Expected 5 counts each of step 4's three samples "by the subscription or by the replay", and the backend keeps no delete
+
+> `state.md` §8, Expected 2: "The backend kept all 1,005 puts, step 4's
+> two among them." Expected 5: "None of step 4's three samples is
+> delivered, by the subscription or by the replay. The consumer counts
+> each undecodable, refused as `form`". Setup: "A union storage runs on
+> `zk2/*/*/*/events/**`."
+
+- **The error.** Step 4's delete is on a key the storage never held, so
+  it leaves the storage holding nothing there, and a GET returns
+  nothing of it. The replay returns step 4's two puts, and counts two.
+  Only the subscription hears the delete, and counts three. Read per
+  path, "counts each" asks the replay for a third.
+- **What zk2py does:** its stand-in storage keeps no delete. The
+  subscription counts the three `form`, the replay the two puts.
+- **Fix:** "The subscription counts each undecodable, refused as `form`
+  …. The replay returns the two puts, and counts each so."
+- **Changes:** wording of what a run counts.
+
+### Counts at core 0.105 and link.v2 0.14
+
+528 entries.
+- **New: F-524 to F-528:**
+  - a contradiction: F-524;
+  - an ambiguity: F-527;
+  - three minor errors: F-525, F-526 and F-528.
+  None is a blocker.
+- **Answered this round:** F-519 to F-523; F-436, re-run, fixed in the
+  reference.
+- **Open:**
+  - F-437 to F-441;
+  - F-524 to F-528.
+
+  F-365 stays open as #965's.
