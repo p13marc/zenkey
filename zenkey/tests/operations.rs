@@ -270,6 +270,17 @@ async fn wait_present(s: &zenoh::Session, selection: &str, n: usize) {
     .await;
 }
 
+/// Until `s`'s queries on `key` reach a queryable (#1028): one declared a
+/// moment before is not yet routed, and a call then reaches none and comes
+/// back silent at once, with no reply.
+async fn routed(s: &zenoh::Session, key: &str) {
+    let querier = s.declare_querier(key).await.unwrap();
+    eventually("the queryable is routed", || async {
+        querier.matching_status().await.unwrap().matching()
+    })
+    .await;
+}
+
 /// A raw GET, as a caller that breaks the rules would make it: every reply.
 /// Its request is `payload` in the request form, CH `0x40` (a JSON Schema
 /// type's tag, 0) under `zenoh/bytes` (core §5.1).
@@ -2365,10 +2376,14 @@ async fn s9_a_calls_forms() {
         })
         .await
         .unwrap();
+    routed(&tool, "zk2/h2/tc/tc.v1/@op/diagnostics").await;
     let h2 = addr("h2/tc");
+    // Each answer below but the frozen server's comes back at once, so the
+    // deadline only bounds a reply that is coming, and a loaded run never
+    // races it (#1028).
     let ping = Client::new(&tool, tc_contract(), &["h2/tc"])
         .unwrap()
-        .with_timeout(Duration::from_millis(500))
+        .with_timeout(common::SETTLE)
         .with_retries(1);
     for (answer, refusal) in [
         (PingAnswer::RouterTimeout, Some("sample_kind")),
@@ -2402,10 +2417,15 @@ async fn s9_a_calls_forms() {
     );
     assert_eq!(pings.load(Ordering::SeqCst) - before, 1, "called once");
 
-    // 6. A frozen server behind the router: silence, called twice.
+    // 6. A frozen server behind the router: silence, called twice. Its
+    // deadline is the point here, so a short one.
     *mode.lock().unwrap() = PingAnswer::Frozen;
     let before = pings.load(Ordering::SeqCst);
-    let out = ping
+    let frozen_ping = Client::new(&tool, tc_contract(), &["h2/tc"])
+        .unwrap()
+        .with_timeout(Duration::from_millis(500))
+        .with_retries(1);
+    let out = frozen_ping
         .call_value(&h2, DIAGNOSTICS, &Bindings::new(), &json!({}))
         .await
         .unwrap();
@@ -2417,6 +2437,12 @@ async fn s9_a_calls_forms() {
             "a querier's or a router's Timeout: {t}"
         );
     }
+    // The second query may reach the frozen server after the caller's
+    // deadline: wait for it, then count exactly two.
+    eventually("the frozen server holds both queries", || async {
+        pings.load(Ordering::SeqCst) - before >= 2
+    })
+    .await;
     assert_eq!(pings.load(Ordering::SeqCst) - before, 2);
 
     // 7. An earlier core's envelope: `set` answered with the JSON error
@@ -2437,9 +2463,10 @@ async fn s9_a_calls_forms() {
         })
         .await
         .unwrap();
+    routed(&tool, "zk2/h3/tc/tc.v1/@op/interfaces/eth0/set").await;
     let h3 = Client::new(&tool, tc_contract(), &["h3/tc"])
         .unwrap()
-        .with_timeout(Duration::from_millis(500))
+        .with_timeout(common::SETTLE)
         .with_retries(1);
     let out = h3
         .call_value(
