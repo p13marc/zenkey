@@ -87,7 +87,7 @@ never sniffed.
 ``--across-face SYSTEM/SERVICE``, repeatable, needs ``--contracts`` and no
 ``SELECTOR``: the tool subscribes by the scopes the contracts in hand give
 for those addresses, each concrete resource by its exact key and each
-template by its selector, an event's ULID chunk a wildcard
+template by its selector, an event's occurrence chunk a wildcard
 (:func:`zk2py.face.scopes`), one subscriber each. No descriptor crosses, so
 the addresses and their contracts are the deployment's word. The scope says
 what it excludes: operations, control keys, ``@adv``, and every key no held
@@ -126,7 +126,7 @@ from . import decoding, live
 
 #: The plain kinds by the data form's key (core §1.1: the kind token at
 #: position 5, then one resource chunk or more; an event's last chunk is
-#: its ULID, core §2.6). A selector watches a kind when it intersects its
+#: its occurrence chunk, core §2.6). A selector watches a kind when it intersects its
 #: form, by zenoh's intersection.
 PLAIN_REACH = (
     ("stream", "zk2/*/*/*/stream/*/**"),

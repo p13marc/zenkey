@@ -363,7 +363,8 @@ class StallWatch:
 
 
 def event_member(key: str) -> str:
-    """§2.7: an event's member is "its key without the ULID chunk"."""
+    """§2.7: an event's member is "its key without its occurrence chunk"
+    (core 0.101)."""
     return key.rsplit("/", 1)[0]
 
 

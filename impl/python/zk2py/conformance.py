@@ -4297,7 +4297,8 @@ def _round98_readings(root: Path) -> list[tuple[str, Any, Any]]:
          + entry("profiles/health/CHANGELOG.md", "0.9", "clock ahead")
          + entry("profiles/alarms/CHANGELOG.md", "0.12", "clock ahead")
          + missing(v1, "| **Status** | experimental |")
-         + missing(idx, "| [`freshness.v1`](freshness/v1.md) | 0.5 | experimental | none |"),
+         # freshness.v1 0.6 (round 107): editorial, no rule
+         + missing(idx, "| [`freshness.v1`](freshness/v1.md) | 0.6 | experimental | none |"),
          [True]),
     ]
     # core §4.3 "Ahead" (0.88): what the guard holds is a write that carries a Zenoh timestamp.
@@ -4709,13 +4710,16 @@ def _round100_readings(root: Path) -> list[tuple[str, Any, Any]]:
     forms = _load_json(root / "errors" / "forms.json")
     exp = _load_json(root / "contracts" / "expect.json")["cases"]
     out.append(("core 0.92's entry: vectors.json's 20 headers and 147 cases, 91 of them on query, reply and "
-                "reply_err, and core 0.97's 2 headers and 12 cases, 2 of them on query and reply (22, 159 and 93); "
-                "forms.json's 256 error bytes, 22 writes and 17 reads; e044-packed-place lists two E044",
+                "reply_err, core 0.97's 2 headers and 12 cases, 2 of them on query and reply, and core 0.101's 15 "
+                "cases, the 14 on a put carrying their key, beside 2 earlier cases re-read so (22, 174, 93 and 16; round "
+                "107); forms.json's 256 error "
+                "bytes, 22 writes and 17 reads; e044-packed-place lists two E044",
                 [len(vec["headers"]), len(vec["cases"]),
                  sum(1 for c in vec["cases"] if c["sample"] in ("query", "reply", "reply_err")),
+                 sum(1 for c in vec["cases"] if "key" in c and c["sample"] == "put"),
                  len(forms["bytes"]), len(forms["writes"]), len(forms["reads"]),
                  exp["e044-packed-place"]["codes"]],
-                [22, 159, 93, 256, 22, 17, ["E044", "E044"]]))
+                [22, 174, 93, 16, 256, 22, 17, ["E044", "E044"]]))
     # What no rule adopted at 0.92 (core §5.1 "The forms", §5.2 "The error
     # form"). Core 0.94 (#985 C4c) adopts the forms: round 101 re-keys this
     # reading to the three sentences' absence, and reads 0.94's own rules in
@@ -4827,14 +4831,14 @@ def _round101_readings(root: Path) -> list[tuple[str, Any, Any]]:
     vec = _load_json(root / "envelope" / "vectors.json")
     forms = _load_json(root / "errors" / "forms.json")
     out.append(("core 0.94's entry: calls.json holds ok-packed-operation's three operations, CHs by the tags Sensor 6, "
-                "Status 14 and Change 2, 21 writes and 18 reads; vectors.json (20 headers, 147 cases, and 0.97's 2 "
-                "and 12) and forms.json (256 bytes, 22 writes, 17 reads) change no case",
+                "Status 14 and Change 2, 21 writes and 18 reads; vectors.json (20 headers, 147 cases, 0.97's 2 "
+                "and 12, and 0.101's 15, round 107) and forms.json (256 bytes, 22 writes, 17 reads) change no case",
                 [cj["contract"], [f["operation"] for f in cj["forms"]],
                  {n.split("#")[1]: t["tag"] for n, t in cj["types"].items()}, len(cj["writes"]), len(cj["reads"]),
                  len(vec["headers"]), len(vec["cases"]), len(forms["bytes"]), len(forms["writes"]),
                  len(forms["reads"])],
                 ["contracts/ok-packed-operation.toml", ["calibrate", "scan", "reset"],
-                 {"Sensor": 6, "Status": 14, "Change": 2}, 21, 18, 22, 159, 256, 22, 17]))
+                 {"Sensor": 6, "Status": 14, "Change": 2}, 21, 18, 22, 174, 256, 22, 17]))
     # §5.1's four additions and §5.2's two, as the entry names them.
     out.append(("core 0.94 §5.1: the caller's request MUST, the owner's value MUST with its as-of mark, reading a "
                 "value, an answer sent again MUST; the bare wire's MAY, gone since core 0.99 (round 104)",
@@ -5020,25 +5024,27 @@ def _round103_readings(root: Path) -> list[tuple[str, Any, Any]]:
     form7 = [c for c in vec["cases"] if c["hex"] and int(c["hex"][:2], 16) >> 5 == 7]
     out.append(("core 0.97's entry: vectors.json 22 headers and 159 cases; carries.json 28 reads; snapshot/bodies.json "
                 "39 writes, 12 refused, 109 reads, 79 refused, and 13 snapshots paged, 2 refused; of vectors.json's "
-                "cases, 18 are a snapshot's CH, 11 on a put, of which 7 parse",
+                "cases, 18 are a snapshot's CH, 11 on a put, of which 7 parse; since core 0.101 and 0.103, 174 cases "
+                "and 37 reads (round 107)",
                 missing(log, "22 headers and 159 cases, 12 of them new", "28 reads, 12 new",
                         "39 writes, 12 of them refused, 109 reads, 79 refused, and 13 snapshots paged, 2 refused")
                 + [len(vec["headers"]), len(vec["cases"]), len(car["reads"]), len(bod["writes"]),
                    refused(bod["writes"]), len(bod["reads"]), refused(bod["reads"]), len(bod["pages"]),
                    refused(bod["pages"]), len(form7), sum(1 for c in form7 if c["sample"] == "put"),
                    sum(1 for c in form7 if c["sample"] == "put" and "refused" not in c["expect"])],
-                [22, 159, 28, 39, 12, 109, 79, 13, 2, 18, 11, 7]))
+                [22, 174, 37, 39, 12, 109, 79, 13, 2, 18, 11, 7]))
     # core 0.100 (round 105) adopts the snapshot: §4.2 has an owner write one
     # and a reader read one, and §7.5's "No rule at this version" is gone.
-    out.append(("core 0.97 §7.5: the snapshot's four static rules as the text states them, §12's static acts, "
-                "form 4 the one reserved; since core 0.100, §4.2's rules adopt it",
+    out.append(("core 0.97 §7.5: the snapshot's four static rules as the text states them, §12's static acts; "
+                "since core 0.100, §4.2's rules adopt it; since core 0.101 no form is reserved, form 4 the event "
+                "(round 107)",
                 missing(core, "An implementation MUST refuse a body for the first of these that applies, reading its "
                               "fields in order, naming the refusal:",
                         "An implementation MUST NOT write a page that this reading refuses.",
                         "Every page an implementation accepts MUST write back to the same bytes.",
                         "An implementation that cuts a snapshot into pages MUST cut it so.",
                         "So are reading or writing a snapshot's page, and cutting a snapshot into pages (§7.5).",
-                        "a reserved form, 4 (`form`);",
+                        "a reserved form (`form`). This version reserves none;",
                         "**Only a GET's reply carries a snapshot.** No owner puts one on its key.")
                 + missing(glossary, "**Snapshot**: one collection's state in a GET's reply, in pages")
                 + [q for q in ("No rule at this version has an owner write one, or a reader read one",) if q in core]
@@ -5049,11 +5055,12 @@ def _round103_readings(root: Path) -> list[tuple[str, Any, Any]]:
     once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
     out.append(("core 0.97's and 0.98's entries: RULES.md lists 250 rules, the static rules 67 with §7.5's four, the "
                 "owner 76; 249 since core 0.99's one fewer (round 104); 262 and the owner 83 since core 0.100 "
-                "(round 105); 267 since observer 0.29's five (round 106)",
+                "(round 105); 267 since observer 0.29's five (round 106); 268 since core 0.102's one, and 273 and the "
+                "owner 85 since core 0.103's five (round 107)",
                 missing(log, "`RULES.md` lists 250 rules, 4 more", "The owner class counts 76 where it counted 78",
                         "[`RULES.md`](RULES.md) lists 249 rules, 1 fewer", "`RULES.md` lists 262 rules, 13 more")
                 + [int(once.group(1)) if once else None, counted.get("Implementation: the static rules"),
-                   counted.get("Owner")], [267, 67, 83]))
+                   counted.get("Owner")], [273, 67, 85]))
     # §7.5's "Sizes", by zk2py's own writer.
     base = {"tag": 0, "run_width": 16, "run": 1, "asof": 9, "time": {"s": 3600, "ms": 250}, "index": 0,
             "more": False, "coll": 0, "live": [], "tombs": []}
@@ -5103,13 +5110,15 @@ def _round103_readings(root: Path) -> list[tuple[str, Any, Any]]:
     # notes say 4 in 3.0 to 3.2 and 11 in 3.3, the bytes keeping 4.
     out.append(("F-495 answered (core 0.100): snapshot/README.md and bodies.json's notes say sdu/endpoint/{endpoint} "
                 "is collection 4 in modem.v3 3.0 to 3.2 and 11 in 3.3 (71f55126, catalog index 8), of 14, the seven "
-                "packed states before it; oper is 2 in each",
+                "packed states before it; oper is 2 in each; 3.4 (04836e17, index 10, the head since #1099) adds "
+                "events alone, so 11 too",
                 missing(readme, "That is its index in modem.v3 3.0 to 3.2, in the canonical form's order. In 3.3, the "
                                 "example's head, it is 11.")
                 + [q for q in ("is collection 4 of modem.v3's state, in the canonical form's order",) if q in readme]
                 + [modem.fingerprint[7:15], len(states), states.index("sdu/endpoint/{endpoint}"),
                    states.index("oper"), sorted(earlier.items()), len(notes)],
-                ["71f55126", 14, 11, 2, [("69081ed3", 4), ("71f55126", 11), ("9a3e2859", 4), ("a584f236", 4)], 1]))
+                ["04836e17", 14, 11, 2, [("04836e17", 11), ("69081ed3", 4), ("71f55126", 11), ("9a3e2859", 4),
+                                         ("a584f236", 4)], 1]))
     # F-497: the collection's index under two revisions a deployment runs at
     # once. modem.v3 3.2 (a584f236, catalog index 6) and 3.3 (71f55126,
     # index 8): 3.3 adds seven state resources that sort before sdu/.
@@ -5254,6 +5263,7 @@ def _round104_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out += _mend_after_round104(root)
     out += _round105_readings(root)
     out += _round106_readings(root)
+    out += _round107_readings(root)
     return out
 
 
@@ -5448,7 +5458,7 @@ def _round106_readings(root: Path) -> list[tuple[str, Any, Any]]:
          + missing(obs, "### 7.5 Reading across a face",
                    "A tool given the face SHOULD NOT declare a scope for a resource the plan keeps off it.",
                    "A tool MUST NOT drop silently a selector it was given that meets none of its scopes: it refuses "
-                   "it, and says why.",
+                   "the read, declaring none of the selectors, and names each such selector and why.",
                    "A tool that reads a mutation, a frame or a heartbeat with no descriptor naming the owner's "
                    "revision MUST read it with the revision chosen in this order.",
                    "A tool MUST NOT decode a record as its declared type under a tag that is not that type's",
@@ -5474,38 +5484,216 @@ def _round106_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 [bool(r_wrong["undecodable"]) and ": tag (" in r_wrong["undecodable"], r_wrong["sniffed"],
                  r_unheld["sniffed"], r_unheld["declared_type"].get("shown"), r_zero["sniffed"] is not None],
                 [True, None, None, "<packed record, tag 5, 5 bytes>", True]))
-    # F-509: tags.json's e3a529fe, a file whose id is its successor's
+    # F-509 to F-511, answered by observer 0.31 (round 107): each reading
+    # re-keyed to its answer
     tags = _load_json(root / "envelope" / "tags.json")
-    cat_file = _load_json(repo / tags["catalogs"]["e3a529fe"])
+    src = tags["catalogs"]["e3a529fe"]
     from . import catalog as cat_mod
 
-    out.append(("F-509 (open): envelope/tags.json maps e3a529fe to examples/zk2/zenoh-modem/catalog.json, whose id is "
-                "0ff6bf6d since #1080; e3a529fe is the catalog of its first nine entries, by its lineage, which the "
-                "description does not say",
-                [tags["catalogs"]["e3a529fe"], cat_mod.catalog_id(cat_file),
-                 any(x.get("id") == "e3a529fe" for x in cat_file.get("lineage") or []),
-                 across.catalog_by_id("e3a529fe", tags["catalogs"]["e3a529fe"], repo).id]
-                + missing(" ".join(tags["description"].split()),
-                          "`catalogs` maps a catalog's id to its file, or to its document, each a predecessor of "
-                          "e3a529fe in its lineage, so a reader checks each id."),
-                ["examples/zk2/zenoh-modem/catalog.json", "0ff6bf6d", True, "e3a529fe"]))
+    tdesc = " ".join(tags["description"].split())
+    out.append(("F-509 answered (observer 0.31): envelope/tags.json maps e3a529fe to its document, as ab76ec37 and "
+                "0a90fd61 are, whose id reads e3a529fe as written, and says that examples/zk2/zenoh-modem/catalog.json's "
+                "0ff6bf6d succeeds it",
+                [isinstance(src, dict), cat_mod.catalog_id(src) if isinstance(src, dict) else None,
+                 all(isinstance(v, dict) for v in tags["catalogs"].values()),
+                 across.catalog_by_id("e3a529fe", src, repo).id]
+                + missing(tdesc, "`catalogs` maps a catalog's id to its document, so a reader checks each id: "
+                                 "e3a529fe, zenoh-modem's catalog of nine entries, which "
+                                 "`examples/zk2/zenoh-modem/catalog.json`'s 0ff6bf6d succeeds"),
+                [True, "e3a529fe", True, "e3a529fe"]))
     faces = _load_json(root / "scope" / "faces.json")
     c12 = faces["cases"][12]
-    out.append(("F-510 (open): observer §7.5's \"it refuses it, and says why\" leaves unsaid whether the tool still "
-                "declares a selector given beside it that meets a scope; scope/faces.json case 12 gives `refused` "
-                "alone (zk2py's echo tool refuses the read)",
+    out.append(("F-510 answered (observer 0.31): a tool given a selector that meets none of its scopes refuses the "
+                "read, declares none of the selectors, and names each such selector and why; scope/faces.json case 12 "
+                "gives `refused` alone, and its description says so (zk2py's echo tool refuses the read, exit 2)",
                 missing(obs, "A tool MUST NOT drop silently a selector it was given that meets none of its scopes: it "
-                             "refuses it, and says why.")
+                             "refuses the read, declaring none of the selectors, and names each such selector and why.")
+                + missing(" ".join(faces["description"].split()),
+                          "the selectors given that meet none of its scopes, for which the tool refuses the read and "
+                          "declares none")
                 + [len(c12["typed"]), sorted(c12["expect"])], [2, ["refused"]]))
     plan22 = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "plan.json")["cases"][22]
     pol, _ = link_v2.parse_policy(plan22["policy"])
     ifs = _link_interfaces(plan22)
     services_only = link_v2.plan(plan22["policy"], {s: list(ifs) for s in pol.services}, ifs, None)
-    out.append(("F-511 (open): observer §7.5 derives the plan with \"each service the policy lists taken to implement "
-                "them all\", and names no device of a device face (link.v2 §2.5): read so, link.v2's plan.json case "
-                "22's device face is refused service_unknown, and the tool has no scope",
-                missing(obs, "each service the policy lists taken to implement them all")
+    out.append(("F-511 answered (observer 0.31): the plan takes each service the policy lists, and each device of its "
+                "faces (link.v2 §2.5), to implement every contract in hand; read without the devices, link.v2's "
+                "plan.json case 22 is refused service_unknown, which zk2py's across.scopes no longer does",
+                missing(obs, "each service the policy lists, and each device of its faces (`link.v2` §2.5), taken to "
+                             "implement them all")
                 + [sorted(f["code"] for f in services_only.get("refused", []))], [["service_unknown"]]))
+    return out
+
+
+def _round107_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.101 to 0.103 (#980 C2a, C2c, C2d; round 105 and 106 answered)
+    and observer 0.30 to 0.32, read cold (#609, round 107): each version and
+    its entry, the rules as their texts state them, zk2py's occurrence chunk
+    and form 4 over the texts' own examples, and the texts round 107's
+    findings quote. The fixtures are the keys and envelope families'; the
+    live half is ``events_live`` (``state.md`` §8) and ``archive_live``
+    (§5)."""
+    import re
+
+    from . import keys, zk2c
+    from .lexical import occurrence_chunk, parse_occurrence
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    def header(rel: str) -> tuple[str | None, str | None]:
+        t = flat(rel)
+        v = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+)", t)
+        w = re.search(r"\| \*\*Written against\*\* \| core (\d+\.\d+)", t)
+        return (v.group(1) if v else None, w.group(1) if w else None)
+
+    core, obs, st = flat("core.md"), flat("observer.md"), flat("scenarios/state.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = f"{m.group(1)}.{m.group(2)}" if m else None
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.103 or later and observer 0.32 or later against core 0.103 or later, each version from 0.101 and "
+         "0.30 with its entry; alarms.v1 0.14, health.v1 0.10, link.v2 0.11, config.v1 0.14, config.v2 0.5, link.v1 "
+         "0.18 and freshness.v1 0.6 entered",
+         [_at_least(core_v, "0.103"), _at_least(header("observer.md")[0], "0.32"),
+          _at_least(header("observer.md")[1], "0.103")]
+         + entry("CHANGELOG.md", "0.101", "an event's key from its run and seq")
+         + entry("CHANGELOG.md", "0.102", "a stray `reply_del`")
+         + entry("CHANGELOG.md", "0.103", "the ULID refused")
+         + entry("observer-CHANGELOG.md", "0.30", "an event's stamp from its key")
+         + entry("observer-CHANGELOG.md", "0.31", "a refused selector refuses the read")
+         + entry("observer-CHANGELOG.md", "0.32", "occurrence chunk")
+         + entry("profiles/alarms/CHANGELOG.md", "0.14", "snapshot's run")
+         + entry("profiles/health/CHANGELOG.md", "0.10", "snapshots")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 0.11", "0ff6bf6d")
+         + entry("profiles/link/CHANGELOG.md", "0.18", "occurrence chunk")
+         + entry("profiles/config/CHANGELOG.md", "0.14", "occurrence chunk")
+         + entry("profiles/config/CHANGELOG.md", "config.v2 0.5", "occurrence chunk")
+         + entry("profiles/freshness/CHANGELOG.md", "`v1.md` 0.6", "event's time"),
+         [True, True, True]),
+    ]
+    # §1.2: the occurrence chunk, its two examples by zk2py's codec both ways
+    ex = [occurrence_chunk(16, 5, 9), occurrence_chunk(32, 0xDEADBEEF, 9), parse_occurrence("002g0009"),
+          parse_occurrence("1qndqvqg0009"), (0x0500_0009 == (5 << 24) | 9)]
+    out.append(("core 0.101 §1.2: an occurrence chunk is the run's bits then the seq's 24, Crockford's base32 in "
+                "lowercase, 8 characters for a 16-bit run and 12 for a 32-bit one; its two examples by zk2py's codec, "
+                "written and read; 0.103: an events key whose last chunk is no occurrence chunk, a ULID's among "
+                "them, is no zk2 key",
+                missing(core, "**An occurrence chunk** (events, §2.6) is a run and a seq (§4.3), the run's bits then "
+                              "the seq's 24, in Crockford's base32 in lowercase",
+                        "A 16-bit run's chunk is 40 bits, in 8 characters.",
+                        "A 32-bit run's chunk is 56 bits, in 12 characters, the first `0` or `1`.",
+                        "So run 5 at seq 9, `0x0500_0009`, is `002g0009`, and the 32-bit run `0xdeadbeef` at seq 9 "
+                        "is `1qndqvqg0009`.",
+                        "**An events key's last chunk** is an occurrence chunk. A key whose last chunk is not one, a "
+                        "26-character ULID's among them, is not a zk2 key.")
+                + [q for q in ("**A ULID chunk**",) if q in core]
+                + [ex[0], ex[1], ex[2].as_json() if ex[2] else None, ex[3].as_json() if ex[3] else None, ex[4],
+                   keys.parse("zk2/s/svc/log.v1/events/applied/01hzx3k5n2m4p6q8r0s2t4v6w8")],
+                ["002g0009", "1qndqvqg0009", {"run_width": 16, "run": 5, "seq": 9},
+                 {"run_width": 32, "run": 0xDEADBEEF, "seq": 9}, True, None]))
+    # every 8- and 12-character chunk zk2py writes reads back to its stamp,
+    # and orders by seq within one run, bytewise ("The fixed width makes
+    # the chunk's byte order its seq's within one run")
+    import random
+
+    rng = random.Random(107)
+    rounds, ordered = [], True
+    for _ in range(2000):
+        w = rng.choice((16, 32))
+        run, a, b = rng.randrange(2**w), rng.randrange(2**24), rng.randrange(2**24)
+        ca, cb = occurrence_chunk(w, run, a), occurrence_chunk(w, run, b)
+        rounds.append(parse_occurrence(ca).as_json() == {"run_width": w, "run": run, "seq": a})
+        ordered = ordered and ((ca.encode() < cb.encode()) == (a < b))
+    out.append(("core 0.101 §1.2: \"The decode is exact and reads no contract. The fixed width makes the chunk's byte "
+                "order its seq's within one run\": 2000 random stamps by zk2py's codec, each read back, and two seqs "
+                "of one run ordered by their chunks' bytes",
+                [all(rounds), ordered], [True, True]))
+    # §2.6, the five rules C2c adds, as their texts state them
+    out.append(("core 0.103 §2.6: the owner's two MUSTs (the occurrence chunk of its run and seq, form 4 with its "
+                "time) and the consumer's three (keep within the retention and drop beyond, never judge an unknown "
+                "time, the order), and their reasons as the text states them",
+                missing(core, "An owner MUST publish each occurrence once, with a one-shot put, on "
+                              "`…/<iface>/events/<template>/<occurrence>`, its last chunk the occurrence chunk (§1.2) "
+                              "of the run and the seq the occurrence took (§4.3).",
+                        "The owner MUST write the put's payload as an event (§7.5's form 4), with the occurrence's "
+                        "time.",
+                        "**An occurrence seen earlier.** An owner that relays one, such as a device's, writes the "
+                        "time it occurred. Its key still takes the owner's next seq, so within one run the relayed "
+                        "occurrences order by their arrival at the owner, and across runs by their times.",
+                        "It is unknown while §4.3's clock guard holds, as a heartbeat's is, and where the owner does "
+                        "not trust its clock.",
+                        "A consumer MUST keep a replayed occurrence whose time (§7.5's form 4) is within the "
+                        "retention, and drop one whose time is beyond it.",
+                        "A consumer MUST NOT judge an unknown time within the retention or beyond it: the storage's "
+                        "`_time` bound alone admitted that occurrence.",
+                        "A consumer MUST deliver a replay in the order of the occurrences' times, then their seqs "
+                        "within one run. The occurrences of an unknown time come after every one with a time, by "
+                        "seq within one run.",
+                        "Between two runs at one time, and among the unknown times of two runs, the order is "
+                        "unspecified: nothing orders two runs (§4.3).",
+                        "zenoh 1.10.1's storage manager refuses no put on a key it holds (Appendix B)."), []))
+    # §7.5, form 4
+    ev16 = zk2c.event(16, {"s": 3600, "ms": 250}, b"{}")
+    ev32 = zk2c.event(32, {"s": 3600, "ms": 250}, b"{}")
+    order = [zk2c.reads("zk2/s/v/a.v1/events/x/002g0009", bytes.fromhex(h)).get("refused")
+             for h in ("", "80", "9000000e1000fa", "8000000e1003e8")]
+    out.append(("core 0.101 §7.5: form 4, `CH · t32 · ms16 · record`, its stamp its key's, CH's width bit the "
+                "chunk's; 7 bytes over its record whatever its run (zk2py's writer: 9 bytes for `{}` under either); "
+                "the parse's key_stamp after request_run and before short, and time after trailing (zk2py: short, "
+                "short, key_stamp, time)",
+                missing(core, "event, a put's payload CH · t32 · ms16 · record",
+                        "**Its stamp is its key's.** The occurrence chunk holds the run and the seq, so the event "
+                        "carries the occurrence's time in their place. CH's width bit is the chunk's: 0 for 8 "
+                        "characters, 1 for 12.",
+                        "An event is 7 bytes over its record, whatever its run: its key holds the stamp.",
+                        "an event whose key's last chunk is not an occurrence chunk of CH's width: 8 characters "
+                        "under a width bit of 1, or 12 under 0 (`key_stamp`);",
+                        "an event whose time is unused (`time`);",
+                        "**The forms.** Each form has one code. This version defines all eight:")
+                + [len(ev16), len(ev32), ev16[0], ev32[0], order],
+                [9, 9, 0x80, 0x90, ["short", "short", "key_stamp", "time"]]))
+    # §4.2, the stray reply_del, and the owner's revision for per-key
+    out.append(("core 0.102 §4.2: a stray reply_del, on a member of a collection its owner answers by snapshot, is "
+                "never merged as a deletion and counts undecodable, form; whether a resource is per key is read from "
+                "the owner's revision for the run of the sample's stamp",
+                missing(core, "A consumer or a tool MUST NOT merge a stray `reply_del` as a deletion. It counts it "
+                              "undecodable, refused as `form`: a delete is no form that owner answers the member in "
+                              "(§7.5).",
+                        "**It says which resources are per key, too.** Whether a member's resource is a per-key "
+                        "resource (above) is read from the owner's revision: the one its descriptor names for the "
+                        "run of the sample's stamp, or the deployment's word.",
+                        "A `reply_del` is a deletion with its stamps (S3), merged as a live delete is. A stray one "
+                        "is not (below).")
+                + missing(st, "## §15 A `reply_del` where the owner answers by snapshot (§4.2)"), []))
+    # Appendix B's new fact, and state.md §8 rewritten
+    out.append(("core 0.103 Appendix B: the storage manager holds one sample per key and refuses no put on a key it "
+                "holds; state.md §8 rewritten: 1,000 occurrences dated by put_at, an unknown time, a run change, "
+                "503 replayed in time order, the unknown time last",
+                missing(core, "The storage manager holds one sample per key, the newest by its timestamp, and refuses "
+                              "no put on a key it holds: a later put replaces what it held")
+                + missing(st, "1. The owner publishes 1,000 occurrences, dated by `put_at`.",
+                          "2. The owner publishes one occurrence of an unknown time.",
+                          "It publishes two occurrences, dated T − 100.5 s and T − 0.5 s.",
+                          "2. The replay holds 503 occurrences",
+                          "4. Step 2's comes last."), []))
+    # observer 0.30 to 0.32
+    out.append(("observer 0.30 §7.3: a tool reads an event's run and seq from its key and its record after its time, "
+                "and shows the time or that the clock was unknown; 0.32 §7.5: an event's last chunk, its occurrence "
+                "chunk, a wildcard",
+                missing(obs, "**An event** (core §7.5's form 4) carries its time where a mutation carries its stamp, "
+                             "and its stamp is its key's occurrence chunk. A tool reads the run and the seq from the "
+                             "key, and the record after the time. It shows the time, or that the owner's clock was "
+                             "unknown, beside the run and the seq.",
+                        "An event's last chunk, its occurrence chunk, is a wildcard too.")
+                + [q for q in ("ULID chunk is a wildcard",) if q in obs], []))
     return out
 
 
@@ -5544,24 +5732,36 @@ def _round105_readings(root: Path) -> list[tuple[str, Any, Any]]:
           _at_least(header("profiles/link/v2.md")[0], "0.9"), _at_least(header("profiles/link/v2.md")[1], "0.100")],
          [True] * 6),
     ]
-    out.append(("F-503 (open): alarms.v1 §2.14 step 5 attributes a GET's reply by the Zenoh timestamp its owner sets, and "
-                "its scenarios §1, §3 and §5, and health.v1's §1 and §4, expect one; core 0.100 answers an alarm's state (a freshness.v2 "
-                "collection) by snapshot, whose entries carry none, and its entry names alarms' scenario §3 alone",
-                missing(al, "A GET's reply carries the alarm's last confirmation, which its owner stamps "
-                            "(`freshness.v2` §2.4), and is read as above;",
-                        "a put whose stamp's id is not the present descriptor's `meta.zid`")
-                + missing(alsc, "G's reply holds the same document under the same in-band stamp, and its last "
-                                "confirmation (core S2)",
-                          "stamp and its last confirmation, the timestamp the owner minted at the delete",
-                          "G's reply holds A, stamped by the new instance, whose `meta.zid` is the stamp's id")
-                + missing(flat("profiles/health/scenarios.md"),
-                          "stamped by the owner's session. It was put before the tokens (§2.3).",
-                          "status, under the owner's stamp, since a router never drops or")
-                + missing(fv2, "A GET answers its members by snapshot (core S2), each live entry with its "
-                               "**confirmation** (core §7.5)."), []))
-    out.append(("F-504 (open): state.md §14's setup gives pages of 8 entries \"at most 975 bytes\", a 16-bit run's "
-                "figure: under a 32-bit run the page holding plans/vehicle-01 is 977 (zk2py's writer)",
-                missing(st, "Its pages then hold 8 entries each, at most 975 bytes.")
+    # F-503 to F-508, answered by core 0.102, alarms.v1 0.14, health.v1 0.10
+    # and link.v2 0.11 (round 107): each reading re-keyed to its answer
+    he_sc = flat("profiles/health/scenarios.md")
+    out.append(("F-503 answered (alarms.v1 0.14, health.v1 0.10): a GET's entry carries no Zenoh timestamp, and is "
+                "attributed by the run of the snapshot that lists it: previous_instance under a run no present "
+                "descriptor states, unattributable with no run stated; never by the entry's own run; alarms' "
+                "scenarios §1, §3 and §5 and health's §1 to §4 read snapshots",
+                missing(al, "**A GET's entry** carries no Zenoh timestamp either (core §4.2). It is attributed by the "
+                            "run of the snapshot that lists it, the run its instance wrote under as it answered (core "
+                            "§7.5). Under a run that no present descriptor of the owner states as its `run` (core "
+                            "§3.3), it is **not asked**, `previous_instance`: an earlier instance answered, and its "
+                            "answer is that instance's last word. With no `run` stated, it is unattributable, and the "
+                            "reader goes on to step 6.",
+                        "**Not the entry's own run.** An entry keeps the run of its member's last mutation (core "
+                        "§7.5).")
+                + missing(alsc, "G's answer for A is a snapshot under the run the owner's descriptor states (core "
+                                "§3.3).",
+                          "G's answer lists the key as a tombstone, with the delete's in-band stamp, and no time",
+                          "G's answer for A is a snapshot under the new instance's run, which its descriptor states "
+                          "as `run` (§2.14 step 5).")
+                + missing(he_sc, "in a snapshot under the run the owner's descriptor states (core §3.3), its entry "
+                                 "with its confirmation (`freshness.v2` §2.4).",
+                          "`checks/net` as a tombstone")
+                + [q for q in ("A GET's reply carries the alarm's last confirmation, which its owner stamps",
+                               "stamped by the owner's session. It was put before the tokens")
+                   if q in al + alsc + he_sc], []))
+    out.append(("F-504 answered (core 0.102): state.md §14's pages hold at most 975 bytes under a 16-bit run and 977 "
+                "under a 32-bit run, as zk2py's writer cuts them",
+                missing(st, "Its pages then hold 8 entries each, at most 975 bytes under a 16-bit run and 977 under a "
+                            "32-bit run.")
                 + [len(snapshot.write_page({"tag": 0, "run_width": w, "run": 1, "asof": 40, "time": {"s": 1, "ms": 0},
                                             "index": 3, "more": False, "coll": 1, "tombs": [],
                                             "live": [{"id": i, "run_width": None, "run": None, "seq": 30,
@@ -5570,32 +5770,33 @@ def _round105_readings(root: Path) -> list[tuple[str, Any, Any]]:
                                                                "vehicle-01"]]}))
                    for w in (16, 32)], [975, 977]))
     l2 = (spec / "profiles" / "link" / "conformance" / "v2" / "plan.json").read_text(encoding="utf-8")
-    out.append(("F-505 (open): link.v2's v2/plan.json cases 14 to 18 carry face policies naming catalog e3a529fe, and "
-                "that catalog, where zenoh-modem's faces name 0ff6bf6d since #1080, and link.md says plan.json holds "
-                "each face's plan",
-                [r'catalog  = \"e3a529fe\"' in l2,
-                 'catalog  = "0ff6bf6d"' in (spec.parent / "examples" / "zk2" / "zenoh-modem" / "faces" /
-                                            "zenohd-rf0.face.toml").read_text(encoding="utf-8")]
-                + missing(" ".join((spec.parent / "examples" / "zk2" / "zenoh-modem" / "link.md")
-                                   .read_text(encoding="utf-8").split()),
-                          "`link.v2`'s `conformance/v2/plan.json` holds each face's plan"),
-                [True, True]))
-    out.append(("F-506 (open): core §4.3 \"Minting\" and freshness.v2 §2.4 mint a last confirmation at a delete, which "
-                "no answer carries since core 0.100: a tombstone's confirmation is 0, with no conf (§7.5)",
-                missing(core, "An owner mints a last confirmation at each mutation of such a member, a delete among "
-                              "them", "A tombstone's is 0.")
+    # #1099 (main d5a83804, round 107) moved the faces and the cases on to
+    # 29bf7d47 together: the answer holds, the cases following the faces.
+    out.append(("F-505 answered (link.v2 0.11): v2/plan.json's cases 14 to 18 carry face policies naming the catalog "
+                "zenoh-modem's faces name, 29bf7d47 since #1099, and no case names e3a529fe in a policy",
+                [r'catalog  = \"e3a529fe\"' in l2, r'catalog  = \"29bf7d47\"' in l2,
+                 'catalog  = "29bf7d47"' in (spec.parent / "examples" / "zk2" / "zenoh-modem" / "faces" /
+                                            "zenohd-rf0.face.toml").read_text(encoding="utf-8")],
+                [False, True, True]))
+    out.append(("F-506 answered (core 0.102) in core §4.3 \"Minting\": a last confirmation at each put and heartbeat, "
+                "a delete's carried by nothing; freshness.v2 §2.4 still mints the times \"at each mutation of the "
+                "member\" (round 107's finding)",
+                missing(core, "An owner mints a last confirmation at each put of such a member, and as it writes each "
+                              "heartbeat that vouches for it (§7.5). A delete's would be carried by nothing: a "
+                              "tombstone has no confirmation.")
+                + [q for q in ("a delete among them",) if q in core]
                 + missing(fv2, "The times** are minted at each mutation of the member"), []))
-    out.append(("F-507 (open): core §4.2 maps a snapshot's index by \"the owner's descriptor\", and §4.3's two "
-                "instances answer one GET, each its run; no text says which descriptor maps which snapshot (zk2py: "
-                "the one whose run is the snapshot's, §3.3)",
-                missing(core, "the revision of the interface that the owner's descriptor names (§3.3)",
-                        "**Where two instances answer**, both answers arrive: a snapshot or a reply of each one's "
-                        "run.")
-                + [q for q in ("the descriptor whose `run`",) if q in core], []))
+    out.append(("F-507 answered (core 0.102): the owner's descriptor is that of the instance whose run is the "
+                "snapshot's; where the descriptors reach the reader and none states it, no omission rule applies "
+                "(zk2py's seed_snapshot.ByDescriptor, no fallback to a lone descriptor since round 107)",
+                missing(core, "The owner's descriptor is that of the instance whose `run` is the snapshot's run (§3.3).",
+                        "**No descriptor states the run.** Where the owner's descriptors reach the reader and none "
+                        "states the snapshot's run, the late joiner applies no omission rule over that snapshot. Its "
+                        "entries still merge."), []))
     sfx = _load_json(root / "seed" / "snapshot.json")
-    out.append(("F-508 (open): seed/snapshot.json's description matches a member \"each parameter one chunk\", where "
-                "core §2.2's rest parameter takes one or more; no case has a rest template",
-                ["each parameter one chunk" in sfx["description"],
+    out.append(("F-508 answered (core 0.102): seed/snapshot.json's description matches a member each parameter one "
+                "chunk, a rest parameter one or more (core §2.2); no case has a rest template, so none moves",
+                ["each parameter one chunk, a rest parameter one or more (core §2.2)" in sfx["description"],
                  any("..." in x["template"] for c in sfx["cases"] for x in c.get("collections", [])
                      + [y for r in (c.get("revisions") or {}).values() for y in r])]
                 + missing(core, "a rest parameter takes one or more chunks"), [True, False]))
@@ -5789,15 +5990,18 @@ def _modem33_readings(root: Path) -> list[tuple[str, Any, Any]]:
     res = c.canonical["resources"] if c.canonical else []
     by = {r["template"]: r for r in res}
     kinds = {k: sum(1 for r in res if r["kind"] == k) for k in ("stream", "state", "event", "operation")}
-    out.append(("modem.v3 3.3 loads clean, fingerprint 71f55126, published in examples/zk2/.history: 105 resources "
-                "(85 streams, 14 states, 4 events, 2 operations), 99 of them optional, as its header says",
-                missing(comments, "Counts: 105 resources (85 streams, 14 states, 4 events, 2 "
-                        "operations); 99 of them optional.")
+    # modem.v3 3.4 (#991, #1099, main d5a83804, round 107) is the example's
+    # head since: 3.3's three face events beside its four JSON ones.
+    out.append(("modem.v3 3.4 (since #1099; 3.3 at round 98) loads clean, fingerprint 04836e17, published in "
+                "examples/zk2/.history: 108 resources (85 streams, 14 states, 7 events, 2 operations), 102 of them "
+                "optional, as its header says",
+                missing(comments, "Counts: 108 resources (85 streams, 14 states, 7 events, 2 "
+                        "operations); 102 of them optional.")
                 + [c.codes, (head["major"], head["minor"]), (c.fingerprint or "")[7:15],
                    (spec.parent / "examples" / "zk2" / ".history" / "modem.v3"
                     / f"{(c.fingerprint or '')[7:]}.bundle.json").is_file(),
                    len(res), kinds, sum(1 for r in res if r.get("optional"))],
-                [[], (3, 3), "71f55126", True, 105, {"stream": 85, "state": 14, "event": 4, "operation": 2}, 99]))
+                [[], (3, 4), "04836e17", True, 108, {"stream": 85, "state": 14, "event": 7, "operation": 2}, 102]))
     frames = sorted(t for t, r in by.items() if r.get("frame") is not None)
     nine = ["frames/air", "frames/bearer", "frames/if", "frames/layer", "frames/link", "frames/message",
             "frames/radio", "frames/sched", "frames/sdu"]
@@ -5926,14 +6130,19 @@ def _modem33_readings(root: Path) -> list[tuple[str, Any, Any]]:
     # #1080 (round 105): catalog.json appends freshness.v2's standard
     # contract at index 9, 0ff6bf6d succeeding e3a529fe.
     fv2c = load_contract(spec / "profiles" / "freshness" / "freshness.v2.toml")
-    out.append(("zenoh-modem's catalog.json is 0ff6bf6d (since #1080), its index 8 modem.v3 3.3's fingerprint and its "
-                "index 9 freshness.v2's; its lineage's last, e3a529fe, is the catalog of its first nine entries, "
-                "which it succeeds, and e3a529fe's own last 8c808dff (core §8.6)",
-                [catalog.catalog_id(cat_doc), cat_doc["entries"][8], cat_doc["entries"][-1], cat_doc["lineage"][-2:],
-                 catalog.catalog_id(prev), succeeds],
-                ["0ff6bf6d", {"contract": c.fingerprint, "iface": "modem.v3", "index": 8},
+    # #1099 (round 107): catalog.json appends modem.v3 3.4 at index 10,
+    # 29bf7d47 succeeding 0ff6bf6d.
+    out.append(("zenoh-modem's catalog.json is 29bf7d47 (since #1099; 0ff6bf6d since #1080), its index 8 modem.v3 "
+                "3.3's fingerprint, its index 9 freshness.v2's and its index 10 modem.v3 3.4's; its lineage's last, "
+                "0ff6bf6d, is the catalog of its first ten entries, which it succeeds, and e3a529fe of its first nine "
+                "(core §8.6)",
+                [catalog.catalog_id(cat_doc), cat_doc["entries"][8], cat_doc["entries"][9], cat_doc["entries"][-1],
+                 cat_doc["lineage"][-2:], catalog.catalog_id(prev), succeeds],
+                ["29bf7d47", {"contract": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+                              "iface": "modem.v3", "index": 8},
                  {"contract": fv2c.fingerprint, "iface": "freshness.v2", "index": 9},
-                 [{"entries": 8, "id": "8c808dff"}, {"entries": 9, "id": "e3a529fe"}], "e3a529fe", True]))
+                 {"contract": c.fingerprint, "iface": "modem.v3", "index": 10},
+                 [{"entries": 9, "id": "e3a529fe"}, {"entries": 10, "id": "0ff6bf6d"}], "0ff6bf6d", True]))
     # Each face file, planned by zk2py with catalog.json, is its plan.json case.
     cases = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "plan.json")["cases"]
     faces = {"zenohd-rf0": 14, "zenohd-lora0-sf7": 15, "zenohd-lora0-sf9": 16, "zenohd-lora0-sf12": 17,
@@ -5944,10 +6153,9 @@ def _modem33_readings(root: Path) -> list[tuple[str, Any, Any]]:
         text = (fm / "faces" / f"{name}.face.toml").read_text(encoding="utf-8")
         got = link_v2.plan(text, case["implements"], _link_interfaces(case), cat_doc)
         face = (got.get("faces") or [{}])[0]
-        # Since #1080 the faces name 0ff6bf6d and plan.json's cases still
-        # carry e3a529fe (F-505): the plans agree but for the catalog.
-        same = {k: v for k, v in got.items() if k != "catalog"} == \
-            {k: v for k, v in case["expect"].items() if k != "catalog"}
+        # Since #1080 the faces name 0ff6bf6d, and since link.v2 0.11 (F-505's
+        # answer, round 107) so do plan.json's cases: the plans agree whole.
+        same = got == case["expect"]
         planned[name] = [same, case["expect"].get("catalog"), got.get("catalog"),
                          [(f_["resource"].rsplit("/", 2)[-2] + "/" + f_["resource"].rsplit("/", 1)[-1], f_["every_s"],
                            f_.get("keyframe_s")) for f_ in face.get("frames", [])],
@@ -5956,21 +6164,22 @@ def _modem33_readings(root: Path) -> list[tuple[str, Any, Any]]:
                          sorted(x["code"] for x in face.get("findings", []) if x["code"] != "frame_unlisted"),
                          [x["code"] for x in link_v2.lint(text)]]
     out.append(("zenoh-modem's five faces (link.v2 0.8 Appendix B), each planned by zk2py with catalog.json as its "
-                "v2/plan.json case 14 to 18, but for the catalog (F-505: the cases carry e3a529fe, the faces "
-                "0ff6bf6d since #1080): one frame each at its cadence, liveness evidence, the two others "
+                "v2/plan.json case 14 to 18, whole (F-505 answered by link.v2 0.11; since #1099 the cases and the "
+                "faces carry 29bf7d47): one frame each at its cadence, liveness evidence, the two others "
                 "frame_unlisted; SF7 keep_alive_not_suppressed, SF9 frame_over_batch (216 B over 117 B); no_arq but "
-                "on SBD",
+                "on SBD; modem.v3 3.4's face/device_fault, JSON, not_packed on each",
                 planned,
-                {"zenohd-rf0": [True, "e3a529fe", "0ff6bf6d", [("frames/fast", 60, None)],
-                                ["modem.v3/stream/frames/fast"], [], ["no_arq"]],
-                 "zenohd-lora0-sf7": [True, "e3a529fe", "0ff6bf6d", [("frames/fast", 60, None)],
-                                      ["modem.v3/stream/frames/fast"], ["keep_alive_not_suppressed"], ["no_arq"]],
-                 "zenohd-lora0-sf9": [True, "e3a529fe", "0ff6bf6d", [("frames/fast", 120, 900)],
-                                      ["modem.v3/stream/frames/fast"], ["frame_over_batch"], ["no_arq"]],
-                 "zenohd-lora0-sf12": [True, "e3a529fe", "0ff6bf6d", [("frames/slow", 900, 3600)],
-                                       ["modem.v3/stream/frames/slow"], [], ["no_arq"]],
-                 "zenohd-sat0": [True, "e3a529fe", "0ff6bf6d", [("frames/paid", 1800, None)],
-                                 ["modem.v3/stream/frames/paid"], [], []]}))
+                {"zenohd-rf0": [True, "29bf7d47", "29bf7d47", [("frames/fast", 60, None)],
+                                ["modem.v3/stream/frames/fast"], ["not_packed"], ["no_arq"]],
+                 "zenohd-lora0-sf7": [True, "29bf7d47", "29bf7d47", [("frames/fast", 60, None)],
+                                      ["modem.v3/stream/frames/fast"], ["keep_alive_not_suppressed", "not_packed"],
+                                      ["no_arq"]],
+                 "zenohd-lora0-sf9": [True, "29bf7d47", "29bf7d47", [("frames/fast", 120, 900)],
+                                      ["modem.v3/stream/frames/fast"], ["frame_over_batch", "not_packed"], ["no_arq"]],
+                 "zenohd-lora0-sf12": [True, "29bf7d47", "29bf7d47", [("frames/slow", 900, 3600)],
+                                       ["modem.v3/stream/frames/slow"], ["not_packed"], ["no_arq"]],
+                 "zenohd-sat0": [True, "29bf7d47", "29bf7d47", [("frames/paid", 1800, None)],
+                                 ["modem.v3/stream/frames/paid"], ["not_packed"], []]}))
     return out
 
 
@@ -6014,12 +6223,13 @@ def _core096_readings(root: Path) -> list[tuple[str, Any, Any]]:
     once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
     out.append(("core 0.96's entry: RULES.md lists 246 rules, 0.95's 239, the core's four and observer 0.26's three; "
                 "250 since core 0.97's four, and core 0.98's still; 249 since core 0.99 (round 104); 262 since core "
-                "0.100's 13 (round 105); 267 since observer 0.29 (round 106)",
+                "0.100's 13 (round 105); 267 since observer 0.29 (round 106); 273 since core 0.102's one and 0.103's "
+                "five (round 107)",
                 missing(flat("CHANGELOG.md"), "lists 246 rules: 0.95's 239, these four and observer 0.26's three",
                         "`RULES.md` lists 250 rules, 4 more", "the index still lists 250 rules",
                         "lists 249 rules, 1 fewer", "`RULES.md` lists 262 rules, 13 more than 0.99's")
                 + missing(flat("observer-CHANGELOG.md"), "**`RULES.md`** counts 267 rules, 82 of them the observer's.")
-                + [int(once.group(1)) if once else None], [267]))
+                + [int(once.group(1)) if once else None], [273]))
     out.append(("core 0.96 §8.1, §8.4, §8.5 and observer 0.26 §3.6, §3.11: the rules as their texts state them",
                 missing(core, "Such an owner SHOULD put every interface it implements in its tokenless set.",
                         "Such an owner MUST NOT implement `archive.v1`, nor an interface whose contract uses "
@@ -6041,10 +6251,10 @@ def _core096_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("F-492 answered (core 0.98): RULES.md lists core §8.4's \"A deployment with such an owner SHOULD\" "
                 "under the deployment alone, and observer §3.11's \"A tool that knows an owner … MUST NOT\" under the "
                 "observer alone; the owner class counts 76, no text changed (83 since core 0.100's seven owner rules, "
-                "round 105)",
+                "round 105; 85 since core 0.103's two, round 107)",
                 missing(flat("CHANGELOG.md"), "It now reads the role a subject opens with, and each role joined to it",
                         "The owner class counts 76 where it counted 78", "§4.2 adds seven owner rules")
-                + [dep, tool, counted.get("Owner")], [["deployment"], ["observer"], 83]))
+                + [dep, tool, counted.get("Owner")], [["deployment"], ["observer"], 85]))
     out.append(("config.v1 0.10 §2.1: the SHOULD NOT on the tokenless set excepts a first hop; since 0.11 §2.12 names "
                 "the reference's restart of the configuration (F-480)",
                 ["The reference refuses the re-mint (`zenkey::config_v1`)" in cv1, "first hop" in cv1,
@@ -6257,10 +6467,12 @@ def _round98_answers(root: Path) -> list[tuple[str, Any, Any]]:
         # core 0.100 (round 105): a freshness.v2 state is answered by
         # snapshot, and a tombstone carries no time; the delete's minted
         # confirmation stays in §4.3's "Minting".
-        ("F-460 answered (core 0.89 S2), restated by core 0.100: a deleted member of a freshness.v2 state is a "
-         "tombstone, confirmation 0 and no time, and §4.3 still mints a last confirmation at its delete",
+        # core 0.102 (F-506, round 107): no confirmation is minted at a
+        # delete, which a tombstone could not carry.
+        ("F-460 answered (core 0.89 S2), restated by core 0.100 and 0.102: a deleted member of a freshness.v2 state is "
+         "a tombstone, confirmation 0 and no time, and §4.3 mints no last confirmation at its delete",
          missing(core, "**0, none:** the collection has no horizon. A tombstone's is 0.",
-                 "An owner mints a last confirmation at each mutation of such a member, a delete among them")
+                 "A delete's would be carried by nothing: a tombstone has no confirmation.")
          + [q for q in ("Its `reply_del` carries the timestamp minted at the delete.",) if q in core], []),
     ]
 
@@ -6576,9 +6788,11 @@ def _round96_readings(root: Path) -> list[tuple[str, Any, Any]]:
          [[], ["freshness.v2", "link.v1"], ["level", "status"], True]),
         ("F-444 answered (core 0.85, observer 0.20): a heartbeat carries a body, never a record of its resource's "
          "type, and a tool MUST NOT read one as such (the sentence names a snapshot too since core 0.97)",
+         # core 0.101 (round 107): an event's record is every byte after its
+         # time, between the two sentences
          missing(core, "**The record** is every byte after a mutation's seq, possibly none. It is read as the "
-                       "resource's type says (§7.1). A heartbeat, a frame and a snapshot carry a **body** there "
-                       "instead, never a record of the resource's type.")
+                       "resource's type says (§7.1). An event's is every byte after its time. A heartbeat, a frame "
+                       "and a snapshot carry a **body** there instead, never a record of the resource's type.")
          + missing(obs, "A tool MUST NOT decode, render or judge a heartbeat's body as a record of its resource's "
                         "type.",
                    "it shows the heartbeat by its envelope: its form, the interface it covers and its size.")
@@ -6593,9 +6807,10 @@ def _round96_readings(root: Path) -> list[tuple[str, Any, Any]]:
          missing(core, "An owner MUST give each live entry of a collection with a horizon its confirmation. It is 1 "
                        "while the owner vouches for the member",
                  "and otherwise 2, with the member's last confirmation (§4.3, \"Minting\").",
-                 # core 0.89 (F-460's answer, round 98): "a delete among them"
-                 "An owner mints a last confirmation at each mutation of such a member, a delete among them, and as "
-                 "it writes each heartbeat that vouches for it (§7.5).")
+                 # core 0.89 (F-460's answer, round 98): "a delete among
+                 # them"; core 0.102 (F-506, round 107): at each put
+                 "An owner mints a last confirmation at each put of such a member, and as it writes each heartbeat "
+                 "that vouches for it (§7.5).")
          + kept(core, "on its replies alone, never on a put")
          + kept(core, "The owner's reply of a member a `freshness.v2` heartbeat confirms MUST carry instead")
          + [keeps_timestamp(beacon, next(r for r in beacon.canonical["resources"] if r["template"] == "status")),
@@ -6709,16 +6924,21 @@ def _round95_readings(root: Path) -> list[tuple[str, Any, Any]]:
          + missing(rules, "Where a consumer reads presence, state or the admin space, `observer.md`'s reader rules "
                           "bind it (core §12). They are under [observer](#observer-the-tool-role-and-a-reader), "
                           "marked *reader*: [§8.6](core.md#86-the-deployment-catalog),"), []),
-        ("F-438: a template's selector names no wildcard for a rest parameter, and an event's ULID chunk only "
+        ("F-438: a template's selector names no wildcard for a rest parameter, and an event's last chunk only "
          "beside a template",
-         missing(core, "**A template's selector** is its key with each parameter a wildcard, and an event's ULID "
+         # core 0.101 and 0.103 (round 107): the last chunk, an occurrence
+         # chunk, where it said the ULID chunk; still no wildcard for a rest
+         # parameter
+         missing(core, "**A template's selector** is its key with each parameter a wildcard, and an event's last "
                        "chunk too. Its literal prefix is what is declared.",
                  "**`{name...}`** is a **rest** parameter: one or more chunks, each slugged.")
-         # observer 0.29 (round 106) rewords the scope's sentence; still no
-         # wildcard for a rest parameter
+         # observer 0.29 (round 106) rewords the scope's sentence, and 0.32
+         # (round 107) names the occurrence chunk; still no wildcard for a
+         # rest parameter
          + missing(obs, "A scope** is a resource's exact key where the resource is concrete, and its key with every "
-                        "parameter a wildcard where it is a template. An event's ULID chunk is a wildcard too."), []),
-        ("F-438 (zk2py's reading): a rest parameter is */**, an event's ULID chunk * with or without a parameter, "
+                        "parameter a wildcard where it is a template. An event's last chunk, its occurrence chunk, "
+                        "is a wildcard too."), []),
+        ("F-438 (zk2py's reading): a rest parameter is */**, an event's occurrence chunk * with or without a parameter, "
          "and the literal prefix is what precedes the first wildcard",
          [face.scope("stream", "path/{path...}"), face.scope("events", "alarm"), face.scope("events", "fault/{k}"),
           face.scope("stream", "axis/{axis}/rate"), face.nonwild_prefix("zk2/a/b/i.v1/stream/axis/*/rate"),
@@ -6981,8 +7201,9 @@ def _mend_after_round94_readings(root: Path) -> list[tuple[str, Any, Any]]:
                          (good + b"\x00", zk2c.ENCODING), (sensor.write(v), "application/octet-stream"),
                          (b"\x80", zk2c.ENCODING))]
     # The refused envelope is form 4's CH since core 0.97, which defines
-    # form 7 (a snapshot, key_kind on this stream key); form 4 is the one
-    # reserved (round 103).
+    # form 7 (a snapshot, key_kind on this stream key); form 4 was the one
+    # reserved (round 103). Core 0.101 defines it, an event, which on a
+    # stream key is key_kind too (round 107).
     out.append(("observer §7.3 (0.16) in zk2py's echo tool: a packed record decoded under its tag and named "
                 "packed:Sensor; one under another tag, one with a byte after its pad, one in no envelope and a "
                 "refused envelope undecodable as packed:Sensor, the refusal named (the envelope's own token for "
@@ -6992,7 +7213,7 @@ def _mend_after_round94_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 [["packed:Sensor"] * 5, {"temperature": "21.5", "humidity": "43.5", "pressure": "1013.2",
                                          "battery": "3.7"},
                  ["undecodable as packed:Sensor: tag", "undecodable as packed:Sensor: length",
-                  "undecodable as packed:Sensor: no_envelope", "undecodable as packed:Sensor: form"],
+                  "undecodable as packed:Sensor: no_envelope", "undecodable as packed:Sensor: key_kind"],
                  [None] * 5]))
     # review-bot on PR #1019, 1: zk2c.Read's three cases, each through
     # packed.read_sample: an accepted envelope (enveloped, its tag), a
@@ -7004,10 +7225,10 @@ def _mend_after_round94_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "sample that carries none; read_sample gives the value, the envelope's token, and no_envelope",
                 [[(r.enveloped, r.refusal, r.tag, r.record) for r in reads],
                  [(x.value, x.refusal) for x in (packed.read_sample(sensor, r) for r in reads)]],
-                [[(True, None, sensor.tag, sensor.write(v)), (True, "form", None, None),
+                [[(True, None, sensor.tag, sensor.write(v)), (True, "key_kind", None, None),
                   (False, None, None, sensor.write(v))],
                  [({"temperature": "21.5", "humidity": "43.5", "pressure": "1013.2", "battery": "3.7"}, None),
-                  (None, "form"), (None, "no_envelope")]]))
+                  (None, "key_kind"), (None, "no_envelope")]]))
 
     # review-bot on PR #1019, 3: a consumer reading through a packed record
     # hands a delete's sink None, never bytes; a put its value.
@@ -7391,7 +7612,7 @@ def _mend_after_round93_readings(root: Path) -> list[tuple[str, Any, Any]]:
     # -- observer §7.3 in a callback: read_put never raises (review-bot) ------
     rng = random.Random(976)
     keys_ = ["zk2/g/svc/zk2py_guard.v1/state/level", "zk2/g/svc/zk2py_guard.v1/stream/x",
-             "zk2/g/svc/zk2py_guard.v1/events/e/01j9zk6q6x5m2f4a8c0d3e7b9h", "ns/zk2/g/svc/zk2py_guard.v1/state/y",
+             "zk2/g/svc/zk2py_guard.v1/events/e/002g0009", "ns/zk2/g/svc/zk2py_guard.v1/state/y",
              "zk2/g/svc/zk2py_guard.v1/@stream/x", "rmw/robot1/cmd_vel", "zk2/g/svc/@zk/instance/0123456789abcdef"]
     encodings = ["zenoh/bytes", "application/json", "zenoh/bytes;x", ""]
     payloads: list[bytes] = [bytes(rng.getrandbits(8) for _ in range(rng.randrange(0, 41))) for _ in range(1500)]
@@ -7402,7 +7623,7 @@ def _mend_after_round93_readings(root: Path) -> list[tuple[str, Any, Any]]:
     raised: list[str] = []
     wrong: list[str] = []
     seen = {"plain": 0, "refused": 0, "accepted": 0}
-    tokens = {"short", "form", "sample_kind", "key_kind", "tag", "trailing"}
+    tokens = {"short", "form", "sample_kind", "key_kind", "tag", "trailing", "key_stamp", "time"}
     for i, data in enumerate(payloads):
         key, enc = keys_[i % len(keys_)], encodings[(i // len(keys_)) % len(encodings)]
         for k, e in ((key, enc), (keys_[0], "zenoh/bytes")):
@@ -7424,9 +7645,12 @@ def _mend_after_round93_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 seen["accepted"] += 1
                 st = r.stamp
                 # core 0.81: a put carries a mutation or a heartbeat, each
-                # written back in the form it was read in
-                if st is None or r.record is None or r.form not in zk2c.PUT_FORMS or zk2c.write(
-                        r.form, st.width, st.run, st.seq, data[0] & 0x0F, r.record) != data:
+                # written back in the form it was read in; an event (0.101)
+                # without its stamp, which its key holds
+                back = None if st is None or r.record is None or r.form not in zk2c.PUT_FORMS else (
+                    zk2c.event(st.width, r.time, r.record, data[0] & 0x0F) if r.form == "event"
+                    else zk2c.write(r.form, st.width, st.run, st.seq, data[0] & 0x0F, r.record))
+                if back != data:
                     wrong.append(f"accepted {data.hex()}")
             if d.record is not None or (d.refused and d.refusal not in tokens) or (d.enveloped and not d.refused
                                                                                     and d.stamp is None):
@@ -7504,7 +7728,7 @@ def _round93_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("core §4.3 (0.73): an owner writes the envelope on stream, state, @state and events keys, and an "
                 "@stream sample keeps its wire",
                 [ow.enveloped(k) for k in ("zk2/g/s/i.v1/stream/x", "zk2/g/s/i.v1/state/x", "zk2/g/s/i.v1/@state/x",
-                                           "zk2/g/s/i.v1/events/x/01j9zk6q6x5m2f4a8c0d3e7b9h",
+                                           "zk2/g/s/i.v1/events/x/002g0009",
                                            "zk2/g/s/i.v1/@stream/x", "zk2/g/s/i.v1/@op/x",
                                            "zk2/g/s/@zk/instance/0123456789abcdef")],
                 [True, True, True, True, False, False, False]))
@@ -10653,17 +10877,23 @@ def family_envelope(root: Path) -> list[Result]:
                 out.append(_check(f"envelope: header {c['byte']} writes back", f"{ch:02x}", c["byte"]))
             for c in data["cases"]:
                 raw = bytes.fromhex(c["hex"])
+                # core 0.101: "an event's case carries its `key`", whose last
+                # chunk holds its stamp; "its parse reads the last chunk and
+                # no grammar" (core 0.103's entry), so no kind token is given
+                last = c["key"].rsplit("/", 1)[-1] if "key" in c else None
                 try:
-                    e = zk2c.parse(raw, c["sample"])
+                    e = zk2c.parse(raw, c["sample"], None, last)
                 except zk2c.Refused as r:
                     got: Any = {"refused": r.token}
                 else:
                     # core 0.92: a request's width, run and seq are null; an
-                    # error's parse adds `error`.
+                    # error's parse adds `error`, and an event's `time`.
                     got = {"form": e.form, "run_width": e.width, "run": e.run, "seq": e.seq, "tag": e.tag,
                            "record": None if e.record is None else e.record.hex()}
                     if e.error is not None:
                         got["error"] = e.error.as_json()
+                    if e.form == "event":
+                        got["time"] = e.time
                     back = zk2c.write_back(e)
                     out.append(_check(f"envelope: {c['sample']} {c['hex'][:64]} writes back", back.hex(), c["hex"]))
                 out.append(_check(f"envelope: {c['sample']} {c['hex'][:64] or '(empty)'}: {c['note']}", got,

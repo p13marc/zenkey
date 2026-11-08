@@ -7,7 +7,7 @@ the fixtures under ``spec/conformance/`` and the scenarios under
 
 Module map, by spec chapter:
 
-- ``lexical``    §1.2  plain chunks, interface ids, instance ids, fingerprints, ULIDs
+- ``lexical``    §1.2  plain chunks, interface ids, instance ids, fingerprints, occurrence chunks
 - ``slug``       §1.4  the injective slug and its decoder
 - ``keys``       §1.1  the five key forms: parse and build
 - ``templates``  §2.2  templates, shapes, match-then-rank resolution

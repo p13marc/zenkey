@@ -4,8 +4,9 @@ reads a key's sample with where no descriptor names the owner's.
 
 **The scope** (:func:`scopes`, :func:`declared`):
 - "A scope is a resource's exact key where the resource is concrete, and its
-  key with every parameter a wildcard where it is a template. An event's ULID
-  chunk is a wildcard too" (:mod:`zk2py.face`).
+  key with every parameter a wildcard where it is a template. An event's last
+  chunk, its occurrence chunk, is a wildcard too" (observer 0.32,
+  :mod:`zk2py.face`).
 - "The heartbeat. An interface in hand whose contract uses ``freshness.v2``
   and has a collection (core §7.5) has a heartbeat. Its scope is the
   heartbeat's exact key under each address … A ``freshness.v2`` contract in
@@ -224,7 +225,7 @@ def _interface_id(canonical: dict[str, Any]) -> str:
 def resource_for(rev: Revision, key: str) -> dict[str, Any] | None:
     """The resource of ``rev`` a data key names, by core §2.2's match and
     rank over its templates of the key's kind token; an event's key drops
-    its ULID chunk first (core §2.6)."""
+    its occurrence chunk first (core §2.6)."""
     chunks = key.split("/")
     if len(chunks) < 6:
         return None

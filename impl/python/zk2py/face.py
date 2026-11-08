@@ -9,7 +9,8 @@ So a consumer or a tool there subscribes to:
 
 - each concrete resource it reads by its exact key;
 - a template by its selector: "its key with each parameter a wildcard, and an
-  event's ULID chunk too. Its literal prefix is what is declared."
+  event's last chunk too. Its literal prefix is what is declared." (core
+  0.101 names the last chunk where it named the ULID chunk.)
 
 :func:`scope` is that selector for one resource, base-relative under one
 address; :func:`scopes`, every subscribable resource of the contracts held at
@@ -21,9 +22,9 @@ their contracts, as a binding does (core R7)").
 - a rest parameter, ``{name...}``, "one or more chunks" (core §2.2), is
   ``*/**``: ``*`` alone misses a member of two chunks, and ``**`` alone also
   matches none, wider than what is read. Its non-wild prefix is the same;
-- an event's ULID chunk is ``*``, whether or not its template has a
-  parameter: an event without one has no exact key, each occurrence being a
-  fresh ULID (core §2.6).
+- an event's last chunk, its occurrence chunk, is ``*``, whether or not its
+  template has a parameter: an event without one has no exact key, each
+  occurrence's chunk being its own run and seq (core §2.6, 0.103).
 
 Operations are queryables, never subscribed, so they have no scope here.
 """
@@ -62,7 +63,7 @@ def template_selector(template: str, bound: dict[str, str] | None = None) -> str
 def scope(token: str, template: str, bound: dict[str, str] | None = None) -> str:
     """``<token>/<template>``'s scope below its interface: its exact key for
     a concrete resource, the template's selector for one with parameters,
-    and an event's ULID chunk a wildcard."""
+    and an event's occurrence chunk a wildcard."""
     rid = f"{token}/{template_selector(template, bound)}"
     return f"{rid}/*" if token == "events" else rid
 

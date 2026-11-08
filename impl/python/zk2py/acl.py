@@ -144,8 +144,8 @@ def own_keys(service: str, history: bool = False) -> list[str]:
 
 def resource_key(token: str, template: str) -> str:
     """A resource's keys as a key expression: its template, and for an
-    event one chunk more, the occurrence's ULID (core §2.6:
-    ``<member>/<ulid>``)."""
+    event one chunk more, the occurrence chunk (core §2.6, 0.103:
+    ``<member>/<occurrence>``)."""
     key = f"{token}/{template_key(template)}"
     return f"{key}/*" if token == "events" else key
 

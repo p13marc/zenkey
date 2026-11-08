@@ -647,7 +647,7 @@ WALK: list[tuple[str, str, str, str, str]] = [
     # observer 0.18 (#980 C1b): a tool's half of core §8.5.
     ("observer", "observer §7.5", "A tool across a constrained face SHOULD subscribe as core §8.5 says", MET,
      "echo_tool --across-face SYSTEM/SERVICE with --contracts: face.scopes, each concrete resource's exact key  "
-     "and each template's selector, an event's ULID chunk a wildcard, a subscriber each (constrained_live step  "
+     "and each template's selector, an event's occurrence chunk a wildcard, a subscriber each (constrained_live step  "
      "5: 25, 31 and 27 B a put, §7 steps 1, 2 and 4's own) (round 95, observer 0.18)"),
     # observer 0.23 (#988 L4): declaring again after silence, re-keyed in round 99.
     ("observer", "observer §7.5", "A tool across a constrained face whose medium repairs no lost frame SHOULD declare a scope again", MET,
@@ -998,6 +998,23 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "observer §7.3", "Another `Encoding`. A reply under any other `Encoding` is no value form", MET,
      "live.read_reply and live.show_reply: undecodable, its refusal encoding (readings) (round 104, observer "
      "0.27)"),
+    # core 0.101 to 0.103 (#980 C2): an event keyed by its run and seq, its
+    # replay filtered and ordered by form 4's time; core 0.102: a stray
+    # reply_del (round 107). The re-key's verdicts: none met yet.
+    ("owner", "core §2.6", "An owner MUST publish each occurrence once, with a one-shot put, on", NOT_MET,
+     "owner.Owner.occur still keys an occurrence by a ULID (round 107's re-key, core 0.103)"),
+    ("owner", "core §2.6", "The owner MUST write the put's payload as an event", NOT_MET,
+     "owner.Owner.occur still writes a mutation (round 107's re-key, core 0.103)"),
+    ("consumer", "core §2.6", "A consumer MUST keep a replayed occurrence whose time", NOT_MET,
+     "live.replay_events still filters by a ULID's time (round 107's re-key, core 0.103)"),
+    ("consumer", "core §2.6", "A consumer MUST NOT judge an unknown time within the retention or beyond it", NOT_MET,
+     "live.replay_events reads no form 4 (round 107's re-key, core 0.103)"),
+    ("consumer", "core §2.6", "A consumer MUST deliver a replay in the order of the occurrences' times", NOT_MET,
+     "live.replay_events returns the replies as they came (round 107's re-key, core 0.103)"),
+    ("consumer", "core §4.2", "A consumer or a tool MUST NOT merge a stray `reply_del` as a deletion", NOT_MET,
+     "live.get_state and seed.LateJoiner merge every reply_del (round 107's re-key, core 0.102)"),
+    ("observer", "core §4.2", "A consumer or a tool MUST NOT merge a stray `reply_del` as a deletion", NOT_MET,
+     "seed.LateJoiner, a tool's, merges every reply_del (round 107's re-key, core 0.102)"),
 ]
 
 

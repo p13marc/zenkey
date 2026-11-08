@@ -1356,7 +1356,7 @@ class ConfigOwner:
       here), on every change of either, and re-put every 30 s by the
       owner's ``freshness.ttl_s`` refresh (freshness.v1 §2.4); never
       deleted.
-    - Each change event is an occurrence on ``events/change/<ulid>``
+    - Each change event is an occurrence on ``events/change/<occurrence>``
       (§2.17).
     - Deadlines and reach applies run on a timer thread of the owner's
       own, at their instants on its clock (§2.8, §2.9, §2.11).
