@@ -284,22 +284,29 @@ pub fn reader_catalogs(
 ) -> std::result::Result<(crate::Catalogs, bool), HeaderRefusal> {
     use crate::model::deployment::{Catalogs, RecordedCatalog};
     use zenkey_model::catalog::{Ancestor, CatalogId};
-    let recorded = header.catalog.as_ref().and_then(|c| {
-        Some(RecordedCatalog {
-            id: CatalogId::from_hex(&c.id)?,
+    // An id that does not parse refuses the header, never reads as no
+    // catalog, which would date under another epoch (review-bot on #1092).
+    let id_of = |id: &str| {
+        CatalogId::from_hex(id)
+            .ok_or_else(|| HeaderRefusal::Header(format!("catalog id {id:?} is not a catalog id")))
+    };
+    let recorded = match header.catalog.as_ref() {
+        None => None,
+        Some(c) => Some(RecordedCatalog {
+            id: id_of(&c.id)?,
             epoch: c.epoch,
             lineage: c
                 .lineage
                 .iter()
-                .filter_map(|a| {
-                    Some(Ancestor {
-                        id: CatalogId::from_hex(&a.id)?,
+                .map(|a| {
+                    Ok(Ancestor {
+                        id: id_of(&a.id)?,
                         entries: a.entries,
                     })
                 })
-                .collect(),
-        })
-    });
+                .collect::<std::result::Result<Vec<_>, HeaderRefusal>>()?,
+        }),
+    };
     match (given, recorded) {
         (Some(g), Some(r)) => {
             let names = |gid: CatalogId| HeaderRefusal::UnknownCatalog {

@@ -217,7 +217,14 @@ async fn served(
         None => {
             let ns_session = dep.session().await?;
             let store = zk2::store(dep, served.contracts);
-            if let Some(catalog) = zk2::read_lens(dep, &ns_session, &store).await {
+            let lens = zk2::read_lens(dep, &ns_session, &store).await;
+            if lens.is_none() {
+                eprintln!(
+                    "  presence did not read: the header names no revision, so this capture \
+                     reads offline only with --contracts (tooling guide §5)"
+                );
+            }
+            if let Some(catalog) = lens {
                 let reached = |addr: &str| {
                     let key =
                         zenkey_fleet::with_namespace(dep.namespace(), format!("zk2/{addr}/**"));
@@ -255,6 +262,11 @@ async fn served(
                 {
                     if let Ok(zenkey_fleet::ContractState::Held(r)) = state {
                         bundles.push((fp.clone(), r.bundle().to_bytes()));
+                    } else if served.bundles {
+                        eprintln!(
+                            "  bundle {fp} was not retrieved: it is left out, and a reader \
+                             needs it from --contracts (tooling guide §5)"
+                        );
                     }
                 }
             }

@@ -95,14 +95,20 @@ impl Recorded {
             let Ok(fp) = Fingerprint::parse(&b.fingerprint) else {
                 continue;
             };
-            let bytes =
-                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b.bytes)
-                    .unwrap_or_default();
-            let read = match Bundle::verify_expecting(&bytes, &fp) {
-                Err(e) => Bundled::Refused(e.tag().to_owned()),
-                Ok(bundle) => match Revision::from_bundle(bundle, ContractSource::Bundle) {
-                    Ok(r) => Bundled::Verified(Arc::new(r)),
-                    Err(e) => Bundled::Unreadable(e.to_string()),
+            // `read_header` refuses a v4 header whose bundle is not
+            // base64; a header built otherwise reads it as unreadable,
+            // never as empty bytes refused by verification (review-bot on
+            // #1092).
+            let decoded =
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b.bytes);
+            let read = match decoded {
+                Err(e) => Bundled::Unreadable(format!("not base64: {e}")),
+                Ok(bytes) => match Bundle::verify_expecting(&bytes, &fp) {
+                    Err(e) => Bundled::Refused(e.tag().to_owned()),
+                    Ok(bundle) => match Revision::from_bundle(bundle, ContractSource::Bundle) {
+                        Ok(r) => Bundled::Verified(Arc::new(r)),
+                        Err(e) => Bundled::Unreadable(e.to_string()),
+                    },
                 },
             };
             out.bundles.insert(fp, read);

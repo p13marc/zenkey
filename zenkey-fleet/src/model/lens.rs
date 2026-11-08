@@ -451,19 +451,25 @@ impl<'a> Lens<'a> {
             }
             // A capture's header in presence's place (§5): its pairs have
             // their revisions, as the live window saw them.
-            None => match self
-                .recorded
-                .and_then(|rec| rec.revisions_of(addr, iface).map(|fps| (rec, fps)))
-            {
-                Some((_, fps)) if fps.len() == 1 => fps.iter().next().cloned().expect("one"),
-                Some((rec, fps)) if rec.named(addr) => {
+            None => match self.recorded.and_then(|rec| {
+                rec.revisions_of(addr, iface).map(|fps| {
+                    let only = if fps.len() == 1 {
+                        fps.iter().next().cloned()
+                    } else {
+                        None
+                    };
+                    (rec, fps, only)
+                })
+            }) {
+                Some((_, _, Some(fp))) => fp,
+                Some((rec, fps, None)) if rec.named(addr) => {
                     return Err(Unresolved::Ambiguous {
                         fingerprints: fps.iter().map(ToString::to_string).collect(),
                     });
                 }
                 // Given by --contracts across a face at record time: chosen
                 // as across a face (observer §7.5).
-                Some((rec, fps)) => {
+                Some((rec, fps, None)) => {
                     let held = rec.held_among(iface, fps);
                     let choice =
                         crate::model::choice::choose(&held, target, self.deployment, heard);
