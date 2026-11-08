@@ -8150,6 +8150,241 @@ async fn config_v2_verbs_read_change_and_end_a_change() {
     bus.keep(rf.svc);
 }
 
+/// #1109's link: B's transport to A through a relay that can drop it, or
+/// cut it, discarding what either end sends, as a radio out of reach does
+/// until both ends' leases close it; and that accepts B's next transport.
+struct Reopening {
+    path: PathBuf,
+    drop_now: Arc<tokio::sync::Notify>,
+    cut: Arc<std::sync::atomic::AtomicBool>,
+    accepted: Arc<AtomicU64>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for Reopening {
+    fn drop(&mut self) {
+        self.task.abort();
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// One direction of [`Reopening`]: what `src` reads, written to `dst`
+/// unless the link is cut, until either end closes.
+async fn reopening_pump(
+    mut src: tokio::net::unix::OwnedReadHalf,
+    mut dst: tokio::net::unix::OwnedWriteHalf,
+    cut: Arc<std::sync::atomic::AtomicBool>,
+) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut buf = vec![0u8; 65_536];
+    loop {
+        let n = src.read(&mut buf).await.unwrap_or(0);
+        if n == 0 {
+            return;
+        }
+        if !cut.load(Ordering::Relaxed) && dst.write_all(&buf[..n]).await.is_err() {
+            return;
+        }
+    }
+}
+
+impl Reopening {
+    async fn to(face: PathBuf) -> Reopening {
+        static NTH: AtomicU64 = AtomicU64::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "zk-reopen-{}-{}.sock",
+            std::process::id(),
+            NTH.fetch_add(1, Ordering::Relaxed)
+        ));
+        let listener = tokio::net::UnixListener::bind(&path).unwrap();
+        let drop_now = Arc::new(tokio::sync::Notify::new());
+        let cut = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let accepted = Arc::new(AtomicU64::new(0));
+        let (d, c, a) = (drop_now.clone(), cut.clone(), accepted.clone());
+        let task = tokio::spawn(async move {
+            loop {
+                let (far, _) = listener.accept().await.unwrap();
+                let near = tokio::net::UnixStream::connect(&face).await.unwrap();
+                a.fetch_add(1, Ordering::SeqCst);
+                let (far_r, far_w) = far.into_split();
+                let (near_r, near_w) = near.into_split();
+                let mut up = tokio::spawn(reopening_pump(far_r, near_w, c.clone()));
+                let mut down = tokio::spawn(reopening_pump(near_r, far_w, c.clone()));
+                tokio::select! {
+                    _ = &mut up => {}
+                    _ = &mut down => {}
+                    () = d.notified() => {}
+                }
+                // Both halves go with their tasks: each end sees its socket
+                // close.
+                up.abort();
+                down.abort();
+            }
+        });
+        Reopening {
+            path,
+            drop_now,
+            cut,
+            accepted,
+            task,
+        }
+    }
+
+    async fn reopened_since(&self, before: u64) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while self.accepted.load(Ordering::SeqCst) <= before {
+            assert!(
+                Instant::now() < deadline,
+                "B never opened its transport again"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    /// Drops the link and waits for B's next transport through it.
+    async fn reopen(&self) {
+        let before = self.accepted.load(Ordering::SeqCst);
+        self.drop_now.notify_one();
+        self.reopened_since(before).await;
+    }
+
+    /// Cuts the link for `silence`, longer than the lease, so that each
+    /// end closes the transport at its lease, then restores it and waits
+    /// for B's next transport.
+    async fn cut_for(&self, silence: Duration) {
+        let before = self.accepted.load(Ordering::SeqCst);
+        self.cut.store(true, Ordering::Relaxed);
+        tokio::time::sleep(silence).await;
+        self.cut.store(false, Ordering::Relaxed);
+        self.reopened_since(before).await;
+    }
+}
+
+/// #1109: a `config set` on a `config.v2` owner, made from a router whose
+/// link to the owner's router opened again before it, reaches the owner
+/// and is answered with the record, as one made before the reopen is: once
+/// after the link drops, and once after a cut past both ends' leases, the
+/// shape of the wire baseline's W2 reconnect. A and B are peers, as its
+/// routers run; the owner is a client of A, zenctl a client of B. The
+/// sets that drew silence there did so because nothing crossed A->B after
+/// the radio's reopen (#1109's write-up), not for anything `config set`
+/// does after one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn config_v2_set_after_the_link_opens_again() {
+    let face = std::env::temp_dir().join(format!("zk-reopen-face-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&face);
+    // A 2-s lease on both ends, so that a cut of 3 s closes the transport.
+    let lease = |c: &mut zenoh::Config| {
+        c.insert_json5("transport/link/tx/lease", "2000").unwrap();
+        c.insert_json5("transport/link/tx/keep_alive", "4").unwrap();
+    };
+    let mut c = base_config();
+    c.insert_json5("mode", "\"peer\"").unwrap();
+    lease(&mut c);
+    c.insert_json5(
+        "listen/endpoints",
+        &format!(
+            "[\"tcp/127.0.0.1:0\", \"unixsock-stream/{}\"]",
+            face.display()
+        ),
+    )
+    .unwrap();
+    let a = zenoh::open(c).await.expect("A");
+    let a_tcp = a
+        .info()
+        .locators()
+        .await
+        .into_iter()
+        .map(|l| l.to_string())
+        .find(|l| l.starts_with("tcp/127.0.0.1:"))
+        .expect("A's tcp listener");
+    let link = Reopening::to(face.clone()).await;
+    let mut c = base_config();
+    c.insert_json5("mode", "\"peer\"").unwrap();
+    lease(&mut c);
+    c.insert_json5("listen/endpoints", r#"["tcp/127.0.0.1:0"]"#)
+        .unwrap();
+    c.insert_json5(
+        "connect/endpoints",
+        &format!("[\"unixsock-stream/{}\"]", link.path.display()),
+    )
+    .unwrap();
+    let b = zenoh::open(c).await.expect("B");
+    let b_tcp = b
+        .info()
+        .locators()
+        .await
+        .into_iter()
+        .map(|l| l.to_string())
+        .find(|l| l.starts_with("tcp/127.0.0.1:"))
+        .expect("B's tcp listener");
+    let bus = Bus::on((a, a_tcp), None).await;
+    let _rf = Rf2::fresh(&bus.owners, "lab/rf0", 2, 500).await;
+    let set = |value: &str| {
+        let argv: Vec<String> = [
+            "config",
+            "set",
+            "lab/rf0",
+            "duty",
+            &format!("fraction_ppm={value}"),
+            "--format",
+            "json",
+            "-c",
+            &b_tcp,
+        ]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+        let home = bus.home.clone();
+        async move {
+            tokio::task::spawn_blocking(move || run(&argv, &home, None, None))
+                .await
+                .unwrap()
+        }
+    };
+    // Before: through B, a set answered with the record.
+    let mut before = set("20000").await;
+    for _ in 0..50 {
+        if before.code == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        before = set("20000").await;
+    }
+    exits(&before, 0);
+    assert_eq!(before.json()["profile"], "config.v2", "{before}");
+    // The link drops and opens again, and a set made at once after it;
+    // then a cut past the lease, which both ends' leases close, as W2's
+    // reconnect was, and a set after B's next transport.
+    let a_zid = bus._router.zid();
+    for (i, value) in ["30000", "40000"].into_iter().enumerate() {
+        if i == 0 {
+            link.reopen().await;
+        } else {
+            link.cut_for(Duration::from_secs(3)).await;
+        }
+        // B's transport to A is up again: a connection R accepted during
+        // the cut carried a handshake R discarded.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !b.info().peers_zid().await.any(|z| z == a_zid) {
+            assert!(Instant::now() < deadline, "B never reached A again");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let after = set(value).await;
+        exits(&after, 0);
+        let doc = after.json();
+        assert_eq!(doc["profile"], "config.v2", "{after}");
+        assert_eq!(doc["answer"], "record", "{after}");
+        assert_eq!(
+            doc["view"]["groups"][0]["parameters"][0]["value"],
+            value.parse::<u64>().unwrap(),
+            "{after}"
+        );
+    }
+    drop(b);
+    let _ = std::fs::remove_file(&face);
+}
+
 /// `scenarios-v2.md` §13, the record across a constrained face (v2 §2.12,
 /// §2.19, §2.21): the caller is a client of R1 with the face's `@zk` deny
 /// on it, so it binds statically (`--across-face --contracts`) and reads no
