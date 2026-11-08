@@ -99,7 +99,9 @@ was asked). A key nothing reports stays, unconfirmed. It also aligns by
 itself whenever an owner or a peer appears; those print no aligned line,
 and what they change shows in the held and gone lines.
 
-Standard output, one line per event:
+Standard output, one line per event, written as it happens: a held or gone line
+may come between a command and its answer, so match an answer by its first word
+(aligned, last-known, refused), never by its position:
   listening tcp/127.0.0.1:<port>      a router on an ephemeral port (with --connect:
                                       connected <endpoint>, a client of that router)
   ready zk2/<system>/<service>/@zk/instance/<instance>
