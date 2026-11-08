@@ -829,7 +829,7 @@ def section4(report: Report) -> None:
     w = World(policy())
     try:
         gf, gc, lf, lc = _events(w)
-        report.check(sec, "step 1: G receives the 5 occurrences of fault, each on its own …/events/fault/<ulid> key, "
+        report.check(sec, "step 1: G receives the 5 occurrences of fault, each on its own …/events/fault/<occurrence> key, "
                           "none dropped by the 1 s interval, and none of change; L receives all 10 (§2.9)",
                      gf == 5 and gc == 0 and lf == 5 and lc == 5, f"G fault {gf}, change {gc}; L {lf} + {lc}")
     finally:

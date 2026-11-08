@@ -87,7 +87,7 @@ never sniffed.
 ``--across-face SYSTEM/SERVICE``, repeatable, needs ``--contracts`` and no
 ``SELECTOR``: the tool subscribes by the scopes the contracts in hand give
 for those addresses, each concrete resource by its exact key and each
-template by its selector, an event's ULID chunk a wildcard
+template by its selector, an event's occurrence chunk a wildcard
 (:func:`zk2py.face.scopes`), one subscriber each. No descriptor crosses, so
 the addresses and their contracts are the deployment's word. The scope says
 what it excludes: operations, control keys, ``@adv``, and every key no held
@@ -126,7 +126,7 @@ from . import decoding, live
 
 #: The plain kinds by the data form's key (core §1.1: the kind token at
 #: position 5, then one resource chunk or more; an event's last chunk is
-#: its ULID, core §2.6). A selector watches a kind when it intersects its
+#: its occurrence chunk, core §2.6). A selector watches a kind when it intersects its
 #: form, by zenoh's intersection.
 PLAIN_REACH = (
     ("stream", "zk2/*/*/*/stream/*/**"),
@@ -320,7 +320,10 @@ def row_of(key: str, delete: bool, size: int, encoding: str, payload: bytes | No
     envelope: ``envelope`` is its in-band stamp, a run and a seq, never a
     time (observer §8.3, 0.15), and what is sniffed is its record. A
     refused envelope is ``undecodable``, its refusal named, and its bytes
-    are never sniffed.
+    are never sniffed. An event (core §7.5's form 4, observer 0.30) adds
+    ``event``: its run and seq, its key's, and its time or that the owner's
+    clock was unknown (:func:`event_of`); its record is every byte after its
+    time.
 
     **A packed type held** (``held``, observer §7.3 at 0.16): its put is
     read through the type's layout under its envelope's tag, ``decoded``
@@ -340,9 +343,11 @@ def row_of(key: str, delete: bool, size: int, encoding: str, payload: bytes | No
     choice = None
     found = None
     if held is not None and data_key and read is not None and not delete and payload is not None \
-            and read.tag is not None and read.form in ("mutation", "frame", "heartbeat"):
+            and read.tag is not None and read.form in ("mutation", "event", "frame", "heartbeat"):
         # observer 0.29 §7.5: the revision chosen in three steps, CH's tag
-        # checked as §7.3 says
+        # checked as §7.3 says. An event (core 0.101) carries its record's
+        # type's tag as a mutation does, so zk2py reads it through the same
+        # steps, which name no event (F-512)
         choice = held.choose(key, payload[0], len(read.record or b""))
         if choice.revision is not None and read.form != "heartbeat":
             from . import across
@@ -432,6 +437,8 @@ def row_of(key: str, delete: bool, size: int, encoding: str, payload: bytes | No
            "envelope": stamp, "undecodable": undecodable, "sniffed": sniffed}
     if held is not None:
         row["decoded"] = decoded
+    if read is not None and not delete and read.form == "event" and read.stamp is not None:
+        row["event"] = event_of(read, epoch)
     if beat is not None:
         row["heartbeat"] = beat
     if framed is not None:
@@ -439,6 +446,25 @@ def row_of(key: str, delete: bool, size: int, encoding: str, payload: bytes | No
     if snap is not None:
         row["snapshot"] = snap
     return row
+
+
+def event_of(read: Any, epoch: int | None = None) -> dict[str, Any]:
+    """An event's row (observer §7.3, 0.30): "A tool reads the run and the
+    seq from the key, and the record after the time. It shows the time, or
+    that the owner's clock was unknown, beside the run and the seq." The
+    time counts from the deployment epoch ``epoch``, 0 where none is given
+    (core §7.6)."""
+    import datetime
+
+    from . import zk2c
+
+    st = read.stamp
+    if read.time is None or read.time == zk2c.UNKNOWN_TIME:
+        return {"run": st.run_hex(), "seq": st.seq, "time": "unknown", "at_ms": None,
+                "shown": f"{st}, the owner's clock unknown"}
+    at = ((epoch or 0) + read.time["s"]) * 1000 + read.time["ms"]
+    when = datetime.datetime.fromtimestamp(at / 1000, datetime.timezone.utc).isoformat(timespec="milliseconds")
+    return {"run": st.run_hex(), "seq": st.seq, "time": read.time, "at_ms": at, "shown": f"{st}, at {when}"}
 
 
 #: What the report's notes say of every payload (observer §7.3, 0.12).

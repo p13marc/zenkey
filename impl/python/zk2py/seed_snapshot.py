@@ -406,7 +406,18 @@ class ByDescriptor:
     **Two instances.** Where two descriptors of one service answer, the one
     whose ``run`` is the snapshot's names its revision (§3.3: "``run`` is
     the run the instance writes under now"); where none states it, no
-    revision is named."""
+    revision is named. Core 0.102 (F-507's answer): "The owner's descriptor
+    is that of the instance whose ``run`` is the snapshot's run", and "Where
+    the owner's descriptors reach the reader and none states the snapshot's
+    run, the late joiner applies no omission rule over that snapshot", so a
+    lone descriptor that states another run names none either (round 107;
+    round 105 fell back to it).
+
+    **Which resources are per key** (core 0.102, "It says which resources
+    are per key, too"): :meth:`per_key` reads it "from the owner's revision:
+    the one its descriptor names for the run of the sample's stamp", for
+    the stray ``reply_del`` (§4.2), which a reader counts undecodable,
+    ``form``, never merged as a deletion."""
 
     def __init__(self, contracts: list[Any]):
         self.by_fp = {c.fingerprint: c for c in contracts}
@@ -431,20 +442,57 @@ class ByDescriptor:
             if isinstance(doc, dict) and isinstance(doc.get("service"), str):
                 self.descriptors.setdefault(doc["service"], []).append(doc)
 
-    def __call__(self, key: str, header: dict[str, Any]) -> list[Collection]:
+    def revision(self, key: str, run_width: int, run: int) -> Any:
+        """The contract of the revision the owner's descriptor names for
+        ``key``'s interface, the descriptor "of the instance whose ``run``
+        is" the run given; None where none states it, where they disagree,
+        or where the revision is not held."""
         from . import live, zk2c
 
         chunks = key.split("/")
         if len(chunks) < 5:
-            return []
+            return None
         service, iface = f"{chunks[1]}/{chunks[2]}", chunks[3]
-        docs = self.descriptors.get(service, [])
-        run = zk2c.InBand(header["run_width"], header["run"], 0).run_hex()
-        named = [d for d in docs if d.get("run") == run] or (docs if len(docs) == 1 else [])
+        run_hex = zk2c.InBand(run_width, run, 0).run_hex()
+        named = [d for d in self.descriptors.get(service, []) if d.get("run") == run_hex]
         fps = {live.fingerprint_of(d, iface) for d in named} - {None}
         if len(fps) != 1:
-            return []
-        contract = self.by_fp.get(fps.pop())
+            return None
+        return self.by_fp.get(fps.pop())
+
+    def __call__(self, key: str, header: dict[str, Any]) -> list[Collection]:
+        contract = self.revision(key, header["run_width"], header["run"])
         if contract is None:
             return []
-        return collections_from(contract, "/".join(chunks[:4]))
+        return collections_from(contract, "/".join(key.split("/")[:4]))
+
+    def per_key(self, key: str, stamp: Any) -> bool | None:
+        """Whether ``key``'s resource is a per-key resource by the owner's
+        revision for the run of ``stamp`` (a :class:`zk2py.zk2c.InBand`),
+        :func:`zk2py.owner.per_key`; None where that revision is not known,
+        or gives the key no state resource: "Without the owner's revision, a
+        reader cannot tell a stray ``reply_del`` from an owner's, and merges
+        it as a deletion"."""
+        if stamp is None:
+            return None
+        contract = self.revision(key, stamp.width, stamp.run)
+        if contract is None:
+            return None
+        return per_key_in(contract, key)
+
+
+def per_key_in(contract: Any, key: str) -> bool | None:
+    """Whether ``key`` names a per-key resource of ``contract`` (core §4.2,
+    0.100: "These are the states §4.3's table lists"); None where the
+    contract gives it no ``state`` or ``@state`` resource."""
+    from . import owner, templates
+
+    chunks = key.split("/")
+    if len(chunks) < 6 or chunks[4] not in ("state", "@state"):
+        return None
+    rows = [r for r in contract.canonical["resources"] if r["token"] == chunks[4]]
+    won = templates.resolve([templates.parse_template(r["template"]) for r in rows], chunks[5:])
+    if won is None:
+        return None
+    r = next(x for x in rows if x["template"] == won[0].text)
+    return owner.per_key(contract, r)

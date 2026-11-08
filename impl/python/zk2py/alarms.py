@@ -1202,6 +1202,25 @@ def is_left_out(seed: SeedGet | None, established: bool, key: str, arrivals: Ite
         and not any(t >= seed.asked_ns for t in arrivals)
 
 
+#: :func:`attribute_entry`'s verdicts
+OWN, PREVIOUS = "own", "previous_instance"
+
+
+def attribute_entry(reply: Any, runs: Iterable[str]) -> str | None:
+    """§2.14 step 5 (0.14, F-503's answer) for a GET's entry: "It is
+    attributed by the run of the snapshot that lists it, the run its
+    instance wrote under as it answered (core §7.5). Under a run that no
+    present descriptor of the owner states as its ``run`` (core §3.3), it
+    is not asked, ``previous_instance`` … With no ``run`` stated, it is
+    unattributable" (None). "Not the entry's own run". A per-key reply,
+    which no snapshot lists, is None here: it is read by ``meta.zid``."""
+    head = getattr(reply, "snapshot_run", None)
+    stated = set(runs)
+    if head is None or not stated:
+        return None
+    return OWN if head.run_hex() in stated else PREVIOUS
+
+
 def seed_get(tool: Any, address: str, timeout: float = 1.0) -> SeedGet:
     """S4's GET (target ``All``, consolidation ``Latest``) of the owner's
     alarms, recorded with the instant it was asked."""
@@ -1687,13 +1706,27 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
     pres = live.list_presence(tool, f"zk2/{address}/@zk/**")
     presence = "present" if pres.instances else "absent" if pres.complete else "incomplete"
     descriptor, meta_zid = None, None
+    #: the runs the present descriptors state (core §3.3), for §2.14 step 5's
+    #: attribution of a GET's entry by its snapshot's run (0.14)
+    runs: set[str] = set()
     v2 = subscriber is not None and address in {a for a, _ in getattr(subscriber, "views", {})}
     if presence == "present":
+        for other in pres.instances[1:]:
+            for a in live.get_descriptor(tool, f"zk2/{address}/@zk/instance/{other['instance']}", timeout=timeout):
+                if a.ok:
+                    try:
+                        r_ = json.loads(a.payload).get("run")
+                    except (ValueError, AttributeError):
+                        r_ = None
+                    if isinstance(r_, str):
+                        runs.add(r_)
         inst = pres.instances[0]["instance"]
         d = live.get_descriptor(tool, f"zk2/{address}/@zk/instance/{inst}", timeout=timeout)
         if len(d) == 1 and d[0].ok:
             doc = json.loads(d[0].payload)
             meta_zid = (doc.get("meta") or {}).get("zid")
+            if isinstance(doc.get("run"), str):
+                runs.add(doc["run"])
             entry = next((e for e in doc.get("interfaces") or [] if e.get("iface") == PROFILE), None)
             descriptor = {"lists": False} if entry is None else {"lists": True, "token": entry.get("token", True)}
     prefix = f"zk2/{address}/{PROFILE}/{TOKEN}/{PREFIX}/"
@@ -1732,7 +1765,7 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
                     # attributed": a freshness.v2 owner's put carries none, so
                     # a subscription's delivery is unattributable.
                     sid_ = None if v2 else x.stamp_id
-                    cands.append((sd.Mark(x.inband, sd.Stamp.of(x.stamp)), x.kind, x.payload, sid_))
+                    cands.append((sd.Mark(x.inband, sd.Stamp.of(x.stamp)), x.kind, x.payload, sid_, None))
         if seed is not None:
             r = replies.get(key)
             if r is None:
@@ -1745,7 +1778,7 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
                 g = fr.reading_of(r, 0, True, meta_zid)
                 if (r.stamp is not None or r.inband is not None) and r.refusal is None:
                     cands.append((sd.Mark(r.inband, sd.Stamp.of(r.stamp)), "delete" if r.deleted else "put",
-                                  r.payload, r.stamp_id))
+                                  r.payload, r.stamp_id, attribute_entry(r, runs)))
             if lost_at is None or seed.asked_ns >= lost_at:
                 obs.append(g.observation(trust))
         latest, prev, doc, sid = None, False, None, None
@@ -1756,13 +1789,16 @@ def read_owner(tool: Any, address: str, *, subscriber: fr.Subscriber | None = No
         left_out = is_left_out(seed, verdict.verdict == ESTABLISHED, key,
                                [] if subscriber is None else [x.arrival_ns for x in subscriber.of(key)])
         if cands:
-            _, kind, payload, sid = sd.merged(cands)
+            _, kind, payload, sid, by_run = sd.merged(cands)
             if kind == "delete":
                 latest = "deleted"
             else:
                 doc = decode(payload)
                 latest = "undecodable" if doc is None else doc.state
-                prev = meta_zid is not None and sid is not None and _zid(sid) != _zid(meta_zid)
+                # §2.14 step 5: a put by meta.zid; a GET's entry by its
+                # snapshot's run (0.14, F-503's answer)
+                prev = by_run == PREVIOUS if by_run is not None else (
+                    meta_zid is not None and sid is not None and _zid(sid) != _zid(meta_zid))
         out.readings[key] = Reading(presence, descriptor, None, obs, latest, prev,
                                     verdict.verdict == ESTABLISHED, left_out)
         out.documents[key], out.stamps[key] = doc, sid

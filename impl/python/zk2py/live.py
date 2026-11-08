@@ -1895,54 +1895,184 @@ def o3_verdict(result: CallResult, may_call: bool | None, present: bool | None =
     return "finding", TOLD_FINDING
 
 
-# -- §2.6 events replay, the consumer's bound (0.16) -----------------------------
+# -- §2.6 events replay, the consumer's bound (0.16), by form 4's time (0.103) --
 
-_CROCKFORD = "0123456789abcdefghjkmnpqrstvwxyz"
+@dataclass(frozen=True)
+class Occurrence:
+    """One replayed occurrence (core §2.6, 0.103), read through observer
+    §7.3's first step: its key, its stamp, the key's occurrence chunk's
+    (§1.2), its time, form 4's (§7.5), ``{"s", "ms"}`` from the deployment
+    epoch or None for the unknown time, that time as Unix ms under the
+    epoch the reader holds, and its record and CH's tag."""
+
+    key: str
+    stamp: zk2c.InBand
+    time: dict[str, int] | None
+    at_ms: int | None
+    record: bytes
+    tag: int = 0
+
+    @property
+    def member(self) -> str:
+        """Its key without its occurrence chunk (core §2.7)."""
+        return self.key.rsplit("/", 1)[0]
 
 
-def ulid_time_ms(ulid: str) -> int | None:
-    """The 48-bit millisecond time a lowercase ULID chunk carries (§1.2):
-    its first 10 Crockford base32 characters."""
-    if len(ulid) != 26:
+@dataclass
+class Replay:
+    """A replay as a consumer delivers it (core §2.6):
+    - ``delivered``: every occurrence kept, in §2.6's order;
+    - ``dropped``: those whose time is beyond the retention;
+    - ``undecodable``: replies on an events key whose envelope was refused,
+      ``(key, token)``, or that carry no event (``not_event``, zk2py's
+      reading: F-514), never delivered;
+    - ``not_zk2``: replies on keys the grammar refuses, a ULID's key among
+      them (core 0.103 §1.2), which no reader resolves."""
+
+    delivered: list[Occurrence] = field(default_factory=list)
+    dropped: list[Occurrence] = field(default_factory=list)
+    undecodable: list[tuple[str, str]] = field(default_factory=list)
+    not_zk2: list[str] = field(default_factory=list)
+
+
+def occurrence_of(key: str, encoding: str, payload: bytes, epoch_s: int = 0) -> Occurrence | tuple[str, str] | None:
+    """A put on ``key`` read as an occurrence: an :class:`Occurrence`, or
+    ``(key, token)`` where its envelope is refused or is no event, or None
+    where the key is no zk2 events key."""
+    parsed = zk2c.data_key(key)
+    if parsed is None or parsed.get("form") != "data" or parsed.get("token") != "events":
         return None
-    n = 0
-    for ch in ulid[:10]:
-        i = _CROCKFORD.find(ch)
-        if i < 0:
-            return None
-        n = n * 32 + i
-    return n
+    read = zk2c.read_put(key, encoding, payload)
+    if read.refused:
+        return (key, read.refusal or "refused")
+    if read.form != "event" or read.stamp is None:
+        return (key, "not_event")
+    t = None if read.time == zk2c.UNKNOWN_TIME else read.time
+    at = None if t is None else (epoch_s + t["s"]) * 1000 + t["ms"]
+    return Occurrence(key, read.stamp, t, at, read.record or b"", read.tag or 0)
 
 
-def new_ulid(ms: int) -> str:
-    """A lowercase ULID chunk for the millisecond time ``ms``, random below."""
-    import secrets
+def replay_filter(occs: list[Occurrence], retention_s: int, now_ms: int) -> tuple[list[Occurrence], list[Occurrence]]:
+    """Core §2.6's filter (0.103): "A consumer MUST keep a replayed occurrence
+    whose time (§7.5's form 4) is within the retention, and drop one whose
+    time is beyond it. A consumer MUST NOT judge an unknown time within the
+    retention or beyond it: the storage's ``_time`` bound alone admitted
+    that occurrence." An unknown time is kept. Returns (kept, dropped)."""
+    bound = now_ms - retention_s * 1000
+    kept = [o for o in occs if o.at_ms is None or o.at_ms >= bound]
+    return kept, [o for o in occs if o.at_ms is not None and o.at_ms < bound]
 
-    n = (ms << 80) | secrets.randbits(80)
-    out = []
-    for _ in range(26):
-        out.append(_CROCKFORD[n & 31])
-        n >>= 5
-    return "".join(reversed(out))
+
+def replay_order(occs: list[Occurrence]) -> list[Occurrence]:
+    """Core §2.6's order (0.103): "A consumer MUST deliver a replay in the
+    order of the occurrences' times, then their seqs within one run. The
+    occurrences of an unknown time come after every one with a time, by seq
+    within one run." "Between two runs at one time, and among the unknown
+    times of two runs, the order is unspecified": zk2py breaks that tie as
+    the reference does, by the run's value, a 16-bit run before a 32-bit
+    one, so that two replays of one storage agree."""
+    def rank(o: Occurrence) -> tuple[int, int, int, int, int]:
+        known = 0 if o.at_ms is not None else 1
+        return (known, o.at_ms or 0, o.stamp.width, o.stamp.run, o.stamp.seq)
+
+    return sorted(occs, key=rank)
 
 
-def replay_events(session: zenoh.Session, selector: str, retention_s: int,
-                  now_ms: int | None = None, timeout: float = GET_TIMEOUT_S) -> tuple[list[str], list[str]]:
-    """§2.6: "A consumer replays with a wildcard GET bounded by the
+def replay_events(session: zenoh.Session, selector: str, retention_s: int, now_ms: int | None = None,
+                  epoch_s: int = 0, timeout: float = GET_TIMEOUT_S) -> Replay:
+    """Core §2.6: "A consumer replays with a wildcard GET bounded by the
     retention", and (0.16) "The retention is the bound a consumer applies
     on replay": a union storage prunes nothing by retention. The GET asks
-    with ``_time``; since a backend may ignore it (the memory backend
-    does, spike S5), the consumer filters by the ULID's time (state.md §8).
-    Returns (kept keys, dropped keys)."""
+    with ``_time``; a backend may ignore it (the memory backend does, spike
+    S5), so the consumer filters by each event's time (0.103,
+    :func:`replay_filter`) and delivers by §2.6's order
+    (:func:`replay_order`). ``epoch_s`` is the deployment epoch the reader
+    holds (§7.6: the catalog's in force, else 0)."""
     now_ms = int(time.time() * 1000) if now_ms is None else now_ms
-    bound = now_ms - retention_s * 1000
-    kept, dropped = [], []
+    out = Replay()
+    occs: list[Occurrence] = []
     for a in _answers(session, f"{selector}?_time=[now(-{retention_s}s)..]", zenoh.QueryTarget.ALL, timeout):
         if not a.ok or a.key is None:
             continue
-        t = ulid_time_ms(a.key.rsplit("/", 1)[-1])
-        (kept if t is not None and t >= bound else dropped).append(a.key)
-    return kept, dropped
+        o = occurrence_of(a.key, a.encoding or "", a.payload, epoch_s)
+        if o is None:
+            out.not_zk2.append(a.key)
+        elif isinstance(o, tuple):
+            out.undecodable.append(o)
+        else:
+            occs.append(o)
+    kept, out.dropped = replay_filter(occs, retention_s, now_ms)
+    out.delivered = replay_order(kept)
+    return out
+
+
+# -- core S5, §4.4: last-known state from an archive, explicitly (round 107) --------
+
+def archive_key(archive: str, origin: str) -> str:
+    """Core §4.4: "Its key is the archived key without its leading ``zk2``
+    chunk, slugged as a rest parameter, under the archive's own ``@state``
+    token: ``zk2/<system>/<archive>/archive.v1/@state/{origin...}``". The
+    archive's address is ``<system>/<service>``."""
+    from . import slug
+
+    chunks = origin.split("/")
+    if chunks[0] != "zk2":
+        raise ValueError(f"{origin}: not a zk2 key")
+    return f"zk2/{archive}/archive.v1/@state/" + "/".join(slug.slug(c) for c in chunks[1:])
+
+
+@dataclass
+class LastKnown:
+    """An archive's answer for one origin (core S5, §4.4): the bytes the
+    owner put, its envelope included (``raw``), their record and in-band
+    stamp, the reply's attachment (``{"iface", "contract", "type",
+    "confirmed"}``), and whether it was a deletion. "The archive's answer is
+    last-known, never current, and a consumer MUST NOT present it as
+    current" (S6): :meth:`shown`."""
+
+    key: str
+    origin: str
+    raw: bytes
+    record: bytes | None
+    stamp: Any
+    attachment: dict[str, Any]
+    deleted: bool = False
+
+    def shown(self) -> str:
+        conf = "confirmed" if self.attachment.get("confirmed") is True else "unconfirmed"
+        what = "deleted" if self.deleted else f"{len(self.record or b'')} bytes"
+        return f"last-known ({conf}), from an archive: {what} of {self.origin}, {self.stamp}"
+
+
+def last_known(session: zenoh.Session, archive: str, origin: str,
+               timeout: float = GET_TIMEOUT_S) -> LastKnown | None:
+    """Core S5: "last-known state MUST be read from an archive (§4.4),
+    explicitly": a GET of ``origin``'s key at ``archive`` (target ``All``,
+    consolidation ``None``), its reply read envelope first (observer §7.3:
+    the owner's put, as the archive keeps it). None for no reply."""
+    key = archive_key(archive, origin)
+    out = None
+    for rep in session.get(key, target=zenoh.QueryTarget.ALL, consolidation=zenoh.ConsolidationMode.NONE,
+                           timeout=timeout):
+        if rep.ok is None:
+            continue
+        s = rep.ok
+        att = s.attachment.to_bytes() if s.attachment is not None else b""
+        try:
+            doc = json.loads(att) if att else {}
+        except ValueError:
+            doc = {}
+        deleted = s.kind == zenoh.SampleKind.DELETE
+        raw = s.payload.to_bytes()
+        rec, stamp = None, None
+        if not deleted:
+            try:
+                env = zk2c.parse(raw, "put", zk2c.key_token(origin), zk2c.last_chunk(origin))
+                rec, stamp = env.record, env.stamp
+            except zk2c.Refused:
+                pass
+        out = LastKnown(str(s.key_expr), origin, raw, rec, stamp, doc if isinstance(doc, dict) else {}, deleted)
+    return out
 
 
 # -- §4 state, a consumer's GET --------------------------------------------------
@@ -1976,6 +2106,10 @@ class StateReply:
     confirmation: str | None = None
     conf: dict[str, int] | None = None
     snapshot_time: dict[str, int] | None = None
+    #: the run of the snapshot that listed it, its header's, with the
+    #: snapshot's asof as its seq: "the run its instance wrote under as it
+    #: answered" (``alarms.v1`` 0.14 §2.14 step 5, F-503's answer)
+    snapshot_run: Any = None
 
 
 @dataclass
@@ -2005,7 +2139,7 @@ class StateReading:
 
 
 def get_state(session: zenoh.Session, selector: str, timeout: float = GET_TIMEOUT_S,
-              across: Any = None) -> StateReading:
+              across: Any = None, revision: Any = None) -> StateReading:
     """S4 (core 0.100): "a state GET MUST be addressed to the owner's keys,
     with target All and consolidation None set explicitly. The consumer MUST
     merge the GET's replies per key, each snapshot's entries among them, as a
@@ -2020,13 +2154,23 @@ def get_state(session: zenoh.Session, selector: str, timeout: float = GET_TIMEOU
     run the later arrival (§4.2, observer §4.1). One GET holds no view
     before it, so its omission rule drops nothing (every value it holds was
     heard after it asked); :attr:`StateReading.snapshots` says which were
-    complete, for a reader that holds one."""
+    complete, for a reader that holds one.
+
+    **A stray ``reply_del``** (core 0.102 §4.2): with ``revision``, a
+    :class:`zk2py.seed_snapshot.ByDescriptor` over the revisions held, a
+    ``reply_del`` on a member its owner's revision answers by snapshot (for
+    the run of its stamp) is "no owner's answer": it is counted undecodable,
+    refused as ``form``, and never merged as a deletion. Without the owner's
+    revision every ``reply_del`` is merged, as the text says a reader then
+    does. The descriptors are read before the GET."""
     from . import seed as sd
     from . import seed_snapshot as ss
     from . import snapshot as snap_mod
 
     if across is not None:
         timeout = across.get_timeout_s(timeout)
+    if revision is not None and hasattr(revision, "prepare"):
+        revision.prepare(session, selector)
     q: queue.Queue = queue.Queue()
     session.get(selector, zenoh.handlers.Callback(q.put, lambda: q.put(_DONE)),
                 target=zenoh.QueryTarget.ALL, consolidation=zenoh.ConsolidationMode.NONE,
@@ -2073,10 +2217,11 @@ def get_state(session: zenoh.Session, selector: str, timeout: float = GET_TIMEOU
                 continue
             out.arrivals.append((key, "page", None if ts is None else str(ts)))
             tracker.add(key, page)
+            head = zk2c.InBand(page["run_width"], page["run"], page["asof"])
             for m in ss.members_of(key, page):
                 merge(StateReply(m.key, m.deleted, m.record, zk2c.ENCODING, None, None, None, m.inband, None,
                                  m.put_bytes() if not m.deleted else b"", m.put_bytes() if m.deleted else None,
-                                 key, m.confirmation, m.conf, m.time), sd.Mark(m.inband, None))
+                                 key, m.confirmation, m.conf, m.time, head), sd.Mark(m.inband, None))
             continue
         out.arrivals.append((key, "delete" if deleted else "put", None if ts is None else str(ts)))
         r = StateReply(
@@ -2087,6 +2232,14 @@ def get_state(session: zenoh.Session, selector: str, timeout: float = GET_TIMEOU
             None if ts is None else ts.get_time_as_ntp64().as_nanos(),
             read.stamp, read.refusal, raw, att)
         if read.refused:
+            out.replies.append(r)
+            continue
+        if deleted and revision is not None and revision.per_key(key, read.stamp) is False:
+            # core 0.102 §4.2: "A consumer or a tool MUST NOT merge a stray
+            # reply_del as a deletion. It counts it undecodable, refused as
+            # form"
+            out.arrivals[-1] = (key, "refused", out.arrivals[-1][2])
+            r.refusal = "form"
             out.replies.append(r)
             continue
         merge(r, sd.Mark(read.stamp, sd.Stamp.of(ts)))

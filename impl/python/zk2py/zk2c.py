@@ -8,6 +8,7 @@ and a call's query, reply and reply error a form as their payload::
 
     mutation, a put's payload            CH · run · seq · record
     delete, a delete's attachment        CH · run · seq
+    event, a put's payload               CH · t32 · ms16 · record
     heartbeat, a put's payload           CH · run · seq · body
     frame, a put's payload               CH · run · seq · body
     snapshot, a GET reply's payload      CH · run · asof · body
@@ -15,6 +16,11 @@ and a call's query, reply and reply error a form as their payload::
     value, a reply's payload             CH · run · seq · record
     error, a reply error's payload       CH · run · seq · error
 
+The event is form 4 (core 0.101, #980 C2a): "Its stamp is its key's", the
+occurrence chunk (:func:`zk2py.lexical.parse_occurrence`), so it carries the
+occurrence's time, ``t32 · ms16`` from the deployment epoch, where a
+mutation carries its run and seq; CH's width bit is the chunk's. Since core
+0.103 an owner writes every occurrence so (:meth:`zk2py.owner.Owner.occur`).
 The heartbeat is form 6 (core 0.81, #978 F1): :mod:`zk2py.heartbeat` reads
 and writes its body, and checks its tag against the covered revision. The
 snapshot is form 7 (core 0.97, #977 E1), ``CH · run · asof · body``, "a GET
@@ -32,10 +38,13 @@ after the seq, possibly none; a request's every byte after its CH.
 key is (§1.1). The parser knows what carries the bytes, its sample":
 ``put``, ``delete``, ``query``, ``reply`` or ``reply_err``. :func:`parse`
 refuses for the first of §7.5's reasons, in its order, each with its token
-(:class:`Refused`): ``short`` (no CH), ``form`` (4, core 0.97), ``sample_kind``,
-``key_kind`` (a frame's or a snapshot's, given its key), ``tag`` (a delete's),
-``request_run``, ``short`` (the stamp, and an error's byte after it),
-``trailing`` (a delete's), then on an error's byte ``cause``, ``detail``,
+(:class:`Refused`): ``short`` (no CH), ``form`` (a reserved form: core 0.101
+reserves none), ``sample_kind``, ``key_kind`` (a frame's, an event's or a
+snapshot's, given its key), ``tag`` (a delete's), ``request_run``,
+``key_stamp`` (an event whose key's last chunk is no occurrence chunk of CH's
+width, core 0.101), ``short`` (the stamp, an event's time, and an error's
+byte after them), ``trailing`` (a delete's), ``time`` (an event's unused
+time), then on an error's byte ``cause``, ``detail``,
 ``extension``, ``short`` (its message), ``utf8`` and ``trailing``. "Every
 envelope and form an implementation accepts MUST write back to the same
 bytes": :func:`write_back` does, and the envelope family checks each
@@ -76,23 +85,33 @@ from typing import Any
 
 from . import keys
 
-#: core §7.5's forms by code. Seven are defined at this version (core 0.81
-#: adds the heartbeat, code 6, 0.83 the frame, code 5, #981 K1, 0.92 the
-#: value, code 2, and the error, code 3, #985 C4a, and 0.97 the snapshot,
-#: code 7, #977 E1); "a reserved form, 4" is refused (``form``).
+#: core §7.5's forms by code. "This version defines all eight" (core 0.101:
+#: 0.81 added the heartbeat, code 6, 0.83 the frame, code 5, #981 K1, 0.92
+#: the value, code 2, and the error, code 3, #985 C4a, 0.97 the snapshot,
+#: code 7, #977 E1, and 0.101 the event, code 4, #980 C2a). "The ``form``
+#: refusal stays in the list for a later version's reserved form": none is
+#: reserved, so :func:`parse` never draws it.
 FORMS = ("mutation", "delete", "value", "error", "event", "frame", "heartbeat", "snapshot")
-DEFINED = ("mutation", "delete", "value", "error", "frame", "heartbeat", "snapshot")
-#: core §7.5 (0.97): "A put carries a mutation, a heartbeat, a frame or a
-#: snapshot, and a delete's attachment a delete. A query and a reply carry a
-#: value, and a reply_err an error." A GET's reply that represents a put, or
-#: carries a snapshot, is ``put``, and a ``reply_del``'s attachment
-#: ``delete``. "Only a GET's reply carries a snapshot … The parser cannot
-#: tell how a put came, so it reads a snapshot either way."
-CARRIES = {"put": ("mutation", "frame", "heartbeat", "snapshot"), "delete": ("delete",), "query": ("value",),
-           "reply": ("value",), "reply_err": ("error",)}
+DEFINED = FORMS
+#: core §7.5 (0.101): "A put carries a mutation, an event, a heartbeat, a
+#: frame or a snapshot, and a delete's attachment a delete. A query and a
+#: reply carry a value, and a ``reply_err`` an error." A GET's reply that
+#: represents a put, or carries a snapshot, is ``put``, and a ``reply_del``'s
+#: attachment ``delete``. "Only a GET's reply carries a snapshot … The parser
+#: cannot tell how a put came, so it reads a snapshot either way."
+CARRIES = {"put": ("mutation", "event", "frame", "heartbeat", "snapshot"), "delete": ("delete",),
+           "query": ("value",), "reply": ("value",), "reply_err": ("error",)}
 #: core §7.5 (0.97): "a snapshot on a key whose kind token is neither
 #: ``state`` nor ``@state``" is ``key_kind``
 SNAPSHOT_TOKENS = ("state", "@state")
+#: core §7.5 (0.101): "an event on a key whose kind token is not ``events``"
+#: is ``key_kind``
+EVENT_TOKEN = "events"
+#: core §7.5 (0.101): "All ones in t32, with ms16 0, say the owner's clock is
+#: unknown."
+UNKNOWN_T32 = 0xFFFFFFFF
+#: an event's time as ``vectors.json`` writes the unknown one
+UNKNOWN_TIME = "unknown"
 SAMPLES = tuple(CARRIES)
 #: the forms a put's payload carries; a delete's attachment carries a delete
 PUT_FORMS = CARRIES["put"]
@@ -186,6 +205,11 @@ class Envelope:
     tag: int
     record: bytes | None
     error: ErrorForm | None = None
+    #: an event's time (core §7.5's form 4, 0.101): ``{"s", "ms"}`` from the
+    #: deployment epoch, or :data:`UNKNOWN_TIME`; None for every other form.
+    #: An event's ``width``, ``run`` and ``seq`` are its key's occurrence
+    #: chunk's: "Its stamp is its key's."
+    time: dict[str, int] | str | None = None
 
     @property
     def request(self) -> bool:
@@ -255,7 +279,34 @@ def _error(data: bytes, at: int) -> ErrorForm:
     return ErrorForm(b["code"], b["cause"], message, detail)
 
 
-def parse(data: bytes, sample: str, key_token: str | None = None) -> Envelope:
+def event_time(t32: int, ms16: int) -> dict[str, int] | str:
+    """Form 4's time read (core §7.5, 0.101): ``{"s", "ms"}``, or
+    :data:`UNKNOWN_TIME` for t32 all ones with ms16 0; ``time`` for an unused
+    one: "An ms16 above 999, or any but 0 under all ones, is unused"."""
+    if t32 == UNKNOWN_T32:
+        if ms16:
+            raise Refused("time", f"an event's t32 is all ones and its ms16 {ms16}: unused")
+        return UNKNOWN_TIME
+    if ms16 > 999:
+        raise Refused("time", f"an event's ms16 is {ms16}, above 999: unused")
+    return {"s": t32, "ms": ms16}
+
+
+def event_time_bytes(time: dict[str, int] | str | None) -> bytes:
+    """Form 4's ``t32 · ms16`` for ``time``: ``{"s", "ms"}`` from the
+    deployment epoch, or None or :data:`UNKNOWN_TIME` for the unknown time.
+    Refuses a time that would not read back: ms above 999, or a known one of
+    t32 all ones."""
+    if time is None or time == UNKNOWN_TIME:
+        return UNKNOWN_T32.to_bytes(4, "big") + b"\x00\x00"
+    assert isinstance(time, dict)
+    s_, ms = time["s"], time["ms"]
+    if not (isinstance(s_, int) and 0 <= s_ < UNKNOWN_T32 and isinstance(ms, int) and 0 <= ms <= 999):
+        raise ValueError(f"an event's time is t32 below all ones and ms16 from 0 to 999: {time!r}")
+    return s_.to_bytes(4, "big") + ms.to_bytes(2, "big")
+
+
+def parse(data: bytes, sample: str, key_token: str | None = None, last_chunk: str | None = None) -> Envelope:
     """Core §7.5's parse of ``data`` as the envelope or form its ``sample``
     carries: ``put`` (its payload, or a GET reply's that represents a put),
     ``delete`` (its attachment, or a ``reply_del``'s), ``query``, ``reply``
@@ -267,7 +318,16 @@ def parse(data: bytes, sample: str, key_token: str | None = None) -> Envelope:
     after ``sample_kind``); None parses with no key, as ``vectors.json``
     does. "Of a snapshot, it takes the body unread": its asof is the
     envelope's ``seq`` and its body the ``record`` (:mod:`zk2py.snapshot`
-    reads it)."""
+    reads it).
+
+    An event's stamp is its key's (core 0.101): ``last_chunk`` is the key's
+    last chunk, which the parse reads as an occurrence chunk of CH's width
+    ("For a frame, an event and a snapshot it also knows its key … its kind
+    token, and an event key's last chunk"), ``key_stamp`` where it is none,
+    a ULID's among them. ``vectors.json`` gives an event its key and no
+    grammar: its kind token is not read there, its last chunk is."""
+    from .lexical import parse_occurrence
+
     if sample not in CARRIES:
         raise ValueError(f"no such sample kind: {sample!r}")
     data = bytes(data)
@@ -280,6 +340,8 @@ def parse(data: bytes, sample: str, key_token: str | None = None) -> Envelope:
         raise Refused("sample_kind", f"a {h['form']} as {_CARRIER[sample]}")
     if h["form"] == "frame" and key_token is not None and key_token != "stream":
         raise Refused("key_kind", f"a frame on a {key_token} key: only a plain stream's carries one (core §7.5)")
+    if h["form"] == "event" and key_token is not None and key_token != EVENT_TOKEN:
+        raise Refused("key_kind", f"an event on a {key_token} key: only an events key carries one (core §7.5)")
     if h["form"] == "snapshot" and key_token is not None and key_token not in SNAPSHOT_TOKENS:
         raise Refused("key_kind", f"a snapshot on a {key_token} key: only a state's carries one (core §7.5)")
     if h["form"] == "delete" and h["tag"] != 0:
@@ -290,6 +352,21 @@ def parse(data: bytes, sample: str, key_token: str | None = None) -> Envelope:
         if h["run_width"] != 16:
             raise Refused("request_run", "a request whose width bit is 1: a request carries no run")
         return Envelope("value", None, None, None, h["tag"], data[1:])
+    if h["form"] == "event":
+        # core §7.5 (0.101): "an event whose key's last chunk is not an
+        # occurrence chunk of CH's width: 8 characters under a width bit of
+        # 1, or 12 under 0 (key_stamp)", then "fewer bytes than … an event's
+        # CH, t32 and ms16 (short)", then "an event whose time is unused
+        # (time)".
+        occ = None if last_chunk is None else parse_occurrence(last_chunk)
+        if occ is None or occ.run_width != h["run_width"]:
+            raise Refused("key_stamp", "an event with no key to read its stamp from" if last_chunk is None
+                          else f"an event whose key's last chunk {last_chunk!r} is no occurrence chunk of a "
+                               f"{h['run_width']}-bit run (core §1.2, §7.5)")
+        if len(data) < 7:
+            raise Refused("short", f"{len(data)} bytes, and an event's CH, t32 and ms16 need 7")
+        t = event_time(int.from_bytes(data[1:5], "big"), int.from_bytes(data[5:7], "big"))
+        return Envelope("event", occ.run_width, occ.run, occ.seq, h["tag"], data[7:], time=t)
     run_bytes = h["run_width"] // 8
     need = 1 + run_bytes + 3
     error = h["form"] == "error"
@@ -325,14 +402,28 @@ def write(form: str, width: int, run: int, seq: int, tag: int = 0, record: bytes
     """An envelope's bytes, or a value's (core §7.5). Refuses what no parse
     would accept back: a reserved form, a width other than 16 or 32, a run,
     a seq or a tag out of its field, a delete with a tag or a record. An
-    error is :func:`write_error`'s, and a request :func:`request`'s."""
+    error is :func:`write_error`'s, a request :func:`request`'s, and an event
+    :func:`event`'s, whose stamp its key holds."""
     if form not in DEFINED:
         raise ValueError(f"form {form!r} is not defined at this version")
     if form == "error":
         raise ValueError("an error form is written by write_error")
+    if form == "event":
+        raise ValueError("an event is written by event(): its stamp is its key's")
     if form == "delete" and (tag or record):
         raise ValueError("a delete carries no record, and its tag is 0")
     return bytes([_ch(form, width, tag)]) + _stamp(width, run, seq) + (record or b"")
+
+
+def event(width: int, time: dict[str, int] | str | None, record: bytes, tag: int = 0) -> bytes:
+    """An event, a put's payload on its occurrence's key (core §7.5's form 4,
+    0.101): ``CH · t32 · ms16 · record``, CH's width bit the key's run's and
+    its tag the record's type's, "as a mutation's is". ``time`` is
+    ``{"s", "ms"}`` from the deployment epoch, or None for the unknown time.
+    "An event is 7 bytes over its record, whatever its run"."""
+    if width not in (16, 32):
+        raise ValueError("a run is 16 or 32 bits")
+    return bytes([_ch("event", width, tag)]) + event_time_bytes(time) + bytes(record)
 
 
 def request(record: bytes, tag: int = 0) -> bytes:
@@ -404,6 +495,8 @@ def write_back(env: Envelope) -> bytes:
     if env.error is not None:
         e = env.error
         return write_error(InBand(env.width, env.run, env.seq), e.code, e.cause, e.message, e.detail, env.tag)
+    if env.form == "event":
+        return event(env.width, env.time, env.record or b"", env.tag)
     return write(env.form, env.width, env.run, env.seq, env.tag, env.record)
 
 
@@ -485,14 +578,24 @@ def key_token(key: str) -> str | None:
     return p.get("token") if p is not None and p.get("form") == "data" else None
 
 
+def last_chunk(key: str) -> str | None:
+    """The last chunk of the zk2 data key a session hears ``key`` as, which
+    an event's parse reads its stamp from (core 0.101); None for a key that
+    is none."""
+    p = data_key(key)
+    return p["resource"][-1] if p is not None and p.get("form") == "data" and p["resource"] else None
+
+
 def reads(key: str, payload: bytes) -> dict[str, str]:
     """``carries.json``'s ``reads`` (core 0.83): how a put on ``key`` under
     ``zenoh/bytes`` reads: ``{"reads": "plain"}`` with no envelope, its
-    form's name, or ``{"refused": token}``, ``key_kind`` among them."""
+    form's name, or ``{"refused": token}``, ``key_kind`` and ``key_stamp``
+    among them. A key that ends in a ULID is no zk2 key (core 0.103), so its
+    put reads plain."""
     if not carries(key, ENCODING):
         return {"reads": "plain"}
     try:
-        return {"reads": parse(payload, "put", key_token(key)).form}
+        return {"reads": parse(payload, "put", key_token(key), last_chunk(key)).form}
     except Refused as e:
         return {"refused": e.token}
 
@@ -520,8 +623,13 @@ class Read:
     #: checks first (core §7.6); None where no envelope was accepted.
     tag: int | None = None
     #: the accepted envelope's form, ``mutation`` or ``heartbeat`` for a put
-    #: (core 0.81); None where none was accepted
+    #: (core 0.81), ``event`` for an occurrence (0.101); None where none was
+    #: accepted
     form: str | None = None
+    #: an event's time (core 0.101): ``{"s", "ms"}`` from the deployment
+    #: epoch, or :data:`UNKNOWN_TIME`; None for every other form. Its
+    #: ``stamp`` is its key's occurrence chunk's.
+    time: dict[str, int] | str | None = None
 
     @property
     def refused(self) -> bool:
@@ -539,10 +647,10 @@ def read_put(key: str, encoding: str, payload: bytes) -> Read:
     if not carries(key, encoding):
         return Read(False, bytes(payload))
     try:
-        env = parse(payload, "put", key_token(key))
+        env = parse(payload, "put", key_token(key), last_chunk(key))
     except Refused as e:
         return Read(True, None, None, e.token, str(e).split(": ", 1)[1])
-    return Read(True, env.record, env.stamp, tag=env.tag, form=env.form)
+    return Read(True, env.record, env.stamp, tag=env.tag, form=env.form, time=env.time)
 
 
 def read_delete(key: str, encoding: str, attachment: bytes | None) -> Read:

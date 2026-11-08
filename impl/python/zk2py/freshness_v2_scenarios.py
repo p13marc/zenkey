@@ -980,9 +980,22 @@ def section3(report: Report, pairing: str) -> None:
         # Step 2.
         o.vouch("status", False)
         cleared = time.monotonic_ns()
-        time.sleep(3.5)
-        beats = [x for x in hb.heartbeats if x.arrival_ns < cleared and x.value is not None
-                 and x.value["sections"].get("state/status", {}).get("vouched") is True]
+
+        def vouching(x: Any) -> bool:
+            return x.value is not None and x.value["sections"].get("state/status", {}).get("vouched") is True
+
+        def aged() -> bool:
+            # review-bot on #1090: polled, where a fixed 3.5 s slept: a
+            # heartbeat after the clear that no longer vouches, and the last
+            # one that did more than ttl + δ (2.5 s) back, with 0.2 s to spare
+            before = [x for x in hb.heartbeats if x.arrival_ns < cleared and vouching(x)]
+            after = [x for x in hb.heartbeats if x.arrival_ns > cleared and x.value is not None and not vouching(x)]
+            return bool(before) and bool(after) and time.monotonic_ns() - before[-1].arrival_ns > 2.7 * NS
+
+        deadline = time.monotonic() + 10.0
+        while not aged() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        beats = [x for x in hb.heartbeats if x.arrival_ns < cleared and vouching(x)]
         last_t = beats[-1].value["time"] if beats else None
         raw2 = live.get_state(bus.g_session, STATUS, timeout=1.0)
         r2, row2 = g()

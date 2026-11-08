@@ -1,0 +1,18 @@
+# zk2py's contract for spec/scenarios/state.md §15 step 2 (core 0.102, #609,
+# round 107): "an owner on an earlier revision". Revision 1.0: `status`, a
+# state with freshness.ttl_s 60 of a contract that uses freshness.v1, is a
+# per-key resource (core §4.2, §4.3's table), so its owner answers it with a
+# reply of its own, and a delete within W with a reply_del. Its successor,
+# zk2py_stray.v1-1.toml, uses freshness.v2 instead. It must load with no
+# finding.
+[interface]
+name    = "zk2py_stray"
+major   = 1
+minor   = 0
+summary = "state.md §15's status, confirmed by freshness.v1"
+uses    = ["freshness.v1"]
+
+[resources.status]
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 60 }

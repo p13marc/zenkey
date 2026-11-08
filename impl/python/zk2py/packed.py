@@ -843,12 +843,13 @@ def read_sample(rec: Record, read: Any, epoch: int | None = None) -> Reading:
     undecodable, and the tool names the refusal. One that came in no
     envelope has no tag, so it is undecodable too." A refused envelope is
     undecodable by its own token. ``time`` fields under ``epoch``, the
-    deployment's, 0 where none is stated."""
+    deployment's, 0 where none is stated. An event's record is read so too
+    (core 0.101: "An event's is every byte after its time")."""
     if not read.enveloped:
         return Reading(None, "no_envelope", "a packed record travels in core §7.5's envelope, which carries its tag")
     if read.refused:
         return Reading(None, read.refusal, f"a refused zk2c envelope: {read.why}")
-    if read.form not in (None, "mutation"):
+    if read.form not in (None, "mutation", "event"):
         # core 0.83 §7.7 "No reading": a frame on a resource that declares no
         # frame table has none, "A reader counts either as undecodable"; zk2py
         # reads no frame's records (K2's), nor a heartbeat as a record.

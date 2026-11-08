@@ -6872,11 +6872,152 @@ successor's file), an ambiguity (a refused selector, or a refused read), and
 a gap (a device face's devices in the tool's plan). None is a blocker. See
 "At observer 0.29 (#990 V1, V2)" in `SPEC-FINDINGS.md`.
 
+## Core 0.101 to 0.103 and observer 0.30 to 0.32: events by run and seq, a stray `reply_del`, and an archive live (round 107)
+
+Since round 106 main took:
+- **core 0.101** (#980 C2a): §1.2's occurrence chunk, a run's bits then a
+  seq's 24 in Crockford's base32, 8 characters for a 16-bit run and 12 for
+  a 32-bit one; §7.5's form 4, the event, `CH · t32 · ms16 · record`, its
+  stamp its key's, and the parse's `key_stamp` and `time`;
+- **core 0.102:** §4.2's stray `reply_del`, never merged as a deletion,
+  and per-key read from the owner's revision for the run of the sample's
+  stamp; F-504, F-506 to F-508 answered;
+- **core 0.103** (#980 C2c, C2d): an owner MUST key each occurrence by its
+  run and seq and write form 4; a consumer filters a replay by form 4's
+  time and orders it by time, then seq within one run, the unknown times
+  last; the ULID's key is no zk2 key; `state.md` §8 rewritten;
+- **observer 0.30 to 0.32:** a tool shows an event's time beside its run
+  and seq; F-509 to F-511 answered; the occurrence chunk a wildcard;
+- **the profiles:** alarms.v1 0.14 and health.v1 0.10 (F-503), link.v2
+  0.11 (F-505), and four texts' wording;
+- **#1099** (main d5a83804, under the round): modem.v3 3.4, its three
+  `face/` events, catalog 29bf7d47, and the fixtures that read them.
+
+No rule changed beyond what the changelogs state.
+
+### Its walk of `RULES.md` at 0.103
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 90 | 78 | 3 | 9 |
+| consumer | 32 | 28 | 0 | 4 |
+| caller | 18 | 18 | 0 | 0 |
+| observer | 104 | 99 | 3 | 2 |
+| static, in every class | 68 | 66 | 0 | 2 |
+
+- **283 rows walked of 283, none without a verdict.** 29 verdicts are
+  beyond the index.
+- **The re-key came first,** with the seven new rules not met, in the
+  commit that brings `just py-conformance` level (6578 of 6578 at
+  d5a83804). The next commit meets them.
+
+### What round 107 changed in zk2py
+
+- **The keys:** `lexical.parse_occurrence` and `occurrence_chunk`; an
+  events key's parse adds `occurrence`, and a key ending in a ULID is
+  refused.
+- **The envelope:** `zk2c` reads and writes form 4 (`zk2c.event`), its
+  stamp from the key's last chunk, `key_kind`, `key_stamp` and `time` in
+  §7.5's order; `zk2c.Read.time`.
+- **The owner:** `Owner.occur(member, payload, at_ms=None, unknown=False)`
+  keys each occurrence by the run and seq it takes from the owner-wide
+  count, and writes form 4 with its time: the owner's clock from the
+  deployment epoch, `at_ms` for an occurrence seen earlier (the
+  reference's `put_at`), unknown under the clock guard or an untrusted
+  clock (`Owner.clock_untrusted`).
+- **The consumer:** `live.replay_events` returns a `Replay`: delivered in
+  §2.6's order (`replay_order`, ties between runs broken by the run's
+  value, as the reference breaks them), dropped by form 4's time
+  (`replay_filter`, an unknown time kept), and what is no event or no
+  zk2 key.
+- **A stray `reply_del`:** `live.get_state(…, revision=)` and
+  `seed.LateJoiner` count it undecodable, `form`, given the owner's
+  revision; `seed_snapshot.ByDescriptor.revision` and `per_key` read it
+  by the run, with no fallback to a lone descriptor (F-507's answer).
+- **alarms.v1 0.14:** `alarms.attribute_entry`, a GET's entry by its
+  snapshot's run (`StateReply.snapshot_run`).
+- **Archives, a reader:** `live.archive_key` and `live.last_known`, an
+  archive's key read as last-known (core S5), never shown as current.
+- **The tools:** the echo tool's `event` row (observer 0.30);
+  `packed.read_sample` reads an event's record.
+- **The mend** (review-bot on #1090): config.v1's re-mint past its bound
+  for step 1's undo (`config_remint_live` check 4); step 3's order looked
+  up with a default; the GET scope's comment; `get_reading` calls
+  `reading_of`; §3 step 2 of `freshness_v2_scenarios` polls; F-471's
+  check stands.
+- **#1099:** the readings pinned to the example re-keyed to modem.v3 3.4
+  and catalog 29bf7d47.
+
+**`just py-conformance`: 6589 of 6589** on main d5a83804. Of them,
+`keys` 69 (`keys.json` 50 of 50), `envelope` 435 (`vectors.json` 22
+headers and 174 cases, `carries.json` 26 cases and 37 reads) and
+`readings` 984.
+
+### Live
+
+On the black boxes of ede440e2, `archive` among them.
+
+| Runner | What | Result |
+|---|---|---|
+| `events_live --only py` | `state.md` §8 whole, zk2py's owner and consumer, under 16-bit runs and under 32-bit draws | 8/8 |
+| `events_live --only rust` | the owner example's occurrences read by zk2py: a 32-bit draw, a 16-bit run after a restart (`--run-file`), an unknown time under its clock guard | 4/4 |
+| `events_live --only zenctl` | zk2py's owner read by `zenctl echo` (each event's time or "time unknown", its run and seq, as zk2py wrote them) and `zenctl get` from a union storage | 3/3 |
+| `stray_live` | `state.md` §15 steps 1 and 2, zk2py's readers | 5/5 |
+| `archive_live` | `state.md` §4, §5 (steps 1 to 3) and §6 (steps 1 to 3), the Rust `archive` aligning from zk2py's owner | 11/11 |
+| `alarms_scenarios` §1, §3, §5 | zk2py's owner and the owner example, attributed by the snapshot's run | 26/26 each |
+| `health_scenarios` §1, §4 | re-keyed to health.v1 0.10 | 11/11 |
+| `snapshot_live` | §14, no lone-descriptor fallback | 40/40 |
+| `across_live` | re-keyed to modem.v3 3.4's scopes | 6/6 |
+| `config_remint_live` | with the mend's check 4 | 4/4 |
+| `freshness_v2_scenarios` §3 | polled | 12/12 |
+
+Also run: `live_interop --only 0.16` 7/7, `constrained_live` 14/14,
+`link_scenarios` §4 3/3, each putting or reading events.
+
+- **A union storage** is zk2py's stand-in (`events_live.UnionStorage`):
+  zenoh-python's router loads no storage manager. It keeps one sample per
+  key and answers every GET whatever its `_time`, as §8's memory backend.
+- **The archive's `held … tombstone`** is its drop: "a deletion kept
+  within the window". §5 step 2's refusal is played by the owner dropping
+  every GET, since zk2py's routers run no access control here.
+
+**The reference, observed (not findings):**
+- **The archive's watch session.** Under it, the default, the black box
+  re-reads no owner whose instance token comes back after a cut of the
+  router link, though a liveliness subscriber on the same router hears
+  the token go and come back. With `--no-watch` it re-reads, so
+  `archive_live` runs the vehicle's archive so, and reports the watch
+  session's case as a deviation (core §4.4: "When an owner becomes
+  reachable again, the archive MUST re-read").
+- **`zenctl get`** shows an event's record and no time, run or seq.
+  `zenctl echo`'s table shows them (observer 0.30), and its ndjson rows
+  carry no envelope, for a mutation as for an event.
+- **`consume`** reads one state and calls one operation. It refuses an
+  event (`"events/entries" is not state`), so it reads no event here.
+
+**Not run:** `put_at` on the owner example, which takes no time to date
+an occurrence with; an archive aligning from zk2py's owner over a stray
+`reply_del` (core 0.102: it "drops no key for one"); `state.md` §9, an
+archive's backend; §5 step 2 under real access control.
+
+Round 107 found F-512 to F-518: two gaps (an event in observer §7.5's
+revision of a key; a replay's sample that is no event), an ambiguity (a
+relayed occurrence's order within one run) and four minor errors. None is
+a blocker. F-503 to F-511 are answered, F-506 in part. See "At core 0.103
+(#980 C2)" in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
-  - archives and alignment (core §4.4, observer §4.5), so `state.md`
-    §4, §5, §6 and §9, and §8's union storage;
+  - an archive of its own (core §4.4, observer §4.5). Since round 107
+    zk2py reads an archive's key as last-known (`live.last_known`), and
+    `archive_live` runs `state.md` §4, §5 and §6 with the Rust archive
+    aligning from zk2py's owner, the owner-side archive the Rust one
+    too. Not run: §9, an archive's backend refusing an outdated put,
+    which needs an archive's store; an archive's alignment over a stray
+    `reply_del`; §5 step 2 under real access control;
+  - a storage manager: §8's union storage is zk2py's stand-in
+    (`events_live.UnionStorage`);
   - O6's summaries and retries (O4). Call metadata (O7) is sent by the
     client (`live.call(attachment=…)`) and read by the owner
     (`OpCall.metadata()`), for `config.v1`'s attribution;
@@ -6885,14 +7026,15 @@ a gap (a device face's devices in the tool's plan). None is a blocker. See
     far side's timeouts and declaring again (round 99): a session opened
     again (§8.5's MAY), and a far router's declarations;
   - the scenarios other than presence.md, retrieval.md, grammar.md §1,
-    state.md (all but its archives' §4, §5, §6, §9 and §8's union storage,
-    round 93) and parts of operations.md. types.md §2 needs a renderer, which zk2py
+    state.md (all but §9; §4 to §6 with the Rust archive since round
+    107) and parts of operations.md. types.md §2 needs a renderer, which zk2py
     does not have: observer §7.3's honest rendering is untested here;
   - §11's History, Archive and union-storage grants, the namespace, and
     §8.5's face declarations toward a far router in a south region: the
     generator emits none of them;
   - observer §3.10's count, and an archive's alignment as a tool sees it
-    (observer §4.5, 0.10): zk2py counts no budget and runs no archive;
+    (observer §4.5, 0.10): zk2py counts no budget and runs no archive of
+    its own;
   - `desired.v1`'s scenario §9, a tool's (`zenctl desired`, #840's DD):
     zk2py's §2.17 runs on fixtures only.
   - of the classes it claims (rounds 89 to 92, and the mend after #926
@@ -6991,7 +7133,7 @@ impl/python/
   requirements.txt    exact pins
   SPEC-FINDINGS.md    every finding against the spec
   zk2py/
-    lexical.py        §1.2      plain chunks, interface ids, instance ids, ULIDs
+    lexical.py        §1.2      plain chunks, interface ids, instance ids, occurrence chunks (round 107)
     slug.py           §1.4      slug / unslug
     keys.py           §1.1      the five key forms
     templates.py      §2.2      templates, shapes, resolution, overlap
@@ -7144,7 +7286,13 @@ impl/python/
     across.py         observer §7.3 §7.5 reading across a face: the scopes by the face's plan, a selector
                                 given, the revision of a key in three steps, CH's tag (round 106)
     across_live.py    observer §7.5, live: zk2py's echo across zenoh-modem's RF face against the owner example
-                                (round 106)
+                                (round 106; modem.v3 3.4's scopes, round 107)
+    events_live.py    §2.6 §7.5 scenarios/state.md §8 live: zk2py's owner and consumer, the owner example's events,
+                                zenctl echo and get, over a union storage stand-in (round 107)
+    stray_live.py     §4.2      scenarios/state.md §15, a stray reply_del and an owner on an earlier revision
+                                (round 107)
+    archive_live.py   §4.4 S5   scenarios/state.md §4 to §6: the Rust archive aligning from zk2py's owner
+                                across a cut router link (round 107)
     echo_tool.py      observer §8.1 §8.2 a generic watcher: the samples a selector delivers, and its scope, what it watches
                                 and the verbatim kinds it excludes, in its report and on stderr; NDJSON rows with the
                                 scope on stderr alone; each payload sniffed, its row saying which case and where it

@@ -446,17 +446,18 @@ def section1(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
         report.check(sec, "2. S reads it raised", bus.reads(k) == [al.RAISED], f"{bus.reads(k)}")
         rg = fr.get_reading(bus.g_session, k)
         f1, _ = g.answers()[k] if k in g.readings else (None, None)
-        # core 0.100 (round 105): an alarm's state is a freshness.v2
-        # collection, answered by snapshot; "its last confirmation (core S2)"
-        # is the entry's confirmation, in band, never a Zenoh timestamp
-        # (F-503: the scenario, at alarms.v1 0.13, still reads a stamp).
-        report.check(sec, "2. G's answer holds the same document under the same in-band stamp, a snapshot's entry "
-                          "whose confirmation is in band, 1, vouched for at the snapshot's time (core 0.100 S2; "
-                          "the scenario's Zenoh-timestamp confirmation is F-503)",
+        # alarms.v1 0.14 (F-503's answer, round 107): "G's answer for A is a
+        # snapshot under the run the owner's descriptor states (core §3.3).
+        # Its entry holds the same document under the same in-band stamp,
+        # with its confirmation (core §4.2)".
+        report.check(sec, "2. G's answer for A is a snapshot under the run the owner's descriptor states; its entry "
+                          "holds the same document under the same in-band stamp, with its confirmation (alarms.v1 "
+                          "0.14, core §4.2)",
                      bool(got) and rg.inband == got[0].inband and rg.snapshot and rg.confirmed_ns is not None
-                     and rg.stamp_id is None and g.documents.get(k) == d,
-                     f"entry in-band {rg.inband}, snapshot {rg.snapshot}, confirmed {rg.confirmed_ns}, stamp "
-                     f"{rg.stamp_id}, document {g.documents.get(k)}")
+                     and rg.stamp_id is None and g.documents.get(k) == d and rg.snapshot_run is not None
+                     and rg.snapshot_run.run_hex() == run,
+                     f"entry in-band {rg.inband}, snapshot {rg.snapshot} under {rg.snapshot_run} (run {run}), "
+                     f"confirmed {rg.confirmed_ns}, stamp {rg.stamp_id}, document {g.documents.get(k)}")
         report.check(sec, "2. G judges yes, firing", f1 is not None and _pair(f1) == "yes, firing",
                      f1 and _pair(f1))
         mark = time.monotonic_ns()
@@ -592,15 +593,12 @@ def section3(report: Report, mode: Any, ctx: dict[str, Any], reraise: bool = Fal
                          f"delete in-band {dele and dele.inband}")
             f1 = g.answers()[k][0] if k in g.readings else None
             report.check(sec, "2. G judges no, deleted", f1 is not None and _pair(f1) == "no, deleted", f1 and _pair(f1))
-            # 0.13 (core 0.89 S2, F-460's answer): "and its last confirmation,
-            # the timestamp the owner minted at the delete"
-            # core 0.100 (round 105): the delete is a tombstone in the
-            # owner's snapshot, confirmation 0, no time: "its last
-            # confirmation, the timestamp the owner minted at the delete" has
-            # nothing to ride (F-503).
-            report.check(sec, "2. the delete is a tombstone of the owner's snapshot, with the delete's in-band stamp "
-                              "and no time and no Zenoh timestamp: the scenario's last confirmation at the delete is "
-                              "carried by nothing (core 0.100 §7.5; F-503)",
+            # alarms.v1 0.14 (F-503's answer, round 107): "G's answer lists
+            # the key as a tombstone, with the delete's in-band stamp, and no
+            # time: a tombstone has no confirmation (core S3, §7.5)".
+            report.check(sec, "2. G's answer lists the key as a tombstone, with the delete's in-band stamp, and no "
+                              "time and no Zenoh timestamp: a tombstone has no confirmation (alarms.v1 0.14; core S3, "
+                              "§7.5)",
                          rg.snapshot and rg.reply == "delete" and rg.stamp_id is None and rg.confirmed_ns is None,
                          f"snapshot {rg.snapshot}, reply {rg.reply}, stamp {rg.stamp}, meta.zid {g.meta_zid}")
             if ctx.get("quick"):
@@ -741,11 +739,14 @@ def section5(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
                 "S saw no new instance token" if not new_tokens else f"the GET did not return ({new_tokens})"))
         elif st is not None and st.errors:
             problems.append(f"the GET's errors {st.errors}")
-        # core 0.100 (round 105): the GET's answer is the owner's snapshot,
-        # whose entries carry no Zenoh timestamp: "stamped by the new
-        # instance" is read by the in-band run, the descriptor's (F-503)
+        # alarms.v1 0.14 (F-503's answer, round 107): "G's GET at the token
+        # is answered by snapshots under the new instance's run, the one its
+        # descriptor states", A and B "each put again under that run", and
+        # "a tombstone of R's key and of P's key, each deleted under that
+        # run": each entry's own stamp and its snapshot's run the new run
         def new_inst(r_: Any) -> bool:
-            return r_ is not None and r_.inband is not None and r_.inband.run_hex() == new_run
+            return r_ is not None and r_.inband is not None and r_.inband.run_hex() == new_run and (
+                getattr(r_, "snapshot_run", None) is None or r_.snapshot_run.run_hex() == new_run)
 
         if seen and (a_doc is None or not a_doc.firing or a_doc.timestamp != t0 or not new_inst(a_at)):
             problems.append(f"A not firing under the new instance's stamp with t0 kept: {a_doc}, "
@@ -763,8 +764,9 @@ def section5(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
                 problems.append(f"{name}'s reply_del not stamped by the new instance: in-band {rep_at[k].inband} "
                                 f"(run {new_run}), Zenoh {rep_at[k].stamp_id}")
         report.check(sec, "3. before the new instance token appears (a SHOULD): a GET made the moment S sees it "
-                          "answers A firing (t0 kept) and B under the new instance's stamps, and a reply_del "
-                          "for each of R's and P's keys",
+                          "is answered by snapshots under the new instance's run, its descriptor's: A firing (t0 "
+                          "kept) and B, each put again under that run, and a tombstone of each of R's and P's keys, "
+                          "deleted under it (alarms.v1 0.14)",
                      not problems, "; ".join(problems) or
                      f"{sorted((k.rsplit('/', 1)[1], 'del' if r.deleted else 'put') for k, r in rep_at.items())}")
         if first_a is not None and tok:
@@ -783,14 +785,17 @@ def section5(report: Report, mode: Any, ctx: dict[str, Any]) -> None:
                      [x.kind for x in b] == ["put", "put", "delete"] and bus.reads(kb)[-3:] == [
                          al.CONFIRMED, al.RESOLVED, al.RETIRED], f"{[x.kind for x in b]}, {bus.reads(kb)}")
         f1 = g.answers()[ka][0] if ka in g.readings else None
-        # core 0.100 (round 105): the entry carries no Zenoh timestamp, so
-        # §2.14 step 5's attribution by the stamp's id has none to read: A is
-        # unattributable, never previous_instance, and goes to step 6 (F-503)
+        # alarms.v1 0.14 (F-503's answer, round 107): "G's answer for A is a
+        # snapshot under the new instance's run, which its descriptor states
+        # as run (§2.14 step 5)": attributed by that run, the present
+        # instance's, so never previous_instance
         a_rep = rep_at.get(ka)
-        report.check(sec, "4. G's answer holds A under the new instance's run, the descriptor's, and no Zenoh "
-                          "timestamp: unattributable, never previous_instance, never foreign (§2.14 step 5; "
-                          "F-503)",
+        report.check(sec, "4. G's answer for A is a snapshot under the new instance's run, which its descriptor "
+                          "states as run: attributed to the present instance by its snapshot's run, never "
+                          "previous_instance, never foreign (alarms.v1 0.14 §2.14 step 5)",
                      a_rep is not None and new_inst(a_rep) and a_rep.stamp_id is None
+                     and getattr(a_rep, "snapshot_run", None) is not None
+                     and al.attribute_entry(a_rep, [new_run]) == al.OWN
                      and not g.readings[ka].previous_instance and not g.foreign,
                      f"in-band {a_rep and a_rep.inband} (run {new_run}), stamp {a_rep and a_rep.stamp_id}, meta.zid "
                      f"{g.meta_zid}")

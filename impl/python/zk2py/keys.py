@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .lexical import HEX64, INSTANCE_ID, ULID, is_interface_id, is_plain_chunk
+from .lexical import HEX64, INSTANCE_ID, is_interface_id, is_plain_chunk, parse_occurrence
 
 GRAMMAR = "zk2"
 CONTROL = "@zk"
@@ -31,12 +31,16 @@ def _data(chunks: list[str]) -> dict[str, Any] | None:
     # which are plain chunks; a verbatim or wildcard chunk is refused.
     if not all(is_plain_chunk(c) for c in resource):
         return None
+    occurrence = None
     if token == "events":
-        # §2.6: ``…/events/<template>/<ulid>``: a non-empty template, then a
-        # lowercase ULID minted by the owner.
-        if len(resource) < 2 or ULID.fullmatch(resource[-1]) is None:
+        # §2.6 (0.103): ``…/events/<template>/<occurrence>``, a non-empty
+        # template, then the occurrence chunk of the run and the seq the
+        # occurrence took. §1.2: "A key whose last chunk is not one, a
+        # 26-character ULID's among them, is not a zk2 key."
+        occurrence = parse_occurrence(resource[-1]) if len(resource) >= 2 else None
+        if occurrence is None:
             return None
-    return {
+    out: dict[str, Any] = {
         "form": "data",
         "system": system,
         "service": service,
@@ -44,6 +48,11 @@ def _data(chunks: list[str]) -> dict[str, Any] | None:
         "token": token,
         "resource": resource,
     }
+    if occurrence is not None:
+        # Appendix E (0.101): "An events key's adds ``occurrence``, its last
+        # chunk's stamp ``{run_width, run, seq}``."
+        out["occurrence"] = occurrence.as_json()
+    return out
 
 
 def _service_control(chunks: list[str]) -> dict[str, Any] | None:

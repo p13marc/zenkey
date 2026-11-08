@@ -1356,7 +1356,7 @@ class ConfigOwner:
       here), on every change of either, and re-put every 30 s by the
       owner's ``freshness.ttl_s`` refresh (freshness.v1 §2.4); never
       deleted.
-    - Each change event is an occurrence on ``events/change/<ulid>``
+    - Each change event is an occurrence on ``events/change/<occurrence>``
       (§2.17).
     - Deadlines and reach applies run on a timer thread of the owner's
       own, at their instants on its clock (§2.8, §2.9, §2.11).
@@ -1876,6 +1876,13 @@ class ConfigOwner:
             if self.core.in_flight is not None:
                 raise OwnerRefused("config.v1 §2.12: an act in flight (§2.7): no re-mint, refused before step 1")
             self._after(self.core.end_for_remint(time.time_ns()), put_first=True)
+            # review-bot on #1090: the wait releases the cv whole (an RLock,
+            # its recursion saved by Condition.wait), so _run_timer, the act
+            # handlers and complete(), each taking the cv, run meanwhile, and
+            # complete()'s _after notifies it. Past the bound the undo stays in
+            # flight: the re-mint is refused as one asked during an act is
+            # (§2.12), and the change ends when the undo completes, as a
+            # cancel's does (§2.10). config_remint_live, check 4.
             if not self.cv.wait_for(lambda: self.core.in_flight is None, timeout=self.remint_undo_wait_s):
                 raise OwnerRefused(f"config.v1 §2.12: step 1's undo still in flight after {self.remint_undo_wait_s} "
                                    "s (zk2py's bound): no re-mint; the change ends when it completes")

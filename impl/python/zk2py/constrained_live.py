@@ -436,7 +436,7 @@ def judge(report: dict[str, Any]) -> list[tuple[str, bool, str]]:
         out.append((f"F-439: zk2py's consumer bound to site/*, {rid} carries its key's text after zk2/site",
                     bool(row and row["carries_in"] == row["counted"]),
                     f"{row and row['batch_bytes']}"))
-    for step, what in (("8a", "a rest parameter's member under */**"), ("8b", "an event under its ULID's *")):
+    for step, what in (("8a", "a rest parameter's member under */**"), ("8b", "an event under its occurrence chunk's *")):
         row = ok(step)
         out.append((f"F-438: {what} rides the literal prefix", bool(row and row["carries_in"] == 0),
                     f"{row and row['batch_bytes']}"))

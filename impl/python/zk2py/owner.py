@@ -1913,13 +1913,42 @@ class Owner:
         if self.budget and b is not None and live_others >= b:
             raise self._refusal(key, c, r, live_others)
 
-    def occur(self, member: str, payload: bytes) -> str:
-        """An event occurrence (§2.6): one put on ``<member>/<ulid>``, the
-        ULID minted here. By default the owner keeps §2.7: no new member
-        while ``bound`` members have an occurrence within the retention, and
-        no more than ``rate`` occurrences of a member within its period."""
+    #: core §2.6 (0.103): "where the owner does not trust its clock", its
+    #: occurrences' time is unknown; set by a runner that plays such an owner
+    clock_untrusted: bool = False
+
+    def event_time(self, at_ms: int | None = None) -> dict[str, int] | None:
+        """An occurrence's time as form 4 carries it (core §2.6, §7.5):
+        ``{"s", "ms"}`` from the deployment epoch, or None, the unknown time.
+        "The time is the owner's clock's, from the deployment epoch (§7.6).
+        It is unknown while §4.3's clock guard holds, as a heartbeat's is,
+        and where the owner does not trust its clock." ``at_ms`` (Unix ms)
+        is "An occurrence seen earlier": an owner that relays one "writes the
+        time it occurred". A time outside t32's span is unknown too."""
+        if at_ms is None:
+            if self.ahead or self.clock_untrusted or self.session is None:
+                return None
+            at_ms = self._now_ns() // 1_000_000
+        total = at_ms - self.writing_epoch() * 1000
+        s_, ms = divmod(total, 1000)
+        return {"s": s_, "ms": ms} if 0 <= s_ < zk2c.UNKNOWN_T32 else None
+
+    def occur(self, member: str, payload: bytes, at_ms: int | None = None, unknown: bool = False) -> str:
+        """An event occurrence (core §2.6, 0.103): "An owner MUST publish each
+        occurrence once, with a one-shot put, on
+        ``…/<iface>/events/<template>/<occurrence>``, its last chunk the
+        occurrence chunk (§1.2) of the run and the seq the occurrence took
+        (§4.3). The owner MUST write the put's payload as an event (§7.5's
+        form 4), with the occurrence's time." The seq is the owner's one
+        count over state and events (§4.3), so a key is unique while S7
+        holds. ``at_ms`` dates an occurrence seen earlier, the reference's
+        ``put_at`` (state.md §8); ``unknown`` writes the unknown time; the
+        clock guard and an untrusted clock write it too (:meth:`event_time`).
+        By default the owner keeps §2.7: no new member while ``bound``
+        members have an occurrence within the retention, and no more than
+        ``rate`` occurrences of a member within its period."""
         from . import budget as bg
-        from .live import new_ulid
+        from .lexical import occurrence_chunk
 
         assert self.session is not None
         found = None
@@ -1944,14 +1973,18 @@ class Owner:
                     live = self._occurrences_live(c, r, now)
                     if b is not None and len(live) >= b:
                         raise self._refusal(member, c, r, len(live))
-            key = f"{member}/{new_ulid(int(time.time() * 1000))}"
+            # Core §2.6 (0.103): the occurrence takes the owner's next seq,
+            # under its run, and its key ends in their occurrence chunk.
+            ib = self._next_inband()
+            key = f"{member}/{occurrence_chunk(ib.width, ib.run, ib.seq)}"
+            when = None if unknown else self.event_time(at_ms)
             # §7.2: a raw type's media type, a JSON Schema type's JSON (or
             # CBOR where the resource says so), protobuf's.
             enc = r["type"]["media_type"] if r["type"]["kind"] == "raw" else (
                 ("application/cbor" if r.get("encoding") == "cbor" else "application/json")
                 if r["type"]["kind"] == "jsonschema" else "application/protobuf")
             # §2.4: with the event's QoS, every field. Each occurrence has a
-            # key of its own (its ULID), so no publisher outlives one put. A
+            # key of its own (its run and seq), so no publisher outlives one put. A
             # reliable event, the default, goes on Session.put with the three
             # stable fields: zenoh's own reliability is reliable (a publisher
             # declared without it reads back RELIABLE). Session.put takes no
@@ -1960,9 +1993,10 @@ class Owner:
             # only once it is put: one that raises publishes nothing, and
             # its member keeps its rate (§2.7).
             qos = qos_of(r)
-            # Core §4.3 (0.73): an occurrence carries §7.5's envelope, its seq
-            # the owner's one count over state and events, under zenoh/bytes.
-            wire, enc = zk2c.mutation(self._next_inband(), payload, self._tag_for(c, r)), zk2c.ENCODING
+            # Core §7.5 (0.101, adopted by 0.103): form 4, `CH · t32 · ms16 ·
+            # record`, CH's width bit the key's run's and its tag the
+            # record's type's, under zenoh/bytes.
+            wire, enc = zk2c.event(ib.width, when, payload, self._tag_for(c, r)), zk2c.ENCODING
             ts = {"timestamp": self.mint()} if self.candidate else {}
             if r["reliability"] == "reliable":
                 self.session.put(key, wire, encoding=enc, congestion_control=qos["congestion_control"],

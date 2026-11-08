@@ -1,0 +1,16 @@
+# zk2py's contract for spec/scenarios/state.md §15 step 2 (core 0.102, #609,
+# round 107): the later revision a reader holds too. Revision 1.1: the same
+# `status`, of a contract that uses freshness.v2, so a collection with a
+# horizon that its owner answers by snapshot (core §4.2). Read by this
+# revision alone, the 1.0 owner's reply_del would be a stray one.
+[interface]
+name    = "zk2py_stray"
+major   = 1
+minor   = 1
+summary = "state.md §15's status, confirmed by freshness.v2"
+uses    = ["freshness.v2"]
+
+[resources.status]
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 60 }

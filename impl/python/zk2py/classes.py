@@ -647,7 +647,7 @@ WALK: list[tuple[str, str, str, str, str]] = [
     # observer 0.18 (#980 C1b): a tool's half of core §8.5.
     ("observer", "observer §7.5", "A tool across a constrained face SHOULD subscribe as core §8.5 says", MET,
      "echo_tool --across-face SYSTEM/SERVICE with --contracts: face.scopes, each concrete resource's exact key  "
-     "and each template's selector, an event's ULID chunk a wildcard, a subscriber each (constrained_live step  "
+     "and each template's selector, an event's occurrence chunk a wildcard, a subscriber each (constrained_live step  "
      "5: 25, 31 and 27 B a put, §7 steps 1, 2 and 4's own) (round 95, observer 0.18)"),
     # observer 0.23 (#988 L4): declaring again after silence, re-keyed in round 99.
     ("observer", "observer §7.5", "A tool across a constrained face whose medium repairs no lost frame SHOULD declare a scope again", MET,
@@ -998,6 +998,31 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "observer §7.3", "Another `Encoding`. A reply under any other `Encoding` is no value form", MET,
      "live.read_reply and live.show_reply: undecodable, its refusal encoding (readings) (round 104, observer "
      "0.27)"),
+    # core 0.101 to 0.103 (#980 C2): an event keyed by its run and seq, its
+    # replay filtered and ordered by form 4's time; core 0.102: a stray
+    # reply_del (round 107).
+    ("owner", "core §2.6", "An owner MUST publish each occurrence once, with a one-shot put, on", MET,
+     "owner.Owner.occur: one put on <member>/<occurrence>, the chunk of the run and the seq it took from the "
+     "owner-wide count (events_live §8 Expected 1, 16- and 32-bit runs; zenctl echo reads them) (round 107, core "
+     "0.103)"),
+    ("owner", "core §2.6", "The owner MUST write the put's payload as an event", MET,
+     "owner.Owner.occur: zk2c.event, its time the owner's clock from the deployment epoch, at_ms for an occurrence "
+     "seen earlier, unknown under the clock guard or an untrusted clock (events_live §8; zenctl echo shows each "
+     "time) (round 107, core 0.103)"),
+    ("consumer", "core §2.6", "A consumer MUST keep a replayed occurrence whose time", MET,
+     "live.replay_filter over form 4's time (events_live §8 Expected 2, py-py and the owner example's) (round 107, "
+     "core 0.103)"),
+    ("consumer", "core §2.6", "A consumer MUST NOT judge an unknown time within the retention or beyond it", MET,
+     "live.replay_filter keeps it (events_live §8 Expected 4; the owner example's under its clock guard) (round "
+     "107, core 0.103)"),
+    ("consumer", "core §2.6", "A consumer MUST deliver a replay in the order of the occurrences' times", MET,
+     "live.replay_order: by time, then seq within one run, the unknown times last; ties between runs by the run's "
+     "value, as the reference breaks them (events_live §8 Expected 3; readings) (round 107, core 0.103)"),
+    ("consumer", "core §4.2", "A consumer or a tool MUST NOT merge a stray `reply_del` as a deletion", MET,
+     "live.get_state and seed.LateJoiner given the owner's revision (seed_snapshot.ByDescriptor.per_key): "
+     "undecodable, form (stray_live §15 steps 1 and 2) (round 107, core 0.102)"),
+    ("observer", "core §4.2", "A consumer or a tool MUST NOT merge a stray `reply_del` as a deletion", MET,
+     "seed.LateJoiner, a tool's, given the owner's revision (stray_live §15 step 1, T) (round 107, core 0.102)"),
 ]
 
 
