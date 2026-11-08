@@ -757,6 +757,48 @@ impl<'a> Lens<'a> {
         )
     }
 
+    /// The revision a heartbeat heard on `wire` under CH's `tag` is read
+    /// with (#978's F2): the covered interface's, as its provider's
+    /// descriptors name it, else the one observer §7.5 chooses among the
+    /// revisions held, as [`Lens::check_sample`] reads the heartbeat's
+    /// body. `None` for a key that is no heartbeat's. A window's own view
+    /// of the covered interface is made with it (#1113: zengui's
+    /// freshness book, whose first sample of a quiet collection's owner is
+    /// a heartbeat).
+    pub fn heartbeat_revision(
+        &self,
+        wire: &str,
+        tag: zenkey_model::wire::Tag,
+    ) -> Option<Result<Arc<Revision>, Unresolved>> {
+        self.covered_revision(wire, tag)
+            .map(|(_, revision)| revision.map(|(rev, _)| rev))
+    }
+
+    /// [`Lens::heartbeat_revision`], with the covered address and how the
+    /// revision was chosen, where it was by tag.
+    #[allow(clippy::type_complexity)]
+    fn covered_revision(
+        &self,
+        wire: &str,
+        tag: zenkey_model::wire::Tag,
+    ) -> Option<(
+        Addr,
+        Result<(Arc<Revision>, Option<ChosenByTag>), Unresolved>,
+    )> {
+        let (addr, iface) = self
+            .relative(wire)
+            .and_then(zenkey_model::heartbeat::covered)?;
+        // Its revisions, with no descriptor, are those of the covered
+        // interface that use freshness.v2, and its tag is the revision's
+        // own (observer §7.5).
+        let heard = Heard::Put {
+            form: zenkey_model::wire::Form::Heartbeat,
+            tag,
+        };
+        let revision = self.revision_of(&addr, &iface, Target::Heartbeat, heard);
+        Some((addr, revision))
+    }
+
     /// A heartbeat heard on `wire` (#978's F2): read with the revision its
     /// provider's descriptors name for the interface it covers, when that
     /// is held; else its form and size, with where resolution stopped. On
@@ -771,10 +813,7 @@ impl<'a> Lens<'a> {
         stamp: zenkey_model::wire::Stamp,
         tag: zenkey_model::wire::Tag,
     ) -> (PayloadRendering, Conformance, Option<ChosenByTag>) {
-        let Some((addr, iface)) = self
-            .relative(wire)
-            .and_then(zenkey_model::heartbeat::covered)
-        else {
+        let Some((addr, revision)) = self.covered_revision(wire, tag) else {
             if resolution.resolved.is_some() {
                 let declared = inband::heartbeat_declared(key);
                 let reason = inband::HEARTBEAT_AS_RECORD.to_owned();
@@ -804,14 +843,7 @@ impl<'a> Lens<'a> {
                 None,
             );
         };
-        // Its revisions, with no descriptor, are those of the covered
-        // interface that use freshness.v2, and its tag is the revision's
-        // own (observer §7.5).
-        let heard = Heard::Put {
-            form: zenkey_model::wire::Form::Heartbeat,
-            tag,
-        };
-        match self.revision_of(&addr, &iface, Target::Heartbeat, heard) {
+        match revision {
             Ok((rev, chosen)) => {
                 let layout = zenkey_model::heartbeat::Layout::of(rev.contract());
                 let (rendering, conformance) =
