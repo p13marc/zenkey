@@ -452,6 +452,10 @@ fn human(
             } else {
                 format!("  {}{rate_suffix}", crate::render::payload_text(rendering))
             });
+            // An event: its time beside its key's stamp (observer §7.3).
+            if let Some(o) = &line.occurred {
+                p.out.push(format!("  at {o}"));
+            }
             if let Some(a) = &line.attachment {
                 p.out
                     .push(format!("  attachment: {}", crate::render::payload_text(a)));
@@ -667,6 +671,50 @@ prod/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0
         assert!(
             !shown.contains(r#"["default"]"#),
             "a refused envelope is never sniffed: {shown}"
+        );
+    }
+
+    /// An event (core §7.5's form 4, observer §7.3; #980's C2c): the table
+    /// form shows its time beside its key's stamp, `at t, run r, seq s`,
+    /// counted from the deployment epoch where no epoch is given; its
+    /// record is the payload.
+    #[test]
+    fn an_event_shows_its_time_beside_its_stamp() {
+        use zenkey_model::collection::Time;
+        use zenkey_model::wire::{Event, Run, Seq, Stamp, Tag};
+        let contracts = zenkey_fleet::ContractSet::new();
+        let lens = Lens::new("prod", None, &contracts);
+        let event = |time| Event {
+            tag: Tag::NONE,
+            stamp: Stamp {
+                run: Run::U16(5),
+                seq: Seq::new(9).expect("a seq"),
+            },
+            time,
+            record: b"up",
+        };
+        let mut s = sample(SampleKind::Put);
+        s.key = "prod/zk2/lab/journal/journal.v1/events/entries/002g0009".into();
+        s.encoding = "zenoh/bytes".into();
+        s.payload = zenoh::bytes::ZBytes::from(
+            event(Time::Known { s: 3600, ms: 250 })
+                .write()
+                .expect("bytes"),
+        );
+        let line = line_of(&s, &lens, false, &mut Default::default());
+        let out = human(&line, &s, Shape::Table { hex: false }, 1, "prod", "").out;
+        assert_eq!(
+            out.last().map(String::as_str),
+            Some("  at 3600.250 s from the deployment epoch, run 0005, seq 9"),
+            "{out:?}"
+        );
+        assert!(out[1].contains("up"), "the record: {out:?}");
+        s.payload = zenoh::bytes::ZBytes::from(event(Time::Unknown).write().expect("bytes"));
+        let line = line_of(&s, &lens, false, &mut Default::default());
+        let out = human(&line, &s, Shape::Table { hex: false }, 1, "prod", "").out;
+        assert_eq!(
+            out.last().map(String::as_str),
+            Some("  at time unknown, run 0005, seq 9")
         );
     }
 

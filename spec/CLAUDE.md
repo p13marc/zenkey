@@ -476,6 +476,20 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   0.12, `config.v2` 0.3 and `redundancy.v1` 0.10 say "error" for
   "envelope", no rule changed. 249 rules (caller 17, observer 72), and
   `check-spec-status.sh` reads a version of any major, part by part.
+  Core 0.101 and observer 0.30 (#980 C2a) define the occurrence chunk
+  (§1.2: run ‖ seq in lowercase Crockford base32, 8 or 12 characters)
+  and form 4, the event (`CH · t32 · ms16 · record`, its stamp its
+  key's; `key_stamp` and `time` refused). Core 0.103 and observer 0.32
+  (#980 C2c, C2d) adopt them: §2.6's owner MUST key each occurrence by
+  its run and seq and write form 4, and its consumer MUSTs filter a
+  replay by form 4's time (an unknown one never judged) and order it by
+  time, then seq within a run, the unknown after, two runs' order
+  unspecified (the reference's tie: the run's value); a key that
+  ends in a ULID is no zk2 key (`keys.json`'s three ULID cases are
+  refusals). `state.md` §8 is 1,003 occurrences across a restart.
+  `config.v1` 0.14, `config.v2` 0.5, `link.v1` 0.18 and `freshness.v1`
+  0.6 name the occurrence chunk, no rule changed. 273 rules (owner 85,
+  consumer 31).
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`

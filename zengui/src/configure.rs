@@ -134,15 +134,15 @@ impl GroupForm {
     /// The idempotency key for `req`: the held one when `req` is the
     /// request it was minted for, else a fresh one.
     pub fn key_for(&mut self, req: &SetRequest, now: SystemTime) -> String {
-        self.key_minted(req, || zenkey::writer::ulid(now))
+        self.key_minted(req, || zenkey::call::request_id(now))
     }
 
     /// [`GroupForm::key_for`] for a `config.v2` owner: a 32-bit nonce,
-    /// spelt in decimal (v2 §2.14), drawn from a fresh ULID.
+    /// spelt in decimal (v2 §2.14), drawn from a fresh request id.
     pub fn nonce_for(&mut self, req: &SetRequest, now: SystemTime) -> String {
         self.key_minted(req, || {
             let mut h = std::collections::hash_map::DefaultHasher::new();
-            zenkey::writer::ulid(now).hash(&mut h);
+            zenkey::call::request_id(now).hash(&mut h);
             (h.finish() as u32).to_string()
         })
     }

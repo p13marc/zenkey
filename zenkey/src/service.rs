@@ -1263,13 +1263,19 @@ impl ServiceBuilder {
         let budget = s.budget(&r);
         let packed = s.packed(&r, self.deployment_epoch())?;
         let gate = s.gate.clone();
+        let epoch = self.deployment_epoch();
         self.expose(iface, resource)?;
-        Ok(
-            EventWriter::new(&self.session, &self.minter, key.to_string(), &r, values)?
-                .bounded(budget)
-                .gated(gate)
-                .packed(packed),
-        )
+        Ok(EventWriter::new(
+            &self.session,
+            &self.minter,
+            key.to_string(),
+            &r,
+            values,
+            epoch,
+        )?
+        .bounded(budget)
+        .gated(gate)
+        .packed(packed))
     }
 
     /// Brings the service up in the order of §8.2. On any refusal, nothing
@@ -2017,12 +2023,18 @@ impl Service {
         let r = self.exposed(iface, resource)?;
         let key = self.key(iface, resource, values)?;
         let s = find(&self.impls, iface)?;
-        Ok(
-            EventWriter::new(&self.session, &self.minter, key.to_string(), &r, values)?
-                .bounded(s.budget(&r))
-                .gated(s.gate.clone())
-                .packed(s.packed(&r, self.deployment_epoch())?),
-        )
+        let epoch = self.deployment_epoch();
+        Ok(EventWriter::new(
+            &self.session,
+            &self.minter,
+            key.to_string(),
+            &r,
+            values,
+            epoch,
+        )?
+        .bounded(s.budget(&r))
+        .gated(s.gate.clone())
+        .packed(s.packed(&r, self.deployment_epoch())?))
     }
 
     /// The members of `resource` its writers hold live now, and its bound

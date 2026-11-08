@@ -311,7 +311,10 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   Time}` (`key_stamp`, `time`), and `key_kind` for an event off an
   `events` key; `Envelope::parse` refuses form 4 as `key_stamp`, having
   no key. `tests/conformance.rs` reads `keys.json`'s `occurrence` and the
-  envelope fixtures' events, each put case carrying its key. `tests/conformance.rs`'s `snapshot_bodies` runs
+  envelope fixtures' events, each put case carrying its key. C2d (core
+  0.103): `grammar::parse` refuses an events key whose last chunk is no
+  occurrence chunk, a ULID's among them, and `chunk::is_lower_ulid` is
+  gone (`slug::ulid_slug` stays, for a ULID as a value). `tests/conformance.rs`'s `snapshot_bodies` runs
   `snapshot/bodies.json`. E2 (the readers): `Page::members(key)` (each
   entry as the per-key reply it stands for, `Member::payload` the bytes its
   mutation put and `attachment` a tombstone's delete, `member_key`),

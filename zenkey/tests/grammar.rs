@@ -18,8 +18,9 @@ use zenoh::pubsub::Publisher;
 use zenoh::query::{ConsolidationMode, QueryTarget, Queryable};
 use zenoh::sample::Sample;
 
-/// A lowercase ULID chunk (§1.2), as an event's last chunk (§2.6).
-const ULID: &str = "01j0000000000000000000000a";
+/// An occurrence chunk (§1.2), run 5 at seq 9, as an event's last chunk
+/// (§2.6).
+const OCCURRENCE: &str = "002g0009";
 
 fn probe() -> IfaceId {
     "probe.v1".parse().unwrap()
@@ -67,7 +68,10 @@ async fn owner(s: &zenoh::Session, address: &str) -> Owner {
         hits.push((name, hit));
     }
     b.expose(&probe(), "events/ev").unwrap();
-    let event_key = format!("{}/{ULID}", b.key(&probe(), "events/ev", &none).unwrap());
+    let event_key = format!(
+        "{}/{OCCURRENCE}",
+        b.key(&probe(), "events/ev", &none).unwrap()
+    );
     Owner {
         svc: b.start().await.unwrap(),
         publishers,

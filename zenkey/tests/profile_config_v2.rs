@@ -50,7 +50,7 @@ use zenkey::model::envelope::Detail;
 use zenkey::model::freshness::Verdict;
 use zenkey::model::grammar::{ZkKey, parse};
 use zenkey::model::template::Bindings;
-use zenkey::model::wire::{Envelope, Stamp};
+use zenkey::model::wire::{Envelope, Stamp, read_event};
 use zenkey::{CallMetadata, Client, Implementation, Outcome, Service, ServiceBuilder, presence};
 use zenoh::query::{ConsolidationMode, QueryTarget, Reply};
 use zenoh::sample::{Sample, SampleKind};
@@ -199,7 +199,9 @@ impl Recorder {
             .into_iter()
             .filter(|r| r.key.contains(&format!("/{IFACE}/events/change/")))
             .map(|r| {
-                let e = Envelope::parse(&r.payload).expect("an event's envelope");
+                let e = read_event(&r.key, &r.payload)
+                    .expect("an event")
+                    .expect("an event's envelope");
                 (
                     r.at,
                     e.stamp,
@@ -907,13 +909,13 @@ async fn s3_a_reach_set_rolled_back_at_its_deadline() {
         (ended[0].2.outcome, ended[0].2.revision),
         (Ending::RolledBack, 0)
     );
-    let key = s1
+    let at = s1
         .all()
         .into_iter()
         .find(|r| r.key.contains("/events/change/"))
-        .unwrap()
-        .key;
-    let published = zenkey::writer::ulid_time(key.rsplit('/').next().unwrap()).unwrap();
+        .unwrap();
+    let e = read_event(&at.key, &at.payload).unwrap().unwrap();
+    let published = common::instant(e.time, 0).expect("the owner's time");
     assert!(apart(published, rf1_apply_at) <= JITTER, "at apply_at");
     assert_eq!(
         rf1.device.with(|d| (d.applies.len(), d.undos.len())),

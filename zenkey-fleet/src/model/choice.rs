@@ -56,8 +56,8 @@ pub enum Heard {
 /// What the key names, for step 1.
 #[derive(Debug, Clone, Copy)]
 pub enum Target<'k> {
-    /// A data key: its kind token and its resource chunks, an event's ULID
-    /// last.
+    /// A data key: its kind token and its resource chunks, an event's
+    /// occurrence chunk last.
     Data {
         kind: KindToken,
         chunks: &'k [String],

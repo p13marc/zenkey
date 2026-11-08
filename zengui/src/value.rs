@@ -415,25 +415,6 @@ pub fn plan(key: &str, identity: Option<&Resolution>) -> ReadPlan {
     }
 }
 
-/// An event key's occurrence time, from its last chunk (§2.6): a ULID's
-/// first ten characters are its creation time in milliseconds, in
-/// Crockford's base32. `None` when the chunk is no ULID: an occurrence
-/// chunk's time is its event's (core 0.101 §7.5's form 4), which
-/// `zenkey_fleet::model::occurrence::time_of` reads from the payload.
-pub fn occurrence_time(key: &str) -> Option<std::time::SystemTime> {
-    const ALPHABET: &[u8] = b"0123456789abcdefghjkmnpqrstvwxyz";
-    let chunk = key.rsplit('/').next()?;
-    if chunk.len() != 26 {
-        return None;
-    }
-    let mut ms: u64 = 0;
-    for c in chunk[..10].bytes() {
-        let value = ALPHABET.iter().position(|a| *a == c.to_ascii_lowercase())?;
-        ms = ms.checked_mul(32)?.checked_add(value as u64)?;
-    }
-    std::time::UNIX_EPOCH.checked_add(std::time::Duration::from_millis(ms))
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -509,9 +490,8 @@ pub(crate) mod tests {
             plan_of(&format!("{at}/stream/tick")),
             ReadPlan::NotRead(NotRead::Stream)
         );
-        let occurrence = zenkey::writer::ulid(std::time::SystemTime::now());
         assert_eq!(
-            plan_of(&format!("{at}/events/alarm/{occurrence}")),
+            plan_of(&format!("{at}/events/alarm/002g0009")),
             ReadPlan::NotRead(NotRead::Event {
                 retention_s: Some(2 * 86_400)
             })
@@ -540,17 +520,5 @@ pub(crate) mod tests {
             ReadPlan::NotRead(NotRead::Unresolved),
             "nothing is read on a guess"
         );
-    }
-
-    /// An occurrence's time is its ULID's (§2.6), to the millisecond — the
-    /// same reading as the runtime's own `ulid_time`.
-    #[test]
-    fn an_occurrence_time_is_its_ulids() {
-        let at = std::time::UNIX_EPOCH + std::time::Duration::from_millis(1_760_000_000_123);
-        let ulid = zenkey::writer::ulid(at);
-        let key = format!("zk2/lab/probe/probe.v1/events/alarm/{ulid}");
-        assert_eq!(occurrence_time(&key), Some(at));
-        assert_eq!(occurrence_time(&key), zenkey::writer::ulid_time(&ulid));
-        assert_eq!(occurrence_time("demo/example/foo"), None);
     }
 }

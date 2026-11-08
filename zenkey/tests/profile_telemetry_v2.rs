@@ -1385,7 +1385,11 @@ async fn a_config_v2_owners_device_reset_is_a_new_instance() {
             .unwrap()
             .iter()
             .filter(|(_, k, _)| k.contains("/events/change/"))
-            .map(|(_, _, b)| serde_json::from_slice(Envelope::parse(b).unwrap().record).unwrap())
+            .map(|(_, k, b)| {
+                // An event (core §7.5's form 4), its stamp its key's.
+                let e = zenkey::model::wire::read_event(k, b).unwrap().unwrap();
+                serde_json::from_slice(e.record).unwrap()
+            })
             .collect()
     };
     let token_at = |id: &str| {

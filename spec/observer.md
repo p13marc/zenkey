@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.31 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.32 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.101 ([`core.md`](core.md)) |
+| **Written against** | core 0.103 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
@@ -1249,7 +1249,7 @@ reads what crosses with no descriptor beside it.
 reads. `[Sc: constrained.md §7]` `[F: scope/faces.json]`
 - **A scope** is a resource's exact key where the resource is concrete,
   and its key with every parameter a wildcard where it is a template. An
-  event's last chunk, an occurrence chunk or a ULID, is a wildcard too.
+  event's last chunk, its occurrence chunk, is a wildcard too.
 - **The heartbeat.** An interface in hand whose contract uses
   `freshness.v2` and has a collection (core §7.5) has a heartbeat. Its
   scope is the heartbeat's exact key under each address,

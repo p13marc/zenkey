@@ -232,9 +232,9 @@ pub(crate) fn replies(
             continue;
         };
         if let Some(horizon) = horizon {
-            // An occurrence's time (core 0.101 §2.6): its event's under its
-            // owner's epoch, or its ULID's; an unknown one is never judged,
-            // and a key with neither falls back to its Zenoh timestamp.
+            // An occurrence's time (core §2.6): its event's under its
+            // owner's epoch; an unknown one is never judged, and a put that
+            // is no event falls back to its Zenoh timestamp.
             use zenkey_fleet::model::occurrence::{OccurrenceTime, time_of};
             let epoch = owner_of(&over, &a.key)
                 .and_then(|addr| addr.parse().ok())
@@ -618,11 +618,22 @@ mod tests {
     }
 
     /// An event replay's answers as the panes read them (#614, FL8a; §2.6):
-    /// an occurrence older than the retention filtered out here and counted
-    /// — a union storage prunes nothing by retention — and an error reply
-    /// counted apart from the values.
+    /// an occurrence older than the retention by its event's time (core
+    /// §7.5's form 4, under the deployment's epoch) filtered out here and
+    /// counted — a union storage prunes nothing by retention — one of an
+    /// unknown time never judged, and an error reply counted apart from the
+    /// values.
     #[test]
     fn an_event_replay_is_bounded_by_its_retention_here() {
+        use zenkey_model::collection::Time;
+        use zenkey_model::wire::{Event, Run, Seq, Stamp, Tag};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let loaded = crate::services::contracts::load_with(
+            &[],
+            &[root.join("examples/zk2/zenoh-modem/catalog.json")],
+        );
+        assert!(loaded.problems.is_empty(), "{:?}", loaded.problems);
+        let epoch = loaded.catalogs.held()[0].epoch();
         let set = Arc::new(crate::value::tests::probe());
         let lens = LensInputs {
             namespace: String::new(),
@@ -631,20 +642,35 @@ mod tests {
             contracts: Some(set),
             generation: 0,
             feed: None,
-            catalogs: Default::default(),
+            catalogs: Arc::clone(&loaded.catalogs),
         };
         let now = std::time::SystemTime::now();
         let day = Duration::from_secs(86_400);
-        let occurrence = |age: Duration| zenkey_fleet::FleetAnswer {
-            key: format!(
-                "zk2/lab/probe/probe.v1/events/alarm/{}",
-                zenkey::writer::ulid(now - age)
-            ),
-            encoding: Some("application/octet-stream".into()),
-            attachment: None,
-            timestamp: None,
-            kind: Some(zenoh::sample::SampleKind::Put),
-            answer: zenkey_fleet::Answer::Value(zenoh::bytes::ZBytes::from(vec![1u8])),
+        let occurrence = |seq: u32, age: Option<Duration>| {
+            let time = age.map_or(Time::Unknown, |age| {
+                let ms = (now - age)
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis();
+                Time::from_unix_ms(i128::try_from(ms).unwrap(), epoch).unwrap()
+            });
+            let e = Event {
+                tag: Tag::NONE,
+                stamp: Stamp {
+                    run: Run::U16(5),
+                    seq: Seq::new(seq).unwrap(),
+                },
+                time,
+                record: &[1u8],
+            };
+            zenkey_fleet::FleetAnswer {
+                key: format!("zk2/lab/probe/probe.v1/events/alarm/{}", e.chunk()),
+                encoding: Some("zenoh/bytes".into()),
+                attachment: None,
+                timestamp: None,
+                kind: Some(zenoh::sample::SampleKind::Put),
+                answer: zenkey_fleet::Answer::Value(zenoh::bytes::ZBytes::from(e.write().unwrap())),
+            }
         };
         let refused = zenkey_fleet::FleetAnswer {
             key: String::new(),
@@ -661,12 +687,21 @@ mod tests {
             &lens,
             ReadKind::Events,
             "zk2/lab/probe/probe.v1/events/alarm/*".into(),
-            vec![occurrence(day), occurrence(3 * day), refused],
+            vec![
+                occurrence(1, Some(day)),
+                occurrence(2, Some(3 * day)),
+                occurrence(3, None),
+                refused,
+            ],
             0,
             Some(2 * 86_400),
             now,
         );
-        assert_eq!(got.replies.len(), 1, "the occurrence within 2d");
+        assert_eq!(
+            got.replies.len(),
+            2,
+            "the occurrence within 2d, and the unknown time"
+        );
         assert_eq!(
             got.retention,
             Some(Retention {

@@ -575,9 +575,10 @@ impl Owner {
     }
 }
 
-/// An event occurrence's key chunk: a ULID's shape (26 Crockford digits).
-fn ulid(n: u64) -> String {
-    format!("01J{n:023}")
+/// An event occurrence's key chunk: an occurrence chunk's shape, 8
+/// Crockford digits under a 16-bit run (core §1.2).
+fn occurrence(n: u64) -> String {
+    format!("{n:08}")
 }
 
 /// The owner's traffic (Conventions): for 5 s, the two streams at 20 Hz,
@@ -604,7 +605,7 @@ async fn traffic(o: &Owner) {
         }
         if i < 10 {
             let ev = if i % 2 == 0 { "fault" } else { "change" };
-            o.put(&format!("events/{ev}/{}", ulid(i)), "e").await;
+            o.put(&format!("events/{ev}/{}", occurrence(i)), "e").await;
         }
         tokio::time::sleep_until(start + Duration::from_millis(50 * (i + 1))).await;
     }
@@ -974,7 +975,7 @@ async fn events(plan: &AclPlan) -> ((usize, usize), (usize, usize)) {
     o.settle(&[&lr.seen], &[&gr.seen]).await;
     for i in 0..10u64 {
         let ev = if i % 2 == 0 { "fault" } else { "change" };
-        o.put(&format!("events/{ev}/{}", ulid(i)), "e").await;
+        o.put(&format!("events/{ev}/{}", occurrence(i)), "e").await;
         tokio::time::sleep(Duration::from_millis(90)).await;
     }
     tokio::time::sleep(SILENCE).await;

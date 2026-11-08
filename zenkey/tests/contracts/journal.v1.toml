@@ -1,4 +1,4 @@
-# state.md §8: occurrences on ULID keys, replayed within the retention.
+# state.md §8: occurrences keyed by their run and seq, replayed within the retention.
 [interface]
 name = "journal"
 major = 1

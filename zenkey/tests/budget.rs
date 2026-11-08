@@ -956,7 +956,7 @@ impl Owner {
     }
 
     /// Waits until the consumer heard an event occurrence under `part`
-    /// (`/alarms/<src>/`, its ULID after it).
+    /// (`/alarms/<src>/`, its occurrence chunk after it).
     async fn heard_event(&self, part: &str) {
         eventually(&format!("an occurrence under …{part} is heard"), || async {
             self.ever(part)

@@ -471,11 +471,11 @@ fn envelope(sample: &Sample) -> Option<Result<(wire::Stamp, wire::Form), Refusal
 /// An event's bytes before its record: CH, t32 and ms16 (core §7.5).
 const EVENT_HEAD: usize = 7;
 
-/// The time an event carries (core 0.101 §7.5's form 4; #980's C2a), read
-/// from the put as it arrived, before [`read`] strips it: `Some` with its
-/// time, known or unknown, for a put on an event key whose payload is an
-/// event; `None` for every other sample, a mutation on an event key, as
-/// an owner writes until core adopts form 4, among them.
+/// The time an event carries (core §7.5's form 4; #980's C2a), read from
+/// the put as it arrived, before [`read`] strips it: `Some` with its time,
+/// known or unknown, for a put on an event key whose payload is an event;
+/// `None` for every other sample, a mutation on an event key among them,
+/// which no owner writes since core 0.103 (§2.6).
 #[must_use]
 pub fn event_time(sample: &Sample) -> Option<zenkey_model::collection::Time> {
     if sample.kind() != SampleKind::Put {

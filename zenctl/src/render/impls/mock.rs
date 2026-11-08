@@ -95,7 +95,8 @@ impl Render for GenPlan {
         let mut notes = vec![
             Note::coverage(format!(
                 "plan: {} entr(y|ies) at {}, every sample through the runtime's writers — the \
-                 contract's QoS and Encoding, the owner's stamp on state, a fresh ULID per event",
+                 contract's QoS and Encoding, the owner's stamp on state, a key per event by its \
+                 run and seq",
                 self.entries.len(),
                 self.address
             ))

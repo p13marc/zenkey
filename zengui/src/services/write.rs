@@ -62,7 +62,7 @@ pub struct ConfigAct {
 fn claimed() -> zenkey::CallMetadata {
     zenkey::CallMetadata {
         actor: std::env::var("USER").ok().filter(|u| !u.is_empty()),
-        request_id: Some(zenkey::writer::ulid(SystemTime::now())),
+        request_id: Some(zenkey::call::request_id(SystemTime::now())),
     }
 }
 

@@ -1987,7 +1987,7 @@
       }
     },
     {
-      "note": "an event on a key that ends in a ULID",
+      "note": "an event on a key that ends in a ULID, no zk2 key: its last chunk is no occurrence chunk",
       "sample": "put",
       "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/01j9zk6q6x5m2f4a8c0d3e7b9h",
       "hex": "8000000e1000fa7b7d",
@@ -1996,7 +1996,7 @@
       }
     },
     {
-      "note": "CH alone on a ULID's key: key_stamp before short",
+      "note": "CH alone on a key that ends in a ULID: key_stamp before short",
       "sample": "put",
       "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/01j9zk6q6x5m2f4a8c0d3e7b9h",
       "hex": "80",

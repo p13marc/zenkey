@@ -62,7 +62,7 @@ pub const CANCEL: &str = "cancel";
 pub const EXTEND: &str = "extend";
 /// `@op/persist` (§2.13), optional.
 pub const PERSIST: &str = "persist";
-/// The change event's template (§2.17): `events/change/<ulid>`.
+/// The change event's template (§2.17): `events/change/<occurrence>`.
 pub const CHANGE: &str = "change";
 
 /// The view's and the status's horizon, their `freshness.ttl_s` (§2.3).
@@ -894,7 +894,7 @@ pub struct Edit {
     pub redacted: bool,
 }
 
-/// One change as it ended, `events/change/<ulid>` (§2.17).
+/// One change as it ended, `events/change/<occurrence>` (§2.17).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConfigChangeEvent {
     /// The owner's address.

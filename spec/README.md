@@ -35,7 +35,7 @@ section number alone is the core's.
 - **Template**: a resource's path below its kind chunk, with parameters
   such as `{axis}` ([§2.2](core.md#22-templates)).
 - **Member**: one value of a template's parameters. That is a key, for a
-  stream or a state; for an event, its key without the ULID chunk
+  stream or a state; for an event, its key without its occurrence chunk
   ([§2.7](core.md#27-the-population-budget)).
 - **Cardinality**: a template's bound on its members in one instance, or
   `"unbounded"` ([§2.2](core.md#22-templates)).

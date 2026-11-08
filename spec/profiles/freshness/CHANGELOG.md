@@ -5,6 +5,18 @@ entry naming its text. Each entry records what changed, what deliberately
 did not, and why. A breaking change is a new major, a new file, never an
 entry here ([`../README.md`](../README.md)).
 
+## `v1.md` 0.6 — 2026-11-08: editorial: an occurrence's age is its event's time, no rule changed (#980 C2c)
+
+Core 0.103 has an owner key each occurrence by its run and seq and carry
+its time in form 4, and refuses a key that ends in a ULID. §2.2's
+"Events" ages an occurrence by its event's time, where it named its
+ULID's.
+
+**Deliberately not changed.**
+- **No rule of this text.** An event has no horizon, and core §2.6 says
+  how a consumer reads its time.
+- **The header** is still written against core 0.22.
+
 ## `v2.md` 0.7 — 2026-11-07: a GET reader ages a snapshot's entry (#977)
 
 Core 0.100 (#977's E3) answers a state GET by snapshot, one collection per

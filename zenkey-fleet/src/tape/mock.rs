@@ -8,7 +8,8 @@
 //! all see it, and every sample on its keys is attributable to it. Its
 //! samples go through the runtime's writers, which is what gives them the
 //! contract's QoS and `Encoding`, each value's in-band stamp under the
-//! instance's run (S1, core §4.3) and a fresh ULID per event. Its runs come
+//! instance's run (S1, core §4.3) and a key per event, ending in its run and
+//! seq (§2.6). Its runs come
 //! from a record the operator names ([`ServeSpec::run_store`],
 //! `--run-file`), else a random 32-bit draw per instance.
 //!

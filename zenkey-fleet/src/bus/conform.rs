@@ -226,7 +226,7 @@ pub struct Heard {
     pub listened: Duration,
     /// Every put delivered, by key, at most [`ARRIVAL_CAP`] in all: what a
     /// stream's or an event's population and an event's rate are counted
-    /// from (§2.7). An event's key still carries its ULID.
+    /// from (§2.7). An event's key still carries its occurrence chunk.
     pub arrivals: BTreeMap<String, Vec<Arrival>>,
     /// Puts delivered past [`ARRIVAL_CAP`], not kept.
     pub arrivals_capped: u64,
@@ -1263,7 +1263,7 @@ async fn probe_call(
         sensitive: BTreeSet::new(),
         metadata: Some(zenkey::CallMetadata {
             actor: Some("zenctl check conform".to_owned()),
-            request_id: Some(zenkey::writer::ulid(SystemTime::now())),
+            request_id: Some(zenkey::call::request_id(SystemTime::now())),
         }),
         timeout,
         across_face: false,

@@ -320,7 +320,7 @@ fn the_lens_resolves_what_the_skeleton_places() {
             "site/zk2/host-a/tc/tc.netem.v1/state/config/{ns}/{iface}",
         ),
         (
-            "site/zk2/host-a/tc/tc.netem.v1/events/applied/01hzy3d1s5k8b2c4e6g8j0m2p4",
+            "site/zk2/host-a/tc/tc.netem.v1/events/applied/1qndqvqg0009",
             "site/zk2/host-a/tc/tc.netem.v1/events/applied/{occurrence}",
         ),
     ] {

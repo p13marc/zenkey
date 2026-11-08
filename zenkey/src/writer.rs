@@ -1,6 +1,7 @@
 //! Writing a resource's data (spec §2.4–§2.6, §7.2): the contract's QoS and
 //! `Encoding` on every sample, advanced publication when the contract
-//! declares `history`, and events as one-shot puts on fresh ULID keys.
+//! declares `history`, and events as one-shot puts, each on its own key
+//! (core §2.6).
 //!
 //! Every `stream`, `state`, `@state` and `events` sample carries core §7.5's
 //! envelope under the owner's stamps (§4.3), its record after it, under the
@@ -13,6 +14,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use zenkey_model::authoring::{Encoding as WireEncoding, Kind};
+use zenkey_model::collection::Time;
 use zenkey_model::contract::{Body, Contract, Data, Resource};
 use zenkey_model::grammar::KindToken;
 use zenkey_model::packed::Layout;
@@ -801,8 +803,15 @@ pub(crate) fn encode_value<T: Serialize>(value: &T, wire: Option<WireEncoding>) 
     crate::codec::encode_json(value, wire).map_err(Error::Contract)
 }
 
-/// One-shot puts on `…/events/<template>/<ulid>`, one key per occurrence
-/// (§2.6), with the contract's QoS and `Encoding`.
+/// One-shot puts on `…/events/<template>/<occurrence>`, one key per
+/// occurrence (core §2.6), with the contract's QoS and `Encoding`.
+///
+/// Each occurrence takes the owner's next state and event seq (§4.3), and
+/// its key ends in that stamp's occurrence chunk (§1.2). Its payload is an
+/// event, §7.5's form 4: CH, the occurrence's time from the deployment
+/// epoch, then the record. The time is the clock's at the put, unknown
+/// while §4.3's clock guard holds ([`EventWriter::put`]), the one given
+/// ([`EventWriter::put_at`]), or unknown ([`EventWriter::put_untimed`]).
 ///
 /// Made by its service, it keeps the resource's budget (§2.7, #741): an
 /// occurrence that would make its member a new live one while the live
@@ -825,6 +834,9 @@ pub struct EventWriter {
     minter: Arc<crate::state::Minter>,
     /// Its packed type, when it has one (core §7.6).
     packed: Option<PackedType>,
+    /// The deployment epoch its events' times count from, in seconds: its
+    /// service's (core §7.5, §7.6).
+    epoch: i64,
 }
 
 impl EventWriter {
@@ -834,6 +846,7 @@ impl EventWriter {
         prefix: String,
         r: &Resource,
         values: &Bindings,
+        epoch: i64,
     ) -> Result<Self> {
         let d = data(r)?;
         if r.kind != Kind::Event {
@@ -851,6 +864,7 @@ impl EventWriter {
             gate: None,
             minter: Arc::clone(minter),
             packed: None,
+            epoch,
         })
     }
 
@@ -867,14 +881,12 @@ impl EventWriter {
         self.packed.as_ref().map_or(Tag::NONE, PackedType::tag)
     }
 
-    /// The deployment epoch its packed records' `time` fields count from,
-    /// in seconds: its service's catalog's, else 0 (core §7.6, §8.6).
+    /// The deployment epoch its events' times and its packed records'
+    /// `time` fields count from, in seconds: its service's catalog's, else
+    /// 0 (core §7.5, §7.6, §8.6).
     #[must_use]
     pub fn deployment_epoch(&self) -> i64 {
-        self.packed.as_ref().map_or(
-            zenkey_model::catalog::EPOCH_WITHOUT_CATALOG,
-            PackedType::epoch,
-        )
+        self.epoch
     }
 
     /// The record's `Encoding`, as the contract's type says (§7.2). Every
@@ -897,15 +909,25 @@ impl EventWriter {
         self
     }
 
-    /// Publishes one occurrence now, and returns its key.
+    /// Publishes one occurrence now, and returns its key. Its time is the
+    /// clock's, unknown while §4.3's clock guard holds (core §2.6).
     pub async fn put(&self, payload: impl Into<ZBytes>) -> Result<String> {
-        self.put_at(payload, SystemTime::now()).await
+        self.put_with(payload, None::<ZBytes>).await
     }
 
-    /// Publishes one occurrence whose ULID carries `at`: for an owner that
-    /// relays occurrences it observed earlier.
+    /// Publishes one occurrence that happened at `at`, for an owner that
+    /// relays occurrences it observed earlier (core §2.6): its event
+    /// carries `at`, and its key still takes the owner's next seq.
     pub async fn put_at(&self, payload: impl Into<ZBytes>, at: SystemTime) -> Result<String> {
         self.put_at_with(payload, None::<ZBytes>, at).await
+    }
+
+    /// Publishes one occurrence now, its time unknown: for an owner that
+    /// does not trust its clock (core §2.6). A consumer's replay keeps it,
+    /// after every occurrence with a time.
+    pub async fn put_untimed(&self, payload: impl Into<ZBytes>) -> Result<String> {
+        self.put_under(payload.into(), None, Time::Unknown, None)
+            .await
     }
 
     /// [`EventWriter::put`] with an attachment, encoded per the contract's
@@ -915,7 +937,7 @@ impl EventWriter {
         payload: impl Into<ZBytes>,
         attachment: Option<impl Into<ZBytes>>,
     ) -> Result<String> {
-        self.put_at_with(payload, attachment, SystemTime::now())
+        self.put_under(payload.into(), attachment.map(Into::into), self.now(), None)
             .await
     }
 
@@ -927,8 +949,20 @@ impl EventWriter {
         attachment: Option<impl Into<ZBytes>>,
         at: SystemTime,
     ) -> Result<String> {
-        self.put_under(payload.into(), attachment.map(Into::into), at, None)
+        let time = time_at(at, self.epoch);
+        self.put_under(payload.into(), attachment.map(Into::into), time, None)
             .await
+    }
+
+    /// The time of an occurrence now: the clock's, from the deployment
+    /// epoch, or unknown while §4.3's clock guard holds, as a heartbeat's
+    /// is (core §2.6).
+    fn now(&self) -> Time {
+        if self.minter.is_ahead() {
+            Time::Unknown
+        } else {
+            time_at(SystemTime::now(), self.epoch)
+        }
     }
 
     /// Publishes one occurrence now, its record `record` sealed under
@@ -941,12 +975,7 @@ impl EventWriter {
         stamp: zenkey_model::wire::Stamp,
     ) -> Result<String> {
         let put = self
-            .put_under(
-                ZBytes::from(record.to_vec()),
-                None,
-                SystemTime::now(),
-                Some(stamp),
-            )
+            .put_under(ZBytes::from(record.to_vec()), None, self.now(), Some(stamp))
             .await;
         // The model's seq was pending (core §4.2, "Its asof"): an event is
         // never recorded, so it holds no snapshot's asof back once sent.
@@ -958,7 +987,7 @@ impl EventWriter {
         &self,
         payload: ZBytes,
         attachment: Option<ZBytes>,
-        at: SystemTime,
+        time: Time,
         stamp: Option<zenkey_model::wire::Stamp>,
     ) -> Result<String> {
         let _write = match &self.gate {
@@ -973,10 +1002,10 @@ impl EventWriter {
         if let Some(b) = &self.budget {
             b.admit(&self.prefix, Instant::now())?;
         }
-        let key = format!("{}/{}", self.prefix, ulid(at));
         // Core §4.3: the occurrence under the owner's next seq, or the one
-        // given, sealed in §7.5's envelope; a Zenoh timestamp only where its
-        // session stamps (§8.2).
+        // given; its key ends in that stamp's occurrence chunk (§1.2, §2.6),
+        // and its payload is §7.5's form 4, the time before the record. A
+        // Zenoh timestamp only where its session stamps (§8.2).
         let stamped = match stamp {
             None => self.minter.mint_event(false),
             Some(stamp) => crate::state::Stamped {
@@ -987,8 +1016,19 @@ impl EventWriter {
                     .then(|| self.minter.time()),
             },
         };
+        let record = payload.to_bytes();
+        let event = zenkey_model::wire::Event {
+            tag: self.tag(),
+            stamp: stamped.stamp,
+            time,
+            record: &record,
+        };
+        let key = format!("{}/{}", self.prefix, event.chunk());
+        let bytes = event.write().ok_or_else(|| {
+            Error::Contract("an event's time is one no reading accepts (core §7.5)".to_owned())
+        })?;
         self.session
-            .put(&key, stamped.seal_tagged(self.tag(), &payload.to_bytes()))
+            .put(&key, bytes)
             .attachment(attachment)
             .encoding(Encoding::ZENOH_BYTES)
             .timestamp(stamped.time)
@@ -1002,53 +1042,13 @@ impl EventWriter {
     }
 }
 
-const CROCKFORD: &[u8; 32] = b"0123456789abcdefghjkmnpqrstvwxyz";
-
-/// A lowercase ULID (§1.2): 48 bits of milliseconds since the epoch, then
-/// 80 random bits, in Crockford's base32.
-#[must_use]
-pub fn ulid(at: SystemTime) -> String {
-    let ms = at
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        & ((1 << 48) - 1);
-    let random: u128 = rand::random::<u128>() & ((1 << 80) - 1);
-    let v = (ms << 80) | random;
-    (0..26)
-        .map(|i| CROCKFORD[((v >> (125 - 5 * i)) & 31) as usize] as char)
-        .collect()
-}
-
-/// The time a ULID chunk carries, if it is one (§1.2).
-#[must_use]
-pub fn ulid_time(chunk: &str) -> Option<SystemTime> {
-    if chunk.len() != 26 {
-        return None;
-    }
-    let mut v: u128 = 0;
-    for b in chunk.bytes() {
-        let d = CROCKFORD.iter().position(|&c| c == b)?;
-        v = (v << 5) | d as u128;
-    }
-    let ms = (v >> 80) as u64;
-    Some(UNIX_EPOCH + Duration::from_millis(ms))
-}
-
-#[cfg(test)]
-mod tests {
-    use std::time::{Duration, UNIX_EPOCH};
-
-    use super::{ulid, ulid_time};
-
-    #[test]
-    fn a_ulid_is_a_lowercase_chunk_carrying_its_time() {
-        let at = UNIX_EPOCH + Duration::from_millis(1_760_000_000_123);
-        let u = ulid(at);
-        assert_eq!(u.len(), 26);
-        assert!(zenkey_model::grammar::parse(&format!("zk2/s/v/i.v1/events/e/{u}")).is_ok());
-        assert_eq!(ulid_time(&u), Some(at));
-        assert_ne!(ulid(at), ulid(at), "80 random bits");
-        assert_eq!(ulid_time("not-a-ulid"), None);
-    }
+/// `wall` as an event's time, counted from the deployment epoch `epoch` in
+/// seconds (core §7.5's form 4): unknown before the epoch, or beyond what
+/// t32 counts.
+fn time_at(wall: SystemTime, epoch: i64) -> Time {
+    wall.duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|d| i128::try_from(d.as_millis()).ok())
+        .and_then(|ms| Time::from_unix_ms(ms, epoch))
+        .unwrap_or(Time::Unknown)
 }

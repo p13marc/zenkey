@@ -90,6 +90,9 @@ struct Rec {
     key: String,
     delete: bool,
     payload: Vec<u8>,
+    /// An event's time (core §2.6, §7.5's form 4), under the deployment
+    /// epoch 0: no catalog is in force.
+    occurred: Option<SystemTime>,
 }
 
 type Log = Arc<Mutex<Vec<Rec>>>;
@@ -100,6 +103,7 @@ fn push(log: &Log, x: &Sample) {
         key: x.key_expr().as_str().to_owned(),
         delete: x.kind() == SampleKind::Delete,
         payload: common::record(x),
+        occurred: common::occurred(x, 0),
     });
 }
 
@@ -802,8 +806,7 @@ async fn s3_a_reach_set_rolled_back_at_its_deadline() {
         .into_iter()
         .find(|r| r.key.contains("/events/change/"))
         .unwrap();
-    let ulid = at.key.rsplit('/').next().unwrap();
-    let published = zenkey::writer::ulid_time(ulid).unwrap();
+    let published = at.occurred.expect("the owner's time");
     assert!(apart(published, rf1_apply_at) <= JITTER, "at apply_at");
     assert_eq!(
         rf1.device.with(|d| (d.applies.len(), d.undos.len())),

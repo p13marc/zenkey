@@ -312,8 +312,8 @@
       }
     },
     {
-      "note": "an event every revision declares alike, its ULID stripped: index 8, by tag",
-      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/01j9zk6q6x5m2f4a8c0d3e7b9h",
+      "note": "an event every revision declares alike, its occurrence chunk stripped: index 8, by tag",
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/002g0009",
       "ch": "0x00",
       "size": 57,
       "held": [

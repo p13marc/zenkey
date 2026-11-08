@@ -602,6 +602,19 @@ pub fn record(s: &zenoh::sample::Sample) -> Vec<u8> {
     strip(s.clone()).payload().to_bytes().into_owned()
 }
 
+/// The instant an event's time names (core §2.6, §7.5's form 4) under the
+/// deployment epoch `epoch`, in seconds: `None` for an unknown time.
+pub fn instant(t: zenkey::model::collection::Time, epoch: i64) -> Option<std::time::SystemTime> {
+    let ms = u64::try_from(t.unix_ms(epoch)?).ok()?;
+    Some(std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms))
+}
+
+/// When a put on an event key says its occurrence happened, under the
+/// deployment epoch `epoch`: `None` for no event, or an unknown time.
+pub fn occurred(s: &zenoh::sample::Sample, epoch: i64) -> Option<std::time::SystemTime> {
+    instant(zenkey::inband::event_time(s)?, epoch)
+}
+
 /// A sample's in-band stamp, when it carries the envelope; a member read's
 /// page's, its entry's.
 pub fn inband(s: &zenoh::sample::Sample) -> Option<zenkey::model::wire::Stamp> {

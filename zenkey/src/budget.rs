@@ -23,7 +23,7 @@
 //!
 //! **Its clock** is the owner's monotonic clock at the write: when the
 //! occurrence is published, which is what a reader measures (§2.7,
-//! "Spans"), and not the instant an `EventWriter::put_at` ULID carries.
+//! "Spans"), and not the time an `EventWriter::put_at` event carries.
 //!
 //! The writers ([`crate::writer::Writer`], [`crate::writer::EventWriter`],
 //! [`crate::state::StateWriter`]) consult the budget their service made
@@ -82,7 +82,7 @@ pub struct Refusal {
     pub iface: IfaceId,
     /// The resource, `<kind token>/<template>`.
     pub resource: String,
-    /// The member: its key, an event's without the ULID chunk.
+    /// The member: its key, an event's without its occurrence chunk.
     pub member: String,
     pub breach: Breach,
 }

@@ -895,7 +895,8 @@ pub(crate) enum Command {
     /// — publishing every stream, state and event resource of each interface
     /// through the runtime's writers: the contract's QoS and `Encoding`,
     /// every value stamped in band under the instance's run (S1, §4.3; runs
-    /// from --run-file when given), a fresh ULID per event (§2.6),
+    /// from --run-file when given), each event on its own key, its run and
+    /// seq (§2.6),
     /// events within their declared rate. Every operation answers each call
     /// with one synthesized response. Payloads are synthesized from the
     /// bundle, deterministic per --seed: JSON Schema values that validate,
@@ -2016,7 +2017,7 @@ pub(crate) enum StorageCmd {
     ///   --enrollment   the enrollment `acl gen` reads, with --contracts: a
     ///                  UNION STORAGE per event resource of every interface an
     ///                  enrolled service implements (spec §2.6), keyed
-    ///                  zk2/*/*/<iface>/events/<template>/<ulid>, its
+    ///                  zk2/*/*/<iface>/events/<template>/<occurrence>, its
     ///                  garbage_collection.lifespan the contract's retention
     ///   --deployment   a file naming volumes, storages by selector, and the
     ///                  [events] block the union storages use

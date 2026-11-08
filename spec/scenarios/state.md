@@ -228,19 +228,41 @@ which a consumer accepts whatever its clock.*
 subscriptions run the tool's on the bus (`zenkey-fleet/tests/seeding.rs`,
 `s7_a_tools_late_joiner_keeps_the_merge_after_its_seed`).*
 
-## §8 Events replay
+## §8 Events replay (§2.6)
 
-**Setup.** An owner publishes 1,000 occurrences of an event with
-`retention = "1h"`: 500 dated within the last hour, and 500 older, whose
-ULIDs carry older times. A union storage runs on `zk2/*/*/*/events/**`.
+**Setup.** An owner `lab/journal` publishes occurrences of
+`events/entries`, `retention = "1h"`. Each rides its occurrence chunk's
+key (core §1.2). Its payload is an event (§7.5's form 4), with its time.
+A union storage runs on `zk2/*/*/*/events/**`. Its backend ignores
+`_time`, as the storage manager's memory backend does (spike S5). A
+consumer replays with a wildcard GET bounded by the retention. T is the
+time of step 1.
 
-**Steps.** A consumer replays with a wildcard GET bounded by the retention.
+**Steps.**
+1. The owner publishes 1,000 occurrences, dated by `put_at`. 500 are
+   within the hour, a second apart, the newest at T. 500 are older, two
+   hours and more before T.
+2. The owner publishes one occurrence of an unknown time.
+3. The owner restarts, so a new instance writes under a new run (§4.3).
+   It publishes two occurrences, dated T − 100.5 s and T − 0.5 s.
+4. The consumer replays the event.
 
-**Expected.** Exactly the 500 recent occurrences. With a backend that
-ignores `_time`, the consumer filters by the ULID's time.
+**Expected.**
+1. Each occurrence's key ends in its run and seq: 8 characters under a
+   16-bit run, or 12 under a 32-bit one. Its payload carries its time,
+   or the unknown time for step 2's.
+2. The replay holds 503 occurrences: step 1's 500 recent ones, step 2's
+   and both of step 3's. The backend kept all 1,003. The consumer dropped
+   the 500 beyond the retention, by each event's time.
+3. The 502 with a time come in the order of their times, across the run
+   change. Step 3's first comes between step 1's at T − 101 s and
+   T − 100 s, and its second between T − 1 s and T.
+4. Step 2's comes last. An unknown time is never judged within the
+   retention or beyond it, and comes after every known one.
 
 *Spike S5: the union replay returned 1,000 in 4 ms; the memory backend
-ignored the `_time` bound.*
+ignored the `_time` bound. The reference runs §8 in `zenkey/tests/state.rs`
+(`s8_events_replay`).*
 
 ## §9 An archive's backend refuses an outdated put (§4.4)
 

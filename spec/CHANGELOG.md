@@ -3,6 +3,83 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.103 — 2026-11-08: an event keyed by its run and seq, and the ULID refused (#980 C2c, C2d)
+
+Epic #975, zk2c, makes the wire bandwidth-first. 0.101 defined the
+occurrence chunk and form 4, the event, and adopted neither. This
+version is #980's C2c, the flip, and C2d: an owner keys each occurrence
+by its run and seq and writes form 4, a consumer's replay reads form 4's
+time, and a key that ends in a ULID is no zk2 key.
+
+**Changed: §2.6, the owner.** "One key per occurrence" is a rule. An
+owner MUST publish each occurrence once, with a one-shot put, on
+`…/events/<template>/<occurrence>`, its last chunk the occurrence chunk
+of the run and the seq the occurrence took, and its payload MUST be an
+event, with the occurrence's time.
+- **An occurrence seen earlier**, relayed, carries the time it occurred,
+  and its key takes the owner's next seq: within one run the relayed
+  occurrences order by their arrival, and across runs by their times.
+- **The time** is unknown while §4.3's clock guard holds, as a
+  heartbeat's is, and where the owner does not trust its clock.
+- **A reused run** mints the same keys, and a union storage keeps the
+  later occurrence under the earlier one's key. §2.6 says so, and points
+  at §4.3's rules: a run is never reused, and a 16-bit run's record is
+  durable before the first sample of each run it issues. Appendix B
+  gains the fact it rests on: the storage manager refuses no put on a
+  key it holds.
+
+**Changed: §2.6, the consumer.** "Replay" has two rules.
+- **The filter.** A consumer MUST keep a replayed occurrence whose time
+  is within the retention, drop one beyond it, and MUST NOT judge an
+  unknown time either way.
+- **The order.** A consumer MUST deliver a replay by the occurrences'
+  times, then by seq within one run. The unknown times come after every
+  known one, by seq within one run. Between two runs at one time, and
+  among the unknown times of two runs, the order is unspecified.
+
+**Changed: §1.2, the ULID refused (C2d).** An events key's last chunk is
+an occurrence chunk. A key whose last chunk is a ULID's 26 characters is
+no zk2 key: it carries no envelope, and no reader resolves it. The ULID
+chunk's definition is gone, and the occurrence chunk spells its alphabet
+itself. §2.7's member, the `key_stamp` refusal (§7.5) and Appendix E's
+`keys.json` (no `null` occurrence) say the same.
+
+**Decided here, where #980's C2 memo left a default.**
+- **An unknown time's place in the order**: after the known times, by
+  seq within one run, so a run's own order holds for occurrences that
+  have no time to order by.
+- **Two runs at one time, and two runs' unknown times**: unspecified,
+  where the memo left their arrival. Nothing orders two runs (§4.3), and
+  the order the runs were first heard in follows the replies' arrival,
+  so two replays of one storage could disagree. The reference breaks the
+  tie by the run's value, a 16-bit run before a 32-bit one, and an
+  occurrence with no stamp after every run.
+- **No repair of a reused run.** zenoh 1.10.1's storage manager refuses no
+  put on a key it holds (Appendix B), so no mechanism here can keep the
+  earlier occurrence. §4.3's durability rule is the defence.
+
+**Migration: a mixed fleet.** A reader before 0.101 (the reference before
+#980's C2b) drops every occurrence an owner of this version writes: its
+grammar admits only a ULID's key, and its envelope reads form 4 as
+reserved, refused as `form`. A deployment upgrades its readers, tools
+and consumers alike, before its owners. A reader of 0.101 reads both.
+
+**Deliberately not changed.**
+- **§4.3.** Events already take the owner-wide state and event seq
+  (0.73), and the run file's rules already make the chunk unique.
+- **A store's `_time` bound.** The storage still admits by its own time,
+  and the consumer's filter reads form 4's.
+- **The evidence.** `keys.json`'s three ULID cases are refusals, 50 cases
+  in all. `envelope/carries.json` moves its event keys to an occurrence
+  chunk, gains a ULID key that carries no envelope (26 cases), reads an
+  event's bytes on a ULID key as plain, and gains a `key_stamp` read, a
+  32-bit run's CH on an 8-character chunk (37 reads). `vectors.json` keeps its
+  `key_stamp` cases on a ULID key: its parse reads the last chunk and no
+  grammar. `tags.json` and `scope/faces.json` name the occurrence chunk.
+  `scenarios/state.md` §8 is rewritten: 1,000 occurrences, half dated
+  beyond the retention, a memory backend that ignores `_time`, an unknown
+  time and a run change.
+
 ## 0.102 — 2026-11-08: a stray `reply_del`, and the owner's revision by its run (#977, #609)
 
 zk2py round 105 read 0.100 cold, and #977's E4 (#1089) found two gaps in

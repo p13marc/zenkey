@@ -97,7 +97,7 @@ block (tooling guide §8.4, #393; zk2's since #704), from either or both of:
   --enrollment   the enrollment `acl gen` reads, with --contracts: a
                  UNION STORAGE per event resource of every interface an
                  enrolled service implements (spec §2.6), keyed
-                 zk2/*/*/<iface>/events/<template>/<ulid>, its
+                 zk2/*/*/<iface>/events/<template>/<occurrence>, its
                  garbage_collection.lifespan the contract's retention
   --deployment   a file naming volumes, storages by selector, and the
                  [events] block the union storages use

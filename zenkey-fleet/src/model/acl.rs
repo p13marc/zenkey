@@ -421,7 +421,7 @@ fn wire(ns: &str, rel: &str) -> String {
 }
 
 /// Canonical form: a generated pattern can spell `**/*` (a rest parameter
-/// then an event's ULID chunk), which zenoh accepts only canonized.
+/// then an event's occurrence chunk), which zenoh accepts only canonized.
 fn canon(s: String) -> String {
     OwnedKeyExpr::autocanonize(s)
         .map(|k| k.to_string())
@@ -505,7 +505,7 @@ impl Provider {
 }
 
 /// A resource's selector under one provider, R2's bindings applied and every
-/// other parameter a wildcard; an event's ends in `*`, the ULID chunk
+/// other parameter a wildcard; an event's ends in `*`, the occurrence chunk
 /// (`zenkey::consumer::Consumer::selectors`, which this mirrors).
 fn resource_pattern(
     provider: &str,

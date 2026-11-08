@@ -443,7 +443,8 @@ pub enum Refusal {
     #[error("a request's width bit is 1, and a request carries no run")]
     RequestRun,
     /// An event whose key's last chunk is not an occurrence chunk of CH's
-    /// width (core 0.101): a ULID's, the other width's, or no key at all.
+    /// width (core 0.101): the other width's, any other chunk, or no key at
+    /// all.
     #[error("an event's key ends in no occurrence chunk of a {} run", if *.wide { "32-bit" } else { "16-bit" })]
     KeyStamp { wide: bool },
     /// Fewer bytes than CH, the run and the seq need, and an error's byte
@@ -1269,7 +1270,7 @@ mod tests {
             "zk2/h/s/i.v1/@stream/frames/f1",
             "zk2/h/s/i.v1/state/mode",
             "zk2/h/s/i.v1/@state/tracks/t1",
-            "zk2/h/s/i.v1/events/fault/01arz3ndektsv4rrffq69g5fav",
+            "zk2/h/s/i.v1/events/fault/002g0009",
             // A session in no namespace hears the namespace in front.
             "prod/zk2/h/s/i.v1/state/mode",
             "site/a/zk2/h/s/i.v1/stream/pose",
@@ -1310,8 +1311,13 @@ mod tests {
             Some(KindToken::ExplicitStream)
         );
         assert_eq!(
-            enveloped_kind("zk2/h/s/i.v1/events/fault/01arz3ndektsv4rrffq69g5fav"),
+            enveloped_kind("zk2/h/s/i.v1/events/fault/002g0009"),
             Some(KindToken::Events)
+        );
+        assert_eq!(
+            enveloped_kind("zk2/h/s/i.v1/events/fault/01arz3ndektsv4rrffq69g5fav"),
+            None,
+            "a ULID's key is no zk2 key (core 0.103 §1.2)"
         );
     }
 
