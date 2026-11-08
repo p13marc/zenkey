@@ -63,7 +63,7 @@ says what it will be.
 | **Snapshots,** one reply per collection | Landed, PRs #1070, #1078, #1086 and #1089 | Core 0.100: an owner answers a state GET with one snapshot per collection, in pages of `ServiceConfig::snapshot_page_bytes`. Every reader GETs under `None`, merges per key, and applies the omission rule over a complete snapshot. A `reply_del` on a collection's member is no owner's answer. `link.v2` 0.9 floors a window only where a tombstone alone proves a delete (#977's E1 to E5) |
 | **The ground's tools across a face** | Landed, PR #1088 | Observer 0.29 §7.5: a tool's scope is the face's plan, with each crossing heartbeat, and a key's revision among several held is chosen by the catalog and CH's tag. A packed record whose type is not held is never sniffed (§7.3; #990's V1 and V2) |
 | Dated values and `.zrec` version 4 | Landed (PR #1092) | The tooling guide's O8: a time dated in UTC under its epoch, named, and a field's bound beside its value. §5's version 4 carries the catalog, the revisions and their bundles, and `zenctl echo --from FILE` reads a capture with nothing beside it (#990's V3 and V4) |
-| The doctor's `packed-refused` and `state-unconfirmed`; `watch`'s lost and diverged heartbeats; zengui and zenwatch across a face; `--face-policy` on `get state`, `watch`, `call` and `telemetry`; `field` over a frame's records | Missing | #990's V5 to V8, and V2's `field` |
+| The doctor's `packed-refused` and `state-unconfirmed`; `watch`'s lost and diverged heartbeats, and zengui's Inspector per collection; zengui and zenwatch across a face; `--face-policy` on `get state`, `watch`, `call` and `telemetry`; `field` over a frame's records | Landed (PRs #1097, #1102 and #990's last two) | #990's V5 to V8, and V2's `field`: a field a frame's record carries absent, or its reader cannot tell, is counted apart and never vanished |
 | **The measurement** of W1 and W2 on zk2c | Missing | #989 |
 
 ## 2. The order to migrate in
@@ -485,7 +485,7 @@ policy runs `sequence = "16bit"`, and `wait_before_close` equals the lease.
 | `echo`, `rate`, `field`, `record`, `timeline`, `snapshot`, `watchdog` | `--across-face SYSTEM/SERVICE`, `--face-policy F --face NAME`, `--contracts`, `--catalog` | the scope is what the face's plan lets cross, each resource and heartbeat by its exact key, never `zk2/**`: on rf0, `frames/fast` alone. `snapshot` GETs every state resource, since a request crosses by grant. A plan the profile refuses, or one that lets nothing the verb reads cross, is exit 2. The session runs the face's transport; `--timeout` defaults to the face's `reply_timeout_ms`; a silent subscription is declared again where `arq = false` |
 | `telemetry` | `--across-face`, a bare flag: the selector names the one owner; `--contracts`, `--catalog`, `--settle` | the series are read from frames with their epoch in band; `--settle` should be the link's round trip, and `--for` should cover a full record, 900 s for 3.3's `frames/fast` on RF |
 | `config get`, `set`, `confirm`, `cancel`, `extend`, `persist` | `--across-face`, a bare flag; `--face-policy F --face NAME`; `--status` for `config.v1` | a silence is unattributed; `config.v1`'s status is two frames and its view six, and `config.v2` answers in its one record; `--timeout` defaults to the face's `reply_timeout_ms`, 15 s on RF |
-| `get state` | `--contracts`, `--catalog`, the global `--timeout` | a collection is read whole by its snapshot, under `None`, its entries merged per key, and the omission rule applied once the snapshot is complete; a page lost leaves it incomplete, dropping nothing. It takes no `--face-policy` yet, so `--timeout` should be the face's 15 s (#990's V8) |
+| `get state`, `watch`, `call` | `--across-face` (the revision `--contracts` holds, never presence), `--face-policy F --face NAME`, `--contracts`, `--catalog` | a collection is read whole by its snapshot, under `None`, its entries merged per key, and the omission rule applied once the snapshot is complete; a page lost leaves it incomplete, dropping nothing. The session runs the face's transport, and `--timeout` defaults to the face's `reply_timeout_ms`, 15 s on RF; `watch` declares a silent subscription again where `arq = false`, and says each heartbeat lost or diverged |
 | `catalog show`, `catalog check`, `schema show` | `--catalog`, `--contracts` | the ground checks what it holds, offline |
 
 ```bash
@@ -511,9 +511,10 @@ give the catalog that lists the revisions in hand: `29bf7d47` lists all five of 
 **Reading values.** A frame's `t=`, a heartbeat's time and a packed `time` field are dated in
 UTC beside the wire's seconds, the epoch named (`dated`: the catalog's, `29bf7d47`'s
 2026-01-01T00:00:00Z, given `--catalog`), and each field shows its bound: `±0.125` for a `fixed`
-field, `(mod 2^24)` for a counter (#990's V3). An assumed epoch is never dated. `field` reads a
-frame's envelope alone, never its records' fields: read the series with `zenctl telemetry`. A
-GET's snapshot entry carries its confirmation, so a reader across RF ages a member without the
+field, `(mod 2^24)` for a counter (#990's V3). An assumed epoch is never dated. `field` reads each
+frame record's fields, through one reader per key for the window: a field a record carries
+absent, or whose value the reader cannot tell after a lost frame, is counted apart (`absent`,
+`unknown`), never read as vanished. A GET's snapshot entry carries its confirmation, so a reader across RF ages a member without the
 heartbeat, which does not cross while every state is `host` (`freshness.v2` 0.7 §2.6).
 
 **Recording and replay.** Capture across the face with `record --across-face h-3fa9c2d41b7e/rf0
@@ -530,11 +531,13 @@ a namespace of your own, `replay FILE --namespace NS`, and read it as across a f
 so it runs on the node's side, with `--catalog`.
 
 **zengui and zenwatch across a face.** zengui takes `--catalog` and `--contracts`. Its Inspector
-reads a frame's fields, its Series plots them, and its Config tool drives `config.v1` and
-`config.v2`. Neither has a face scope yet (#990's V7), and zengui takes no `--face-policy`. Its
-scopes are wildcards, under which each put across a face would carry its key's text (core
-§8.5). Across a face, give it `--selector` with each frame's exact key, `--zenoh-config` with
-`acl gen --far-config`'s block, and `--timeout 15`. Give each zenwatch rule exact keys.
+reads a frame's fields, its Series plots them, its Config tool drives `config.v1` and
+`config.v2`, and for a heartbeat or a collection member it says each collection vouched, lost or
+diverged by the window's own view. `zengui --across-face h-3fa9c2d41b7e/rf0 --face-policy …
+--face rf --contracts … --catalog …` reads no presence, subscribes to the face's plan alone,
+never `zk2/**`, and runs the face's transport and reply timeout. zenwatch takes an
+`across_face` block (`addresses`, `contracts`, `policy`, `face`) and narrows each rule's
+selector to the plan; a rule that reads presence or the doctor is refused there (exit 2).
 
 **A ground service in code.** Read the policy with `zenkey_model::link::parse`, then take
 `FacePolicy::far_side("rf")`. Open the session with `FarSide::session_keys()`, and read through
@@ -578,8 +581,5 @@ A migration started today would hit each of these.
 | **The readers' `wait_before_close` default** is zenoh 1.10.1's 5 s | Pass `--wait-before-close`, or `--face-policy` where a verb takes it | #1011 |
 | **Event keys in 0.21 end in a ULID.** `main` keys an occurrence by its run and seq (core 0.103), for the next release | Keep the four events `host`, and publish no `face/` twin, until modem-mgmt takes that release | #980 (C2) |
 | **No text in packed records,** so four backends cannot move to `config.v2` | Text stays in the JSON states, and those backends on `config.v1`. Across RF, a GET of the status by grant; the view is never pushed | #979 (B3) |
-| **zengui and zenwatch have no face scope,** and `get state`, `watch`, `call` and `telemetry` take no `--face-policy` | Set `--selector`, `--zenoh-config`, `--timeout` and `--settle` by hand, and give a zenwatch rule exact keys (§4) | #990 (V7, V8) |
-| **The doctor has no `packed-refused` or `state-unconfirmed`,** and `watch` shows no lost heartbeat or divergence | `get state` shows each member's last confirmation, and the watchdog's `invalid-payload` names a layout's refusal on a stream | #990 (V5, V6) |
-| **`field` reads a frame's envelope alone** | Read the series with `zenctl telemetry` | #990 (V2's `field`) |
 | **The transport that never came back** (W2, finding 5) | zenoh-modem's tracker. Keep nothing `block` larger than a batch on a crossing key | #988's design, §1.8 |
 | **The bytes are modelled.** zk2c's run of W1 and W2 on the fake media has not happened | Read every unmarked figure here as a model | #989 |
