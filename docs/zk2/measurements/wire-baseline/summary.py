@@ -11,6 +11,10 @@ Usage: summary.py [results-dir]
 - LoRa, per window and direction, a day: the lean runs' counters and airtime,
   the duty used, the keep-alives lost and the links opened again in the
   window, and the model (model.json's lora).
+- zk2c on RF (#989's zk2c runs), per window, direction and element, a day:
+  the bare runs decoded, the lean stack derived from them, the lean runs'
+  counters, and the model's zk2c column (model.json's w2_rf_zk2c_per_direction,
+  w1_73_rf_zk2c and idle_rf_zk2c).
 Standard library only.
 """
 import json
@@ -151,6 +155,134 @@ def lora_table(model):
                               f"| {v['airtime_s'] / 864 * 100:,.0f} % | | |")
 
 
+ZK2C_ORDER = ("telemetry", "heartbeat", "health", "alarms", "config", "desired", "events",
+              "keep-alive", "handshake", "presence", "declarations", "admin", "interests", "oam",
+              "other", "undecoded", "reconnect")
+
+
+def zk2c_window(a, window, model_dir, title, lean=None):
+    """One zk2c window per direction and element, a day: the bare run decoded, its SDUs,
+    the lean stack derived (+16 B an SDU), the lean run's counters, and the model."""
+    w = win(a, window)
+    if not w:
+        return
+    lw = win(lean, window) if lean else None
+    for d in ("ab", "ba"):
+        md = (model_dir or {}).get(MODEL_DIR[d], {})
+        rows = w["elements_per_day"][d]
+        print(f"\n#### {title}, {NAMES[d]}, a day ({w['seconds']:.0f} s)\n")
+        print("| Element | Bare | Bare, SDUs | Lean, derived | Model (lean) |")
+        print("|---|---:|---:|---:|---:|")
+        tot = {"b": 0, "n": 0}
+        for el in ZK2C_ORDER:
+            r = rows.get(el)
+            m = md.get(el, {}).get("zk2c_bytes")
+            if not r and m is None:
+                continue
+            r = r or {"bytes": 0, "sdus": 0}
+            tot["b"] += r["bytes"]
+            tot["n"] += r["sdus"]
+            print(f"| {el} | {kb(r['bytes']) if r['bytes'] else ''} | {r['sdus']:,.0f} | "
+                  f"{kb(r['bytes'] + LEAN * r['sdus']) if r['bytes'] else ''} | "
+                  f"{kb(m) if m is not None else '—'} |")
+        mt = md.get("total", {}).get("zk2c_bytes")
+        print(f"| **total** | **{kb(tot['b'])}** | {tot['n']:,.0f} | **{kb(tot['b'] + LEAN * tot['n'])}** | "
+              f"{'**' + kb(mt) + '**' if mt is not None else '—'} |")
+        p = w[d]["per_day"]
+        print(f"\nBare, the counters: {p['sdus']:,} SDUs, {kb(p['bytes'])}, {p['airtime_s']:,} s of air "
+              f"({p['airtime_pct']} %); relay {w[d]['relay_sdus']} SDUs, {w[d]['relay_dropped']} lost.")
+        if lw:
+            q = lw[d]["per_day"]
+            print(f"Lean, the counters ({lw['seconds']:.0f} s): {q['sdus']:,} SDUs, {kb(q['bytes'])}, "
+                  f"{q['airtime_s']:,} s of air ({q['airtime_pct']} %); relay {lw[d]['relay_sdus']} SDUs, "
+                  f"{lw[d]['relay_dropped']} lost.")
+
+
+def zk2c_tables(model):
+    w1, w1l = load("zk2c-w1-bare-1"), load("zk2c-w1-lean-1")
+    w2, w2l = load("zk2c-w2-bare-1"), load("zk2c-w2-lean-1")
+    if not (w1 or w2):
+        return
+    print("\n## zk2c on RF")
+    if w1:
+        idle = model["idle_rf_zk2c"]["lean"]["per_direction"]["bytes"]
+        zk2c_window(w1, "idle", {"a_to_b": {"keep-alive": {"zk2c_bytes": idle}},
+                                 "b_to_a": {"keep-alive": {"zk2c_bytes": idle}}},
+                    "The idle link at link.v2's transport", w1l)
+        m = model["w1_73_rf_zk2c"]
+        zk2c_window(w1, "w1", {"a_to_b": {"telemetry": {"zk2c_bytes": m["a_to_b_bytes"]}},
+                               "b_to_a": {"keep-alive": {"zk2c_bytes": idle}}},
+                    "W1-73 across rf0's face", w1l)
+    if w2:
+        zk2c_window(w2, "steady", model["w2_rf_zk2c_per_direction"], "W2 zk2c, the steady window", w2l)
+        w2_day(w2, model["w2_rf_zk2c_per_direction"])
+    sf7 = load("zk2c-sf7-lean-1")
+    if sf7:
+        m = model["w1_73_sf7_zk2c"]
+        print("\n#### W1-73 across lora0's SF7 face, lean, a day\n")
+        print("| Window | Direction | SDUs | Bytes | Airtime | Duty used | Keep-alives lost; "
+              "links reopened | Model: airtime |")
+        print("|---|---|---:|---:|---:|---:|---|---|")
+        for w in sf7["windows"]:
+            for d in ("ab", "ba"):
+                x, p = w[d], w[d]["per_day"]
+                if w["window"] == "w1" and d == "ab":
+                    mod = (f"frames {m['gen_frames_airtime_s']:,} s (gen's), "
+                           f"keep-alives {m['uplink_keepalive']['airtime_s']} s")
+                else:
+                    mod = f"{m['idle_keepalive_per_direction']['airtime_s']} s of keep-alives"
+                lost = ", ".join(f"+{t}" for t in x.get("keepalives_lost_at", [])) or "none"
+                # Under a face the far side opens: its InitSyns go B->A.
+                opened = ", ".join(f"+{t}" for t in episodes(w["ba"].get("links_opened_at", []))) or "never"
+                ev = f"lost {lost}" + (f"; reopened {opened}" if d == "ba" else "")
+                print(f"| {w['window']} ({w['seconds']:.0f} s) | {NAMES[d]} | {p['sdus']:,} | {kb(p['bytes'])} | "
+                      f"{p['airtime_s']:,} s | {p['airtime_s'] / 864 * 100:,.0f} % | {ev} | {mod} |")
+
+
+W2_EVENTS = 15
+
+
+def w2_day(a, model):
+    """W2's day as the report's §2.2 makes it: the steady window's periodic elements, its
+    events at W2's 15 a day (gen puts 60 an hour: the steady window's cost an occurrence),
+    the acts at their daily counts and 4 reconnects, bare and lean (+16 B an SDU)."""
+    steady, w2 = win(a, "steady"), a["w2"]
+    span = steady["seconds"]
+    occurrences = steady.get("far_samples", {}).get("events/oper_change", 0) * DAY / span
+    for d in ("ab", "ba"):
+        md = model[MODEL_DIR[d]]
+        rows = {}
+        for el, v in steady["elements_per_day"][d].items():
+            if el == "events" and occurrences:
+                v = {k: v[k] * W2_EVENTS / occurrences for k in ("bytes", "sdus")}
+            rows[el] = dict(v)
+        for kind, dirs in w2.get("acts", {}).items():
+            v = dirs.get(d, {}).get("per_day")
+            if v and v["bytes"]:
+                r = rows.setdefault(ACT_ELEMENT[kind], {"bytes": 0, "sdus": 0})
+                r["bytes"] += v["bytes"]
+                r["sdus"] += v["sdus"]
+        cost = w2.get("reconnect", {}).get(d, {}).get("cost")
+        if cost:
+            rows["reconnect"] = {k: w2["reconnects_per_day"] * cost[k] for k in ("bytes", "sdus")}
+        print(f"\n#### W2 zk2c, {NAMES[d]}, a day as W2 makes it\n")
+        print("| Element | Bare | Bare, SDUs | Lean, derived | Model (lean) | Lean / model |")
+        print("|---|---:|---:|---:|---:|---:|")
+        tb = tn = tm = 0
+        for el in ZK2C_ORDER:
+            r, m = rows.get(el), md.get(el, {}).get("zk2c_bytes")
+            if not r and m is None:
+                continue
+            r = r or {"bytes": 0, "sdus": 0}
+            lean = r["bytes"] + LEAN * r["sdus"]
+            tb, tn, tm = tb + r["bytes"], tn + r["sdus"], tm + (m or 0)
+            ratio = f"{lean / m:.2f}" if m and lean else ""
+            print(f"| {el} | {kb(r['bytes']) if r['bytes'] else 'not measured'} | {r['sdus']:,.0f} | "
+                  f"{kb(lean) if lean else ''} | {kb(m) if m is not None else '—'} | {ratio} |")
+        lean = tb + LEAN * tn
+        print(f"| **total** | **{kb(tb)}** | {tn:,.0f} | **{kb(lean)}** | **{kb(tm)}** | {lean / tm:.2f} |")
+
+
 def main():
     model = json.load(open(os.path.join(RES, "model.json")))
     bare, lean = load("w2-rf-bare-3"), load("w2-rf-lean-1")
@@ -159,6 +291,9 @@ def main():
         w2_tables(bare, lean, model["w2_rf_per_direction"])
     print("\n## LoRa")
     lora_table(model)
+    zk2c = os.path.join(RES, "model-zk2c.json")
+    if os.path.exists(zk2c):
+        zk2c_tables(json.load(open(zk2c)))
 
 
 if __name__ == "__main__":

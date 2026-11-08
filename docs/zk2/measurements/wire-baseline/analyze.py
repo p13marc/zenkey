@@ -129,12 +129,17 @@ def delta(series, t0, t1):
     return None if a is None or b is None else b - a
 
 
+def lora(params):
+    """A LoRa medium (sf7, sf9, sf12, sf7ka4); RF's are rf and rf-zk2c (#989's zk2c runs)."""
+    return not params.get("medium", "rf").startswith("rf")
+
+
 def airtime_fn(params):
     medium = params.get("medium", "rf")
-    if medium == "rf":
+    if not lora(params):
         rate = params.get("rate", 2400)
         return lambda n: n * 8 / rate
-    sf = int(medium[2:].split("ka")[0])
+    sf = int("".join(c for c in medium[2:].split("ka")[0].split("-")[0] if c.isdigit()))
     t_sym = 2**sf / 125_000
     de = 1 if t_sym > 0.016 else 0
 
@@ -161,8 +166,9 @@ def classify(params, r):
 
 
 def initsyn_size(params):
-    """An InitSyn (27 bytes, the first of a link's handshake) under the run's layers."""
-    n = 27 + (14 if params.get("stack") == "lean" else 0)
+    """An InitSyn (27 bytes, the first of a link's handshake) under the run's layers. Under a
+    face (#989's zk2c runs) it carries usrpwd's extension, 30 bytes, and the far side opens."""
+    n = (30 if params.get("face") else 27) + (14 if params.get("stack") == "lean" else 0)
     if "fragment" in params:
         n += 6
     return n + (2 if params.get("stack") == "lean" else 0)
@@ -217,8 +223,9 @@ def window(run, name, t0, t1):
             if v is not None:
                 layer[key.split("/", 1)[1]] = v
         airtime = sum(air_s(r["n"]) for r in air)
+        opener = "ba" if params.get("face") else "ab"
         reopened = sum(1 for r in air if r["n"] == initsyn_size(params)
-                       and classify(params, r) == "other") if d == "ab" else None
+                       and classify(params, r) == "other") if d == opener else None
         if name == "w1":
             data, rest = split_w1(run, d, [r for r in air if classify(params, r) == "other"])
             kinds.pop("other", None), kbytes.pop("other", None), kair.pop("other", None)
@@ -240,12 +247,12 @@ def window(run, name, t0, t1):
         if reopened is not None:
             rel["links_opened"] = reopened
         rel["keepalives_lost"] = sum(1 for r in air if r["drop"] and classify(params, r) == "keep-alive")
-        if params.get("medium", "rf") != "rf":
+        if lora(params):
             # On LoRa, when each keep-alive was lost and each link opened again
             # (seconds into the window): a close follows a lost keep-alive.
             rel["keepalives_lost_at"] = [round(r["t"] - t0, 1) for r in air
                                          if r["drop"] and classify(params, r) == "keep-alive"]
-            if d == "ab":
+            if d == opener:
                 rel["links_opened_at"] = [round(r["t"] - t0, 1) for r in air
                                           if r["n"] == initsyn_size(params)
                                           and classify(params, r) == "other"]
@@ -258,14 +265,25 @@ def window(run, name, t0, t1):
                 "by_kind": {k: {"sdus": round(kinds[k] * scale), "bytes": round(kbytes[k] * scale),
                                 "airtime_s": round(kair[k] * scale, 1)} for k in kinds},
             }
-            if params.get("medium", "rf") != "rf":
+            if lora(params):
                 rel["duty_s_per_hour"] = round(airtime * 3600 / span, 2)
                 rel["duty_pct_of_eu868"] = round(100 * airtime * 3600 / span / 36, 1)
         res[d] = rel
-    far = Counter(r["key"].split("/", 4)[-1] for r in run["far"]
-                  if r.get("key") and t0 <= r["t"] < t1)
+    def resource(key):
+        # An event's last chunk is its occurrence (core §2.6): count by resource.
+        rest = key.split("/", 4)[-1]
+        return rest.rsplit("/", 1)[0] if rest.startswith("events/") or "/events/" in rest else rest
+    far = Counter(resource(r["key"]) for r in run["far"] if r.get("key") and t0 <= r["t"] < t1)
     if far:
         res["far_samples"] = dict(sorted(far.items()))
+    # zk2c's (#989): each frame's payload size as the far reader got it, and
+    # what its records held (every field known, or every one absent).
+    sizes = {}
+    for r in run["far"]:
+        if r.get("key") and t0 <= r["t"] < t1 and r.get("n") is not None:
+            sizes.setdefault(resource(r["key"]), Counter())[r["n"]] += 1
+    if sizes and any("/frames/" in k or "/events/" in k for k in sizes):
+        res["far_payload_bytes"] = {k: dict(sorted(v.items())) for k, v in sorted(sizes.items())}
     if params.get("stack") != "lean" and "fragment" not in params:
         # A bare run decodes: each element's share of the window, per day.
         got = zdecode.decode(run["air"], t0, t1)
@@ -273,6 +291,9 @@ def window(run, name, t0, t1):
             d: {el: {"bytes": round(v["bytes"] * scale), "sdus": round(v["sdus"] * scale, 1)}
                 for el, v in got[d].items()} for d in ("ab", "ba")}
         res["decode_errors"] = got["errors"]
+        # Each transport opened in the window, by its InitSyn, decoded (a
+        # face's usrpwd and 16-bit resolution change the InitSyn's size).
+        res["opens_at"] = {d: [round(t - t0, 1) for t in got["opens"][d]] for d in ("ab", "ba")}
     return res
 
 

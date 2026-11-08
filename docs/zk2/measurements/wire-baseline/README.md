@@ -8,7 +8,10 @@ end, in both directions, on zenoh-modem's media as a lab simulates them:
 - **phase 1** (2026-10-31): W1, modem.v3's 4 link readings at one a minute, and
   the idle link, on RF;
 - **phase 2** (2026-10-31): W2, the generic device, on RF; W1 and the idle link
-  on LoRa at SF7, SF9 and SF12, and SF7 idle at keep_alive 4.
+  on LoRa at SF7, SF9 and SF12, and SF7 idle at keep_alive 4;
+- **zk2c** (2026-11-08): W1 with all 73 modem readings across rf0's face, W2
+  and the idle link, on RF at link.v2's transport; W1-73 at LoRa SF7; and the
+  honesty checks across the face ([below](#zk2c-on-rf-and-w1-73-at-lora-sf7-989s-zk2c-half)).
 
 SBD is not measured. Every figure is a day, extrapolated from a window of 10
 to 45 minutes, and every one is per direction: A->B is the owner's router
@@ -561,6 +564,297 @@ lost all came after its link failed (W2's finding 5).
    matched it, one tile of 23 bytes every 270 s (8 in each direction in the
    window, fewer than 10 because the link was down).
 
+## zk2c on RF, and W1-73 at LoRa SF7 (#989's zk2c half)
+
+Run 2026-11-08, from zenkey at 2fa3e6ab (#1098's branch, with modem.v3 3.4
+and link.v2 0.12). The same path, drivers and fork as phases 1 and 2, with
+three changes: zk2c's owners, link.v2's transport, and, for W1-73, rf0's face.
+
+- **The owners are zenkey's reference, not a device's.**
+  - modem.v3's owner is **`zenctl gen`**, zenkey's generator, under
+    zenoh-modem's catalog (29bf7d47). zenoh-modem's own owner, modem-mgmt, is
+    not ported yet (zenoh-modem#214), so no figure here is modem-mgmt's.
+    gen's synthetic records hold every reading at random on even minutes and
+    none on odd ones, so its frames are full records of all 73 readings or
+    of none. The model's "24 of 73 moving" is computed, not measured
+    (Appendix A section 10).
+  - W2's device is the owner example (`--health --alarms --config-v2
+    --desired-target`), with `zenctl gen` beside it at the same address for
+    gendev.v1 1.1's `frames/sample` (`--i-know`). The owner example drives no
+    contract's frame writer but its scenarios'.
+- **link.v2's transport** on both routers, as rf0's policy states it: lease
+  240 s, keep_alive 4, `wait_before_close` 240 s, 16-bit sequence numbers,
+  batch 222 (render.py's `rf-zk2c`; `sf7-zk2c` is lora0's SF7 face, lease
+  120 s).
+- **rf0's face (W1-73 and the honesty checks).** Router A runs what `zenctl
+  acl gen --face-policy zenohd-rf0.face.toml --json5` writes, in `router`
+  mode, with three settings the generator does not write:
+  - `timestamping: { enabled: { router: false } }` (core §8.2's SHOULD: a
+    router stamps every unstamped put it routes otherwise);
+  - usrpwd credentials, since the plan's subjects are user names: gen
+    presents `rf-node`, router B `ground`;
+  - the far side opens the lane, the reverse of phases 1 and 2. zenoh's
+    usrpwd authenticates the opener to the acceptor, so router A can only
+    bind router B to `ground` if router B opens.
+
+  Router B runs `--far-config`'s transport as a peer. The far side reads with
+  `zenctl echo --across-face h-3fa9c2d41b7e/rf0 --face-policy … --face rf`,
+  whose scope is the plan: frames/fast and the three `face/` events.
+- **W2 has no face.** Its standard contracts (health.v1, alarms.v1, rfcfg.v1)
+  expose nothing `link`, so a face would carry none of them. Its routers run
+  link.v2's transport as peers, as phase 2's did. The far side reads as core
+  §8.5 asks across a constrained link: one `zenctl echo --across-face` per
+  interface, each resource by its exact key, never `zk2/**`.
+- **Loss as phase 2 had it.** Each link opens and its owners set up with no
+  loss, and each window runs at the medium's 5 % (`LOSS_START=0` with
+  `LOSSLESS_SETUP=1` or `LOSS_AT_STEADY=0.05`). The relay's seed is 0 in
+  every run, so runs see the same loss sequence.
+- The harness ran on cores 4–5.
+
+| Run | Path, stack | Windows | Owner's run |
+|---|---|---|---|
+| `zk2c-w1-bare-1` | RF, rf0's face, no layers | idle 1,200 s, W1-73 1,800 s | 32-bit |
+| `zk2c-w1-lean-1` | RF, rf0's face, lean (`rf.zdict`) | idle 600 s, W1-73 1,800 s | 16-bit (`--run-file`) |
+| `zk2c-sf7-lean-1` | LoRa SF7, lora0's face, lean (`rf.zdict`) | idle 600 s, W1-73 1,800 s | 16-bit |
+| `zk2c-w2-bare-1` | RF, no face, no layers | steady 2,100 s, the acts, a 245-s cut, two config sets | 32-bit |
+| `zk2c-w2-lean-1` | RF, no face, lean (`w2.zdict`) | as `-bare-1` | 16-bit |
+| `zk2c-honesty-1`, `zk2c-honesty-reset-1` | RF, rf0's face, no layers | 75 % loss for 240 s, a 392-s cut, a restart | 32-bit |
+
+### The idle link at link.v2's transport
+
+Each direction, a day: **1,440 keep-alives, one a minute, the model's figure
+exactly**: 1.4 KB bare, 24.5 KB and 81.6 s of air under the lean stack
+(`zk2c-w1-bare-1`'s 1,200 s and `zk2c-w1-lean-1`'s 600 s). Phase 1's lease of
+10 s sent 34,560 a day each way, 24 times as many. One keep-alive was lost
+each way in 1,200 s and the link held: at keep_alive 4 a close takes three
+lost in a row.
+
+### W1-73 across rf0's face
+
+What crosses is the plan's and nothing else: frames/fast once a minute and
+`face/device_fault` once a minute, gen's rate at that event's ceiling,
+`low`. The two `rare` events fell outside the windows. gen also writes the 73
+JSON streams, the 9 deprecated frames, `frames/slow` and `frames/paid`, every
+state and the four JSON events, and none of it reached the air. No heartbeat
+crosses either: modem.v3's collections are `host`, and the plan denies
+`freshness.v2`'s stream on the face. The frames are the liveness evidence.
+
+| A day, A->B | Bare (`-bare-1`) | Lean (`-lean-1`, the counters) | Model (lean) |
+|---|---:|---:|---:|
+| frames/fast, gen's (a full frame of every reading, then one of none) | 176.4 KB, 1,440 SDUs | 207.3 KB, 2,160 SDUs | 211.0 KB on the same frames (Appendix A §10) |
+| `face/device_fault`, one a minute | 172.9 KB, 1,440 SDUs | 162.9 KB, 1,440 SDUs | not modelled |
+| uplink keep-alives | none | 336 | none: a frame a minute replaces them |
+| **total** | **349.3 KB, 1,164 s of air (1.3 %)** | **377.2 KB, 1,257 s (1.5 %)** | |
+| W1-73 as the report prices it: a full frame every 15 minutes, a delta each minute with 24 readings moving | | | **168 KB**, corrected (Appendix A §8 said 200 KB) |
+
+B->A, a day: the 1,440 keep-alives, 24.5 KB lean, the model's figure.
+
+- **The frame's anatomy is the model's, byte for byte.** A full record of all
+  73 readings is 199 B (core §7.7: the time, `full`, then a presence bit and
+  the code per field, 1,469 bits of codes at zenoh-modem's ranges), a record
+  of none 15 B. With the envelope that is 205 B and 21 B on a 16-bit run, 207
+  B and 23 B on gen's 32-bit one in the bare run. The put adds 5 B (no QoS
+  extension: frames/fast is priority `data`) and the face's frame 3 B (16-bit
+  sequence numbers): SDUs of 215 B and 30 B, exactly as decoded.
+- **Under the lean stack a full frame takes two SDUs.** Its 210-B put does
+  not fit the 201 B a 220-B SDU leaves after the layers and the frame, so
+  zenoh fragments it: 220 B and 29 B. Compression stored 43 of the 82 SDUs
+  and saved 579 B in 30 minutes, 7 % of the uplink's bytes, nearly all of it
+  on the events' JSON.
+- **The model's 200 KB was the model's miss, not the wire's.** Appendix A §8
+  priced illustrative widths (254-B keyframe, 98-B delta) on a `data_low`
+  frame with the QoS extension and a 5-byte frame. At zenoh-modem's ranges,
+  on the face's 3-byte frame with a 16-bit run, a full frame is 205 B and a
+  delta with 16 counters and 8 gauges moving is 84 B: **168 KB a day** under
+  the lean stack, 0.65 % of RF. zenoh-modem's README says 177 KB for the same
+  case.
+- **An event at its ceiling costs as much as the frames.**
+  `face/device_fault` at `low` is 1,440 a day of 97–98 B of form 4 (its JSON
+  words) in 120-B SDUs bare: 173 KB a day, 163 KB lean, where `rf.zdict`
+  compressed it. link.md prices rf0's three events at 417 KB a day at their
+  worst; a device that faults once an hour sends 3 KB.
+
+### W2 zk2c
+
+Both directions, a day, as the report's §2.2 makes W2: the steady window's
+periodic elements, its events at W2's 15 (gen put 60 an hour, so the window
+gives each one's cost), the acts at their daily counts and 4 reconnects.
+"Lean, derived" is the bare run (`zk2c-w2-bare-1`, decoded, 32-bit runs) plus
+16 B an SDU; the model is Appendix A §6's zk2c column, each element under its
+sender ([`model.py --zk2c`](model.py)).
+
+| Element, a day | A->B bare | A->B lean, derived | B->A lean, derived | Model (lean) | Lean / model |
+|---|---:|---:|---:|---:|---:|
+| telemetry: frames/sample, three 10-s records a frame every 30 s | 288.0 KB | 334.1 KB | | 334.1 KB | 1.00 |
+| heartbeat: health.v1's and rfcfg.v1's every 28.5 s, alarms.v1's every 427.5 s | 154.4 KB | 238.0 KB | | 51.8 KB | 4.59 |
+| desired: a GET every 300 s, the author's reply | 19.4 KB | 26.0 KB | 58.3 KB | 27.4 KB | 3.08 |
+| health, 4 changes | 0.1 KB | 0.2 KB | | 0.2 KB | 1.36 |
+| alarms, 5 raised and 5 resolved | 1.7 KB | 2.0 KB | | 0.4 KB | 4.60 |
+| config, 5 changes | not measured | | 0.6 KB (the requests) | 0.3 KB | |
+| events, 15 | 1.1 KB | 1.3 KB | | 0.7 KB | 1.97 |
+| keep-alives | | | 22.4 KB | 24.5 KB | 0.91 |
+| reconnects, 4 | 4.9 KB | 5.6 KB | 6.6 KB | 3.5 KB | 3.45 |
+| **total** | **469.6 KB** | **607.1 KB** | **87.9 KB** | **443 KB** | **1.57** |
+
+Measured under the lean stack with 16-bit runs (`zk2c-w2-lean-1`, the
+counters): **668.8 KB a day both directions as W2 makes it, 2.6 % of RF**
+(steady window 688.9 KB A->B and 71.5 KB B->A, 2,296 s and 238 s of air,
+with gen's 1,399 events; less those and plus the acts and reconnects as
+above). The corrected model, Appendix A §10, says 666 KB.
+
+- **zk2c cuts W2 by 25 times on RF, not 41.** Today's W2 crossed 16.49 MB a
+  day under the lean stack, derived (phase 2), and the model says 18.37 MB:
+  25 and 27 times the 0.67 MB measured. Against phase 2's lean run with a
+  dictionary trained on its own traffic, 10.46 MB, it is 16 times. The
+  channel goes from 64 % to 2.6 %. The model's 443 KB (1.7 %, 41 times) misses
+  by 1.5 times, in two elements.
+- **The heartbeat is one put per interface, not 18 B inside a frame.**
+  freshness.v2 sends a heartbeat per interface with a collection, each on its
+  own key (§2.4). W2's device has three: health.v1's and rfcfg.v1's every
+  28.5 s (16 B each on a 16-bit run) and alarms.v1's every 427.5 s. Appendix
+  A §6 folded one 18-B section into every third telemetry frame. Measured:
+  238 KB a day, 4.6 times the model's 52 KB, between every pair of
+  heartbeats in one SDU (199 KB) and each in its own (257 KB). The miss is the
+  model's: it priced a design freshness.v2 did not take.
+- **The desired re-read is today's GET.** Each 300 s the target asks with a
+  12-B request and the author answers its whole document, 166 B, then the
+  final: 64 KB a day, where §6's conditional GET answering an unchanged slice
+  in 3 B gave 27 KB. The target's 1-s default still loses some: 4 of the
+  device's 12 GETs drew "Didn't receive final reply … Timeout(1s)", the two
+  at its start among them, and their replies crossed for nothing. The first
+  re-read, 300 s in, brought the document, and the device adopted it (its
+  report changed), where none of phase 2's did (its finding 6).
+- **Telemetry is the model's exactly.** Each 30-s frame of three records was
+  93 B on gen's 32-bit run in a 100-B SDU bare, where the model's 5-byte frame
+  and 16-bit run give 100 B too. With a 16-bit run (the lean run) it is 91 B,
+  in 98 B on the 3-byte frame of 16-bit sequence numbers.
+- **Alarms stay JSON.** An alarm raised took 154 B of air, a resolve 194 B
+  in two SDUs (a put, then the delete), against §6's 8-B transition: alarms.v1
+  has no packed record. Re-puts are gone (the heartbeat confirms), so at 10
+  transitions a day it is 2 KB.
+- **The link came back after a 245-s cut** under W2's load, where phase 2's
+  never did (W2 finding 5): each reconnect cost 1.2 KB A->B (the handshake,
+  presence and the device's declarations) and 1.4 KB B->A (the six readers'
+  and the author's subscriptions again), against §6's 0.8 KB and 0.1 KB.
+- **The two config changes drew silence.** After the reconnect, both
+  `zenctl config set` on rfcfg.v1 (config.v2) exited 2 with `"silence"`,
+  presence `no_token_visible`, after their 30 s; router B logged "Route reply:
+  Query not found!" as the late replies came back. Phase 2's sets drew
+  silence too (W2 finding 7). The config element is not measured.
+- **Compression does nothing for zk2c.** The lean run's compress layer
+  stored 221 of 245 SDUs A->B and saved 69 B in 35 minutes, and stored
+  every keep-alive: zk2c's records leave it nothing, as the report says
+  (§3.3). W1-73's 7 % came from `face/device_fault`'s JSON.
+
+### W1-73 at LoRa SF7
+
+The same W1-73 across lora0's SF7 face, lean (`zk2c-sf7-lean-1`): lease
+120 s, keep_alive 4 (a keep-alive every 30 s), 16-bit sequence numbers;
+frames/fast every minute, the two `rare` events listed and none in the
+window, `face/device_fault` denied.
+
+| A day | Measured | Duty (864 s) | Model |
+|---|---:|---:|---:|
+| idle, each way | 2,880 keep-alives, 148.2 s | 17 % | 148.2 s |
+| W1-73 uplink, gen's frames | 2,160 SDUs, 363.0 s | 42 % | 365.5 s (Appendix A §10) |
+| W1-73 uplink keep-alives | 2,160, 111.1 s | 13 % | 1,440, 74.1 s |
+| **W1-73 uplink** | **474.2 s** | **55 %** | 439.6 s |
+| W1-73 downlink | 2,880 keep-alives, 148.2 s | 17 % | 148.2 s |
+
+- **W1-73 fits EU868's duty at SF7 under zk2c.** All 73 readings a minute
+  took 55 % of the uplink's 864 s, where today's 4 link readings took 116 %
+  (`sf7-lean-2`). With 24 readings moving, the corrected frames take 288 s,
+  and the uplink 362 s to 399 s with its keep-alives (42–46 %).
+- **The link never reopened.** Five keep-alives were lost in 40 minutes,
+  never two in a row; at keep_alive 2 each would have closed it (phase 2's
+  LoRa finding 1).
+- **Frames spared one uplink keep-alive in four.** Frames a minute apart
+  should leave one keep-alive between two (link.v2 §2.16, "Data spares the
+  keep-alives"). The uplink kept its 30-s cadence (keep-alives at +0.13 s,
+  +60.13 s, +90.13 s with frames at +30.4 s and +90.2 s), 37 s of air a day
+  more than the model. On RF, at a 60-s interval, the frames spared every
+  one. Not investigated.
+
+### The honesty checks, across the face
+
+Each through the tools a ground operator would run across rf0's face (`zenctl
+echo`, `watch` and `telemetry` with `--across-face --face-policy … --face
+rf`, and `doctor`), on W1-73's path ([`honesty.sh`](honesty.sh); what each
+tool said is [`results/zk2c-honesty.json`](results/zk2c-honesty.json), read
+by [`honesty.py`](honesty.py)).
+
+1. **Loss is detected.** At 75 % loss for 240 s, the far frame reader and
+   `watch` both read seq 6 as `follows: gap, lost: 2`, then seq 9 as `gap,
+   lost: 2`; after the cut, seq 22 as `gap, lost: 7`. Every lost frame was
+   named, by both.
+2. **No false "nothing fires", on a frame series.** `zenctl telemetry` over a
+   600-s window holding the loss read each counter's pair across the gap as
+   one rate over 240 s (the counters are absolute and the run is one, so the
+   rate holds), and each record of no reading as `no_sample: absent`, never
+   0. Inside the cut it said `unobservable`: "no sample … arrived in 60.0s:
+   silence is never a verdict".
+3. **Stale is never fresh, but nothing says "unconfirmed".** The link was cut
+   for 392 s, past frames/fast's 300-s horizon and the 240-s lease. No tool
+   read the readings as current: `telemetry` was `unobservable`, the doctor
+   exited 2 (no zk2 token is visible across a face, so it judged nothing), and
+   `watch` printed nothing. None said the horizon had passed: `watch` reports
+   no lost heartbeat and the doctor has no `state-unconfirmed` yet (#990's V5
+   and V6). W2's `zenctl health` and the doctor's `health-stale`, run 100 s
+   into a 245-s cut, with the device's tokens still held and health.v1's
+   heartbeat silent past its 60-s horizon, both said `unobservable`: the
+   descriptor's GET could not cross, so whether it implements health.v1
+   could not be told.
+4. **A reset is detected.** gen stopped and a new gen started (a new instance
+   and run). The reader's next frame `follows: run`, a run it did not hold;
+   `zenctl telemetry` over a window holding both
+   runs read the counter pair across them `continuity: reset`, `no_rate:
+   reset` (40, then 0), and the pairs after it a rate again
+   (`zk2c-honesty-reset-1`).
+
+The link came back after the 392-s cut: the lease expired on both ends, and
+router B opened a new transport 3.9 s after the restore. Its reopen cost
+544 B B->A (the handshake with usrpwd, then the reader's subscriptions) and
+108 B A->B. Nothing re-declared by hand was needed.
+
+### Findings (zk2c)
+
+1. **The headline holds in order and misses in factor.** zk2c takes W2 from
+   64 % of RF's channel to 2.6 %, and the idle link from 34,560 keep-alives a
+   day each way to 1,440. W2 measured 669 KB a day, 25 times less than
+   today's wire derived the same way, where the report says 443 KB and 41
+   times (W2's findings above). W1-73 fits RF in 1.5 % with gen's frames and
+   LoRa SF7's duty in 55 %.
+2. **Appendix A is corrected where the model missed** (§10): W1-73's frames
+   at zenoh-modem's ranges (168 KB a day, not 200 KB), W2's heartbeats per
+   interface and its desired GET unconditional (666 KB, not 443 KB). Each
+   correction asserts the run it rests on; the measured anatomy (frame,
+   envelope, put, SDU) is asserted byte for byte. The report's text still
+   quotes the uncorrected zk2c figures.
+3. **`zenctl acl gen` does not write a face router's timestamping.** A
+   router stamps every unstamped put it routes unless told not to (core
+   §4.1), and core §8.2 says a deployment SHOULD turn it off on a router that
+   forwards onto a constrained face. The generated block (link.v2 §2.18) has
+   no `timestamping` key, so a router run from it alone stamps every frame
+   (seen in a loopback check: every put through a default router carried
+   the router's 26-B HLC). These runs set it by hand.
+4. **A face's subjects by user name need the far side to open the lane.**
+   zenoh's usrpwd authenticates an opener to its acceptor only, so router A
+   binds router B to `ground` only when router B opens; with phase 1's
+   direction the handshake was refused ("Recv InitSyn. Expected extension").
+   And credentials configured on router B make it ask them of every opener,
+   so the ground's own tools present one too (`local`). Neither is in the
+   face policy, link.v2 or the generated far block.
+5. **Across a face no tool says "unconfirmed" yet.** The honesty checks
+   hold (none read stale readings as current, every loss and reset was
+   named), but `watch` and the doctor only fall silent or unobservable past a
+   horizon (#990's V5 and V6 are not on this branch).
+6. **At LoRa SF7, frames a minute apart spared one uplink keep-alive in
+   four**, where link.v2 §2.16 has them spare every other one; on RF at a
+   60-s interval they spared all.
+7. **Not measured:** W2's config changes (they drew silence), the `rare`
+   modem.v3 events (none in a window), W2 across a face, LoRa SF9 and SF12,
+   SBD.
+
 ## Reproduce
 
 `WORK` defaults to `/srv/dev/targets/zenkey-989`. It holds the binaries and
@@ -611,6 +905,47 @@ python3 -I model.py > results/model.json                # Appendix A, per direct
 python3 -I summary.py                                    # the tables above
 ```
 
+zk2c (2026-11-08): the routers at link.v2's transport (`rf-zk2c`, `sf7-zk2c`),
+a face's plan on router A where `FACE_POLICY` names one, each process on cores
+4–5, each run from a frozen copy whose `REPO` is the checkout (gendev.v1's
+schemas are named relative to it, hence `CONTRACTS`):
+
+```bash
+R=$PWD/../../../..; F=$R/examples/zk2/zenoh-modem/faces
+export WORK CORES=4-5 REPO=$R LOSS_START=0
+# Idle and W1-73 across rf0's face (about 55 minutes), bare, then lean with 16-bit runs
+INST=rf BASE=17400 LOSSLESS_SETUP=1 W1=73 FACE_POLICY=$F/zenohd-rf0.face.toml IDLE_S=1200 W1_S=1800 \
+  timeout 2h taskset -c 4-5 ./measure.sh rf-zk2c bare zk2c-w1-bare-1
+INST=rf BASE=17400 LOSSLESS_SETUP=1 W1=73 RUN_FILE=1 FACE_POLICY=$F/zenohd-rf0.face.toml W1_S=1800 \
+  timeout 2h taskset -c 4-5 ./measure.sh rf-zk2c lean zk2c-w1-lean-1
+# W1-73 across lora0's SF7 face, lean
+INST=lora BASE=17600 LOSSLESS_SETUP=1 W1=73 RUN_FILE=1 FACE_POLICY=$F/zenohd-lora0-sf7.face.toml \
+  DEVICE=h-c2a95e41d7f0/lora0 FACE=lora PRINCIPAL=lora-node W1_S=1800 \
+  timeout 2h taskset -c 4-5 ./measure.sh sf7-zk2c lean zk2c-sf7-lean-1
+# W2 zk2c (about 50 minutes), bare, then lean with 16-bit runs and w2.zdict
+INST=w2 BASE=17500 LOSS_AT_STEADY=0.05 ZK2C=1 CONTRACTS=$PWD/contracts \
+  timeout 3h taskset -c 4-5 ./measure-w2.sh rf-zk2c bare zk2c-w2-bare-1
+INST=w2 BASE=17500 LOSS_AT_STEADY=0.05 ZK2C=1 RUN_FILE=1 DICT=$PWD/w2.zdict CONTRACTS=$PWD/contracts \
+  timeout 3h taskset -c 4-5 ./measure-w2.sh rf-zk2c lean zk2c-w2-lean-1
+# The honesty checks (about 40 minutes), and the reset alone with a window across both runs
+INST=honesty BASE=17600 LOSS_START=0.05 FACE_POLICY=$F/zenohd-rf0.face.toml \
+  timeout 2h taskset -c 4-5 ./honesty.sh zk2c-honesty-1
+INST=honesty BASE=17600 LOSS_START=0.05 FACE_POLICY=$F/zenohd-rf0.face.toml STEPS=reset \
+  timeout 1h taskset -c 4-5 ./honesty.sh zk2c-honesty-reset-1
+
+# Analysis
+python3 -I analyze.py $WORK/logs/<run> --json results/<run>/analysis.json
+python3 -I honesty.py $WORK/logs/{zk2c-honesty-1,zk2c-honesty-reset-1,zk2c-w2-bare-1} \
+  --json results/zk2c-honesty.json
+python3 -I model.py --zk2c > results/model-zk2c.json   # Appendix A's zk2c column, per direction
+python3 -I summary.py                                   # the zk2c tables
+```
+
+The first `honesty.sh` run's watch probe inside the cut asked `--format json`
+of a stream and was refused; the script asks ndjson since, and the whole-run
+`watch` it rests on printed nothing in the cut. Its reset step had a window
+that held only the new run, so `zk2c-honesty-reset-1` ran the reset alone.
+
 Phase 1's bare run was made from copies of these scripts, before they moved
 into this directory, and both phase 1 runs from configs that `render.py`'s
 `rf` medium now renders the same, but for the per-path directories. The
@@ -631,12 +966,13 @@ lossy-setup runs (`w2-smoke-1`, `w2-smoke-2`, `w2-rf-bare-1`,
 | `relay.py` | the userspace netem between the two drivers, and a JSON line per datagram |
 | `stamp.py` | stamps each `zenctl echo` row with the wall clock |
 | `zdecode.py` | decodes a bare run's SDUs as the fork's codec writes them, and gives each zk2 element its bytes |
-| `analyze.py` | the drivers' counters and the relay's capture, per direction and window; W2's elements, acts and reconnect |
+| `analyze.py` | the drivers' counters and the relay's capture, per direction and window; W2's elements, acts and reconnect; zk2c's frame and event sizes, and the transports opened |
+| `honesty.sh`, `honesty.py` | #989's honesty checks across rf0's face (zk2c), and what each tool said in them |
 | `setup-loss.py` | what a declaration lost in the setup cost a bare W2 run |
-| `model.py` | runs the report's Appendix A and states its figures per direction |
-| `summary.py` | the README's W2 and LoRa tables, from `results/` |
+| `model.py` | runs the report's Appendix A and states its figures per direction; `--zk2c` its zk2c column |
+| `summary.py` | the README's W2, LoRa and zk2c tables, from `results/` |
 | `train-dictionary.sh`, `rf.zdict`, `w2.zdict` | the compress layer's dictionaries: `rf.zdict` from `bare-1` (W1), `w2.zdict` from `w2-rf-bare-2` (W2) |
-| `results/` | each run's `analysis.json`, `marks.json`, relay summary and rendered `configs/`; the dictionaries' inputs (`bare-1/air.jsonl`, `w2-rf-bare-2/air.jsonl`); `setup-loss.json`; `model.json` |
+| `results/` | each run's `analysis.json`, `marks.json`, relay summary and rendered `configs/` (a face's generated blocks among them, router B's test password redacted); the dictionaries' inputs (`bare-1/air.jsonl`, `w2-rf-bare-2/air.jsonl`); `setup-loss.json`; `model.json`, and `model-zk2c.json` and `zk2c-honesty.json` for the zk2c runs |
 
 Each relay summary's `loss` is the loss it started with. Under `LOSS_START=0`
 that is 0, and the windows' loss was set later on the control port.
@@ -646,4 +982,8 @@ Versions:
   bedb9802 (main, `git describe` 0.14.0-1465-gbedb9802), zenoh 1.10.1;
 - routers: zenoh's fork at tag `zm-1.10.2-r1` (2454b10c), rustc 1.98.1;
 - drivers: zenoh-modem's `modem-driver` at d8c62df, built 2026-10-29 with
-  every feature, run unchanged.
+  every feature, run unchanged;
+- zk2c (2026-11-08): `zenctl` and the owner example from zenkey at 2fa3e6ab
+  (`git describe` 0.14.0-2019-g2fa3e6ab, #1098's branch), release builds,
+  zenoh 1.10.1; the fork at `zm-1.10.2-r1` and `modem-driver` at d8c62df,
+  rebuilt the same way.

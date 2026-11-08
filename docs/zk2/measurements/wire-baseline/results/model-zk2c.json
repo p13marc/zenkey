@@ -1,0 +1,97 @@
+{
+ "w2_rf_zk2c_per_direction": {
+  "a_to_b": {
+   "telemetry": {
+    "zk2c_bytes": 334080,
+    "airtime_s": 1113.6
+   },
+   "health": {
+    "zk2c_bytes": 152,
+    "airtime_s": 0.5
+   },
+   "alarms": {
+    "zk2c_bytes": 430,
+    "airtime_s": 1.4
+   },
+   "config": {
+    "zk2c_bytes": 295,
+    "airtime_s": 1.0
+   },
+   "events": {
+    "zk2c_bytes": 675,
+    "airtime_s": 2.2
+   },
+   "heartbeat": {
+    "zk2c_bytes": 51840,
+    "airtime_s": 172.8
+   },
+   "desired": {
+    "zk2c_bytes": 11232,
+    "airtime_s": 37.4
+   },
+   "reconnect": {
+    "zk2c_bytes": 3076,
+    "airtime_s": 10.3
+   },
+   "total": {
+    "zk2c_bytes": 401780,
+    "airtime_s": 1339.3
+   }
+  },
+  "b_to_a": {
+   "desired": {
+    "zk2c_bytes": 16128,
+    "airtime_s": 53.8
+   },
+   "keep-alive": {
+    "zk2c_bytes": 24480,
+    "airtime_s": 81.6
+   },
+   "reconnect": {
+    "zk2c_bytes": 460,
+    "airtime_s": 1.5
+   },
+   "total": {
+    "zk2c_bytes": 41068,
+    "airtime_s": 136.9
+   }
+  }
+ },
+ "w1_73_rf_zk2c": {
+  "keyframe_payload": 254,
+  "delta_payload": 98,
+  "keyframes_a_day": 96,
+  "deltas_a_day": 1344,
+  "a_to_b_bytes": 200256,
+  "note": "Appendix A section 8: a keyframe every 15 minutes and a delta each minute, each a data_low put in its own SDU, under the lean stack"
+ },
+ "idle_rf_zk2c": {
+  "lean": {
+   "per_direction": {
+    "sdus": 1440,
+    "bytes": 24480,
+    "airtime_s": 81.6
+   }
+  },
+  "bare": {
+   "per_direction": {
+    "sdus": 1440,
+    "bytes": 1440,
+    "airtime_s": 4.8
+   }
+  }
+ },
+ "w1_73_sf7_zk2c": {
+  "frames_airtime_s": 287.9,
+  "gen_frames_airtime_s": 365.5,
+  "uplink_keepalive": {
+   "sdus": 1440,
+   "airtime_s": 74.1
+  },
+  "idle_keepalive_per_direction": {
+   "sdus": 2880,
+   "airtime_s": 148.2
+  },
+  "duty_budget_s_per_day": 864
+ }
+}

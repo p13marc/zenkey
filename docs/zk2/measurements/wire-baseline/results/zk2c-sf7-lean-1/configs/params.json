@@ -1,0 +1,27 @@
+{
+ "medium": "sf7-zk2c",
+ "stack": "lean",
+ "inst": "lora",
+ "batch_size": 208,
+ "ports": {
+  "router_a": 17601,
+  "router_b": 17602,
+  "driver_a": 17610,
+  "driver_b": 17611,
+  "relay_a": 17612,
+  "relay_b": 17613
+ },
+ "run": "/srv/dev/targets/zenkey-989/run/lora",
+ "face": true,
+ "max_sdu": 222,
+ "rate": 5469,
+ "latency_ms": 10,
+ "jitter_ms": 5,
+ "loss": 0.05,
+ "lease": 120000,
+ "keep_alive": 4,
+ "open": 10000,
+ "interests": 10000,
+ "sequence": "16bit",
+ "timers": "zenohd-lora0-sf7.face.toml's [transport] (link.v2 \u00a72.16)"
+}

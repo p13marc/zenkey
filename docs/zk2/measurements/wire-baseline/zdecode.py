@@ -13,9 +13,9 @@ resolved through the D_KEYEXPR declarations seen each way: the receiver's
 by default, the sender's under the M flag.
 
 Each message's bytes go to one element, by its key (a response's by its
-request's): telemetry, events, health, alarms, config, desired, presence
-(every declaration under @zk), admin (@/), declarations (every other
-declaration), interests, keep-alive, handshake. A frame's header and
+request's): telemetry, events, health, alarms, config, desired, heartbeat
+(zk2c's freshness.v2), presence (every declaration under @zk), admin (@/),
+declarations (every other declaration), interests, keep-alive, handshake. A frame's header and
 extensions go to its first message, and an SDU's bytes are shared among its
 messages in proportion; a fragmented message takes every SDU it spans.
 Standard library only.
@@ -212,9 +212,13 @@ def element(key, kind):
         return "admin"
     if kind.startswith("declare"):
         return "presence" if "@zk/" in k else "declarations"
-    for needle, name in (("/gendev.v1/stream/", "telemetry"), ("/modem.v3/stream/", "telemetry"),
-                         ("/gendev.v1/events/", "events"), ("/health.v1/", "health"),
+    # zk2c's (#989): freshness.v2's heartbeats, config.v2's rfcfg.v1, modem.v3's events.
+    for needle, name in (("/freshness.v2/", "heartbeat"),
+                         ("/gendev.v1/stream/", "telemetry"), ("/modem.v3/stream/", "telemetry"),
+                         ("/gendev.v1/events/", "events"), ("/modem.v3/events/", "events"),
+                         ("/health.v1/", "health"),
                          ("/alarms.v1/", "alarms"), ("/config.v1/", "config"),
+                         ("/rfcfg.v1/", "config"),
                          ("/worker.v1/", "desired"), ("/tasking.v1/", "desired"),
                          ("@zk/", "presence"), ("/@adv/", "advanced")):
         if needle in k:
@@ -248,6 +252,7 @@ def decode(rows, t0=None, t1=None, dump=False, listing=None):
     acc = defaultdict(lambda: defaultdict(lambda: [0.0, 0]))   # dir -> element -> [bytes, msgs]
     sdus = defaultdict(lambda: defaultdict(float))              # dir -> element -> share of SDUs
     errors = defaultdict(int)
+    opens = {"ab": [], "ba": []}
 
     def credit(d, parts, total, inwin, share, t, count=True):
         if not inwin or not parts:
@@ -302,6 +307,8 @@ def decode(rows, t0=None, t1=None, dump=False, listing=None):
                     exts(r, z)
                     parts.append(("keep-alive", r.i - start, "keep-alive", None))
                 elif tid in (0x01, 0x02, 0x03):
+                    if tid == 0x01 and not h & 0x20 and inwin:
+                        opens[d].append(row["t"])          # an InitSyn: a transport opening
                     r.i = len(b)
                     parts.append(("handshake", r.i - start, "handshake", None))
                 elif tid == 0x05:
@@ -354,6 +361,7 @@ def decode(rows, t0=None, t1=None, dump=False, listing=None):
         out[d] = {el: {"bytes": round(v[0], 1), "messages": v[1], "sdus": round(sdus[d][el], 2)}
                   for el, v in sorted(acc[d].items(), key=lambda kv: -kv[1][0])}
     out["errors"] = dict(errors)
+    out["opens"] = opens
     return out
 
 
