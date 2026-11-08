@@ -20,7 +20,8 @@ at ``lab/journal``):
   :func:`zk2py.live.replay_events` at step 5), twice: under 16-bit runs (a
   run record) and under 32-bit draws. The restart of step 3 is a new
   :class:`~zk2py.owner.Owner` on the same record, or a new draw. Step 4's
-  two puts come from a zk2py session of its own;
+  two puts come from a zk2py session of its own; and, beyond §8, a delete
+  on an events key, counted ``form`` (:func:`run_delete`, F-522);
 - ``zenctl``: the Rust readers of zk2py's owner: ``zenctl echo`` hearing
   occurrences live, and ``zenctl get`` replaying them from the stand-in;
   and ``zenctl echo`` hearing step 4's two puts from zk2py, a tool's
@@ -190,7 +191,7 @@ class Heard:
 def _section8(width: int, connect: str, tool: Any, storage: UnionStorage) -> tuple[list[Result], dict[str, Any]]:
     """§8 steps 1 to 5 with zk2py's owner under ``width``-bit runs, and step
     4's two puts from a zk2py session of their own."""
-    from . import live, zk2c
+    from . import live
     from .contract import load_contract
     from .owner import Owner
 
@@ -337,6 +338,33 @@ def _table(text: str) -> dict[str, list[str]]:
         elif key is not None and line.startswith("  "):
             out[key].append(line.strip())
     return out
+
+
+def run_delete() -> list[Result]:
+    """Beyond §8 (F-522, open): a delete on an events key, which no text has
+    a consumer read. zk2py's subscription counts it undecodable, ``form``,
+    as §4.2 counts a stray ``reply_del``, and delivers nothing."""
+    from . import live, zk2c
+    from .lexical import occurrence_chunk
+    from .live_interop import _r1
+
+    r, ep, _ = _r1(timestamping=True)
+    tool, other = live.open_client(ep), live.open_client(ep)
+    heard = Heard(tool)
+    try:
+        time.sleep(0.5)
+        k = f"{MEMBER}/{occurrence_chunk(16, 7, 9_000_002)}"
+        other.delete(k, attachment=zk2c.deletion(zk2c.InBand(16, 7, 9_000_002)))
+        heard.wait_for(1)
+        with heard.lock:
+            got = (list(heard.delivered), list(heard.undecodable))
+        return [("beyond §8 (F-522): a delete on an events key, heard by zk2py's subscription, is never delivered "
+                 "and counted undecodable, form (zk2py's reading)", got == ([], [(k, "form")]), f"{got}")]
+    finally:
+        heard.close()
+        other.close()
+        tool.close()
+        r.close()
 
 
 def _zenctl(args: list[str], window: float | None = None, timeout: float = 60) -> tuple[str, str, int]:
@@ -681,7 +709,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.events_live", description=__doc__.split("\n")[0])
     ap.add_argument("--only", action="append", choices=("py", "zenctl", "rust", "replayed"))
     args = ap.parse_args(argv)
-    runs = {"py": run_py, "zenctl": lambda: run_zenctl() + run_zenctl_no_event(), "rust": run_rust,
+    runs = {"py": lambda: run_py() + run_delete(), "zenctl": lambda: run_zenctl() + run_zenctl_no_event(),
+            "rust": run_rust,
             "replayed": run_replayed}
     failed = 0
     for name in args.only or list(runs):

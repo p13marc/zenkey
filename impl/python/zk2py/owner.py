@@ -2523,14 +2523,14 @@ class Owner:
                 if read.refused:
                     self.undecodable.append((key, read.refusal))
                     return
-                if sample.kind == zenoh.SampleKind.PUT:
-                    # Core §2.6 (0.104): "A consumer MUST NOT deliver a put on
-                    # an events key whose payload is no event ... It counts it
-                    # undecodable, refused as form."
-                    token = no_event(key, read)
-                    if token is not None:
-                        self.undecodable.append((key, token))
-                        return
+                # Core §2.6 (0.104): "A consumer MUST NOT deliver a put on an
+                # events key whose payload is no event ... It counts it
+                # undecodable, refused as form"; a delete there likewise,
+                # zk2py's reading (F-522).
+                token = no_event(key, read, deleted=sample.kind == zenoh.SampleKind.DELETE)
+                if token is not None:
+                    self.undecodable.append((key, token))
+                    return
                 if record is not None:
                     if sample.kind == zenoh.SampleKind.DELETE:
                         sink(key, None)

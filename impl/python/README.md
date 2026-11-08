@@ -7006,6 +7006,120 @@ relayed occurrence's order within one run) and four minor errors. None is
 a blocker. F-503 to F-511 are answered, F-506 in part. See "At core 0.103
 (#980 C2)" in `SPEC-FINDINGS.md`.
 
+## `link.v2` 0.12, core 0.104, observer 0.33 and `freshness.v2` 0.8: a face's events, and round 107 answered (round 108)
+
+Round 108 read one branch, at 889e84e9, which takes:
+- **link.v2 0.12** (#1098): §2.7, a face's `events = [...]`, entries
+  `<iface>/<template>`. On a face with `events`, only a listed event that
+  its contract exposes `link` crosses, and every other exposed event is
+  denied by name. A face with no `events` keeps link.v1's rule, and
+  `events = []` lists none. `event_unknown` refuses an entry naming no
+  event resource. §2.1: `events` only with `expose = "link"`, one value,
+  and a link.v1 policy's `unknown_field`. zenoh-modem's five faces list
+  their events: RF the three `face/` events, LoRa SF7 and SF9 the two
+  `rare` ones, SF12 and SBD none. link.v1 0.19 is editorial;
+- **core 0.104**, round 107's F-513, F-514, F-516, F-517 and F-518
+  answered: §2.6's "A put that carries no event", a consumer's MUST NOT,
+  heard or replayed, counted `form`; the two orders; Appendix B's storage
+  manager, the newest by its Zenoh timestamp; `state.md` §8 rewritten,
+  step 1's recent occurrences written newest first and a new step 4;
+- **observer 0.33** (F-512): §7.5's revision of a key names an event.
+  `envelope/tags.json` has 36 cases;
+- **`freshness.v2` 0.8** (F-515): a member's times minted at each put.
+
+No rule changed beyond what the changelogs state.
+
+### Its walk of `RULES.md` at 0.104
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 90 | 78 | 3 | 9 |
+| consumer | 33 | 29 | 0 | 4 |
+| caller | 18 | 18 | 0 | 0 |
+| observer | 104 | 99 | 3 | 2 |
+| static, in every class | 68 | 66 | 0 | 2 |
+
+- **284 rows walked of 284, none without a verdict.** 29 verdicts are
+  beyond the index.
+- **The re-key came first,** with core 0.104's consumer rule not met, in
+  the commit that brings `just py-conformance` level (6612 of 6612). The
+  next commit meets it.
+
+### What round 108 changed in zk2py
+
+- **`link_v2`** (0.12): a face's `events` (`FaceV2.events`,
+  `event_name`), read as one value, `bad_value` on a face that exposes
+  none; `FaceReading.denies` lets an event resource of a listed interface
+  cross only when the face lists it, so link.v1's carve-out denies the
+  rest by name; `event_unknown`.
+- **The consumer** (core 0.104 §2.6): `live.no_event`, the one reading.
+  A mutation, any envelope but an event, and a payload under another
+  Encoding count `form`; a refused envelope keeps its refusal (F-521).
+  `live.replay_events` counts `form` where it counted `not_event`.
+  `live.subscribe_events`, new, reads each put heard as a replay's.
+  `Owner.subscribe_role` hands no such put on. A delete on an events key
+  is counted `form` too (F-522).
+- **`events_live`:** §8 as 0.104 has it, and `--only replayed`, step 4's
+  puts written by `zenctl replay`.
+- **`across_live --only lora`:** a face's events, live.
+- **The mend** (review-bot on #1100):
+  1. `alarms.read_owner` reads every present instance's descriptor in
+     one GET (`live.get_descriptors`);
+  2. the owner's revision on every consumer path: the alarms reader,
+     `health.read_near`, `freshness.get_reading` and `read_service`, and
+     `freshness_v2`'s re-read, each a `seed_snapshot.ByDescriptor` of the
+     revisions it holds. `ByDescriptor.prepare` replaces what it held of
+     the services it reached;
+  3. the mutation on an events key: answered by core 0.104, and counted
+     `form` as the text says;
+  4. `archive_live` §5 step 1 checks the text's expected alone, the
+     deletion held within W and read back as one. The default watch
+     session stays a reported deviation, #1101;
+  5. the nits: `archive_live`'s unused imports, one `_zenctl` in
+     `events_live`, and `_find` gone.
+
+**`just py-conformance`: 6618 of 6618** on 889e84e9. Of them, `link` 325
+(`v2/plan.json` 41 of 41, `v2/lints.json` 69 of 69), `scope` 19
+(`faces.json` 19 of 19), `envelope` 441 (`tags.json` 36 of 36) and
+`readings` 995.
+
+### Live
+
+On the black boxes of 889e84e9.
+
+| Runner | What | Result |
+|---|---|---|
+| `events_live --only py` | `state.md` §8 whole, steps 1 to 5, zk2py's owner and consumer, under 16-bit runs and under 32-bit draws; and a delete on an events key (F-522) | 11/11 |
+| `events_live --only replayed` | §8 step 4 with a Rust writer: `zenctl record` captures zk2py's two puts, `zenctl replay` publishes them beside the owner example's two occurrences; zk2py's consumer delivers the owner example's alone, subscribed and replayed | 3/3 |
+| `events_live --only zenctl` | `zenctl echo` and `get` reading zk2py's occurrences, and `zenctl echo`, a tool, showing step 4's two puts as observer §7.3 says | 4/4 |
+| `events_live --only rust` | the owner example's occurrences read by zk2py | 4/4 |
+| `across_live` | the RF face's runs, and `--only lora`: `zenctl echo --across-face` through LoRa SF7's face hears zk2py's `face/oper_change` and `face/identity_change`, never `face/device_fault`, each read as its packed type, 3.4 by the catalog | 8/8 |
+| `stray_live` | §15 steps 1 and 2, and step 3, `freshness.get_reading` given the owner's revision beside a stray `reply_del`, and the control | 7/7 |
+| `archive_live` | §4, §5 (step 1 tightened) and §6 | 11/11 |
+| `alarms_scenarios` §1, §3, §5 | the alarms reader with the owner's revision, zk2py's owner and the owner example | 26/26 each |
+| `health_scenarios` §1, §4 | `read_near` with the owner's revision | 11/11 |
+| `freshness_v2_scenarios` §3 | the re-read with the owner's revision | 12/12 |
+| `snapshot_live` | §14, `ByDescriptor.prepare` replacing what it held | 40/40 |
+
+**The reference, observed (not findings):**
+- **`zenctl echo`** shows a mutation on an events key by its record, and
+  a JSON document under `application/json` whole, neither with an
+  event's time, run or seq.
+- **`zenctl replay`** publishes a captured put on an owner's key with
+  `--force-base --i-know` alone, both bases being empty.
+- **The archive's watch session** still re-reads no owner whose token
+  comes back after a cut (#1101).
+
+**Not run:** a Rust consumer of an event against zk2py's step 4: `consume`
+refuses an event, and no other black box consumes one (F-523).
+
+Round 108 found F-519 to F-523: an ambiguity (a refused envelope's count
+on an events key), a gap (a delete on an events key) and three minor
+errors (link.v2 0.12's case count, §5's "lists no event", and the
+reference's state in core 0.104's entry). None is a blocker. F-512 to
+F-518 are answered. See "At link.v2 0.12 and core 0.104" in
+`SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -7286,11 +7400,13 @@ impl/python/
     across.py         observer §7.3 §7.5 reading across a face: the scopes by the face's plan, a selector
                                 given, the revision of a key in three steps, CH's tag (round 106)
     across_live.py    observer §7.5, live: zk2py's echo across zenoh-modem's RF face against the owner example
-                                (round 106; modem.v3 3.4's scopes, round 107)
+                                (round 106; modem.v3 3.4's scopes, round 107); zenctl echo across LoRa SF7's
+                                face hearing the two events it lists of zk2py's owner (--only lora, round 108)
     events_live.py    §2.6 §7.5 scenarios/state.md §8 live: zk2py's owner and consumer, the owner example's events,
-                                zenctl echo and get, over a union storage stand-in (round 107)
+                                zenctl echo and get, over a union storage stand-in (round 107); step 4's two puts
+                                that carry no event, from zk2py and replayed by zenctl replay (round 108)
     stray_live.py     §4.2      scenarios/state.md §15, a stray reply_del and an owner on an earlier revision
-                                (round 107)
+                                (round 107); the readers given the owner's revision (step 3, round 108)
     archive_live.py   §4.4 S5   scenarios/state.md §4 to §6: the Rust archive aligning from zk2py's owner
                                 across a cut router link (round 107)
     echo_tool.py      observer §8.1 §8.2 a generic watcher: the samples a selector delivers, and its scope, what it watches

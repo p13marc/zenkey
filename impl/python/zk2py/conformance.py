@@ -5630,18 +5630,46 @@ def _round108_readings(root: Path) -> list[tuple[str, Any, Any]]:
     got.append(["application/json", live.no_event(k, zk2c.read_put(k, "application/json", b"{}"))])
     got.append(["a state key", live.no_event("zk2/lab/s/a.v1/state/x", zk2c.read_put(
         "zk2/lab/s/a.v1/state/x", zk2c.ENCODING, zk2c.mutation(zk2c.InBand(16, 1, 1), b"")))])
+    # F-522 (open): a delete on an events key, which no text names, zk2py
+    # counts form too
+    got.append(["a delete", live.no_event(k, zk2c.read_delete(k, zk2c.ENCODING, zk2c.deletion(
+        zk2c.InBand(16, 1, 1))), deleted=True)])
     want = [[c["expect"], None if c["expect"] == {"reads": "event"} else
              ("form" if "reads" in c["expect"] else c["expect"]["refused"])] for c in ev_reads]
-    want += [["application/json", "form"], ["a state key", None]]
+    want += [["application/json", "form"], ["a state key", None], ["a delete", "form"]]
     out.append(("core 0.104 §2.6 (live.no_event, which live.replay_events, live.subscribe_events and "
                 "Owner.subscribe_role read): over carries.json's reads on an events key, an event delivered, a "
                 "mutation (or any envelope but an event) counted form, a refused envelope by its refusal (observer "
-                "§7.3), a payload under another Encoding form; a key of another kind is not the rule's",
+                "§7.3), a payload under another Encoding form; a key of another kind is not the rule's; a delete "
+                "on an events key, which no text names (F-522), form too",
                 [len(ev_reads), got], [len(ev_reads), want]))
     out.append(("observer 0.33 §7.5: an event among the samples whose revision a tool chooses with no descriptor",
                 missing(obs, "A tool that reads a mutation, an event, a frame or a heartbeat with no descriptor "
                              "naming the owner's revision MUST read it with the revision chosen in this order."),
                 []))
+    # Round 108's findings, each text as it quotes it, so an answer moves it
+    log = flat("profiles/link/CHANGELOG.md")
+    out.append(("F-519 (open): link.v2 0.12's entry counts 40 cases in v2/plan.json, which holds 41",
+                missing(log, "`v2/plan.json` gains three cases, 40 in all") + [len(plan)], [41]))
+    out.append(("F-520 (open): link.v2 §5 answers yes for a face that \"lists no event\", §2.1's words for "
+                "events = [], and the frames row likewise",
+                missing(l2, "It is exposed, and the face lists it or lists no event (§2.7).",
+                        "It is exposed, and the face lists it or lists no frame (§2.7).",
+                        "An empty `events` lists no event.", "An empty `frames` lists no frame."), []))
+    out.append(("F-521 (open): core §2.6 counts a put that carries no event form, observer §7.3 a refused envelope by "
+                "its refusal; a JSON document under zenoh/bytes on an events key is refused sample_kind",
+                missing(core, "It counts it undecodable, refused as `form`, as §4.2 counts a stray `reply_del`.")
+                + missing(obs, "A refused envelope is undecodable, and the tool names the refusal.")
+                + [zk2c.reads(k, b'{"entry": "no envelope"}')], [{"refused": "sample_kind"}]))
+    out.append(("F-522 (open): core §2.6's rule names a put alone; nothing says what a consumer does with a delete on "
+                "an events key",
+                missing(core, "A consumer MUST NOT deliver a put on an events key whose payload is no event")
+                + [q for q in ("a delete on an events key", "put or a delete on an events key") if q in core], []))
+    out.append(("F-523 (open): core 0.104's entry says the reference delivers both of state.md §8 step 4's puts, "
+                "and §8's note that the reference runs §8",
+                missing(flat("CHANGELOG.md"), "The reference** delivers both today.",
+                        "**Written ahead of the reference**, which delivers both.")
+                + missing(st, "The reference runs §8 in `zenkey/tests/state.rs` (`s8_events_replay`)."), []))
     return out
 
 
