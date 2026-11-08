@@ -137,7 +137,12 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   `s7_late_joiners_across_runs_inside_the_seed`). `examples/archive.rs`
   (#977) is its black box, driven from its `--help` (`--record`, `ready`,
   `aligned`, `held`/`gone`, stdin `align`/`last-known`/`quit`;
-  `tests/archive_example.rs`). `archive` is a
+  `tests/archive_example.rs`). Since #1101 the archive holds a clone of
+  the watch session handed in (`Watch::Subscribed::_session`): zenoh closes
+  a session when its last handle drops, and the example handed in its
+  only one, so its subscribers had been silent from `start` on;
+  `the_archive_example_aligns_after_a_link_cut{,_in_a_namespace}` cut and
+  heal a router link and see the alignment it then makes alone. `archive` is a
   minimal `archive.v1` (§4.4): records, refuses outdated puts, aligns on
   positive evidence only, and `last_known` reads it as last-known, never
   current (`LastKnown::inband` and `mark()`, its in-band stamp, A3; the

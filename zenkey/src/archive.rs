@@ -211,9 +211,13 @@ pub struct Archive {
 
 /// How an archive learns that an owner, or a peer, appeared (#830).
 enum Watch {
-    /// Liveliness subscribers on the archive's watch session, held for the
-    /// archive's life.
+    /// Liveliness subscribers on the archive's watch session, and the
+    /// session itself, both held for the archive's life (#1101): zenoh
+    /// closes a session when its last handle drops, and a subscriber holds
+    /// none, so a caller that handed in its only handle would otherwise see
+    /// every subscriber silent from the moment `start` returned.
     Subscribed {
+        _session: zenoh::Session,
         _subscribers: Vec<zenoh::pubsub::Subscriber<()>>,
     },
     /// A presence read every [`PRESENCE_POLL`].
@@ -849,7 +853,10 @@ impl Archive {
                         .map_err(zenoh)?,
                     );
                 }
-                Watch::Subscribed { _subscribers: subs }
+                Watch::Subscribed {
+                    _session: w.clone(),
+                    _subscribers: subs,
+                }
             }
             None => Watch::Polled(tokio::spawn(Arc::clone(&inner).watch_presence(watched))),
         };
