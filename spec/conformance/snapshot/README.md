@@ -19,8 +19,9 @@ A snapshot on a key that is no state key is
 
 **zenoh-modem's endpoints.** The fixtures' bytes give
 `sdu/endpoint/{endpoint}` collection 4. That is its index in modem.v3 3.0
-to 3.2, in the canonical form's order. In 3.3, the example's head, it
-is 11. Seven `packed/` states sort before it, and 4 is `packed/identity`.
+to 3.2, in the canonical form's order. In 3.3 and 3.4 it is 11. Seven
+`packed/` states sort before it, and 4 is `packed/identity`. 3.4 adds
+events alone, which no collection index counts.
 A reader maps the index with the owner's revision (core §4.2). These
 fixtures read no contract. Its records here are JSON documents of about
 110 bytes, and its horizon is 60 s. So each live entry carries a
