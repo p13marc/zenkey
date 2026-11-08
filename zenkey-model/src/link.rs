@@ -544,17 +544,15 @@ impl StatedTransport {
     pub fn stamps(&self) -> bool {
         let mode = match self.0.get("mode") {
             Some(Value::String(mode)) => mode.as_str(),
-            // Unstated or `null`, as zenohd runs; any other, refused by
-            // zenoh.
-            None | Some(_) => "router",
+            // Unstated or `null`, as zenohd runs, or a value zenoh refuses.
+            _ => "router",
         };
         let default = mode == "router";
         let read = |value: Option<&Value>| match value {
             Some(Value::Bool(b)) => *b,
-            // Left out, or `null`, which zenoh reads as left out.
-            None | Some(Value::Null) => default,
-            // A value zenoh refuses to load.
-            Some(_) => default,
+            // Left out, `null` (which zenoh reads as left out), or a value
+            // zenoh refuses to load.
+            _ => default,
         };
         match self.0.get("timestamping/enabled") {
             Some(Value::Object(per_mode)) => read(per_mode.get(mode)),
@@ -4885,6 +4883,13 @@ mod tests {
         }));
         assert!(!written.stamps());
         assert_eq!(TIMESTAMPING_OFF.len(), 2);
+        // Both its paths, each off, whatever the order.
+        for path in ["timestamping/enabled/router", "timestamping/enabled/peer"] {
+            assert!(
+                TIMESTAMPING_OFF.contains(&(path, false)),
+                "{path} in {TIMESTAMPING_OFF:?}"
+            );
+        }
         // A `null`, as zenoh reads it: left out, at the mode's default.
         assert!(stamps(Some("router"), Some(serde_json::Value::Null)));
         assert!(stamps(
