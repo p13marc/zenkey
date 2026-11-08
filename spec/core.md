@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.103** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.104** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -417,12 +417,17 @@ not, is §2.7's.
   chunk before resolving the template.
   `[F: keys.json; envelope/vectors.json]` `[Sc: state.md §8]`
   - **Why the stamp.** The key is unique while S7 holds, orders one run's
-    occurrences, and needs no clock. So an owner whose clock is unknown
-    still keys an occurrence, and writes its time as unknown.
+    occurrences as the owner wrote them, and needs no clock. So an owner
+    whose clock is unknown still keys an occurrence, and writes its time
+    as unknown.
   - **An occurrence seen earlier.** An owner that relays one, such as a
     device's, writes the time it occurred. Its key still takes the
-    owner's next seq, so within one run the relayed occurrences order by
-    their arrival at the owner, and across runs by their times.
+    owner's next seq when the owner writes it.
+    - **Two orders.** Within one run, the seqs are the order the owner
+      wrote the occurrences in. Their times are when they occurred. So a
+      relayed occurrence can carry a time earlier than an earlier seq's.
+    - **A replay** delivers by time first (below). So it delivers such
+      an occurrence before the earlier seq's.
   - **The time** is the owner's clock's, from the deployment epoch
     (§7.6). It is unknown while §4.3's clock guard holds, as a
     heartbeat's is, and where the owner does not trust its clock.
@@ -432,8 +437,9 @@ not, is §2.7's.
     and nothing repairs it, as a later put repairs a state key. §4.3's
     rules keep it from happening: a run is never reused, and a 16-bit
     run's record is durable before the first sample written under each
-    run it issues. zenoh 1.10.1's storage manager refuses no put on a key
-    it holds (Appendix B).
+    run it issues. zenoh 1.10.1's storage manager keeps a key's newest
+    put by its Zenoh timestamp, and the later occurrence's is the newer
+    (Appendix B).
 - **`rate`** is `rare` (at most 1/h), `low` (at most 1/min) or `burst(<n>/h)`,
   for each member of the template, within any period that long (§2.7).
   **`retention`** is `<n>` followed by `s`, `m`, `h`, `d` or `w`.
@@ -467,10 +473,25 @@ not, is §2.7's.
     occurrences' times, then their seqs within one run. The occurrences of
     an unknown time come after every one with a time, by seq within one
     run. `[Sc: state.md §8]`
+    - **The seq** decides only within one run, between occurrences of one
+      time and among those of none. Where their times differ, the time
+      decides, against the seqs if need be (above).
     - **Two runs.** Between two runs at one time, and among the unknown
       times of two runs, the order is unspecified: nothing orders two runs
       (§4.3). The reference breaks the tie by the run's value, a 16-bit
       run before a 32-bit one.
+- **A put that carries no event.** An owner writes every occurrence as an
+  event (above). A consumer MUST NOT deliver a put on an events key whose
+  payload is no event, such as a mutation or a payload with no envelope,
+  whether a subscription heard it or a replay returned it. It counts it
+  undecodable, refused as `form`, as §4.2 counts a stray `reply_del`.
+  `[Sc: state.md §8]`
+  - **Why.** §7.5's parse refuses no mutation on an events key. But a
+    mutation carries no time, so the filter could neither keep it nor
+    drop it. An unknown time is an owner's word in an event, and a
+    mutation says nothing of its time.
+  - **Where one comes from.** A storage can still answer one, put by an
+    owner of an earlier core or by a broken writer.
 
 ### 2.7 The population budget
 
@@ -2201,8 +2222,9 @@ last chunk is an occurrence chunk (§1.2, §2.6).
   ms16 0, say the owner's clock is unknown. An ms16 above 999, or any
   but 0 under all ones, is unused.
 - **Its order.** An event key holds one occurrence, so no merge compares
-  two events. Within one run they order by seq, as §4.3 orders state and
-  events, and across two runs nothing orders them but their times.
+  two events. Within one run, their seqs are the order the owner wrote
+  them in, as §4.3 numbers state and events. Their times are when they
+  occurred, and a replay delivers by time, then by seq (§2.6).
 
 `[F: envelope/vectors.json, carries.json]`
 
@@ -5001,10 +5023,13 @@ Appendix B. These are the ones the rules above cite:
   admin space unobservable, never clean.
 - The storage manager garbage-collects tombstones, not values: an event
   occurrence a union storage holds is never pruned by its retention.
-- The storage manager holds one sample per key, the newest by its
-  timestamp, and refuses no put on a key it holds: a later put replaces
-  what it held (zenoh-plugin-storage-manager's `storages_mgt/service.rs`;
-  §2.6's reused run).
+- The storage manager keeps one sample per key under `History::Latest`,
+  its memory backend's: the newest by its Zenoh timestamp. It refuses no
+  put for holding the key. A put on a key it holds replaces what it held
+  when its timestamp is newer, and is skipped as outdated when it is
+  older (zenoh-plugin-storage-manager's `storages_mgt/service.rs`,
+  `guard_cache_if_latest` and its "Skipping outdated Sample"; §2.6's
+  reused run).
 - A router's admin document (`@/<zid>/router`) lists its sessions, each
   with the peer's zid and `whatami`: `router`, `peer` or `client`.
 - A node's admin space answers its declaration records
@@ -5499,7 +5524,7 @@ section each was written against, whose pointer leads on.
 | `conformance/frame/` | §7.7 |
 | `conformance/catalog/` | §8.6 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
-| `scenarios/state.md` | §4; §1 in-band stamps through a router that stamps nothing and one that stamps, and §8.2's session posture; §7 runs, a record's and a random draw's, the run before the seq wraps, and a consumer's and a tool's late joiner across two runs, after their seed and inside it; §8 a replay filtered and ordered by each event's time, an unknown time and a run change among them; §9 an archive within a run and across two; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node; §13 a stream key's seq wrapping, and kept across a takeover; §14 a collection's snapshot in pages, a member read, a page lost, `Latest`'s control, a delete beyond the window and two instances answering; §15 a stray `reply_del`, and an owner on an earlier revision whose state is per key |
+| `scenarios/state.md` | §4; §1 in-band stamps through a router that stamps nothing and one that stamps, and §8.2's session posture; §7 runs, a record's and a random draw's, the run before the seq wraps, and a consumer's and a tool's late joiner across two runs, after their seed and inside it; §8 a replay filtered and ordered by each event's time, against the seqs, an unknown time and a run change among them, and two puts that carry no event; §9 an archive within a run and across two; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node; §13 a stream key's seq wrapping, and kept across a takeover; §14 a collection's snapshot in pages, a member read, a page lost, `Latest`'s control, a delete beyond the window and two instances answering; §15 a stray `reply_del`, and an owner on an earlier revision whose state is per key |
 | `scenarios/operations.md` | §5, §6; §9 a call's forms for each kind of type, the as-of mark, an owner's error beside a router's `Timeout`, a querier's and a malformed one, an earlier version's envelope read as the transport's, and a request under another `Encoding` refused |
 | `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip; §7–§9 what a complete presence read is: a session cut off, before a read or while it runs, a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict; §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout; a watch session in no namespace on the wire keys, a round trip through a watch session cut off, and a move unconfirming what a reader holds; a reopen telling every token, the round trip after it waiting for them, and one round trip and one read at a time; step 10's counts, the reader's own sessions'; what a black box is judged on there, at what period its output is sampled, and one that prints nothing while its link is cut; Appendix B |
 | `scenarios/bindings.md` | §3.2; §6 a binding's order kept by the descriptor |

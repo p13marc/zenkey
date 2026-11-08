@@ -3,6 +3,96 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.104 — 2026-11-08: a put that carries no event, a replay's two orders, and the storage manager's newest put (#609, #980)
+
+zk2py round 107 read 0.101 to 0.103 cold, and filed F-512 to F-518. None
+was a blocker. This version answers the core's five. `observer.md` moves
+to text 0.33 for F-512 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)),
+and `freshness.v2` to 0.8 for F-515.
+
+**Added: §2.6, "A put that carries no event" (F-514, a gap).**
+- **The rule.** A consumer MUST NOT deliver a put on an events key whose
+  payload is no event, such as a mutation or a payload with no envelope.
+  That holds whether a subscription heard it or a replay returned it. It
+  counts it undecodable, refused as `form`, as §4.2 counts a stray
+  `reply_del`. `[Sc: state.md §8]`
+- **Why.** §7.5's parse refuses no mutation on an events key. But a
+  mutation carries no time, so the replay's filter could neither keep it
+  nor drop it. 0.103 said nothing of one.
+- **Where one comes from.** A storage can still answer one. An owner
+  before 0.103 could put one, since nothing then required form 4, and so
+  can a broken writer.
+- **The subscription too.** zk2py's fix named the replay alone. A put the
+  replay refuses would otherwise be delivered live, as an occurrence with
+  no time.
+- **The reference** delivers both today. `Consumer::replay` keeps such a
+  put as an unknown time, and the subscription delivers it. The code half
+  is listed for a Rust lane.
+
+**Changed: §2.6 and §7.5, the two orders (F-513, an ambiguity).**
+- **Before:** "within one run the relayed occurrences order by their
+  arrival at the owner, and across runs by their times". The replay's
+  MUST orders by time first.
+- **Now:** within one run, the seqs are the order the owner wrote the
+  occurrences in, and their times are when they occurred. A replay
+  delivers by time first. So a relayed occurrence dated before an
+  earlier seq's comes first.
+- **The seq** decides only within one run, between occurrences of one
+  time and among those of none. The MUST is unchanged.
+- **§7.5's "Its order"** says the same of form 4.
+- **The reference** orders so already (`replay_order`), and so does
+  zk2py.
+
+**Changed: Appendix B and §2.6, the storage manager (F-517, minor).**
+- **Before:** it held "the newest by its timestamp, and refuses no put
+  on a key it holds". Read together, the two disagreed.
+- **Now:** under `History::Latest`, the memory backend's, it keeps one
+  sample per key, the newest by its Zenoh timestamp. It refuses no put
+  for holding the key. A newer put replaces what it held, and an older
+  one is skipped as outdated (`storages_mgt/service.rs`,
+  `guard_cache_if_latest`).
+- **§2.6's reused run** rests on the first half. The later occurrence's
+  timestamp is the newer, so it replaces the earlier one.
+
+**The evidence.**
+- **`scenarios/state.md` §8.** Step 1 writes each occurrence with a time
+  of its own, as a relayed one is, and the recent ones newest first. So
+  the replay delivers them against their seqs (F-513).
+  - **New step 4** puts a mutation and a JSON document with no envelope
+    on the event's keys, while the consumer subscribes. Neither is
+    delivered, by the subscription or by the replay (F-514).
+  - **Written ahead of the reference**, which delivers both.
+- **`envelope/carries.json`.** Read 36's note says that the parse reads a
+  mutation on an events key, and that a consumer counts it undecodable.
+  The description says no case states that count. No case moves.
+- **`envelope/tags.json`** is observer 0.33's (F-512).
+
+**Answered: zk2py round 107's F-513, F-514, F-516, F-517 and F-518.**
+F-512 is observer 0.33's, and F-515 `freshness.v2` 0.8's.
+- **F-513, F-514 and F-517:** above.
+- **F-516, minor: `state.md` §8's `put_at`.** It is the reference's
+  writer, which no text defines. Step 1 says what it does, citing §2.6's
+  "An occurrence seen earlier", and names `put_at` in parentheses.
+- **F-518, minor: `snapshot/README.md`'s head.** It called modem.v3 3.3
+  the example's head. It now says the index is 11 in 3.3 and 3.4, since
+  3.4 adds events alone. No case moves.
+
+**Migration.** A consumer of this version drops a mutation on an events
+key, which one of 0.103 delivered. An owner of 0.103 writes form 4. So
+only an earlier writer, or a storage that holds what it wrote, meets the
+change.
+
+**Deliberately not changed.**
+- **§7.5's parse.** A mutation on an events key still reads as one. As
+  for a stray `reply_del`, `form` names the consumer's count, not a
+  refusal of the parse.
+- **Observer §7.3.** A tool reads a mutation on an events key as the
+  envelope it is, and shows its record.
+- **No section number** and no fingerprint moves.
+
+**The figures.** `RULES.md` lists 274 rules, one more than 0.103's 273:
+the consumer's MUST NOT (consumer 32).
+
 ## 0.103 — 2026-11-08: an event keyed by its run and seq, and the ULID refused (#980 C2c, C2d)
 
 Epic #975, zk2c, makes the wire bandwidth-first. 0.101 defined the
