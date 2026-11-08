@@ -7,6 +7,55 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.16 — 2026-11-08: editorial: `scenarios-v2.md` §3 hears an event no owner stamps, and §2.18's block is three objects, no rule changed (#609, #1106)
+
+zk2py round 109 read 0.13 and 0.14 cold, beside core 0.105. It filed
+F-524 and F-525 against this text, a contradiction and a minor error.
+This version answers them. Core 0.106 answers the round's other three
+([`../../CHANGELOG.md`](../../CHANGELOG.md)).
+
+**Changed: `scenarios-v2.md` §3, what F hears (F-524, a contradiction).**
+- **Before:** F subscribed to `…/radio.v1/state/oper`. Expected 2 said
+  its sample carries no timestamp, and Expected 4 N's in the control.
+  But `radio.v1` uses `freshness.v1`, and `oper` declares
+  `freshness.ttl_s` 4. So core §4.3's table lists it, and its owner sets
+  a Zenoh timestamp on every put. A router stamps only a put that
+  carries none (core Appendix B). With a conforming owner, F's sample
+  carries the owner's stamp in both runs, never N's.
+- **Now:** F subscribes to `…/radio.v1/events/fault/*`, an event that
+  crosses whole, and the owner publishes `fault` until F receives an
+  occurrence. The table lists no event, so a timestamp on one is a
+  router's. A setup bullet says why `fault`.
+- **Why not keep `oper`,** expecting its owner's stamp alone: the
+  control would then show nothing of N's stamping.
+- **The reference's test** reads `oper`, put by a stand-in owner with no
+  timestamp, as no conforming owner of `radio.v1` puts it. Moving it to
+  `fault` is listed for a Rust lane. zk2py observed `fault` carry no
+  timestamp under the block, and N's in the control.
+
+**Changed: §2.18, the block's objects (F-525, minor).**
+- **Before:** "the router's top-level `transport` and `routing`
+  objects", and a configuration holding a `transport` merges the two.
+  Since 0.13 the block holds `timestamping` too, and the far end's bullet
+  counts three objects.
+- **Now:** the block is three objects. A configuration that already
+  holds one of them merges the two, key by key: its `transport` may hold
+  its authentication and its TLS, and its `timestamping` a
+  `drop_future_timestamp` (`health.v1`'s scenarios §4 set one). Where
+  both state a key, the merged file keeps the block's value, which §2.19
+  checks.
+- **The reference** writes the block and asks for the merge by hand. Its
+  comment names `transport` alone, which is listed for a Rust lane.
+
+**Deliberately not changed.**
+- **No rule.** §2.18's MUSTs, §2.19's codes and §5's rows are as they
+  were.
+- **A generator merges nothing.** It writes the block, and the
+  deployment merges it into the router's configuration. zk2py's merge
+  keeps the block's value, as the text now says of the merged file.
+- **No fixture.** `v2/transport.json` holds its 21 cases.
+- **The header** is still written against core 0.100.
+
 ## link.v2 0.15 — 2026-11-08: §2.5, the end that opens, and the far end's user; §2.19, a `null` read as left out (#1107)
 
 #989's zk2c runs found that a face whose far principal is a user name
