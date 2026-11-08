@@ -204,8 +204,8 @@ pub enum KindToken {
     State,
     /// `@state`: explicit-only state (large populations).
     ExplicitState,
-    /// `events`: one key per occurrence, ending in an occurrence chunk or a
-    /// ULID (core §1.2).
+    /// `events`: one key per occurrence, ending in its occurrence chunk
+    /// (core §1.2).
     Events,
     /// `@op`: request/reply.
     Op,
@@ -680,16 +680,14 @@ pub fn parse(key: &str) -> Result<ZkKey, KeyError> {
             });
         }
     }
-    // An occurrence chunk or a ULID (core §1.2): this version admits
-    // both, while owners move to the first (#980's C2a).
+    // An occurrence chunk (core §1.2): a key that ends in anything else,
+    // a ULID's 26 characters among them, is no zk2 key (#980's C2d).
     if kind == KindToken::Events
         && !resource
             .last()
-            .is_some_and(|l| crate::chunk::is_occurrence(l) || crate::chunk::is_lower_ulid(l))
+            .is_some_and(|l| crate::chunk::is_occurrence(l))
     {
-        return Err(shape(
-            "an events key ends in an occurrence chunk or a lowercase ULID",
-        ));
+        return Err(shape("an events key ends in an occurrence chunk"));
     }
     Ok(ZkKey::Data {
         addr,
@@ -820,7 +818,8 @@ mod tests {
             "zk2/vehicle-01/navigation/nav.v2/telemetry/x",
             "zk2/Vehicle/navigation/nav.v2/stream/x",
             "zk2/vehicle-01/navigation/nav.v2/stream",
-            "zk2/vehicle-01/navigation/nav.v2/events/applied/not-a-ulid",
+            "zk2/vehicle-01/navigation/nav.v2/events/applied/not-a-chunk",
+            "zk2/vehicle-01/navigation/nav.v2/events/applied/01jgxqz4yqk8v6txw3m9f2a7cd",
             "zk2/@zk/contract/nav.v2/abc",
             "zk2/vehicle-01/navigation/@zk/instance/XYZ",
         ] {

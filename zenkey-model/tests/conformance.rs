@@ -56,8 +56,8 @@ fn key_json(k: &ZkKey) -> Value {
         } => {
             let mut v = json!({"form": "data", "system": addr.system.as_str(), "service": addr.service.as_str(),
                     "iface": iface.to_string(), "token": kind.as_str(), "resource": resource});
-            // An events key's last chunk (core §1.2; #980's C2a): an
-            // occurrence chunk's stamp, or `null` for a ULID.
+            // An events key's last chunk (core §1.2; #980's C2a): its
+            // occurrence chunk's stamp, the only chunk it parses with.
             if *kind == zenkey_model::grammar::KindToken::Events {
                 v["occurrence"] = resource
                     .last()

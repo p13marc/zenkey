@@ -561,10 +561,7 @@ mod tests {
             ("prod/zk2/h/s/i.v1/@stream/frames/f1", Order::Serial),
             ("zk2/h/s/i.v1/state/mode", Order::Plain),
             ("zk2/h/s/i.v1/@state/tracks/t1", Order::Plain),
-            (
-                "zk2/h/s/i.v1/events/fault/01arz3ndektsv4rrffq69g5fav",
-                Order::Plain,
-            ),
+            ("zk2/h/s/i.v1/events/fault/002g0009", Order::Plain),
             ("demo/tick", Order::Plain),
         ] {
             assert_eq!(Order::of_key(key), order, "{key}");

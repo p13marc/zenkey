@@ -35,19 +35,8 @@ pub fn is_lower_hex(s: &str, n: usize) -> bool {
     s.len() == n && s.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f'))
 }
 
-/// Whether `s` is a lowercase ULID: 26 Crockford base32 characters
-/// (`0-9`, `a-z` without `i`, `l`, `o`, `u`).
-#[must_use]
-pub fn is_lower_ulid(s: &str) -> bool {
-    s.len() == 26
-        && s.bytes().all(|c| {
-            c.is_ascii_digit()
-                || (c.is_ascii_lowercase() && !matches!(c, b'i' | b'l' | b'o' | b'u'))
-        })
-}
-
-/// Crockford's base32 in lowercase, the ULID's alphabet (core §1.2): the
-/// digits, then the letters but `i`, `l`, `o` and `u`.
+/// Crockford's base32 in lowercase (core §1.2): the digits, then the
+/// letters but `i`, `l`, `o` and `u`.
 const CROCKFORD: &[u8; 32] = b"0123456789abcdefghjkmnpqrstvwxyz";
 
 /// A Crockford base32 character's value, `None` outside the lowercase
@@ -148,13 +137,11 @@ mod tests {
     }
 
     #[test]
-    fn hex_ulid_ident() {
+    fn hex_occurrence_ident() {
         assert!(is_lower_hex("8f3a5c2e9b1d4f70", 16));
         assert!(!is_lower_hex("8F3A5C2E9B1D4F70", 16));
         assert!(!is_lower_hex("8f3a", 16));
-        assert!(is_lower_ulid("01jgxqz4yqk8v6txw3m9f2a7cd"));
-        assert!(!is_lower_ulid("01JGXQZ4YQK8V6TXW3M9F2A7CD"));
-        assert!(!is_lower_ulid("01jgxqz4yqk8v6txw3m9f2a7ci"));
+        assert!(!is_occurrence("01jgxqz4yqk8v6txw3m9f2a7cd"), "a ULID");
         assert!(is_ident("set_origin"));
         // An occurrence chunk (core §1.2; #980's C2a).
         use crate::wire::{Run, Seq, Stamp};
