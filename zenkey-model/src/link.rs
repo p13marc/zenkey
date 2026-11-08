@@ -960,6 +960,9 @@ pub enum Code {
     /// A face's `frames` entry that names no frame resource of a listed
     /// interface (v2 §2.7).
     FrameUnknown,
+    /// A face's `events` entry that names no event resource of a listed
+    /// interface (v2 §2.7). An event that is listed but not exposed is
+    /// denied, never this.
     EventUnknown,
     /// An exposed frame resource of a listed interface that a face's
     /// `frames` leaves out, and that crosses no face of the policy (v2
