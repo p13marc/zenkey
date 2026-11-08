@@ -7,6 +7,37 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.13 — 2026-11-08: editorial: §5 asks of a face with no `frames` or no `events`, and 0.12's evidence counted, no rule changed (#609, #1098)
+
+zk2py round 108 read 0.12 cold, and filed F-519 and F-520 against this
+text, both minor. This version answers them. Core 0.105 answers the
+round's other three ([`../../CHANGELOG.md`](../../CHANGELOG.md)).
+
+**Changed: §5, whether a frame or an event crosses a face (F-520).**
+- **Before:** yes when "the face lists it or lists no frame", and the
+  same of an event. §2.1 says an empty `frames` lists no frame, and an
+  empty `events` no event. So the rows let every exposed one cross a
+  face with `frames = {}` or `events = []`, where §2.7 lets none cross.
+- **Now:** yes when the face lists it, or has no `frames`. An event's
+  row says "has no `events`". An empty list lists none, so nothing it
+  could list crosses, as §2.7 says.
+- **No rule changed.** §2.7's MUSTs said so already, and `v2/plan.json`'s
+  case 38 (from 0) reads an empty `events` so. zk2py reads §2.7 too.
+
+**Erratum: 0.12's evidence (F-519).** Its entry said `v2/plan.json`
+gains three cases, 40 in all. It gained four, 41 in all.
+- **The fourth,** case 40 (from 0), came in a later commit of #1098: a
+  face that lists an event its contract does not expose `link`. The
+  event is denied, and no `event_unknown` is drawn.
+- **It is the only case** of §2.7's "Listed and not exposed".
+- **The line is corrected** in 0.12's entry, which says that it was.
+
+**Deliberately not changed.**
+- **§2.1's** "An empty `events` lists no event", and its `frames` twin.
+  They say what §2.7 reads, and §5 now agrees with them.
+- **No fixture.** `v2/plan.json` holds its 41 cases, as they were.
+- **The header** is still written against core 0.100.
+
 ## link.v2 0.12 — 2026-11-08: §2.7, a face lists the events it carries (#1098)
 
 `modem.v3` 3.4 exposes three events for a face (#991). A face listed its
@@ -49,9 +80,11 @@ LoRa at SF7 and SF9 the two `rare` ones, LoRa at SF12 and SBD none.
   resources (observer §7.5).
 - **The header** is still written against core 0.100.
 
-**The evidence.** `v2/plan.json` gains three cases, 40 in all: a face that
-lists one event of two, an empty `events`, and an entry that names no
-event (`event_unknown`). Its zenoh-modem cases list their events, as
+**The evidence.** `v2/plan.json` gains four cases, 41 in all: a face that
+lists one event of two, an empty `events`, an entry that names no event
+(`event_unknown`), and an event the face lists and its contract does not
+expose `link`. This line said three cases, 40 in all, until link.v2
+0.13's erratum (F-519). Its zenoh-modem cases list their events, as
 their files do: SF7's and SF9's plans deny `face/device_fault` by name,
 and SF12's and SBD's deny every event whole, `not_packed` left to RF's.
 `v2/lints.json` gains six cases, 69 in all: `events` read, empty,
