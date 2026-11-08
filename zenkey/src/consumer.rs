@@ -233,6 +233,11 @@ pub struct Delivery {
     /// them (core §7.7): `None` for a sample of any other resource, and
     /// for a delete. `sample`'s payload is then the frame's body.
     pub frame: Option<FrameRead>,
+    /// An event's time (core 0.101 §7.5's form 4; #980's C2b), from the
+    /// deployment epoch, known or unknown: `None` for every sample that is
+    /// no event, an occurrence an owner wrote on a ULID key among them,
+    /// whose time is its key's ([`crate::writer::ulid_time`]).
+    pub occurred: Option<zenkey_model::collection::Time>,
 }
 
 /// A frame as a subscription's reader of its key read it (core §7.7,
@@ -918,6 +923,7 @@ impl Consumer {
                 // Core §7.5, §7.6: a refused envelope, or a packed
                 // record its layout refuses, is undecodable, never
                 // delivered, never an arrival.
+                let occurred = crate::inband::event_time(&sample);
                 let read = crate::inband::read(sample);
                 let (inband, tag) = (read.stamp(), read.tag());
                 // Core §7.7: a frame resource's put is a frame, read
@@ -1035,6 +1041,7 @@ impl Consumer {
                     tag,
                     lifespan,
                     frame,
+                    occurred,
                 });
             });
             match (&redeclaring, horizon) {
@@ -1204,8 +1211,20 @@ impl Consumer {
 
     /// Replays an event's occurrences within `retention` (§2.6): a GET on
     /// every bound provider's selector, bounded by `_time`, then filtered by
-    /// each occurrence's ULID time on this side, because a storage backend
-    /// may ignore `_time` (spike S5: the memory backend does).
+    /// each occurrence's time on this side, because a storage backend may
+    /// ignore `_time` (spike S5: the memory backend does).
+    ///
+    /// - **Its time** (core 0.101 §2.6; #980's C2b) is its event's (§7.5's
+    ///   form 4), counted from this consumer's deployment epoch, where its
+    ///   key ends in an occurrence chunk; or its ULID's, where its key ends
+    ///   in one. An unknown time, or an occurrence chunk's key whose payload
+    ///   is no event, is never judged within the retention or beyond it:
+    ///   the storage's `_time` bound alone admitted it.
+    /// - **The order**: the occurrences with a time by their times, then
+    ///   each of one time by the run first heard and its seq; those with
+    ///   none after them, by the run first heard, then the seq. So one run's
+    ///   occurrences keep their seq's order wherever a time does not
+    ///   decide, and two runs at one time the order their first arrived in.
     pub async fn replay(
         &self,
         resource: &str,
@@ -1223,7 +1242,11 @@ impl Consumer {
         // delivery.
         let premise =
             timing::Plan::new(&r, &self.contract.iface, &[], &self.params, self.epsilon).premise();
-        let mut out = Vec::new();
+        let mut out: Vec<(
+            Option<std::time::SystemTime>,
+            Option<zenkey_model::wire::Stamp>,
+            Delivery,
+        )> = Vec::new();
         let timeout = self.reply_wait(timeout);
         for ke in self.selectors(resource)? {
             let rx = self
@@ -1251,14 +1274,26 @@ impl Consumer {
                 else {
                     continue;
                 };
-                let Some(at) = chunks.pop().as_deref().and_then(crate::writer::ulid_time) else {
+                let Some(last) = chunks.pop() else {
                     continue;
                 };
-                if at < since || !self.providers.iter().any(|p| p.matches(&addr)) {
+                // A ULID's time, or the event's: `None` is unknown.
+                let at = if zenkey_model::chunk::is_occurrence(&last) {
+                    crate::inband::event_time(&sample)
+                        .and_then(|t| t.unix_ms(self.epoch))
+                        .and_then(|ms| u64::try_from(ms).ok())
+                        .map(|ms| std::time::UNIX_EPOCH + Duration::from_millis(ms))
+                } else {
+                    crate::writer::ulid_time(&last)
+                };
+                if at.is_some_and(|at| at < since)
+                    || !self.providers.iter().any(|p| p.matches(&addr))
+                {
                     continue;
                 }
                 let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
                 if let Some(values) = r.template.matches(&refs) {
+                    let occurred = crate::inband::event_time(&sample);
                     let read = crate::inband::read(sample);
                     if let Err(why) = crate::inband::admit(&read, layout.as_deref()) {
                         tracing::warn!(key = %read.sample().key_expr(), reason = %why.reason(), "an undecodable occurrence is not replayed");
@@ -1267,22 +1302,27 @@ impl Consumer {
                     let (inband, tag) = (read.stamp(), read.tag());
                     let sample = read.into_sample();
                     let stamp = sample.timestamp().copied();
-                    out.push(Delivery {
-                        provider: addr,
-                        resource: name.clone(),
-                        values,
-                        sample,
-                        arrival: Instant::now(),
-                        stamp,
+                    out.push((
+                        at,
                         inband,
-                        tag,
-                        lifespan: premise,
-                        frame: None,
-                    });
+                        Delivery {
+                            provider: addr,
+                            resource: name.clone(),
+                            values,
+                            sample,
+                            arrival: Instant::now(),
+                            stamp,
+                            inband,
+                            tag,
+                            lifespan: premise,
+                            frame: None,
+                            occurred,
+                        },
+                    ));
                 }
             }
         }
-        Ok(out)
+        Ok(replay_order(out))
     }
 
     /// GETs current state from its owners (S4): every bound provider's keys
@@ -2228,4 +2268,40 @@ async fn reread(
         seen.rereads.fetch_add(1, Ordering::Relaxed);
     }
     done();
+}
+
+/// Replay's order ([`Consumer::replay`], core 0.101 §2.6): the occurrences
+/// with a time by it, then each of one time by its run's rank (the order
+/// runs were first heard in) and its seq; those whose time is unknown after
+/// them, by run rank and seq. An occurrence with no in-band stamp ranks as
+/// a run of its own. Arrival breaks every other tie: a total order, so the
+/// sort is stable and well defined.
+fn replay_order(
+    items: Vec<(
+        Option<std::time::SystemTime>,
+        Option<zenkey_model::wire::Stamp>,
+        Delivery,
+    )>,
+) -> Vec<Delivery> {
+    let mut runs: Vec<zenkey_model::wire::Run> = Vec::new();
+    let mut keyed: Vec<_> = items
+        .into_iter()
+        .enumerate()
+        .map(|(i, (at, stamp, d))| {
+            let rank = match stamp {
+                Some(s) => match runs.iter().position(|r| *r == s.run) {
+                    Some(r) => r,
+                    None => {
+                        runs.push(s.run);
+                        runs.len() - 1
+                    }
+                },
+                None => usize::MAX,
+            };
+            let seq = stamp.map_or(0, |s| s.seq.get());
+            ((at.is_none(), at, rank, seq, i), d)
+        })
+        .collect();
+    keyed.sort_by_key(|a| a.0);
+    keyed.into_iter().map(|(_, d)| d).collect()
 }

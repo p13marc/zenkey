@@ -11,6 +11,9 @@
 //!       (Read::Refused)
 //! a delete on such a key whose attachment parses as a delete's envelope
 //!     → its in-band stamp (Read::Enveloped, the sample unchanged)
+//! a put on an event key whose payload is an event (core §7.5's form 4, 0.101)
+//!     → its record becomes the payload, its key's occurrence chunk its
+//!       in-band stamp (Read::Enveloped), its time read by [`event_time`]
 //! a put whose envelope is a heartbeat (core §7.5's form 6, 0.81)
 //!     → its body becomes the payload, its run and seq its key's stamp
 //!       (Read::Heartbeat): never a record of the key's type
@@ -273,10 +276,16 @@ pub fn read(sample: Sample) -> Read {
     }
     // `envelope` returned a put's stamp only from `Envelope::parse` of these
     // bytes, which refuses an empty or short payload (`short`): they hold
-    // CH and the stamp, `stamp.envelope_bytes()` of them.
+    // CH and the stamp, `stamp.envelope_bytes()` of them. An event's hold
+    // CH and its time, 7 bytes, its stamp in its key (`read_event`).
     let bytes = sample.payload().to_bytes();
     let tag = wire::Header::from_byte(bytes[0]).tag;
-    let record = bytes[stamp.envelope_bytes()..].to_vec();
+    let head = if form == wire::Form::Event {
+        EVENT_HEAD
+    } else {
+        stamp.envelope_bytes()
+    };
+    let record = bytes[head..].to_vec();
     let sample = SampleBuilder::<SampleBuilderPut>::try_from(sample)
         .expect("a put")
         .payload(record)
@@ -440,11 +449,34 @@ fn envelope(sample: &Sample) -> Option<Result<(wire::Stamp, wire::Form), Refusal
                 | Reading::Heartbeat(e)
                 | Reading::Framed(e)
                 | Reading::Snapshot(e) => Ok((e.stamp, e.form)),
+                // Its stamp is its key's (core 0.101, #980's C2a).
+                Reading::Event(e) => Ok((e.stamp, wire::Form::Event)),
                 Reading::Refused(refusal) => Err(refusal),
                 Reading::Plain => return None,
             })
         }
     }
+}
+
+/// An event's bytes before its record: CH, t32 and ms16 (core §7.5).
+const EVENT_HEAD: usize = 7;
+
+/// The time an event carries (core 0.101 §7.5's form 4; #980's C2a), read
+/// from the put as it arrived, before [`read`] strips it: `Some` with its
+/// time, known or unknown, for a put on an event key whose payload is an
+/// event; `None` for every other sample, a mutation on an event key, as
+/// an owner writes until core adopts form 4, among them.
+#[must_use]
+pub fn event_time(sample: &Sample) -> Option<zenkey_model::collection::Time> {
+    if sample.kind() != SampleKind::Put {
+        return None;
+    }
+    let key = sample.key_expr().as_str();
+    if !wire::carries(key, &sample.encoding().to_string()) {
+        return None;
+    }
+    let bytes = sample.payload().to_bytes();
+    wire::read_event(key, &bytes)?.ok().map(|e| e.time)
 }
 
 /// A zenoh timestamp as the model orders it: its NTP64 time, and its id's

@@ -140,6 +140,107 @@ async fn s8_events_replay() {
     );
 }
 
+/// #980's C2b (core 0.101 §2.6): a replay reads both last chunks while
+/// owners move from the ULID to the occurrence chunk. Its storage answers,
+/// in no order: a ULID key 100 s old, and five events on occurrence chunks
+/// (§7.5's form 4) of run 7, at seq 1 80 s old, seq 3 50 s old, seq 2 of
+/// an unknown time, seq 4 two hours old, and run 9's seq 1 of an unknown
+/// time. The two-hour-old one is beyond the retention; the unknown times
+/// are never judged so, and come after every known time, run 7's before
+/// run 9's (the order the runs were first heard in), then by seq. Each
+/// delivery's in-band stamp is its key's chunk, or the ULID mutation's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_replay_reads_ulid_and_occurrence_keys_in_order() {
+    use zenkey::model::collection::Time;
+    use zenkey::model::wire::{Event, Seq, Tag};
+    let (_r1, ep) = router(None).await;
+    let storage = client(&ep).await;
+    let reader = client(&ep).await;
+    let base = "zk2/lab/journal/journal.v1/events/entries";
+    let now = SystemTime::now();
+    let at = |ago: u64| {
+        let s = (now - Duration::from_secs(ago))
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap();
+        Time::Known {
+            s: u32::try_from(s.as_secs()).unwrap(),
+            ms: u16::try_from(s.subsec_millis()).unwrap(),
+        }
+    };
+    let stamp = |run: u16, seq: u32| InBand {
+        run: Run::U16(run),
+        seq: Seq::new(seq).unwrap(),
+    };
+    let event = |run: u16, seq: u32, time: Time, record: &'static [u8]| {
+        let e = Event {
+            tag: Tag::NONE,
+            stamp: stamp(run, seq),
+            time,
+            record,
+        };
+        (format!("{base}/{}", e.chunk()), e.write().unwrap())
+    };
+    let ulid = zenkey::writer::ulid(now - Duration::from_secs(100));
+    let answers: Vec<(String, Vec<u8>)> = vec![
+        event(7, 3, at(50), b"seq 3"),
+        event(9, 1, Time::Unknown, b"run 9"),
+        event(7, 4, at(7200), b"too old"),
+        event(7, 2, Time::Unknown, b"unknown"),
+        (
+            format!("{base}/{ulid}"),
+            Envelope::mutation(Tag::NONE, stamp(1, 10), b"ulid").write(),
+        ),
+        event(7, 1, at(80), b"seq 1"),
+    ];
+    let _q = storage
+        .declare_queryable(format!("{base}/**"))
+        .callback(move |q| {
+            for (k, v) in &answers {
+                let _ = q
+                    .reply(k.clone(), v.clone())
+                    .encoding(Encoding::ZENOH_BYTES)
+                    .wait();
+            }
+        })
+        .await
+        .unwrap();
+    let consumer = Consumer::for_tool(
+        &reader,
+        Arc::new(contract("journal.v1")),
+        &["lab/journal"],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    let mut got = Vec::new();
+    for _ in 0..50 {
+        got = consumer
+            .replay("events/entries", Duration::from_secs(3600), T)
+            .await
+            .unwrap();
+        if got.len() == 5 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let records: Vec<String> = got
+        .iter()
+        .map(|d| String::from_utf8(d.sample.payload().to_bytes().into_owned()).unwrap())
+        .collect();
+    assert_eq!(records, ["ulid", "seq 1", "seq 3", "unknown", "run 9"]);
+    let stamps: Vec<Option<InBand>> = got.iter().map(|d| d.inband).collect();
+    assert_eq!(
+        stamps,
+        [
+            Some(stamp(1, 10)),
+            Some(stamp(7, 1)),
+            Some(stamp(7, 3)),
+            Some(stamp(7, 2)),
+            Some(stamp(9, 1)),
+        ],
+        "an event's stamp is its key's chunk"
+    );
+}
+
 fn plan() -> IfaceId {
     "mission_plan.v1".parse().unwrap()
 }

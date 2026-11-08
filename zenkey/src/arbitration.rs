@@ -514,6 +514,7 @@ where
                 }
                 // Core §7.5, §7.6: a refused envelope, or a packed record
                 // its layout refuses, is undecodable, no arrival.
+                let occurred = crate::inband::event_time(&sample);
                 let read = crate::inband::read(sample);
                 if let Err(why) = crate::inband::admit(&read, layout.as_deref()) {
                     tracing::debug!(
@@ -579,6 +580,7 @@ where
                             tag,
                             lifespan: lifespan.unwrap_or(premise),
                             frame: None,
+                            occurred,
                         }),
                     });
                 }
