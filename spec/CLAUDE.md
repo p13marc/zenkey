@@ -535,8 +535,10 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   subdirectories, so `link.v2` and `config.v2` are draft (status entries).
   #991's 3.3 (`link.v1` 0.17, `link.v2` 0.8, `telemetry.v2` 0.3, all
   editorial) puts the readings in `frames/fast`, `slow` and `paid` and
-  deprecates the nine. Cases 14–18 carry `catalog.json`'s `e3a529fe`
-  inline: a new catalog is copied into them before their plans re-bless.
+  deprecates the nine. Cases 14–18 carry `catalog.json`'s catalog
+  inline, `0ff6bf6d` since `link.v2` 0.11 (its lineage ends at
+  `e3a529fe`, `expect.catalog` `0ff6bf6d`): a new catalog is copied into
+  them before their plans re-bless.
 - **`config.v2`** (#985 G1, text 0.1, `experimental` until G4, written against
   core 0.94) sits beside `config.v1` in `spec/profiles/config/`: `v2.md`,
   `scenarios-v2.md`, `config.v2.json` (the change event), and

@@ -280,10 +280,19 @@ async fn owner(
     (b, a)
 }
 
+/// What the owner's descriptor states of its instance (core §3.3): its
+/// `meta.zid`, whose stamps are its own, and its `run`, under which it
+/// answers a GET (§2.14 step 5).
+#[derive(Debug, Clone)]
+struct Described {
+    zid: String,
+    run: Option<String>,
+}
+
 /// The owner's presence as a tool reads it (§2.13): its instance token and
 /// descriptor, waiting for the token (a start returns before its
-/// declarations reach R1), and the descriptor's `meta.zid`.
-async fn presence_of(tool: &zenoh::Session, want: Option<&InstanceId>) -> (Presence, String) {
+/// declarations reach R1), and what the descriptor states of it.
+async fn presence_of(tool: &zenoh::Session, want: Option<&InstanceId>) -> (Presence, Described) {
     let instance = || async {
         presence::tokens(tool, &format!("zk2/{SVC}/@zk/**"), T)
             .await
@@ -304,14 +313,17 @@ async fn presence_of(tool: &zenoh::Session, want: Option<&InstanceId>) -> (Prese
         .unwrap()
         .into_descriptor()
         .unwrap();
-    let zid = d.meta["zid"].as_str().unwrap().to_owned();
+    let described = Described {
+        zid: d.meta["zid"].as_str().unwrap().to_owned(),
+        run: d.run.clone(),
+    };
     let p = Presence::Present(
         d.interfaces
             .iter()
             .find(|e| e.iface == "alarms.v1")
             .map_or(Listing::NotListed, |e| Listing::Listed { token: e.token }),
     );
-    (p, zid)
+    (p, described)
 }
 
 /// G's S4 GET of the owner's alarms.
@@ -343,17 +355,39 @@ const TRUSTED: ClockTrust = ClockTrust::Trusted {
 
 /// G judges its reply for `alert_key` (§2.14): §5's first question and
 /// its last.
-fn judge_g(a: &StateAnswer, alert_key: &str, presence: Presence, zid: &str) -> (Judged, Judged) {
+/// The run of the snapshot G's answer listed `key` in: the run its
+/// instance answered under (core §7.5); `None` for a per-key reply.
+fn snapshot_run(a: &StateAnswer, key: &str) -> Option<String> {
+    a.snapshots
+        .iter()
+        .rev()
+        .find(|h| {
+            key.strip_prefix(h.key.as_str())
+                .is_some_and(|r| r.is_empty() || r.starts_with('/'))
+        })
+        .map(|h| h.run.to_string())
+}
+
+fn judge_g(
+    a: &StateAnswer,
+    alert_key: &str,
+    presence: Presence,
+    owner: &Described,
+) -> (Judged, Judged) {
     let c = reply(a, alert_key).expect("a reply for the key");
     let obs = [c.freshness(TRUSTED)];
+    // §2.14 step 5 (text 0.14): a snapshot's entry is attributed by the
+    // snapshot's run against the run the descriptor states, a per-key
+    // reply by its stamp against `meta.zid`.
+    let previous_instance = match snapshot_run(a, c.key()) {
+        Some(run) => owner.run.as_ref().is_some_and(|stated| *stated != run),
+        None => c.clock().is_some_and(|id| id != owner.zid),
+    };
     let r = Reading {
         presence,
         observations: &obs,
         latest: Some(latest_of(c)),
-        // A snapshot's confirmation names no instance (#977's E3).
-        previous_instance: c
-            .clock()
-            .is_some_and(|id| id != zid && id != zenkey::inband::owner_clock(c.key()).to_string()),
+        previous_instance,
         held_whole: false,
         left_out: false,
     };
@@ -432,8 +466,8 @@ async fn s1_raise() {
     assert_eq!(a.max_alarms(), 256);
     assert_eq!(a.adoption().source, Source::Nothing);
     let svc = b.start().await.unwrap();
-    let (presence, zid) = presence_of(&rs, None).await;
-    assert_eq!(zid, owner_zid);
+    let (presence, owner_said) = presence_of(&rs, None).await;
+    assert_eq!(owner_said.zid, owner_zid);
     assert_eq!(presence, Presence::Present(Listing::Listed { token: true }));
     let first = get(&g).await;
     assert!(first.complete, "at its final reply (core S2)");
@@ -491,7 +525,15 @@ async fn s1_raise() {
         Some(zenkey::inband::owner_clock(c.key()).to_string()),
         "the entry carries its confirmation, the owner's clock (freshness.v2 §2.6)"
     );
-    let (firing, stale) = judge_g(&answer, A_KEY, presence, &zid);
+    // alarms.v1 0.14 scenarios §1 step 2: a snapshot under the run the
+    // owner's descriptor states (core §3.3).
+    assert!(owner_said.run.is_some(), "the descriptor states its run");
+    assert_eq!(
+        snapshot_run(&answer, c.key()),
+        owner_said.run,
+        "G's answer for A is a snapshot under the descriptor's run"
+    );
+    let (firing, stale) = judge_g(&answer, A_KEY, presence, &owner_said);
     assert_eq!(pair(firing), (Answer::Yes, Reason::Firing));
     assert_eq!(pair(stale), (Answer::No, Reason::Fresh));
 
@@ -534,7 +576,7 @@ async fn escalate_refresh_confirm(imp: Implementation, quiet: Duration, bound: D
     let sub = g.subscribe(RES, |_| {}).await.unwrap();
     let (b, a) = owner(&os, config(SVC), imp, Startup::default()).await;
     let svc = b.start().await.unwrap();
-    let (presence, zid) = presence_of(&rs, None).await;
+    let (presence, owner_said) = presence_of(&rs, None).await;
     seen_by(&os).await;
     let t0 = a
         .raise(alarm_a(Severity::Warning))
@@ -595,7 +637,7 @@ async fn escalate_refresh_confirm(imp: Implementation, quiet: Duration, bound: D
     // At the contract's own horizon, the copy's 4 s or the standard's 900 s.
     let j = g.freshness(RES, &[sub.freshness(&key_of(A_KEY))]).unwrap();
     assert_eq!(j.verdict, Verdict::Fresh, "past the horizon: {j:?}");
-    let (firing, _) = judge_s(&sub, &snapshot(&s.log), A_KEY, presence, &zid);
+    let (firing, _) = judge_s(&sub, &snapshot(&s.log), A_KEY, presence, &owner_said.zid);
     assert_eq!(pair(firing), (Answer::Yes, Reason::Firing));
     svc.close().await.unwrap();
 }
@@ -636,7 +678,7 @@ async fn s3_resolve_then_delete() {
     )
     .await;
     let svc = b.start().await.unwrap();
-    let (presence, zid) = presence_of(&rs, None).await;
+    let (presence, owner_said) = presence_of(&rs, None).await;
     seen_by(&os).await;
     let raised = a.raise(alarm_a(Severity::Warning)).await.unwrap().document;
     deliveries(&s.log, A_KEY, 1).await;
@@ -687,7 +729,7 @@ async fn s3_resolve_then_delete() {
     );
     assert_eq!(c.timestamp(), None, "a tombstone carries no confirmation");
     let _ = before;
-    let (firing, _) = judge_g(&answer, A_KEY, presence, &zid);
+    let (firing, _) = judge_g(&answer, A_KEY, presence, &owner_said);
     assert_eq!(pair(firing), (Answer::No, Reason::Deleted));
 
     // 3. 65 s after it, with the 60 s window: nothing for the key.
@@ -832,15 +874,17 @@ async fn s5_a_restart_mid_incident() {
     let instance = svc.instance().clone();
 
     // G GETs the moment S sees the new instance token (the SHOULD, as core
-    // §8.2 observes it): A firing, t0 kept, and B, unchanged, each under the
-    // new instance's stamp id, and a reply_del of R's key and of P's, which
-    // it deleted before its token.
+    // §8.2 observes it): snapshots under the new instance's run listing A
+    // firing, t0 kept, and B, unchanged, each put again under that run,
+    // and a tombstone of R's key and of P's, which it deleted before its
+    // token (text 0.14).
     at_new_token(&s.log, before.len()).await;
     let at_token = get(&g).await;
     assert!(
         at_token.complete,
         "the GET at the token ran to its final reply"
     );
+    let new_run = svc.minter().run().to_string();
     for (k, doc) in [(A_KEY, &a_doc), (b_key.as_str(), &b_doc)] {
         let c = reply(&at_token, k).unwrap_or_else(|| panic!("{k} answered at the token"));
         let Current::Value { sample, .. } = c else {
@@ -857,6 +901,15 @@ async fn s5_a_restart_mid_incident() {
             c.clock(),
             Some(zenkey::inband::owner_clock(c.key()).to_string()),
             "{k}: its confirmation, the owner's clock"
+        );
+        assert_eq!(
+            snapshot_run(&at_token, c.key()).as_deref(),
+            Some(new_run.as_str()),
+            "{k}: in a snapshot under the new instance's run"
+        );
+        assert!(
+            matches!(at_token.mark(c), Some(Mark::InBand(s)) if s.run == svc.minter().run()),
+            "{k}: put again under that run"
         );
     }
     for k in [r_key.as_str(), p_key] {
@@ -912,9 +965,20 @@ async fn s5_a_restart_mid_incident() {
         ]
     );
 
-    // 4. G: A stamped by the new instance, whose meta.zid is the stamp's id.
-    let (presence, zid) = presence_of(&rs, Some(&instance)).await;
-    assert_eq!(zid, new_zid);
+    // 4. G: A in a snapshot under the new instance's run, which its
+    // descriptor states as `run` (§2.14 step 5, text 0.14).
+    let (presence, owner_said) = presence_of(&rs, Some(&instance)).await;
+    assert_eq!(owner_said.zid, new_zid);
+    assert_eq!(
+        owner_said.run.as_deref(),
+        Some(new_run.as_str()),
+        "the new instance's descriptor states its run"
+    );
+    assert_eq!(
+        snapshot_run(&at_token, &key_of(A_KEY)),
+        owner_said.run,
+        "3. the snapshots at the token are under the run the descriptor states"
+    );
     let answer = get(&g).await;
     let c = reply(&answer, A_KEY).expect("A answered");
     assert_eq!(
@@ -922,7 +986,12 @@ async fn s5_a_restart_mid_incident() {
         Some(zenkey::inband::owner_clock(c.key()).to_string()),
         "its confirmation, on the owner's clock (freshness.v2 §2.6)"
     );
-    let (firing, _) = judge_g(&answer, A_KEY, presence, &zid);
+    assert_eq!(
+        snapshot_run(&answer, c.key()),
+        owner_said.run,
+        "A's snapshot is under the run the descriptor states"
+    );
+    let (firing, _) = judge_g(&answer, A_KEY, presence, &owner_said);
     assert_eq!(
         pair(firing),
         (Answer::Yes, Reason::Firing),
@@ -938,7 +1007,7 @@ async fn s5_a_restart_mid_incident() {
 /// `quiet` after the last heartbeat that vouched for A, S receives no put
 /// of it, and its heartbeats with A's bit clear; G's GET still answers it,
 /// under that last confirmation. Returns S's subscription and log, G's
-/// consumer, the owner's presence and zid, the heartbeats, and what keeps
+/// consumer, the owner's presence and descriptor, the heartbeats, and what keeps
 /// the bus up.
 async fn stops_confirming(
     imp: Implementation,
@@ -949,7 +1018,7 @@ async fn stops_confirming(
     Vec<Rec>,
     Consumer,
     Presence,
-    String,
+    Described,
     Alarms,
     Beats,
 ) {
@@ -962,7 +1031,7 @@ async fn stops_confirming(
     let sub = g.subscribe(RES, |_| {}).await.unwrap();
     let (b, a) = owner(&os, config(SVC), imp, Startup::default()).await;
     let svc = b.start().await.unwrap();
-    let (presence, zid) = presence_of(&rs, None).await;
+    let (presence, owner_said) = presence_of(&rs, None).await;
     seen_by(&os).await;
     a.raise(alarm_a(Severity::Warning)).await.unwrap();
     deliveries(&s.log, A_KEY, 1).await;
@@ -1021,7 +1090,7 @@ async fn stops_confirming(
         log,
         g,
         presence,
-        zid,
+        owner_said,
         a,
         beats,
     )
@@ -1076,10 +1145,10 @@ async fn s6_a_hung_owner_goes_stale() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "slow tier: §6 waits 905 s at the contract's 900 s horizon"]
 async fn s6_a_hung_owner_goes_stale_at_900_s() {
-    let (bus, sub, log, g, presence, zid, _a, _beats) =
+    let (bus, sub, log, g, presence, owner_said, _a, _beats) =
         stops_confirming(alarms::implementation(), Duration::from_secs(905)).await;
     // 2. S judges.
-    let (firing, stale) = judge_s(&sub, &log, A_KEY, presence, &zid);
+    let (firing, stale) = judge_s(&sub, &log, A_KEY, presence, &owner_said.zid);
     assert_eq!(pair(firing), (Answer::Unobservable, Reason::Stale));
     assert_eq!(pair(stale), (Answer::Yes, Reason::Stale));
     // G GETs and judges: A firing, under a stamp more than 900.5 s old.
@@ -1090,7 +1159,7 @@ async fn s6_a_hung_owner_goes_stale_at_900_s() {
         .unwrap();
     assert!(age > Duration::from_millis(900_500), "{age:?}");
     assert_eq!(latest_of(c), Latest::Firing);
-    let (firing, stale) = judge_g(&answer, A_KEY, presence, &zid);
+    let (firing, stale) = judge_g(&answer, A_KEY, presence, &owner_said);
     assert_eq!(pair(firing), (Answer::Unobservable, Reason::Stale));
     assert_eq!(pair(stale), (Answer::Yes, Reason::Stale));
     drop(bus);
@@ -1348,8 +1417,8 @@ async fn a_restart_adopts_from_an_archive_on_its_own_side() {
         "its timestamp kept"
     );
     let svc = b.start().await.unwrap();
-    let (presence, zid) = presence_of(&rs, Some(svc.instance())).await;
-    assert_eq!(zid, new_zid);
+    let (presence, owner_said) = presence_of(&rs, Some(svc.instance())).await;
+    assert_eq!(owner_said.zid, new_zid);
     let answer = get(&g).await;
     let c = reply(&answer, A_KEY).expect("A answered");
     // A snapshot's confirmation names the owner by its address, whatever
@@ -1364,7 +1433,7 @@ async fn a_restart_adopts_from_an_archive_on_its_own_side() {
         Some(svc.minter().run()),
         "under the new stamps"
     );
-    let (firing, _) = judge_g(&answer, A_KEY, presence, &zid);
+    let (firing, _) = judge_g(&answer, A_KEY, presence, &owner_said);
     assert_eq!(pair(firing), (Answer::Yes, Reason::Firing));
     svc.close().await.unwrap();
 }

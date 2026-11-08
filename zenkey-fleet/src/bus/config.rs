@@ -225,12 +225,18 @@ pub async fn get(
         };
         samples.push(sample.clone());
     }
-    // A `reply_del` of the view or the status, which its owner answers by
-    // snapshot, is no owner's answer: undecodable, `form` (#977's E4).
+    // A stray `reply_del` of the view or the status, where its owner's
+    // revision under the deletion's run answers it by snapshot, is no
+    // owner's answer: undecodable, `form` (core §4.2, 0.101).
     let config = zenkey::config_v1::implementation().shared_contract();
-    let (samples, strays) = crate::bus::query::merged_without_strays(samples, &[&*config], |s| {
-        crate::bus::query::reply_samples_aged(s, epochs)
-    });
+    let held = [&*config];
+    let mut revisions = crate::bus::query::OwnerRevisions::new(session, timeout, &held, None);
+    let (entries, strays) =
+        crate::bus::query::merged_without_strays(samples, &mut revisions, |s| {
+            crate::bus::query::reply_entries_aged(s, epochs)
+        })
+        .await;
+    let samples: Vec<Sample> = entries.into_iter().map(|e| e.sample).collect();
     let refused = zenkey_model::collection::STRAY_REPLY_DEL.reason();
     for sample in &strays {
         let Some((addr, resource)) = config_key(sample.key_expr().as_str(), KindToken::State)
@@ -688,12 +694,17 @@ pub async fn get_records(
             };
             samples.push(sample.clone());
         }
-        // A `reply_del` of the record, which its owner answers by snapshot,
-        // is no owner's answer: undecodable, `form` (#977's E4).
-        let (samples, strays) =
-            crate::bus::query::merged_without_strays(samples, &[&*target.contract], |s| {
-                crate::bus::query::reply_samples_at(s, Some(target.epoch))
-            });
+        // A stray `reply_del` of the record, where its owner's revision
+        // under the deletion's run answers it by snapshot, is no owner's
+        // answer: undecodable, `form` (core §4.2, 0.101).
+        let held = [&*target.contract];
+        let mut revisions = crate::bus::query::OwnerRevisions::new(session, timeout, &held, None);
+        let (entries, strays) =
+            crate::bus::query::merged_without_strays(samples, &mut revisions, |s| {
+                crate::bus::query::reply_entries_at(s, Some(target.epoch))
+            })
+            .await;
+        let samples: Vec<Sample> = entries.into_iter().map(|e| e.sample).collect();
         if strays.iter().any(|s| s.key_expr().as_str() == key) {
             out.services.entry(addr.clone()).or_default().record = Some(Replied {
                 value: Some(Err(zenkey_model::collection::STRAY_REPLY_DEL.reason())),

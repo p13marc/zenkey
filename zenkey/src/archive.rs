@@ -455,11 +455,14 @@ impl Inner {
                 _ => Vec::new(),
             };
             let replies = entries_of(
+                &self.session,
+                timeout,
                 replies,
                 &from,
                 &src.selector,
                 src.rec.implementation.contract(),
-            );
+            )
+            .await;
             let mut seen = Vec::new();
             for s in &replies {
                 let key = s.key_expr().as_str();
@@ -624,21 +627,36 @@ fn snapshots_of(
 /// envelope as attachment), those on keys `selector` selects; a page whose
 /// body is refused is left out, undecodable. A peer archive answers per key
 /// (§4.4), so a page from one is left out. From the owner, a `reply_del` on
-/// a member of a collection it answers by snapshot, read with `contract`,
-/// is no owner's answer, and is left out too, undecodable (core S2, S3;
-/// #977's E4); a per-key resource's, and every peer's, is a deletion.
+/// a member of a collection it answers by snapshot is no owner's answer,
+/// and is left out too, undecodable (core §4.2); whether the member is per
+/// key is read from the owner's revision under the deletion's run, the one
+/// its descriptor names, `contract` where no descriptor reaches the
+/// archive (`answer::stray_reply_del`, 0.101). A per-key resource's, one
+/// whose owner's revision cannot be had, and every peer's, is a deletion.
 /// Every other reply as it came.
-fn entries_of(
+async fn entries_of(
+    session: &zenoh::Session,
+    timeout: Duration,
     replies: Vec<Sample>,
     from: &AlignedFrom,
     selector: &OwnedKeyExpr,
     contract: &zenkey_model::contract::Contract,
 ) -> Vec<Sample> {
     let mut out = Vec::with_capacity(replies.len());
+    let mut owners = std::collections::BTreeMap::new();
     for s in replies {
         if matches!(from, AlignedFrom::Owner(_))
             && s.kind() == SampleKind::Delete
-            && zenkey_model::collection::stray_reply_del(contract, s.key_expr().as_str())
+            && let Some(stamp) = crate::inband::stamp(&s)
+            && crate::answer::stray_reply_del(
+                session,
+                s.key_expr().as_str(),
+                stamp.run,
+                contract,
+                timeout,
+                &mut owners,
+            )
+            .await
         {
             let why = zenkey_model::collection::STRAY_REPLY_DEL.reason();
             tracing::warn!(key = %s.key_expr(), reason = %why, "a reply_del where the owner answers by snapshot is not aligned from");

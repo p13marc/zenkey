@@ -5,11 +5,13 @@
 //! text and checked by a second reading, never blessed: every case must
 //! pass as written.
 //!
-//! A catalog is named by its id, mapped to a file or a document. A file
-//! whose id is not the one named is read through its lineage (core §8.6):
-//! the predecessor the lineage names, its entries the first it counts, is
-//! rebuilt and its id checked. `examples/zk2/zenoh-modem/catalog.json` is
-//! `0ff6bf6d` since #1080, which succeeds the `e3a529fe` the cases name.
+//! A catalog is named by its id, mapped to a document or a file, and its
+//! id is checked. `e3a529fe`, zenoh-modem's catalog of nine entries, is an
+//! inline document since the fixture's answer to zk2py round 106:
+//! `examples/zk2/zenoh-modem/catalog.json` is `0ff6bf6d` since #1080, which
+//! succeeds it. A file whose id is not the one named is read through its
+//! lineage (core §8.6): the predecessor the lineage names, its entries the
+//! first it counts, is rebuilt and its id checked.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

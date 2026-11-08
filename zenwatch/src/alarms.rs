@@ -1147,6 +1147,7 @@ mod tests {
             at: Instant::now(),
             wall: SystemTime::now(),
             via,
+            snapshot_run: None,
         }
     }
 

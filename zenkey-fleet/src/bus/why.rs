@@ -310,9 +310,10 @@ fn reply_of(sample: &zenoh::sample::Sample) -> KeyReply {
 /// with the member's snapshot on its key, read as the reply its entry
 /// stands for; a snapshot of no entry brings none. Two replies on the key,
 /// from two instances, merge by their stamps, never the first to arrive
-/// kept (core S4); a stray `reply_del`, read with `revisions`, moves
-/// nothing, and is the answer only where nothing else answered (#977's
-/// E4).
+/// kept (core S4); a stray `reply_del`, judged by the revision its
+/// owner's descriptor names under the deletion's run, else `revisions`
+/// where no descriptor reaches the tool (core §4.2, 0.101), moves
+/// nothing, and is the answer only where nothing else answered.
 async fn state_answer(
     session: &Session,
     key: &str,
@@ -336,13 +337,15 @@ async fn state_answer(
             Err(_) => complete = false,
         }
     }
-    let (kept, strays) = crate::bus::query::merged_without_strays(samples, revisions, |s| {
-        crate::bus::query::reply_samples(s)
+    let mut owners = crate::bus::query::OwnerRevisions::new(session, timeout, revisions, None);
+    let (kept, strays) = crate::bus::query::merged_without_strays(samples, &mut owners, |s| {
+        crate::bus::query::reply_entries(s)
             .into_iter()
-            .filter(|e| e.key_expr().as_str() == key)
+            .filter(|e| e.sample.key_expr().as_str() == key)
             .collect()
-    });
-    let mut out: Vec<KeyReply> = kept.iter().map(reply_of).collect();
+    })
+    .await;
+    let mut out: Vec<KeyReply> = kept.iter().map(|e| reply_of(&e.sample)).collect();
     out.extend(strays.iter().map(|s| KeyReply {
         stray: true,
         ..reply_of(s)

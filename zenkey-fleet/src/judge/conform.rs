@@ -5949,6 +5949,7 @@ mod tests {
             at: std::time::Instant::now(),
             wall: std::time::SystemTime::now(),
             via: AlarmVia::Get,
+            snapshot_run: None,
         };
         let a = json!({"timestamp": 5, "rule": "link_down", "severity": "warning",
             "state": "firing", "summary": "s", "labels": {"peer": "r2", "port": "eth0"}});

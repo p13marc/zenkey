@@ -1436,6 +1436,8 @@ impl Consumer {
         let mut omitted: Vec<Vec<String>> = Vec::new();
         let mut complete = true;
         let timeout = self.reply_wait(timeout);
+        // The owner's revision under each run a `reply_del` named.
+        let mut owners = BTreeMap::new();
         // The resource's own collection, as this consumer's revision reads
         // a page's index: what its snapshots are held toward.
         let ours = |key: &str, page: &Page| {
@@ -1519,12 +1521,25 @@ impl Consumer {
                         continue;
                     }
                     // A `reply_del` where the owner answers by snapshot is
-                    // no owner's answer (core S2, S3; #977's E4): counted
-                    // undecodable, never merged as a deletion. A snapshot's
-                    // tombstone is no `reply_del` here.
+                    // no owner's answer (core §4.2): counted undecodable,
+                    // never merged as a deletion. Which resources are per
+                    // key is read from the owner's revision under the
+                    // deletion's run, never from this consumer's alone
+                    // (0.101): an owner on an earlier revision answers its
+                    // member per key. A snapshot's tombstone is no
+                    // `reply_del` here.
                     if !from_page
                         && read.sample().kind() == zenoh::sample::SampleKind::Delete
-                        && collection::stray_reply_del(&self.contract, &key)
+                        && let Some(stamp) = read.stamp()
+                        && crate::answer::stray_reply_del(
+                            &self.session,
+                            &key,
+                            stamp.run,
+                            &self.contract,
+                            timeout,
+                            &mut owners,
+                        )
+                        .await
                     {
                         undecodable.insert(
                             key,

@@ -240,8 +240,11 @@ pub fn state_projection(namespace: &str, selector: &str) -> Option<String> {
 /// tool's merge (observer §4.1, `bus::query::KeyMerge`). A deletion within
 /// an owner's window is not a value: it orders the key's later replies,
 /// and keeps no row. A stray `reply_del`, on a member of a collection
-/// every revision of its interface in `contracts` answers by snapshot, is
-/// no owner's answer, and orders nothing (#977's E4). Returns the values,
+/// its owner's revision under the deletion's run answers by snapshot
+/// (`bus::query::OwnerRevisions`: the revision its descriptor names, else
+/// every revision of its interface in `contracts` where no descriptor
+/// reaches the tool), is no owner's answer, and orders nothing (core §4.2,
+/// 0.101). Returns the values,
 /// in the order their keys first arrived, and the error replies counted.
 ///
 /// **The bound** is `max_replies` replies, as [`TriggerSpec::max_replies`]
@@ -264,6 +267,7 @@ async fn state_get(
         .timeout(timeout)
         .await
         .map_err(|e| Error::bus("state preamble", selector, e))?;
+    let mut revisions = crate::bus::query::OwnerRevisions::new(session, timeout, &held, None);
     let mut errors = 0u64;
     let mut kept = 0usize;
     // A deletion's item is `None`: it holds the key's mark, no row.
@@ -282,11 +286,10 @@ async fn state_get(
             continue;
         }
         kept += 1;
-        // A stray `reply_del`, judged on the reply, never on a snapshot's
-        // tombstone, which its entries read as a delete.
-        if s.kind() == SampleKind::Delete
-            && crate::bus::query::is_stray(&held, s.key_expr().as_str())
-        {
+        // A stray `reply_del`, judged on the reply by its owner's revision
+        // under the deletion's run (core §4.2, 0.101), never on a
+        // snapshot's tombstone, which its entries read as a delete.
+        if revisions.stray(&s).await {
             continue;
         }
         for s in crate::bus::query::reply_samples(&s) {

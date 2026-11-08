@@ -607,12 +607,20 @@ pub async fn get(
         };
         samples.push(sample.clone());
     }
-    // A `reply_del` of the status or a check, which its owner answers by
-    // snapshot, is no owner's answer: undecodable, `form` (#977's E4).
+    // A stray `reply_del` of the status or a check, where its owner's
+    // revision under the deletion's run answers it by snapshot, is no
+    // owner's answer: undecodable, `form` (core §4.2, 0.101). An owner on
+    // revision 1.0 confirms its status by `freshness.v1`, so it answers per
+    // key, and its `reply_del` is a deletion.
     let health = zenkey::health::implementation().shared_contract();
-    let (samples, strays) = crate::bus::query::merged_without_strays(samples, &[&*health], |s| {
-        crate::bus::query::reply_samples_aged(s, epochs)
-    });
+    let held = [&*health];
+    let mut revisions = crate::bus::query::OwnerRevisions::new(session, timeout, &held, None);
+    let (entries, strays) =
+        crate::bus::query::merged_without_strays(samples, &mut revisions, |s| {
+            crate::bus::query::reply_entries_aged(s, epochs)
+        })
+        .await;
+    let samples: Vec<Sample> = entries.into_iter().map(|e| e.sample).collect();
     for sample in &strays {
         let Some((addr, resource)) = health_key(sample.key_expr().as_str(), KindToken::State)
         else {

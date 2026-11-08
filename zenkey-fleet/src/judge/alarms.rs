@@ -423,6 +423,7 @@ mod tests {
                 at: t0,
                 wall: wall(),
                 via: AlarmVia::Get,
+                snapshot_run: None,
             }]
         } else {
             vec![]
@@ -542,6 +543,7 @@ mod tests {
             at: t0,
             wall: wall(),
             via: AlarmVia::Subscription,
+            snapshot_run: None,
         });
         let r = judge(&o, Severity::Warning);
         assert_eq!(r.any_firing.answer, AlarmAnswerToken::No, "{r:#?}");
