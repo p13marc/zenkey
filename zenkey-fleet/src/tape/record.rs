@@ -1276,13 +1276,22 @@ fn place(
 /// mutation it stands for (its envelope and stamp, `zenoh/bytes`) and each
 /// tombstone a delete whose attachment is its envelope (core §7.5), on its
 /// member's key, at the row's axes; any other row as it came.
-fn seeded_rows(row: IngestRow) -> Vec<IngestRow> {
-    let Some(Ok(page)) =
-        crate::model::inband::page(&row.key, row.encoding.as_deref(), &row.payload)
-    else {
-        return vec![row];
+fn seeded_rows(row: IngestRow) -> std::result::Result<Vec<IngestRow>, String> {
+    // A row that is no page goes as it came. A page whose body is refused
+    // is malformed: written as it came it would land as an opaque put on
+    // the snapshot key, so it is counted and skipped (review-bot on #1097).
+    let page = match crate::model::inband::page(&row.key, row.encoding.as_deref(), &row.payload) {
+        None => return Ok(vec![row]),
+        Some(Err(refusal)) => {
+            return Err(format!(
+                "{}: a snapshot page whose body is refused ({refusal:?}), not seeded",
+                row.key
+            ));
+        }
+        Some(Ok(page)) => page,
     };
-    page.members(&row.key)
+    Ok(page
+        .members(&row.key)
         .into_iter()
         .map(|m| IngestRow {
             key: m.key.clone(),
@@ -1292,7 +1301,7 @@ fn seeded_rows(row: IngestRow) -> Vec<IngestRow> {
             delete: m.is_tombstone(),
             attachment: m.attachment(),
         })
-        .collect()
+        .collect())
 }
 
 /// Replay a `.zrec` onto a bus — or list what doing so would publish.
@@ -1408,7 +1417,20 @@ pub async fn replay(
         // 4, #990 V8) is written as its entries: each live entry a mutation
         // with its stamp, each tombstone a delete with its envelope, on its
         // member's key. Every other row as it came.
-        let rows = if seeding { seeded_rows(row) } else { vec![row] };
+        let rows = if seeding {
+            match seeded_rows(row) {
+                Ok(rows) => rows,
+                Err(reason) => {
+                    on_event(ReplayEvent::Malformed {
+                        reason: reason.clone(),
+                    });
+                    record_err(&mut report, reason, false);
+                    continue;
+                }
+            }
+        } else {
+            vec![row]
+        };
         for row in rows {
             // A put row on a wildcard is refused like a wildcard delete (#504):
             // a refused row, counted — not the fatal declare error it would
@@ -2013,7 +2035,8 @@ mod tests {
             qos_axes: None,
             delete: false,
             attachment: None,
-        });
+        })
+        .unwrap();
         // Each live entry the mutation it stands for, its stamp in band;
         // each tombstone a delete carrying its envelope.
         let a = &members[0];
@@ -2040,6 +2063,25 @@ mod tests {
         let mut reader = source_of(&body).await;
         let report = replay(&mut reader, spec(false), |_| {}).await.unwrap();
         assert_eq!(report.preamble_skipped, 1, "the page skipped whole");
+        // A page whose body is refused is never written as an opaque put on
+        // the snapshot key: seeding refuses it (review-bot on #1097).
+        let bad = page[..page.len() - 1].to_vec();
+        match crate::model::inband::page(key, Some("zenoh/bytes"), &bad) {
+            Some(Err(_)) => {}
+            other => panic!("a truncated page reads as a refused body, not {other:?}"),
+        }
+        let refused = seeded_rows(IngestRow {
+            key: key.into(),
+            payload: bad,
+            encoding: Some("zenoh/bytes".into()),
+            qos_axes: None,
+            delete: false,
+            attachment: None,
+        });
+        assert!(
+            refused.is_err(),
+            "a refused page is not seeded: {refused:?}"
+        );
     }
 
     /// A retained window written through `new_at` keeps its real pacing
