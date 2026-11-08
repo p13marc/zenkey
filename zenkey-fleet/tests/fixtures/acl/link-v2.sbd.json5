@@ -156,6 +156,9 @@ transport: {
   unicast: { open_timeout: 1000000, accept_timeout: 1000000 },  // ms
 },
 routing: { interests: { timeout: 1000000 } },  // ms
+// zenoh stamps every unstamped put a router routes, and the stamp crosses the face:
+// this router stamps none, in either mode (core §8.2, link.v2 §2.18).
+timestamping: { enabled: { router: false, peer: false } },
 // Face radio: the far side (ground) attaches as a client of this router (link.v1 §2.5):
 // it receives only the declarations its interests ask for, and the face's denies
 // keep @zk, @adv, the admin space and every push that does not cross off it.

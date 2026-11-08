@@ -364,8 +364,8 @@ pub struct AclPlan {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub binding: Option<Binding>,
     /// The router's transport, from a `link.v2` face policy (§2.16): the
-    /// `transport` and `routing` blocks the generator writes beside
-    /// `access_control`, and for the far end (§2.18). Absent for a
+    /// `transport`, `routing` and `timestamping` blocks the generator
+    /// writes beside `access_control`, and for the far end (§2.18). Absent for a
     /// `link.v1` policy, which states none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transport: Option<Transport>,

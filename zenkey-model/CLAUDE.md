@@ -57,7 +57,11 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   `[transport]`, `FacePlan::reply_timeout_ms`, the lints
   `transport_missing` … `no_arq` (`keep_alive_flaps` exact in
   `num-bigint`), and `StatedTransport`, `check_transport` and
-  `check_catalog`/`catalog_id` for v2 §2.19; and v2 0.3, #988 L3:
+  `check_catalog`/`catalog_id` for v2 §2.19 (since 0.13, #1106,
+  `StatedTransport::read` also keeps `POSTURE_PATHS`, the `mode` and
+  `timestamping/enabled`, `stamps()` reads them at the mode, `router`
+  where none is stated, and `face_timestamping` is its warning;
+  `TIMESTAMPING_OFF` is what a generator writes); and v2 0.3, #988 L3:
   `uses_v2`, `Shape`/`crossing_v2` (`Reason::Unlisted`, `Timed`; a
   crossing frame `Whole`), `packed_required`/`contract_findings`,
   `Face::frames` (`FrameCadence`) and `horizon_s`, `Res::new` and its

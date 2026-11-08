@@ -2482,6 +2482,10 @@ pub fn link_says(code: link::Code) -> &'static str {
             "the far end runs another lease or keep_alive than the router: the lease is not \
              negotiated, so one direction closes sooner or pays more keep-alives (link.v2 §2.16)"
         }
+        C::FaceTimestamping => {
+            "the router stamps every unstamped put it routes, read at its mode: each frame \
+             crosses the face with the router's 26-B timestamp (core §8.2, link.v2 §2.19)"
+        }
         C::CatalogMismatch => {
             "the catalog the far side holds is not the policy's: it decodes with another \
              (link.v2 §2.19)"
@@ -3075,12 +3079,14 @@ pub fn to_json5(plan: &AclPlan) -> String {
     out
 }
 
-/// The `transport` and `routing` blocks of a `link.v2` policy's
-/// `[transport]` (`link.v2` §2.18), for `end`: each key at zenoh 1.10.1's
-/// configuration key (`zenoh-config-1.10.1/src/lib.rs`: `LinkTxConf`,
-/// `QueueConf`, `TransportUnicastConf`, `InterestsConf`), the values in
-/// zenoh's units, `wait_before_close` in µs. All eight are written, the
-/// defaults of absent ones included.
+/// The `transport`, `routing` and `timestamping` blocks of a `link.v2`
+/// policy's `[transport]` (`link.v2` §2.18), for `end`: each key at zenoh
+/// 1.10.1's configuration key (`zenoh-config-1.10.1/src/lib.rs`:
+/// `LinkTxConf`, `QueueConf`, `TransportUnicastConf`, `InterestsConf`,
+/// `TimestampingConf`), the values in zenoh's units, `wait_before_close` in
+/// µs. All eight are written, the defaults of absent ones included, and
+/// timestamping off for a router and a peer ([`link::TIMESTAMPING_OFF`]),
+/// so that `end` stamps no put it routes onto the face (core §8.2).
 fn transport_json5(
     out: &mut String,
     t: &link::Transport,
@@ -3134,11 +3140,19 @@ fn transport_json5(
         "routing: {{ interests: {{ timeout: {} }} }},  // ms",
         v(K::InterestsTimeout)
     );
+    let [(_, router), (_, peer)] = link::TIMESTAMPING_OFF;
+    let _ = writeln!(
+        out,
+        "// zenoh stamps every unstamped put a router routes, and the stamp crosses the face:\n\
+         // {end} stamps none, in either mode (core §8.2, link.v2 §2.18).\n\
+         timestamping: {{ enabled: {{ router: {router}, peer: {peer} }} }},"
+    );
 }
 
-/// The far end's `transport` and `routing` blocks (`link.v2` §2.18): the
-/// far router's configuration, or the gateway client's session one, so
-/// that both ends run the policy's lease and keep-alives (§2.16). `None`
+/// The far end's `transport`, `routing` and `timestamping` blocks
+/// (`link.v2` §2.18): the far router's configuration, or the gateway
+/// client's session one, so that both ends run the policy's lease and
+/// keep-alives (§2.16) and stamp nothing onto the face. `None`
 /// for a plan with no transport, from a `link.v1` policy or none.
 pub fn far_json5(plan: &AclPlan) -> Option<String> {
     use std::fmt::Write as _;
@@ -4419,8 +4433,10 @@ mod tests {
             let tree =
                 RouterConfig::stated_tree(text, dialect).unwrap_or_else(|e| panic!(".{ext}: {e}"));
             let config = RouterConfig::read(&zenoh, &tree).unwrap();
+            // The mode beside the transport keys: what a router's
+            // timestamping is read at (link.v2 §2.19).
             let stated: Vec<&str> = config.transport.0.keys().map(String::as_str).collect();
-            assert_eq!(stated, ["transport/link/tx/lease", wbc], ".{ext}");
+            assert_eq!(stated, ["mode", "transport/link/tx/lease", wbc], ".{ext}");
             assert_eq!(
                 config.transport.0[wbc],
                 serde_json::json!(10_000_000),

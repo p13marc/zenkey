@@ -2771,6 +2771,140 @@ async fn v2_s1_the_router_runs_the_block() {
     let _ = std::fs::remove_file(&sock);
 }
 
+/// N for link.v2 scenarios §3: `block` with its listeners, as a router, the
+/// owner `radio-a` and F's `ground` in its dictionary.
+async fn stamping_near(block: &str, name: &str) -> (zenoh::Session, String, PathBuf, PathBuf) {
+    let dict = scratch(&format!("{name}.txt"));
+    std::fs::write(
+        &dict,
+        "router:router-pw\nground:ground-pw\nradio-a:radio-a-pw\n",
+    )
+    .unwrap();
+    let sock = scratch(&format!("{name}.sock"));
+    let config = config_of(
+        block,
+        &[
+            ("mode", "\"router\"".to_owned()),
+            (
+                "listen/endpoints",
+                format!(
+                    "[\"{}\", \"unixsock-stream/{}\"]",
+                    util::ANY_PORT,
+                    sock.display()
+                ),
+            ),
+            (
+                "transport/auth/usrpwd",
+                format!(
+                    "{{ user: \"router\", password: \"router-pw\", dictionary_file: {:?} }}",
+                    dict.display().to_string()
+                ),
+            ),
+        ],
+    );
+    let n = zenoh::open(config).await.expect("N runs the block");
+    let tcp = util::bound(&n).await;
+    (n, tcp, sock, dict)
+}
+
+/// Steps 2 and 3 of link.v2 scenarios §3 against N running `block`: the
+/// timestamp F's sample of `oper` carries, N's zid, and the tool's findings.
+async fn stamped_across(
+    block: &str,
+    name: &str,
+) -> (
+    Option<zenoh::time::Timestamp>,
+    String,
+    Vec<(String, String)>,
+) {
+    let (n, tcp, sock, dict) = stamping_near(block, name).await;
+    let f = client(&format!("unixsock-stream/{}", sock.display()), "ground").await;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let _sub = f
+        .declare_subscriber("zk2/lab/radio-a/radio.v1/state/oper")
+        .callback(move |s: zenoh::sample::Sample| {
+            let _ = tx.send(s.timestamp().cloned());
+        })
+        .await
+        .unwrap();
+    let o = owner(&tcp, "radio-a").await;
+    let owner_ref = &o;
+    let mut stamp = None;
+    eventually("F receives the owner's oper across the face", || {
+        if let Ok(t) = rx.try_recv() {
+            stamp = Some(t);
+        }
+        let done = stamp.is_some();
+        let o = owner_ref;
+        async move {
+            if !done {
+                o.put("state/oper", "up").await;
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            done
+        }
+    })
+    .await;
+    let zid = n.zid().to_string();
+    let plan = plan(V2_POLICY);
+    let parsed = link::parse(V2_POLICY);
+    let config = RouterConfig::from_json5(&format!("{{\n{block}}}")).unwrap();
+    let c = check_face(
+        &plan,
+        parsed.policy.as_ref().unwrap(),
+        &config,
+        &FaceAsk::default(),
+        "N.json5",
+    );
+    let findings = c
+        .findings
+        .iter()
+        .map(|f| (f.code.as_str().to_owned(), f.at.clone()))
+        .collect();
+    drop((o, f, n));
+    let _ = std::fs::remove_file(&dict);
+    let _ = std::fs::remove_file(&sock);
+    (stamp.flatten(), zid, findings)
+}
+
+/// link.v2 scenarios §3: a router run from the generator's block stamps no
+/// put it routes onto the face, and the tool finds nothing; the same block
+/// with its `timestamping` removed stamps each with N's own timestamp, and
+/// the tool reports `face_timestamping` (link.v2 §2.18, §2.19; core §8.2).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn v2_s3_the_near_router_stamps_nothing() {
+    let block = acl_plan_json5(&plan(V2_POLICY));
+    // 1. N's block states timestamping off for a router and a peer.
+    let tree = RouterConfig::stated_tree(
+        &format!("{{\n{block}}}"),
+        zenkey_fleet::ConfigDialect::Json5,
+    )
+    .unwrap();
+    assert_eq!(
+        tree["timestamping"],
+        serde_json::json!({"enabled": {"router": false, "peer": false}}),
+        "{block}"
+    );
+    // 2, 3. No timestamp onto the face, and no finding.
+    let (stamp, _, findings) = stamped_across(&block, "v2-s3-n").await;
+    assert_eq!(stamp, None, "a put across the face carries no timestamp");
+    assert!(findings.is_empty(), "{findings:?}");
+    // 4. Control: the block without its timestamping.
+    let unstamped: String = block
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("timestamping:"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    assert_ne!(unstamped, block);
+    let (stamp, zid, findings) = stamped_across(&unstamped, "v2-s3-control").await;
+    let stamp = stamp.expect("a default router stamps what it routes");
+    assert_eq!(stamp.get_id().to_string(), zid, "N's own timestamp");
+    assert_eq!(
+        findings,
+        [("face_timestamping".to_owned(), "timestamping".to_owned())]
+    );
+}
+
 /// link.v2 scenarios §2's deployment: `lab/probe-a` implements `probe.v1`,
 /// and the console, run by `local` and `ground`, binds every stream, state
 /// and event of it.

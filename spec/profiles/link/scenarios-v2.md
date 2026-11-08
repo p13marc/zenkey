@@ -131,3 +131,25 @@ section, named after it. [`scenarios.md`](scenarios.md)'s sections are
    is downsampled.
 5. G receives 4 to 6 puts of `level`, one a second.
 6. G receives no put of `frames/detail` or `setpoint`.
+
+## §3 The near router stamps nothing (§2.18, §2.19; core §8.2)
+
+**Setup.** N, the owner and F as the Conventions run them. The owner is
+`lab/radio-a`, a client session of N on the near side as `radio-a`, its
+timestamping off (core §8.2). F attaches to N over the face directly.
+
+**Steps.**
+1. The generator compiles N's block from the policy, the enrollment and
+   the contract, and N starts with it.
+2. F subscribes to `zk2/lab/radio-a/radio.v1/state/oper`, a state the
+   face lets cross whole. The owner puts `oper` until F receives it.
+3. A tool checks N's configuration (§2.19).
+4. **Control:** N starts again from its block with the `timestamping`
+   object removed, and steps 2 and 3 run against it.
+
+**Expected.**
+1. N's configuration states timestamping off for a router and a peer.
+2. F's sample of `oper` carries no timestamp.
+3. The tool reports no finding.
+4. In the control, F's sample carries a timestamp, N's own, its id N's
+   zid. The tool reports `face_timestamping` at `timestamping`.

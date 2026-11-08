@@ -523,7 +523,12 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   an omitted key at the binding's default), and `check_face(plan,
   policy, &config, &FaceAsk { windows, peer, catalog }, against)` adds
   `link::check_transport` and `check_catalog` to its findings and
-  `FaceCheck::{binding, transport, catalog}` rows. `tests/acl_plans.rs`
+  `FaceCheck::{binding, transport, catalog}` rows. Since link.v2 0.13
+  (#1106) `transport_json5` writes `timestamping: { enabled: { router:
+  false, peer: false } }` into both ends' blocks, and `check_transport`'s
+  `face_timestamping` reads the file's mode and timestamping;
+  `tests/link_face.rs`' `v2_s3_the_near_router_stamps_nothing` shows no
+  timestamp onto the face from the block, and N's own without it. `tests/acl_plans.rs`
   pins the four media of `examples/zk2/link/media/`
   (`link-v2.<medium>.json5`) and flags a hand-edited `wait_before_close`
   on each, self-checks zenoh-modem's five fork-binding faces read as data

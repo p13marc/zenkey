@@ -66,7 +66,8 @@
 //! Transport::value(key)             ─▶ the value a generator writes at zenoh's key
 //! StatedTransport::read(config)     ─▶ the keys a router's configuration states
 //! check_transport(policy, router,
-//!                 peer)             ─▶ transport_differs, wait_under_lease, peer_differs
+//!                 peer)             ─▶ transport_differs, wait_under_lease, peer_differs,
+//!                                      face_timestamping
 //! check_catalog(policy, held)       ─▶ catalog_mismatch
 //! ```
 
@@ -483,29 +484,71 @@ impl TransportKey {
     }
 }
 
+/// What a generator writes beside the transport, at zenoh 1.10.1's
+/// configuration key (`zenoh-config`'s `TimestampingConf`, a
+/// `ModeDependentValue<bool>`): timestamping off for a router and a peer,
+/// so that the near router stamps no put it routes onto the face, whichever
+/// mode it runs in (v2 §2.18, core §8.2).
+pub const TIMESTAMPING_OFF: [(&str, bool); 2] = [
+    ("timestamping/enabled/router", false),
+    ("timestamping/enabled/peer", false),
+];
+
+/// The keys a router's timestamping is read from (v2 §2.19): its mode, and
+/// `timestamping/enabled`, a boolean or a value per mode.
+pub const POSTURE_PATHS: [&str; 2] = ["mode", "timestamping/enabled"];
+
 /// The transport keys a router's configuration states, by zenoh key, as
 /// the file writes them (v2 §2.19): a key it omits is absent, and read at
-/// the binding's default.
+/// the binding's default. Its mode and `timestamping/enabled`
+/// ([`POSTURE_PATHS`]) beside them, where it states them.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StatedTransport(pub BTreeMap<String, Value>);
 
 impl StatedTransport {
     /// The keys `config`, a router's configuration as a JSON tree, states:
-    /// each of [`TransportKey::ALL`]'s whose path it holds, `null` included,
-    /// since a key written down is the file's choice.
+    /// each of [`TransportKey::ALL`]'s and [`POSTURE_PATHS`]' whose path it
+    /// holds, `null` included, since a key written down is the file's
+    /// choice.
     #[must_use]
     pub fn read(config: &Value) -> StatedTransport {
         let mut out = BTreeMap::new();
-        for k in TransportKey::ALL {
-            let v = k
-                .path()
+        let paths = TransportKey::ALL
+            .into_iter()
+            .map(TransportKey::path)
+            .chain(POSTURE_PATHS);
+        for path in paths {
+            let v = path
                 .split('/')
                 .try_fold(config, |node, part| node.get(part));
             if let Some(v) = v {
-                out.insert(k.path().to_owned(), v.clone());
+                out.insert(path.to_owned(), v.clone());
             }
         }
         StatedTransport(out)
+    }
+
+    /// Whether the router stamps the puts it routes (v2 §2.19, core §4.1):
+    /// `timestamping/enabled` as a boolean, or its value for the mode the
+    /// configuration runs, `router` where it states none, as zenohd runs; a
+    /// mode the value leaves out, or no value, at zenoh 1.10.1's default,
+    /// on for a router and off for a peer and a client.
+    #[must_use]
+    pub fn stamps(&self) -> bool {
+        let mode = self
+            .0
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("router");
+        let default = mode == "router";
+        match self.0.get("timestamping/enabled") {
+            Some(Value::Bool(b)) => *b,
+            Some(Value::Object(per_mode)) => per_mode
+                .get(mode)
+                .and_then(Value::as_bool)
+                .unwrap_or(default),
+            _ => default,
+        }
     }
 
     /// Whether the configuration states `key`.
@@ -949,6 +992,9 @@ pub enum Code {
     /// The far end's lease or keep-alive is not the near router's (v2
     /// §2.19).
     PeerDiffers,
+    /// A router's configuration stamps the puts it routes onto the face
+    /// (v2 §2.18, §2.19; core §8.2).
+    FaceTimestamping,
     /// The catalog the far side holds is not the policy's (v2 §2.19).
     CatalogMismatch,
     /// A contract that lists `link.v2` exposes a resource whose type is not
@@ -1042,6 +1088,7 @@ impl Code {
             Self::NoArq => "no_arq",
             Self::TransportDiffers => "transport_differs",
             Self::PeerDiffers => "peer_differs",
+            Self::FaceTimestamping => "face_timestamping",
             Self::CatalogMismatch => "catalog_mismatch",
             Self::PackedRequired => "packed_required",
             Self::NotPacked => "not_packed",
@@ -1079,6 +1126,7 @@ impl Code {
             | Self::ReplyTimeoutShort
             | Self::NoArq
             | Self::PeerDiffers
+            | Self::FaceTimestamping
             | Self::NotPacked
             | Self::FrameUnlisted
             | Self::HorizonUnderFace
@@ -2527,7 +2575,9 @@ pub fn same_value(a: &Value, b: &Value) -> bool {
 /// - `transport_differs`, each key whose router value is not the policy's;
 /// - `wait_under_lease`, the router's `wait_before_close` below its lease,
 ///   whatever the policy says;
-/// - `peer_differs`, the far end's lease or `keep_alive` not the router's.
+/// - `peer_differs`, the far end's lease or `keep_alive` not the router's;
+/// - `face_timestamping`, the router stamping the puts it routes, read at
+///   its mode ([`StatedTransport::stamps`]).
 ///
 /// A `link.v1` policy states no transport: nothing to report.
 #[must_use]
@@ -2568,6 +2618,9 @@ pub fn check_transport(
                 out.push(Finding::new(Code::PeerDiffers, None, key.at()));
             }
         }
+    }
+    if router.stamps() {
+        out.push(Finding::new(Code::FaceTimestamping, None, "timestamping"));
     }
     sort_findings(&mut out);
     out
@@ -4750,10 +4803,12 @@ mod tests {
         let wbc = TransportKey::WaitBeforeClose.path();
         let lease = TransportKey::Lease.path();
         let found = |pairs: &[(&str, Value)]| -> Vec<(&'static str, String)> {
+            // A router that stamps nothing, as the generator writes it.
             let stated = StatedTransport(
                 pairs
                     .iter()
                     .map(|(k, v)| ((*k).to_owned(), v.clone()))
+                    .chain([("timestamping/enabled".to_owned(), Value::from(false))])
                     .collect(),
             );
             check_transport(&p, &stated, None)
@@ -4776,6 +4831,49 @@ mod tests {
             ]),
             [("transport_differs", "transport.lease_ms".to_owned())]
         );
+    }
+
+    /// A router's timestamping read at its mode (v2 §2.19, core §4.1):
+    /// a boolean whatever the mode, a value per mode, or zenoh 1.10.1's
+    /// default where neither is stated, on for a router only; no mode is
+    /// zenohd's `router`.
+    #[test]
+    fn a_routers_timestamping_is_read_at_its_mode() {
+        let stamps = |mode: Option<&str>, enabled: Option<Value>| {
+            let mut m = BTreeMap::new();
+            if let Some(mode) = mode {
+                m.insert("mode".to_owned(), Value::from(mode));
+            }
+            if let Some(e) = enabled {
+                m.insert("timestamping/enabled".to_owned(), e);
+            }
+            StatedTransport(m).stamps()
+        };
+        assert!(stamps(None, None), "zenohd's router stamps by default");
+        assert!(stamps(Some("router"), None));
+        assert!(!stamps(Some("peer"), None));
+        assert!(!stamps(Some("client"), None));
+        assert!(stamps(Some("peer"), Some(Value::from(true))));
+        assert!(!stamps(Some("router"), Some(Value::from(false))));
+        let off = serde_json::json!({"router": false, "peer": false});
+        assert!(!stamps(None, Some(off.clone())));
+        assert!(!stamps(Some("peer"), Some(off)));
+        // A per-mode value that leaves the router's mode out is its default.
+        assert!(stamps(
+            Some("router"),
+            Some(serde_json::json!({"peer": false}))
+        ));
+        assert!(stamps(
+            Some("peer"),
+            Some(serde_json::json!({"peer": true}))
+        ));
+        // The generator's posture, read back: a router that stamps nothing.
+        let written = StatedTransport::read(&serde_json::json!({
+            "mode": "router",
+            "timestamping": {"enabled": {"router": false, "peer": false}},
+        }));
+        assert!(!written.stamps());
+        assert_eq!(TIMESTAMPING_OFF.len(), 2);
     }
 
     /// The keep-alive interval in words: exact, or "about" where the lease
