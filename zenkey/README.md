@@ -22,12 +22,12 @@ default `zenoh` feature, this crate builds with no zenoh crate but
 
 ```toml
 [dependencies]
-zenkey = "0.21"
+zenkey = "0.22"
 zenoh = "1.10"
 tokio = { version = "1", features = ["full"] }
 
 [build-dependencies]
-zenkey-build = "0.21"
+zenkey-build = "0.22"
 ```
 
 Take `zenkey` and `zenkey-build` at the same 0.x: the generated code is
@@ -84,65 +84,74 @@ The walkthrough is the worked example: its contracts are in
 and `examples/owner.rs` is a service to interoperate with, driven from
 its standard input.
 
-## Changes since 0.20
+## Changes since 0.21
 
-- **The wire breaks 0.20's: a 0.20 service and a 0.21 one do not
-  understand each other's state GETs.** Move a deployment's owners and
+- **The wire breaks 0.21's: a 0.21 service and a 0.22 one do not
+  understand each other's events.** Move a deployment's owners and
   readers together.
-  - An owner answers a state GET by snapshot (core 0.100,
-    [#977](https://git.marcpardo.eu/marcpardo/zenkey/issues/977)): one per
-    collection, in pages of `ServiceConfig::snapshot_page_bytes` (1,024 B
-    unless set), a live entry with a horizon carrying its confirmation.
-    Only a per-key resource still answers a reply per key.
-  - Every state GET, the generated `Consumer`'s, `last_known`, the
-    freshness re-read and an archive's alignment among them, is read under
-    consolidation `None`. Its replies merge per key, and the omission rule
-    applies over a complete snapshot (`state::StateAnswer::{snapshots,
-    confirmations, omitted}`). A complete snapshot of no entry is
-    `StateGet::Answered` with no key, never `Silent`. A `reply_del` on a
-    member of a collection answered by snapshot is undecodable, never a
-    deletion.
-  - A call is read in its forms alone (core 0.99,
-    [#985](https://git.marcpardo.eu/marcpardo/zenkey/issues/985)'s C4d). An
-    owner refuses a request under any `Encoding` but `zenoh/bytes` with
-    `invalid_request`, before any handler runs. A caller reads a value
-    under another `Encoding` as malformed, and an error under one as the
-    transport's, which is silence.
-  - A `freshness.v2` heartbeat's time counts from the catalog's epoch, as
-    a frame's does (`freshness.v2` 0.6,
-    [#1080](https://git.marcpardo.eu/marcpardo/zenkey/issues/1080)).
+  - An owner keys each occurrence by its run and its next seq (core
+    0.103, [#980](https://git.marcpardo.eu/marcpardo/zenkey/issues/980)'s
+    C2), `…/events/<template>/<occurrence>`, 8 or 12 characters where a
+    ULID took 26. Its payload is form 4: the occurrence's time, counted
+    from the deployment epoch (the catalog's, given by
+    `ServiceBuilder::catalog`, else 0), then the record. A 0.22 reader
+    refuses a 0.21 owner's ULID keys, and a 0.21 reader refuses form 4.
+  - `EventWriter::put` writes the clock's time, unknown while core §4.3's
+    clock guard holds. `put_at` writes the time it is given, and its key
+    still takes the next seq. `put_untimed` writes an unknown time, for an
+    owner that does not trust its clock.
+  - `Consumer::replay` orders by the event's time, then by run and seq,
+    and the occurrences of unknown time after the rest (core §2.6).
+    `Delivery::occurred` carries an event's time.
+  - A put or a delete on an events key that carries no event is never
+    delivered, live or replayed (core 0.104 and 0.105). It is counted
+    undecodable, `form` (`inband::admit_event`, `Undecodable::NoEvent`),
+    and a replay's refusals now reach `Consumer::with_refused`'s callback
+    too.
+  - A `reply_del` is a stray by the owner's revision under its run, never
+    the reader's (core 0.102,
+    [#1094](https://git.marcpardo.eu/marcpardo/zenkey/issues/1094)): the
+    revision the owner's descriptor names, retrieved by its fingerprint
+    when the reader holds another. A snapshot's omission rule applies only
+    where a descriptor states the snapshot's run.
+- **An archive keeps the watch session handed in**
+  ([#1101](https://git.marcpardo.eu/marcpardo/zenkey/issues/1101)).
+  Given its caller's only handle in `ArchiveConfig::watch`, it went deaf
+  as `start` returned, and never re-aligned an owner whose token came
+  back after a link cut.
+- **Added:** `Consumer::subscribe_heartbeats` hands over each heartbeat
+  its view reads, confirmed, diverged or absent, and whether one was lost
+  before it (`consumer::{HeartbeatRead, HeartbeatSection}`;
+  [#990](https://git.marcpardo.eu/marcpardo/zenkey/issues/990)'s V6).
+  `inband::event_time` reads an event's time from its sample.
 - **Removed, and what to use instead:**
-  - `call::Malformed`, `Outcome::Malformed`, `ReplyKind::Malformed`,
-    `client::ErrorReply::Malformed` and `Replies::malformed`: a reply
-    error that is no error form is `Transport`, silence.
-  - `OpError::envelope`, `OpError::into_envelope`, `From<Envelope> for
-    OpError` and `Refusal::of_envelope`: `OpError::{code, message, cause,
-    detail}`. `Refusal` holds `code`, `message`, `cause` and `detail` as
-    its own fields, where it dereferenced to an envelope.
-  - `Answer::record_encoding` and `Call::record_encoding`: a record has
-    no `Encoding` of its own now. `Answer::record` fails with a
-    `FormRefusal`, `ReplyForm::Bare` is `ReplyForm::NoForm`, and
-    `Call::request_tag` is a `Tag`, no longer an `Option`.
-  - `heartbeat::EPOCH`: the epoch is the catalog's, given by
-    `ServiceBuilder::catalog` (`Service::deployment_epoch`), and 0 with
-    none.
+  - `writer::ulid` and `writer::ulid_time`: an event's key ends in its
+    occurrence chunk (`zenkey_model::chunk::occurrence` reads it), its
+    time is `Delivery::occurred` or `inband::event_time`, and a call's
+    request id is `call::request_id`.
+  - Built field by field or matched whole, `Delivery` needs `occurred`
+    and `Undecodable` its `NoEvent`.
 
-## What 0.21 does not promise
+## What 0.22 does not promise
 
 zk2c, the bandwidth-first wire (epic
 [#975](https://git.marcpardo.eu/marcpardo/zenkey/issues/975)), is not
-finished. Two things under 0.21 are still moving, and a 0.22 may break
+finished. Two things under 0.22 are still moving, and a 0.23 may break
 either:
 
-- **The wire.** An event's key is to end in its run and seq in place of
-  a ULID ([#980](https://git.marcpardo.eu/marcpardo/zenkey/issues/980)'s
-  C2), and the rest of #975 follows. A 0.21 service and a 0.22 one may
-  not understand each other.
+- **The wire and the profiles.** These are still open, and a 0.22
+  service and a 0.23 one may not understand each other:
+  - `freshness.v2`'s heartbeat, one put per interface, which the
+    maintainer is deciding
+    ([#1110](https://git.marcpardo.eu/marcpardo/zenkey/issues/1110));
+  - `link.v2`'s subjects by user name, in progress
+    ([#1107](https://git.marcpardo.eu/marcpardo/zenkey/issues/1107));
+  - #980's C3, the archive attachment, and C5, the compact descriptor.
 - **The authoring format** and the canonical form a fingerprint is taken
-  over. Neither moved from 0.20 to 0.21, but a contract that builds under
-  0.21 may need editing under 0.22, and its fingerprint may change.
+  over. Neither moved from 0.21 to 0.22, but a contract that builds under
+  0.22 may need editing under 0.23, and its fingerprint may change.
 
-A 0.21.x patch release changes neither. The rules are the spec's
+A 0.22.x patch release changes neither. The rules are the spec's
 ([`spec/core.md`](https://git.marcpardo.eu/marcpardo/zenkey/src/branch/main/spec/core.md),
 its version in its header), and a release implements the spec as it
 stood when it was cut.

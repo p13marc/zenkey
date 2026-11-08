@@ -1,6 +1,6 @@
 [package]
 name = "zenkey"
-version = "0.21.0"
+version = "0.22.0"
 edition.workspace = true
 rust-version.workspace = true
 license = "MIT"
@@ -28,7 +28,7 @@ zenoh = ["hostid", "dep:zenoh", "dep:zenoh-ext", "dep:flume", "dep:tokio", "dep:
 hostid = ["dep:libc", "dep:rand", "dep:tracing"]
 
 [dependencies]
-zenkey-model = { path = "../zenkey-model", version = "0.21.0" }
+zenkey-model = { path = "../zenkey-model", version = "0.22.0" }
 zenoh = { workspace = true, optional = true }
 # An unbounded liveliness and reply handler (spec §8.1: zenoh's default
 # 256-slot handler hangs a liveliness GET on a session that also holds a
