@@ -8,8 +8,8 @@
 //! A catalog is named by its id, mapped to a document or a file, and its
 //! id is checked. `e3a529fe`, zenoh-modem's catalog of nine entries, is an
 //! inline document since the fixture's answer to zk2py round 106:
-//! `examples/zk2/zenoh-modem/catalog.json` is `0ff6bf6d` since #1080, which
-//! succeeds it. A file whose id is not the one named is read through its
+//! `examples/zk2/zenoh-modem/catalog.json` succeeds it, `0ff6bf6d` since
+//! #1080 and `29bf7d47`, modem.v3 3.4 at index 10, since #991. A file whose id is not the one named is read through its
 //! lineage (core §8.6): the predecessor the lineage names, its entries the
 //! first it counts, is rebuilt and its id checked.
 
@@ -189,7 +189,7 @@ fn a_key_with_no_record_reads_with_any_revision_step_one_leaves() {
     assert!(problems.is_empty(), "{problems:?}");
     let iface: zenkey_model::grammar::IfaceId = "modem.v3".parse().unwrap();
     let held: Vec<Arc<Revision>> = set.of_iface(&iface).cloned().collect();
-    assert_eq!(held.len(), 4);
+    assert_eq!(held.len(), 5);
     let chunks = vec!["oper".to_owned()];
     let target = Target::Data {
         kind: zenkey_model::grammar::KindToken::State,
@@ -204,8 +204,8 @@ fn a_key_with_no_record_reads_with_any_revision_step_one_leaves() {
             step: Step::Any,
         } => assert_eq!(
             revision.fingerprint().to_string(),
-            "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
-            "the catalog's latest"
+            "sha256:04836e1785402629a03f27d3ff0f07158942460564facde5731f4467020467ca",
+            "the catalog's latest, modem.v3 3.4"
         ),
         other => panic!("{other:?}"),
     }
@@ -219,7 +219,7 @@ fn a_key_with_no_record_reads_with_any_revision_step_one_leaves() {
     ));
     let latest: Vec<Arc<Revision>> = held
         .iter()
-        .filter(|r| r.fingerprint().to_string().starts_with("sha256:71f5"))
+        .filter(|r| r.fingerprint().to_string().starts_with("sha256:0483"))
         .cloned()
         .collect();
     assert!(matches!(
@@ -254,7 +254,7 @@ fn the_lens_reads_a_record_with_the_revision_chtag_chooses() {
         seq: Seq::new(1).unwrap(),
     };
     let put = |tag: u8| Envelope::mutation(Tag::new(tag).unwrap(), stamp, b"{}").write();
-    let latest = "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf";
+    let latest = "sha256:04836e1785402629a03f27d3ff0f07158942460564facde5731f4467020467ca";
 
     let lens = Lens::new("", None, &set).offline(&set).catalogs(&modem);
     let c = lens.check(key, Member::Type, Some("zenoh/bytes"), &put(0));

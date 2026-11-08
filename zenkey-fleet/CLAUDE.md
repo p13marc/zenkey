@@ -384,8 +384,9 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   (`render::tag_refused`, in `decode_under` and `render_resource`).
   `tests/choice.rs` runs `spec/conformance/envelope/tags.json` whole (31
   cases; its `e3a529fe` an inline document since zk2py round 106's
-  answers, `catalog.json` being `0ff6bf6d` since #1080) and the lens end
-  to end.
+  answers, `catalog.json` being `0ff6bf6d` since #1080 and `29bf7d47`,
+  modem.v3 3.4 at index 10, since #991) and the lens end to end, over the
+  five published revisions of modem.v3.
   Step 3 orders by one index, two revisions at the same index (two
   unrelated catalogs) ambiguous, and `Step::Any` is said
   `{"by": "any", "step": 1}` (`ByTag::Any`; review-bot on #1088).
@@ -525,7 +526,11 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   pins the four media of `examples/zk2/link/media/`
   (`link-v2.<medium>.json5`) and flags a hand-edited `wait_before_close`
   on each, self-checks zenoh-modem's five fork-binding faces read as data
-  (not pinned: zenoh's loader refuses them), and its tcgui and walkthrough plans grant each bound
+  (not pinned: zenoh's loader refuses them), checks each face's carried
+  `modem.v3` 3.4 `face/` events at their rate's worst case against its
+  medium's budget beside 3.3's frames' figures (#991,
+  `zenoh_modem_events_fit_each_face_budget`, the overhead review's
+  Appendix A model in a `wire` module), and its tcgui and walkthrough plans grant each bound
   `freshness.v2` heartbeat since #978 F5 moved those contracts (bless with
   `ACL_BLESS=1`). Since F5 no tcgui state is on core §4.3's table: a test
   that needs row 1 reads `zenkey/tests/contracts/beacon.v1.toml` or runs
