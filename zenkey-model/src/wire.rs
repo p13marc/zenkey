@@ -5,6 +5,7 @@
 //! ```text
 //! mutation, a put's payload        CH · run · seq · record
 //! delete, a delete's attachment    CH · run · seq
+//! event, a put's payload           CH · t32 · ms16 · record     (core 0.101, #980's C2a)
 //! heartbeat, a put's payload       CH · run · seq · body        (core 0.81, #978's F1)
 //! frame, a put's payload           CH · run · seq · body        (core 0.83, #981's K1)
 //! snapshot, a GET reply's payload  CH · run · asof · body       (core 0.97, #977's E1)
@@ -45,7 +46,11 @@
 //! with its declaration ([`crate::frame`]), its tag that declaration's. A
 //! snapshot's body (core 0.97, #977's E1) is taken unread, its asof in the
 //! seq's place, and read by [`crate::collection`], its tag its
-//! collection's type's. [`read_put`] refuses a frame on a key whose kind
+//! collection's type's. An event (core 0.101, #980's C2a) carries its
+//! time where the stamp would be, and its stamp is its key's occurrence
+//! chunk ([`crate::chunk::occurrence`]): [`Event`], which [`read_event`]
+//! and [`read_put`] read with the key, `key_stamp` and `time` among their
+//! refusals; read without one ([`Envelope::parse`]) it is `key_stamp`. [`read_put`] refuses a frame on a key whose kind
 //! token is not `stream`, and a snapshot on one that is neither `state`
 //! nor `@state` (`key_kind`), which [`Envelope::parse_on`] reads. Only a
 //! GET's reply carries a snapshot, but the parser cannot tell how a put
@@ -71,9 +76,9 @@ use thiserror::Error;
 use crate::envelope::{Cause, Code, ErrorForm, FormRefusal};
 use crate::grammar::{KindToken, ZkKey, parse};
 
-/// A form: CH's three high bits. This version defines a mutation, a
-/// delete, a value, an error, a frame, a heartbeat and a snapshot, and
-/// reserves the other, an event, for a later version, refused.
+/// A form: CH's three high bits. This version defines all eight: a
+/// mutation, a delete, a value, an error, an event (core 0.101), a frame,
+/// a heartbeat and a snapshot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Form {
     /// Code 0: a put's run and seq, then its record.
@@ -86,7 +91,9 @@ pub enum Form {
     /// Code 3: a reply error's run and seq, then §5.2's error in bytes
     /// (core 0.92, [`crate::envelope::ErrorForm`]).
     Error,
-    /// Code 4, reserved: an event's occurrence.
+    /// Code 4: an event's occurrence, a put's payload on an `events` key,
+    /// its time then its record, its stamp its key's (core 0.101, #980's
+    /// C2a, [`Event`]).
     Event,
     /// Code 5: a stream's records under one header, a put's payload on a
     /// plain stream's key (core 0.83 §7.7, [`crate::frame`]).
@@ -138,9 +145,11 @@ impl Form {
     }
 
     /// Whether this version defines the form; a reserved one is refused.
+    /// Every form is defined since core 0.101, so none is: the check stays
+    /// for a later version's.
     #[must_use]
     pub const fn is_defined(self) -> bool {
-        !matches!(self, Form::Event)
+        true
     }
 
     /// The form's name, as §7.5's table and the fixtures spell it.
@@ -207,16 +216,16 @@ impl SampleKind {
         }
     }
 
-    /// Whether the sample carries the form: a put a mutation, a heartbeat,
-    /// a frame or a snapshot, a delete's attachment a delete, a query and a
-    /// reply a value, and a `reply_err` an error. No sample carries a
-    /// reserved one.
+    /// Whether the sample carries the form: a put a mutation, an event, a
+    /// heartbeat, a frame or a snapshot, a delete's attachment a delete, a
+    /// query and a reply a value, and a `reply_err` an error. No sample
+    /// carries a reserved one.
     #[must_use]
     pub const fn carries(self, form: Form) -> bool {
         match self {
             SampleKind::Put => matches!(
                 form,
-                Form::Mutation | Form::Frame | Form::Heartbeat | Form::Snapshot
+                Form::Mutation | Form::Event | Form::Frame | Form::Heartbeat | Form::Snapshot
             ),
             SampleKind::Delete => matches!(form, Form::Delete),
             SampleKind::Query | SampleKind::Reply => matches!(form, Form::Value),
@@ -433,6 +442,10 @@ pub enum Refusal {
     /// 0.92).
     #[error("a request's width bit is 1, and a request carries no run")]
     RequestRun,
+    /// An event whose key's last chunk is not an occurrence chunk of CH's
+    /// width (core 0.101): a ULID's, the other width's, or no key at all.
+    #[error("an event's key ends in no occurrence chunk of a {} run", if *.wide { "32-bit" } else { "16-bit" })]
+    KeyStamp { wide: bool },
     /// Fewer bytes than CH, the run and the seq need, and an error's byte
     /// after them.
     #[error("{have} bytes, short of the {need} that the header, the stamp and what follows need")]
@@ -458,6 +471,10 @@ pub enum Refusal {
     /// An error's message that is not UTF-8, as RFC 3629 defines it.
     #[error("the message is not UTF-8")]
     Utf8,
+    /// An event's time with an unused code (core 0.101): an ms16 above
+    /// 999, or any but 0 under a t32 of all ones.
+    #[error("the event's time is an unused code")]
+    Time,
 }
 
 fn cause_text(code: Code, cause: Option<Cause>) -> String {
@@ -471,7 +488,8 @@ impl Refusal {
     /// The reason token `spec/conformance/envelope/vectors.json`,
     /// `carries.json` and `spec/conformance/errors/forms.json` pin:
     /// `short`, `form`, `sample_kind`, `key_kind`, `tag`, `request_run`,
-    /// `trailing`, `cause`, `detail`, `extension` or `utf8`.
+    /// `key_stamp`, `trailing`, `time`, `cause`, `detail`, `extension` or
+    /// `utf8`.
     #[must_use]
     pub const fn token(&self) -> &'static str {
         match self {
@@ -481,6 +499,8 @@ impl Refusal {
             Refusal::KeyKind { .. } => "key_kind",
             Refusal::DeleteTag(_) => "tag",
             Refusal::RequestRun => "request_run",
+            Refusal::KeyStamp { .. } => "key_stamp",
+            Refusal::Time => "time",
             Refusal::Trailing(_) => "trailing",
             Refusal::Cause { .. } => "cause",
             Refusal::Detail(_) => "detail",
@@ -527,11 +547,13 @@ fn read_header(
 }
 
 /// Whether a key of the kind `kind` carries the form, by its kind alone: a
-/// frame only a `stream` key, a snapshot only a `state` or `@state` key,
-/// and every other form any key (core §7.5's `key_kind`).
+/// frame only a `stream` key, an event only an `events` key, a snapshot
+/// only a `state` or `@state` key, and every other form any key (core
+/// §7.5's `key_kind`).
 const fn key_carries(form: Form, kind: KindToken) -> bool {
     match form {
         Form::Frame => matches!(kind, KindToken::Stream),
+        Form::Event => matches!(kind, KindToken::Events),
         Form::Snapshot => matches!(kind, KindToken::State | KindToken::ExplicitState),
         _ => true,
     }
@@ -687,6 +709,15 @@ impl<'a> Envelope<'a> {
     }
 
     fn read_with(bytes: &'a [u8], kind: Option<KindToken>) -> Result<Envelope<'a>, Refusal> {
+        // An event's stamp is its key's (core 0.101): with none here, the
+        // key gives no occurrence chunk. [`read_event`] reads one.
+        if let Some(&ch) = bytes.first() {
+            let header = Header::from_byte(ch);
+            if header.form == Form::Event {
+                read_header(bytes, SampleKind::Put, kind)?;
+                return Err(Refusal::KeyStamp { wide: header.wide });
+            }
+        }
         let (header, stamp, record) = read(bytes, SampleKind::Put, kind)?;
         Ok(Envelope {
             form: header.form,
@@ -947,6 +978,10 @@ pub enum Reading<'a> {
     /// revision ([`crate::heartbeat::Heartbeat::parse`]), never decoded as
     /// a record of the key's type. Its stamp is its key's.
     Heartbeat(Envelope<'a>),
+    /// An event (core 0.101, form 4) on an `events` key whose last chunk
+    /// is an occurrence chunk: its time, then its record, which every later
+    /// step reads as a mutation's; its stamp is its key's.
+    Event(Event<'a>),
     /// A snapshot's page (core 0.97, form 7) on a `state` or `@state`
     /// key, a GET reply's: its body is read by
     /// [`crate::collection::Page::read`], never decoded as a record of the
@@ -965,6 +1000,12 @@ pub fn read_put<'a>(key: &str, encoding: &str, payload: &'a [u8]) -> Reading<'a>
     if !carries(key, encoding) {
         return Reading::Plain;
     }
+    if let Some(event) = read_event(key, payload) {
+        return match event {
+            Ok(e) => Reading::Event(e),
+            Err(r) => Reading::Refused(r),
+        };
+    }
     let parsed = match enveloped_kind(key) {
         Some(kind) => Envelope::parse_on(payload, kind),
         None => Envelope::parse(payload),
@@ -976,6 +1017,98 @@ pub fn read_put<'a>(key: &str, encoding: &str, payload: &'a [u8]) -> Reading<'a>
         Ok(e) => Reading::Enveloped(e),
         Err(r) => Reading::Refused(r),
     }
+}
+
+/// An event, a put's payload on an `events` key (core 0.101 §7.5's form
+/// 4; #980's C2a): `CH · t32 · ms16 · record`. Its stamp is its key's
+/// occurrence chunk ([`crate::chunk::occurrence`]), CH's width bit the
+/// chunk's, and it carries the occurrence's time in the stamp's place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Event<'a> {
+    /// The record's type's: 0 unless its type kind defines a tag.
+    pub tag: Tag,
+    /// Its key's occurrence chunk.
+    pub stamp: Stamp,
+    /// The occurrence's time, from the deployment epoch (§7.6), or unknown.
+    pub time: crate::collection::Time,
+    /// Every byte after the time, possibly none, read as the resource's
+    /// type says.
+    pub record: &'a [u8],
+}
+
+impl Event<'_> {
+    /// Its CH: an event's form, its stamp's width, and its tag.
+    #[must_use]
+    pub const fn header(&self) -> Header {
+        Header {
+            form: Form::Event,
+            wide: self.stamp.run.is_wide(),
+            tag: self.tag,
+        }
+    }
+
+    /// Its key's last chunk: its stamp's occurrence chunk.
+    #[must_use]
+    pub fn chunk(&self) -> String {
+        crate::chunk::write_occurrence(self.stamp)
+    }
+
+    /// Its bytes: 7 over the record. `None` for a time no reading accepts
+    /// (an ms above 999, or a t32 of all ones known).
+    #[must_use]
+    pub fn write(&self) -> Option<Vec<u8>> {
+        let (s, ms) = self.time.fields().ok()?;
+        let mut out = Vec::with_capacity(7 + self.record.len());
+        out.push(self.header().byte());
+        out.extend_from_slice(&s.to_be_bytes());
+        out.extend_from_slice(&ms.to_be_bytes());
+        out.extend_from_slice(self.record);
+        Some(out)
+    }
+}
+
+/// A put's payload on `key` read as an event (core 0.101 §7.5's form 4),
+/// or the first refusal that applies, in §7.5's order: CH's checks
+/// (`short`, `sample_kind`, `key_kind` on a key whose kind token is not
+/// `events`), then `key_stamp` (the key's last chunk is no occurrence
+/// chunk of CH's width), `short` (fewer than 7 bytes) and `time`. `None`
+/// for a payload whose CH is not form 4's, or that has no byte, which
+/// [`Envelope::parse_on`] reads.
+#[must_use]
+pub fn read_event<'a>(key: &str, bytes: &'a [u8]) -> Option<Result<Event<'a>, Refusal>> {
+    let &ch = bytes.first()?;
+    if Header::from_byte(ch).form != Form::Event {
+        return None;
+    }
+    Some(event(key, bytes))
+}
+
+fn event<'a>(key: &str, bytes: &'a [u8]) -> Result<Event<'a>, Refusal> {
+    let (header, rest) = read_header(bytes, SampleKind::Put, enveloped_kind(key))?;
+    let stamp = key
+        .rsplit('/')
+        .next()
+        .and_then(crate::chunk::occurrence)
+        .filter(|s| s.run.is_wide() == header.wide)
+        .ok_or(Refusal::KeyStamp { wide: header.wide })?;
+    if rest.len() < 6 {
+        return Err(Refusal::Short {
+            need: 7,
+            have: bytes.len(),
+        });
+    }
+    let (t, record) = rest.split_at(6);
+    let time = crate::collection::Time::of_fields(
+        u32::from_be_bytes([t[0], t[1], t[2], t[3]]),
+        u16::from_be_bytes([t[4], t[5]]),
+    )
+    .map_err(|_| Refusal::Time)?;
+    Ok(Event {
+        tag: header.tag,
+        stamp,
+        time,
+        record,
+    })
 }
 
 /// A delete's in-band stamp: on a key whose samples may carry an envelope

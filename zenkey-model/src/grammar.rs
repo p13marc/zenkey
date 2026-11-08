@@ -204,7 +204,8 @@ pub enum KindToken {
     State,
     /// `@state`: explicit-only state (large populations).
     ExplicitState,
-    /// `events`: one key per occurrence, ending in a ULID.
+    /// `events`: one key per occurrence, ending in an occurrence chunk or a
+    /// ULID (core §1.2).
     Events,
     /// `@op`: request/reply.
     Op,
@@ -679,12 +680,16 @@ pub fn parse(key: &str) -> Result<ZkKey, KeyError> {
             });
         }
     }
+    // An occurrence chunk or a ULID (core §1.2): this version admits
+    // both, while owners move to the first (#980's C2a).
     if kind == KindToken::Events
         && !resource
             .last()
-            .is_some_and(|l| crate::chunk::is_lower_ulid(l))
+            .is_some_and(|l| crate::chunk::is_occurrence(l) || crate::chunk::is_lower_ulid(l))
     {
-        return Err(shape("an events key ends in a lowercase ULID"));
+        return Err(shape(
+            "an events key ends in an occurrence chunk or a lowercase ULID",
+        ));
     }
     Ok(ZkKey::Data {
         addr,

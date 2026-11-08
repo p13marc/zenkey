@@ -46,6 +46,71 @@ pub fn is_lower_ulid(s: &str) -> bool {
         })
 }
 
+/// Crockford's base32 in lowercase, the ULID's alphabet (core §1.2): the
+/// digits, then the letters but `i`, `l`, `o` and `u`.
+const CROCKFORD: &[u8; 32] = b"0123456789abcdefghjkmnpqrstvwxyz";
+
+/// A Crockford base32 character's value, `None` outside the lowercase
+/// alphabet.
+fn crockford(c: u8) -> Option<u64> {
+    CROCKFORD
+        .iter()
+        .position(|&a| a == c)
+        .and_then(|i| u64::try_from(i).ok())
+}
+
+/// Whether `s` is an occurrence chunk (core §1.2; #980's C2a):
+/// [`occurrence`] reads a stamp from it.
+#[must_use]
+pub fn is_occurrence(s: &str) -> bool {
+    occurrence(s).is_some()
+}
+
+/// The run and the seq an occurrence chunk names (core §1.2, §2.6; #980's
+/// C2a): run ‖ seq in Crockford's base32 in lowercase, most significant
+/// first, zero-filled. 8 characters hold a 16-bit run's 40 bits, and 12 a
+/// 32-bit run's 56, the first of them `0` or `1`. `None` for any other
+/// chunk, a ULID's included. The decode is exact: every chunk it accepts
+/// is [`write_occurrence`]'s for its stamp.
+#[must_use]
+pub fn occurrence(s: &str) -> Option<crate::wire::Stamp> {
+    use crate::wire::{Run, Seq, Stamp};
+    let bits = match s.len() {
+        8 => 40,
+        12 => 56,
+        _ => return None,
+    };
+    let mut v: u64 = 0;
+    for &c in s.as_bytes() {
+        v = (v << 5) | crockford(c)?;
+    }
+    if v >> bits != 0 {
+        return None;
+    }
+    let seq = Seq::new(u32::try_from(v & 0x00ff_ffff).ok()?)?;
+    let high = v >> 24;
+    let run = if bits == 40 {
+        Run::U16(u16::try_from(high).ok()?)
+    } else {
+        Run::U32(u32::try_from(high).ok()?)
+    };
+    Some(Stamp { run, seq })
+}
+
+/// The occurrence chunk of `stamp` (core §1.2): 8 characters for a 16-bit
+/// run, 12 for a 32-bit one.
+#[must_use]
+pub fn write_occurrence(stamp: crate::wire::Stamp) -> String {
+    let n = if stamp.run.is_wide() { 12 } else { 8 };
+    let mut v = (u64::from(stamp.run.value()) << 24) | u64::from(stamp.seq.get());
+    let mut out = vec![b'0'; n];
+    for c in out.iter_mut().rev() {
+        *c = CROCKFORD[usize::try_from(v & 31).unwrap_or(0)];
+        v >>= 5;
+    }
+    String::from_utf8(out).unwrap_or_default()
+}
+
 /// Whether `s` is an identifier as the authoring format uses them for
 /// parameter names, role names and interface-name segments:
 /// `[a-z][a-z0-9_]*`.
@@ -91,6 +156,35 @@ mod tests {
         assert!(!is_lower_ulid("01JGXQZ4YQK8V6TXW3M9F2A7CD"));
         assert!(!is_lower_ulid("01jgxqz4yqk8v6txw3m9f2a7ci"));
         assert!(is_ident("set_origin"));
+        // An occurrence chunk (core §1.2; #980's C2a).
+        use crate::wire::{Run, Seq, Stamp};
+        let at = |run, seq| Stamp {
+            run,
+            seq: Seq::new(seq).unwrap(),
+        };
+        assert_eq!(occurrence("002g0009"), Some(at(Run::U16(5), 9)));
+        assert_eq!(
+            occurrence("1qndqvqg0009"),
+            Some(at(Run::U32(0xdead_beef), 9))
+        );
+        assert_eq!(occurrence("2qndqvqg0009"), None, "57 bits");
+        assert_eq!(occurrence("002G0009"), None, "uppercase");
+        assert_eq!(occurrence("002i0009"), None, "outside the alphabet");
+        assert_eq!(occurrence("01jgxqz4yqk8v6txw3m9f2a7cd"), None, "a ULID");
+        for stamp in [
+            at(Run::U16(0), 0),
+            at(Run::U16(0xffff), 0x00ff_ffff),
+            at(Run::U32(0x1234_5678), 0x009a_bcde),
+            at(Run::U32(u32::MAX), 0x00ff_ffff),
+        ] {
+            let chunk = write_occurrence(stamp);
+            assert!(is_plain_chunk(&chunk), "{chunk}");
+            assert_eq!(occurrence(&chunk), Some(stamp), "{chunk}");
+        }
+        assert_eq!(
+            write_occurrence(at(Run::U32(0x1234_5678), 0x009a_bcde)),
+            "04hmasw9nf6y"
+        );
         assert!(!is_ident("Set"));
         assert!(!is_ident("1a"));
         assert!(!is_ident("a-b"));

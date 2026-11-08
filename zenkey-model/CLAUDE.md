@@ -300,7 +300,18 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   `complete`), `Entry`, `Tombstone`, `Confirmation` and `Time` (t32·ms16);
   `wire::Form::Snapshot` is defined, a put's (`Reading::Snapshot`, asof in the
   seq's place, the body unread), `Refusal::KeyKind { form, kind }` off a
-  `state`/`@state` key. `tests/conformance.rs`'s `snapshot_bodies` runs
+  `state`/`@state` key. #980 C2a (core 0.101, an event's key from its run
+  and seq, adopted by no rule until C2c): `chunk::{is_occurrence,
+  occurrence, write_occurrence}` (run ‖ seq in lowercase Crockford base32,
+  8 characters for a 16-bit run, 12 for a 32-bit one, the first `0`/`1`),
+  `grammar::parse` admitting it beside the ULID; `Form::Event` defined, so
+  every form is (`is_defined` always true), `wire::Event` (`tag`, `stamp`
+  from the key, `time` a `collection::Time`, `record`; `write`, `chunk`),
+  `read_event(key, bytes)` and `Reading::Event`, `Refusal::{KeyStamp,
+  Time}` (`key_stamp`, `time`), and `key_kind` for an event off an
+  `events` key; `Envelope::parse` refuses form 4 as `key_stamp`, having
+  no key. `tests/conformance.rs` reads `keys.json`'s `occurrence` and the
+  envelope fixtures' events, each put case carrying its key. `tests/conformance.rs`'s `snapshot_bodies` runs
   `snapshot/bodies.json`. E2 (the readers): `Page::members(key)` (each
   entry as the per-key reply it stands for, `Member::payload` the bytes its
   mutation put and `attachment` a tombstone's delete, `member_key`),

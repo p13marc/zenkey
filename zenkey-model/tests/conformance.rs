@@ -54,8 +54,28 @@ fn key_json(k: &ZkKey) -> Value {
             kind,
             resource,
         } => {
-            json!({"form": "data", "system": addr.system.as_str(), "service": addr.service.as_str(),
-                    "iface": iface.to_string(), "token": kind.as_str(), "resource": resource})
+            let mut v = json!({"form": "data", "system": addr.system.as_str(), "service": addr.service.as_str(),
+                    "iface": iface.to_string(), "token": kind.as_str(), "resource": resource});
+            // An events key's last chunk (core §1.2; #980's C2a): an
+            // occurrence chunk's stamp, or `null` for a ULID.
+            if *kind == zenkey_model::grammar::KindToken::Events {
+                v["occurrence"] = resource
+                    .last()
+                    .and_then(|l| zenkey_model::chunk::occurrence(l))
+                    .map_or(Value::Null, |s| {
+                        assert_eq!(
+                            zenkey_model::chunk::write_occurrence(s),
+                            *resource.last().unwrap(),
+                            "an occurrence chunk writes back"
+                        );
+                        json!({
+                            "run_width": if s.run.is_wide() { 32 } else { 16 },
+                            "run": s.run.value(),
+                            "seq": s.seq.get(),
+                        })
+                    });
+            }
+            v
         }
         ZkKey::Instance { addr, instance } => {
             json!({"form": "instance", "system": addr.system.as_str(),
@@ -1180,6 +1200,10 @@ fn envelope_carries() {
                 assert_eq!(e.write(), bytes, "{note}: writes back");
                 json!({"reads": e.form.as_str()})
             }
+            Reading::Event(e) => {
+                assert_eq!(e.write().as_ref(), Some(&bytes), "{note}: writes back");
+                json!({"reads": "event"})
+            }
             Reading::Refused(r) => json!({"refused": r.token()}),
         };
         seen.insert(got.to_string());
@@ -1192,6 +1216,10 @@ fn envelope_carries() {
     assert!(
         seen.contains(r#"{"reads":"snapshot"}"#),
         "a snapshot read on a state key"
+    );
+    assert!(
+        seen.contains(r#"{"reads":"event"}"#) && seen.contains(r#"{"refused":"key_stamp"}"#),
+        "an event read on its key, and one refused by its key's chunk"
     );
 }
 
@@ -1260,22 +1288,57 @@ fn envelope_vectors() {
         let bytes = unhex(case["hex"].as_str().expect("hex"));
         let sample = case["sample"].as_str();
         samples.insert(sample.unwrap_or_default().to_owned());
-        let got = match sample {
-            Some("put") => match Envelope::parse(&bytes) {
+        let key = case["key"].as_str();
+        // An event's stamp is its key's (core 0.101): every case of form 4
+        // on a put carries its key.
+        if sample == Some("put") && bytes.first().is_some_and(|b| b >> 5 == 4) {
+            assert!(key.is_some(), "{note}: an event's case carries its key");
+        }
+        let got = match (sample, key) {
+            (Some("put"), Some(key)) => match zenkey_model::wire::read_event(key, &bytes) {
+                Some(Ok(e)) => {
+                    assert_eq!(e.write().as_ref(), Some(&bytes), "{note}: writes back");
+                    assert_eq!(
+                        e.chunk(),
+                        key.rsplit('/').next().unwrap(),
+                        "{note}: the key's chunk"
+                    );
+                    let mut p = parsed(e.header(), e.stamp, json!(hex(e.record)));
+                    p["time"] = match e.time {
+                        zenkey_model::collection::Time::Unknown => json!("unknown"),
+                        zenkey_model::collection::Time::Known { s, ms } => {
+                            json!({"s": s, "ms": ms})
+                        }
+                    };
+                    p
+                }
+                Some(Err(r)) => json!({"refused": r.token()}),
+                None => match zenkey_model::wire::enveloped_kind(key).map_or_else(
+                    || Envelope::parse(&bytes),
+                    |k| Envelope::parse_on(&bytes, k),
+                ) {
+                    Ok(e) => {
+                        assert_eq!(e.write(), bytes, "{note}: writes back");
+                        parsed(e.header(), e.stamp, json!(hex(e.record)))
+                    }
+                    Err(r) => json!({"refused": r.token()}),
+                },
+            },
+            (Some("put"), None) => match Envelope::parse(&bytes) {
                 Ok(e) => {
                     assert_eq!(e.write(), bytes, "{note}: writes back");
                     parsed(e.header(), e.stamp, json!(hex(e.record)))
                 }
                 Err(r) => json!({"refused": r.token()}),
             },
-            Some("delete") => match DeleteStamp::parse(&bytes) {
+            (Some("delete"), _) => match DeleteStamp::parse(&bytes) {
                 Ok(d) => {
                     assert_eq!(d.write(), bytes, "{note}: writes back");
                     parsed(d.header(), d.stamp, Value::Null)
                 }
                 Err(r) => json!({"refused": r.token()}),
             },
-            Some("query") => match read_query(&bytes) {
+            (Some("query"), _) => match read_query(&bytes) {
                 Ok(q) => {
                     assert_eq!(q.write(), bytes, "{note}: writes back");
                     json!({
@@ -1289,14 +1352,14 @@ fn envelope_vectors() {
                 }
                 Err(r) => json!({"refused": r.token()}),
             },
-            Some("reply") => match read_reply(&bytes) {
+            (Some("reply"), _) => match read_reply(&bytes) {
                 Ok(v) => {
                     assert_eq!(v.write(), bytes, "{note}: writes back");
                     parsed(v.header(), v.stamp, json!(hex(v.record)))
                 }
                 Err(r) => json!({"refused": r.token()}),
             },
-            Some("reply_err") => match read_reply_err(&bytes) {
+            (Some("reply_err"), _) => match read_reply_err(&bytes) {
                 Ok(e) => {
                     assert_eq!(e.write().as_ref(), Ok(&bytes), "{note}: writes back");
                     let mut p = parsed(e.header(), e.stamp, Value::Null);
@@ -1310,7 +1373,7 @@ fn envelope_vectors() {
                 }
                 Err(r) => json!({"refused": r.token()}),
             },
-            other => panic!("{note}: sample {other:?}"),
+            (other, _) => panic!("{note}: sample {other:?}"),
         };
         assert_eq!(case["expect"], got, "{note}");
     }
