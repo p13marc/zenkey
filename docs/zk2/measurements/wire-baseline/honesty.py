@@ -64,6 +64,8 @@ def read(path):
     marks = json.load(open(f"{path}/marks.json"))
     t0 = marks.get("gen1", marks.get("steady_start", 0))
     out = {"run": os.path.basename(os.path.normpath(path)),
+           # A run's marks before honesty.sh said so read as complete.
+           "complete": marks.get("complete", True),
            "marks_s": {k: round(v - t0, 1) for k, v in marks.items() if isinstance(v, float)}}
     frames = []
     for r in jsonl(f"{path}/far.jsonl"):

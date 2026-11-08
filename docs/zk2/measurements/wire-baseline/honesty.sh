@@ -67,12 +67,20 @@ probe() { # name, command...: one tool's reading across the face, at most 120 s
   echo "$name exit $rc"
 }
 
-trap '$W down || true' EXIT
+COMPLETE=false
+# marks.json on every way out, a failed step's run included: honesty.py
+# reads what was marked, and `complete` says whether every step ran.
+write_marks() {
+  [ -f "$LOGS/marks.part" ] || return 0
+  { echo "{"; cat "$LOGS/marks.part"; echo "\"complete\": $COMPLETE, \"medium\": \"rf-zk2c\", \"stack\": \"bare\"}"; } >"$LOGS/marks.json"
+  rm -f "$LOGS/marks.part"
+}
+trap 'write_marks; $W down || true' EXIT
 
 $W up rf-zk2c bare
 # The far side: the frame reader, records and field states, for the whole run.
-$W start far bash -c "$ZENCTL echo --across-face $DEV ${ACROSS[*]@Q} --format ndjson \
-  | python3 -I -u $HERE/stamp.py $LOGS/far.jsonl --all"
+$W start far bash -c "${ZENCTL@Q} echo --across-face ${DEV@Q} ${ACROSS[*]@Q} --format ndjson \
+  | python3 -I -u ${HERE@Q}/stamp.py ${LOGS@Q}/far.jsonl --all"
 $W start watch "$ZENCTL" watch "$DEV" modem.v3 frames/fast --across-face "${ACROSS[@]}" --format ndjson
 sleep 5
 mark gen1
@@ -126,6 +134,5 @@ if step reset; then
   sleep 330
 fi
 
-{ echo "{"; cat "$LOGS/marks.part"; echo "\"medium\": \"rf-zk2c\", \"stack\": \"bare\"}"; } >"$LOGS/marks.json"
-rm "$LOGS/marks.part"
+COMPLETE=true
 echo "done: $LOGS"

@@ -277,6 +277,8 @@ def main():
         if acl and side == "a":
             text = text.replace("__ACL__", "// The face's access control, as acl gen wrote it.\n"
                                 + acl + ",")
+        left = sorted(set(re.findall(r"@[A-Z_]+@|__ACL__", text)))
+        assert not left, f"zenohd-{side}.json5: unfilled placeholders {left}"
         open(f"{a.out}/zenohd-{side}.json5", "w").write(text)
     params = {"medium": a.medium, "stack": a.stack, "inst": a.inst, "batch_size": b,
               "ports": ports, "run": run, "face": bool(a.face),

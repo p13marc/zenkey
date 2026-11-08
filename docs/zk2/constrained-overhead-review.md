@@ -388,7 +388,7 @@ Each element is given as today's wire, what must be kept, the compact layout, th
   ✗ marks a case that exceeds the 864 s of air the 1 % duty cycle allows in a day. modem.v3's streams are `data_low`, so every put and frame carries the 2-byte QoS extension. Its frame resource `frames/fast` is `data`, which carries none, on a face's 3-byte frame of 16-bit sequence numbers. The first model's all-73 row was 200 KB, 325 s, 1,043 s (556 s) and 833 s. No LoRa face ships today, so the LoRa "today" rows are what the current wire would cost.
   - The readings' rows send each reading in its own SDU, the upper bound. zenoh batched some of them on the paced links. The measured readings fell between that bound and all four in one SDU, on every medium (§9).
   - The uplink row adds the keep-alives and, at LoRa's keep_alive of 2, the reopens. Each keep-alive lost on the downlink closes the link (§6.2).
-  - zk2c's rows are the readings alone, but the measured one's SF7 figure in brackets.
+  - zk2c's rows count the readings alone, except the measured row, whose SF7 cell also gives, in parentheses, the uplink with its keep-alives.
 - **Deadband.** A declared δ and maximum interval let the owner omit members that moved less than δ. The reader then knows the value to ±δ until the interval runs out, and nothing after. That is a declared loss, allowed by the brief. It is forbidden on timed and arbitrated streams (§5.17, §5.18).
 - **Risk.** One key per group means ACLs apply per group; split groups by audience.
 
