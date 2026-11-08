@@ -552,23 +552,29 @@ mod wire {
     /// stack and the frame, a message too large fragmented.
     pub fn sdus(messages: &[usize], mtu: usize) -> Vec<usize> {
         let cap = mtu - LEAN - FRAME;
-        let (mut out, mut used): (Vec<usize>, Option<usize>) = (Vec::new(), None);
+        let mut out: Vec<usize> = Vec::new();
+        // What the open batch holds; `None` once a fragmented message closed it.
+        let mut used: Option<usize> = None;
         for &m in messages {
             if m > cap {
-                let mut rest = (m + FIRST_FRAG) as isize;
+                let mut rest = m + FIRST_FRAG;
                 while rest > 0 {
-                    out.push((rest as usize).min(cap) + FRAME + LEAN);
-                    rest -= cap as isize;
+                    let part = rest.min(cap);
+                    out.push(part + FRAME + LEAN);
+                    rest -= part;
                 }
                 used = None;
                 continue;
             }
-            if used.is_none_or(|u| u + m > cap) {
-                out.push(FRAME + LEAN);
-                used = Some(0);
-            }
-            *out.last_mut().unwrap() += m;
-            used = used.map(|u| u + m);
+            let u = match used {
+                Some(u) if u + m <= cap => u,
+                _ => {
+                    out.push(FRAME + LEAN);
+                    0
+                }
+            };
+            *out.last_mut().expect("a batch is open") += m;
+            used = Some(u + m);
         }
         out
     }
@@ -597,13 +603,11 @@ mod wire {
 }
 
 /// #991's third done-when, the per-medium cadences against their budgets,
-/// for modem.v3 3.4's `face/` events (link.md, "Events"). Each face's plan
-/// lets the three cross (exposed `link`, link.v1 §2.9) and denies the four
-/// JSON events by name. What a face carries is its device's owner's
-/// configuration (`config:device.events.<name>`), since a face lists
-/// frames, never events: each event a face carries, at its rate's worst
-/// case, beside 3.3's frames' figure for all 73 readings (README, "What
-/// each face spends"), fits the medium's budget, and each it leaves out
+/// for modem.v3 3.4's `face/` events (link.md, "Events"). Each face's
+/// policy lists the events it carries (link.v2 0.12 §2.7), and its plan
+/// lets exactly those cross: each, at its rate's worst case, beside 3.3's
+/// frames' figure for all 73 readings (README, "What each face spends"),
+/// fits the medium's budget, and each exposed one the face leaves out
 /// would not.
 #[test]
 fn zenoh_modem_events_fit_each_face_budget() {
@@ -665,56 +669,42 @@ fn zenoh_modem_events_fit_each_face_budget() {
         Sbd,
     }
     let faces = [
-        (
-            "rf0",
-            Medium::Rf,
-            220,
-            177_000.0,
-            25_920_000.0,
-            &[
-                "face/oper_change",
-                "face/identity_change",
-                "face/device_fault",
-            ][..],
-        ),
-        (
-            "lora0-sf7",
-            Medium::Lora(7),
-            222,
-            376.0,
-            864.0,
-            &["face/oper_change", "face/identity_change"][..],
-        ),
-        (
-            "lora0-sf9",
-            Medium::Lora(9),
-            115,
-            534.0,
-            864.0,
-            &["face/oper_change", "face/identity_change"][..],
-        ),
-        ("lora0-sf12", Medium::Lora(12), 222, 785.0, 864.0, &[][..]),
-        ("sat0", Medium::Sbd, 270, 96.0, 96.0, &[][..]),
+        ("rf0", Medium::Rf, 220, 177_000.0, 25_920_000.0),
+        ("lora0-sf7", Medium::Lora(7), 222, 376.0, 864.0),
+        ("lora0-sf9", Medium::Lora(9), 115, 534.0, 864.0),
+        ("lora0-sf12", Medium::Lora(12), 222, 785.0, 864.0),
+        ("sat0", Medium::Sbd, 270, 96.0, 96.0),
     ];
-    for (face, medium, mtu, frames, budget, carried) in faces {
-        // The plan lets each `face/` event cross, and denies the JSON four.
+    for (face, medium, mtu, frames, budget) in faces {
+        // What the face carries is what its policy lists (link.v2 §2.7),
+        // and its plan lets exactly those events cross.
+        let policy = link::parse(&modem_policy(face))
+            .policy
+            .expect("a face policy");
+        let listed: std::collections::BTreeSet<String> = policy
+            .faces
+            .values()
+            .flat_map(|f| f.events.clone().expect("each face lists its events"))
+            .collect();
         let plan = modem_plan(face, AclPermission::Deny);
-        let denied: Vec<&String> = plan.faces[0]
-            .deny
+        let crossing: std::collections::BTreeSet<String> = plan.faces[0]
+            .crossing
             .iter()
-            .filter(|d| d.id == "events:modem.v3")
-            .flat_map(|d| &d.key_exprs)
+            .filter(|n| n.contains("/events/"))
+            .cloned()
             .collect();
         assert_eq!(
-            denied,
-            [
-                "zk2/*/*/modem.v3/events/action_event/**",
-                "zk2/*/*/modem.v3/events/device_fault/**",
-                "zk2/*/*/modem.v3/events/identity_change/**",
-                "zk2/*/*/modem.v3/events/oper_change/**",
-            ],
-            "{face}"
+            crossing, listed,
+            "{face}: the plan carries what the face lists"
         );
+        let carried: Vec<String> = listed
+            .iter()
+            .map(|n| {
+                n.strip_prefix("modem.v3/events/")
+                    .expect("modem.v3's")
+                    .to_owned()
+            })
+            .collect();
         let cost = |put: usize, per_day: usize| -> f64 {
             let s = wire::sdus(&[put], mtu);
             per_day as f64
@@ -727,18 +717,33 @@ fn zenoh_modem_events_fit_each_face_budget() {
         let spent = frames
             + events
                 .iter()
-                .filter(|e| carried.contains(&e.0.as_str()))
+                .filter(|e| carried.contains(&e.0))
                 .map(|e| cost(e.1, e.2))
                 .sum::<f64>();
         assert!(spent <= budget, "{face}: {spent} of {budget}");
         for (name, put, per_day) in &events {
-            if !carried.contains(&name.as_str()) {
+            if !carried.contains(name) {
                 assert!(
                     spent + cost(*put, *per_day) > budget,
                     "{face} could carry {name}: {} of {budget}",
                     spent + cost(*put, *per_day)
                 );
             }
+        }
+        // SF12's knife-edge, deliberate: `face/oper_change` alone, 24 a
+        // day at 3.293 s of air each (2 tiles), takes frames/slow's 785 s to
+        // 864.036 s against the duty's 864 s, 36 ms over. The check's
+        // verdict there is the model's, not a rounding of it.
+        if face == "lora0-sf12" {
+            let oper = events
+                .iter()
+                .find(|e| e.0 == "face/oper_change")
+                .expect("face/oper_change");
+            let over = frames + cost(oper.1, oper.2) - budget;
+            assert!(
+                (over - 0.036_416).abs() < 1e-6,
+                "SF12's margin: {over} s over"
+            );
         }
     }
 }

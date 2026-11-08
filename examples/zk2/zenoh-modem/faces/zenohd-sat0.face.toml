@@ -17,10 +17,10 @@
 # `frame_unlisted` of frames/fast and frames/slow: sat0 does not publish
 # them.
 #
-# Events (modem.v3 3.4, #991): the plan lets the three `face/` events cross,
-# and `face/device_fault` draws `not_packed`, but sat0's owner publishes
-# none: each occurrence would be a paid message of its own, beside the 96 a
-# day the frames and the keep-alives already take (link.md, "Events").
+# Events (modem.v3 3.4, #991): the face lists none, `events = []` (link.v2
+# 0.12 §2.7), so the plan denies every event: each occurrence would be a
+# paid message of its own, beside the 96 a day the frames and the
+# keep-alives already take (link.md, "Events").
 profile  = "link.v2"
 system   = "h-71c0e2a9d4b3"
 services = ["sat0"]
@@ -50,6 +50,8 @@ loss_ppm         = 0
 arq              = true
 reply_timeout_ms = 1000000
 horizon_s        = 3600
+# none: each occurrence would be a paid message of its own
+events           = []
 
 [face.sbd.frames]
 "modem.v3/frames/paid" = { every_s = 1800 }

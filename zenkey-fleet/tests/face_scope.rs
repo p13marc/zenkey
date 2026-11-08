@@ -34,7 +34,7 @@ fn every_case_of_faces_json() {
         .expect("faces.json");
     let doc: Value = serde_json::from_str(&text).expect("JSON");
     let cases = doc["cases"].as_array().expect("cases");
-    assert_eq!(cases.len(), 17, "the fixture's cases");
+    assert_eq!(cases.len(), 19, "the fixture's cases");
     let mut failures = Vec::new();
     for (i, case) in cases.iter().enumerate() {
         let note = case["note"].as_str().unwrap_or_default();
