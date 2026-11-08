@@ -1139,6 +1139,12 @@
                 "code": "timed_downsampled",
                 "face": "radio",
                 "severity": "warning"
+              },
+              {
+                "at": "transport.keep_alive",
+                "code": "keep_alive_not_suppressed",
+                "face": "radio",
+                "severity": "warning"
               }
             ],
             "frames": [
@@ -1179,7 +1185,7 @@
           "probe.v1"
         ]
       },
-      "note": "probe.v1, a contract that lists link.v2, on an RF face listing `frames/link` at 60 s (\u00a72.3, \u00a72.7, \u00a72.8, \u00a72.16): the listed frame crosses whole and the unlisted `frames/detail` is denied by name (`frame_unlisted`); the timed `setpoint` is denied (`timed_downsampled`); `level` alone is downsampled; `status` crosses, and with it the heartbeat; `config`'s 232-byte put is above the 222-byte batch (`block_over_batch`); a frame a minute spares the uplink its keep-alives, every 60 s",
+      "note": "probe.v1, a contract that lists link.v2, on an RF face listing `frames/link` at 60 s (\u00a72.3, \u00a72.7, \u00a72.8, \u00a72.16): the listed frame crosses whole and the unlisted `frames/detail` is denied by name (`frame_unlisted`); the timed `setpoint` is denied (`timed_downsampled`); `level` alone is downsampled; `status` crosses, and with it the heartbeat; `config`'s 232-byte put is above the 222-byte batch (`block_over_batch`); a frame a minute at a 60-s keep-alive interval: each keep-alive races a frame, and goes first when the frame is later than the one before (`keep_alive_not_suppressed`, \u00a72.16)",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"probe-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nhorizon_s        = 300\nframes           = { \"probe.v1/frames/link\" = { every_s = 60, keyframe_s = 900 } }\n"
     },
     {
@@ -1620,6 +1626,12 @@
                 "code": "timed_downsampled",
                 "face": "radio",
                 "severity": "warning"
+              },
+              {
+                "at": "transport.keep_alive",
+                "code": "keep_alive_not_suppressed",
+                "face": "radio",
+                "severity": "warning"
               }
             ],
             "frames": [
@@ -1801,6 +1813,12 @@
               {
                 "at": "probe.v1/stream/setpoint",
                 "code": "timed_downsampled",
+                "face": "sat",
+                "severity": "warning"
+              },
+              {
+                "at": "transport.keep_alive",
+                "code": "keep_alive_not_suppressed",
                 "face": "sat",
                 "severity": "warning"
               }
@@ -2010,6 +2028,12 @@
               {
                 "at": "probe.v1/stream/setpoint",
                 "code": "timed_downsampled",
+                "face": "radio",
+                "severity": "warning"
+              },
+              {
+                "at": "transport.keep_alive",
+                "code": "keep_alive_not_suppressed",
                 "face": "radio",
                 "severity": "warning"
               }
@@ -2457,6 +2481,12 @@
                 "code": "timed_downsampled",
                 "face": "radio",
                 "severity": "warning"
+              },
+              {
+                "at": "transport.keep_alive",
+                "code": "keep_alive_not_suppressed",
+                "face": "radio",
+                "severity": "warning"
               }
             ],
             "frames": [
@@ -2892,6 +2922,12 @@
                 "code": "frame_unlisted",
                 "face": "rf",
                 "severity": "warning"
+              },
+              {
+                "at": "transport.keep_alive",
+                "code": "keep_alive_not_suppressed",
+                "face": "rf",
+                "severity": "warning"
               }
             ],
             "frames": [
@@ -2931,7 +2967,7 @@
           "health.v1"
         ]
       },
-      "note": "zenoh-modem's RF router (Appendix B, `examples/zk2/zenoh-modem/faces/`) over modem.v3 3.4, which lists link.v1: what it exposes is its three frame resources over one record of all 73 readings, all packed, so none draws `not_packed` (§2.17); 3.2's nine are deprecated and `host`, so they are denied with the reading subtrees; the face lists `frames/fast` at 60 s, crossing whole with no downsampling, and denies `frames/slow` and `frames/paid` by name (`frame_unlisted`, §2.7); `frames/fast`'s 300 s horizon is liveness evidence; one frame a minute replaces each keep-alive, so no `keep_alive_not_suppressed` (§2.16); the catalog the ground holds lists every crossing revision (§2.18); the face lists modem.v3 3.4's three `face/` events, which cross whole, never downsampled (§2.7, link.v1 §2.9), and its four JSON events are denied by name; `face/device_fault` is JSON, so it draws `not_packed` (§2.17)",
+      "note": "zenoh-modem's RF router (Appendix B, `examples/zk2/zenoh-modem/faces/`) over modem.v3 3.4, which lists link.v1: what it exposes is its three frame resources over one record of all 73 readings, all packed, so none draws `not_packed` (§2.17); 3.2's nine are deprecated and `host`, so they are denied with the reading subtrees; the face lists `frames/fast` at 60 s, crossing whole with no downsampling, and denies `frames/slow` and `frames/paid` by name (`frame_unlisted`, §2.7); `frames/fast`'s 300 s horizon is liveness evidence; one frame a minute at the 60-s keep-alive interval, so each keep-alive races a frame (`keep_alive_not_suppressed`, §2.16); the catalog the ground holds lists every crossing revision (§2.18); the face lists modem.v3 3.4's three `face/` events, which cross whole, never downsampled (§2.7, link.v1 §2.9), and its four JSON events are denied by name; `face/device_fault` is JSON, so it draws `not_packed` (§2.17)",
       "policy": "# zenoh-modem's RF node (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\nbinding  = \"zm-1.10.2-r1\"           # the zenoh fork zenoh-modem's routers run\ncatalog  = \"29bf7d47\"               # catalog.json, which the ground holds\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4            # a keep-alive every 60 s, which a frame a minute replaces\nwait_before_close_ms = 240000       # at least the lease\nsequence             = \"16bit\"\nbatch_bytes          = 222          # the radio's 220 B SDU and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.rf]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000            # 5 %\narq              = false            # no link ARQ on the radio (zenoh-modem's tracker)\nreply_timeout_ms = 15000            # 16 full batches take 11.8 s\nhorizon_s        = 120              # one frame a minute affords a 120 s horizon\nevents           = [\"modem.v3/face/device_fault\", \"modem.v3/face/identity_change\", \"modem.v3/face/oper_change\"]\n\n[face.rf.frames]\n\"modem.v3/frames/fast\" = { every_s = 60 }\n"
     },
     {
@@ -3698,6 +3734,12 @@
                 "code": "frame_unlisted",
                 "face": "lora",
                 "severity": "warning"
+              },
+              {
+                "at": "transport.keep_alive",
+                "code": "keep_alive_not_suppressed",
+                "face": "lora",
+                "severity": "warning"
               }
             ],
             "frames": [
@@ -3738,7 +3780,7 @@
           "health.v1"
         ]
       },
-      "note": "zenoh-modem's LoRa router at SF9 (Appendix B): `frames/fast` at 120 s, asked for a full record every 900 s, which its 15 records reach by a full record every seventh (`keyframe_s`, §2.7); 120 s is the keep-alive interval, so none is paid beside the data (§2.16); its largest frame, 216 B, a delta record that includes every field, is above the 117 B batch (`frame_over_batch`, link.v1 §2.8); `frames/slow` and `frames/paid` are denied by name (`frame_unlisted`, §2.7); the face lists modem.v3 3.4's two `rare` events, which cross whole, and the plan denies `face/device_fault` by name with the four JSON events (§2.7)",
+      "note": "zenoh-modem's LoRa router at SF9 (Appendix B): `frames/fast` at 120 s, asked for a full record every 900 s, which its 15 records reach by a full record every seventh (`keyframe_s`, §2.7); 120 s is the keep-alive interval, so each keep-alive races a frame (`keep_alive_not_suppressed`, §2.16); its largest frame, 216 B, a delta record that includes every field, is above the 117 B batch (`frame_over_batch`, link.v1 §2.8); `frames/slow` and `frames/paid` are denied by name (`frame_unlisted`, §2.7); the face lists modem.v3 3.4's two `rare` events, which cross whole, and the plan denies `face/device_fault` by name with the four JSON events (§2.7)",
       "policy": "# zenoh-modem's LoRa node at SF9 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"29bf7d47\"\n\n[transport]\nlease_ms             = 480000\nkeep_alive           = 4\nwait_before_close_ms = 480000\nsequence             = \"16bit\"\nbatch_bytes          = 117          # the chip's 115 B frame and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 1758\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000            # 16 full batches take 8.5 s\nhorizon_s        = 120\nevents           = [\"modem.v3/face/identity_change\", \"modem.v3/face/oper_change\"]\n\n[face.lora.frames]\n\"modem.v3/frames/fast\" = { every_s = 120, keyframe_s = 900 }\n"
     },
     {
@@ -4062,6 +4104,12 @@
                 "code": "frame_unlisted",
                 "face": "lora",
                 "severity": "warning"
+              },
+              {
+                "at": "transport.keep_alive",
+                "code": "keep_alive_not_suppressed",
+                "face": "lora",
+                "severity": "warning"
               }
             ],
             "frames": [
@@ -4102,7 +4150,7 @@
           "health.v1"
         ]
       },
-      "note": "zenoh-modem's LoRa router at SF12 (Appendix B): `frames/slow` at 900 s, asked for a full record hourly, which its 4 records reach (`keyframe_s`, §2.7); its 1,800 s horizon is twice its cadence and the face's `horizon_s`, so it is liveness evidence with no `interval_over_horizon` or `horizon_under_face` (§2.12); the 900 s keep-alive interval is the cadence, so none is paid beside the data (§2.16); `frames/fast` and `frames/paid` are denied by name (`frame_unlisted`, §2.7); the face lists no event (`events = []`), so `events` is denied whole (§2.7)",
+      "note": "zenoh-modem's LoRa router at SF12 (Appendix B): `frames/slow` at 900 s, asked for a full record hourly, which its 4 records reach (`keyframe_s`, §2.7); its 1,800 s horizon is twice its cadence and the face's `horizon_s`, so it is liveness evidence with no `interval_over_horizon` or `horizon_under_face` (§2.12); the 900 s keep-alive interval is the cadence, so each keep-alive races a frame (`keep_alive_not_suppressed`, §2.16); `frames/fast` and `frames/paid` are denied by name (`frame_unlisted`, §2.7); the face lists no event (`events = []`), so `events` is denied whole (§2.7)",
       "policy": "# zenoh-modem's LoRa node at SF12 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"29bf7d47\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 4\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 224          # the fragment layer's 222 B SDU and 2 B of stream framing\nopen_timeout_ms      = 40000\naccept_timeout_ms    = 40000\ninterests_timeout_ms = 40000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 900\nmax_outage_s     = 3600\nlink_bps         = 293\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 120000\nhorizon_s        = 1800\nevents           = []\n\n# frames/slow writes a full record at least every 4 (modem.v3), hourly at\n# one every 15 minutes, as the face asks.\n[face.lora.frames]\n\"modem.v3/frames/slow\" = { every_s = 900, keyframe_s = 3600 }\n"
     },
     {
@@ -4426,6 +4474,12 @@
                 "code": "frame_unlisted",
                 "face": "sbd",
                 "severity": "warning"
+              },
+              {
+                "at": "transport.keep_alive",
+                "code": "keep_alive_not_suppressed",
+                "face": "sbd",
+                "severity": "warning"
               }
             ],
             "frames": [
@@ -4465,7 +4519,7 @@
           "health.v1"
         ]
       },
-      "note": "zenoh-modem's SBD router (Appendix B): the face lists `frames/paid` alone, every frame a full record, at the keep-alive interval, so a message replaces a keep-alive (§2.16); `frames/fast` and `frames/slow` are denied by name (`frame_unlisted`, §2.7); `frames/paid`'s 3,600 s horizon is the face's `horizon_s`, so the plan lists it as evidence, and liveness across the face is observable (link.v1 §2.12); the face lists no event (`events = []`), so `events` is denied whole (§2.7)",
+      "note": "zenoh-modem's SBD router (Appendix B): the face lists `frames/paid` alone, every frame a full record, at the keep-alive interval, so a message replaces a keep-alive unless it is later than the one before (`keep_alive_not_suppressed`, §2.16); `frames/fast` and `frames/slow` are denied by name (`frame_unlisted`, §2.7); `frames/paid`'s 3,600 s horizon is the face's `horizon_s`, so the plan lists it as evidence, and liveness across the face is observable (link.v1 §2.12); the face lists no event (`events = []`), so `events` is denied whole (§2.7)",
       "policy": "# zenoh-modem's SBD terminal (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-71c0e2a9d4b3\"\nservices = [\"sat0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"29bf7d47\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 2\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 271          # a message's 270 B, as configs/zenohd-sat0.json5 ships it\nopen_timeout_ms      = 1000000\naccept_timeout_ms    = 1000000\ninterests_timeout_ms = 1000000\n\n[face.sbd]\nfar              = \"ground-gateway\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 1800\nmax_outage_s     = 86400\nlink_bps         = 2400\nloss_ppm         = 0\narq              = true\nreply_timeout_ms = 1000000\nhorizon_s        = 3600\nevents           = []\n\n[face.sbd.frames]\n\"modem.v3/frames/paid\" = { every_s = 1800 }\n"
     },
     {
@@ -4878,6 +4932,12 @@
                 "code": "timed_downsampled",
                 "face": "radio",
                 "severity": "warning"
+              },
+              {
+                "at": "transport.keep_alive",
+                "code": "keep_alive_not_suppressed",
+                "face": "radio",
+                "severity": "warning"
               }
             ],
             "frames": [
@@ -5159,6 +5219,12 @@
                 "code": "timed_downsampled",
                 "face": "radio",
                 "severity": "warning"
+              },
+              {
+                "at": "transport.keep_alive",
+                "code": "keep_alive_not_suppressed",
+                "face": "radio",
+                "severity": "warning"
               }
             ],
             "frames": [
@@ -5392,6 +5458,12 @@
                 "code": "timed_downsampled",
                 "face": "radio",
                 "severity": "warning"
+              },
+              {
+                "at": "transport.keep_alive",
+                "code": "keep_alive_not_suppressed",
+                "face": "radio",
+                "severity": "warning"
               }
             ],
             "frames": [
@@ -5573,6 +5645,12 @@
               {
                 "at": "probe.v1/stream/setpoint",
                 "code": "timed_downsampled",
+                "face": "sat",
+                "severity": "warning"
+              },
+              {
+                "at": "transport.keep_alive",
+                "code": "keep_alive_not_suppressed",
                 "face": "sat",
                 "severity": "warning"
               }
@@ -9137,6 +9215,28 @@
         "local",
         "radio-a"
       ]
+    },
+    {
+      "contracts": [
+        "spec/profiles/link/conformance/contracts/probe.v1.toml"
+      ],
+      "expect": {
+        "refused": [
+          {
+            "at": "probe.v1/stream/frames/link",
+            "code": "keyframe_unreachable",
+            "face": "radio",
+            "severity": "error"
+          }
+        ]
+      },
+      "implements": {
+        "probe-a": [
+          "probe.v1"
+        ]
+      },
+      "note": "case 5's face with `frames/link` every 45 s (\u00a72.16): below the 60-s keep-alive interval, so each frame comes before a keep-alive falls due and the plan warns no `keep_alive_not_suppressed`; at the interval itself, case 5, it does",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"probe-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nhorizon_s        = 300\nframes           = { \"probe.v1/frames/link\" = { every_s = 45, keyframe_s = 900 } }\n"
     }
   ],
   "description": "link.v2's plan (v2.md \u00a72.3, \u00a72.4, \u00a72.7, \u00a72.8, \u00a72.11, \u00a72.12, \u00a72.16, \u00a72.17, \u00a72.18). Each case is a face policy, `policy`, and a deployment as link.v1's plan.json writes it (`implements`, `contracts` loaded from the repository's root, or `interfaces` inline). `expect` is `{refused}`, the findings that refuse it (a policy's linter's, warnings included, or a deployment's errors alone, link.v1 \u00a72.3), or the plan: `binding`, `catalog` (null when the policy names none), `transport` (null for a link.v1 policy) and `faces`, each face as link.v1's plan.json writes it with `reply_timeout_ms` for a link.v2 face. A face's plan carries `frames` for a link.v2 face with `frames`: each listed frame that crosses, `{resource, every_s, keyframe_s}`, and none for an empty `frames` (\u00a72.3). A case's own `catalog`, where it gives one, is the core \u00a78.6 catalog the far side holds (\u00a72.18); an inline revision has no fingerprint, so a case about the catalog loads contracts. An inline resource may state `type`, its type's kind: `packed` is packed, and any other or none is not (\u00a72.17). `narrow` names principals: `expect.narrowed` gives, for each, the link protocols a subject bound to it is selected by (link.v1 \u00a72.4 over the binding's list), null when no face excludes any. A device face (\u00a72.5) names its devices by address: `implements` maps a listed service's name, or a device's `<system>/<service>`, to its interfaces, and its plan's `attach` is `{shape: \"device\", devices}`. An inline interface may state `uses`, which a device's `presence_required` reads for `redundancy.v1`, and an inline resource `epoch`, the parameter its template declares as its epoch (`epoch_on_device`). The device cases, from case 22, were written by reading the text, not derived by the reference. A link.v2 face's `windows` is \u00a72.11's floor: each listed service that owns a state or @state resource whose deletes only a tombstone proves, a per-key resource (core \u00a74.2) or a template whose first chunk is a parameter, read from its revisions' kinds, templates, resolved annotations and `uses`. A device's address is its window's `service`, as it is a listed service's. An inline revision uses what its `uses` lists, and none where it states none."

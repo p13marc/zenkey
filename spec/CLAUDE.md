@@ -536,6 +536,16 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   counter series reads its run as epoch, `telemetry.v2`), §2.16's
   `block_over_batch` and `keep_alive_not_suppressed`, and §2.18's
   `catalog_missing` (a crossing revision the far side's catalog lacks).
+  Text 0.17 (#1108) restates §2.16's "Data
+  spares the keep-alives" as zenoh 1.10.1's timer counts it (an
+  interval from the last batch sent or keep-alive, nothing received
+  counting): ⌈C/I⌉ − 1 keep-alives a gap, and at a whole multiple the
+  last races the next batch, so a cadence equal to the interval spares
+  only on-time batches' keep-alives, and `keep_alive_not_suppressed`
+  warns there too (cadence × `keep_alive` ≥ `lease_ms`, `v2/plan.json`'s
+  case 44 the 45-s side); Appendix B's "Keep-alives beside
+  frames" holds the file and lines and the SF7 and RF measurements, and
+  `scenarios-v2.md` §5 runs it at a 250-ms interval.
   `conformance/contracts/probe.v1.toml` (with `probe.json`) is the
   contract of `v2/plan.json`'s cases and `scenarios-v2.md` §2. A code
   keeps one severity, so the memo's one `not_packed` is two codes.

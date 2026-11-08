@@ -6,6 +6,14 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a face whose cadence is its keep-alive interval (#1108)
+
+`link.v2` 0.17 §2.16.
+
+| Before | Now | Notes |
+|---|---|---|
+| `acl gen --face-policy`, `check face`: `keep_alive_not_suppressed` for a face whose shortest crossing cadence is above the keep-alive interval | also for one whose cadence is the interval itself, and its message says "the keep-alive interval or above it" | zenoh counts each keep-alive interval from the last batch sent, so at the interval each keep-alive races a batch: zenoh-modem's RF, SF9, SF12 and SBD faces draw it now |
+
 ## Unreleased (`main`, zk2) — the far end opens a face bound by a user name (#1107)
 
 `link.v2` 0.15 §2.1, §2.5, §2.18.

@@ -3113,6 +3113,98 @@ async fn v2_s4_the_far_end_opens_a_face_bound_by_a_user_name() {
     assert_eq!(r.seen.puts(oper), 0, "nothing crosses a link N opened");
 }
 
+/// N's uplink keep-alives between the first and the last of `offsets.len()`
+/// puts crossing the face to F through R, the k-th put due `cadence` × k
+/// after the first and sent `offsets[k]` ms late.
+async fn keep_alives_beside(o: &Owner, r: &Relay, cadence: Duration, offsets: &[u64]) -> usize {
+    let start = tokio::time::Instant::now() + cadence;
+    let mut from = Instant::now();
+    for (k, late) in offsets.iter().enumerate() {
+        let due = start + cadence * u32::try_from(k).unwrap() + Duration::from_millis(*late);
+        tokio::time::sleep_until(due).await;
+        o.put("state/oper", "up").await;
+        if k == 0 {
+            // Past the first put's own crossing, and short of any keep-alive
+            // it defers.
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            from = Instant::now();
+        }
+    }
+    // Past the last put's own crossing.
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    r.log.lock().unwrap().keep_alives(1, from, Instant::now())
+}
+
+/// link.v2 scenarios §5: a batch an end sends defers its next keep-alive
+/// to one interval after the batch, and a keep-alive defers nothing, so
+/// between two batches a cadence C apart an end sends ⌈C/I⌉ − 1
+/// keep-alives at an interval I; where C is a whole multiple of I, the
+/// last of them falls due when the next batch does, and goes first when
+/// that batch is later on its schedule than the one before (link.v2
+/// §2.16; zenoh 1.10.1's `TimeoutTracker`, #1108).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn v2_s5_data_spares_the_keep_alives() {
+    // N's lease 1 s with 4 keep-alives: a keep-alive every 250 ms.
+    let policy = V2_POLICY.replace("lease_ms             = 2000", "lease_ms             = 1000");
+    assert_ne!(policy, V2_POLICY);
+    let block = acl_plan_json5(&plan(&policy));
+    let (n, tcp, sock, dict) = stamping_near(&block, "v2-s4-n").await;
+    let r = relay(sock.clone()).await;
+    let f = client(&format!("unixsock-stream/{}", r.path.display()), "ground").await;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let _sub = f
+        .declare_subscriber("zk2/lab/radio-a/radio.v1/state/oper")
+        .callback(move |_: zenoh::sample::Sample| {
+            let _ = tx.send(());
+        })
+        .await
+        .unwrap();
+    let o = owner(&tcp, "radio-a").await;
+    let owner_ref = &o;
+    eventually("F receives the owner's oper across the face", || {
+        let done = rx.try_recv().is_ok();
+        async move {
+            if !done {
+                owner_ref.put("state/oper", "up").await;
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            done
+        }
+    })
+    .await;
+    let ms = Duration::from_millis;
+    let on_time = [0; 17];
+    // Each put late by 0, 30 or 60 ms, never as late as the one before:
+    // 8 of the 16 later than the one before.
+    let late = [0, 60, 30, 0, 30, 60, 0, 60, 30, 60, 0, 30, 0, 60, 30, 0, 60];
+    let later = late.windows(2).filter(|w| w[1] > w[0]).count();
+    assert_eq!(later, 8);
+
+    // 1. Half the interval apart: no keep-alive.
+    let half = keep_alives_beside(&o, &r, ms(125), &on_time).await;
+    // 2. One and a half intervals apart: one between two puts.
+    let one_half = keep_alives_beside(&o, &r, ms(375), &on_time).await;
+    // 3. Two intervals apart, each put late on its schedule as `late`
+    //    says: one between two puts, and one more before each later one.
+    let two = keep_alives_beside(&o, &r, ms(500), &late).await;
+    // 4. One interval apart, the same: one before each later put alone.
+    let one = keep_alives_beside(&o, &r, ms(250), &late).await;
+    eprintln!(
+        "§5: 16 gaps: {half} at 125 ms, {one_half} at 375 ms, {two} at 500 ms, \
+         {one} at 250 ms; {later} puts later than the one before"
+    );
+    drop((o, f, n, r));
+    let _ = std::fs::remove_file(&dict);
+    let _ = std::fs::remove_file(&sock);
+    assert!(half <= 1, "under the interval, none: {half}");
+    assert!(one_half.abs_diff(16) <= 1, "one a gap: {one_half}");
+    assert!(
+        two.abs_diff(16 + later) <= 1,
+        "one a gap, and the race: {two}"
+    );
+    assert!(one.abs_diff(later) <= 1, "the race alone: {one}");
+}
+
 /// link.v2 scenarios §2's deployment: `lab/probe-a` implements `probe.v1`,
 /// and the console, run by `local` and `ground`, binds every stream, state
 /// and event of it.

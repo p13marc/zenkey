@@ -360,6 +360,7 @@ rf: no_arq at arq: the medium repairs no lost frame, and zenoh repairs no lost d
 face rf: not_packed modem.v3/events/face/device_fault: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
 face rf: frame_unlisted modem.v3/stream/frames/paid: an exposed frame resource the face's frames leaves out, which no face of the policy lets cross: its owner writes it for no far side (link.v2 §2.7)
 face rf: frame_unlisted modem.v3/stream/frames/slow: an exposed frame resource the face's frames leaves out, which no face of the policy lets cross: its owner writes it for no far side (link.v2 §2.7)
+face rf: keep_alive_not_suppressed transport.keep_alive: the face's shortest crossing cadence is the keep-alive interval or above it: the uplink pays keep-alives beside its data, at the interval one before each batch later than the one before (link.v2 §2.16)
 tests/cmd/fixtures/link/router-zm-rf0.json5: face rf (far ground): 13 deny rule(s) across subject(s) ground; 0 downsampling rule(s) on its transports
 transport (link.v2 §2.19), an omitted key read at zm-1.10.2-r1's default:
     transport.lease_ms              planned 240000     runs 240000     far end 240000
