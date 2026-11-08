@@ -7,6 +7,15 @@ names where its question went, or that nothing on `main` asks it yet. No
 aliases and no shims, except where the two spellings were always one fact
 (`base` and `namespace`).
 
+## Unreleased (`main`, zk2) — `across_face` (#990 V7)
+
+No rule changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| — | `across_face: { addresses, contracts, policy, face }`: the owners read across a constrained face, no presence read, each engine rule's selector narrowed to the face's scope (the fleet's `FaceScope`: one selector per resource of the contracts in hand under each address, or what a `link.v2` face's plan lets cross) and watched in its place; with a face, the sessions run its `[transport]` and the timeout is at least its `reply_timeout_ms` | core §8.5, observer §7.5; the block's `contracts` load beside the top-level ones |
+| — | refused by `check-config` and `run`, exit 2, under `across_face`: a wildcard address, `policy` without `face` or the reverse, a policy the linter refuses or a face it does not name, a scope with nothing in it, an engine rule whose selector meets none of the scope, `instance-gone`, `liveliness-gone`, `alerts`, `alert-firing` and `doctor` rules, and the `doctor` block | each names where it was written |
+
 ## Unreleased (`main`, zk2) — the doctor's `packed-refused` and `state-unconfirmed` (#990 V5)
 
 No rule changed.

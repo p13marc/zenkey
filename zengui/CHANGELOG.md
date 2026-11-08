@@ -4,6 +4,16 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — across a constrained face (#990 V7)
+
+No rule changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| — | `--across-face SYSTEM/SERVICE`, repeatable: no presence read (no monitor, no lens feed), every key resolved through the contracts held, the pump subscribing to the face scope's selectors alone (`zenkey_fleet::FaceScope`), watched whole and unseeded, a `--selector` narrowed to them, never `zk2/**`; no subtree watch | core §8.5, observer §7.5; a wildcard address is refused at launch |
+| — | `--face-policy F --face N` (with `--across-face`): the scope is what the face's plan lets cross, every session runs the face's `[transport]`, the default `--timeout` its `reply_timeout_ms` (a flag or a context still wins), and a selector with a horizon is declared again after two horizons of silence where the face says `arq = false` | a policy the linter refuses, a `link.v1` one or a face it does not name is refused at launch |
+| the strip's scope: the preset's | across a face, "across a face" and how many selectors under which addresses, or why there is no scope | shots scene `across-face` |
+
 ## Unreleased (`main`, zk2) — two doctor checks, and a heartbeat's own key held (#990 V5)
 
 | Before | Now | Notes |

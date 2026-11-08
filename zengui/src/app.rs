@@ -460,6 +460,7 @@ pub(crate) fn test_settings() -> Settings {
         echo_lines: 100,
         history_entries: 10,
         max_keys: 1000,
+        across: None,
     }
 }
 

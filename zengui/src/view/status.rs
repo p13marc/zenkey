@@ -161,6 +161,9 @@ pub struct Status<'a> {
     /// long statement no longer pushes the contracts state and the
     /// reachability warning off screen.
     pub scope_coverage: &'a str,
+    /// Across a constrained face (#990 V7): what the face's scope is, in
+    /// place of the preset's; `None` on a deployment read through presence.
+    pub across: Option<&'a str>,
     pub keys: usize,
     /// Keys retired to stay within the table's bound.
     pub keys_evicted: u64,
@@ -216,6 +219,8 @@ impl<'a> Status<'a> {
             namespace_label: dep.namespace_label(),
             scope_label: dep.settings.scope.short(),
             scope_coverage: dep.settings.scope.label(),
+            // Across a face the pump's scope is the face's (#990 V7).
+            across: dep.across_face().then_some(dep.across_note.as_str()),
             keys: obs.keys,
             keys_evicted: obs.keys_evicted,
             keys_unwatched: obs.keys_unwatched,
@@ -420,11 +425,19 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
     let mut r = row![
         link,
         kit::muted(format!("namespace: {}", s.namespace_label)),
-        kit::muted(if s.scope_coverage.is_empty() {
-            format!("scope: {}", s.scope_label)
-        } else {
-            format!("scope: {} ({})", s.scope_label, s.scope_coverage)
-        }),
+        match s.across {
+            Some(note) => row![
+                kit::status_chip(Tone::Info, "across a face"),
+                kit::muted(note.to_owned()),
+            ]
+            .spacing(space::XS)
+            .into(),
+            None => Element::from(kit::muted(if s.scope_coverage.is_empty() {
+                format!("scope: {}", s.scope_label)
+            } else {
+                format!("scope: {} ({})", s.scope_label, s.scope_coverage)
+            })),
+        },
         keys_label(s.keys, s.keys_evicted),
         kit::muted(format!(
             "{count} samples · {} · {}",

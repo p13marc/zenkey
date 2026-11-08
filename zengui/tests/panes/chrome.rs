@@ -36,6 +36,7 @@ fn preferences_are_visible_and_a_broken_file_says_so() {
         last_known: None,
         scope_label: "all",
         scope_coverage: "",
+        across: None,
         keys: 0,
         keys_evicted: 0,
         identity: (0, 0),
@@ -508,6 +509,7 @@ fn launch_settings() -> zengui::config::Settings {
         echo_lines: 2000,
         history_entries: 200,
         max_keys: 50_000,
+        across: None,
     }
 }
 

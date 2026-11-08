@@ -100,6 +100,34 @@ pub struct Config {
     /// service at all.
     #[serde(default)]
     pub publish: PublishConfig,
+    /// The owners read across a constrained face (core §8.5, observer §7.5;
+    /// #990 V7). Absent: the deployment is read through presence, as
+    /// before. Present: no presence is read, every engine rule's selector
+    /// is narrowed to the face's scope (one selector per resource of the
+    /// contracts in hand under each address, or what the face's plan lets
+    /// cross), and a rule that reads presence or the doctor is refused.
+    pub across_face: Option<AcrossFaceConfig>,
+}
+
+/// The `across_face` block (#990 V7): which owners, which contracts, and
+/// the face they sit across.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AcrossFaceConfig {
+    /// Each owner, `SYSTEM/SERVICE`, each a plain chunk: a wildcard would
+    /// subscribe wider than the daemon reads (core §8.5).
+    pub addresses: Vec<String>,
+    /// Contracts known offline for them, beside the top-level `contracts`:
+    /// no descriptor crosses a face, so the scope and every key's revision
+    /// come from these. Relative paths are the working directory's.
+    #[serde(default)]
+    pub contracts: Vec<PathBuf>,
+    /// A `link.v2` face policy (#988 L4): with `face`, the scope is what the
+    /// face's plan lets cross, the sessions run its `[transport]`, and the
+    /// reply timeout is at least its `reply_timeout_ms`.
+    pub policy: Option<PathBuf>,
+    /// The face of `policy` the owners sit across.
+    pub face: Option<String>,
 }
 
 /// The `publish` section (#614, FL3): `false` runs no service; `true`, `{}`
@@ -609,6 +637,74 @@ pub fn parse(text: &str) -> Result<Config, json5::Error> {
     json5::from_str(text)
 }
 
+/// The `across_face` block's static half (#990 V7): at least one plain
+/// `SYSTEM/SERVICE`, `policy` and `face` together, and no rule that reads
+/// presence or the doctor, which do not cross a constrained face (core
+/// §8.5). Whether each engine rule's selector meets the face's scope is
+/// [`crate::load_checked`]'s: the scope needs the contracts loaded.
+fn check_across_face(problem: &mut impl FnMut(String, String), cfg: &Config, a: &AcrossFaceConfig) {
+    if a.addresses.is_empty() {
+        problem(
+            "across_face.addresses".into(),
+            "name at least one owner, SYSTEM/SERVICE".into(),
+        );
+    }
+    for (i, addr) in a.addresses.iter().enumerate() {
+        if let Err(e) = addr.parse::<zenkey_model::grammar::Addr>() {
+            problem(
+                format!("across_face.addresses[{i}]"),
+                format!(
+                    "{addr:?}: {e}. Name one service, SYSTEM/SERVICE, each a plain chunk: a \
+                     wildcard would subscribe wider than the daemon reads (core §8.5)"
+                ),
+            );
+        }
+    }
+    match (&a.policy, &a.face) {
+        (Some(_), None) => problem(
+            "across_face.face".into(),
+            "a policy needs the face the owners sit across".into(),
+        ),
+        (None, Some(_)) => problem(
+            "across_face.policy".into(),
+            "a face is one of a `link.v2` policy's: name the policy".into(),
+        ),
+        _ => {}
+    }
+    if cfg.doctor.is_some() {
+        problem(
+            "doctor".into(),
+            "the scheduled doctor reads presence, which does not cross a constrained face \
+             (core §8.5): drop the block, or run it on the face's own side"
+                .into(),
+        );
+    }
+    for (i, r) in cfg.rules.iter().enumerate() {
+        let reads_presence = match parse_rule(&r.rule) {
+            Ok(RuleKind::Engine(c)) => matches!(
+                c,
+                zenkey_fleet::Condition::DoctorCheck { .. }
+                    | zenkey_fleet::Condition::InstanceGone { .. }
+                    | zenkey_fleet::Condition::AlertFiring { .. }
+            ),
+            Ok(RuleKind::InstanceGone { .. })
+            | Ok(RuleKind::LivelinessGone { .. })
+            | Ok(RuleKind::Alerts { .. }) => true,
+            _ => false,
+        };
+        if reads_presence {
+            problem(
+                format!("rules[{i}].rule"),
+                format!(
+                    "{:?} reads presence or the doctor, which do not cross a constrained face \
+                     (core §8.5): drop the rule, or watch it on the face's own side",
+                    r.rule
+                ),
+            );
+        }
+    }
+}
+
 /// Everything `run` would refuse that the parser cannot: each returned
 /// problem is one reason for exit 2. Empty means the config is runnable.
 ///
@@ -652,6 +748,9 @@ pub fn check(cfg: &Config) -> Vec<ConfigProblem> {
     }
     check_discipline(&mut problem, cfg);
     check_doctor(&mut problem, cfg);
+    if let Some(a) = &cfg.across_face {
+        check_across_face(&mut problem, cfg, a);
+    }
     // The service's address, as written (#614, FL3). Whether the host can
     // mint it is [`crate::load_checked`]'s: that reads the host.
     if let Some(s) = cfg.publish.settings()

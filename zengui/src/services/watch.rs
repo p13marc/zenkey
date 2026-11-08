@@ -176,6 +176,38 @@ pub fn scope(
     )
 }
 
+/// Watch the scope across a constrained face (#990 V7; core §8.5,
+/// observer §7.5): each of `selectors`, the face scope's or narrowed to
+/// it, unseeded, declared again after two horizons of silence where the
+/// face's medium repairs no lost frame and the selector has a horizon, as
+/// zenctl's `FaceScope::watch` does.
+pub fn scope_across(
+    monitor: Arc<Monitor>,
+    scope: Arc<zenkey_fleet::FaceScope>,
+    selectors: Vec<String>,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            let redeclares = scope
+                .far()
+                .is_some_and(zenkey_model::link::FarSide::redeclares);
+            let mut ids = Vec::new();
+            for sel in &selectors {
+                let watched = match scope.horizon(sel).filter(|_| redeclares) {
+                    Some(h) => monitor.watch_across(sel, h).await,
+                    None => monitor.watch(sel).await,
+                };
+                match watched {
+                    Ok(id) => ids.push(id),
+                    Err(e) => tracing::warn!("scope watch {sel}: {e}"),
+                }
+            }
+            ids
+        },
+        |r| Message::Deployment(DeploymentMsg::ScopeWatchesStarted(r)),
+    )
+}
+
 /// Release every scope watch.
 pub fn release_scope(monitor: Arc<Monitor>, ids: Vec<WatchId>) -> Task<Message> {
     Task::perform(

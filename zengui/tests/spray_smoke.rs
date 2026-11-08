@@ -231,6 +231,7 @@ async fn the_window_reads_the_spray_through_its_presence_link_and_lens() {
         echo_lines: 100,
         history_entries: 10,
         max_keys: 1000,
+        across: None,
     };
     let (mut app, boot) =
         zengui::app::Zengui::with_prefs(settings, zengui::prefs::Prefs::default(), None);

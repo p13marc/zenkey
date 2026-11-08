@@ -51,6 +51,9 @@ pub struct BusSettings {
     pub namespace: String,
     pub transport: Transport,
     pub timeout: Duration,
+    /// The face the owners sit across (`across_face`'s `policy` and `face`,
+    /// #990 V7): every session runs its `[transport]` (#988 L4).
+    pub far: Option<zenkey_model::link::FarSide>,
 }
 
 /// The deployment namespace: `--namespace` > config > `ZENWATCH_BASE` >
@@ -133,6 +136,7 @@ pub fn resolve_with(
             scouting: scouting(cfg.scouting, stored),
         },
         timeout: timeout(cfg.timeout_s, stored),
+        far: None,
     }
 }
 
@@ -203,36 +207,54 @@ impl BusSettings {
     /// its namespace in front, the raw one's as they are.
     pub async fn sessions(&self, watches: Watches) -> Result<Sessions> {
         let t = &self.transport;
-        let raw = spend(
-            zenkey_fleet::open_reporting(t.file.as_deref(), &t.connect, &t.listen, t.scouting)
-                .await,
-        )?;
+        let (file, connect, listen) = (t.file.as_deref(), &t.connect, &t.listen);
+        let raw = spend(match &self.far {
+            Some(far) => {
+                zenkey_fleet::open_reporting_across(far, file, connect, listen, t.scouting).await
+            }
+            None => zenkey_fleet::open_reporting(file, connect, listen, t.scouting).await,
+        })?;
         let namespaced = || async {
-            spend(
-                zenkey_fleet::open_in_namespace(
-                    &self.namespace,
-                    t.file.as_deref(),
-                    &t.connect,
-                    &t.listen,
-                    t.scouting,
-                )
-                .await,
-            )
+            spend(match &self.far {
+                Some(far) => {
+                    zenkey_fleet::open_in_namespace_across(
+                        far,
+                        &self.namespace,
+                        file,
+                        connect,
+                        listen,
+                        t.scouting,
+                    )
+                    .await
+                }
+                None => {
+                    zenkey_fleet::open_in_namespace(
+                        &self.namespace,
+                        file,
+                        connect,
+                        listen,
+                        t.scouting,
+                    )
+                    .await
+                }
+            })
         };
         let session = namespaced().await?;
         let watch_for = |namespace: &'_ str| {
             let namespace = namespace.to_owned();
             async move {
-                spend(
-                    zenkey_fleet::open_watch(
-                        &namespace,
-                        t.file.as_deref(),
-                        &t.connect,
-                        &t.listen,
-                        t.scouting,
-                    )
-                    .await,
-                )
+                spend(match &self.far {
+                    Some(far) => {
+                        zenkey_fleet::open_watch_across(
+                            far, &namespace, file, connect, listen, t.scouting,
+                        )
+                        .await
+                    }
+                    None => {
+                        zenkey_fleet::open_watch(&namespace, file, connect, listen, t.scouting)
+                            .await
+                    }
+                })
             }
         };
         let watch = match watches.namespaced {

@@ -128,6 +128,7 @@ fn the_strip_reports_replay_over_the_link() {
         last_known: None,
         scope_label: "all",
         scope_coverage: "",
+        across: None,
         keys: 3,
         keys_evicted: 0,
         identity: (0, 0),

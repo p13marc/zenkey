@@ -339,7 +339,9 @@ pub(crate) fn update(
         BusMsg::MonitorStarted(Ok(monitor)) => {
             obs.monitor = Some(Arc::clone(&monitor));
             obs.epoch += 1;
-            if dep.settings.eager {
+            // Across a face the scope is the face's few selectors, watched
+            // at once (#990 V7): nothing else subscribes.
+            if dep.settings.eager || dep.across_face() {
                 return super::deployment::watch_scope(dep, obs);
             }
             Task::none()
@@ -386,9 +388,36 @@ pub(crate) fn update(
                 same_revisions(&held.set, &loaded.set) && held.same_catalogs(&loaded)
             });
             dep.contracts = Some(loaded);
+            // Across a face the pump's scope is built from the contracts
+            // (#990 V7): a first load, or a load that moved them, watches
+            // it.
+            let scope_due = dep.across_face()
+                && (!unchanged || dep.face_scope.as_ref().is_some_and(|s| s.is_err()));
+            let watch_face = if scope_due {
+                use super::deployment::{FaceRewatch, face_rewatch};
+                let before = dep.face_selectors();
+                dep.refresh_face_scope();
+                let after = dep.face_selectors();
+                match face_rewatch(
+                    before.as_deref(),
+                    after.as_deref(),
+                    !obs.scope_watches.is_empty(),
+                ) {
+                    FaceRewatch::Keep => Task::none(),
+                    FaceRewatch::Watch => super::deployment::watch_scope(dep, obs),
+                    // The scope moved: its old watches go, its new ones come.
+                    FaceRewatch::Rewatch => {
+                        let release = super::deployment::unwatch_scope(obs);
+                        let acquire = super::deployment::watch_scope(dep, obs);
+                        Task::batch([release, acquire])
+                    }
+                }
+            } else {
+                Task::none()
+            };
             if unchanged {
                 dep.recount_contracts();
-                return Task::none();
+                return watch_face;
             }
             dep.reseed_store();
             forget_judgements(obs, work);
@@ -397,7 +426,7 @@ pub(crate) fn update(
             // The lens feed retrieves into the store it was opened on: the
             // presence link restarts over the new one.
             restart_presence(obs);
-            Task::none()
+            watch_face
         }
         BusMsg::Link(state) => {
             obs.link = state;
@@ -640,7 +669,10 @@ pub(crate) fn start_presence(dep: &Deployment, obs: &mut Observation) -> Task<Me
         .map(services::watch::shutdown)
         .unwrap_or_else(Task::none);
     obs.presence_epoch += 1;
-    if dep.session.is_none() {
+    // Across a face no descriptor crosses, so no presence is read (core
+    // §8.5, observer §7.5; #990 V7): the lens resolves through the
+    // contracts held.
+    if dep.session.is_none() || dep.across_face() {
         return old;
     }
     Task::batch([

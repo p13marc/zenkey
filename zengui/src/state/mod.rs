@@ -141,6 +141,11 @@ mod tests {
                     // FL7: the identity cache's own generation, bumped at
                     // every door the lens's inputs move through.
                     "identity_epoch",
+                    // #990 V7: the scope across a face, built from the
+                    // contracts held and the namespace, so rebuilt when
+                    // either moves; and the strip's words for it.
+                    "face_scope",
+                    "across_note",
                 ],
             ),
             // What the bus said, and what we asked it to keep saying.
@@ -416,7 +421,8 @@ mod tests {
         // Then #819 (TD): a slot's telemetry.v1 fold of its history — 95.
         // Then #908 (MC): a slot's timing.v1 window — its owner track, the
         // key it is of, a lag and the latest tick's instant — 99. Then #983
-        // (T2): a slot's telemetry.v2 fold of its frames — 100.
-        assert_eq!(leaves, 100, "the split must place every field exactly once");
+        // (T2): a slot's telemetry.v2 fold of its frames — 100. Then #990
+        // (V7): the scope across a face and the strip's words for it — 102.
+        assert_eq!(leaves, 102, "the split must place every field exactly once");
     }
 }

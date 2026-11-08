@@ -149,3 +149,99 @@ fn the_ports_refusals_are_exit_two_through_the_shared_gate() {
     assert!(loaded.contracts.len() >= 3, "{}", loaded.contracts.len());
     assert_eq!(loaded.bus.namespace, "site");
 }
+
+/// `across_face` (#990 V7; core §8.5, observer §7.5): zenoh-modem's rf0
+/// owner across its `rf` face. An engine rule on `frames/fast` loads, its
+/// selector the scope's exact key, the timeout at least the face's 15 s
+/// reply timeout and the sessions' far side the face's; a rule whose
+/// selector meets none of the scope, one that reads presence, the
+/// scheduled doctor, a wildcard address, and a policy without its face
+/// are each refused, exit 2.
+#[test]
+fn across_a_face_a_rule_is_narrowed_to_the_faces_scope_or_refused() {
+    // SAFETY: a test-local config root nobody else reads, set once.
+    let home = tempfile::tempdir().unwrap();
+    unsafe { std::env::set_var("ZENKEY_EXPLORER_CONFIG_DIR", home.path()) };
+    let dir = tempfile::tempdir().unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let modem = root.join("examples/zk2/zenoh-modem/modem.v3.toml");
+    let policy = root.join("examples/zk2/zenoh-modem/faces/zenohd-rf0.face.toml");
+    let across = |extra: &str| {
+        format!(
+            r#"across_face: {{ addresses: ["h-3fa9c2d41b7e/rf0"], contracts: [{modem:?}]{extra} }},
+               publish: false"#
+        )
+    };
+    let face = format!(r#", policy: {policy:?}, face: "rf""#);
+    let fast = "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast";
+
+    let ok = config(
+        dir.path(),
+        "ok.json5",
+        &format!(
+            r#"{}, rules: [{{ name: "fast", rule: "rate-below {fast} 1", sinks: ["hook"] }}]"#,
+            across(&face)
+        ),
+    );
+    let loaded = zenwatch::load_checked(&ok, &DeploymentArgs::default()).expect("runnable");
+    let a = loaded.across.expect("across a face");
+    assert_eq!(a.selectors, [fast]);
+    assert_eq!(a.scope.face(), Some("rf"));
+    assert_eq!(loaded.bus.far.as_ref().map(|f| f.face.as_str()), Some("rf"));
+    assert!(
+        loaded.bus.timeout >= std::time::Duration::from_secs(15),
+        "{:?}",
+        loaded.bus.timeout
+    );
+
+    let elsewhere = config(
+        dir.path(),
+        "elsewhere.json5",
+        &format!(
+            r#"{}, rules: [{{ name: "x", rule: "rate-below zk2/lab/other/** 1", sinks: ["hook"] }}]"#,
+            across(&face)
+        ),
+    );
+    refused(&elsewhere, "reaches none of the selectors across the face");
+
+    let presence = config(
+        dir.path(),
+        "presence.json5",
+        &format!(
+            r#"{}, rules: [{{ name: "gone", rule: "instance-gone h-3fa9c2d41b7e/rf0", sinks: ["hook"] }}]"#,
+            across("")
+        ),
+    );
+    refused(&presence, "do not cross a constrained face");
+
+    let doctor = config(
+        dir.path(),
+        "doctor.json5",
+        &format!(
+            r#"{}, doctor: {{ every_h: 6, sinks: ["hook"] }},
+               rules: [{{ name: "fast", rule: "rate-below {fast} 1", sinks: ["hook"] }}]"#,
+            across("")
+        ),
+    );
+    refused(&doctor, "do not cross a constrained face");
+
+    let wildcard = config(
+        dir.path(),
+        "wildcard.json5",
+        &format!(
+            r#"across_face: {{ addresses: ["*/rf0"], contracts: [{modem:?}] }}, publish: false,
+               rules: [{{ name: "fast", rule: "rate-below {fast} 1", sinks: ["hook"] }}]"#
+        ),
+    );
+    refused(&wildcard, "SYSTEM/SERVICE");
+
+    let half = config(
+        dir.path(),
+        "half.json5",
+        &format!(
+            r#"{}, rules: [{{ name: "fast", rule: "rate-below {fast} 1", sinks: ["hook"] }}]"#,
+            across(&format!(", policy: {policy:?}"))
+        ),
+    );
+    refused(&half, "a policy needs the face");
+}

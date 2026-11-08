@@ -378,6 +378,38 @@ pub(crate) fn watch_scope(dep: &Deployment, obs: &Observation) -> Task<Message> 
     let Some(monitor) = obs.monitor.clone() else {
         return Task::none();
     };
+    // Across a face (#990 V7; core §8.5, observer §7.5): the face's scope,
+    // a custom scope's selectors narrowed to it, never `zk2/**`, and no
+    // seed, since its GET would reach wider than the scope.
+    if dep.across_face() {
+        let Some(Ok(scope)) = &dep.face_scope else {
+            return Task::none();
+        };
+        let selectors = if dep.settings.scope == crate::scope::ScopePreset::Custom {
+            match scope.narrow(&dep.settings.selectors) {
+                Ok(n) => {
+                    for unmet in &n.unmet {
+                        tracing::warn!(
+                            "--selector {unmet} meets none of the selectors across the face: \
+                             not watched (observer §7.5)"
+                        );
+                    }
+                    n.selectors
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "{}: not a key expression ({}): nothing watched across the face",
+                        e.selector,
+                        e.error
+                    );
+                    Vec::new()
+                }
+            }
+        } else {
+            scope.selectors().to_vec()
+        };
+        return services::watch::scope_across(monitor, std::sync::Arc::clone(scope), selectors);
+    }
     let selectors = dep
         .settings
         .scope
@@ -391,7 +423,7 @@ pub(crate) fn watch_scope(dep: &Deployment, obs: &Observation) -> Task<Message> 
     services::watch::scope(monitor, selectors, policy, dep.store.clone())
 }
 
-fn unwatch_scope(obs: &mut Observation) -> Task<Message> {
+pub(crate) fn unwatch_scope(obs: &mut Observation) -> Task<Message> {
     let Some(monitor) = obs.monitor.clone() else {
         return Task::none();
     };
@@ -400,4 +432,56 @@ fn unwatch_scope(obs: &mut Observation) -> Task<Message> {
         obs.seeding.remove(id);
     }
     services::watch::release_scope(monitor, ids)
+}
+
+/// What a contracts load does to the pump's watches across a face (#990
+/// V7), from the face scope's selectors before and after it rebuilt and
+/// whether scope watches are held: none held and a scope stands, watch it;
+/// held and the selectors moved, release them and watch again (none, when
+/// no scope stands); otherwise keep them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FaceRewatch {
+    Keep,
+    Watch,
+    Rewatch,
+}
+
+pub(crate) fn face_rewatch(
+    before: Option<&[String]>,
+    after: Option<&[String]>,
+    watching: bool,
+) -> FaceRewatch {
+    match (watching, after) {
+        (false, Some(_)) => FaceRewatch::Watch,
+        (false, None) => FaceRewatch::Keep,
+        (true, _) if before == after => FaceRewatch::Keep,
+        (true, _) => FaceRewatch::Rewatch,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #990 V7, review-bot on its PR: a contracts load that moves the face
+    /// scope releases the watches of the old one and watches the new, and
+    /// one that leaves it alone keeps them.
+    #[test]
+    fn a_moved_face_scope_is_watched_again() {
+        let a = vec!["zk2/x/y/m.v1/stream/a".to_owned()];
+        let b = vec![
+            "zk2/x/y/m.v1/stream/a".to_owned(),
+            "zk2/x/y/m.v1/stream/b".to_owned(),
+        ];
+        assert_eq!(face_rewatch(None, Some(&a), false), FaceRewatch::Watch);
+        assert_eq!(face_rewatch(Some(&a), Some(&a), false), FaceRewatch::Watch);
+        assert_eq!(face_rewatch(None, None, false), FaceRewatch::Keep);
+        assert_eq!(face_rewatch(Some(&a), Some(&a), true), FaceRewatch::Keep);
+        assert_eq!(face_rewatch(Some(&a), Some(&b), true), FaceRewatch::Rewatch);
+        assert_eq!(
+            face_rewatch(Some(&a), None, true),
+            FaceRewatch::Rewatch,
+            "a scope gone: its watches released, nothing watched"
+        );
+    }
 }
