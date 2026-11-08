@@ -148,7 +148,12 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   presence read as the capture begins with each descriptor's `named`
   catalog, or across a face the contracts in hand, no `named`; and
   `bundles`, base64, `--no-bundles` leaving them out; `record --on`'s
-  header names no revision yet; 1 to 3 still read), `echo --from FILE`
+  header states them too, read as it arms (`Triggered::served`,
+  `TriggerSpec::served`), and its preamble keeps a snapshot's pages as
+  they arrived, which `replay --seed-state` writes as their entries (each
+  live entry its mutation with its stamp, each tombstone a delete with its
+  envelope; a replayed delete keeps its attachment, #990 V8); 1 to 3
+  still read), `echo --from FILE`
   prints one through the offline lens with no session (the header in
   presence's place, `zenkey_fleet::model::recorded`; `--catalog` the
   header's or a successor, else exit 2, `unknown_catalog` or
@@ -209,7 +214,18 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   where `arq = false`, in `echo`, `rate`, `record`, `timeline`; `check
   conform` and `alarms` take `--face-policy` for the routers' lease and
   `wait_before_close` (`zk2::routers`; `--lease`/`--wait-before-close` are
-  `Option` now, #1011's item 3); #980 C1c: `--catalog
+  `Option` now, #1011's item 3); #990 V8: `get state`, `watch` and `call`
+  take `cli::OwnerFaceArgs` (`--across-face`, the revision `--contracts`
+  holds, never presence, `zk2::held_across` refusing one it does not
+  name, exit 2; `--face-policy F --face N`, `zk2::across` →
+  `Deployment::across`, `call`'s contract `timeout_ms` floored at the
+  face's, `watch` through `zenkey_fleet::watch_resource_across`, the
+  runtime's `Consumer::across`), and `telemetry --across-face` the face
+  pair beside it; #1087: `health --catalog` and `alarms --catalog`
+  (`HealthSpec::catalogs`, `AlarmSpec::catalogs`) and `check conform`'s
+  `--catalog` (`run_conform`'s `catalogs`) date a snapshot's
+  confirmations under the catalog each owner's descriptor names, and
+  `get state`'s dates name the catalog (`Catalogs::dating`); #980 C1c: `--catalog
   PATH` in `ContractArgs`, beside `--contracts`, loaded by
   `cmd::zk2::load_catalogs`, the lens's `.catalogs()` in `echo`, `get`,
   `rate`, `field` and `snapshot`, `get state` and `watch` under the

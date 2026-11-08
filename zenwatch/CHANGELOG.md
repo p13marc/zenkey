@@ -7,6 +7,12 @@ names where its question went, or that nothing on `main` asks it yet. No
 aliases and no shims, except where the two spellings were always one fact
 (`base` and `namespace`).
 
+## Unreleased (`main`, zk2) — `alerts` rules read the deployment catalog (#1087)
+
+| Before | Now | Notes |
+|---|---|---|
+| `alerts` readers: no catalog, so a GET's confirmations went undated for an owner whose descriptor names one | the top-level `catalog`: each confirmation dated under the catalog the owner's descriptor names | zenwatch has no `health` rule, and its scheduled doctor read the catalog already; the watchdog vocabulary's `alert-firing` holds none yet |
+
 ## Unreleased (`main`, zk2) — a GET's alarm attributed by its snapshot's run (zk2py rounds 105, 106)
 
 | Before | Now | Notes |

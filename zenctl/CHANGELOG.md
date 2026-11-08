@@ -6,6 +6,22 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — the catalog and the face everywhere (#1087, #990 V4's follow-ups, V8)
+
+No rule changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| `health`, `alarms`: no catalog, so a snapshot's confirmations went undated for an owner whose descriptor names one (every zenoh-modem owner's) | `--catalog PATH`, repeatable: each confirmation dated under the epoch of the catalog the owner's descriptor names, read through these | a file that is not a catalog is refused, exit 2; without one, as before |
+| `check conform --catalog`: read for packed `time` fields alone | also dates the alarms, health and config GETs' confirmations (#1087) | |
+| `record --on`'s header: no revisions, no bundles | its `revisions` and `bundles`, read as it arms, as plain `record`'s (one presence read, or across a face the contracts in hand; `--no-bundles` leaves the bundles out) | `.zrec` version 4 |
+| `record --on`'s preamble: a snapshot's entries, one row per member | each page as it arrived, a row on its snapshot key under `zenoh/bytes`, kept once; a per-key reply as before | the entries carry their stamps, which order them against the pre-roll |
+| `replay --seed-state`: a preamble row one put | a page row as its entries: each live entry a put of the mutation it stands for, its stamp in band, and each tombstone a delete carrying its envelope, on its member's key; each counted in `preamble_seeded` | a delete still needs `--i-know` |
+| `replay`: a recorded delete published with no attachment | with its attachment: a zk2 delete's envelope, so its stamp rides | |
+| `get state`'s dates (O8): the epoch alone | name the catalog too (`dated.catalog`) | `--catalog`'s, the deployment's word |
+| — | `get state`, `watch`, `call`: `--across-face` (the owner's revision the one `--contracts` holds, never read from presence; exit 2 when it holds none the revision names) and `--face-policy F --face N` (requires `--across-face`): the session runs the face's `[transport]`, the default `--timeout` is its `reply_timeout_ms`, a floor under `call`'s contract `timeout_ms`, and `watch` declares each subscriber again after two horizons of silence where the face says `arq = false` | as `echo`, `record` and the other across-face verbs (#988 L4) |
+| `telemetry --across-face` | also `--face-policy F --face N`, its transport and timeout | |
+
 ## Unreleased (`main`, zk2) — an event keyed by its run and seq, and the ULID refused (#980 C2c, C2d)
 
 Core 0.103: an owner keys each occurrence by the run and the seq it took,

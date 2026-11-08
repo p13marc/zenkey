@@ -33,7 +33,8 @@ Claude Code loads this file when working in `zenwatch/`; the root `CLAUDE.md` is
   `dropped`) plus three of its own: `instance-gone <SYSTEM/SERVICE>`
   (either position `*`), `liveliness-gone <SEL>` and `alerts <SEL>` (#800
   AD, `alarms.rs`: the fleet's `AlarmFeed` per distinct base-relative
-  selector on the namespaced session; one state per alarm key, firing on
+  selector on the namespaced session, its GET's confirmations dated
+  under the top-level `catalog`, `AlarmRules::open`'s `catalogs`, #1087; one state per alarm key, firing on
   §5's first answer yes, ok on no, unobservable otherwise, never ok; an
   escalation notifies, a refresh or confirmation does not; an answer that
   is only the reader's sight leaves the key at its last word, a loss is

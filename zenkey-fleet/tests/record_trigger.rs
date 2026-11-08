@@ -38,6 +38,8 @@ use util::zk2::{client, config, example, iface, router};
 const HEALTH: &str = "zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0";
 const CONFIG: &str = "zk2/host-a/tc/tc.netif.v1/state/namespaces";
 const SELECTOR: &str = "zk2/host-a/tc/tc.netif.v1/state/**";
+/// The snapshot key of `interfaces/{ns}/{iface}`: its pages arrive on it.
+const INTERFACES: &str = "zk2/host-a/tc/tc.netif.v1/state/interfaces";
 
 /// A byte sink the test can read back; the sink owns its writer on the
 /// blocking pool (#332), so the bytes are shared rather than handed back.
@@ -79,7 +81,23 @@ fn spec(rule: &str, semantics: Option<PreambleSemantics>, give_up: Duration) -> 
         max_samples: None,
         max_replies: zenkey_fleet::DEFAULT_MAX_REPLIES,
         across_face: false,
+        served: None,
     }
+}
+
+/// A header stating `rev` at `host-a/tc` as what served the capture's
+/// scope, its bundle beside it (`.zrec` version 4).
+fn served_by(rev: &Revision) -> zenkey_fleet::ZrecHeader {
+    zenkey_fleet::ZrecHeader::capture(vec![SELECTOR.into()], "").served_by(
+        None,
+        vec![zenkey_fleet::report::ZrecRevision {
+            address: "host-a/tc".into(),
+            iface: rev.iface().to_string(),
+            fingerprint: rev.fingerprint().to_string(),
+            named: Some(None),
+        }],
+        Some(vec![(rev.fingerprint().clone(), rev.bundle().to_bytes())]),
+    )
 }
 
 /// The pre-roll [`capture`] asks for (#766): far wider than its burst, so
@@ -149,6 +167,7 @@ async fn capture(semantics: PreambleSemantics) -> (zenkey_fleet::RecordReport, V
 
     let (fired_tx, mut fired_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
     let buf = SharedBuf::default();
+    let served = Revision::from_contract(example("tcgui/tc.netif.v1"), ContractSource::File);
     let mut recorder = tokio::spawn({
         let buf = buf.clone();
         async move {
@@ -162,6 +181,9 @@ async fn capture(semantics: PreambleSemantics) -> (zenkey_fleet::RecordReport, V
                     pre: PRE_ROLL,
                     post: util::SETTLE,
                     max_samples: Some(1),
+                    // What served the scope, as `record --on` reads it
+                    // when it arms (`.zrec` version 4).
+                    served: Some(served_by(&served)),
                     ..spec(
                         &format!("silent-for {HEALTH} 0.7"),
                         Some(semantics),
@@ -225,6 +247,15 @@ async fn capture(semantics: PreambleSemantics) -> (zenkey_fleet::RecordReport, V
     let bytes = buf.0.lock().expect("buffer lock").clone();
     let mut reader = ZrecReader::new(bytes.as_slice()).expect("a .zrec header");
     assert_eq!(reader.header().zrec, 4, "the file is version 4");
+    // The header carries what served the scope, as plain `record`'s does
+    // (#990 V4's follow-up).
+    let header = reader.header();
+    assert_eq!(
+        header.revisions.as_ref().map(Vec::len),
+        Some(1),
+        "the revision that served the scope: {header:?}"
+    );
+    assert_eq!(header.bundles.as_ref().map(Vec::len), Some(1), "its bundle");
     let mut lines = Vec::new();
     while let Some(item) = reader.next() {
         lines.push(match item.expect("a well-formed line") {
@@ -242,7 +273,8 @@ async fn capture(semantics: PreambleSemantics) -> (zenkey_fleet::RecordReport, V
 
 /// The acceptance case: one file, in order — header (version 4, the
 /// preamble and what the selectors exclude stated) → preamble row (the
-/// held key, `t: 0`) → pre-roll rows (the spoken key, ascending `t`, none
+/// held key's snapshot page, `t: 0`; the spoken key's page left out, every
+/// member it lists in the ring) → pre-roll rows (the spoken key, ascending `t`, none
 /// marked preamble) → the trigger record (`silent-for`, to `firing`) → the
 /// post-roll row.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -330,7 +362,8 @@ async fn a_condition_firing_writes_preamble_pre_trigger_and_post_in_one_file() {
 }
 
 /// `full` semantics keep every fetched key — the spoken one too, though the
-/// ring already holds its story.
+/// ring already holds its story, in the page of its collection's snapshot
+/// as it arrived, on the snapshot's key (`.zrec` version 4, #990 V8).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn full_semantics_keep_every_fetched_key() {
     let (report, lines) = capture(PreambleSemantics::Full).await;
@@ -345,7 +378,7 @@ async fn full_semantics_keep_every_fetched_key() {
         })
         .collect();
     keys.sort_unstable();
-    assert_eq!(keys, vec![HEALTH, CONFIG]);
+    assert_eq!(keys, vec![INTERFACES, CONFIG]);
 }
 
 /// Nothing fires within `give_up`: no file, no trigger, and a report that

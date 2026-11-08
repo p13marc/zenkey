@@ -1057,6 +1057,7 @@ impl World {
                     grace: Duration::from_secs(1),
                     clocks_synced: false,
                     face: None,
+                    catalogs: Default::default(),
                 },
                 presence: Some(Ok(self.observed.clone())),
                 first: Ok(got.clone()),

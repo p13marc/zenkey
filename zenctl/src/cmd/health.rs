@@ -42,9 +42,14 @@ pub async fn run(cli: HealthArgs) -> Result<()> {
         for_secs,
         grace,
         across_face,
+        catalog,
         ns,
     } = cli;
     let dep = ASKING.ask(Deployment::resolve(&ns));
+    let catalogs = ASKING.ask(super::zk2::load_catalogs(&crate::cli::ContractArgs {
+        contracts: Vec::new(),
+        catalog,
+    }));
     let grace = ASKING.ask(super::positive_secs("--grace", grace));
     let window = match for_secs {
         Some(s) => Some(ASKING.ask(super::positive_secs("--for", s))),
@@ -59,6 +64,7 @@ pub async fn run(cli: HealthArgs) -> Result<()> {
         face: across_face.map(|f| AcrossFace {
             status_crosses: f == FaceStatus::Crosses,
         }),
+        catalogs,
     };
     let target = address.map_or(HealthTarget::All, HealthTarget::One);
     let session = ASKING.ask(dep.session().await);

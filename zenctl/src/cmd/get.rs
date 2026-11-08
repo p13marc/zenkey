@@ -359,10 +359,20 @@ fn value_row(a: &FleetAnswer, line: &Line) -> serde_json::Value {
 pub async fn state(cli: crate::cli::StateGetArgs) -> Result<()> {
     use crate::cmd::zk2;
     let dep = crate::bus::Deployment::resolve(&cli.ns)?;
+    // #990 V8: across a face's policy, the face's transport and timeout.
+    let dep = zk2::across(
+        dep,
+        cli.face.face_policy.as_deref(),
+        cli.face.face.as_deref(),
+    )?;
     let contracts = zk2::load_contracts(&cli.contracts)?;
+    if cli.face.across_face {
+        zk2::held_across(&contracts, &cli.target)?;
+    }
     // Core §8.6: no descriptor is read here, so the catalogs given are the
-    // deployment's word for the epoch a packed `time` field counts from.
-    let epoch = zk2::load_catalogs(&cli.contracts)?.epoch(zenkey_fleet::CatalogStated::Unread);
+    // deployment's word for the epoch a packed `time` field counts from,
+    // and the catalog each date names (O8).
+    let epoch = zk2::load_catalogs(&cli.contracts)?.dating(zenkey_fleet::CatalogStated::Unread);
     let target = zenkey_fleet::ResolvedTarget::parse(&cli.address.to_string())?;
     let values = zk2::bindings(&cli.params);
     let mut session = None;

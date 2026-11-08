@@ -434,6 +434,7 @@ mod tests {
             grace: Duration::from_secs(2),
             clocks_synced: synced,
             face: None,
+            catalogs: Default::default(),
         }
     }
 

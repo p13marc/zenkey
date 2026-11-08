@@ -48,6 +48,12 @@ Options:
           
           [default: 0.25]
 
+      --face-policy <FILE>
+          With --face, the `link.v2` face policy the owner sits across (#990 V8, as #988 L4's verbs): the session runs the face's `[transport]` (`link.v2` §2.16), a key the --zenoh-config file states winning, and the default --timeout is the face's `reply_timeout_ms` (core §8.1). A `link.v1` policy states none of that and is refused, exit 2
+
+      --face <NAME>
+          The face of --face-policy, by its name (`[face.<name>]`)
+
       --contracts <PATH>
           Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
           

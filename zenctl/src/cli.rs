@@ -216,6 +216,31 @@ pub(crate) struct AcrossFaceArgs {
     pub(crate) face: Option<String>,
 }
 
+/// The face a verb naming one owner reads across (#990 V8): `get state`,
+/// `watch` and `call`.
+#[derive(clap::Args, Clone, Default)]
+pub(crate) struct OwnerFaceArgs {
+    /// The owner sits across a constrained face (core §8.5), where presence
+    /// and descriptors do not cross: its revision is the one --contracts
+    /// holds, the deployment's word, never read from presence (exit 2 when
+    /// --contracts holds none that the revision names).
+    #[arg(long = "across-face")]
+    pub(crate) across_face: bool,
+    /// With --face, the `link.v2` face policy the owner sits across (#990
+    /// V8, as #988 L4's verbs): the session runs the face's `[transport]`
+    /// (`link.v2` §2.16), a key the --zenoh-config file states winning;
+    /// the default --timeout is the face's `reply_timeout_ms`, and `call`'s
+    /// a floor under its contract's `timeout_ms` (core §8.1); and `watch`
+    /// declares each subscriber again after two horizons of silence where
+    /// the face says `arq = false`. A `link.v1` policy states none of that
+    /// and is refused, exit 2.
+    #[arg(long = "face-policy", value_name = "FILE", requires_all = ["across_face", "face"])]
+    pub(crate) face_policy: Option<PathBuf>,
+    /// The face of --face-policy, by its name (`[face.<name>]`).
+    #[arg(long = "face", value_name = "NAME", requires = "face_policy")]
+    pub(crate) face: Option<String>,
+}
+
 #[derive(Parser)]
 #[command(
     name = "zenctl",
@@ -2625,6 +2650,8 @@ pub(crate) struct StateGetArgs {
     #[arg(long, value_name = "ARCHIVE", value_parser = addr_arg)]
     pub(crate) last_known: Option<zenkey_model::grammar::Addr>,
     #[command(flatten)]
+    pub(crate) face: OwnerFaceArgs,
+    #[command(flatten)]
     pub(crate) contracts: ContractArgs,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
@@ -2662,6 +2689,8 @@ pub(crate) struct CallArgs {
     #[arg(long, value_name = "N", default_value_t = 0)]
     pub(crate) retries: u32,
     #[command(flatten)]
+    pub(crate) face: OwnerFaceArgs,
+    #[command(flatten)]
     pub(crate) contracts: ContractArgs,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
@@ -2690,6 +2719,8 @@ pub(crate) struct WatchArgs {
     /// Stop after this many samples (default: until interrupted).
     #[arg(long, value_name = "N")]
     pub(crate) count: Option<u64>,
+    #[command(flatten)]
+    pub(crate) face: OwnerFaceArgs,
     #[command(flatten)]
     pub(crate) contracts: ContractArgs,
     #[command(flatten)]
@@ -3676,6 +3707,14 @@ pub(crate) struct HealthArgs {
     /// unobservable, never unhealthy or down (health.v1 §2.8).
     #[arg(long, value_enum, value_name = "STATUS", requires = "address")]
     pub(crate) across_face: Option<FaceStatus>,
+    /// The deployment catalog (core §8.6), repeatable: a `zk2-catalog/1`
+    /// file the deployment provisions. A snapshot's confirmations are dated
+    /// under the epoch of the catalog an owner's descriptor names, read
+    /// through these; without one, an owner naming a catalog leaves them
+    /// undated, so its members read unconfirmed by time. A file that is not
+    /// a catalog is refused (exit 2).
+    #[arg(long = "catalog", value_name = "PATH")]
+    pub(crate) catalog: Vec<PathBuf>,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
 }
@@ -3743,6 +3782,14 @@ pub(crate) struct AlarmsArgs {
     /// (alarms.v1 §2.11).
     #[arg(long, value_enum, value_name = "GRANT")]
     pub(crate) across_face: Option<FaceGrant>,
+    /// The deployment catalog (core §8.6), repeatable: a `zk2-catalog/1`
+    /// file the deployment provisions. A snapshot's confirmations are dated
+    /// under the epoch of the catalog an owner's descriptor names, read
+    /// through these; without one, an owner naming a catalog leaves them
+    /// undated, so its members read unconfirmed by time. A file that is not
+    /// a catalog is refused (exit 2).
+    #[arg(long = "catalog", value_name = "PATH")]
+    pub(crate) catalog: Vec<PathBuf>,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
 }
@@ -3906,6 +3953,16 @@ pub(crate) struct TelemetryArgs {
     #[arg(long, value_name = "SECS",
           default_value_t = zenkey_fleet::TELEMETRY_DEFAULT_SETTLE.as_secs_f64())]
     pub(crate) settle: f64,
+    /// With --face, the `link.v2` face policy the owner sits across (#990
+    /// V8, as #988 L4's verbs): the session runs the face's `[transport]`
+    /// (`link.v2` §2.16), a key the --zenoh-config file states winning, and
+    /// the default --timeout is the face's `reply_timeout_ms` (core §8.1).
+    /// A `link.v1` policy states none of that and is refused, exit 2.
+    #[arg(long = "face-policy", value_name = "FILE", requires_all = ["across_face", "face"])]
+    pub(crate) face_policy: Option<PathBuf>,
+    /// The face of --face-policy, by its name (`[face.<name>]`).
+    #[arg(long = "face", value_name = "NAME", requires = "face_policy")]
+    pub(crate) face: Option<String>,
     #[command(flatten)]
     pub(crate) contracts: ContractArgs,
     #[command(flatten)]

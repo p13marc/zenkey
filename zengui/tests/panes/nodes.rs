@@ -289,6 +289,7 @@ fn health_report(clocks_synced: bool) -> zenkey_fleet::report::HealthReport {
             grace: Duration::from_secs(1),
             clocks_synced,
             face: None,
+            catalogs: Default::default(),
         },
         presence: Some(Ok(health_presence())),
         first: Ok(got.clone()),

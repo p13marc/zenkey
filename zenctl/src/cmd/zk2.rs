@@ -471,6 +471,45 @@ pub fn far_side(policy: &std::path::Path, face: &str) -> Result<zenkey_model::li
         .map_err(|e| unaskable!("--face-policy {} --face {face}: {e}", policy.display()))
 }
 
+/// `dep` read across the face `policy` names `face` of (#990 V8, as #988
+/// L4's verbs): its sessions run the face's `[transport]`, and its default
+/// timeout is the face's `reply_timeout_ms` (core §8.1). `dep` as it was
+/// without a policy. A `link.v1` policy, or a face it does not name, is
+/// refused, exit 2.
+pub fn across(
+    dep: Deployment,
+    policy: Option<&std::path::Path>,
+    face: Option<&str>,
+) -> Result<Deployment> {
+    match (policy, face) {
+        (Some(p), Some(f)) => Ok(dep.across(far_side(p, f)?)),
+        _ => Ok(dep),
+    }
+}
+
+/// Refuses, exit 2, a revision `--contracts` does not name, for a verb
+/// whose owner sits across a face (`--across-face`, #990 V8): no
+/// descriptor crosses, so presence is never read for it.
+pub fn held_across(contracts: &ContractSet, spec: &RevisionSpec) -> Result<()> {
+    let offline: BTreeSet<Fingerprint> = contracts
+        .of_iface(&spec.iface)
+        .map(|r| r.fingerprint().clone())
+        .collect();
+    match pick(spec, &offline)? {
+        Some(_) => Ok(()),
+        None => Err(unaskable!(
+            "--across-face: no descriptor crosses a face, so --contracts must hold the revision \
+             of {} to read{}",
+            spec.iface,
+            if offline.len() > 1 {
+                " (it holds several: name one with @<fingerprint>)"
+            } else {
+                ""
+            }
+        )),
+    }
+}
+
 impl FaceScope {
     /// The scope `--across-face` asks for, or `None` when it was not given.
     /// Refused, exit 2: an address that is not `SYSTEM/SERVICE` with each a

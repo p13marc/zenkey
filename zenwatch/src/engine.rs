@@ -663,6 +663,7 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
                 e.bus.watch.as_ref(),
                 e.timeout,
                 e.clocks_synced,
+                e.catalogs,
             )
             .await;
         let mut remembered: BTreeMap<String, Vec<Remembered>> = BTreeMap::new();

@@ -86,8 +86,9 @@ async fn state_read(
     };
     let read = zenkey_fleet::StateRead::from_resolved(resolved, timeout);
     let over = lens.lens();
-    // Core §8.6: the epoch the owner's descriptor names, as the lens reads it.
-    let epoch = over.epoch_of(&resolved.address);
+    // Core §8.6: the epoch the owner's descriptor names, as the lens reads
+    // it, and its catalog, which each date names (O8).
+    let epoch = over.dating_of(&resolved.address);
     let report = match archive {
         None => zenkey_fleet::get_state_in(session, read, epoch).await,
         Some(archive) => zenkey_fleet::last_known_state_in(session, read, archive, epoch).await,
@@ -311,12 +312,21 @@ pub struct LensInputs {
     /// The deployment catalogs given (core §8.6): a packed record's `time`
     /// fields are read under the epoch in force for its owner.
     pub catalogs: Arc<zenkey_fleet::Catalogs>,
+    /// A replayed capture's version-4 header, read in presence's place
+    /// (`ReplayLens::recorded`); `None` live.
+    pub recorded: Option<Arc<zenkey_fleet::model::recorded::Recorded>>,
 }
 
 impl LensInputs {
     /// The lens over these inputs.
     pub fn lens(&self) -> zenkey_fleet::Lens<'_> {
-        let lens = zenkey_fleet::Lens::new(&self.namespace, self.catalog.as_deref(), &self.store)
+        let lens = match &self.recorded {
+            Some(r) => {
+                zenkey_fleet::Lens::new(&self.namespace, self.catalog.as_deref(), &**r).recorded(r)
+            }
+            None => zenkey_fleet::Lens::new(&self.namespace, self.catalog.as_deref(), &self.store),
+        };
+        let lens = lens
             .held(self.contracts.as_ref().map_or(0, |c| c.len()))
             .at_generation(self.generation)
             .catalogs(&self.catalogs);
@@ -587,6 +597,7 @@ mod tests {
             generation: 0,
             feed: None,
             catalogs,
+            recorded: None,
         };
         let key = "zk2/lab/packed/packed.v1/stream/clock";
         let value = |l: &LensInputs| {
@@ -643,6 +654,7 @@ mod tests {
             generation: 0,
             feed: None,
             catalogs: Arc::clone(&loaded.catalogs),
+            recorded: None,
         };
         let now = std::time::SystemTime::now();
         let day = Duration::from_secs(86_400);
@@ -728,6 +740,7 @@ mod tests {
             generation: 0,
             feed: None,
             catalogs: Default::default(),
+            recorded: None,
         };
         let key = "plant/line-1/temp";
         let at = |seconds: u64, kind: SampleKind| zenkey_fleet::FleetAnswer {
@@ -775,6 +788,7 @@ mod tests {
             generation: 0,
             feed: None,
             catalogs: Default::default(),
+            recorded: None,
         };
         let key = "zk2/lab/m/m.v1/state/level";
         let at = |seconds: u64, payload: Vec<u8>| zenkey_fleet::FleetAnswer {
@@ -848,6 +862,7 @@ mod tests {
             generation: 0,
             feed: None,
             catalogs: Default::default(),
+            recorded: None,
         };
         let key = "zk2/robot1/nav/nav.v2/stream/position";
         let at = |seq: u32| zenkey_fleet::FleetAnswer {

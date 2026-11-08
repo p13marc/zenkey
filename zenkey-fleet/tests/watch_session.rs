@@ -296,7 +296,7 @@ async fn an_alarm_feed_that_listens_needs_a_watch_session_of_its_own() {
     let spec = AlarmSpec::new(T);
     let beside = watch_of(&tool, "");
     for refused in [None, Some(&beside)] {
-        let e = AlarmFeed::open(&tool, refused, AlarmScope::all(), spec, true)
+        let e = AlarmFeed::open(&tool, refused, AlarmScope::all(), spec.clone(), true)
             .await
             .expect_err("refused");
         assert!(e.not_asked().is_some(), "{e}");
@@ -306,7 +306,7 @@ async fn an_alarm_feed_that_listens_needs_a_watch_session_of_its_own() {
         &tool,
         Some(&watch_of(&watch, "")),
         AlarmScope::all(),
-        spec,
+        spec.clone(),
         true,
     )
     .await

@@ -148,8 +148,19 @@ impl Publication {
     /// there is no bare-put helper. Gate dynamic keys through
     /// [`check_retire`] first — the class semantics live there.
     pub async fn retire(&self) -> Result<()> {
-        self.publisher
-            .delete()
+        self.retire_with(None).await
+    }
+
+    /// [`retire`](Self::retire), its attachment riding beside the delete:
+    /// a recorded delete's, which for a zk2 key is its envelope (core
+    /// §7.5), so a replayed delete keeps its stamp.
+    pub async fn retire_with(&self, attachment: Option<Vec<u8>>) -> Result<()> {
+        let delete = self.publisher.delete();
+        let delete = match attachment {
+            Some(a) => delete.attachment(a),
+            None => delete,
+        };
+        delete
             .await
             .map_err(|e| Error::bus("delete", self.publisher.key_expr().as_str(), e))
     }

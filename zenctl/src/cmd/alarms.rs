@@ -42,9 +42,14 @@ pub async fn run(cli: AlarmsArgs) -> Result<()> {
         wait_before_close,
         face_policy,
         across_face,
+        catalog,
         ns,
     } = cli;
     let dep = ASKING.ask(Deployment::resolve(&ns));
+    let catalogs = ASKING.ask(zk2::load_catalogs(&crate::cli::ContractArgs {
+        contracts: Vec::new(),
+        catalog,
+    }));
     // No scope note here, as `timing` and `telemetry` give (#950): every
     // alarms.v1 key is plain state, `zk2/<s>/<v>/alarms.v1/state/alarms/<key>`,
     // so the verbatim chunks a wildcard excludes hold no alarm.
@@ -67,6 +72,7 @@ pub async fn run(cli: AlarmsArgs) -> Result<()> {
     spec.lease = routers.lease;
     spec.wait_before_close = routers.wait_before_close;
     spec.face = across_face.map(|f| f == FaceGrant::Granted);
+    spec.catalogs = catalogs;
     let session = ASKING.ask(dep.session().await);
     // A window follows the owners' instance tokens, on a watch session of
     // its own (#830, core §8.1, 0.37); the reads stay on `session`.
