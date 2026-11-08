@@ -1221,10 +1221,11 @@ impl Consumer {
     ///   is no event, is never judged within the retention or beyond it:
     ///   the storage's `_time` bound alone admitted it.
     /// - **The order**: the occurrences with a time by their times, then
-    ///   each of one time by the run first heard and its seq; those with
-    ///   none after them, by the run first heard, then the seq. So one run's
-    ///   occurrences keep their seq's order wherever a time does not
-    ///   decide, and two runs at one time the order their first arrived in.
+    ///   each of one time by its run's value and its seq; those with none
+    ///   after them, by run value, then the seq. So one run's occurrences
+    ///   keep their seq's order wherever a time does not decide, and two
+    ///   runs at one time a fixed order, which says nothing of which ran
+    ///   first: two replays of one storage deliver alike.
     pub async fn replay(
         &self,
         resource: &str,
@@ -2271,10 +2272,10 @@ async fn reread(
 }
 
 /// Replay's order ([`Consumer::replay`], core 0.101 §2.6): the occurrences
-/// with a time by it, then each of one time by its run's rank (the order
-/// runs were first heard in) and its seq; those whose time is unknown after
-/// them, by run rank and seq. An occurrence with no in-band stamp ranks as
-/// a run of its own. Arrival breaks every other tie: a total order, so the
+/// with a time by it, then each of one time by its run's value (a 16-bit
+/// run before a 32-bit one) and its seq; those whose time is unknown after
+/// them, by run value and seq. An occurrence with no in-band stamp ranks
+/// after every run. Arrival breaks every other tie: a total order, so the
 /// sort is stable and well defined.
 fn replay_order(
     items: Vec<(
@@ -2283,20 +2284,19 @@ fn replay_order(
         Delivery,
     )>,
 ) -> Vec<Delivery> {
-    let mut runs: Vec<zenkey_model::wire::Run> = Vec::new();
+    // Nothing orders two runs (core §4.3). Between two runs at one time,
+    // or among unknown times, the tie is broken by the run's value: a
+    // fixed rule, so two replays of one storage deliver alike, where the
+    // order the runs were first heard in follows the replies' arrival
+    // (review-bot on #1093). It says nothing about which run came first.
     let mut keyed: Vec<_> = items
         .into_iter()
         .enumerate()
         .map(|(i, (at, stamp, d))| {
-            let rank = match stamp {
-                Some(s) => match runs.iter().position(|r| *r == s.run) {
-                    Some(r) => r,
-                    None => {
-                        runs.push(s.run);
-                        runs.len() - 1
-                    }
-                },
-                None => usize::MAX,
+            let rank: (u8, u32) = match stamp.map(|s| s.run) {
+                Some(zenkey_model::wire::Run::U16(r)) => (0, u32::from(r)),
+                Some(zenkey_model::wire::Run::U32(r)) => (1, r),
+                None => (2, 0),
             };
             let seq = stamp.map_or(0, |s| s.seq.get());
             ((at.is_none(), at, rank, seq, i), d)

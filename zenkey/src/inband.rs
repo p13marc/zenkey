@@ -278,14 +278,24 @@ pub fn read(sample: Sample) -> Read {
     // bytes, which refuses an empty or short payload (`short`): they hold
     // CH and the stamp, `stamp.envelope_bytes()` of them. An event's hold
     // CH and its time, 7 bytes, its stamp in its key (`read_event`).
+    // Read through `get`, never by index, so a later change to those
+    // checks refuses network input as `short`, never panics on it
+    // (review-bot on #1093).
     let bytes = sample.payload().to_bytes();
-    let tag = wire::Header::from_byte(bytes[0]).tag;
     let head = if form == wire::Form::Event {
         EVENT_HEAD
     } else {
         stamp.envelope_bytes()
     };
-    let record = bytes[head..].to_vec();
+    let (Some(&ch), Some(record)) = (bytes.first(), bytes.get(head..)) else {
+        let have = bytes.len();
+        return Read::Refused {
+            sample,
+            refusal: Refusal::Short { need: head, have },
+        };
+    };
+    let tag = wire::Header::from_byte(ch).tag;
+    let record = record.to_vec();
     let sample = SampleBuilder::<SampleBuilderPut>::try_from(sample)
         .expect("a put")
         .payload(record)
