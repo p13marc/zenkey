@@ -6,6 +6,17 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a heartbeat's loss and divergence, two doctor checks, and a heartbeat's own key held (#990 V6, V5)
+
+No rule changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| `watch` over a collection: a heartbeat row only for one in step with the view, naming what it confirmed | a row for every heartbeat the view reads, with `lost` (its key's seqs skipped since the one before) and `diverged` (its section not the view's, nothing confirmed); `absent` (its map bit 0) when true; the text form a line for each | each the reader's word, no finding about the owner (`freshness.v2` §5); the exit code is unchanged |
+| `watch`'s summary | adds `heartbeats`, `heartbeats_lost`, `heartbeats_diverged`, present at zero; the text form a line when any heartbeat was read | |
+| `doctor`: thirty-five checks | thirty-seven: `packed-refused` (core §7.6, an error: a packed state value its layout refuses under CH's tag, the refusal named by its token) and `state-unconfirmed` (`freshness.v2` §2.6, a warning: a member of a `freshness.v2` collection whose last confirmation is older than its horizon) | both `--deep`, read off `state-stamp-foreign`'s GET; `state-unconfirmed` not asked without `--clocks-synced`, and unjudged where a confirmation cannot be dated (`--catalog`). Exit 1 on either finding at `--fail-on`, as for any check |
+| a heartbeat's own key with no presence read (`--across-face`, a replay through `--contracts`), `freshness.v2` not in `--contracts`: `none_left` (`not_held`) | its identity is `freshness.v2`'s standard revision (`8756e6a6…`), the one every tool holds compiled in; its body is still read with the covered revision | a recorded header or a descriptor naming the revision keeps its own word |
+
 ## Unreleased (`main`, zk2) — the catalog and the face everywhere (#1087, #990 V4's follow-ups, V8)
 
 No rule changed.

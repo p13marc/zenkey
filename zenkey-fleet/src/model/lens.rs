@@ -487,7 +487,13 @@ impl<'a> Lens<'a> {
                     let Some(set) = self.offline else {
                         return Err(Unresolved::PresenceNotRead);
                     };
-                    let held: Vec<Arc<Revision>> = set.of_iface(iface).cloned().collect();
+                    let mut held: Vec<Arc<Revision>> = set.of_iface(iface).cloned().collect();
+                    // A heartbeat's own key (#990): `freshness.v2`'s
+                    // standard revision is the one every tool holds,
+                    // compiled in, where `--contracts` gives none.
+                    if held.is_empty() {
+                        held.extend(standard_revision(iface));
+                    }
                     let choice =
                         crate::model::choice::choose(&held, target, self.deployment, heard);
                     return match choice {
@@ -1061,6 +1067,23 @@ pub fn template_chunks(kind: zenkey_model::grammar::KindToken, chunks: &[String]
         (zenkey_model::grammar::KindToken::Events, Some((_occurrence, template))) => template,
         _ => chunks,
     }
+}
+
+/// `freshness.v2`'s standard revision, the bundle `zenkey` embeds byte for
+/// byte (freshness.v2 §3), for `iface` when it is `freshness.v2`: what a
+/// tool holds of a heartbeat's own key with no contract given for it
+/// (#990). Its body is read with the covered revision all the same
+/// (observer §7.5).
+fn standard_revision(iface: &IfaceId) -> Option<Arc<Revision>> {
+    static FRESHNESS_V2: std::sync::LazyLock<Arc<Revision>> = std::sync::LazyLock::new(|| {
+        let bundle = zenkey_model::bundle::Bundle::verify(zenkey::heartbeat::BUNDLE)
+            .expect("the published freshness.v2 bundle verifies");
+        Arc::new(
+            Revision::from_bundle(bundle, crate::report::ContractSource::Bundle)
+                .expect("the published freshness.v2 bundle reads"),
+        )
+    });
+    (iface.to_string() == zenkey_model::heartbeat::PROFILE).then(|| Arc::clone(&FRESHNESS_V2))
 }
 
 /// A control key's address and form.
@@ -1807,6 +1830,69 @@ mod tests {
                 if reason == inband::HEARTBEAT_AS_RECORD),
             "{:?}",
             on_data.conformance
+        );
+    }
+
+    /// A heartbeat's own key (#990): with no presence read and only the
+    /// covered interface's contracts given (`--contracts` across a face),
+    /// its identity is `freshness.v2`'s standard revision, the one every
+    /// tool holds compiled in, never `none_left` (`not_held`); its body is
+    /// still read with the covered revision (observer §7.5). Another
+    /// interface not given still stops at `not_held`.
+    #[test]
+    fn a_heartbeats_own_key_resolves_to_the_standard_revision() {
+        use zenkey_model::heartbeat::{Heartbeat, Layout, Time};
+        use zenkey_model::wire::{Run, Seq, Stamp};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let (set, problems) =
+            ContractSet::load_path(&root.join("examples/zk2/tcgui/tc.netif.v1.toml"));
+        assert!(problems.is_empty(), "{problems:?}");
+        let covered = set.iter().next().expect("tc.netif.v1").clone();
+        let lens = Lens::new("", None, &set).offline(&set);
+        let wire = "zk2/host-a/tc/freshness.v2/stream/heartbeat/tc.netif.v1";
+
+        let resolution = lens.resolve(wire);
+        assert_eq!(resolution.identity.unresolved, None, "{resolution:?}");
+        assert!(
+            matches!(&resolution.identity.group,
+                KeyGroup::Resource { iface, resource: Some(r), .. }
+                    if iface == "freshness.v2" && r == "stream/heartbeat/{iface}"),
+            "{:?}",
+            resolution.identity.group
+        );
+        assert_eq!(resolution.identity.values["iface"], ["tc.netif.v1"]);
+        let resolved = resolution.resolved.expect("resolved");
+        assert_eq!(
+            resolved.revision.fingerprint().to_string(),
+            format!("sha256:{}", zenkey::heartbeat::FINGERPRINT)
+        );
+
+        let layout = Layout::of(covered.contract());
+        let stamp = Stamp {
+            run: Run::U16(7),
+            seq: Seq::new(1).expect("a seq"),
+        };
+        let hb = Heartbeat {
+            time: Time::Unknown,
+            sections: vec![None; layout.collections.len()],
+        };
+        let bytes = hb.envelope(&layout, stamp).expect("writes");
+        let read = lens.check(wire, Member::Type, Some("zenoh/bytes"), &bytes);
+        assert_eq!(read.identity.unresolved, None);
+        assert_eq!(read.conformance, Conformance::Valid, "{:?}", read.rendering);
+        assert!(
+            matches!(&read.rendering.rendered,
+                Rendered::Value { declared, .. } if declared == "zk2c heartbeat (tc.netif.v1)"),
+            "{:?}",
+            read.rendering.rendered
+        );
+
+        assert!(
+            matches!(
+                lens.identity("zk2/host-a/tc/other.v1/state/x").unresolved,
+                Some(Unresolved::NoneLeft { .. })
+            ),
+            "only freshness.v2's own revision is compiled in"
         );
     }
 

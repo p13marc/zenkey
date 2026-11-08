@@ -422,8 +422,35 @@ pub struct StateStamps {
     pub replies: Vec<StateReply>,
     /// Metric value replies past either cap, not kept.
     pub replies_capped: u64,
+    /// Whether the revision the owner's descriptors name was in hand: what
+    /// `packed-refused` and `state-unconfirmed` read the replies by.
+    pub revision: bool,
+    /// The value replies of a packed type read by its layout under CH's
+    /// tag (core §7.6; `packed-refused`, #990 V5): how many.
+    pub packed_read: usize,
+    /// Of them, those the layout refused: how many, and the first keys with
+    /// the refusal's token.
+    pub packed_refused: (usize, Vec<String>),
+    /// Each live entry of a `freshness.v2` collection with a horizon, and
+    /// its last confirmation's age at the GET (`state-unconfirmed`, #990
+    /// V5).
+    pub confirmations: Vec<EntryConfirmed>,
     /// Whether every GET ended at the final reply.
     pub complete: bool,
+}
+
+/// One live snapshot entry of a `freshness.v2` collection, as
+/// `state-unconfirmed` reads it (`freshness.v2` §2.6; core §7.5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntryConfirmed {
+    /// The member's key, base-relative.
+    pub key: String,
+    /// Its resource's horizon.
+    pub horizon: Duration,
+    /// Its last confirmation's age at the GET, on this host's clock; `None`
+    /// where its time cannot be had: an unknown time, or one under an epoch
+    /// not in force (`unknown_catalog`, catalogs that disagree).
+    pub age: Option<Duration>,
 }
 
 impl StateStamps {
@@ -763,12 +790,20 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
     };
     // The owners' state GETs follow the retrieval: `telemetry-sample` keeps
     // the replies of the metric resources alone, by the revisions retrieved.
+    // Each owner's entries dated under the catalog its descriptor names,
+    // read through the catalogs given (core §8.6).
+    let epochs = crate::bus::query::EntryEpochs::observed(&spec.catalogs, observed);
+    let epochs = &epochs;
     let contracts_then_stamps = async {
         let contracts = contracts.await;
         let mut out = BTreeMap::new();
         if !spec.asks(CheckId::StateStampForeign)
             && !spec.asks(CheckId::PopulationOverBound)
             && !spec.asks(CheckId::TelemetrySample)
+            && !spec.asks(CheckId::PackedRefused)
+            // `state-unconfirmed` compares the owner's clock with this
+            // host's: asked only on the deployment's word that they agree.
+            && !(spec.asks(CheckId::StateUnconfirmed) && spec.clocks_synced)
         {
             return (contracts, out);
         }
@@ -781,15 +816,11 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
                     .flatten(),
                 bytes: 0,
             };
-            let read = state_stamps(s, &addr, &iface, t, revision, keep).await;
+            let read = state_stamps(s, &addr, &iface, t, revision, keep, epochs).await;
             out.insert((addr, iface), read);
         }
         (contracts, out)
     };
-    // Each owner's entries dated under the catalog its descriptor names,
-    // read through the catalogs given (core §8.6).
-    let epochs = crate::bus::query::EntryEpochs::observed(&spec.catalogs, observed);
-    let epochs = &epochs;
     let second = async {
         if spec.asks_health() {
             Some(crate::bus::health::get(s, &health, t, epochs).await)
@@ -1830,10 +1861,12 @@ async fn state_stamps(
     timeout: Duration,
     revision: Option<Arc<Revision>>,
     mut keep: ReplyKeeper,
+    epochs: &crate::bus::query::EntryEpochs,
 ) -> Result<StateStamps, String> {
     let iface = iface.to_string();
     let mut out = StateStamps {
         complete: true,
+        revision: revision.is_some(),
         ..StateStamps::default()
     };
     for token in ["state", "@state"] {
@@ -1861,6 +1894,9 @@ async fn state_stamps(
                 out.complete = false;
                 continue;
             };
+            if let Some(rev) = &revision {
+                entry_confirmations(&mut out, rev.contract(), sample, epochs);
+            }
             samples.extend(crate::bus::query::reply_samples(sample));
         }
         for sample in &samples {
@@ -1880,6 +1916,9 @@ async fn state_stamps(
                 continue;
             }
             if sample.kind() == SampleKind::Put {
+                if let Some(rev) = &revision {
+                    packed_value(&mut out, rev.contract(), key, sample);
+                }
                 let sample = read.sample();
                 out.values.insert(key.to_owned());
                 let size = sample.payload().len() + sample.attachment().map_or(0, |a| a.len());
@@ -1892,6 +1931,97 @@ async fn state_stamps(
         }
     }
     Ok(out)
+}
+
+/// `packed-refused`'s reading of one value reply on `key` (core §7.6; #990
+/// V5): a record of a packed type in `contract`, read by its layout under
+/// CH's tag; a refusal kept with its token.
+fn packed_value(
+    out: &mut StateStamps,
+    contract: &Contract,
+    key: &str,
+    sample: &zenoh::sample::Sample,
+) {
+    let Some(r) = crate::model::inband::resource_of(contract, key) else {
+        return;
+    };
+    let zenkey_model::contract::Body::Data(data) = &r.body else {
+        return;
+    };
+    let Ok(Some(layout)) = contract.packed_layout(&data.type_) else {
+        return;
+    };
+    let bytes = sample.payload().to_bytes();
+    let encoding = sample.encoding().to_string();
+    let crate::model::inband::Payload::Record { record, tag, .. } =
+        crate::model::inband::payload(key, Some(&encoding), &bytes)
+    else {
+        return;
+    };
+    out.packed_read += 1;
+    if let Err(refusal) = layout.check(tag.get(), record) {
+        let (n, keys) = &mut out.packed_refused;
+        *n += 1;
+        if keys.len() < crate::judge::common::EXPANSION_CAP {
+            keys.push(format!("{key} ({})", refusal.token()));
+        }
+    }
+}
+
+/// `state-unconfirmed`'s reading of one reply (`freshness.v2` §2.6; #990
+/// V5): a snapshot's page, each live entry of a collection with a horizon
+/// in a contract that uses `freshness.v2`, its last confirmation (1 at the
+/// snapshot's time, 2 at its `conf`) aged at this host's clock under the
+/// epoch in force for its owner.
+fn entry_confirmations(
+    out: &mut StateStamps,
+    contract: &Contract,
+    sample: &zenoh::sample::Sample,
+    epochs: &crate::bus::query::EntryEpochs,
+) {
+    use zenkey_model::collection::Confirmation;
+    if !zenkey_model::freshness::uses_v2(contract) {
+        return;
+    }
+    let key = sample.key_expr().as_str();
+    let bytes = sample.payload().to_bytes();
+    let encoding = sample.encoding().to_string();
+    let Some(Ok(page)) = crate::model::inband::page(key, Some(&encoding), &bytes) else {
+        return;
+    };
+    let epoch = epochs.of(key);
+    // A clock before the Unix epoch dates nothing: the member is left
+    // undated, never aged at zero (review-bot on #1102).
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_millis() as i128);
+    for m in page.members(key) {
+        if m.is_tombstone() {
+            continue;
+        }
+        let Some(horizon) = crate::model::inband::resource_of(contract, &m.key)
+            .and_then(|r| zenkey_model::freshness::horizon_of(r).ttl())
+        else {
+            continue;
+        };
+        let time = match m.confirmation {
+            Confirmation::None => continue,
+            Confirmation::AtTime => page.time,
+            Confirmation::At(t) => t,
+        };
+        let age = epoch
+            .and_then(|e| time.unix_ms(e))
+            .zip(now_ms)
+            .map(|(at, now_ms)| {
+                Duration::from_millis(u64::try_from((now_ms - at).max(0)).unwrap_or(u64::MAX))
+            });
+        out.confirmations.push(EntryConfirmed {
+            key: m.key,
+            horizon,
+            age,
+        });
+    }
 }
 
 // ─── the judgement ──────────────────────────────────────────────────────────
@@ -1940,6 +2070,8 @@ pub fn judge(obs: &DoctorObservation, spec: &DoctorSpec) -> DoctorReport {
                 CheckId::HealthInconsistent => health_inconsistent(p, spec),
                 CheckId::HostidDuplicate => hostid_duplicate(p),
                 CheckId::PopulationOverBound => population_over_bound(p),
+                CheckId::PackedRefused => packed_refused(p),
+                CheckId::StateUnconfirmed => state_unconfirmed(p, spec),
                 CheckId::ConfigProjection => config_projection(p),
                 CheckId::ConfigOverdue => config_overdue(p),
                 CheckId::ConfigUnpersisted => config_unpersisted(p, spec),
@@ -3275,6 +3407,155 @@ fn state_stamp_foreign(p: &Presence<'_>) -> CheckReport {
              session",
             t + k
         ),
+    };
+    CheckReport::of(C, findings, undecided, clean)
+}
+
+/// Core §7.6 (#990 V5): each owner interface's packed state values, from
+/// the GET `state-stamp-foreign` reads (each snapshot entry's record), read
+/// by the layout of the revision the owner's descriptors name under CH's
+/// tag. A value its layout refuses is the finding, an error, named by its
+/// token. An owner whose revision is not in hand is unjudged where it
+/// answered a value, since whether a type is packed cannot be told.
+fn packed_refused(p: &Presence<'_>) -> CheckReport {
+    const C: CheckId = CheckId::PackedRefused;
+    let mut findings = Vec::new();
+    let mut undecided = Vec::new();
+    let (mut read, mut owners) = (0usize, 0usize);
+    for ((addr, iface), r) in &p.obs.stamps {
+        let subject = format!("{addr} {iface}");
+        let stamps = match r {
+            Ok(s) => s,
+            Err(e) => {
+                undecided.push(unjudged(
+                    subject,
+                    format!("its state could not be read: {e}"),
+                ));
+                continue;
+            }
+        };
+        let (n, keys) = &stamps.packed_refused;
+        if *n > 0 {
+            findings.push(finding(
+                C,
+                DoctorSeverity::Error,
+                subject,
+                format!(
+                    "of {} packed state value(s), {n} its layout refuses under CH's tag (e.g. \
+                     {}): undecodable, never read as its type",
+                    stamps.packed_read,
+                    keys.join(", ")
+                ),
+            ));
+        } else if !stamps.revision && !stamps.values.is_empty() {
+            undecided.push(unjudged(
+                subject,
+                "no revision its descriptors name is in hand: whether a value is packed, and \
+                 by which layout, cannot be told",
+            ));
+        } else if stamps.packed_read > 0 {
+            read += stamps.packed_read;
+            owners += 1;
+        }
+    }
+    let clean = if read == 0 {
+        "no owner answered a packed state value".to_owned()
+    } else {
+        format!(
+            "{read} packed state value(s) from {owners} owner interface(s), each read by its \
+             layout under CH's tag"
+        )
+    };
+    CheckReport::of(C, findings, undecided, clean)
+}
+
+/// `freshness.v2` §2.6 (#990 V5): each live member of a `freshness.v2`
+/// collection with a horizon, from the GET `state-stamp-foreign` reads, its
+/// last confirmation (a snapshot entry's, core §7.5) aged at this host's
+/// clock under the epoch in force for its owner. Older than its horizon is
+/// the finding, a warning, on the deployment's word that the clocks agree
+/// (asked only with `--clocks-synced`). A confirmation whose time cannot
+/// be had leaves its owner unjudged, never fresh.
+fn state_unconfirmed(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
+    const C: CheckId = CheckId::StateUnconfirmed;
+    if !spec.clocks_synced {
+        return CheckReport::not_asked(C);
+    }
+    let mut findings = Vec::new();
+    let mut undecided = Vec::new();
+    let (mut fresh, mut owners) = (0usize, 0usize);
+    for ((addr, iface), r) in &p.obs.stamps {
+        let subject = format!("{addr} {iface}");
+        let stamps = match r {
+            Ok(s) => s,
+            Err(e) => {
+                undecided.push(unjudged(
+                    subject,
+                    format!("its state could not be read: {e}"),
+                ));
+                continue;
+            }
+        };
+        let (mut stale, mut undated, mut within) = (Vec::new(), Vec::new(), 0usize);
+        for c in &stamps.confirmations {
+            match c.age {
+                Some(age) if age > c.horizon => stale.push(format!(
+                    "{} ({}s ago, its horizon {}s)",
+                    c.key,
+                    age.as_secs(),
+                    c.horizon.as_secs()
+                )),
+                Some(_) => within += 1,
+                None => undated.push(c.key.clone()),
+            }
+        }
+        if !stale.is_empty() {
+            let n = stale.len();
+            stale.truncate(crate::judge::common::EXPANSION_CAP);
+            findings.push(finding(
+                C,
+                DoctorSeverity::Warning,
+                subject,
+                format!(
+                    "{n} member(s) last confirmed longer ago than the horizon (e.g. {}), on the \
+                     deployment's word that this host's clock and the owner's agree \
+                     (--clocks-synced)",
+                    stale.join(", ")
+                ),
+            ));
+        } else if !undated.is_empty() {
+            undecided.push(unjudged(
+                subject,
+                format!(
+                    "{} member(s) whose last confirmation cannot be dated (e.g. {}): an unknown \
+                     time, or the catalog its descriptor names not given (--catalog)",
+                    undated.len(),
+                    undated
+                        .iter()
+                        .take(crate::judge::common::EXPANSION_CAP)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            ));
+        } else if !stamps.revision && !stamps.values.is_empty() {
+            undecided.push(unjudged(
+                subject,
+                "no revision its descriptors name is in hand: which collections freshness.v2 \
+                 confirms, and their horizons, cannot be told",
+            ));
+        } else if within > 0 {
+            fresh += within;
+            owners += 1;
+        }
+    }
+    let clean = if fresh == 0 {
+        "no owner answered a member of a freshness.v2 collection with a horizon".to_owned()
+    } else {
+        format!(
+            "{fresh} member(s) of freshness.v2 collections from {owners} owner interface(s), \
+             each last confirmed within its horizon"
+        )
     };
     CheckReport::of(C, findings, undecided, clean)
 }
@@ -6037,6 +6318,245 @@ mod tests {
         assert_eq!(s.plain.0, 1, "no envelope, whatever its clock");
         assert!(!s.add(key, Some(Err(Refusal::Empty)), None, Some(true)));
         assert_eq!(s.refused.0, 1);
+    }
+
+    /// zenoh-modem's modem.v3: packed states, and `freshness.v2` with
+    /// horizons, for #990 V5's readings.
+    fn modem() -> Contract {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../examples/zk2/zenoh-modem/modem.v3.toml");
+        zenkey_model::contract::load_path(&path)
+            .contract
+            .expect("modem.v3 loads")
+    }
+
+    /// #990 V5's `packed-refused` reading: a packed state value read by its
+    /// layout under CH's tag, a refusal kept with its token; a value of
+    /// another kind not read.
+    #[test]
+    fn a_packed_value_is_read_by_its_layout() {
+        use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
+        let c = modem();
+        let key = "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/packed/oper";
+        let r = crate::model::inband::resource_of(&c, key).expect("its resource");
+        let zenkey_model::contract::Body::Data(data) = &r.body else {
+            panic!("data")
+        };
+        let layout = c.packed_layout(&data.type_).unwrap().expect("packed");
+        let stamp = Stamp {
+            run: Run::U16(1),
+            seq: Seq::new(1).unwrap(),
+        };
+        let put = |tag: u8, record: &[u8]| -> zenoh::sample::Sample {
+            let bytes = Envelope::mutation(Tag::new(tag).unwrap(), stamp, record).write();
+            zenoh::sample::SampleBuilder::put(
+                zenoh::key_expr::KeyExpr::try_from(key.to_owned()).unwrap(),
+                bytes,
+            )
+            .encoding(zenoh::bytes::Encoding::ZENOH_BYTES)
+            .into()
+        };
+        let mut out = StateStamps::default();
+        packed_value(&mut out, &c, key, &put(layout.tag(), &[0x01]));
+        let other = (layout.tag() + 1) % 16;
+        packed_value(&mut out, &c, key, &put(other, &[0x01]));
+        assert_eq!(out.packed_read, 2);
+        assert_eq!(out.packed_refused.0, 2, "{out:?}");
+        assert!(out.packed_refused.1[0].ends_with("(length)"), "{out:?}");
+        assert!(out.packed_refused.1[1].ends_with("(tag)"), "{out:?}");
+        let json = "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/link";
+        packed_value(&mut out, &c, json, &put(0, b"{}"));
+        assert_eq!(out.packed_read, 2, "a JSON type is not packed");
+    }
+
+    /// #990 V5's `state-unconfirmed` reading: a snapshot's live entry of a
+    /// `freshness.v2` collection with a horizon, its last confirmation aged
+    /// under the epoch in force; a tombstone, and a confirmation of no
+    /// horizon, not read.
+    #[test]
+    fn an_entrys_last_confirmation_is_aged() {
+        use zenkey_model::collection::{Confirmation, Entry, Snapshot, Time, Tombstone};
+        use zenkey_model::wire::{Run, Seq, Tag};
+        let c = modem();
+        let key = "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/sdu/endpoint";
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i128;
+        let seq = |n| Seq::new(n).unwrap();
+        let coll = zenkey_model::collection::coll_of(
+            &c,
+            crate::model::inband::resource_of(&c, &format!("{key}/e1")).expect("a resource"),
+        )
+        .expect("a collection");
+        let page = Snapshot {
+            tag: Tag::NONE,
+            run: Run::U16(2),
+            asof: seq(9),
+            time: Time::from_unix_ms(now_ms, 0).unwrap(),
+            coll,
+            live: vec![
+                Entry {
+                    id: "e1".into(),
+                    run: None,
+                    seq: seq(3),
+                    confirmation: Confirmation::At(
+                        Time::from_unix_ms(now_ms - 120_000, 0).unwrap(),
+                    ),
+                    record: b"{}".to_vec(),
+                },
+                Entry {
+                    id: "e2".into(),
+                    run: None,
+                    seq: seq(4),
+                    confirmation: Confirmation::AtTime,
+                    record: b"{}".to_vec(),
+                },
+            ],
+            tombs: vec![Tombstone {
+                id: "e3".into(),
+                run: None,
+                seq: seq(5),
+            }],
+        }
+        .paginate(4096)
+        .unwrap()[0]
+            .write()
+            .unwrap();
+        let sample: zenoh::sample::Sample = zenoh::sample::SampleBuilder::put(
+            zenoh::key_expr::KeyExpr::try_from(key.to_owned()).unwrap(),
+            page,
+        )
+        .encoding(zenoh::bytes::Encoding::ZENOH_BYTES)
+        .into();
+        let mut out = StateStamps::default();
+        entry_confirmations(
+            &mut out,
+            &c,
+            &sample,
+            &crate::bus::query::EntryEpochs::default(),
+        );
+        assert_eq!(out.confirmations.len(), 2, "{out:?}");
+        let e1 = &out.confirmations[0];
+        assert_eq!(e1.key, format!("{key}/e1"));
+        assert_eq!(e1.horizon, Duration::from_secs(60));
+        assert!(
+            e1.age.is_some_and(|a| a > Duration::from_secs(100)),
+            "{e1:?}"
+        );
+        assert!(
+            out.confirmations[1]
+                .age
+                .is_some_and(|a| a < Duration::from_secs(10)),
+            "vouched for at the snapshot's time"
+        );
+    }
+
+    /// #990 V5: `packed-refused` finds a value its layout refuses, an
+    /// error naming its token; reads clean otherwise; and leaves an owner
+    /// whose revision is not in hand unjudged.
+    #[test]
+    fn packed_refused_finds_a_value_its_layout_refuses() {
+        let c = tc(0, false, false);
+        let keys = [inst("h1/tc", A), alive("h1/tc", "tc.v1", A, &c)];
+        let mut o = obs(
+            observed(
+                &keys,
+                vec![(("h1/tc", A), descriptor("h1/tc", A, &[entry(&c)], &[]))],
+            ),
+            &[&c],
+            &[],
+        );
+        let at: (Addr, IfaceId) = ("h1/tc".parse().unwrap(), "tc.v1".parse().unwrap());
+        let read = |o: &mut DoctorObservation, s: StateStamps| {
+            o.stamps = [(at.clone(), Ok(s))].into();
+            check(o, CheckId::PackedRefused)
+        };
+        let f = read(
+            &mut o,
+            StateStamps {
+                revision: true,
+                packed_read: 3,
+                packed_refused: (1, vec!["zk2/h1/tc/tc.v1/state/x (length)".into()]),
+                ..Default::default()
+            },
+        );
+        let f = found(&f);
+        assert_eq!(f.severity, DoctorSeverity::Error);
+        assert!(f.evidence.contains("(length)"), "{f:?}");
+        assert!(
+            clean(&read(
+                &mut o,
+                StateStamps {
+                    revision: true,
+                    packed_read: 3,
+                    ..Default::default()
+                }
+            ))
+            .contains("3 packed state value(s) from 1 owner interface(s)")
+        );
+        assert!(
+            unseen(&read(
+                &mut o,
+                StateStamps {
+                    values: ["zk2/h1/tc/tc.v1/state/x".to_owned()].into(),
+                    ..Default::default()
+                }
+            ))
+            .contains("no revision its descriptors name is in hand")
+        );
+    }
+
+    /// #990 V5: `state-unconfirmed`, asked only with `--clocks-synced`,
+    /// finds a member last confirmed past its horizon, a warning; reads
+    /// clean within it; and leaves an undated confirmation unjudged.
+    #[test]
+    fn state_unconfirmed_finds_a_member_past_its_horizon() {
+        let c = tc(0, false, false);
+        let keys = [inst("h1/tc", A), alive("h1/tc", "tc.v1", A, &c)];
+        let mut o = obs(
+            observed(
+                &keys,
+                vec![(("h1/tc", A), descriptor("h1/tc", A, &[entry(&c)], &[]))],
+            ),
+            &[&c],
+            &[],
+        );
+        assert_eq!(
+            check(&o, CheckId::StateUnconfirmed).verdict,
+            Judgement::NotAsked,
+            "not asked without --clocks-synced"
+        );
+        let synced = DoctorSpec {
+            clocks_synced: true,
+            ..spec()
+        };
+        let at: (Addr, IfaceId) = ("h1/tc".parse().unwrap(), "tc.v1".parse().unwrap());
+        let read = |o: &mut DoctorObservation, age: Option<u64>| {
+            o.stamps = [(
+                at.clone(),
+                Ok(StateStamps {
+                    revision: true,
+                    confirmations: vec![EntryConfirmed {
+                        key: "zk2/h1/tc/tc.v1/state/x".into(),
+                        horizon: Duration::from_secs(60),
+                        age: age.map(Duration::from_secs),
+                    }],
+                    ..Default::default()
+                }),
+            )]
+            .into();
+            judge(o, &synced)
+                .check(CheckId::StateUnconfirmed)
+                .expect("asked")
+                .clone()
+        };
+        let f = read(&mut o, Some(90));
+        let f = found(&f);
+        assert_eq!(f.severity, DoctorSeverity::Warning);
+        assert!(f.evidence.contains("90s ago, its horizon 60s"), "{f:?}");
+        assert!(clean(&read(&mut o, Some(30))).contains("each last confirmed within its horizon"));
+        assert!(unseen(&read(&mut o, None)).contains("cannot be dated"));
     }
 
     #[test]

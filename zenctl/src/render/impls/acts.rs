@@ -520,14 +520,29 @@ impl Render for StateReport {
 
 // ── watch ──────────────────────────────────────────────────────────────────
 
-/// A heartbeat's confirmation, for a person (#978's F2): which members it
-/// confirmed, by which heartbeat.
+/// A heartbeat the watch read, for a person (#978's F2; #990 V6): which
+/// members it confirmed, by which heartbeat, and whether one was lost
+/// before it or its section diverged, each the reader's word
+/// (`freshness.v2` §5).
 pub fn confirmation_lines(c: &zenkey_fleet::report::WatchConfirmation) -> Vec<String> {
     let mut lines = vec![format!(
         "{}  [{}]  in band {}",
         c.key, c.provider, c.heartbeat
     )];
-    if c.confirmed.is_empty() {
+    if c.lost {
+        lines.push(
+            "  <a heartbeat lost before it: its key's seqs skipped (freshness.v2 §2.5)>".to_owned(),
+        );
+    }
+    if c.diverged {
+        lines.push(
+            "  <diverged: its digest is not this watch's view, so it confirms nothing — the \
+             reader's word, no finding about the owner (freshness.v2 §5)>"
+                .to_owned(),
+        );
+    } else if c.absent {
+        lines.push("  <its collection is absent from it: nothing confirmed>".to_owned());
+    } else if c.confirmed.is_empty() {
         lines.push("  <heartbeat: its digest is the watch's, and it vouches for none>".to_owned());
     }
     for k in &c.confirmed {
@@ -601,6 +616,13 @@ pub fn summary_lines(s: &WatchSummary) -> Vec<String> {
         lines.push(format!(
             "{} sample(s) put on a wildcard key, discarded by rule (R6) — not losses",
             s.discarded
+        ));
+    }
+    if s.heartbeats > 0 {
+        lines.push(format!(
+            "{} heartbeat(s) read: {} after one lost, {} diverged from this watch's view — \
+             the reader's word, no finding about the owner (freshness.v2 §5)",
+            s.heartbeats, s.heartbeats_lost, s.heartbeats_diverged
         ));
     }
     if s.unresolved > 0 {

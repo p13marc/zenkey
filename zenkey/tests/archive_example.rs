@@ -229,6 +229,13 @@ async fn the_archive_example_drops_what_the_owners_complete_snapshot_omits() {
             dropped = true;
             break;
         }
+        // Between the first instance's withdrawal and the second's token,
+        // no owner is present, and an `align` asked then answers
+        // `from=nothing`: the window the loop waits out (CI triage on #1102).
+        if line.starts_with("aligned from=nothing ") {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            continue;
+        }
         assert!(
             line.starts_with("aligned from=owner:ground/fleet-mgr "),
             "{line}"

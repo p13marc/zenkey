@@ -179,11 +179,24 @@ pub enum CheckId {
     /// a face policy (`--face-policy`), the one way a tool knows which
     /// owners are on a first hop (observer §3.11).
     FirstHopToken,
+    /// A packed state value its layout refuses under CH's tag (core §7.6;
+    /// #990 V5): each snapshot entry's record of a packed type, from the
+    /// GET `state-stamp-foreign` makes, read by the layout of the revision
+    /// the owner's descriptors name, the refusal named by its token
+    /// (`tag`, `length`, `code`, `pad`, …). An error. Asked under `--deep`.
+    PackedRefused,
+    /// A member of a `freshness.v2` collection whose last confirmation, a
+    /// snapshot entry's (core §7.5), is older than its horizon at the GET
+    /// (`freshness.v2` §2.6; #990 V5), read under the epoch in force for
+    /// its owner. A warning. Asked under `--deep` and only with
+    /// `--clocks-synced`, since it compares the owner's clock with this
+    /// host's.
+    StateUnconfirmed,
 }
 
 impl CheckId {
     /// Every check id, in the order the doctor reports them.
-    pub const ALL: [CheckId; 35] = [
+    pub const ALL: [CheckId; 37] = [
         CheckId::SplitBrain,
         CheckId::BindingUnsatisfied,
         CheckId::ContractDrift,
@@ -219,6 +232,8 @@ impl CheckId {
         CheckId::ArbitrationDeclaration,
         CheckId::CatalogMissing,
         CheckId::FirstHopToken,
+        CheckId::PackedRefused,
+        CheckId::StateUnconfirmed,
     ];
 
     /// The wire token, exactly as it serializes.
@@ -259,6 +274,8 @@ impl CheckId {
             CheckId::ArbitrationDeclaration => "arbitration-declaration",
             CheckId::CatalogMissing => "catalog-missing",
             CheckId::FirstHopToken => "first-hop-token",
+            CheckId::PackedRefused => "packed-refused",
+            CheckId::StateUnconfirmed => "state-unconfirmed",
         }
     }
 
@@ -306,6 +323,8 @@ impl CheckId {
             CheckId::ArbitrationDeclaration => "arbitration.v1 §2.14",
             CheckId::CatalogMissing => "§8.6",
             CheckId::FirstHopToken => "§8.1",
+            CheckId::PackedRefused => "§7.6",
+            CheckId::StateUnconfirmed => "freshness.v2 §2.6",
         }
     }
 
@@ -439,6 +458,13 @@ impl CheckId {
                  contract queryable, beyond the instance token alone an owner on a first hop \
                  holds?"
             }
+            CheckId::PackedRefused => {
+                "does an owner answer a packed state value its layout refuses under CH's tag?"
+            }
+            CheckId::StateUnconfirmed => {
+                "is a member of a freshness.v2 collection last confirmed longer ago than its \
+                 horizon?"
+            }
         }
     }
 
@@ -448,7 +474,11 @@ impl CheckId {
     pub fn reads_data(self) -> bool {
         matches!(
             self,
-            CheckId::StateStampForeign | CheckId::PopulationOverBound | CheckId::TelemetrySample
+            CheckId::StateStampForeign
+                | CheckId::PopulationOverBound
+                | CheckId::TelemetrySample
+                | CheckId::PackedRefused
+                | CheckId::StateUnconfirmed
         )
     }
 
@@ -1141,6 +1171,8 @@ mod check_id_tests {
                 "arbitration-declaration",
                 "catalog-missing",
                 "first-hop-token",
+                "packed-refused",
+                "state-unconfirmed",
             ]
         );
     }

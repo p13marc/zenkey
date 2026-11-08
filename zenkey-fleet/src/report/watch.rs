@@ -70,10 +70,13 @@ pub enum WatchEvent {
     Delete,
 }
 
-/// What one heartbeat confirmed of the collection watched (core §7.5's
-/// form 6; #978's F2): its provider, its key and in-band stamp, and the
-/// members it vouched for whose digest was the watch's view's, in key
-/// order. A confirmation, never a sample: no value moved.
+/// One heartbeat the watch's view read for the collection watched (core
+/// §7.5's form 6; #978's F2; #990 V6): its provider, its key and in-band
+/// stamp, the members it vouched for whose digest was the view's, in key
+/// order, whether one was lost before it and whether its section diverged.
+/// A row of its own, never a sample: no value moved. A loss and a
+/// divergence are the reader's word, no finding about the owner
+/// (`freshness.v2` §5).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct WatchConfirmation {
     /// `<system>/<service>` whose heartbeat it was.
@@ -82,8 +85,19 @@ pub struct WatchConfirmation {
     pub key: String,
     /// The heartbeat key's run and seq.
     pub heartbeat: InbandStamp,
-    /// The members confirmed, base-relative, in key order.
+    /// The members confirmed, base-relative, in key order: none where it
+    /// diverged, or its collection was absent.
     pub confirmed: Vec<String>,
+    /// Its key's seqs skipped since the last heartbeat the view read: one
+    /// or more were lost.
+    pub lost: bool,
+    /// Its section's digest, or its live count, was not the view's, so it
+    /// confirmed nothing (`freshness.v2` §2.5).
+    pub diverged: bool,
+    /// Its map bit was 0: the collection not available, nothing confirmed.
+    /// Omitted when false.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub absent: bool,
 }
 
 /// How a watch went, when it ends.
@@ -117,6 +131,15 @@ pub struct WatchSummary {
     /// Samples dropped because this tool fell behind its own buffer:
     /// losses, which make `received` a lower bound (O6).
     pub lagged: u64,
+    /// Heartbeats the view read for the collection (#990 V6): none for a
+    /// resource that is no collection, or one whose parameters are bound.
+    pub heartbeats: u64,
+    /// Of them, those read after a gap in their key's seqs: a heartbeat
+    /// lost before each (`freshness.v2` §2.5). The reader's word.
+    pub heartbeats_lost: u64,
+    /// Of them, those whose section diverged from the view: nothing
+    /// confirmed. The reader's word, no finding about the owner (§5).
+    pub heartbeats_diverged: u64,
     /// How long the subscription was open, seconds.
     pub elapsed_s: f64,
     /// Why it ended.
@@ -151,6 +174,9 @@ mod tests {
                 seq: 3,
             },
             confirmed: vec!["zk2/lab/n1/hb.v1/state/link".into()],
+            lost: false,
+            diverged: false,
+            absent: false,
         };
         assert_eq!(
             serde_json::to_value(&c).unwrap(),
@@ -159,6 +185,8 @@ mod tests {
                 "key": "zk2/lab/n1/freshness.v2/stream/heartbeat/hb.v1",
                 "heartbeat": {"run": "0007", "seq": 3},
                 "confirmed": ["zk2/lab/n1/hb.v1/state/link"],
+                "lost": false,
+                "diverged": false,
             })
         );
     }
@@ -232,6 +260,9 @@ mod tests {
             qos_mismatched: 1,
             nonconforming: 0,
             lagged: 0,
+            heartbeats: 3,
+            heartbeats_lost: 1,
+            heartbeats_diverged: 0,
             elapsed_s: 1.5,
             ended: WatchEnd::Window,
         };
@@ -246,5 +277,14 @@ mod tests {
             "a count, present at zero: the claim it bounds is made"
         );
         assert_eq!(v["ended"], "window");
+        assert_eq!(
+            (
+                v["heartbeats"].clone(),
+                v["heartbeats_lost"].clone(),
+                v["heartbeats_diverged"].clone()
+            ),
+            (json!(3), json!(1), json!(0)),
+            "counts, present at zero (#990 V6)"
+        );
     }
 }
