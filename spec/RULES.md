@@ -698,7 +698,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§7.5](observer.md#75-reading-across-a-face) | A tool given the face SHOULD NOT declare a scope for a resource the plan keeps off it. | `[F: scope/faces.json]` |
 | [§7.5](observer.md#75-reading-across-a-face) | **A selector given.** … A tool MUST NOT drop silently a selector it was given that meets none of its scopes: it refuses the read, declaring none of the selectors, and names each such selector and why. | `[F: scope/faces.json]` |
 | [§7.5](observer.md#75-reading-across-a-face) | A tool across a constrained face whose medium repairs no lost frame SHOULD declare a scope again when it has heard nothing on it for two of its horizons while its session's transport stayed up, as core §8.5 says. | `[Sc: constrained.md §9]` |
-| [§7.5](observer.md#75-reading-across-a-face) | **The revision of a key.** … A tool that reads a mutation, a frame or a heartbeat with no descriptor naming the owner's revision MUST read it with the revision chosen in this order. | `[F: envelope/tags.json]` |
+| [§7.5](observer.md#75-reading-across-a-face) | **The revision of a key.** … A tool that reads a mutation, an event, a frame or a heartbeat with no descriptor naming the owner's revision MUST read it with the revision chosen in this order. | `[F: envelope/tags.json]` |
 
 ### [observer §7.6 Frames](observer.md#76-frames)
 
