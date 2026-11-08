@@ -5618,6 +5618,26 @@ def _round108_readings(root: Path) -> list[tuple[str, Any, Any]]:
                           "consumer counts each undecodable, refused as `form`: it carries no event (core §2.6).",
                           "The owner writes the recent ones newest first, so among them a later seq carries an "
                           "earlier time."), []))
+    # zk2py's consumer over §2.6's new rule, offline: carries.json's reads on
+    # an events key, and a payload under another Encoding
+    from . import live, zk2c
+
+    car = _load_json(root / "envelope" / "carries.json")
+    ev_reads = [c for c in car["reads"] if zk2c.key_token(c["key"]) == "events"]
+    got = [[c["expect"], live.no_event(c["key"], zk2c.read_put(c["key"], zk2c.ENCODING, bytes.fromhex(c["hex"])))]
+           for c in ev_reads]
+    k = "zk2/lab/journal/journal.v1/events/entries/000g0001"
+    got.append(["application/json", live.no_event(k, zk2c.read_put(k, "application/json", b"{}"))])
+    got.append(["a state key", live.no_event("zk2/lab/s/a.v1/state/x", zk2c.read_put(
+        "zk2/lab/s/a.v1/state/x", zk2c.ENCODING, zk2c.mutation(zk2c.InBand(16, 1, 1), b"")))])
+    want = [[c["expect"], None if c["expect"] == {"reads": "event"} else
+             ("form" if "reads" in c["expect"] else c["expect"]["refused"])] for c in ev_reads]
+    want += [["application/json", "form"], ["a state key", None]]
+    out.append(("core 0.104 §2.6 (live.no_event, which live.replay_events, live.subscribe_events and "
+                "Owner.subscribe_role read): over carries.json's reads on an events key, an event delivered, a "
+                "mutation (or any envelope but an event) counted form, a refused envelope by its refusal (observer "
+                "§7.3), a payload under another Encoding form; a key of another kind is not the rule's",
+                [len(ev_reads), got], [len(ev_reads), want]))
     out.append(("observer 0.33 §7.5: an event among the samples whose revision a tool chooses with no descriptor",
                 missing(obs, "A tool that reads a mutation, an event, a frame or a heartbeat with no descriptor "
                              "naming the owner's revision MUST read it with the revision chosen in this order."),

@@ -1924,8 +1924,8 @@ class Replay:
     - ``delivered``: every occurrence kept, in §2.6's order;
     - ``dropped``: those whose time is beyond the retention;
     - ``undecodable``: replies on an events key whose envelope was refused,
-      ``(key, token)``, or that carry no event (``not_event``, zk2py's
-      reading: F-514), never delivered;
+      ``(key, token)``, or that carry no event, ``(key, "form")`` (core 0.104
+      §2.6, F-514's answer), never delivered;
     - ``not_zk2``: replies on keys the grammar refuses, a ULID's key among
       them (core 0.103 §1.2), which no reader resolves."""
 
@@ -1935,18 +1935,41 @@ class Replay:
     not_zk2: list[str] = field(default_factory=list)
 
 
+#: Core §2.6 (0.104): the token a consumer counts a put on an events key
+#: under when its payload is no event, "as §4.2 counts a stray reply_del".
+NO_EVENT = "form"
+
+
+def no_event(key: str, read: zk2c.Read) -> str | None:
+    """Core §2.6 (0.104), "A put that carries no event": "A consumer MUST NOT
+    deliver a put on an events key whose payload is no event, such as a
+    mutation or a payload with no envelope, whether a subscription heard it
+    or a replay returned it. It counts it undecodable, refused as form". The
+    token a consumer counts such a put, read through §7.5's parse, under
+    (:data:`NO_EVENT`), or the parse's own where it refused the envelope
+    ("A refused envelope is undecodable, and the tool names the refusal",
+    observer §7.3; zk2py's reading); None for an event, or a key that is no
+    zk2 events key."""
+    if zk2c.key_token(key) != "events":
+        return None
+    if read.refused:
+        return read.refusal or "refused"
+    if read.form != "event" or read.stamp is None:
+        return NO_EVENT
+    return None
+
+
 def occurrence_of(key: str, encoding: str, payload: bytes, epoch_s: int = 0) -> Occurrence | tuple[str, str] | None:
     """A put on ``key`` read as an occurrence: an :class:`Occurrence`, or
-    ``(key, token)`` where its envelope is refused or is no event, or None
-    where the key is no zk2 events key."""
+    ``(key, token)`` where its envelope is refused or it carries no event
+    (:func:`no_event`), or None where the key is no zk2 events key."""
     parsed = zk2c.data_key(key)
     if parsed is None or parsed.get("form") != "data" or parsed.get("token") != "events":
         return None
     read = zk2c.read_put(key, encoding, payload)
-    if read.refused:
-        return (key, read.refusal or "refused")
-    if read.form != "event" or read.stamp is None:
-        return (key, "not_event")
+    token = no_event(key, read)
+    if token is not None:
+        return (key, token)
     t = None if read.time == zk2c.UNKNOWN_TIME else read.time
     at = None if t is None else (epoch_s + t["s"]) * 1000 + t["ms"]
     return Occurrence(key, read.stamp, t, at, read.record or b"", read.tag or 0)
@@ -2004,6 +2027,29 @@ def replay_events(session: zenoh.Session, selector: str, retention_s: int, now_m
     kept, out.dropped = replay_filter(occs, retention_s, now_ms)
     out.delivered = replay_order(kept)
     return out
+
+
+def subscribe_events(session: zenoh.Session, selector: str, deliver: Any, undecodable: Any,
+                     epoch_s: int = 0) -> Any:
+    """A consumer's subscription to an event (core §2.6): each put heard on
+    an events key read as :func:`occurrence_of` reads a replay's, so that
+    "whether a subscription heard it or a replay returned it" one rule holds
+    (0.104). ``deliver`` gets each :class:`Occurrence`; ``undecodable`` gets
+    ``(key, token)`` for a put that carries no event (``form``) or whose
+    envelope is refused, never delivered. A delete delivers nothing: an
+    owner publishes each occurrence "with a one-shot put", and no rule has a
+    consumer read a delete on an events key (zk2py's reading). Returns the
+    subscriber."""
+    def received(sample: zenoh.Sample) -> None:
+        if sample.kind != zenoh.SampleKind.PUT:
+            return
+        o = occurrence_of(str(sample.key_expr), str(sample.encoding), sample.payload.to_bytes(), epoch_s)
+        if isinstance(o, tuple):
+            undecodable(o)
+        elif o is not None:
+            deliver(o)
+
+    return session.declare_subscriber(selector, zenoh.handlers.Callback(received))
 
 
 # -- core S5, §4.4: last-known state from an archive, explicitly (round 107) --------

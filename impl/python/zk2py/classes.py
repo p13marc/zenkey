@@ -11,7 +11,9 @@ classes, each at the full level (core §12: not the constrained modifier):
 - **owner**: :mod:`zk2py.owner`'s :class:`~zk2py.owner.Owner`, and every
   profile's owner built on it;
 - **consumer**: a role's subscription through its bindings
-  (:meth:`~zk2py.owner.Owner.subscribe_role`), S4's GET
+  (:meth:`~zk2py.owner.Owner.subscribe_role`), an event's subscription and
+  replay (:func:`zk2py.live.subscribe_events`,
+  :func:`zk2py.live.replay_events`), S4's GET
   (:func:`zk2py.live.get_state`), a late joiner (:mod:`zk2py.seed`), and the
   profiles' consumers (a ``desired.v1`` target, a ``timing.v1`` reader, an
   ``arbitration.v1`` actuator, a ``redundancy.v1`` follower);
@@ -1027,8 +1029,9 @@ WALK: list[tuple[str, str, str, str, str]] = [
     # core 0.104 (F-514's answer): a put on an events key that carries no
     # event (round 108).
     ("consumer", "core §2.6", "A consumer MUST NOT deliver a put on an events key whose payload is no event",
-     NOT_MET, "live.replay_events drops one, but counts it not_event, not form, and Owner.subscribe_role delivers "
-     "one (round 108, core 0.104)"),
+     MET, "live.no_event, read by live.replay_events, live.subscribe_events and Owner.subscribe_role: a mutation or a "
+     "payload with no envelope counted undecodable, form, never delivered (events_live §8 Expected 5, py-py and "
+     "zenctl replay's puts beside the owner example's) (round 108, core 0.104)"),
 ]
 
 
