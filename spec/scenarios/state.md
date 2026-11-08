@@ -272,9 +272,11 @@ time of step 1.
 4. Step 2's comes last. An unknown time is never judged within the
    retention or beyond it, and comes after every known one.
 5. None of step 4's three samples is delivered, by the subscription or
-   by the replay. The consumer counts each undecodable, refused as
-   `form`: each carries no event, in an envelope §7.5's parse accepts or
-   in none (core §2.6).
+   by the replay. The subscription counts each of the three undecodable,
+   refused as `form`: each carries no event, in an envelope §7.5's parse
+   accepts or in none (core §2.6). The replay returns step 4's two puts
+   alone, since the storage holds no value under the deleted key, and
+   counts each of the two so.
 
 *Spike S5: the union replay returned 1,000 in 4 ms; the memory backend
 ignored the `_time` bound. The reference runs §8 in `zenkey/tests/state.rs`

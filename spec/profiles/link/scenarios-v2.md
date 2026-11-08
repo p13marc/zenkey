@@ -137,22 +137,28 @@ section, named after it. [`scenarios.md`](scenarios.md)'s sections are
 **Setup.** N, the owner and F as the Conventions run them. The owner is
 `lab/radio-a`, a client session of N on the near side as `radio-a`, its
 timestamping off (core §8.2). F attaches to N over the face directly.
+- **Why `fault`.** An owner sets no Zenoh timestamp on an event: core
+  §4.3's table lists none. So a timestamp on F's occurrence is a
+  router's. A state the table lists keeps its owner's own, under the
+  block and in the control alike. `oper` is one, its `freshness.ttl_s`
+  4, and would show nothing of N.
 
 **Steps.**
 1. The generator compiles N's block from the policy, the enrollment and
    the contract, and N starts with it.
-2. F subscribes to `zk2/lab/radio-a/radio.v1/state/oper`, a state the
-   face lets cross whole. The owner puts `oper` until F receives it.
+2. F subscribes to `zk2/lab/radio-a/radio.v1/events/fault/*`, an event
+   the face lets cross whole. The owner publishes `fault` until F
+   receives an occurrence.
 3. A tool checks N's configuration (§2.19).
 4. **Control:** N starts again from its block with the `timestamping`
    object removed, and steps 2 and 3 run against it.
 
 **Expected.**
 1. N's configuration states timestamping off for a router and a peer.
-2. F's sample of `oper` carries no timestamp.
+2. F's occurrence of `fault` carries no timestamp.
 3. The tool reports no finding.
-4. In the control, F's sample carries a timestamp, N's own, its id N's
-   zid. The tool reports `face_timestamping` at `timestamping`.
+4. In the control, F's occurrence carries a timestamp, N's own, its id
+   N's zid. The tool reports `face_timestamping` at `timestamping`.
 
 ## §4 The far end opens a face bound by a user name (§2.5, §2.18)
 

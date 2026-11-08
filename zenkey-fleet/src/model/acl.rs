@@ -3161,7 +3161,11 @@ fn transport_json5(
              // every session that opens to it, and refuses one the file does not hold. Give each\n  \
              // session of the far side a user of its own there, its local tools among them. zenoh\n  \
              // loads no user without a password, and opens no dictionary it cannot read.\n  \
-             auth: {{ usrpwd: {{ user: {user:?}, password: \"<{user}'s password>\", dictionary_file: \"<{end}'s dictionary>\" }} }},"
+             auth: {{ usrpwd: {{ user: {user:?}, password: {password:?}, dictionary_file: {dictionary:?} }} }},",
+            // Quoted whole, so a name holding `"` or `\` keeps the line JSON5
+            // (review-bot on #1122).
+            password = format!("<{user}'s password>"),
+            dictionary = format!("<{end}'s dictionary>"),
         );
     }
     let _ = writeln!(out, "}},");
