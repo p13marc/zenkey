@@ -14,6 +14,7 @@ No rule changed.
 |---|---|---|
 | `health`, `alarms`: no catalog, so a snapshot's confirmations went undated for an owner whose descriptor names one (every zenoh-modem owner's) | `--catalog PATH`, repeatable: each confirmation dated under the epoch of the catalog the owner's descriptor names, read through these | a file that is not a catalog is refused, exit 2; without one, as before |
 | `check conform --catalog`: read for packed `time` fields alone | also dates the alarms, health and config GETs' confirmations (#1087) | |
+| `watchdog --catalog`, `record --on --catalog`: read for packed `time` fields alone | an `alert-firing` rule's reader also dates a GET's confirmations under them, so a modem owner's alarm can read firing (#1087) | |
 | `record --on`'s header: no revisions, no bundles | its `revisions` and `bundles`, read as it arms, as plain `record`'s (one presence read, or across a face the contracts in hand; `--no-bundles` leaves the bundles out) | `.zrec` version 4 |
 | `record --on`'s preamble: a snapshot's entries, one row per member | each page as it arrived, a row on its snapshot key under `zenoh/bytes`, kept once; a per-key reply as before | the entries carry their stamps, which order them against the pre-roll |
 | `replay --seed-state`: a preamble row one put | a page row as its entries: each live entry a put of the mutation it stands for, its stamp in band, and each tombstone a delete carrying its envelope, on its member's key; each counted in `preamble_seeded` | a delete still needs `--i-know` |

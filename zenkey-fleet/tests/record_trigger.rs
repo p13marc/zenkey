@@ -82,6 +82,7 @@ fn spec(rule: &str, semantics: Option<PreambleSemantics>, give_up: Duration) -> 
         max_replies: zenkey_fleet::DEFAULT_MAX_REPLIES,
         across_face: false,
         served: None,
+        catalogs: Default::default(),
     }
 }
 

@@ -894,13 +894,16 @@ impl RuleAlarms {
 
     /// One reader per selector `rules` read, reading on `session` and
     /// holding its instance tokens' subscription on `watch` (#830); with no
-    /// session, each is unobservable, saying why.
+    /// session, each is unobservable, saying why. A GET's confirmations
+    /// are dated under the catalog each owner's descriptor names, read
+    /// through `catalogs` (#1087).
     pub(crate) async fn open(
         session: Option<&zenoh::Session>,
         watch: Option<&crate::WatchSession>,
         rules: &RuleSet,
         timeout: Duration,
         clocks_synced: bool,
+        catalogs: &crate::model::deployment::Catalogs,
     ) -> RuleAlarms {
         let mut feeds = Vec::new();
         for selector in rules.alarm_selectors() {
@@ -913,6 +916,7 @@ impl RuleAlarms {
                     let mut spec = AlarmSpec::new(timeout);
                     spec.clocks_synced = clocks_synced;
                     spec.archives = false;
+                    spec.catalogs = catalogs.clone();
                     AlarmFeed::open(s, watch, scope, spec, true)
                         .await
                         .map(|(f, _)| f)
@@ -1237,6 +1241,10 @@ pub struct WatchdogSpec {
     /// listens to no status, so without it a `doctor health-*` rule reads a
     /// `health.v1` status's age as unobservable (#735, a PF follow-up).
     pub clocks_synced: bool,
+    /// The deployment catalogs given (`--catalog`, core §8.6): an
+    /// `alert-firing` rule's reader dates a GET's confirmations under the
+    /// catalog each owner's descriptor names, read through these (#1087).
+    pub catalogs: crate::model::deployment::Catalogs,
 }
 
 /// How many payload checks each key gets per tick under an
@@ -1812,6 +1820,7 @@ pub fn watchdog_across<'a>(
                 &rules,
                 spec.timeout,
                 spec.clocks_synced,
+                &spec.catalogs,
             )
             .await
         } else {

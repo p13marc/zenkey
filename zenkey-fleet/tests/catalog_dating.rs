@@ -11,7 +11,7 @@ use std::path::Path;
 use std::time::{Duration, SystemTime};
 
 mod util;
-use util::zk2::{T, client, config, eventually, router};
+use util::zk2::{T, client, config, eventually, router, watch_of};
 
 use zenkey::{Service, ServiceBuilder};
 use zenkey_fleet::{Catalogs, DeploymentCatalog};
@@ -297,6 +297,60 @@ async fn conform_dates_a_modem_owners_confirmations() {
     assert!(
         alarm_stamp(&undated).is_none() && status_stamp(&undated).is_none(),
         "no catalog given: undated, never under 0"
+    );
+    svc.close().await.expect("closed");
+}
+
+/// The watchdog's `alert-firing` (`zenctl watchdog --catalog`, `record --on`,
+/// zenwatch's `catalog`): the same alarms reader, so a modem owner's alarm,
+/// confirmed and dated under the catalog, fires; with no catalog its
+/// confirmation is undated, and the rule never reads it firing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_watchdogs_alert_firing_dates_a_modem_owners_confirmation() {
+    use zenkey_fleet::Sipper as _;
+    use zenkey_fleet::judge::condition::{Condition, WatchdogSpec, watchdog};
+    let (_r, ep) = router(None).await;
+    let (owners, tool, watch) = (client(&ep).await, client(&ep).await, client(&ep).await);
+    let (svc, _) = modem_owner(&owners).await;
+    let rule = format!("alert-firing zk2/{ADDRESS}/** warning");
+    let bus = zenkey_fleet::DoctorBus {
+        session: tool.clone(),
+        raw: tool.clone(),
+        namespace: String::new(),
+        watch: Some(watch_of(&watch, "")),
+    };
+    let store = zenkey_fleet::BundleStore::new(T);
+    let contracts = zenkey_fleet::ContractSet::new();
+    let states = |modem: bool| {
+        let (bus, store, contracts, rule) = (&bus, &store, &contracts, rule.clone());
+        async move {
+            let spec = WatchdogSpec {
+                rules: vec![Condition::parse(&rule).expect("rule")],
+                tick: Duration::from_millis(300),
+                ticks: Some(3),
+                timeout: T,
+                clocks_synced: true,
+                catalogs: given(modem),
+            };
+            let mut run = watchdog(bus, store, contracts, &spec).pin();
+            let mut to = Vec::new();
+            while let Some(t) = run.sip().await {
+                to.push(t.to);
+            }
+            run.await.expect("a run");
+            to
+        }
+    };
+    eventually("the alarm fires under the catalog", || async {
+        states(true)
+            .await
+            .contains(&zenkey_fleet::report::CondState::Firing)
+    })
+    .await;
+    let undated = states(false).await;
+    assert!(
+        !undated.contains(&zenkey_fleet::report::CondState::Firing),
+        "no catalog given: undated, never read firing: {undated:?}"
     );
     svc.close().await.expect("closed");
 }

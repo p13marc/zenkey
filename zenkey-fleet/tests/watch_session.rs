@@ -261,6 +261,7 @@ async fn instance_gone_is_refused_without_a_watch_session_of_its_own() {
         ticks: Some(1),
         timeout: T,
         clocks_synced: false,
+        catalogs: Default::default(),
     };
     let store = zenkey_fleet::BundleStore::new(T);
     let contracts = zenkey_fleet::ContractSet::new();
@@ -728,6 +729,7 @@ async fn instance_gone_is_unobservable_while_its_round_trip_does_not_stand() {
         ticks: Some(3),
         timeout: T,
         clocks_synced: false,
+        catalogs: Default::default(),
     };
     let store = zenkey_fleet::BundleStore::new(T);
     let contracts = zenkey_fleet::ContractSet::new();

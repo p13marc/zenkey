@@ -223,8 +223,10 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   runtime's `Consumer::across`), and `telemetry --across-face` the face
   pair beside it; #1087: `health --catalog` and `alarms --catalog`
   (`HealthSpec::catalogs`, `AlarmSpec::catalogs`) and `check conform`'s
-  `--catalog` (`run_conform`'s `catalogs`) date a snapshot's
-  confirmations under the catalog each owner's descriptor names, and
+  `--catalog` (`run_conform`'s `catalogs`), and the `alert-firing` rule
+  of `watchdog --catalog` and `record --on` (`WatchdogSpec::catalogs`,
+  `TriggerSpec::catalogs`), date a snapshot's confirmations under the
+  catalog each owner's descriptor names, and
   `get state`'s dates name the catalog (`Catalogs::dating`); #980 C1c: `--catalog
   PATH` in `ContractArgs`, beside `--contracts`, loaded by
   `cmd::zk2::load_catalogs`, the lens's `.catalogs()` in `echo`, `get`,

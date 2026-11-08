@@ -87,6 +87,7 @@ async fn a_watchdog_emits_one_transition_per_genuine_change_and_none_per_tick() 
                 ticks: Some(6),
                 timeout: Duration::from_millis(300),
                 clocks_synced: false,
+                catalogs: Default::default(),
             };
             drain(&b, None, &spec).await
         }
@@ -165,6 +166,7 @@ async fn instance_gone_fires_on_an_absent_address_and_only_once() {
         ticks: Some(3),
         timeout: Duration::from_millis(300),
         clocks_synced: false,
+        catalogs: Default::default(),
     };
     let (transitions, summary) = drain(&b, Some(&watch), &spec).await.expect("run");
     assert_eq!(summary.ticks, 3);
@@ -215,6 +217,7 @@ async fn instance_gone_is_judged_per_address_on_the_live_projection() {
         ticks: Some(10),
         timeout: Duration::from_millis(500),
         clocks_synced: false,
+        catalogs: Default::default(),
     };
     let watch = util::joining(&a).await;
     let run = tokio::spawn({
@@ -316,6 +319,7 @@ async fn a_sweep_does_not_stop_the_sampling_it_judges() {
                 ticks: Some(3),
                 timeout: Duration::from_millis(500),
                 clocks_synced: false,
+                catalogs: Default::default(),
             };
             drain(&b, None, &spec).await
         }
@@ -378,6 +382,7 @@ async fn a_consumer_that_stops_sipping_still_gets_the_summary_and_the_teardown()
         ticks: Some(4),
         timeout: Duration::from_millis(200),
         clocks_synced: false,
+        catalogs: Default::default(),
     };
 
     let bus = bus_of(&b, Some(&watch));

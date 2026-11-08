@@ -569,6 +569,8 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
         ticks: e.once.then_some(1),
         timeout: e.timeout,
         clocks_synced: e.clocks_synced,
+        // #1087: `alert-firing`'s reader dates under the config's `catalog`.
+        catalogs: e.catalogs.clone(),
     };
     let mut watchdog = (!engine_rules.is_empty())
         .then(|| zenkey_fleet::watchdog(e.bus, e.store, e.contracts, &spec).pin());

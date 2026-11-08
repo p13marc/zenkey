@@ -439,9 +439,10 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `impl Into<Dating>` (`get_state_in`, `get_state_answer_in`,
   `last_known_in`), and `bus::consume::watch_across` (a `FarSide`, the
   runtime's `Consumer::across`). #1087: `AlarmSpec::catalogs` and
-  `HealthSpec::catalogs` (neither `Copy` now) and `run_conform`/`observe`'s
-  `catalogs` reach `EntryEpochs`, so the health, alarms and conform
-  readers date a snapshot's confirmations under the catalog each owner's
+  `HealthSpec::catalogs` (neither `Copy` now), `run_conform`/`observe`'s
+  `catalogs`, and `WatchdogSpec::catalogs`/`TriggerSpec::catalogs` through
+  `RuleAlarms::open` (the `alert-firing` rule) reach `EntryEpochs`, so the
+  health, alarms, conform and watchdog readers date a snapshot's confirmations under the catalog each owner's
   descriptor names (`tests/catalog_dating.rs`, an owner under
   zenoh-modem's `0ff6bf6d`).
   A call's forms alone (#985 C4b; C4d, core 0.99, removed the bare

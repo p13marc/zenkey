@@ -125,6 +125,10 @@ pub struct TriggerSpec {
     /// `bundles` the file's header carries, as plain `record`'s does. `None`
     /// states none.
     pub served: Option<ZrecHeader>,
+    /// The deployment catalogs given (`--catalog`, core §8.6): an
+    /// `alert-firing` rule's reader dates a GET's confirmations under the
+    /// catalog each owner's descriptor names, read through these (#1087).
+    pub catalogs: crate::model::deployment::Catalogs,
 }
 
 /// What a trigger capture reports as it runs — the frontend renders these;
@@ -446,6 +450,7 @@ where
             &rules,
             spec.timeout,
             spec.clocks_synced,
+            &spec.catalogs,
         )
         .await
     } else {
