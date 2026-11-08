@@ -5825,6 +5825,25 @@ def _round109_readings(root: Path) -> list[tuple[str, Any, Any]]:
                           "The backend kept all 1,005 puts, step 4's two among them.",
                           "5. None of step 4's three samples is delivered, by the subscription or by the replay."),
                 []))
+    # zk2py's consumer over core 0.105's count, offline: a delete on an events
+    # key read through §7.5's parse, by each kind of attachment
+    from . import live, zk2c
+
+    k = "zk2/lab/journal/journal.v1/events/entries/000g0001"
+    dels = {"a delete": zk2c.deletion(zk2c.InBand(16, 1, 1)), "none": None, "empty": b"",
+            "a mutation": zk2c.mutation(zk2c.InBand(16, 1, 1), b"x"),
+            "a byte after the seq": zk2c.deletion(zk2c.InBand(16, 1, 1)) + b"\0"}
+    got_d = {what: live.no_event(k, live.delete_read(k, zk2c.ENCODING, a), deleted=True) for what, a in dels.items()}
+    got_d["under another Encoding"] = live.no_event(k, live.delete_read(k, "application/json", b"\x20"), deleted=True)
+    got_d["a state key"] = live.no_event("zk2/lab/s/a.v1/state/x", live.delete_read(
+        "zk2/lab/s/a.v1/state/x", zk2c.ENCODING, zk2c.deletion(zk2c.InBand(16, 1, 1))), deleted=True)
+    out.append(("core 0.105 §2.6's count of a delete on an events key (live.no_event over live.delete_read, which "
+                "live.subscribe_events, live.replay_events and Owner.subscribe_role read): its attachment's refusal "
+                "where §7.5's parse refuses it (short, sample_kind, trailing), form where it reads as a delete or "
+                "carries none (no attachment, as core 0.105's entry says, F-527; another Encoding); a state key is "
+                "not the rule's",
+                got_d, {"a delete": "form", "none": "form", "empty": "short", "a mutation": "sample_kind",
+                        "a byte after the seq": "trailing", "under another Encoding": "form", "a state key": None}))
     rules = (spec / "RULES.md").read_text(encoding="utf-8")
     counts = dict(re.findall(r"^\| \[([A-Za-z][^\]]*)\]\(#[^)]*\) \| (\d+)", rules, re.M))
     every = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)

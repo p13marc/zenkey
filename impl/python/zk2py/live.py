@@ -1011,6 +1011,9 @@ class Answer:
     replier: str | None = None
     #: a ``reply_del``: the reply's sample is a delete (round 108)
     deleted: bool = False
+    #: the reply's attachment, or None for none (round 109: a ``reply_del``'s
+    #: is its envelope, core §7.5)
+    attachment: bytes | None = None
 
 
 def replier_of(reply: Any) -> str | None:
@@ -1074,7 +1077,8 @@ def _replies(session: zenoh.Session, selector: str, target: zenoh.QueryTarget, t
             s = item.ok
             yield Answer(True, str(s.key_expr), str(s.encoding), s.payload.to_bytes(),
                          s.timestamp is not None, s.attachment is not None, replier_of(item),
-                         s.kind == zenoh.SampleKind.DELETE)
+                         s.kind == zenoh.SampleKind.DELETE,
+                         None if s.attachment is None else s.attachment.to_bytes())
         else:
             e = item.err
             yield Answer(False, None, str(e.encoding), e.payload.to_bytes(), replier=replier_of(item))
@@ -1948,8 +1952,8 @@ class Replay:
     - ``dropped``: those whose time is beyond the retention;
     - ``undecodable``: replies on an events key whose envelope was refused,
       ``(key, token)``, or that carry no event, ``(key, "form")`` (core 0.104
-      §2.6, F-514's answer), a ``reply_del`` there among them (F-522), never
-      delivered;
+      §2.6, F-514's answer), a ``reply_del`` there among them (core 0.105,
+      F-522's answer), never delivered;
     - ``not_zk2``: replies on keys the grammar refuses, a ULID's key among
       them (core 0.103 §1.2), which no reader resolves."""
 
@@ -1959,33 +1963,55 @@ class Replay:
     not_zk2: list[str] = field(default_factory=list)
 
 
-#: Core §2.6 (0.104): the token a consumer counts a put on an events key
-#: under when its payload is no event, "as §4.2 counts a stray reply_del".
+#: Core §2.6 (0.104, 0.105): the token a consumer counts a sample on an events
+#: key under when it carries no event and §7.5's parse refused nothing, "as
+#: §4.2 counts a stray reply_del".
 NO_EVENT = "form"
 
 
 def no_event(key: str, read: zk2c.Read | None, deleted: bool = False) -> str | None:
-    """Core §2.6 (0.104), "A put that carries no event": "A consumer MUST NOT
-    deliver a put on an events key whose payload is no event, such as a
-    mutation or a payload with no envelope, whether a subscription heard it
-    or a replay returned it. It counts it undecodable, refused as form". The
-    token a consumer counts such a put, read through §7.5's parse, under
-    (:data:`NO_EVENT`), or the parse's own where it refused the envelope
-    ("A refused envelope is undecodable, and the tool names the refusal",
-    observer §7.3; zk2py's reading); None for an event, or a key that is no
-    zk2 events key. A delete there, ``deleted`` (a subscription's or a
-    ``reply_del``), no text names (F-522): zk2py counts it ``form`` too, as
-    §4.2 counts a stray ``reply_del``, "a delete is no form that owner
-    answers the member in", never delivering it."""
+    """Core §2.6 (0.105), "A sample that carries no event": "A consumer MUST
+    NOT deliver a put on an events key whose payload is no event, such as a
+    mutation or a payload with no envelope, or a delete on an events key,
+    whether a subscription heard it or a replay returned it." Its count:
+    "Where §7.5's parse refuses its envelope, the count names that refusal,
+    such as short, sample_kind or key_stamp … Any other is refused as form
+    …: its envelope reads as another form, or it carries none."
+
+    ``read`` is the sample read through §7.5's parse (:func:`zk2c.read_put`,
+    or for a delete :func:`delete_read`), or None for a sample that carries
+    none. Returns the token the consumer counts the sample under, or None
+    for an event, or a key that is no zk2 events key. A delete
+    (``deleted``) is never an event: its attachment's refusal, else
+    ``form``. A delete with no attachment carries none, ``form``, as core
+    0.105's entry says ("one that reads as a delete, or none, as form";
+    F-527, zk2py's reading)."""
     if zk2c.key_token(key) != "events":
         return None
-    if deleted or read is None:
+    if read is None:
         return NO_EVENT
     if read.refused:
         return read.refusal or "refused"
-    if read.form != "event" or read.stamp is None:
+    if deleted or read.form != "event" or read.stamp is None:
         return NO_EVENT
     return None
+
+
+def delete_read(key: str, encoding: str, attachment: bytes | None) -> zk2c.Read | None:
+    """A delete's envelope, its attachment, read through §7.5's parse; None
+    where it has no attachment, which carries none (:func:`no_event`)."""
+    return None if attachment is None else zk2c.read_delete(key, encoding, attachment)
+
+
+def sample_no_event(sample: zenoh.Sample) -> str | None:
+    """:func:`no_event` of a zenoh sample, a put's payload or a delete's
+    attachment read through §7.5's parse."""
+    key = str(sample.key_expr)
+    if sample.kind == zenoh.SampleKind.DELETE:
+        att = sample.attachment
+        return no_event(key, delete_read(key, str(sample.encoding), None if att is None else att.to_bytes()),
+                        deleted=True)
+    return no_event(key, zk2c.read_put(key, str(sample.encoding), sample.payload.to_bytes()))
 
 
 def occurrence_of(key: str, encoding: str, payload: bytes, epoch_s: int = 0) -> Occurrence | tuple[str, str] | None:
@@ -2047,7 +2073,10 @@ def replay_events(session: zenoh.Session, selector: str, retention_s: int, now_m
         if not a.ok or a.key is None:
             continue
         if a.deleted and zk2c.key_token(a.key) == "events":
-            out.undecodable.append((a.key, NO_EVENT))
+            # Core 0.105 §2.6: a reply_del on an events key is never
+            # delivered, counted by its attachment's refusal, else form.
+            out.undecodable.append((a.key, no_event(a.key, delete_read(a.key, a.encoding or "", a.attachment),
+                                                    deleted=True) or NO_EVENT))
             continue
         o = occurrence_of(a.key, a.encoding or "", a.payload, epoch_s)
         if o is None:
@@ -2068,13 +2097,13 @@ def subscribe_events(session: zenoh.Session, selector: str, deliver: Any, undeco
     "whether a subscription heard it or a replay returned it" one rule holds
     (0.104). ``deliver`` gets each :class:`Occurrence`; ``undecodable`` gets
     ``(key, token)`` for a put that carries no event (``form``) or whose
-    envelope is refused, never delivered. A delete delivers nothing: an
-    owner publishes each occurrence "with a one-shot put", and no rule has a
-    consumer read a delete on an events key (F-522): it is counted
-    ``(key, "form")`` (:func:`no_event`). Returns the subscriber."""
+    envelope is refused, never delivered. A delete delivers nothing (core
+    0.105 §2.6: "or a delete on an events key"): it is counted by its
+    attachment's refusal, else ``form`` (:func:`sample_no_event`). Returns
+    the subscriber."""
     def received(sample: zenoh.Sample) -> None:
         if sample.kind != zenoh.SampleKind.PUT:
-            token = no_event(str(sample.key_expr), None, deleted=True)
+            token = sample_no_event(sample)
             if token is not None:
                 undecodable((str(sample.key_expr), token))
             return

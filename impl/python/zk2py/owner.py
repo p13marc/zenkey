@@ -2498,8 +2498,9 @@ class Owner:
         it hands ``sink`` (key, None), never bytes; its envelope, in the
         delete's attachment, is read as every delete's is. A put on an events
         key that carries no event, a mutation or a payload with no envelope,
-        is undecodable, ``form``, never handed on (core 0.104 §2.6,
-        :func:`zk2py.live.no_event`).
+        and a delete on an events key, are undecodable, never handed on,
+        counted by the parse's refusal, else ``form`` (core 0.105 §2.6,
+        :func:`zk2py.live.sample_no_event`).
 
         ``across``, a :class:`zk2py.far_side.FarSide` (core §8.5, 0.91):
         where the face's medium repairs no lost frame, each subscription with
@@ -2509,27 +2510,27 @@ class Owner:
         (:class:`zk2py.far_side.Redeclaring`). Returns the subscriptions,
         each undeclared by ``.undeclare()``."""
         from . import far_side, packed
-        from .live import no_event
+        from .live import sample_no_event
 
         assert self.session is not None
 
         def received(sample: zenoh.Sample) -> None:
             key = str(sample.key_expr)
             if "*" not in key:
+                # Core §2.6 (0.105): "A consumer MUST NOT deliver a put on an
+                # events key whose payload is no event … or a delete on an
+                # events key", counted by the parse's refusal, else form; a
+                # delete with no attachment carries none (F-527).
+                token = sample_no_event(sample)
+                if token is not None:
+                    self.undecodable.append((key, token))
+                    return
                 # Observer §7.3 (0.14) and core §4.3 (0.73): the envelope's
                 # record is the payload; a refused one is undecodable, never
                 # handed on, and counted.
                 read = zk2c.read_sample(sample)
                 if read.refused:
                     self.undecodable.append((key, read.refusal))
-                    return
-                # Core §2.6 (0.104): "A consumer MUST NOT deliver a put on an
-                # events key whose payload is no event ... It counts it
-                # undecodable, refused as form"; a delete there likewise,
-                # zk2py's reading (F-522).
-                token = no_event(key, read, deleted=sample.kind == zenoh.SampleKind.DELETE)
-                if token is not None:
-                    self.undecodable.append((key, token))
                     return
                 if record is not None:
                     if sample.kind == zenoh.SampleKind.DELETE:
