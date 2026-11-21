@@ -7542,6 +7542,150 @@ scenario §8 still asking `"params": {}`). None is a blocker. F-529 to
 F-534 stay open: their answers are not on this branch. See "At core
 0.107" in `SPEC-FINDINGS.md`.
 
+## Core 0.108 and `link.v2` 0.18: the owner heartbeat, written before its fixture, and round 110 answered (round 112)
+
+Round 112 read main at fc16a564:
+- **core 0.108** (#1110), §7.5's **owner heartbeat**: form 6 with a
+  group per covered interface, each group its catalog index, its tag,
+  its size and its sections. It is static at this version: the form,
+  its parse and write, its refusals and its round trip;
+- **`link.v2` 0.18**, the answers to F-529 to F-534: a `null` among the
+  eight keys (§2.19), the far end's block unfilled (§2.18),
+  `keep_alive_not_suppressed` pinned on both sides of the interval, and
+  zenoh-modem's notes re-priced by §2.16.
+
+### The owner heartbeat, from the text first
+
+`owner_heartbeat` was written from §7.5 and §8.6 alone and committed
+(6d620e7f) before `heartbeat/owner.json` was opened. Then the runner was
+written, and the file run.
+
+**90 of 90 on the first run: no case wrong, and no line of
+`owner_heartbeat` changed after the fixture was read.** 12 writes, 45
+reads, 32 groups and the one body read both ways. `SPEC-FINDINGS.md`
+names the sentences that decided the cases a reader could get wrong,
+and what zk2py had to choose where §7.5 names nothing.
+
+- **`owner_heartbeat`,** new:
+  - `read`, a put's payload: "The envelope's parse comes first", then
+    `tag`, then the body. `read_body`: `short`, `code`, `order` and
+    `leb128` as each field is read whole and judged, then `trailing`,
+    then `pad`. A group's sections are kept as their bits, unread;
+  - `read_group`, one group with the catalogs its reader holds and the
+    revisions it holds: `unknown_catalog` or `unknown_index` through
+    `catalog.resolve`, then `short` and `code` over the bits its size
+    counts, then `trailing`. A revision not held is skipped, never
+    refused. `tag_matches` says whether the group's tag is its
+    revision's. `read_groups` reads each group from its own bits, so a
+    refused one moves no other;
+  - `write`, `write_body`, `body_bits`, `group_of`: CH's tag 0, the
+    groups in ascending order of their indices, each size its sections'
+    count of bits in LEB128, "the next 8 bits of the body, wherever
+    they fall". `write_back` writes an accepted one to the same bytes;
+  - `size_of`: §7.5's "Sizes".
+- **`heartbeat`** reads and writes a body's sections apart from its
+  time (`read_sections`, `sections_bits`, `read_time`, `time_bits`), so
+  a group's sections and a heartbeat's are one code. Its fixtures did
+  not move: 167 of 167 before the runner read `owner.json`.
+- **Neither reader chooses by the bytes.** A caller that holds an owner
+  heartbeat's key calls `owner_heartbeat.read`, and one that holds a
+  heartbeat's calls `heartbeat.read`. No function takes the key: no
+  text on this main names it (F-542).
+- **A put of another form** on an owner heartbeat's key is refused
+  `form`, zk2py's own token: §7.5 names none (F-540).
+
+### Its walk of `RULES.md` at 0.108
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 93 | 82 | 2 | 9 |
+| consumer | 33 | 29 | 0 | 4 |
+| caller | 18 | 18 | 0 | 0 |
+| observer | 104 | 99 | 3 | 2 |
+| static, in every class | 74 | 72 | 0 | 2 |
+
+- **293 rows walked of 293, none without a verdict.** 29 verdicts are
+  beyond the index. `RULES.md` lists 283 rules, 277 before, the static
+  rules 73.
+- **The six new static rows are met,** each by `owner_heartbeat`.
+- **The re-key went with the owner heartbeat's runner,** in one commit:
+  the heartbeat family fails until `owner.json` is read, and the six
+  rows are verdicts on this round's code.
+
+### `link.v2` 0.18
+
+- **`link_v2`** reads a `null` `routing/interests/timeout` as left out,
+  at the binding's default (`NULL_LEFT_OUT`). At each of the seven
+  other keys a `null` stays the value stated: `transport_differs`, and
+  `wait_under_lease` skips it. Round 110 read all eight by the letter.
+- **`v2/plan.json` 46 of 46 and `v2/transport.json` 27 of 27.**
+- **zk2py's generated blocks carry no comment:** `block` and
+  `far_block` are JSON objects.
+- **F-529 to F-534 are resolved,** each as `SPEC-FINDINGS.md` says.
+
+**`just py-conformance`: 6826 of 6826** on fc16a564. Of them,
+`heartbeat` 295, 128 of them `owner.json`'s, `link` 347 and `readings`
+1047: round 112's seventeen, and round 110's five of F-530 to F-534
+gone with their answers.
+
+### Live
+
+On the black boxes of fc16a564. Every router is zenoh-python's, zenoh
+1.10.1.
+
+| Runner | What | Result |
+|---|---|---|
+| `link_v2_live --only null`, new | N's configuration as zk2py's generator writes it, a `null` at each of the eight keys in turn. zenoh-python refuses the file at each of the seven and loads it at `routing/interests/timeout`, and a router opens from that file. zk2py's check: `transport_differs` at each of the seven, no `wait_under_lease`, nothing at the interests timeout. **`zenctl check face`** under `zm-1.10.2-r1`: the same eight answers. Under `zenoh-1.10.1` it loads the file through zenoh, and ends at exit 2 for each of the seven and for a string lease (F-546). Under a policy at 40,000 ms the `null` interests timeout is `transport_differs` by both | 36/36 |
+| `desired_scenarios --only tool-shapes` | the mend: two differing reports on one key, with no envelope, in envelopes of one run and of two. zk2py's tool reads the one its merge keeps. `zenctl desired` reads each as two that differ, `report_invalid`: known by F-545, by name | 93/93, 3 of them known by F-545 |
+| `freshness_v2_scenarios`, `heartbeat_epoch_live` | whole, over `heartbeat`'s sections read and written apart from the time | 112/112, 8/8 |
+| `stamp_live`, `link_v2_live`, `link_v2_frames_live` | whole, over `link_v2`'s reading of a `null` | 15/15, 71/71 (the 36 of `null` among them), 11/11 |
+| `desired_scenarios` | zk2py's parties, whole, with the three shapes | 196/196 |
+
+**The mend** (`py-carry-r111.md`):
+1. **F-529 to F-534:** each answer holds, and the walk is re-keyed.
+2. **The two `desired_scenarios` checks:** the reference moved, not
+   zk2py. `zenctl desired` answers `report_invalid` for two differing
+   reports on one key, in any order, enveloped or not, of one run or
+   two. `desired.v1` §2.10 has them "not two", by a sentence that rests
+   on `Latest`, which core 0.100's S4 replaced (F-545). zk2py keeps its
+   reading, the merge's, and its runner names the reference's.
+3. **1,167 B and 1,184 B:** a member's presence and a run's width.
+   `zenctl gen --run-file … --catalog examples/zk2/zenoh-modem/catalog.json`
+   serves 1,184 B: `"catalog":"29bf7d47"` and its comma are 21 B more,
+   and a 16-bit run 4 B less. Same order, no spacing in either.
+4. **The 512 B warning:** drawn. `zenctl gen` at a service chunk of
+   296 characters or more logs it, and at 295 does not, where zk2py
+   counts the other members 507 B and 506 B: the reference counts a
+   few bytes of separators zk2py does not (F-536, open).
+5. **zenohd:** not run (below).
+6. **review-bot's notes on #1129:** the carry list holds none.
+
+**The reference, observed (not findings):**
+- **`zenctl gen`** at a service chunk of 200 characters or more
+  reports `up`, and no instance token of it reached zk2py's reader in
+  12 s. At 100 characters it did. Not analysed.
+- **The owner example** at a service chunk of 300 characters serves
+  1,382 B, 449 B of it the other members, and logs no warning.
+
+**Not run:**
+- an owner heartbeat on a bus: no text on this main names its key;
+- zenohd as a black box: `bin/current` holds none, and the host's own
+  reports 1.10.0, outside the brief's black boxes;
+- the live runners not named in the table: none reads what this round
+  moved;
+- F-531's far router, again: round 110's measurement stands.
+
+Round 112 found F-540 to F-546: two gaps (no refusal names a put of
+another form on an owner heartbeat's key; §7.5 sends a reader to a
+`freshness.v2` §3 that names one key on this main), three ambiguities
+(a reader that "holds that interface's revision alone" needs a catalog;
+`desired.v1` §2.10's two reports on one key under `None`; a file zenoh
+refuses "is `transport_differs`") and two minor errors ("Nothing in the
+bytes tells the two apart", which CH's tag does; "That group alone"
+citing a fixture with no such case). None is a blocker. F-529 to F-534
+are resolved. F-535 to F-539 stay open: their answers are not on this
+main. See "At core 0.108 and link.v2 0.18" in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -7604,6 +7748,10 @@ F-534 stay open: their answers are not on this branch. See "At core
   zk2py's owner holds values only for parameterless state. It answers
   templated operations through the handlers and members it is given, and
   otherwise names no member.
+- **The owner heartbeat on a bus** (core 0.108, round 112): zk2py parses
+  and writes one, and reads its groups through a catalog. No zk2py
+  owner sends one and no reader subscribes to one: no text on this main
+  names its key, who sends it or what a reader concludes (F-542).
 - **A collection's snapshot** (core 0.97, round 103): zk2py reads, writes
   and cuts pages, and its echo tool shows one. Its owners answer a GET
   per key and its readers read with `Latest`, as S2 to S4 still say: no
@@ -7720,7 +7868,11 @@ impl/python/
     freshness.py      freshness.v1 horizons, judgements, the clock trust, a subscriber, a tool's read
     freshness_scenarios.py freshness.v1 scenarios.md §1–§6 on an in-process router
     heartbeat.py      §7.5      the heartbeat: the tag, the collections, the body written and read, the digest
-                                (round 96)
+                                (round 96); its sections read and written apart from its time (round 112)
+    owner_heartbeat.py §7.5 §8.6 the owner heartbeat, form 6 with a group per covered interface: the groups read
+                                with no contract, each group's sections with its revision through the catalog,
+                                the writer and the round trip; written from the text before owner.json was
+                                opened (core 0.108, round 112)
     snapshot.py       §7.5      the snapshot, form 7: a page read, written and written back, cut by the paging
                                 rule twice (by writing, by arithmetic), held complete (core 0.97, round 103)
     seed_snapshot.py  §4.2      a seed over snapshots, core 0.100's §4.2: the fixture's Seed, and the live
@@ -7749,7 +7901,9 @@ impl/python/
                                 side and frames per face, exposure.json (0.3, round 99); timestamping off in the
                                 block, the far end's block, and face_timestamping (0.13, round 109); a face's
                                 opens, near_opens_user, the far end's user, a null left out (0.15), the block
-                                merged (0.16), and §2.16's keep-alives beside data (0.17) (round 110)
+                                merged (0.16), and §2.16's keep-alives beside data (0.17) (round 110); a null
+                                routing/interests/timeout left out, and a null at each other key no value zenoh
+                                runs (0.18, round 112)
     far_side.py       §8.1 §8.5 a far side across a face: the reply timeout, a subscription's horizon, Redeclaring
                                 (core 0.91, observer 0.23, link.v2 0.4; round 99)
     far_side_live.py  §8.1 §8.5 constrained.md §8 and §9 in process, a proxy dropping a batch the far client sends
@@ -7843,7 +7997,9 @@ impl/python/
     link_v2_live.py   link.v2   scenarios-v2.md §4, the far end opening a face bound by a user name, with zenctl
                                 acl gen beside zk2py's generator, and §5, N's keep-alives beside puts counted by a
                                 relay (round 110); §1 over a relay that holds both directions, and §1 and §4
-                                on the reference's generated pair (--only s1, s1ref, s4ref; round 111)
+                                on the reference's generated pair (--only s1, s1ref, s4ref; round 111); a null
+                                at each of the eight keys, zenoh-python's load, zk2py's check and zenctl check
+                                face under both bindings (--only null; round 112)
     link_v2_frames_live.py link.v2 scenarios-v2.md §2, frames per face, on zk2py's block and on zenctl acl gen's
                                 (round 111)
     stray_live.py     §4.2      scenarios/state.md §15, a stray reply_del and an owner on an earlier revision

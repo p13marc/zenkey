@@ -27204,3 +27204,449 @@ e46b040b):
   - F-535 to F-539.
 
   F-365 stays open as #965's.
+
+## At core 0.108 and link.v2 0.18
+
+Round 112 read core 0.108 (#1110: §7.5's owner heartbeat, form 6 with a
+group per covered interface) and link.v2 0.18 (round 110's F-529 to
+F-534 answered), at main fc16a564. It read cold:
+- core §7.5 whole, with §8.6 where it sends a reader;
+- link.v2 §2.18, §2.19 and Appendix B;
+- both changelog entries, `heartbeat/owner.json` (after the code, below),
+  `layouts.json`'s four new revisions, `v2/plan.json`'s cases 44 and 45
+  and `v2/transport.json`'s 24 to 26, and zenoh-modem's notes as 0.18
+  re-priced them.
+
+zk2py diffed `spec/` and `examples/zk2/` between round 111's e46b040b
+and fc16a564. `spec/CLAUDE.md` moved too, and the barrier keeps it
+unread. **No rule changed beyond what the changelogs state:**
+`RULES.md` lists 283 rules, 277 before, the static rules 73, and its six
+new rows are core 0.108's. link.v2 0.18 moves no row.
+
+F-535 to F-539 stay open: their answers are not on this main.
+
+### The owner heartbeat, written from §7.5 before its fixture
+
+zk2py wrote `owner_heartbeat` from §7.5 and §8.6 alone and committed it
+(6d620e7f) before it opened `heartbeat/owner.json`. Then it wrote the
+runner and ran the file.
+
+**`owner.json`: 90 of 90 on the first run. No case was wrong, and no
+line of `owner_heartbeat` moved after the fixture was read.** By part:
+12 writes, 45 reads (32 refused), 32 groups (20 refused) and the one
+body read both ways. `layouts.json`'s six revisions pass, the four new
+ones among them.
+
+**The sentences that decided the cases a reader could get wrong:**
+- "Each field is read whole, then judged, and the first field that
+  draws a refusal decides. So an unused code is refused before a later
+  field cut short, and an index out of order before its own group's
+  size." It decides reads 33, 36, 37 and 43, and 15 with the snapshot's
+  "A fifth byte with its high bit set is refused, whatever follows it".
+- "the body holds a byte after its pad (`trailing`)" before "a bit of
+  the pad is 1 (`pad`)": read 42.
+- "The envelope's parse comes first", then "CH's tag is not 0": read
+  20, a tag refused with no body at all.
+- "Each of its bytes is the next 8 bits of the body, wherever they
+  fall": write 8, sizes on no byte boundary.
+- "A group has no pad of its own" and "the sections hold a bit after
+  their last field (`trailing`)": groups 15, 30 and 31.
+- "Another tag refuses nothing here: the sections read the same":
+  group 12.
+- §8.6's "It then reads only the indices below that item's count of
+  entries": group 4, an index the successor holds and the catalog named
+  does not.
+
+**What zk2py had to choose, where §7.5 names nothing, and no case
+tests:**
+- a put on an owner heartbeat's key whose form is not 6: `form`
+  (F-540);
+- a writer given groups out of order: it writes them in ascending
+  order, and refuses none, sixteen and one index twice. The text has
+  the writer write them so and names no refusal of its own;
+- a group whose entry names a revision the reader does not hold:
+  skipped, never refused, as "skips every other by its size, one whose
+  revision it does not hold among them" says. Every `groups` case's
+  revision is one of `layouts.json`'s.
+
+**Beyond the fixture** (`readings`): every truncation and every one-bit
+change of W2's payload, 3,000 random bodies and 300 random owner
+heartbeats written. Each is refused by a token of the text's, or read
+and written back to the same bytes. Every refusal of the first reading
+is met. A refused group between two others leaves both as they read
+without it.
+
+**The changelog's claims, checked.**
+- **The evidence:** 12 writes, 45 reads, 32 groups through three
+  catalogs and one body, 90 cases. `layouts.json` gains `alert.v1`,
+  `knob.v1`, `vital.v1` and `mixed.v1`.
+- **The cost,** computed from §7.5's "Sizes": W2's groups are 46, 34
+  and 34 bits, 226 bits of body, a 35-byte payload on a 16-bit run.
+  Without the sizes, 202 bits and 32 bytes. A 58-byte SDU every 28.5 s
+  is 176 KB a day, and a 55-byte one 167 KB.
+- **"Today's three heartbeats … cost 245 KB on the same basis"** is
+  reproduced only with a period the entry does not state: 17, 16 and
+  16 B of payload, each put 4 B over it and each SDU 19 B over that,
+  come to 245 KB with `alert.v1`'s sent every 427.5 s and the two
+  others every 28.5 s, and to 358 KB with all three every 28.5 s. Not
+  a finding: the entry prices W2, whose periods are not this text's.
+- **"Six rules, all static":** six rows cite `owner.json`.
+- **Not checked:** that both files' cases "were computed twice, by two
+  readings of this text that shared no code". zk2py's is a third, and
+  it agrees on every case.
+
+**What a reader cannot know from §7.5 at this main** is F-542's list.
+
+### link.v2 0.18: the answers
+
+**The answers hold**, F-529 to F-534. Each is resolved:
+- **F-529** (the fixture): case 44 asks a full record every 675 s. It
+  plans, draws `frame_over_interval` and no
+  `keep_alive_not_suppressed`. Case 45, case 5's face under a lease of
+  240,001 ms, draws none where case 5 at 240,000 ms does. The two pin
+  §2.16's inequality on both sides: a generator that warned of every
+  face with a cadence fails both now.
+- **F-530** (the fixture): `plan.json`'s description says "A case may
+  give `users`, the principals the deployment binds by a user name".
+- **F-531** (§2.18): "Unfilled, each part fails its own way." Only the
+  dictionary stops the far end, and with its dictionary filled in it
+  starts and the near router refuses its link. That is what round 110
+  measured on zenoh-python.
+- **F-532** (§2.19): "**A `null`** reads as zenoh 1.10.1 reads it":
+  left out at `routing/interests/timeout`, and no value zenoh runs at
+  each of the seven other keys. zk2py's reading moved with it
+  (`link_v2.NULL_LEFT_OUT`): a `null` there is read at the binding's
+  10,000. Cases 24 to 26 pass, and zk2py's own reading states a `null`
+  at each of the eight keys in turn: no finding at the interests
+  timeout, `transport_differs` at each other, and no
+  `wait_under_lease` for a `null` lease or a `null`
+  `wait_before_close`.
+- **F-533** (zenoh-modem's mapping): `link.md`, `README.md` and
+  `MIGRATION.md` price the keep-alives by §2.16. Computed from the
+  rule: none to 1,440 a day on RF, 1,440 to 2,880 at SF7, none to 720
+  at SF9, to 96 at SF12 and to 48 on SBD, as printed. The table lists
+  `keep_alive_not_suppressed` on all five faces, as cases 14 to 18 draw
+  it. The sums at the most are as printed: 450 s, 653 s and 927 s, and
+  144 messages. `MIGRATION.md` §6 holds neither #1107 nor #1108.
+- **F-534** (Appendix B): "Their plans are `plan.json`'s cases 14 to
+  18, counted from 0: RF, LoRa at SF7, SF9 and SF12, then SBD", which
+  is their order.
+
+**The changelog's claims, checked.**
+- `v2/plan.json` holds 46 cases and `v2/transport.json` 27. zk2py
+  passes 46 of 46 and 27 of 27.
+- Case 15's note says what §2.16 says of twice the interval.
+- "The header is still written against core 0.100": it is.
+- **Not checked:** the entry's line numbers in zenoh's source and the
+  fork's. The barrier keeps Rust source unread.
+
+**zk2py's generated blocks carry no comment.** `link_v2.block` and
+`far_block` are JSON objects, and nothing in them states a `null`.
+
+**Measured** (zenoh-python, zenoh 1.10.1; the black boxes of fc16a564):
+- **A `null` at each of the eight keys** (`link_v2_live --only null`),
+  in N's configuration as zk2py's generator writes it for
+  `scenarios-v2.md`'s policy:
+  - zenoh-python refuses the file with a `null` at each of the seven
+    keys, and loads it with a `null` `routing/interests/timeout`. A
+    router opens from that file;
+  - zk2py's check reports `transport_differs` at each of the seven, no
+    `wait_under_lease` beside a `null` lease or a `null`
+    `wait_before_close`, and no finding at the interests timeout;
+  - `zenctl check face` under the binding `zm-1.10.2-r1`, which its
+    help says it reads "as data in zenoh's shapes", reports the same
+    eight answers, each `transport_differs` at zenoh's key with
+    `observed` `null`;
+  - under a policy at 40,000 ms, the `null` interests timeout is
+    `transport_differs` by both, and the same router with 40,000
+    stated draws nothing.
+- **Two reports on one key** (`desired_scenarios --only tool-shapes`,
+  the carry): F-545.
+- **zenoh-modem's node descriptor** (the carry): `zenctl gen` at
+  `h-c2a95e41d7f0/rf0`, from the three authoring files, in four runs.
+
+  | `zenctl gen` | The descriptor | `run` | `catalog` |
+  |---|---|---|---|
+  | as round 111 ran it | 1,167 B | 16 B, 8 digits | none |
+  | `--run-file` | 1,163 B | 12 B, 4 digits | none |
+  | `--catalog` | 1,188 B | 16 B | 20 B |
+  | `--run-file` and `--catalog` | **1,184 B** | 12 B | 20 B |
+
+  So core 0.107's 1,184 B is the owner on a 16-bit run under
+  zenoh-modem's `catalog.json`. It differs from round 111's 1,167 B by
+  a member's presence, `"catalog":"29bf7d47"` and its comma, 21 B, and
+  by the run's width, 4 B less. The members' order is the same, and
+  both are written with no spacing. The four members are 944 B in
+  each, and the entry's 947 B holds a comma a member (F-536).
+
+**The reference, observed** (not findings but where one is named):
+- **`zenctl check face` under `zenoh-1.10.1`** reads the file through
+  zenoh's own loader. A `null` at one of the seven keys ends it at
+  exit 2, "zenoh refused the config … the question could not be
+  asked", with no `transport_differs`. A string lease ends the same
+  way (F-546).
+- **`zenctl check face` reads a `null`
+  `routing/interests/timeout`** as not stated, under either binding,
+  as link.v2 0.18's entry says it now does.
+- **The 512 B warning** (the carry): `zenctl gen` at a service chunk of
+  296 characters or more logs "the descriptor is over the 1 KB it
+  SHOULD stay within, with more than 512 B beside its interfaces,
+  capabilities, requires and profiles (spec §3.3)". At 295 it logs
+  nothing. Computed from the 3-character address's descriptor, the
+  other members are 507 B at 296 and 506 B at 295, each from its name
+  to its value's end. So the reference's count is above zk2py's by a
+  few bytes of separators, which is F-536's open question. The
+  descriptor at that length was not read back: `zenctl gen` at a
+  service chunk of 200 characters or more reports `up`, and no
+  instance token of it reached zk2py's reader in 12 s, where one of
+  100 characters did. Not analysed.
+- **The owner example** at a service chunk of 300 characters serves a
+  descriptor of 1,382 B, 449 B of it the others, and logs no warning.
+
+**Not run:**
+- an owner heartbeat on a bus: no text on this main names its key, and
+  no black box's help names one;
+- zenohd as a black box. `bin/current` holds none. The host's own
+  `zenohd` reports 1.10.0, where the spec is against 1.10.1, and it is
+  not among the brief's black boxes;
+- F-531's two cases on a far router, again: round 110's measurement
+  stands, and 0.18's sentences state it;
+- review-bot's notes on #1129: the carry list holds none, and the
+  barrier keeps the tracker unread.
+
+### F-540 · gap · core §7.5 "The groups": no refusal names a put of another form on an owner heartbeat's key
+
+> §7.5, "Parsing": "A put carries a mutation, an event, a heartbeat, a
+> frame or a snapshot". "The groups": "The envelope's parse comes first
+> (above). An implementation MUST then refuse an owner heartbeat for
+> the first of these that applies, in this order, naming the refusal:
+> CH's tag is not 0 (`tag`); reading the body's fields in order: …".
+> `owner.json`, `description`: "`reads`: a put's payload in hex, on an
+> owner heartbeat's key, whose envelope the parse accepts as form 6".
+
+- **What is missing.** The parse accepts a mutation and a frame of a
+  put on a `stream` key. The list that follows starts at CH's tag.
+  Read as written, a mutation whose tag is 0 passes `tag`, and its
+  record is read as an owner heartbeat's body. W2's payload under
+  `0x00` reads so, three groups. The fixture sets the case aside by
+  its description.
+- **The same holds of a heartbeat's key** since core 0.81: "Reading a
+  body" lists `short`, `code`, `trailing` and `pad`, and no form.
+- **What zk2py does:** `form`, on either key, its own token.
+- **Fix:** a first item in each list: "the form is not 6 (`form`)",
+  and a case of each in `owner.json` and `bodies.json`.
+- **Changes:** one refusal in two lists, and two fixture cases.
+
+### F-541 · minor · core §7.5: "Nothing in the bytes tells the two apart", which CH's tag does 15 times in 16
+
+> §7.5, "The owner heartbeat": "Which of the two layouts a put carries
+> is its key's to say … Nothing in the bytes tells the two apart. An
+> implementation MUST NOT choose the layout by a payload's bytes." And:
+> "**CH's tag** is 0." "The heartbeat": "**CH's tag** is the low 4
+> bits of the last byte of the covered revision's fingerprint".
+> `CHANGELOG.md`, 0.108: "one body can read as either". `owner.json`,
+> `either`: "one `body` in hex".
+
+- **The error.** The sentence is true of a body, as the entry and the
+  fixture say it. Of a put's bytes it is not: an owner heartbeat's CH
+  is `0xc0` or `0xd0`, and a heartbeat's carries its revision's tag. A
+  put whose tag is not 0 is no owner heartbeat, and is refused `tag`
+  as one. The fixture's own body, sent as a heartbeat covering
+  `hb.v1`, starts `0xce`. None of `layouts.json`'s six revisions has
+  tag 0, so no payload of the fixtures reads both ways.
+- **The rule stands.** A revision's tag is 0 one time in 16, and then
+  nothing tells the two apart.
+- **What zk2py does:** it never chooses by the bytes. Each of its two
+  readers is called by what its caller holds of the key.
+- **Fix:** "Nothing in a body tells the two apart, and a heartbeat's
+  CH carries tag 0 for one revision in 16."
+- **Changes:** wording.
+
+### F-542 · gap · core §7.5 sends a reader to `freshness.v2` §3 for "both keys", and on this main §3 names one
+
+> §7.5: "It is form 6 too, on a key of its own. Which of the two
+> layouts a put carries is its key's to say, and `freshness.v2` §3
+> names both keys." And: "**Who sends one**, on which key, and what
+> each group covers, is `freshness.v2`'s to say." `CHANGELOG.md`,
+> 0.108: "`freshness.v2` 0.9 adopts it". `profiles/freshness/v2.md`,
+> text 0.8, §3: one resource, `heartbeat/{iface}`. `layouts.json`,
+> `mixed.v1`: "a revision whose collections are of two exposures, so
+> freshness.v2 §2.4 puts them in two owner heartbeats".
+
+- **The gap,** on this main. `freshness.v2` is 0.8, its §3 names the
+  heartbeat's key alone, its §2.4 says nothing of two owner
+  heartbeats, and its changelog holds no 0.9 entry. The form can be
+  parsed and written from §7.5. Nothing that uses it can be built.
+- **What a reader cannot know without the later text:**
+  1. **the key**, and with it its kind token (which the parse's
+     `key_kind` reads), its QoS, the grant that reaches it (core
+     §11.1's Consume names the heartbeat's key alone), and how a tool
+     tells it from a heartbeat's key, since it MUST NOT by the bytes;
+  2. **who sends one:** every owner given a catalog, or only one
+     serving several interfaces; beside its heartbeats or in their
+     place; and how often, where its groups' collections have
+     different horizons;
+  3. **what a group covers:** which of its revision's collections its
+     map may mark, and what "class of exposure" (the entry's word)
+     splits one revision's collections into two owner heartbeats;
+  4. **what a reader concludes:** whether a group steps a view as a
+     heartbeat's body does (`freshness.v2` §2.5); what it makes of a
+     covered interface with no group in one owner heartbeat, of a
+     group whose tag is not its revision's, of a refused group, and of
+     an owner heartbeat refused whole;
+  5. **more than 15** covered interfaces;
+  6. **whether a group of no bit is sent,** for a revision with no
+     collection, as write 3 and group 14 hold one;
+  7. **what a tool shows.** `observer.md` stays 0.33: its §7.3 and
+     §7.5 read a heartbeat by its key's covered interface and CH's
+     tag, and an owner heartbeat has neither;
+  8. **across a face:** whether an owner heartbeat crosses where
+     `link.v2` §2.18's "the heartbeat covering it" does.
+- **What zk2py does:** the static half alone, as the entry says the
+  version is. `owner_heartbeat` takes no key, and no zk2py owner sends
+  one.
+- **Fix:** none here if `freshness.v2` 0.9 lands as the entry says.
+  Until it does, §7.5's "names both keys" names a text not on main.
+- **Changes:** nothing in core 0.108.
+
+### F-543 · ambiguity · core §7.5 "Why a size": a reader that "holds that interface's revision alone" finds its group only through a catalog
+
+> §7.5: "**Why a size.** A reader bound to one interface holds that
+> interface's revision alone. With the size it skips the groups of the
+> others, whose sections it cannot read." And: "It reads a group's
+> index through the catalog its owner names, as §8.6 says". §8.6: "A
+> **catalog** is a file that a deployment provisions to its owners,
+> and to the far side of a constrained face (§8.5) … A catalog is
+> never fetched, and no participant serves one on the bus". And: "A
+> reader MUST refuse … an id, when it holds neither that catalog nor
+> one whose `lineage` holds it (`unknown_catalog`)".
+
+- **Two readings.**
+  - Every reader of an owner heartbeat is provisioned its owner's
+    catalog. Then §8.6's list of who is given one is short by the near
+    side's consumers and tools.
+  - A near-side consumer holds its revision alone, as the bullet says.
+    Then each group it reads is `unknown_catalog`, its own among them:
+    it cannot tell which index is its interface's, and "never a guess"
+    forbids finding it by the tag.
+- **What changed.** A heartbeat's reader needs the revision alone. It
+  reads the catalog only for the time's epoch (F-437 and F-440, open).
+  An owner heartbeat's reader needs it for every group.
+- **Computed:** a reader that holds `vital.v1`'s revision and no
+  catalog reads W2's three groups `unknown_catalog`.
+- **What zk2py does:** `read_group` takes the catalogs its caller
+  holds, and refuses as §8.6 says with none.
+- **Fix:** say who is provisioned: "A reader of an owner heartbeat
+  holds its owner's catalog, or a successor (§8.6)", and add the near
+  side's readers to §8.6's first sentence. Or name what a reader with
+  no catalog does.
+- **Changes:** who a deployment provisions; one sentence in §8.6.
+
+### F-544 · minor · core §7.5 "That group alone" cites `owner.json`, where no case reads a refused group beside another
+
+> §7.5: "**That group alone.** A refused group says nothing of the
+> groups beside it. An implementation MUST read each other group as it
+> would with the refused one left out. `[F: heartbeat/owner.json]`"
+> `owner.json`, `description`: "`groups`: the catalog the owner
+> `names` …, the catalogs the reader `holds`, and one `group`". And of
+> `reads`: "No contract and no catalog is used".
+
+- **The error.** Each `groups` case reads one group, and each `reads`
+  case reads no sections. An implementation that stops at the first
+  refused group, or that drops a group after a refused one, passes the
+  file whole. The rule's tag cites evidence the file does not hold.
+- **What zk2py does:** `read_groups` reads each group from its own
+  bits. Its own reading puts a refused group between two read ones,
+  and compares both with the owner heartbeat without it.
+- **Fix:** a fourth list in `owner.json`: a payload, the catalogs, and
+  every group's reading or refusal, one refused among them.
+- **Changes:** fixture cases.
+
+### F-545 · ambiguity · `desired.v1` §2.10: "S4's GET answers the later (core §4.1)", where core 0.100's S4 answers both
+
+> `desired.v1` §2.10 (text 0.13, written against core 0.73): "two
+> readable ones, of two report resources, that claim it and differ are
+> **unreadable**, since the target says two things of one role. Two
+> instances' reports on one key are not two: S4's GET answers the
+> later (core §4.1), and §2.17 reads a split target's report as the
+> later one's." Core S4, since 0.100: "consolidation `None` set
+> explicitly. The consumer MUST merge the GET's replies per key".
+> `CHANGELOG.md`, 0.100, "Profiles that read replies": "`redundancy.v1`
+> §2.10's 'A seed' still says `Latest` keeps one reply per key: under
+> `None` both arrive … left for their profiles". `slices.json`, case
+> 13: "two instances' reports on one key reach a tool as one reply,
+> the later (core §4.1)".
+
+- **The error.** Under `None` the GET answers both. The sentence rests
+  on `Latest`, and core 0.100's list of such sentences does not hold
+  it. The fixture gives the tool one reply, so it shows nothing of two.
+- **Two readings.**
+  - A tool merges the replies per key, as core §4.2 does: within one
+    run the higher seq, across two runs the later arrival, with no
+    envelope the later Zenoh timestamp. One report is left, and it is
+    the report.
+  - Both arrive, and two readable reports that claim the slice and
+    differ are unreadable, though the sentence before says so of "two
+    report resources" alone.
+- **Measured** (the carry's two failing checks, `zenctl desired` of
+  fc16a564 against test sessions). It answers `report_invalid`,
+  `two_differ`, for two differing reports on one key: with no envelope
+  in either order, in envelopes of one run with seqs 1 and 2 in either
+  order, and of two runs in either order. One reply, one mutation sent
+  twice, and two runs' equal reports each read as the report.
+- **Which side moved.** The reference's. Round 105 ran the section 29
+  of 29 against its `zenctl` (round 111's note), and the `zenctl` of
+  rounds 110 to 112 reads two. zk2py's GET merges per key, and round
+  110's zk2py, run as round 111's control, failed the same two checks.
+- **What zk2py does:** the first reading. Its runner holds the three
+  shapes, and names the reference's answer as known by this finding.
+- **Fix:** "Two instances' reports on one key are not two: a tool
+  merges S4's replies per key (core §4.2) and reads the one the merge
+  keeps." And a `slices.json` case that gives a tool both replies.
+- **Changes:** one sentence, a fixture case, and the reference's tool
+  or zk2py's.
+
+### F-546 · ambiguity · link.v2 §2.19: a value zenoh refuses at load "is `transport_differs`", of a file no zenoh loads
+
+> §2.19: "**No value zenoh runs**, at each of the seven other keys.
+> zenoh refuses the file at load. It is `transport_differs`, as a
+> string is." And: "A tool checks a router's configuration against
+> the policy". `v2/transport.json`, `description`: "`router`, the
+> transport keys a router's configuration states". Case 24, binding
+> `zenoh-1.10.1`: "a `null` lease, which zenoh 1.10.1 refuses at
+> load", `transport_differs`.
+
+- **Two readings** of a file with such a value.
+  - The tool reads the file's keys as data, and reports
+    `transport_differs` at the key, as the fixture's `router` is given.
+  - The file is no configuration a router runs, so the tool names
+    zenoh's refusal and asks nothing.
+- **Measured** (`link_v2_live --only null`): `zenctl check face` of
+  fc16a564 does the second under `zenoh-1.10.1`, for a `null` at each
+  of the seven keys and for a string lease: exit 2, "zenoh refused the
+  config". It does the first under `zm-1.10.2-r1`. So the reference's
+  tool never reports case 24's finding of a file under case 24's
+  binding.
+- **What zk2py does:** the first, under either binding. It reads the
+  file as JSON.
+- **Fix:** say which a tool does of a file zenoh refuses: "A tool that
+  loads the file through zenoh names its refusal and asks no
+  question (§5); one that reads it as data reports
+  `transport_differs`". Or ask the first of every tool.
+- **Changes:** what a tool reports of one file, and its exit.
+
+### Counts at core 0.108 and link.v2 0.18
+
+546 entries.
+- **New: F-540 to F-546:**
+  - two gaps: F-540 and F-542;
+  - three ambiguities: F-543, F-545 and F-546;
+  - two minor errors: F-541 and F-544.
+  None is a blocker.
+- **Answered this round:** F-529 to F-534, each resolved.
+- **Open:**
+  - F-437 to F-441;
+  - F-535 to F-539, whose answers are not on this main;
+  - F-540 to F-546.
+
+  F-365 stays open as #965's.
