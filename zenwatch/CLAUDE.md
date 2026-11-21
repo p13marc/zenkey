@@ -127,4 +127,10 @@ Claude Code loads this file when working in `zenwatch/`; the root `CLAUDE.md` is
   check, carried otherwise; a run over an empty scope is `unobservable`
   with the previous report retained, and every message ends with the
   coverage (scope read, checks established / unobservable / not asked).
+  **The routers' zenoh** (#1011): the top-level `binding`
+  (`zenkey_model::link::Binding` by name, absent zenoh 1.10.1's) gives
+  `Config::routers`, `Routers::of_binding`, which `Engine::routers` hands
+  both alarm readers: `alarms::reader_spec` (`alerts`) and
+  `WatchdogSpec::routers` (`alert-firing`). No routers' face policy is
+  read and no lease key exists.
   `zenwatch/CHANGELOG.md` carries the old→new tables.

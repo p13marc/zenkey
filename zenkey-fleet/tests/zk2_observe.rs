@@ -773,6 +773,7 @@ async fn invalid_payload_and_qos_mismatch_fire_and_clear() {
         timeout: T,
         clocks_synced: false,
         catalogs: Default::default(),
+        routers: Default::default(),
     };
     let contracts = ContractSet::new();
     let store = bed.store.clone();

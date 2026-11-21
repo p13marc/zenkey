@@ -22,6 +22,11 @@
   // firing at the first look is told once a live put measures its owner's
   // clock, at most 450 s later).
   clocks_synced: false,
+  // The zenoh the deployment's routers run: "zenoh-1.10.1" (the default
+  // when absent) or "zm-1.10.2-r1", zenoh-modem's fork, which waits 10 s
+  // before it closes a transport where zenoh 1.10.1 waits 5 s. The alarm
+  // rules read their window and their own stall by its defaults.
+  binding: "zenoh-1.10.1",
   tick_s: 5,
   rules: [
     { name: "streams-quiet", rule: "silent-for site/zk2/*/*/*/stream/** 30", severity: "warning", labels: { team: "infra" }, sinks: ["ops"] },

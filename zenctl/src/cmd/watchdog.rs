@@ -191,6 +191,9 @@ pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
         // #1087: an `alert-firing` rule's confirmations dated under the
         // catalog each owner's descriptor names, read through `--catalog`.
         catalogs,
+        // `watchdog` takes no `--lease`, `--wait-before-close` or
+        // `--binding`: its `alert-firing` readers read by zenoh 1.10.1's.
+        routers: zenkey_model::budget::Routers::default(),
     };
 
     eprintln!(

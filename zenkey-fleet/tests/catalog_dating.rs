@@ -331,6 +331,7 @@ async fn the_watchdogs_alert_firing_dates_a_modem_owners_confirmation() {
                 timeout: T,
                 clocks_synced: true,
                 catalogs: given(modem),
+                routers: Default::default(),
             };
             let mut run = watchdog(bus, store, contracts, &spec).pin();
             let mut to = Vec::new();

@@ -419,15 +419,11 @@ impl AlarmRules {
         timeout: Duration,
         clocks_synced: bool,
         catalogs: &zenkey_fleet::Catalogs,
+        routers: zenkey_model::budget::Routers,
     ) -> Vec<Vec<AlarmTransition>> {
         let mut out = Vec::new();
         for r in &mut self.readers {
-            let mut spec = AlarmSpec::new(timeout);
-            spec.clocks_synced = clocks_synced;
-            spec.catalogs = catalogs.clone();
-            // What fires is the owners' word; an archive's last-known is
-            // never part of a verdict (core S6).
-            spec.archives = false;
+            let spec = reader_spec(timeout, clocks_synced, catalogs, routers);
             let opened = match AlarmScope::parse(&r.selector) {
                 Err(why) => Err(why),
                 Ok(scope) => AlarmFeed::open(session, watch, scope, spec, true)
@@ -1108,6 +1104,24 @@ fn evidence(
     )
 }
 
+/// What an `alerts` rule's reader asks: the owners' word alone, since an
+/// archive's last-known is never part of a verdict (core S6); a GET dated
+/// under `catalogs`; and its window and its own stall read by `routers`,
+/// the config's `binding` (#1011).
+fn reader_spec(
+    timeout: Duration,
+    clocks_synced: bool,
+    catalogs: &zenkey_fleet::Catalogs,
+    routers: zenkey_model::budget::Routers,
+) -> AlarmSpec {
+    let mut spec = AlarmSpec::new(timeout);
+    spec.clocks_synced = clocks_synced;
+    spec.catalogs = catalogs.clone();
+    spec.archives = false;
+    spec.routers = routers;
+    spec
+}
+
 #[cfg(test)]
 mod tests {
     //! The rule over a real book (the fleet's, session-free): §2.6's
@@ -1123,6 +1137,34 @@ mod tests {
 
     const A: &str = "zk2/lab/svc/alarms.v1/state/alarms/a659f813308ad1da";
     const ZID: &str = "a1";
+
+    /// A rule's reader carries the routers the config's `binding` names
+    /// (#1011): on zm-1.10.2-r1 it may stall 7.5 s, the lease less a
+    /// keep-alive, since the fork waits 10 s on a full queue; told
+    /// nothing, zenoh 1.10.1's 5 s. Its book reads the same routers.
+    #[test]
+    fn a_rules_reader_carries_the_configs_binding() {
+        let config = |binding: &str| {
+            crate::config::parse(&format!(
+                r#"{{ {binding}
+                  rules: [{{ name: "fleet", rule: "alerts zk2/lab/**", sinks: ["hook"] }}],
+                  sinks: {{ hook: {{ kind: "webhook", url: "https://example.org/h" }} }},
+                }}"#
+            ))
+            .unwrap()
+        };
+        let t = Duration::from_secs(1);
+        let catalogs = zenkey_fleet::Catalogs::default();
+        let fork = config(r#"binding: "zm-1.10.2-r1","#);
+        let spec = reader_spec(t, true, &catalogs, fork.routers());
+        assert_eq!(spec.routers.wait_before_close, Duration::from_secs(10));
+        assert_eq!(spec.stall_bound(), Duration::from_millis(7_500));
+        assert_eq!(spec.book().routers, spec.routers);
+        assert!(spec.clocks_synced && !spec.archives);
+        let stock = reader_spec(t, false, &catalogs, config("").routers());
+        assert_eq!(stock.routers, zenkey_model::budget::Routers::default());
+        assert_eq!(stock.stall_bound(), Duration::from_secs(5));
+    }
 
     fn stamp(at: SystemTime) -> Timestamp {
         Timestamp::new(

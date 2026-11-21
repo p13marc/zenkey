@@ -7,6 +7,15 @@ names where its question went, or that nothing on `main` asks it yet. No
 aliases and no shims, except where the two spellings were always one fact
 (`base` and `namespace`).
 
+## Unreleased (`main`, zk2) — `binding`: the routers' zenoh (#1011)
+
+No rule changed (observer §5.2; `link.v2` §2.19).
+
+| Before | Now | Notes |
+|---|---|---|
+| `alerts` and `alert-firing` readers: zenoh 1.10.1's 10 s lease, 4 keep-alives and 5 s `wait_before_close`, whatever zenoh the routers run | `binding: "zenoh-1.10.1"` or `"zm-1.10.2-r1"` (top level): the readers read by its defaults; absent, zenoh 1.10.1's, as before | on `zm-1.10.2-r1`, which waits 10 s before it closes a transport, a reader may stall 7.5 s (its lease less a keep-alive) before it counts a loss, where 5 s was read; the watch past a window is 10 s and the timeout on both, since both default to a 10 s lease. Any other name is refused at the parse, exit 2 |
+| — | no routers' face policy is read, and there is no key for a lease | a deployment whose routers state their own lease or `wait_before_close` is read by the binding's defaults; `across_face.policy` is the face the owners sit across |
+
 ## Unreleased (`main`, zk2) — `across_face` (#990 V7)
 
 No rule changed.
