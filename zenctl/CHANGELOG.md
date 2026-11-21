@@ -6,6 +6,15 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a `null` among a router's transport keys (zk2py round 110)
+
+`link.v2` 0.18 §2.18, §2.19.
+
+| Before | Now | Notes |
+|---|---|---|
+| `check face`: a router config with `routing: { interests: { timeout: null } }` is `transport_differs` at `transport.interests_timeout_ms`, `observed: null`, `stated: true`, exit 1 under a policy at 10,000 ms; `acl gen --check`'s comparison differs there too | the key reads as left out: `observed` the binding's default, `stated: false`, `runs 10000 (the default)`, and no finding where that is the policy's | zenoh 1.10.1 loads that `null` and runs its default, as `zm-1.10.2-r1` does. Under a policy at another value it is still `transport_differs`, the comparison saying "the file states `null`, which zenoh reads as left out". A `null` at any of the seven other keys is unchanged: stock zenoh refuses the file, and read as data it is `transport_differs` |
+| `acl gen --far-config`: the credentials' comment ends "zenoh loads no user without a password, and opens no dictionary it cannot read" | it says what follows unfilled: the far end does not start for its dictionary alone; with the dictionary filled in and the password not, it starts and the near router refuses its link | wording only: the block's keys are unchanged |
+
 ## Unreleased (`main`, zk2) — a reader's lease and `wait_before_close` by its binding (#1011)
 
 Observer §5.2; `link.v2` §2.19. No rule moved.

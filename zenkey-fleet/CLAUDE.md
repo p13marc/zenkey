@@ -541,7 +541,10 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   enrollment's `user`s (`near_opens_user`, explained by `link_says`), and
   `far_json5` names the far principal's user inside `transport`
   (`auth.usrpwd.user`, its `password` and `dictionary_file` placeholders,
-  since zenoh loads no user without a password; `far_user`: one far principal across
+  both the deployment's; the block's comment says what follows unfilled,
+  link.v2 0.18 §2.18: an unreadable dictionary alone stops the far end,
+  and with the password unfilled it starts and the near router refuses its
+  link; `far_user`: one far principal across
   the faces that are no device faces, bound by a user name);
   `v2_s4_the_far_end_opens_a_face_bound_by_a_user_name` runs the pair: F
   from the far block opens and N binds it, F refuses a session with no

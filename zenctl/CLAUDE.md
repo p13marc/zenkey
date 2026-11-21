@@ -132,7 +132,11 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   `zenkey_fleet::RouterConfig`; under a fork binding, as data, #1044,
   `load_against(path, binding)`, `load_peer` alike), with `--peer-config
   <FAR-CONFIG>` and `--catalog <FILE>` (both refused, exit 2, beside a
-  `link.v1` policy); `check-face.trycmd` runs the RF router of
+  `link.v1` policy); since link.v2 0.18 a `null`
+  `routing/interests/timeout` reads as left out, `stated: false` at the
+  binding's default (`router-rf-null-interests.json5`, exit 0), and
+  `--far-config`'s comment says what follows from each placeholder left
+  unfilled; `check-face.trycmd` runs the RF router of
   `examples/zk2/link/media/` and a hand-edited `wait_before_close`, and
   zenoh-modem's rf0 router on the fork's binding, read as data, with a
   hand edit that does not read (exit 2).

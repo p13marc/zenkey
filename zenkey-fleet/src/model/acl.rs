@@ -3160,8 +3160,12 @@ fn transport_json5(
              // face's links as {user:?}. Fill in its password, the one the near router's dictionary\n  \
              // holds for it, and {end}'s own dictionary_file: with credentials, {end} asks a user of\n  \
              // every session that opens to it, and refuses one the file does not hold. Give each\n  \
-             // session of the far side a user of its own there, its local tools among them. zenoh\n  \
-             // loads no user without a password, and opens no dictionary it cannot read.\n  \
+             // session of the far side a user of its own there, its local tools among them.\n  \
+             // Unfilled, each part fails its own way (link.v2 §2.18). zenoh opens no dictionary it\n  \
+             // cannot read, so {end} does not start from this block as written. With the\n  \
+             // dictionary filled in and the password not, it starts, and the near router refuses its\n  \
+             // link: it presents the placeholder as its password, or no user at all once the password\n  \
+             // is removed, since zenoh loads no user without one.\n  \
              auth: {{ usrpwd: {{ user: {user:?}, password: {password:?}, dictionary_file: {dictionary:?} }} }},",
             // Quoted whole, so a name holding `"` or `\` keeps the line JSON5
             // (review-bot on #1122).
