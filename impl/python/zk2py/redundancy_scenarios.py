@@ -948,7 +948,15 @@ def section5(rp: Report, runs: int) -> None:
             tok = holder.liveliness().declare_token("zk2/lab/ledger/@zk/instance/" + "e" * 16)
             other = live.open_client(f"tcp/127.0.0.1:{port3}")
             time.sleep(0.3)
+            # The check is of who a read answers, not of how soon a token
+            # is declared: the own-session read is asked until it holds the
+            # claim, 3 s at most (round 114: 0.3 s was short once in a whole
+            # run, own 0, where the section alone passed three times).
             own = live.list_presence(holder, "zk2/lab/ledger/@zk/**")
+            until = time.monotonic() + 3.0
+            while not own.instances and time.monotonic() < until:
+                time.sleep(0.2)
+                own = live.list_presence(holder, "zk2/lab/ledger/@zk/**")
             far = live.list_presence(other, "zk2/lab/ledger/@zk/**")
             rp.check(sec, "3. the same read on a claim's own session returns the claim (observer §3.8, 0.40), on another "
                           "session nothing: why A reads on its reader",
@@ -1128,18 +1136,27 @@ def section9(rp: Report, runs: int) -> None:
         rp.check(sec, "1. K's value moves to A's only, and K discards every sample stamped with B's meta.zid",
                  k is not None and acc and set(acc) == {za} and disc and set(disc) == {zb},
                  f"accepted {len(acc)} ({set(acc) == {za}}), discarded {len(disc)}")
-        # redundancy.v1 0.11, Expected 2: "K's seed takes A's reply and
-        # discards B's: under S4's None both arrive (core S4). Where A's
-        # reply did not arrive, K holds no value for balance until A's next
-        # put: never B's (§2.10)."
+        # redundancy.v1 0.11, scenarios.md §9, Expected 2: "K's seed takes
+        # A's reply and discards B's: under S4's `None` both arrive (core
+        # S4). Where A's reply did not arrive, K holds no value for
+        # `balance` until A's next put: never B's (§2.10)."
+        #
+        # The second sentence lets A's reply not arrive, over a real bus. So
+        # the one check holds both branches, and which replies arrived is a
+        # note, never a check (review-bot on #1143, 2: a hard check that
+        # both arrived failed a run that follows the text).
         ids = [None if z is None else zid_value(z) for z in (k.seed_ids if k else [])]
         a_arrived = za in ids
-        rp.check(sec, "2. K's seed takes A's reply and discards B's, both arriving under S4's None; where A's did "
-                      "not arrive it holds none: never B's",
-                 k is not None and ((a_arrived and seeded == "accepted") or (not a_arrived and seeded != "accepted")),
-                 f"seed {seeded}; replies' ids A {ids.count(za)}, B {ids.count(zb)}, other {len(ids) - ids.count(za) - ids.count(zb)}")
-        rp.check(sec, "2. both incumbents' replies arrived on the one key (consolidation None), and K took A's",
-                 k is not None and a_arrived and zb in ids and seeded == "accepted", f"seed {seeded}; ids {len(ids)}")
+        rp.check(sec, "2. K's seed takes A's reply and discards B's; where A's reply did not arrive it holds no "
+                      "value from the seed: never B's",
+                 k is not None
+                 and ((a_arrived and seeded == "accepted") or (not a_arrived and seeded in ("discarded", "silent"))),
+                 f"seed {seeded}; replies' ids A {ids.count(za)}, B {ids.count(zb)}, other "
+                 f"{len(ids) - ids.count(za) - ids.count(zb)}")
+        rp.note(sec, f"2. of S4's replies on the one key, A's arrived {ids.count(za)} and B's {ids.count(zb)}: "
+                     + ("both, as under consolidation None, and K took A's" if a_arrived and zb in ids
+                        else "A's did not arrive, the case Expected 2's second sentence allows" if not a_arrived
+                        else "B's did not arrive"))
         b.release_heal()
         # the owner example names no why after a step-down; the role is enough
         down = _wait(lambda: b.standing().get("role") == "standby", 12.0, 0.05)

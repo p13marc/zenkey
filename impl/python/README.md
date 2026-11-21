@@ -7994,9 +7994,31 @@ and `beside` were opened.
 - **`link_v2`, `desired_tool`:** no line moved. zk2py's check already
   read a file's keys as data, and its tool already merged.
 
-**`just py-conformance`: 6968 of 6968** on 1374e566. Of them,
+**`just py-conformance`: 6970 of 6970** on 1374e566. Of them,
 `descriptors` 61, `heartbeat` 314, 147 of them `owner.json`'s, and
-`readings` 1081.
+`readings` 1083, two of them review-bot's on #1143.
+
+**review-bot's three notes on #1143,** each done:
+1. **The seed's attributes.** `live.StateReply` holds `stamp_id` and
+   `stamp_ns` as fields, None on a reply with no Zenoh timestamp, so the
+   seed raises on none. The decision is `redundancy_live.seed_of` now,
+   with no session, and a reading builds an unstamped reply through it:
+   one the follower "cannot attribute", discarded. A snapshot's entries
+   are among the replies it reads.
+2. **Scenario §9's Expected 2** lets A's reply not arrive: "Where A's
+   reply did not arrive, K holds no value for `balance` until A's next
+   put: never B's". The check that both replies arrived is a note.
+3. **An envelope's Encoding** is `zenoh/bytes` whole. Core §7.2: an
+   owner "MUST NOT add a schema suffix to it", and
+   `envelope/carries.json` has no envelope in "a sample under any other
+   Encoding, a schema suffix on `zenoh/bytes` included". The comparison
+   stays exact, in one function (`zk2c.envelope_encoding`), and a
+   reading pins it.
+
+`redundancy_scenarios`, whole, after them: 88/88. One run before it
+failed 1 of 88, §5 step 3, a read on a claim's own session asked 0.3 s
+after the token was declared: the read now waits for the claim, 3 s at
+most. The section alone passed three times unchanged.
 
 ### Live
 
