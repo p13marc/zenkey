@@ -623,8 +623,10 @@ impl AlarmFeed {
                 .declare_subscriber(scope.heartbeat_selector())
                 .callback(move |s: Sample| {
                     let at = Instant::now();
-                    if let crate::model::inband::Read::Heartbeat { sample, stamp, tag } =
-                        crate::model::inband::read(s)
+                    // Core §7.5: another form on the key is no heartbeat,
+                    // refused before its tag or its body is read.
+                    if let Ok((sample, stamp, tag)) =
+                        zenkey::inband::admit_heartbeat(crate::model::inband::read(s))
                     {
                         hq.send(Delivery::Heartbeat {
                             key: sample.key_expr().as_str().to_owned(),
@@ -648,8 +650,10 @@ impl AlarmFeed {
                 .declare_subscriber(scope.owner_heartbeat_selector())
                 .callback(move |s: Sample| {
                     let at = Instant::now();
-                    if let crate::model::inband::Read::Heartbeat { sample, stamp, tag } =
-                        crate::model::inband::read(s)
+                    // Core §7.5: another form on the key is no heartbeat,
+                    // refused before its tag or its body is read.
+                    if let Ok((sample, stamp, tag)) =
+                        zenkey::inband::admit_heartbeat(crate::model::inband::read(s))
                     {
                         oq.send(Delivery::Heartbeat {
                             key: sample.key_expr().as_str().to_owned(),

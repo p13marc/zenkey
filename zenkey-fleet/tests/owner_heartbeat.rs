@@ -261,6 +261,137 @@ fn a_refused_owner_heartbeat_is_undecodable() {
     );
 }
 
+/// Core §7.5, "Another form on a heartbeat's key": the lens refuses a
+/// put of another form on a class key, and on a heartbeat's key, `form`,
+/// before its tag or its body is read. A mutation and a frame under tag 0
+/// whose bytes after the seq are an owner heartbeat's body are never read
+/// as one, nor shown as a record of the key's raw type; a put with no
+/// envelope is refused the same way. The parse's own refusal stands, and
+/// the owner heartbeat itself is read. Rendering through one revision in
+/// hand, `freshness.v2`'s, refuses alike.
+#[test]
+fn another_form_on_a_heartbeats_key_is_refused_form_by_the_lens() {
+    use zenkey_model::heartbeat::Heartbeat;
+    let set = contracts(&IFACES);
+    let held = Catalogs::new(vec![catalog()]);
+    let lens = Lens::new("", None, &set).offline(&set).catalogs(&held);
+    // CH's form bits, the top three: 0 a mutation, 5 a frame.
+    let as_form = |payload: &[u8], form: u8| -> Vec<u8> {
+        let mut bytes = payload.to_vec();
+        bytes[0] = (bytes[0] & 0x1f) | (form << 5);
+        bytes
+    };
+    let owner_beat = put(vec![group(0, "alpha.v1", 1)]);
+    assert_eq!(owner_beat[0], 0xc0, "form 6, a 16-bit run, tag 0");
+    let alpha = Layout::of(revision(&set, "alpha.v1").contract());
+    let beat = Heartbeat {
+        time: Time::Unknown,
+        sections: vec![None; alpha.collections.len()],
+    }
+    .envelope(&alpha, stamp())
+    .unwrap();
+    let class_key = owner_key("lab", "trio", Class::Host);
+    let own_key = zenkey_model::heartbeat::key("lab", "trio", &alpha.iface);
+    let standard = Revision::from_bundle(
+        zenkey_model::bundle::Bundle::verify(zenkey::heartbeat::BUNDLE).unwrap(),
+        zenkey_fleet::report::ContractSource::Bundle,
+    )
+    .unwrap();
+    for (key, declared, whose, payload) in [
+        (
+            &class_key,
+            "zk2c owner heartbeat (host)",
+            "an owner heartbeat's",
+            &owner_beat,
+        ),
+        (
+            &own_key,
+            "zk2c heartbeat (alpha.v1)",
+            "a heartbeat's",
+            &beat,
+        ),
+    ] {
+        for (what, bytes, encoding) in [
+            ("a mutation", as_form(payload, 0), "zenoh/bytes"),
+            ("a frame", as_form(payload, 5), "zenoh/bytes"),
+            (
+                "a put with no envelope",
+                payload.clone(),
+                "application/octet-stream",
+            ),
+        ] {
+            let want =
+                format!("refused: form, {what} on {whose} key, which carries form 6 and no other");
+            let c = lens.check(key, Member::Type, Some(encoding), &bytes);
+            assert_eq!(
+                c.rendering.rendered,
+                Rendered::Undecodable {
+                    declared: declared.to_owned(),
+                    reason: want.clone()
+                },
+                "{key}: {what}"
+            );
+            assert_eq!(
+                c.conformance,
+                Conformance::Undecodable {
+                    declared: declared.to_owned(),
+                    reason: want.clone()
+                },
+                "{key}: {what}"
+            );
+            // Through one revision in hand, the standard contract's,
+            // whose resource of the key is raw bytes.
+            let r = zenkey_fleet::model::render::render_with(
+                &standard,
+                key,
+                Member::Type,
+                Some(encoding),
+                &bytes,
+            );
+            assert_eq!(
+                r.rendered,
+                Rendered::Undecodable {
+                    declared: declared.to_owned(),
+                    reason: want
+                },
+                "{key}: {what}, one revision in hand"
+            );
+        }
+        // The parse's refusal stands before `form`: a put cut short.
+        let c = lens.check(key, Member::Type, Some("zenoh/bytes"), &payload[..2]);
+        assert!(
+            matches!(&c.conformance, Conformance::Undecodable { reason, .. } if reason == "zk2c envelope refused: short"),
+            "{key}: {:?}",
+            c.conformance
+        );
+        // Form 6 itself passes the gate on its key: the owner heartbeat
+        // is read, and the heartbeat is its covered revision's to read,
+        // never refused `form`.
+        let c = lens.check(key, Member::Type, Some("zenoh/bytes"), payload);
+        if key == &class_key {
+            assert_eq!(c.conformance, Conformance::Valid, "{:?}", c.rendering);
+        }
+        assert!(
+            !format!("{:?}", c.rendering.rendered).contains("refused: form"),
+            "{key}: {:?}",
+            c.rendering
+        );
+    }
+    // Any other key is untouched: a mutation there is its resource's.
+    assert_eq!(
+        zenkey_fleet::model::inband::no_heartbeat(
+            "zk2/lab/trio/alpha.v1/state/status",
+            Some("zenoh/bytes"),
+            &zenkey_fleet::model::inband::payload(
+                "zk2/lab/trio/alpha.v1/state/status",
+                Some("zenoh/bytes"),
+                &as_form(&owner_beat, 0)
+            )
+        ),
+        None
+    );
+}
+
 /// The `host` class's key is in no face's scope (observer 0.34 §7.5,
 /// `link.v2` §2.9), and the `link` class's is only where the plan lets it
 /// cross; with no face policy a tool given a catalog has both, and one
