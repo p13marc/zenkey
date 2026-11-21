@@ -61,17 +61,20 @@ pub const DEFAULT_KEEP_ALIVE: u32 = 4;
 ///
 /// A deployment on another binding states its own: zm-1.10.2-r1, the fork
 /// zenoh-modem builds on, defaults to 10 s, its lease (#1011). A tool takes
-/// the deployment's word for it (zenctl's `--wait-before-close`, or the
-/// `[transport]` of the routers' `link.v2` face policy: [`Routers::of`]),
-/// never its own session's configuration, which states how long the
-/// tool's own pushes wait and says nothing of its routers'.
+/// the deployment's word for it (zenctl's `--wait-before-close`, the
+/// `[transport]` of the routers' `link.v2` face policy, [`Routers::of`],
+/// or the binding it is told, [`Routers::of_binding`]), never its own
+/// session's configuration, which states how long the tool's own pushes
+/// wait and says nothing of its routers'.
 pub const DEFAULT_WAIT_BEFORE_CLOSE: Duration = Duration::from_secs(5);
 
 /// The routers' link settings a window's reader reads by (§2.7, observer
 /// §5.2): their lease, keep-alives and `wait_before_close`. The
 /// deployment's word: a `link.v2` face policy's `[transport]`, which its
-/// routers run (`link.v2` §2.16; [`Routers::of`]), and zenoh 1.10.1's
-/// defaults where it gives none ([`Routers::default`], #1011's item 3).
+/// routers run (`link.v2` §2.16; [`Routers::of`]); where it gives none,
+/// the defaults of the binding it names ([`Routers::of_binding`]); and
+/// zenoh 1.10.1's where it names none ([`Routers::default`], #1011's item
+/// 3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Routers {
     pub lease: Duration,
@@ -103,7 +106,16 @@ impl Routers {
         }
     }
 
-    /// [`stall_bound`] of these routers.
+    /// What routers of `binding` run where their configuration states no
+    /// transport key (`link.v2` §2.19, [`crate::link::Binding::defaults`]):
+    /// zm-1.10.2-r1's `wait_before_close` is 10 s where zenoh 1.10.1's is
+    /// 5 s (#1011).
+    #[must_use]
+    pub fn of_binding(binding: crate::link::Binding) -> Routers {
+        Routers::of(&binding.defaults())
+    }
+
+    /// [`stall_bound`] of these routers, by their own keep-alives.
     #[must_use]
     pub fn stall_bound(&self) -> Duration {
         stall_bound(self.wait_before_close, self.lease, self.keep_alive)
@@ -930,6 +942,35 @@ mod tests {
             presence_tail(DEFAULT_LEASE, DEFAULT_WAIT_BEFORE_CLOSE, s(1)),
             "given no policy, zenoh 1.10.1's"
         );
+    }
+
+    /// A reader told its binding and no policy reads by the binding's
+    /// defaults (#1011's item 3): zenoh 1.10.1's are [`Routers::default`],
+    /// and zm-1.10.2-r1's `wait_before_close` is its lease, 10 s. The
+    /// issue's case is a 1 s lease on the fork's defaults: the owner is
+    /// watched 10 s and the timeout, where zenoh 1.10.1's 5 s would end the
+    /// watch 5 s early.
+    #[test]
+    fn a_bindings_defaults_are_what_its_routers_run() {
+        use crate::link::Binding;
+        let s = Duration::from_secs;
+        assert_eq!(
+            Routers::of_binding(Binding::Zenoh1_10_1),
+            Routers::default()
+        );
+        let zm = Routers::of_binding(Binding::Zm1_10_2R1);
+        assert_eq!(
+            (zm.lease, zm.keep_alive, zm.wait_before_close),
+            (s(10), 4, s(10))
+        );
+        assert_eq!(
+            zm.stall_bound(),
+            Duration::from_millis(7_500),
+            "the lease less a keep-alive decides, wait_before_close being 10 s"
+        );
+        let short = |r: Routers| Routers { lease: s(1), ..r };
+        assert_eq!(short(zm).presence_tail(s(1)), s(11));
+        assert_eq!(short(Routers::default()).presence_tail(s(1)), s(6));
     }
 
     #[test]
