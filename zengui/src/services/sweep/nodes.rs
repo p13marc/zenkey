@@ -98,6 +98,20 @@ pub fn redundancy(
 /// commander arrive within it.
 pub const ARBITRATION_DEADLINES: u32 = 2;
 
+/// What the Workbench's view asks: [`ARBITRATION_DEADLINES`] of each role's
+/// own deadline, and a stall judged by `routers`, the window's `--binding`
+/// (#1011).
+fn arbitration_spec(
+    timeout: Duration,
+    routers: zenkey_model::budget::Routers,
+) -> zenkey_fleet::ArbitrationSpec {
+    let mut spec = zenkey_fleet::ArbitrationSpec::new(timeout);
+    spec.listen = Duration::ZERO;
+    spec.deadlines = Some(ARBITRATION_DEADLINES);
+    spec.routers = routers;
+    spec
+}
+
 /// One address's `arbitration.v1` (#909, BC), at the selection's settle
 /// beside `redundancy.v1`, never polled: read as
 /// `zenctl arbitration <address>` reads it, through the engine's `run_arbitration` on the
@@ -114,12 +128,11 @@ pub fn arbitration(
     addr: Addr,
     store: zenkey_fleet::BundleStore,
     timeout: Duration,
+    routers: zenkey_model::budget::Routers,
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let mut spec = zenkey_fleet::ArbitrationSpec::new(timeout);
-            spec.listen = Duration::ZERO;
-            spec.deadlines = Some(ARBITRATION_DEADLINES);
+            let spec = arbitration_spec(timeout, routers);
             let offline = zenkey_fleet::ContractSet::new();
             let report = zenkey_fleet::run_arbitration(
                 &session,
@@ -138,4 +151,25 @@ pub fn arbitration(
             Message::Pane(PaneMsg::Nodes(NodesMsg::ArbitrationRead(addr, ran, report)))
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The arbitration view's stall is judged by the window's routers
+    /// (`--binding`, #1011): zm-1.10.2-r1's lease less a keep-alive, 7.5 s,
+    /// where zenoh 1.10.1's 5 s `wait_before_close` bounds it.
+    #[test]
+    fn the_arbitration_view_reads_by_the_windows_routers() {
+        use zenkey_model::budget::Routers;
+        use zenkey_model::link::Binding;
+        let t = Duration::from_secs(1);
+        let stock = arbitration_spec(t, Routers::default());
+        assert_eq!(stock.stall_bound(), Duration::from_secs(5));
+        assert_eq!(stock.deadlines, Some(ARBITRATION_DEADLINES));
+        assert!(stock.listen.is_zero());
+        let fork = arbitration_spec(t, Routers::of_binding(Binding::Zm1_10_2R1));
+        assert_eq!(fork.stall_bound(), Duration::from_millis(7_500));
+    }
 }

@@ -113,9 +113,15 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   owner's seed and window, restarted at the first complete GET after a
   loss or a gap in presence and counted to the watch after a window before
   now (the longer of a lease and `wait_before_close`, and the timeout:
-  `BookSpec::tail`, observer text 0.6's F-320; every reader's spec
-  defaults to zenoh 1.10.1's lease and `wait_before_close`, said so, the
-  deployment stating another binding's, #1011); the latest GET's answered keys and each key's last arrival, so a
+  `BookSpec::tail`, observer text 0.6's F-320; every reader's spec,
+  `ConformSpec`, `AlarmSpec` and its `BookSpec`, `TelemetrySpec`,
+  `TimingSpec` and `ArbitrationSpec`, holds one `routers:
+  zenkey_model::budget::Routers`, zenoh 1.10.1's by default, in place of a
+  `lease` and a `wait_before_close`, so its stall bound reads the routers'
+  own keep-alives and `check conform` hands its nested telemetry and
+  timing readers all three, and `WatchdogSpec::routers` reaches an
+  `alert-firing` rule's reader through `RuleAlarms::spec`, a trigger's
+  reading by zenoh 1.10.1's, #1011); the latest GET's answered keys and each key's last arrival, so a
   key that GET left out reaches the judge as `left_out` and loses its
   sample once its owner is established, a reply dated by its GET's ask
   (text 0.5, F-136), and a receive path that could not be watched is a

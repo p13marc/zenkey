@@ -98,13 +98,14 @@ pub struct AlarmSpec {
     /// The operator's word that this host's clock and the owners' agree
     /// within the HLC delta (`freshness.v1` §2.6, ground 1).
     pub clocks_synced: bool,
-    /// The deployment's link lease (core §2.7, 0.25).
-    pub lease: Duration,
-    /// The routers' `wait_before_close`: with the lease, the longest this
-    /// reader may stall and keep a window lossless (core §2.7, 0.27), and,
-    /// where it is longer than the lease, how long the owners are watched
-    /// past a window (observer §5.2).
-    pub wait_before_close: Duration,
+    /// The routers' lease, keep-alives and `wait_before_close`: the longest
+    /// this reader may stall and keep a window lossless (core §2.7, 0.27;
+    /// [`zenkey_model::budget::Routers::stall_bound`]), and how long the
+    /// owners are watched past a window, the longer of the lease and
+    /// `wait_before_close` (observer §5.2). The deployment's word: a face
+    /// policy's `[transport]`, its binding's defaults, or zenoh 1.10.1's
+    /// (#1011).
+    pub routers: zenkey_model::budget::Routers,
     /// Across a constrained face (§2.11): whether the face lets this
     /// reader GET the alarms. `None`: no face.
     pub face: Option<bool>,
@@ -118,15 +119,13 @@ pub struct AlarmSpec {
 }
 
 impl AlarmSpec {
-    /// No window, no word, zenoh 1.10.1's lease and `wait_before_close`, no
-    /// face, archives read.
+    /// No window, no word, zenoh 1.10.1's routers, no face, archives read.
     pub fn new(timeout: Duration) -> AlarmSpec {
         AlarmSpec {
             timeout,
             window: None,
             clocks_synced: false,
-            lease: zenkey_model::budget::DEFAULT_LEASE,
-            wait_before_close: zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE,
+            routers: zenkey_model::budget::Routers::default(),
             face: None,
             archives: true,
             catalogs: crate::model::deployment::Catalogs::default(),
@@ -137,20 +136,16 @@ impl AlarmSpec {
     pub fn book(&self) -> BookSpec {
         BookSpec {
             timeout: self.timeout,
-            lease: self.lease,
-            wait_before_close: self.wait_before_close,
+            routers: self.routers,
             clocks_synced: self.clocks_synced,
             face: self.face,
         }
     }
 
-    /// The longest this reader may stall (core §2.7, 0.27).
+    /// The longest this reader may stall (core §2.7, 0.27), by the
+    /// routers' own keep-alives.
     pub fn stall_bound(&self) -> Duration {
-        zenkey_model::budget::stall_bound(
-            self.wait_before_close,
-            self.lease,
-            zenkey_model::budget::DEFAULT_KEEP_ALIVE,
-        )
+        self.routers.stall_bound()
     }
 }
 

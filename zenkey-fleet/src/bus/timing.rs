@@ -93,11 +93,12 @@ pub struct TimingSpec {
     pub timeout: Duration,
     /// How long the window runs, from its start.
     pub window: Duration,
-    /// The deployment's link lease (core §2.7): with `wait_before_close`,
-    /// the longest this reader may stall before it counts a loss.
-    pub lease: Duration,
-    /// The routers' `wait_before_close` (core §2.7, 0.27).
-    pub wait_before_close: Duration,
+    /// The routers' lease, keep-alives and `wait_before_close` (core §2.7):
+    /// the longest this reader may stall before it counts a loss
+    /// ([`zenkey_model::budget::Routers::stall_bound`]). The deployment's
+    /// word: a face policy's `[transport]`, its binding's defaults, or
+    /// zenoh 1.10.1's (#1011).
+    pub routers: zenkey_model::budget::Routers,
     /// ε, the deployment's stated clock bound (§2.6); `None`: none stated,
     /// and every lifespan unobservable (`no_bound`), never the HLC's delta.
     pub clock_bound: Option<Duration>,
@@ -115,14 +116,12 @@ pub struct TimingSpec {
 }
 
 impl TimingSpec {
-    /// A window, zenoh 1.10.1's lease and `wait_before_close`, no bound, no
-    /// face.
+    /// A window, zenoh 1.10.1's routers, no bound, no face.
     pub fn new(timeout: Duration, window: Duration) -> TimingSpec {
         TimingSpec {
             timeout,
             window,
-            lease: zenkey_model::budget::DEFAULT_LEASE,
-            wait_before_close: zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE,
+            routers: zenkey_model::budget::Routers::default(),
             clock_bound: None,
             across_face: false,
             owner_zids: Vec::new(),
@@ -130,13 +129,10 @@ impl TimingSpec {
         }
     }
 
-    /// The longest this reader may stall (core §2.7, 0.27).
+    /// The longest this reader may stall (core §2.7, 0.27), by the
+    /// routers' own keep-alives.
     pub fn stall_bound(&self) -> Duration {
-        zenkey_model::budget::stall_bound(
-            self.wait_before_close,
-            self.lease,
-            zenkey_model::budget::DEFAULT_KEEP_ALIVE,
-        )
+        self.routers.stall_bound()
     }
 }
 

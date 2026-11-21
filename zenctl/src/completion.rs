@@ -347,6 +347,15 @@ pub fn case_ids() -> Vec<CompletionCandidate> {
     )
 }
 
+/// `--binding`'s names: the zenoh bindings `link.v2` §2.4 lists (#1011).
+pub fn bindings() -> Vec<CompletionCandidate> {
+    candidates(
+        zenkey_model::link::Binding::ALL
+            .into_iter()
+            .map(|b| b.as_str().to_owned()),
+    )
+}
+
 /// Wire keys, completed from the services a presence read last saw in the
 /// line's namespace: `<ns>/zk2/<system>/<service>/**`, one per address.
 ///

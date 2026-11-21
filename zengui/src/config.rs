@@ -109,6 +109,17 @@ pub struct Cli {
     #[arg(long, value_name = "NAME", requires = "face_policy")]
     pub face: Option<String>,
 
+    /// The zenoh the deployment's routers run, by its `link.v2` name
+    /// (§2.4): `zenoh-1.10.1` or `zm-1.10.2-r1` (#1011). A budget badge and
+    /// the Workbench's arbitration view read by its defaults (`link.v2`
+    /// §2.19): how long this window may stall before it counts a loss
+    /// (zm-1.10.2-r1 waits 10 s before it closes a transport, zenoh 1.10.1
+    /// 5 s), and the lease an owner stays present past a window. Omitted,
+    /// zenoh 1.10.1's. No routers' face policy is read: `--face-policy` is
+    /// the face the owners sit across.
+    #[arg(long, value_name = "NAME", value_parser = binding_arg)]
+    pub binding: Option<zenkey_model::link::Binding>,
+
     /// v1's registry directories. Refused by name: zk2 reads contracts
     /// (`--contracts`), and a registry slice describes nothing a zk2 bus
     /// carries.
@@ -227,6 +238,20 @@ pub struct Settings {
     /// The owners read across a constrained face (`--across-face`, #990
     /// V7), `None` on a deployment read through presence.
     pub across: Option<AcrossFace>,
+    /// The zenoh the deployment's routers run (`--binding`, #1011): zenoh
+    /// 1.10.1 unless told. Launch only, as `across` is.
+    pub binding: zenkey_model::link::Binding,
+}
+
+/// A zenoh binding by its `link.v2` name (§2.4), for `--binding`.
+fn binding_arg(s: &str) -> Result<zenkey_model::link::Binding, String> {
+    use zenkey_model::link::Binding;
+    Binding::parse(s).ok_or_else(|| {
+        format!(
+            "not a binding; one of: {}",
+            Binding::ALL.map(Binding::as_str).join(", ")
+        )
+    })
 }
 
 /// The owners `--across-face` names, and the face `--face-policy` and
@@ -500,6 +525,7 @@ impl Cli {
             history_entries,
             max_keys,
             across,
+            binding: self.binding.unwrap_or_default(),
         })
     }
 }
@@ -613,6 +639,14 @@ impl std::fmt::Display for NamespaceChoice {
 impl Settings {
     pub fn timeout(&self) -> Duration {
         Duration::from_secs(self.timeout_secs)
+    }
+
+    /// The routers' lease, keep-alives and `wait_before_close` this window
+    /// reads a budget and its arbitration view by (#1011): the defaults of
+    /// `--binding`, zenoh 1.10.1's without it.
+    #[must_use]
+    pub fn routers(&self) -> zenkey_model::budget::Routers {
+        zenkey_model::budget::Routers::of_binding(self.binding)
     }
 
     /// How the namespace should be shown to a human — see
@@ -1134,5 +1168,28 @@ mod tests {
             "a face needs --across-face"
         );
         assert!(parse(&[]).unwrap().across.is_none());
+    }
+
+    /// `--binding` (#1011): one of `link.v2`'s names, zenoh 1.10.1 without
+    /// it, and the routers the window reads by are its defaults: the fork
+    /// waits 10 s on a full queue, so its lease less a keep-alive bounds a
+    /// stall, where zenoh 1.10.1's 5 s `wait_before_close` does.
+    #[test]
+    fn the_binding_names_the_routers_the_window_reads_by() {
+        use zenkey_model::budget::Routers;
+        use zenkey_model::link::Binding;
+        let stock = parse(&[]).unwrap();
+        assert_eq!(stock.binding, Binding::Zenoh1_10_1);
+        assert_eq!(stock.routers(), Routers::default());
+        assert_eq!(
+            parse(&["--binding", "zenoh-1.10.1"]).unwrap().routers(),
+            Routers::default()
+        );
+        let fork = parse(&["--binding", "zm-1.10.2-r1"]).unwrap();
+        assert_eq!(fork.binding, Binding::Zm1_10_2R1);
+        assert_eq!(fork.routers().wait_before_close, Duration::from_secs(10));
+        assert_eq!(fork.routers().stall_bound(), Duration::from_millis(7_500));
+        assert_eq!(stock.routers().stall_bound(), Duration::from_secs(5));
+        assert!(parse(&["--binding", "zenoh-1.10.2"]).is_err());
     }
 }

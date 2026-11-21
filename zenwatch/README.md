@@ -387,6 +387,7 @@ name. The whole example is [`examples/zenwatch.json5`](examples/zenwatch.json5):
   bus: { context: "lab", namespace: "site" },  // or connect/listen/scouting/timeout_s/zenoh_config
   contracts: ["/etc/zenwatch/contracts"],      // known offline; the rest come from the bus
   clocks_synced: false,
+  binding: "zenoh-1.10.1",                     // the routers' zenoh; "zm-1.10.2-r1" for zenoh-modem's fork
   tick_s: 5,
   rules: [
     { name: "streams-quiet", rule: "silent-for site/zk2/*/*/*/stream/** 30", severity: "warning", labels: { team: "infra" }, sinks: ["ops"] },
@@ -430,6 +431,18 @@ deployment catalog (core §8.6), `zk2-catalog/1` files the deployment
 provisions: the scheduled doctor's `catalog-missing` judges every running
 revision against it, and is not asked without one; a file not there, or one
 a reader refuses, is refused (exit 2).
+
+`binding` names the zenoh the deployment's routers run, `"zenoh-1.10.1"`
+(the default when absent) or `"zm-1.10.2-r1"`; any other name is refused
+at the parse. The alarm rules (`alerts`, `alert-firing`) read by its
+defaults (`link.v2` §2.19, observer §5.2): how long a reader may stall
+before it counts a loss, the routers' `wait_before_close` or their lease
+less a keep-alive, and how long past a window its owners are watched.
+zm-1.10.2-r1 waits 10 s before it closes a transport where zenoh 1.10.1
+waits 5 s, so a reader on it may stall 7.5 s, not 5 s. zenwatch reads no
+routers' face policy and has no key for a lease: a deployment whose routers
+state their own lease or `wait_before_close` is read by the binding's
+defaults (`across_face.policy` is the face the owners sit across).
 
 `across_face` reads owners across a constrained face (core §8.5, observer
 §7.5): no descriptor crosses one, so no presence is read, and each engine

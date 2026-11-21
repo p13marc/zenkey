@@ -403,6 +403,9 @@ pub struct Engine<'a> {
     /// The deployment catalogs (`catalog`, core §8.6): the scheduled
     /// doctor's `catalog-missing` judges against them.
     pub catalogs: &'a zenkey_fleet::Catalogs,
+    /// The routers the alarm rules' readers read by (`binding`, #1011):
+    /// `alerts` and the watchdog's `alert-firing`.
+    pub routers: zenkey_model::budget::Routers,
     /// Across a constrained face (`across_face`, #990 V7): the engine
     /// rules' selectors narrowed to the face's scope, declared in place of
     /// the rules' own, with no presence read for the lens. `None` reads
@@ -576,6 +579,8 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
         clocks_synced: e.clocks_synced,
         // #1087: `alert-firing`'s reader dates under the config's `catalog`.
         catalogs: e.catalogs.clone(),
+        // #1011: and reads by the routers the config's `binding` names.
+        routers: e.routers,
     };
     let mut watchdog = (!engine_rules.is_empty())
         .then(|| zenkey_fleet::watchdog_across(e.bus, e.store, e.contracts, &spec, e.across).pin());
@@ -671,6 +676,7 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
                 e.timeout,
                 e.clocks_synced,
                 e.catalogs,
+                e.routers,
             )
             .await;
         let mut remembered: BTreeMap<String, Vec<Remembered>> = BTreeMap::new();
@@ -1225,6 +1231,7 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
             doctor: cfg.doctor.as_ref(),
             clocks_synced: cfg.clocks_synced,
             catalogs: &loaded.catalogs,
+            routers: cfg.routers(),
             across: loaded.across.as_ref().map(|a| a.selectors.as_slice()),
         },
         stop_signal(),

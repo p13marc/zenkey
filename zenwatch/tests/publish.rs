@@ -394,8 +394,7 @@ async fn zenwatch_passes_its_own_conformance() {
                 trust_admin: false,
                 calls_granted: true,
                 clocks_synced: true,
-                lease: zenkey::model::budget::DEFAULT_LEASE,
-                wait_before_close: zenkey::model::budget::DEFAULT_WAIT_BEFORE_CLOSE,
+                routers: zenkey::model::budget::Routers::default(),
                 skip: zenkey_fleet::bus::conform::Skipped::default(),
             },
         )

@@ -262,6 +262,7 @@ async fn instance_gone_is_refused_without_a_watch_session_of_its_own() {
         timeout: T,
         clocks_synced: false,
         catalogs: Default::default(),
+        routers: Default::default(),
     };
     let store = zenkey_fleet::BundleStore::new(T);
     let contracts = zenkey_fleet::ContractSet::new();
@@ -359,7 +360,7 @@ async fn a_telemetry_reading_needs_a_watch_session_of_its_own() {
     let store = zenkey_fleet::BundleStore::new(T);
     let offline = zenkey_fleet::ContractSet::new();
     let mut spec = zenkey_fleet::TelemetrySpec::new(T, Duration::from_millis(200));
-    spec.lease = Duration::from_millis(200);
+    spec.routers.lease = Duration::from_millis(200);
     let read = |watch: Option<zenkey_fleet::WatchSession>| {
         let (tool, store, offline) = (tool.clone(), store.clone(), offline.clone());
         async move {
@@ -730,6 +731,7 @@ async fn instance_gone_is_unobservable_while_its_round_trip_does_not_stand() {
         timeout: T,
         clocks_synced: false,
         catalogs: Default::default(),
+        routers: Default::default(),
     };
     let store = zenkey_fleet::BundleStore::new(T);
     let contracts = zenkey_fleet::ContractSet::new();

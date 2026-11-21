@@ -904,6 +904,7 @@ impl RuleAlarms {
         timeout: Duration,
         clocks_synced: bool,
         catalogs: &crate::model::deployment::Catalogs,
+        routers: zenkey_model::budget::Routers,
     ) -> RuleAlarms {
         let mut feeds = Vec::new();
         for selector in rules.alarm_selectors() {
@@ -913,10 +914,7 @@ impl RuleAlarms {
                 }
                 (_, Err(why)) => Err(why),
                 (Some(s), Ok(scope)) => {
-                    let mut spec = AlarmSpec::new(timeout);
-                    spec.clocks_synced = clocks_synced;
-                    spec.archives = false;
-                    spec.catalogs = catalogs.clone();
+                    let spec = Self::spec(timeout, clocks_synced, catalogs, routers);
                     AlarmFeed::open(s, watch, scope, spec, true)
                         .await
                         .map(|(f, _)| f)
@@ -926,6 +924,23 @@ impl RuleAlarms {
             feeds.push((selector, feed));
         }
         RuleAlarms { feeds }
+    }
+
+    /// What each reader asks: the owners' word alone, no archive (core
+    /// S6), dated under `catalogs`, its window and its own stall read by
+    /// `routers` (#1011).
+    fn spec(
+        timeout: Duration,
+        clocks_synced: bool,
+        catalogs: &crate::model::deployment::Catalogs,
+        routers: zenkey_model::budget::Routers,
+    ) -> AlarmSpec {
+        let mut spec = AlarmSpec::new(timeout);
+        spec.clocks_synced = clocks_synced;
+        spec.archives = false;
+        spec.catalogs = catalogs.clone();
+        spec.routers = routers;
+        spec
     }
 
     /// Some reader listens: the drain owes it its deliveries.
@@ -1245,6 +1260,11 @@ pub struct WatchdogSpec {
     /// `alert-firing` rule's reader dates a GET's confirmations under the
     /// catalog each owner's descriptor names, read through these (#1087).
     pub catalogs: crate::model::deployment::Catalogs,
+    /// The routers' lease, keep-alives and `wait_before_close`, which an
+    /// `alert-firing` rule's reader reads its window and its own stall by
+    /// ([`crate::bus::alarms::AlarmSpec::routers`]): the deployment's word,
+    /// its binding's defaults or zenoh 1.10.1's (#1011).
+    pub routers: zenkey_model::budget::Routers,
 }
 
 /// How many payload checks each key gets per tick under an
@@ -1821,6 +1841,7 @@ pub fn watchdog_across<'a>(
                 spec.timeout,
                 spec.clocks_synced,
                 &spec.catalogs,
+                spec.routers,
             )
             .await
         } else {
@@ -2568,6 +2589,25 @@ mod tests {
             RuleSet::new(&[Condition::parse("doctor population-over-bound").expect("rule")])
                 .expect("compiles");
         assert!(rules.doctor_spec(t, false).deep);
+    }
+
+    /// An `alert-firing` rule's reader reads by the routers its watchdog
+    /// is given (#1011): told zm-1.10.2-r1, it may stall 7.5 s, the lease
+    /// less a keep-alive, where zenoh 1.10.1's 5 s `wait_before_close`
+    /// bounds it; and it reads no archive either way.
+    #[test]
+    fn an_alert_firing_reader_reads_by_the_watchdogs_routers() {
+        use zenkey_model::budget::Routers;
+        use zenkey_model::link::Binding;
+        let t = Duration::from_secs(1);
+        let catalogs = crate::model::deployment::Catalogs::default();
+        let stock = RuleAlarms::spec(t, false, &catalogs, Routers::default());
+        assert_eq!(stock.stall_bound(), Duration::from_secs(5));
+        let fork = RuleAlarms::spec(t, true, &catalogs, Routers::of_binding(Binding::Zm1_10_2R1));
+        assert_eq!(fork.routers.wait_before_close, Duration::from_secs(10));
+        assert_eq!(fork.stall_bound(), Duration::from_millis(7_500));
+        assert_eq!(fork.book().routers, fork.routers);
+        assert!(fork.clocks_synced && !fork.archives && !stock.archives);
     }
 
     /// `alert-firing` (#800, AC) is §5's second question at its floor: yes

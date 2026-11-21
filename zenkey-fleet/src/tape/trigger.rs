@@ -451,6 +451,8 @@ where
             spec.timeout,
             spec.clocks_synced,
             &spec.catalogs,
+            // A trigger is told no binding: zenoh 1.10.1's (#1011).
+            zenkey_model::budget::Routers::default(),
         )
         .await
     } else {

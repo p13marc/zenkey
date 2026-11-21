@@ -112,24 +112,24 @@ pub struct ConformSpec {
     /// GET reply's stamp is aged only against a clock this run measured on
     /// a live put of the same clock, and is unobservable otherwise.
     pub clocks_synced: bool,
-    /// The deployment's link lease: a path gone silent withdraws the
-    /// owner's token only when it runs out, so a window's owner is watched
-    /// for it, or `wait_before_close` when that is longer, and `timeout`
-    /// more, after the window ([`ConformSpec::presence_tail`], observer
-    /// §5.2). zenoh 1.10.1's default, `zenkey_model::budget::DEFAULT_LEASE`,
-    /// unless the deployment lengthens it.
-    pub lease: Duration,
-    /// The routers' `wait_before_close`: how long a router waits on this
-    /// run's full queue before it closes the transport, and with the lease
-    /// the longest this run may stall and still read a window lossless
-    /// (core §2.7, 0.27). A router that waits it before closing a transport
-    /// tells a withdrawal that late, so a window's owner is watched for it
-    /// where it is longer than the lease (observer §5.2). zenoh 1.10.1's
-    /// default, `zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE`, unless
-    /// the deployment states its own, as one on another binding does
-    /// (zm-1.10.2-r1's is 10 s, #1011). The deployment's word, never this
-    /// run's session configuration, which states only its own pushes'.
-    pub wait_before_close: Duration,
+    /// The routers' lease, keep-alives and `wait_before_close`.
+    ///
+    /// - **The lease:** a path gone silent withdraws the owner's token only
+    ///   when it runs out, so a window's owner is watched for it, or
+    ///   `wait_before_close` when that is longer, and `timeout` more, after
+    ///   the window ([`ConformSpec::presence_tail`], observer §5.2).
+    /// - **`wait_before_close`:** how long a router waits on this run's
+    ///   full queue before it closes the transport. With the lease less
+    ///   one of the routers' keep-alive intervals, it is the longest this
+    ///   run may stall and still read a window lossless (core §2.7, 0.27;
+    ///   [`ConformSpec::stall_bound`]).
+    ///
+    /// The deployment's word, never this run's session configuration,
+    /// which states only its own pushes': a face policy's `[transport]`,
+    /// its binding's defaults (zm-1.10.2-r1's `wait_before_close` is 10 s),
+    /// or zenoh 1.10.1's, `zenkey_model::budget::Routers::default`
+    /// (#1011).
+    pub routers: zenkey_model::budget::Routers,
     /// The cases `--skip` names. A skipped case sends nothing: an
     /// operation is called only when `operation` is asked, its fan-out
     /// probed only when `fanout-refused` is, and a standby probed only when
@@ -171,14 +171,9 @@ impl Skipped {
 impl ConformSpec {
     /// The longest this run's reader may stall over a window and the lease
     /// after it (core §2.7, 0.27): `wait_before_close`, or the lease less
-    /// one keep-alive interval (zenoh 1.10.1's default keep-alive) when
-    /// shorter.
+    /// one of the routers' keep-alive intervals when shorter.
     pub fn stall_bound(&self) -> Duration {
-        zenkey_model::budget::stall_bound(
-            self.wait_before_close,
-            self.lease,
-            zenkey_model::budget::DEFAULT_KEEP_ALIVE,
-        )
+        self.routers.stall_bound()
     }
 
     /// How long after a window's end the owner's instance tokens are
@@ -188,7 +183,7 @@ impl ConformSpec {
     /// (zk2py round 85's F-320) it was the lease alone, so a
     /// `wait_before_close` longer than the lease never lengthened it.
     pub fn presence_tail(&self) -> Duration {
-        zenkey_model::budget::presence_tail(self.lease, self.wait_before_close, self.timeout)
+        self.routers.presence_tail(self.timeout)
     }
 
     /// How much of a subscription's listening counts toward a window's
@@ -577,8 +572,7 @@ pub async fn observe(
             return None;
         }
         let mut tspec = crate::bus::telemetry::TelemetrySpec::new(t, spec.window);
-        tspec.lease = spec.lease;
-        tspec.wait_before_close = spec.wait_before_close;
+        tspec.routers = spec.routers;
         let scope = crate::model::telemetry::TelemetryScope::of(&address).with_iface(iface.clone());
         Some(
             crate::bus::telemetry::observe(
@@ -601,8 +595,7 @@ pub async fn observe(
             return None;
         }
         let mut tspec = crate::bus::timing::TimingSpec::new(t, spec.window);
-        tspec.lease = spec.lease;
-        tspec.wait_before_close = spec.wait_before_close;
+        tspec.routers = spec.routers;
         let scope = crate::model::timing::TimingScope::of(&address).with_iface(iface.clone());
         Some(
             crate::bus::timing::observe(
@@ -1700,8 +1693,11 @@ mod tail_tests {
             trust_admin: false,
             calls_granted: false,
             clocks_synced: false,
-            lease: Duration::from_secs(lease),
-            wait_before_close: Duration::from_secs(wait_before_close),
+            routers: zenkey_model::budget::Routers {
+                lease: Duration::from_secs(lease),
+                wait_before_close: Duration::from_secs(wait_before_close),
+                ..Default::default()
+            },
             skip: Skipped::default(),
         }
     }

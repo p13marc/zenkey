@@ -82,6 +82,12 @@ Claude Code loads this file when working in `zengui/`; the root `CLAUDE.md` is t
   word; shots scenes `inspector-freshness` (`World::tick_samples`) and
   `inspector-freshness-quiet` (a member ticked before `connect`, then
   heartbeats alone);
+  the routers' zenoh (#1011): `--binding` (`Settings::binding`, launch
+  only, `zenkey_model::link::Binding`) gives `Settings::routers`,
+  `Routers::of_binding`, which the budget strip (`BudgetInputs::routers`:
+  its lease and stall bound) and the Workbench's arbitration view
+  (`services::sweep::nodes::arbitration_spec`) read by; no routers' face
+  policy is read;
   `--registry` is refused by name, exit 2, and a context's stored
   `registry` rides a save untouched. **Presence** runs on a monitor of its
   own on a watch session of its own, in no namespace on the wire keys (`presence_link.rs`, the zenwatch pattern,

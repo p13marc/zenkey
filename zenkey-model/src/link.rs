@@ -226,7 +226,7 @@ impl Profile {
 /// The zenoh a near router runs (v2 §2.4): it names the router's link
 /// protocols, and the defaults a configuration that omits a transport key
 /// runs with (v2 §2.19). A `link.v1` policy reads as `zenoh-1.10.1`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Binding {
     /// Stock zenoh 1.10.1.
     #[default]
@@ -241,7 +241,7 @@ impl Binding {
 
     /// Its name in a policy.
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Zenoh1_10_1 => "zenoh-1.10.1",
             Self::Zm1_10_2R1 => "zm-1.10.2-r1",
@@ -294,6 +294,26 @@ impl fmt::Display for Binding {
 impl Serialize for Binding {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_str(self.as_str())
+    }
+}
+
+/// A binding by its name in a policy, for a tool's own configuration (a
+/// policy's `binding` is read by [`parse`], with its findings): any other
+/// string is refused with the names it could have been.
+impl<'de> serde::Deserialize<'de> for Binding {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        // Every binding's name, so a new one is offered without a second list.
+        const NAMES: [&str; Binding::ALL.len()] = {
+            let mut names = [""; Binding::ALL.len()];
+            let mut i = 0;
+            while i < names.len() {
+                names[i] = Binding::ALL[i].as_str();
+                i += 1;
+            }
+            names
+        };
+        let name = String::deserialize(d)?;
+        Binding::parse(&name).ok_or_else(|| serde::de::Error::unknown_variant(&name, &NAMES))
     }
 }
 
@@ -4543,6 +4563,27 @@ mod tests {
 
     fn ke(s: &str) -> &keyexpr {
         keyexpr::new(s).unwrap()
+    }
+
+    /// A binding reads from a tool's configuration by its policy name, and
+    /// any other string is refused with the names it could have been.
+    #[test]
+    fn a_binding_deserializes_by_its_name() {
+        for b in Binding::ALL {
+            let read: Binding = serde_json::from_value(Value::from(b.as_str())).unwrap();
+            assert_eq!(read, b);
+            assert_eq!(serde_json::to_value(b).unwrap(), Value::from(b.as_str()));
+        }
+        let e = serde_json::from_value::<Binding>(Value::from("zenoh-1.10.2"))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("zenoh-1.10.2")
+                && e.contains("`zenoh-1.10.1`")
+                && e.contains("`zm-1.10.2-r1`"),
+            "{e}"
+        );
+        assert!(serde_json::from_value::<Binding>(Value::from(1)).is_err());
     }
 
     /// The zenoh facts the plan rests on (§0, §2.6, §2.7).

@@ -227,7 +227,15 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   where `arq = false`, in `echo`, `rate`, `record`, `timeline`; `check
   conform` and `alarms` take `--face-policy` for the routers' lease and
   `wait_before_close` (`zk2::routers`; `--lease`/`--wait-before-close` are
-  `Option` now, #1011's item 3); #990 V8: `get state`, `watch` and `call`
+  `Option` now, #1011's item 3; since its last chunk `zk2::routers` is the
+  one rule of all five window verbs, `check conform`, `alarms`,
+  `telemetry`, `timing` and `arbitration`: the flag, then `--face-policy`'s
+  `[transport]`, then `--binding <NAME>`'s defaults, `cli::BindingArgs`,
+  then zenoh 1.10.1's, the keep-alives the policy's or the binding's, never
+  an assumed 4; `timing` and `arbitration` take the routers'
+  `--face-policy`, `telemetry`'s stays the face's it reads across;
+  `tests/cmd/routers-binding.trycmd`, and `live_zk2.rs`'s
+  `alarms_told_the_forks_binding_watch_its_wait_before_close`); #990 V8: `get state`, `watch` and `call`
   take `cli::OwnerFaceArgs` (`--across-face`, the revision `--contracts`
   holds, never presence, `zk2::held_across` refusing one it does not
   name, exit 2; `--face-policy F --face N`, `zk2::across` →
@@ -393,8 +401,8 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   window and the watch after it, and a closed transport or a gap past
   `budget::stall_bound` (`--wait-before-close`, 5 s, or `--lease` less a
   keep-alive) reads `reader_stalled`. Every `--wait-before-close` says
-  its 5 s default is zenoh 1.10.1's, and a deployment on another binding
-  states its own (`zm-1.10.2-r1`'s is 10 s; #1011). The runtime
+  its default: `--face-policy`'s, else `--binding`'s (`zm-1.10.2-r1`'s is
+  10 s), else zenoh 1.10.1's 5 s (#1011). The runtime
   keeps §2.7 (#741): `zenkey::budget` refuses a new member at the bound,
   an occurrence beyond the rate and a lowering below the live members
   (`Error::Budget`), so a test that needs an owner over its bound uses

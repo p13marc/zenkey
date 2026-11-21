@@ -9579,6 +9579,46 @@ async fn alarms_in_a_namespace_hear_an_owner_leave_the_window() {
     assert!(!to.contains(&"ok"), "an owner gone is never ok: {ruled}");
 }
 
+/// #1011's case, a 1 s lease on the fork's defaults: told its routers'
+/// binding, `alarms` watches the owners zm-1.10.2-r1's 10 s
+/// `wait_before_close` and the timeout past its window, as its listening
+/// line says; told nothing, zenoh 1.10.1's 5 s and the timeout, which
+/// would end the watch 5 s before a router of the fork tells a withdrawal
+/// (observer §5.2). No owner is needed: the line is the reader's own.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn alarms_told_the_forks_binding_watch_its_wait_before_close() {
+    let bus = Bus::bare(None).await;
+    let asked = |binding: &'static [&'static str]| {
+        let mut args = vec![
+            "alarms",
+            LAB,
+            "--for",
+            "0.2",
+            "--lease",
+            "1",
+            "--timeout",
+            "1",
+            "--format",
+            "json",
+        ];
+        args.extend(binding);
+        bus.spawn(&args)
+    };
+    let (told, untold) = (asked(&["--binding", "zm-1.10.2-r1"]), asked(&[]));
+    let (told, untold) = (told.await.expect("told"), untold.await.expect("untold"));
+    assert!(
+        told.stderr
+            .contains("alarms: listening 0.2s to the alarms and the owners' tokens, then 11s more"),
+        "{told}"
+    );
+    assert!(
+        untold
+            .stderr
+            .contains("alarms: listening 0.2s to the alarms and the owners' tokens, then 6s more"),
+        "{untold}"
+    );
+}
+
 // ─── telemetry.v1: scenarios.md §8, the tool's section (#819, TC) ──────────
 //
 // Common setup, the text's: R1 a router with timestamping on, the owner O

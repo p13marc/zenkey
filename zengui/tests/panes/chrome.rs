@@ -511,6 +511,7 @@ fn launch_settings() -> zengui::config::Settings {
         history_entries: 200,
         max_keys: 50_000,
         across: None,
+        binding: Default::default(),
     }
 }
 

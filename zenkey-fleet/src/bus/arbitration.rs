@@ -103,34 +103,30 @@ pub struct ArbitrationSpec {
     /// Only this role; `None`: every role carrying a policy, or whose
     /// declaring contract is not in hand.
     pub role: Option<String>,
-    /// The deployment's link lease (core §2.7): with `wait_before_close`,
-    /// the longest this reader may stall before it counts a loss.
-    pub lease: Duration,
-    /// The routers' `wait_before_close` (core §2.7, 0.27).
-    pub wait_before_close: Duration,
+    /// The routers' lease, keep-alives and `wait_before_close` (core §2.7):
+    /// the longest this reader may stall before it counts a loss
+    /// ([`zenkey_model::budget::Routers::stall_bound`]). The deployment's
+    /// word: a face policy's `[transport]`, its binding's defaults, or
+    /// zenoh 1.10.1's (#1011).
+    pub routers: zenkey_model::budget::Routers,
 }
 
 impl ArbitrationSpec {
-    /// Every role, [`DEFAULT_LISTEN`], zenoh 1.10.1's lease and
-    /// `wait_before_close`.
+    /// Every role, [`DEFAULT_LISTEN`], zenoh 1.10.1's routers.
     pub fn new(timeout: Duration) -> ArbitrationSpec {
         ArbitrationSpec {
             timeout,
             listen: DEFAULT_LISTEN,
             deadlines: None,
             role: None,
-            lease: zenkey_model::budget::DEFAULT_LEASE,
-            wait_before_close: zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE,
+            routers: zenkey_model::budget::Routers::default(),
         }
     }
 
-    /// The longest this reader may stall (core §2.7, 0.27).
+    /// The longest this reader may stall (core §2.7, 0.27), by the
+    /// routers' own keep-alives.
     pub fn stall_bound(&self) -> Duration {
-        zenkey_model::budget::stall_bound(
-            self.wait_before_close,
-            self.lease,
-            zenkey_model::budget::DEFAULT_KEEP_ALIVE,
-        )
+        self.routers.stall_bound()
     }
 }
 

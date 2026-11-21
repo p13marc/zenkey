@@ -37,6 +37,8 @@ pub async fn run(cli: ArbitrationArgs) -> Result<()> {
         for_secs,
         lease,
         wait_before_close,
+        face_policy,
+        binding,
         contracts,
         ns,
     } = cli;
@@ -57,9 +59,13 @@ pub async fn run(cli: ArbitrationArgs) -> Result<()> {
     let mut spec = ArbitrationSpec::new(dep.timeout());
     spec.listen = std::time::Duration::from_secs_f64(for_secs);
     spec.role = role;
-    spec.lease = ASKING.ask(super::positive_secs("--lease", lease));
-    spec.wait_before_close = ASKING.ask(super::positive_secs(
-        "--wait-before-close",
+    // The routers' lease, keep-alives and wait_before_close: the flags,
+    // else the face policy's, else the binding's, else zenoh 1.10.1's
+    // (#1011).
+    spec.routers = ASKING.ask(zk2::routers(
+        face_policy.as_deref(),
+        binding.binding,
+        lease,
         wait_before_close,
     ));
     let session = ASKING.ask(dep.session().await);

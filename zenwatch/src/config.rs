@@ -69,6 +69,17 @@ pub struct Config {
     /// clock (at most 450 s, alarms.v1 §2.7). Default off.
     #[serde(default)]
     pub clocks_synced: bool,
+    /// The zenoh the deployment's routers run, by its `link.v2` name (§2.4):
+    /// `"zenoh-1.10.1"` or `"zm-1.10.2-r1"`. The alarm rules (`alerts`,
+    /// `alert-firing`) read by its defaults (`link.v2` §2.19; #1011): how
+    /// long a reader may stall before it counts a loss, and how long past
+    /// a window its owners are watched ([`Config::routers`]). zm-1.10.2-r1
+    /// waits 10 s before it closes a transport, zenoh 1.10.1 5 s. Absent:
+    /// zenoh 1.10.1's. Any other name is refused at the parse. No routers'
+    /// face policy is read, so the lease and the keep-alives are the
+    /// binding's defaults.
+    #[serde(default)]
+    pub binding: Option<zenkey_model::link::Binding>,
     /// The watchdog's evaluation cadence for the engine rules, seconds, and
     /// the `alerts` rules' re-read (presence, the owners' GET) and sweep.
     #[serde(default = "default_tick")]
@@ -107,6 +118,15 @@ pub struct Config {
     /// contracts in hand under each address, or what the face's plan lets
     /// cross), and a rule that reads presence or the doctor is refused.
     pub across_face: Option<AcrossFaceConfig>,
+}
+
+impl Config {
+    /// The routers the alarm rules read by (#1011): the defaults of
+    /// `binding`, zenoh 1.10.1's without one.
+    #[must_use]
+    pub fn routers(&self) -> zenkey_model::budget::Routers {
+        zenkey_model::budget::Routers::of_binding(self.binding.unwrap_or_default())
+    }
 }
 
 /// The `across_face` block (#990 V7): which owners, which contracts, and
@@ -1190,6 +1210,37 @@ mod tests {
         assert!(check(&cfg).is_empty(), "{:?}", check(&cfg));
     }
 
+    /// The top-level `binding` (#1011): one of `link.v2`'s names, read at
+    /// the parse; absent, zenoh 1.10.1's routers, as before; any other name
+    /// refused with the names it could have been.
+    #[test]
+    fn the_binding_is_one_of_link_v2s_names_and_zenoh_1_10_1s_when_absent() {
+        use zenkey_model::budget::Routers;
+        use zenkey_model::link::Binding;
+        let with =
+            |binding: &str| parse(&MINIMAL.replacen('{', &format!("{{ binding: {binding},"), 1));
+        let absent = parse(MINIMAL).unwrap();
+        assert_eq!(absent.binding, None);
+        assert_eq!(absent.routers(), Routers::default());
+        let stock = with(r#""zenoh-1.10.1""#).unwrap();
+        assert_eq!(stock.binding, Some(Binding::Zenoh1_10_1));
+        assert_eq!(stock.routers(), Routers::default());
+        let fork = with(r#""zm-1.10.2-r1""#).unwrap();
+        assert_eq!(fork.binding, Some(Binding::Zm1_10_2R1));
+        assert_eq!(fork.routers(), Routers::of_binding(Binding::Zm1_10_2R1));
+        assert_eq!(
+            fork.routers().wait_before_close,
+            std::time::Duration::from_secs(10)
+        );
+        assert!(check(&fork).is_empty(), "{:?}", check(&fork));
+        let e = with(r#""zenoh-1.10.2""#).unwrap_err().to_string();
+        assert!(
+            e.contains("zenoh-1.10.2") && e.contains("`zm-1.10.2-r1`"),
+            "{e}"
+        );
+        assert!(with("true").is_err(), "a name, never a switch");
+    }
+
     /// The parse-time refusals: an unknown field anywhere, and a bare string
     /// where a secret goes — with the sentence that says why.
     #[test]
@@ -1504,6 +1555,7 @@ mod tests {
         let cfg = parse(include_str!("../examples/zenwatch.json5")).expect("the example");
         assert_eq!(cfg.bus.namespace.as_deref(), Some("site"));
         assert!(!cfg.contracts.is_empty());
+        assert_eq!(cfg.routers(), zenkey_model::budget::Routers::default());
         assert_eq!(cfg.discipline.group_by, ["system"]);
         for r in &cfg.rules {
             parse_rule(&r.rule).unwrap_or_else(|e| panic!("{}: {e}", r.rule));

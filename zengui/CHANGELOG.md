@@ -4,6 +4,15 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — `--binding`: the routers' zenoh (#1011)
+
+No rule changed (observer §5.2; `link.v2` §2.19). No pixel moved.
+
+| Before | Now | Notes |
+|---|---|---|
+| a budget badge's stall bound and lease, and the arbitration view's stall bound: zenoh 1.10.1's, whatever zenoh the routers run | `--binding zenoh-1.10.1` or `zm-1.10.2-r1`: read by its defaults; omitted, zenoh 1.10.1's, as before | on `zm-1.10.2-r1`, which waits 10 s before it closes a transport, a window may stall 7.5 s (its lease less a keep-alive) before a badge reads "lossy", where 5 s was read. A launch flag only, not remembered; any other name is refused at launch |
+| — | no routers' face policy is read | `--face-policy` stays the face the owners sit across; the bound is the binding's defaults with it too |
+
 ## Unreleased (`main`, zk2) — the freshness book's bounds, said (#1120)
 
 No rule changed.

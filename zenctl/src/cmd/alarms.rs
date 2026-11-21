@@ -41,6 +41,7 @@ pub async fn run(cli: AlarmsArgs) -> Result<()> {
         lease,
         wait_before_close,
         face_policy,
+        binding,
         across_face,
         catalog,
         ns,
@@ -64,13 +65,15 @@ pub async fn run(cli: AlarmsArgs) -> Result<()> {
     let mut spec = AlarmSpec::new(dep.timeout());
     spec.window = window;
     spec.clocks_synced = clocks_synced;
-    let routers = ASKING.ask(zk2::routers(
+    // The routers' lease, keep-alives and wait_before_close: the flags,
+    // else the face policy's, else the binding's, else zenoh 1.10.1's
+    // (#1011).
+    spec.routers = ASKING.ask(zk2::routers(
         face_policy.as_deref(),
+        binding.binding,
         lease,
         wait_before_close,
     ));
-    spec.lease = routers.lease;
-    spec.wait_before_close = routers.wait_before_close;
     spec.face = across_face.map(|f| f == FaceGrant::Granted);
     spec.catalogs = catalogs;
     let session = ASKING.ask(dep.session().await);

@@ -416,6 +416,7 @@ async fn wf_the_watchdog_after_a_reopen_beside_the_crowd_measured() {
         timeout: Duration::from_secs(30),
         clocks_synced: false,
         catalogs: Default::default(),
+        routers: Default::default(),
     };
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let started = Instant::now();
