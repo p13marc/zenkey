@@ -6686,7 +6686,9 @@ def _round114_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "S4's under a header written against core 0.73, whose S4 is 0.100's only since 0.100; F-562, §2.19 "
                 "reads `timestamping/enabled` at the mode the router runs, and names the seven keys alone as "
                 "holding no value zenoh runs; F-563, §7.5's put with no envelope and its group of a revision not "
-                "held, beside an owner.json whose description gives a reader catalogs and no revisions",
+                "held, beside an owner.json whose description gives a reader catalogs and no revisions; F-564, core's "
+                "Appendix C and E hold no entry for conformance/heartbeat/, and Appendix C none for "
+                "conformance/packed/, where conformance/README.md has a row for each",
                 missing(log, "`RULES.md` lists 285 rules, 283 in 0.108.", "and `observer.md` stays 0.33.",
                         "- **What a tool shows** is `observer.md`'s, which stays 0.33 here.",
                         "- **So the sentence stands,** and is true once that text merges.")
@@ -6702,8 +6704,12 @@ def _round114_readings(root: Path) -> list[tuple[str, Any, Any]]:
                           "`beside`: the catalog the owner `names`, the catalogs the reader `holds`, and a put's "
                           "payload in `hex` that the first reading accepts",
                           "`forms`: a put's payload in hex, on an owner heartbeat's key or a heartbeat's, whose "
-                          "envelope the parse accepts as another form than 6"),
-                [286, True, True]))
+                          "envelope the parse accepts as another form than 6")
+                + missing(core, "## Appendix C. Evidence index", "## Appendix E. Fixture formats")
+                + ["heartbeat" in core[core.find("## Appendix C. Evidence index"):], "conformance/packed" in core,
+                   "| [`heartbeat/`](heartbeat/) |" in flat("conformance/README.md"),
+                   "| [`packed/`](packed/) |" in flat("conformance/README.md")],
+                [286, True, True, False, False, True, True]))
     return out
 
 
