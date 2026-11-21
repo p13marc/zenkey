@@ -234,7 +234,16 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   regenerate the fixture with the fleet's `OWNER_HEARTBEAT_BLESS=1`); and
   every `--across-face` verb passes whether `--catalog` was given
   (`zk2::FaceScope::of_given`; `of`, given none, is the tests'), so the
-  scope holds the class key that crosses; #988 L4: `--face-policy F
+  scope holds the class key that crosses; #1110's H3: `live_zk2.rs`'s
+  `watch_reads_a_real_owners_owner_heartbeats` runs `watch --catalog`
+  against the runtime's owner with `ServiceConfig::owner_heartbeat` set
+  (`freshness.v2`'s scenarios §8's `lab/w2`): a `confirmation` row per
+  group on the class key, `host` index 2 for `pulse.v1` and `link` index
+  0 for `beacon.v2`'s status, the table's head line, and with no
+  `--catalog` no row at all and `heartbeats` 0, the regression
+  `freshness.v2` §2.4's "Readers first" names; `gen` and `serve` take no
+  flag for the option, so their owners list `stream/heartbeats/{class}`
+  unavailable, cause `config` (`build` before H3); #988 L4: `--face-policy F
   --face NAME` in `AcrossFaceArgs` (`zk2::far_side`, a `link.v2` face, exit
   2 otherwise), `FaceScope::deployment` → `Deployment::across` (the face's
   `reply_timeout_ms` the default `--timeout` below a flag or context, every

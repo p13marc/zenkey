@@ -92,8 +92,19 @@ Claude Code loads this file when working in `zengui/`; the root `CLAUDE.md` is t
   `HeartbeatRead::group`, `Section::OtherClass`; the Inspector's OWNER
   HEARTBEATS section for a class key (`InspectorData::owner_heartbeats`,
   `inspector::group_head`/`group_word`), and `Deployment::face_scope`
-  through `FaceScope::of_given` with whether catalogs are loaded; no
-  scene holds one yet, so no shot moved;
+  through `FaceScope::of_given` with whether catalogs are loaded; since
+  #1110's H3 shots scene `inspector-owner-heartbeat` holds one:
+  `World::owner_heartbeats` is `lab/w2`, the owner of `freshness.v2`'s
+  scenarios §8, one instance of `beacon.v2`, `dial.v1`, `pulse.v1` and
+  `freshness.v2` whose descriptor states its catalog (`deployment`'s
+  `named`; an address named again is one instance implementing one
+  interface more), the window given that catalog (`w2_catalog`, loaded
+  from a file as `--catalog` loads one) and the standard `freshness.v2`
+  contract (a scene retrieves no bundle, and a descriptor naming a
+  revision the window does not hold reads `contract not held`); the scene
+  sends the members, then owner heartbeats written by the model's writer
+  group by group as the runtime's owner writes them, the `host` key's
+  second after one lost and with `pulse.v1`'s group out of step;
   the routers' zenoh (#1011): `--binding` (`Settings::binding`, launch
   only, `zenkey_model::link::Binding`) gives `Settings::routers`,
   `Routers::of_binding`, which the budget strip (`BudgetInputs::routers`:
