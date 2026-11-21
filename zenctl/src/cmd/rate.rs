@@ -40,7 +40,13 @@ pub async fn run(cli: crate::cli::RateArgs) -> Result<()> {
     // statistic, and the aggregate table has no column to print it in.
     let per_key = per_key || latency;
     let namespace = dep.namespace().to_owned();
-    let face = zk2::FaceScope::of(&across, &contracts, &namespace, zk2::Reads::Samples)?;
+    let face = zk2::FaceScope::of_given(
+        &across,
+        &contracts,
+        &namespace,
+        zk2::Reads::Samples,
+        !catalogs.is_empty(),
+    )?;
     let dep = match &face {
         Some(f) => f.deployment(dep),
         None => dep,

@@ -7,6 +7,17 @@ names where its question went, or that nothing on `main` asks it yet. No
 aliases and no shims, except where the two spellings were always one fact
 (`base` and `namespace`).
 
+## Unreleased (`main`, zk2) — an owner heartbeat's key across a face (#1110)
+
+Observer 0.34 §7.5. zenwatch reads no heartbeat's bytes itself: its
+`alerts` and `alert-firing` readers are the fleet's alarm book, which
+reads an owner heartbeat's group for `alarms.v1` through the top-level
+`catalog` since this change's fleet half.
+
+| Before | Now | Notes |
+|---|---|---|
+| `across_face` with a top-level `catalog`: the scope held each heartbeat's key | also each owner heartbeat key a collection in hand has a class for, with a `policy` the `link` class's alone, where the face's plan lets it cross | a rule on `…/freshness.v2/stream/heartbeats/link` loads; with no `catalog`, and on the `host` key, it meets no scope and is refused, exit 2 (`tests/refusals.rs`' `across_a_face_a_catalog_adds_the_link_owner_heartbeat_key`) |
+
 ## Unreleased (`main`, zk2) — `binding`: the routers' zenoh (#1011)
 
 No rule changed (observer §5.2; `link.v2` §2.19).

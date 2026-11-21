@@ -4,6 +4,20 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — an owner heartbeat's groups (#1110)
+
+Core §7.5; `freshness.v2` §2.5; observer 0.34 §7.3, §7.5. No owner sends
+one until #1110's next chunk.
+
+| Before | Now | Notes |
+|---|---|---|
+| a put on `…/freshness.v2/stream/heartbeats/<class>`: no business of the window's freshness reading | read as one heartbeat per group, each to its owner's view (made through the revision the group's index names in `--catalog`, where the window holds it): the Inspector of a member or heartbeat key says "group N of an owner heartbeat on its host key" at the latest, and a collection of the other class "confirmed on the other class's key" | with no `--catalog` no group is read: each is kept by its index, tag and size, `unknown_catalog` |
+| the Inspector of a class key: its value as a heartbeat of no interface | its value the owner heartbeat's groups (the lens's), a `zk2c owner heartbeat (<class>)` chip, and OWNER HEARTBEATS · THIS WINDOW'S VIEW: the puts read on the key, how many after one lost, and the latest one's groups, each `#index iface · tag · bits` with what was read or the rung where its reading stopped | the reader's word, as the FRESHNESS section; none in a replay |
+| `--across-face` with `--catalog`: the scope held each heartbeat's key | also the owner heartbeat key that crosses the face (`FaceScope::of_given`) | observer 0.34 §7.5 |
+
+No scene's pixels move: the new section and words show only for a class
+key or a group, which no scene holds yet.
+
 ## Unreleased (`main`, zk2) — `--binding`: the routers' zenoh (#1011)
 
 No rule changed (observer §5.2; `link.v2` §2.19). No pixel moved.

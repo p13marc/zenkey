@@ -237,12 +237,15 @@ impl Deployment {
                         policy: &f.policy,
                         name: f.name.as_str(),
                     });
-                zenkey_fleet::FaceScope::of(
+                // Given a catalog, the scope also holds the owner
+                // heartbeat key that crosses the face (observer 0.34 §7.5).
+                zenkey_fleet::FaceScope::of_given(
                     &across.addresses,
                     &c.set,
                     &self.settings.namespace,
                     zenkey_fleet::model::face_scope::Reads::Samples,
                     face,
+                    !c.catalogs.is_empty(),
                 )
                 .map(Arc::new)
                 .map_err(|e| e.to_string())

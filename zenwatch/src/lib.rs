@@ -190,7 +190,7 @@ pub fn load_checked(path: &Path, dep: &DeploymentArgs) -> Result<Loaded> {
     let across = match &cfg.across_face {
         None => None,
         Some(a) => {
-            let across = across_face(a, &cfg, &contracts, &bus.namespace)
+            let across = across_face(a, &cfg, &contracts, &bus.namespace, !catalogs.is_empty())
                 .map_err(|problems| refuse(path, &problems))?;
             // Core §8.1: a reply across the face takes at least its
             // `reply_timeout_ms`.
@@ -239,11 +239,18 @@ pub fn load_checked(path: &Path, dep: &DeploymentArgs) -> Result<Loaded> {
 /// errors, nothing in it), an address that is no `SYSTEM/SERVICE`, and an
 /// engine rule whose selector meets none of the scope (observer §7.5:
 /// never dropped silently).
+///
+/// `catalog` says whether the config gives a deployment catalog (core
+/// §8.6): given one, the scope also holds each owner heartbeat key a
+/// collection in hand has a class for, with a face policy the `link`
+/// class's alone, where the face's plan lets it cross (observer 0.34
+/// §7.5; #1110).
 fn across_face(
     a: &config::AcrossFaceConfig,
     cfg: &config::Config,
     contracts: &ContractSet,
     namespace: &str,
+    catalog: bool,
 ) -> std::result::Result<Across, Vec<ConfigProblem>> {
     let mut problems = Vec::new();
     let mut problem = |path: &str, message: String| {
@@ -300,12 +307,13 @@ fn across_face(
         .as_ref()
         .zip(a.face.as_deref())
         .map(|(policy, name)| zenkey_fleet::model::face_scope::Face { policy, name });
-    let scope = match zenkey_fleet::FaceScope::of(
+    let scope = match zenkey_fleet::FaceScope::of_given(
         &addresses,
         contracts,
         namespace,
         zenkey_fleet::model::face_scope::Reads::Samples,
         face,
+        catalog,
     ) {
         Ok(s) => s,
         Err(e) => {

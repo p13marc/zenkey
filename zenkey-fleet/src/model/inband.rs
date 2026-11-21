@@ -517,6 +517,118 @@ pub fn owner_heartbeat_value(
     Ok((v, whole))
 }
 
+/// Whether `declared` is an owner heartbeat's ([`heartbeat_declared`]).
+#[must_use]
+pub fn is_owner_heartbeat_declared(declared: &str) -> bool {
+    declared.starts_with("zk2c owner heartbeat")
+}
+
+/// What a group of [`owner_heartbeat_value`]'s was not read for, as a
+/// person reads it: the rung where its reading stopped.
+#[must_use]
+pub fn group_unread_words(token: &str) -> &'static str {
+    match token {
+        "unknown_catalog" => {
+            "no catalog to read its index through (core §8.6): give the one its owner names"
+        }
+        "unknown_index" => "the catalog holds no entry at its index (core §8.6)",
+        "not_held" => "the revision its index names is not in hand",
+        "tag" => {
+            "its tag is not that of the revision its index names: the bytes disagree with \
+             the deployment's word (observer §7.5)"
+        }
+        "short" => "its sections end before a bit they need (core §7.5)",
+        "code" => "its sections hold an unused code (core §7.5)",
+        "trailing" => "its sections hold bits past their last field (core §7.5)",
+        _ => "its sections are refused (core §7.5)",
+    }
+}
+
+/// An owner heartbeat's reading ([`owner_heartbeat_value`]) as a person
+/// reads it (observer 0.34 §7.3): a head line, then a line per group, its
+/// index, tag and size first, since a tool needs no contract for those.
+///
+/// ```text
+/// host, run 0007, seq 5, time unknown, 2 groups
+/// #0 alpha.v1, tag 11, 34 bits: state/status 0000000a vouched
+/// #900 tag 11, 34 bits: unread, unknown_index: the catalog holds no entry at its index (core §8.6)
+/// ```
+///
+/// A templated section says its live count and the ranks it vouches for.
+/// `None` for a value that is no owner heartbeat's reading.
+#[must_use]
+pub fn owner_heartbeat_lines(value: &serde_json::Value) -> Option<Vec<String>> {
+    let groups = value.get("groups")?.as_array()?;
+    let time = match (value.get("time"), value.get("dated")) {
+        (Some(t), dated) if !t.is_null() => {
+            let at = format!(
+                "t={}.{:03}",
+                t.get("s").and_then(serde_json::Value::as_u64).unwrap_or(0),
+                t.get("ms").and_then(serde_json::Value::as_u64).unwrap_or(0)
+            );
+            match dated.and_then(|d| d.get("utc")).and_then(|u| u.as_str()) {
+                Some(utc) => format!("{at} ({utc})"),
+                None => at,
+            }
+        }
+        _ => "time unknown".to_owned(),
+    };
+    let mut lines = vec![format!(
+        "{}, run {}, seq {}, {time}, {} group{}",
+        value.get("class")?.as_str()?,
+        value.get("run")?.as_str()?,
+        value.get("seq")?,
+        groups.len(),
+        if groups.len() == 1 { "" } else { "s" }
+    )];
+    for g in groups {
+        let head = format!(
+            "#{}{}, tag {}, {} bits",
+            g.get("index")?,
+            g.get("covers")
+                .and_then(|c| c.as_str())
+                .map(|c| format!(" {c}"))
+                .unwrap_or_default(),
+            g.get("tag")?,
+            g.get("size")?
+        );
+        let body = match g.get("unread").and_then(|u| u.as_str()) {
+            Some(why) => format!("unread, {why}: {}", group_unread_words(why)),
+            None => {
+                let sections = g.get("sections")?.as_object()?;
+                if sections.is_empty() {
+                    "no collection in it".to_owned()
+                } else {
+                    sections
+                        .iter()
+                        .map(|(name, s)| {
+                            let digest = s.get("digest").and_then(|d| d.as_str()).unwrap_or("?");
+                            let vouched = match s.get("vouched") {
+                                Some(serde_json::Value::Bool(true)) => "vouched".to_owned(),
+                                Some(serde_json::Value::Bool(false)) => "not vouched".to_owned(),
+                                Some(serde_json::Value::Array(ranks)) => format!(
+                                    "live {}, vouched [{}]",
+                                    s.get("live").unwrap_or(&serde_json::Value::Null),
+                                    ranks
+                                        .iter()
+                                        .map(ToString::to_string)
+                                        .collect::<Vec<_>>()
+                                        .join(" ")
+                                ),
+                                _ => String::new(),
+                            };
+                            format!("{name} {digest} {vouched}")
+                        })
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                }
+            }
+        };
+        lines.push(format!("{head}: {body}"));
+    }
+    Some(lines)
+}
+
 /// An owner heartbeat read by [`owner_heartbeat_value`]: its groups and
 /// valid, or undecodable where core §7.5 refuses it whole. A group shown
 /// by its envelope leaves it valid: the put is well formed, and what the

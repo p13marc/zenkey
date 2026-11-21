@@ -15,6 +15,15 @@
 //! when it is made. A heartbeat no revision in hand reads is counted not
 //! read, with the lens's word on why, never dropped.
 //!
+//! **An owner heartbeat** (core §7.5; freshness.v2 §2.5; #1110) is read
+//! as one heartbeat per group, each to its owner's view: the put is read
+//! on its class key's own sequence ([`ClassKey`]), each group's index
+//! through the catalogs the lens holds and the one its owner names
+//! (`Lens::owner_catalogs`), and its sections by the view of the interface
+//! the index names, made through the revision it names where the lens
+//! holds it. A group the window cannot read is kept by its index, tag and
+//! size, with why.
+//!
 //! What it says is the reader's word, never a finding about the owner
 //! (§5): a heartbeat whose digest is not this window's view **diverged**
 //! (the window missed a put, or never heard the members); one after a gap
@@ -30,7 +39,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::Instant;
 
 use zenkey_fleet::SampleView;
-use zenkey_model::freshness::{Applied, SectionRead, View};
+use zenkey_model::freshness::{Applied, GroupRead, SectionRead, Sequence, View};
+use zenkey_model::heartbeat::Class;
 use zenkey_model::wire::Stamp;
 
 /// How many owner interfaces the book follows; past it a new one is
@@ -54,6 +64,9 @@ pub enum Section {
     Absent,
     /// A collection the view does not follow.
     NotFollowed,
+    /// In a group of an owner heartbeat, a collection of the other class:
+    /// the other class's key confirms it (freshness.v2 §2.5).
+    OtherClass,
 }
 
 /// The latest heartbeat the view read.
@@ -66,6 +79,43 @@ pub struct HeartbeatRead {
     /// Each collection, `<kind token>/<template>`, in the layout's order,
     /// and what its section did.
     pub sections: Vec<(String, Section)>,
+    /// For a group of an owner heartbeat, the class its key names and the
+    /// group's index in the owner's catalog; `None` for a heartbeat.
+    pub group: Option<(Class, u16)>,
+}
+
+/// One group of the latest owner heartbeat read on a class key: its
+/// index, tag and size, which need no contract, and what the window read
+/// of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupSeen {
+    pub index: u16,
+    pub tag: u8,
+    /// Its sections' count of bits.
+    pub size: u64,
+    /// The interface its index names, where the catalog read it.
+    pub iface: Option<String>,
+    /// `Ok`: each collection and what its section did to its owner's view.
+    /// `Err`: why it is not read, `unknown_catalog`, `unknown_index`,
+    /// `not_held`, `tag`, or the token core §7.5 refuses its sections by.
+    pub read: Result<Vec<(String, Section)>, String>,
+}
+
+/// One owner heartbeat key (`<system>/<service>` and a class) as this
+/// window read it: older and lost are the key's (freshness.v2 §2.5).
+#[derive(Debug, Clone, Default)]
+pub struct ClassKey {
+    seq: Sequence,
+    /// Owner heartbeats read on the key, whatever became of their groups.
+    pub read: u64,
+    /// Of them, those read after a gap in the key's seqs: one lost, with
+    /// every group it held.
+    pub lost: u64,
+    /// Puts on the key not read: refused whole, or no heartbeat's body.
+    pub unread: u64,
+    /// The latest one read: its stamp, whether one was lost before it, and
+    /// its groups.
+    pub last: Option<(Stamp, bool, Vec<GroupSeen>)>,
 }
 
 /// One owner interface's view and what its heartbeats did to it.
@@ -171,6 +221,8 @@ impl HeldSet {
 #[derive(Debug, Clone, Default)]
 pub struct Book {
     owners: BTreeMap<String, Owner>,
+    /// Each owner heartbeat key read, by `<system>/<service>/<class>`.
+    classes: BTreeMap<String, ClassKey>,
     held: HeldSet,
     heard: u64,
     forgotten: u64,
@@ -192,6 +244,11 @@ impl Book {
         lens: &zenkey_fleet::Lens<'_>,
         at: Instant,
     ) {
+        // Core §7.5: the key says which layout a put carries.
+        if let Some((addr, class)) = zenkey_model::heartbeat::owner_class(&sample.key) {
+            self.owner_heartbeat(&addr, class, sample, lens, at);
+            return;
+        }
         if let Some((addr, iface)) = zenkey_model::heartbeat::covered(&sample.key) {
             self.heartbeat(format!("{addr}/{iface}"), sample, lens, at);
             return;
@@ -299,6 +356,88 @@ impl Book {
         }
     }
 
+    /// An owner heartbeat from `addr` on its key of `class` (freshness.v2
+    /// §2.5): refused whole or older on its key, it reads nothing; else
+    /// each group alone, to the view of the interface its index names.
+    fn owner_heartbeat(
+        &mut self,
+        addr: &zenkey_model::grammar::Addr,
+        class: Class,
+        sample: &SampleView,
+        lens: &zenkey_fleet::Lens<'_>,
+        at: Instant,
+    ) {
+        let name = format!("{addr}/{class}");
+        if !self.classes.contains_key(&name) && self.classes.len() >= MAX_OWNERS {
+            self.refused += 1;
+            return;
+        }
+        let bytes = sample.payload.to_bytes();
+        let parsed =
+            match zenkey_fleet::model::inband::payload(&sample.key, Some(&sample.encoding), &bytes)
+            {
+                zenkey_fleet::model::inband::Payload::Heartbeat { body, stamp, tag } => {
+                    zenkey_model::heartbeat::OwnerHeartbeat::parse(tag, body)
+                        .ok()
+                        .map(|hb| (hb, stamp))
+                }
+                _ => None,
+            };
+        let key = self.classes.entry(name.clone()).or_default();
+        let Some((hb, stamp)) = parsed else {
+            key.unread += 1;
+            return;
+        };
+        let Some(read) = key.seq.read(stamp) else {
+            return;
+        };
+        key.read += 1;
+        if read.gap {
+            key.lost += 1;
+        }
+        let through = lens.owner_catalogs(addr);
+        let mut groups = Vec::with_capacity(hb.groups.len());
+        for g in &hb.groups {
+            let mut seen = GroupSeen {
+                index: g.index,
+                tag: g.tag.get(),
+                size: g.size(),
+                iface: None,
+                read: Err(String::new()),
+            };
+            seen.read = match g.entry(through.held, through.named) {
+                Err(r) => Err(r.token().to_owned()),
+                Ok(entry) => {
+                    seen.iface = Some(entry.iface.to_string());
+                    let owner = format!("{addr}/{}", entry.iface);
+                    // Its owner's view, made through the revision the index
+                    // names where none stands and the lens holds it.
+                    if !self.owners.get(&owner).is_some_and(|o| o.view.is_some())
+                        && let Some(rev) = lens.revision_held(&entry.iface, &entry.contract)
+                    {
+                        self.make_view(&owner, rev.contract());
+                    }
+                    match self.owners.get_mut(&owner).filter(|o| o.view.is_some()) {
+                        Some(o) => o.group(class, entry, g, hb.time, stamp, read.gap, at),
+                        None => Err("not_held".to_owned()),
+                    }
+                }
+            };
+            groups.push(seen);
+        }
+        if let Some(key) = self.classes.get_mut(&name) {
+            key.last = Some((stamp, read.gap, groups));
+        }
+    }
+
+    /// The owner heartbeat key `key` is, as this window read it; `None`
+    /// for any other key, and before its first put.
+    #[must_use]
+    pub fn of_class(&self, key: &str) -> Option<&ClassKey> {
+        let (addr, class) = zenkey_model::heartbeat::owner_class(key)?;
+        self.classes.get(&format!("{addr}/{class}"))
+    }
+
     /// Makes `name`'s view of `contract`'s collections, following each,
     /// and takes in what the book held of it, in the order heard; `None`
     /// when the contract has none, or past [`MAX_OWNERS`], when what was
@@ -395,6 +534,61 @@ impl Book {
 }
 
 impl Owner {
+    /// One group of a read owner heartbeat of `class`, whose index named
+    /// this interface (`entry`): read by the view as a heartbeat's
+    /// sections are, on the collections of the key's class. `Err` with
+    /// why it confirmed nothing: another revision or tag, or its sections
+    /// refused.
+    #[allow(clippy::too_many_arguments)]
+    fn group(
+        &mut self,
+        class: Class,
+        entry: &zenkey_model::catalog::Entry,
+        group: &zenkey_model::heartbeat::Group,
+        time: zenkey_model::heartbeat::Time,
+        stamp: Stamp,
+        gap: bool,
+        at: Instant,
+    ) -> Result<Vec<(String, Section)>, String> {
+        let Some(view) = self.view.as_mut() else {
+            return Err("not_held".to_owned());
+        };
+        let read = match view.apply_group(class, entry, group, time, at) {
+            GroupRead::Read(sections) => sections,
+            GroupRead::NotFollowed => return Ok(Vec::new()),
+            GroupRead::Revision => {
+                self.unread += 1;
+                return Err("tag".to_owned());
+            }
+            GroupRead::Refused(r) => {
+                self.unread += 1;
+                return Err(r.token().to_owned());
+            }
+        };
+        let sections = sections_of(view, read);
+        // As the model counts it: a group that read no section of the
+        // view, one on the other class's key, is no heartbeat applied.
+        if sections
+            .iter()
+            .any(|(_, s)| !matches!(s, Section::NotFollowed | Section::OtherClass))
+        {
+            self.heartbeats += 1;
+            if gap {
+                self.lost += 1;
+            }
+            if sections.iter().any(|(_, s)| *s == Section::Diverged) {
+                self.diverged += 1;
+            }
+            self.last = Some(HeartbeatRead {
+                stamp,
+                lost: gap,
+                sections: sections.clone(),
+                group: Some((class, group.index)),
+            });
+        }
+        Ok(sections)
+    }
+
     fn heartbeat(&mut self, sample: &SampleView, at: Instant) {
         let bytes = sample.payload.to_bytes();
         let (Some(view), zenkey_fleet::model::inband::Payload::Heartbeat { body, stamp, tag }) = (
@@ -410,27 +604,7 @@ impl Owner {
                 if gap {
                     self.lost += 1;
                 }
-                let sections: Vec<(String, Section)> = view
-                    .layout()
-                    .collections
-                    .iter()
-                    .zip(sections)
-                    .map(|(c, s)| {
-                        (
-                            c.resource(),
-                            match s {
-                                SectionRead::Confirmed(keys) => Section::Vouched(keys.len()),
-                                SectionRead::Diverged => Section::Diverged,
-                                SectionRead::Absent => Section::Absent,
-                                // `OtherClass` is a group's reading alone,
-                                // never a heartbeat's.
-                                SectionRead::NotFollowed | SectionRead::OtherClass => {
-                                    Section::NotFollowed
-                                }
-                            },
-                        )
-                    })
-                    .collect();
+                let sections = sections_of(view, sections);
                 if sections.iter().any(|(_, s)| *s == Section::Diverged) {
                     self.diverged += 1;
                 }
@@ -438,6 +612,7 @@ impl Owner {
                     stamp,
                     lost: gap,
                     sections,
+                    group: None,
                 });
             }
             // An older heartbeat within the run: no news.
@@ -445,6 +620,28 @@ impl Owner {
             Applied::Revision | Applied::Refused(_) => self.unread += 1,
         }
     }
+}
+
+/// Each collection of `view`'s layout, `<kind token>/<template>`, with
+/// what its section did.
+fn sections_of(view: &View<Instant>, read: Vec<SectionRead>) -> Vec<(String, Section)> {
+    view.layout()
+        .collections
+        .iter()
+        .zip(read)
+        .map(|(c, s)| {
+            (
+                c.resource(),
+                match s {
+                    SectionRead::Confirmed(keys) => Section::Vouched(keys.len()),
+                    SectionRead::Diverged => Section::Diverged,
+                    SectionRead::Absent => Section::Absent,
+                    SectionRead::NotFollowed => Section::NotFollowed,
+                    SectionRead::OtherClass => Section::OtherClass,
+                },
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -745,6 +942,276 @@ mod tests {
         assert_eq!(
             (owner.heartbeats, owner.lost, owner.diverged, owner.unread),
             (2, 1, 1, 0)
+        );
+    }
+
+    // --- owner heartbeats (#1110) ----------------------------------------
+
+    use zenkey_model::heartbeat::{Group, OwnerHeartbeat, owner_key};
+
+    const TRIO: [&str; 3] = ["alpha.v1", "bravo.v1", "charlie.v1"];
+
+    /// The runtime's three test contracts, a collection of the `host`
+    /// class each; they use freshness.v1, so a view is made only through
+    /// a group's index, never at a member's resolution.
+    fn trio() -> zenkey_fleet::ContractSet {
+        let mut set = zenkey_fleet::ContractSet::new();
+        for name in TRIO {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(format!("../zenkey/tests/contracts/trio/{name}.toml"));
+            let (loaded, problems) = zenkey_fleet::ContractSet::load_path(&path);
+            assert!(problems.is_empty(), "{problems:?}");
+            set.extend(loaded);
+        }
+        set
+    }
+
+    fn revision_of(set: &zenkey_fleet::ContractSet, name: &str) -> Layout {
+        let rev = set
+            .iter()
+            .find(|r| r.iface().to_string() == name)
+            .expect("in hand");
+        Layout::of(rev.contract())
+    }
+
+    /// The three interfaces at indices 0, 1 and 2.
+    fn trio_catalog(set: &zenkey_fleet::ContractSet) -> zenkey_fleet::Catalogs {
+        let mut c = zenkey_model::catalog::Catalog::new(0).unwrap();
+        for name in TRIO {
+            let l = revision_of(set, name);
+            c.push(l.iface.clone(), l.fingerprint.clone()).unwrap();
+        }
+        zenkey_fleet::Catalogs::new(vec![c])
+    }
+
+    fn status_key(name: &str) -> String {
+        format!("zk2/lab/trio/{name}/state/status")
+    }
+
+    /// A put of `name`'s status under `stamp(3, seq)`.
+    fn status_put(seq: u32) -> Vec<u8> {
+        oper_put(seq)
+    }
+
+    /// `name`'s group at `index`: its status of `digest`, vouched.
+    fn status_group(
+        set: &zenkey_fleet::ContractSet,
+        index: u16,
+        name: &str,
+        digest: Digest,
+    ) -> Group {
+        let layout = revision_of(set, name);
+        let sections: Vec<Option<Body>> = layout
+            .collections
+            .iter()
+            .map(|c| {
+                (c.resource() == "state/status").then_some(Body {
+                    digest,
+                    members: Members::One { vouched: true },
+                })
+            })
+            .collect();
+        Group::of(index, &layout, &sections).unwrap()
+    }
+
+    fn owner_put(groups: Vec<Group>, seq: u32) -> Vec<u8> {
+        OwnerHeartbeat {
+            time: Time::Unknown,
+            groups,
+        }
+        .envelope(stamp(9, seq))
+        .unwrap()
+    }
+
+    /// One owner heartbeat's groups go each to its owner's view, made
+    /// through the revision its index names: three interfaces vouched by
+    /// one put. One lost on the key is lost for each of them; a group
+    /// whose digest is not the window's diverges alone; a group at an
+    /// index the catalog does not hold is kept by its envelope, unread,
+    /// beside a known one.
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn an_owner_heartbeats_groups_go_each_to_its_owners_view() {
+        let set = trio();
+        let catalogs = trio_catalog(&set);
+        let lens = zenkey_fleet::Lens::new("", None, &set)
+            .offline(&set)
+            .catalogs(&catalogs);
+        let host = owner_key("lab", "trio", zenkey_model::heartbeat::Class::Host);
+        let mut book = Book::default();
+        let at = Instant::now();
+        // Each status heard before any view stands: held.
+        for (i, name) in TRIO.iter().enumerate() {
+            book.observe(
+                &view(&status_key(name), status_put(i as u32 + 1)),
+                None,
+                &lens,
+                at,
+            );
+        }
+        let held = |i: usize| Digest::of([(status_key(TRIO[i]).as_str(), stamp(3, i as u32 + 1))]);
+        let all = |digests: [Digest; 3]| {
+            (0..3)
+                .map(|i| status_group(&set, i as u16, TRIO[i], digests[i]))
+                .collect::<Vec<_>>()
+        };
+        let put = |book: &mut Book, groups: Vec<Group>, seq: u32| {
+            book.observe(&view(&host, owner_put(groups, seq)), None, &lens, at);
+        };
+        let counts = |book: &Book, i: usize| {
+            let o = book.of_key(&status_key(TRIO[i])).expect("its view");
+            (o.heartbeats, o.lost, o.diverged, o.unread)
+        };
+
+        put(&mut book, all([held(0), held(1), held(2)]), 0);
+        for i in 0..3 {
+            assert_eq!(counts(&book, i), (1, 0, 0, 0), "{}", TRIO[i]);
+            let last = book
+                .of_key(&status_key(TRIO[i]))
+                .unwrap()
+                .last
+                .clone()
+                .unwrap();
+            assert_eq!(
+                last.group,
+                Some((zenkey_model::heartbeat::Class::Host, i as u16))
+            );
+            assert!(
+                last.sections
+                    .contains(&("state/status".to_owned(), Section::Vouched(1))),
+                "{last:?}"
+            );
+            // charlie.v1's `reach` is of the `link` class: the `host` key
+            // does not read it.
+            assert_eq!(
+                last.sections
+                    .contains(&("state/reach".to_owned(), Section::OtherClass)),
+                i == 2,
+                "{last:?}"
+            );
+        }
+        let key = book.of_class(&host).expect("the class key");
+        assert_eq!((key.read, key.lost, key.unread), (1, 0, 0));
+
+        // Seq 2: seq 1 was lost on the key, with every group it held.
+        put(&mut book, all([held(0), held(1), held(2)]), 2);
+        for i in 0..3 {
+            assert_eq!(counts(&book, i), (2, 1, 0, 0), "{}", TRIO[i]);
+        }
+        assert_eq!(book.of_class(&host).unwrap().lost, 1);
+
+        // Seq 3: bravo.v1's group alone diverges.
+        let missed = Digest::of([(status_key("bravo.v1").as_str(), stamp(3, 99))]);
+        put(&mut book, all([held(0), missed, held(2)]), 3);
+        assert_eq!(counts(&book, 0), (3, 1, 0, 0));
+        assert_eq!(counts(&book, 1), (3, 1, 1, 0));
+        assert_eq!(counts(&book, 2), (3, 1, 0, 0));
+
+        // Seq 4: a known group beside an index the catalog does not hold.
+        put(
+            &mut book,
+            vec![
+                status_group(&set, 0, "alpha.v1", held(0)),
+                status_group(&set, 900, "bravo.v1", held(1)),
+            ],
+            4,
+        );
+        assert_eq!(counts(&book, 0), (4, 1, 0, 0), "the known one is read");
+        assert_eq!(
+            counts(&book, 1),
+            (3, 1, 1, 0),
+            "bravo.v1 had no group in it"
+        );
+        let (_, lost, groups) = book.of_class(&host).unwrap().last.clone().unwrap();
+        assert!(!lost);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].iface.as_deref(), Some("alpha.v1"));
+        assert!(groups[0].read.is_ok());
+        assert_eq!(
+            (
+                groups[1].index,
+                groups[1].iface.clone(),
+                groups[1].read.clone()
+            ),
+            (900, None, Err("unknown_index".to_owned()))
+        );
+        assert_eq!(
+            groups[1].size,
+            status_group(&set, 0, "bravo.v1", held(1)).size()
+        );
+
+        // What the Inspector says of each: its index, tag and size first,
+        // then what was read, or the rung where its reading stopped.
+        use crate::view::inspector::{group_head, group_word};
+        assert_eq!(
+            group_head(&groups[0]),
+            format!("#0 alpha.v1 · tag {} · 34 bits", groups[0].tag)
+        );
+        assert_eq!(
+            group_word(&groups[0]),
+            (false, "read · 1 collection(s) vouched, 0 absent".to_owned())
+        );
+        assert_eq!(
+            group_head(&groups[1]),
+            format!("#900 · tag {} · 34 bits", groups[1].tag)
+        );
+        let (caution, word) = group_word(&groups[1]);
+        assert!(
+            caution && word.starts_with("unread · unknown_index: the catalog holds no entry"),
+            "{word}"
+        );
+
+        // An older one on the key reads nothing; one refused whole is
+        // counted unread.
+        put(&mut book, all([held(0), held(1), held(2)]), 4);
+        assert_eq!(book.of_class(&host).unwrap().read, 4);
+        let mut refused = owner_put(all([held(0), held(1), held(2)]), 5);
+        refused[0] |= 0x05;
+        book.observe(&view(&host, refused), None, &lens, at);
+        let key = book.of_class(&host).unwrap();
+        assert_eq!((key.read, key.unread), (4, 1));
+    }
+
+    /// A window given no catalog reads no group: each is kept by its
+    /// index, tag and size, `unknown_catalog`, and no view is made of it.
+    /// One whose revision is not in hand is `not_held`.
+    #[test]
+    fn a_window_with_no_catalog_reads_no_group() {
+        let set = trio();
+        let host = owner_key("lab", "trio", zenkey_model::heartbeat::Class::Host);
+        let at = Instant::now();
+        let groups = vec![
+            status_group(&set, 0, "alpha.v1", Digest::EMPTY),
+            status_group(&set, 1, "bravo.v1", Digest::EMPTY),
+        ];
+        let lens = zenkey_fleet::Lens::new("", None, &set).offline(&set);
+        let mut book = Book::default();
+        book.observe(&view(&host, owner_put(groups.clone(), 0)), None, &lens, at);
+        let (_, _, seen) = book.of_class(&host).unwrap().last.clone().unwrap();
+        assert!(
+            seen.iter()
+                .all(|g| g.iface.is_none() && g.read == Err("unknown_catalog".to_owned())),
+            "{seen:?}"
+        );
+        assert_eq!(seen[0].tag, groups[0].tag.get());
+        assert!(book.of_key(&status_key("alpha.v1")).is_none(), "no view");
+
+        // The catalog given, bravo.v1's revision not in hand.
+        let catalogs = trio_catalog(&set);
+        let mut alpha = zenkey_fleet::ContractSet::new();
+        for r in set.iter().filter(|r| r.iface().to_string() == "alpha.v1") {
+            alpha.insert((**r).clone());
+        }
+        let lens = zenkey_fleet::Lens::new("", None, &alpha)
+            .offline(&alpha)
+            .catalogs(&catalogs);
+        let mut book = Book::default();
+        book.observe(&view(&host, owner_put(groups, 0)), None, &lens, at);
+        let (_, _, seen) = book.of_class(&host).unwrap().last.clone().unwrap();
+        assert!(seen[0].read.is_ok(), "{:?}", seen[0]);
+        assert_eq!(
+            (seen[1].iface.as_deref(), seen[1].read.clone()),
+            (Some("bravo.v1"), Err("not_held".to_owned()))
         );
     }
 }

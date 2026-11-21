@@ -109,6 +109,9 @@ pub struct InspectorData<'a> {
     /// interface (#990 V6): a heartbeat's, or a collection member's; `None`
     /// where it follows none, and during a replay.
     pub freshness: Option<&'a crate::freshness::Owner>,
+    /// For an owner heartbeat key, what the window read on it (#1110):
+    /// its puts read and lost, and the latest one's groups.
+    pub owner_heartbeats: Option<&'a crate::freshness::ClassKey>,
     /// The dock's resolved spacing grid (#192) — Comfortable by default: a
     /// form wants air.
     pub sp: Spacing,
@@ -174,9 +177,15 @@ fn freshness_section<'a>(owner: &'a crate::freshness::Owner, sp: Spacing) -> Col
         return col;
     };
     col = col.push(kit::caption(format!(
-        "latest heartbeat: run {}, seq {}{}",
+        "latest heartbeat: run {}, seq {}{}{}",
         last.stamp.run.hex(),
         last.stamp.seq.get(),
+        match last.group {
+            Some((class, index)) => {
+                format!(", group {index} of an owner heartbeat on its {class} key")
+            }
+            None => String::new(),
+        },
         if last.lost {
             " — a heartbeat lost before it (freshness.v2 §2.5)"
         } else {
@@ -192,6 +201,7 @@ fn freshness_section<'a>(owner: &'a crate::freshness::Owner, sp: Spacing) -> Col
             ),
             Section::Absent => kit::data_chip("absent · not available"),
             Section::NotFollowed => kit::data_chip("not followed"),
+            Section::OtherClass => kit::data_chip("confirmed on the other class's key"),
         };
         col = col.push(
             iced::widget::row![kit::caption(resource.clone()).font(face::MONO), word]
@@ -200,6 +210,113 @@ fn freshness_section<'a>(owner: &'a crate::freshness::Owner, sp: Spacing) -> Col
         );
     }
     col
+}
+
+/// What this window read on an owner heartbeat key (#1110; core §7.5,
+/// observer 0.34 §7.3): its puts read and lost, and the latest one's
+/// groups, each by its index, tag and size, with the interface its index
+/// names and what its sections did to that owner's view, or why the
+/// window could not read it. The reader's word, as the section above.
+fn owner_heartbeat_section<'a>(
+    key: &'a crate::freshness::ClassKey,
+    sp: Spacing,
+) -> Column<'a, Message> {
+    let mut col = Column::new().spacing(sp.xs);
+    col = col.push(kit::eyebrow(
+        "OWNER HEARTBEATS · THIS WINDOW'S VIEW (freshness.v2)",
+    ));
+    col = col.push(kit::muted(format!(
+        "{} owner heartbeat(s) read: {} after one lost, with every group it held{} — the \
+         reader's word, no finding about the owner (freshness.v2 §5)",
+        key.read,
+        key.lost,
+        if key.unread > 0 {
+            format!("; {} not read", key.unread)
+        } else {
+            String::new()
+        }
+    )));
+    let Some((stamp, lost, groups)) = &key.last else {
+        return col;
+    };
+    col = col.push(kit::caption(format!(
+        "latest: run {}, seq {}, {} group(s){}",
+        stamp.run.hex(),
+        stamp.seq.get(),
+        groups.len(),
+        if *lost {
+            " — one lost before it (freshness.v2 §2.5)"
+        } else {
+            ""
+        }
+    )));
+    for g in groups {
+        let (caution, word) = group_word(g);
+        let chip = if caution {
+            kit::status_chip(crate::view::theme::Tone::Caution, word)
+        } else {
+            kit::data_chip(word)
+        };
+        col = col.push(
+            iced::widget::row![kit::caption(group_head(g)).font(face::MONO), chip]
+                .spacing(sp.xs)
+                .align_y(iced::Alignment::Center),
+        );
+    }
+    col
+}
+
+/// A group's head: its index, the interface it names where read, its tag
+/// and its size, the three a tool needs no contract for.
+pub fn group_head(g: &crate::freshness::GroupSeen) -> String {
+    format!(
+        "#{}{} · tag {} · {} bits",
+        g.index,
+        g.iface
+            .as_deref()
+            .map(|i| format!(" {i}"))
+            .unwrap_or_default(),
+        g.tag,
+        g.size
+    )
+}
+
+/// What the window read of a group, and whether it is a caution: its
+/// collections vouched, diverged from this window's view or absent, or
+/// why it is unread, the rung where its reading stopped.
+pub fn group_word(g: &crate::freshness::GroupSeen) -> (bool, String) {
+    use crate::freshness::Section;
+    match &g.read {
+        Ok(sections) => {
+            let (mut vouched, mut diverged, mut absent) = (0, 0, 0);
+            for (_, s) in sections {
+                match s {
+                    Section::Vouched(_) => vouched += 1,
+                    Section::Diverged => diverged += 1,
+                    Section::Absent => absent += 1,
+                    Section::NotFollowed | Section::OtherClass => {}
+                }
+            }
+            if diverged > 0 {
+                (
+                    true,
+                    format!("{diverged} collection(s) diverged from this window's view"),
+                )
+            } else {
+                (
+                    false,
+                    format!("read · {vouched} collection(s) vouched, {absent} absent"),
+                )
+            }
+        }
+        Err(why) => (
+            true,
+            format!(
+                "unread · {why}: {}",
+                zenkey_fleet::model::inband::group_unread_words(why)
+            ),
+        ),
+    }
 }
 
 /// A prefix names a subtree, and a subtree has no value, no history and no
@@ -251,6 +368,9 @@ fn key_sections<'a>(key: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> 
     // collection vouched, diverged or absent at its latest heartbeat.
     if let Some(owner) = d.freshness {
         col = col.push(freshness_section(owner, d.sp));
+    }
+    if let Some(key) = d.owner_heartbeats {
+        col = col.push(owner_heartbeat_section(key, d.sp));
     }
 
     // The bounded field observation (#223) and the why ladder (#214): both

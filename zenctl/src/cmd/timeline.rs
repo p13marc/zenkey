@@ -42,6 +42,9 @@ use crate::cmd::zk2;
 pub async fn run(cli: crate::cli::TimelineArgs) -> Result<()> {
     let dep = Deployment::resolve(&cli.ns)?;
     let contracts = zk2::load_contracts(&cli.contracts)?;
+    // Given a catalog, the scope across a face holds the owner heartbeat
+    // key that crosses it (observer 0.34 §7.5).
+    let catalog = !zk2::load_catalogs(&cli.contracts)?.is_empty();
     let crate::cli::TimelineArgs {
         selectors,
         explicit: crate::cli::ExplicitArgs { explicit },
@@ -62,7 +65,10 @@ pub async fn run(cli: crate::cli::TimelineArgs) -> Result<()> {
             // Clap has already required `--for` without `--from`; the
             // positivity check is the one every window shares (#307).
             let secs = for_secs.expect("clap requires --for without --from");
-            live(&selectors, explicit, &across, secs, &dep, &contracts).await?
+            live(
+                &selectors, explicit, &across, secs, &dep, &contracts, catalog,
+            )
+            .await?
         }
     };
     let report = timeline(&window, order);
@@ -81,9 +87,16 @@ async fn live(
     for_secs: f64,
     dep: &Deployment,
     contracts: &zenkey_fleet::ContractSet,
+    catalog: bool,
 ) -> Result<Window> {
     let duration = super::positive_secs("--for", for_secs)?;
-    let face = zk2::FaceScope::of(across, contracts, dep.namespace(), zk2::Reads::Samples)?;
+    let face = zk2::FaceScope::of_given(
+        across,
+        contracts,
+        dep.namespace(),
+        zk2::Reads::Samples,
+        catalog,
+    )?;
     let dep = &match &face {
         Some(f) => f.deployment(dep.clone()),
         None => dep.clone(),

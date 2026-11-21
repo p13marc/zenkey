@@ -889,10 +889,7 @@ impl<'a> Lens<'a> {
         tag: zenkey_model::wire::Tag,
     ) -> (PayloadRendering, Conformance) {
         let dating = self.dating_of(addr);
-        let through = zenkey_model::freshness::Catalogs {
-            held: self.deployment.map_or(&[], Catalogs::held),
-            named: dating.catalog,
-        };
+        let through = self.owner_catalogs(addr);
         inband::owner_heartbeat_check(
             key,
             class,
@@ -900,7 +897,7 @@ impl<'a> Lens<'a> {
             tag,
             body,
             through,
-            |entry| match self.held_revision(&entry.iface, &entry.contract) {
+            |entry| match self.revision_held(&entry.iface, &entry.contract) {
                 Some(rev) => {
                     inband::GroupRevision::Held(zenkey_model::heartbeat::Layout::of(rev.contract()))
                 }
@@ -910,9 +907,24 @@ impl<'a> Lens<'a> {
         )
     }
 
+    /// What an owner heartbeat's groups from `addr` are read through (core
+    /// §8.6): the catalogs the tool was given, and the one its owner names
+    /// (with no descriptor in hand, the one held: the deployment's word).
+    /// A window that makes its own views of the groups reads their indices
+    /// with it (zengui's freshness book).
+    #[must_use]
+    pub fn owner_catalogs(&self, addr: &Addr) -> zenkey_model::freshness::Catalogs<'a> {
+        zenkey_model::freshness::Catalogs {
+            held: self.deployment.map_or(&[], Catalogs::held),
+            named: self.dating_of(addr).catalog,
+        }
+    }
+
     /// The revision of `iface` whose fingerprint is `fp`, where the tool
-    /// holds it: retrieved or recorded, or given offline.
-    fn held_revision(
+    /// holds it: retrieved or recorded, or given offline. What a group's
+    /// index names is read with it (observer §7.5).
+    #[must_use]
+    pub fn revision_held(
         &self,
         iface: &IfaceId,
         fp: &zenkey_model::canonical::Fingerprint,

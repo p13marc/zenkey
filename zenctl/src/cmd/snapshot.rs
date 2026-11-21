@@ -68,7 +68,13 @@ pub async fn take(cli: SnapshotArgs) -> Result<()> {
     // before the session, because nothing the fleet answers changes it.
     let mode = super::output_mode(&out, overwrite)?;
     let namespace = dep.namespace().to_owned();
-    let face = zk2::FaceScope::of(&across, &contracts, &namespace, zk2::Reads::State)?;
+    let face = zk2::FaceScope::of_given(
+        &across,
+        &contracts,
+        &namespace,
+        zk2::Reads::State,
+        !catalogs.is_empty(),
+    )?;
     let dep = match &face {
         Some(f) => f.deployment(dep),
         None => dep,

@@ -343,6 +343,11 @@ fn inspector<'a>(
             .key()
             .filter(|_| work.replay.replay.is_none())
             .and_then(|k| obs.freshness.of_key(k)),
+        owner_heartbeats: slot
+            .current
+            .key()
+            .filter(|_| work.replay.replay.is_none())
+            .and_then(|k| obs.freshness.of_class(k)),
         sp,
     })
 }
