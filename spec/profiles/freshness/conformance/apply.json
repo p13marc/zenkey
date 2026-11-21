@@ -2876,7 +2876,7 @@
       ]
     },
     {
-      "note": "an unknown index beside known ones: the catalog holds indices 0 to 2 and 4 is past it, so with a catalog of five entries a group of index 7 is refused, and that group alone: the groups before it are read, and so would one after it be",
+      "note": "an unknown index beside known ones: the catalog holds five entries, indices 0 to 4, and 7 is past it, so the group of index 7 is refused, and that group alone: the groups before it, at indices 0, 2 and 4, are read and confirm, and so would one after it be",
       "catalog": [
         "alert.v1",
         "hb.v1",

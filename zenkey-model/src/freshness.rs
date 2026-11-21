@@ -1149,7 +1149,10 @@ impl<T: Arrival> View<T> {
     /// - **Read:** each followed collection of `class` as a heartbeat's
     ///   section is read, on the collection's one count of divergences in
     ///   a row; a followed one of the other class is
-    ///   [`SectionRead::OtherClass`], unread and uncounted.
+    ///   [`SectionRead::OtherClass`], unread and uncounted. The group is a
+    ///   heartbeat applied ([`View::heartbeats`], [`View::owner_time`])
+    ///   only when a section was read: one on the other class's key reads
+    ///   none.
     pub fn apply_group(
         &mut self,
         class: crate::heartbeat::Class,
@@ -1168,8 +1171,6 @@ impl<T: Arrival> View<T> {
             Ok(s) => s,
             Err(r) => return GroupRead::Refused(r),
         };
-        self.time = Some(time);
-        self.heartbeats += 1;
         let mut sections = Vec::with_capacity(read.len());
         for (i, section) in read.iter().enumerate() {
             sections.push(if !self.follows[i] {
@@ -1179,6 +1180,18 @@ impl<T: Arrival> View<T> {
             } else {
                 self.read_section(i, section.as_ref(), at)
             });
+        }
+        // v2 §2.5: what counts for a collection is "the groups whose
+        // sections were read for its interface, on its own class's key". A
+        // group on the other class's key reads no section of the view, so
+        // it is no heartbeat applied to it: neither its count nor the
+        // owner's time moves (review of #1137).
+        if sections
+            .iter()
+            .any(|s| !matches!(s, SectionRead::NotFollowed | SectionRead::OtherClass))
+        {
+            self.time = Some(time);
+            self.heartbeats += 1;
         }
         GroupRead::Read(sections)
     }
@@ -1246,7 +1259,8 @@ impl<T: Arrival> View<T> {
     }
 
     /// The owner's time in the last heartbeat applied, or in the last
-    /// owner heartbeat a group of which was read for the interface.
+    /// owner heartbeat a group of which read a section of a followed
+    /// collection.
     #[must_use]
     pub fn owner_time(&self) -> Option<crate::heartbeat::Time> {
         self.time
@@ -1259,8 +1273,8 @@ impl<T: Arrival> View<T> {
         self.seq.last()
     }
 
-    /// How many heartbeats it applied, each group read for the interface
-    /// among them.
+    /// How many heartbeats it applied, each group among them that read a
+    /// section of a followed collection, on its class's key.
     #[must_use]
     pub fn heartbeats(&self) -> u64 {
         self.heartbeats
@@ -1401,6 +1415,19 @@ impl<T: Arrival> Views<T> {
             .into_iter()
             .filter(|c| self.views.values().any(|v| v.classes().contains(c)))
             .collect()
+    }
+
+    /// The horizon of the provider's owner heartbeat key of `class`, as
+    /// this reader can tell it (core §8.5): the shortest among the
+    /// collections of that class in the revisions it holds a view of,
+    /// `None` with none. A reader across a face declares the key's
+    /// subscription again after two of them of silence.
+    #[must_use]
+    pub fn class_horizon(&self, class: crate::heartbeat::Class) -> Option<Duration> {
+        self.views
+            .values()
+            .filter_map(|v| v.layout().class_horizon(class))
+            .min()
     }
 
     /// An owner heartbeat heard at `at` on the key of `class`: CH's tag,
@@ -2015,6 +2042,91 @@ annotations = { "freshness.ttl_s" = 60 }
             assert_eq!(v.classes(), vec![Class::Link]);
             let vs = views(&mixed, &vital);
             assert_eq!(vs.classes(), vec![Class::Link, Class::Host]);
+        }
+
+        /// A group on the other class's key reads no section of the view,
+        /// so it is no heartbeat applied to it: v2 §2.5 counts "the groups
+        /// whose sections were read for its interface, on its own class's
+        /// key" (review of #1137). The owner heartbeat itself is read and
+        /// counted on its key.
+        #[test]
+        fn a_group_on_the_other_classs_key_is_no_heartbeat_applied() {
+            let (mixed, vital) = (layout(MIXED), layout(VITAL));
+            let cat = catalog(&mixed, &vital);
+            let through = Catalogs {
+                held: std::slice::from_ref(&cat),
+                named: Some(cat.id()),
+            };
+            // A reader of mixed.v1's `status` alone, its `link` collection.
+            let mut v = View::new(mixed.clone());
+            assert!(v.follow_resource("state/status"));
+            v.put(STATUS, Some(st(1, 2)), ms(0));
+            let mut vs = Views::new();
+            vs.insert(v);
+            let known = Time::At { secs: 7, ms: 0 };
+            let put = |g: Group| {
+                OwnerHeartbeat {
+                    time: known,
+                    groups: vec![g],
+                }
+                .write()
+                .unwrap()
+            };
+            // On the `host` key, mixed.v1's group holds `peer` alone.
+            let host = vs.apply_owner(
+                Class::Host,
+                Tag::new(0).unwrap(),
+                st(9, 0),
+                &put(mixed_host(&mixed)),
+                through,
+                ms(10),
+            );
+            let OwnerApplied::Read { groups, .. } = host else {
+                panic!("read: {host:?}");
+            };
+            assert_eq!(
+                groups[0].read,
+                GroupRead::Read(vec![SectionRead::NotFollowed, SectionRead::OtherClass])
+            );
+            let view = vs.view(&mixed.iface).unwrap();
+            assert_eq!(view.heartbeats(), 0, "no section read, none applied");
+            assert_eq!(view.owner_time(), None);
+            assert_eq!(vs.owner_heartbeats(Class::Host), 1, "read on its key");
+            // On the `link` key, its group reads `status`: one applied.
+            let link = Group::of(0, &mixed, &[None, one(STATUS, st(1, 2))]).unwrap();
+            let applied = vs.apply_owner(
+                Class::Link,
+                Tag::new(0).unwrap(),
+                st(9, 0),
+                &put(link),
+                through,
+                ms(20),
+            );
+            let OwnerApplied::Read { groups, .. } = applied else {
+                panic!("read: {applied:?}");
+            };
+            assert_eq!(
+                groups[0].read,
+                GroupRead::Read(vec![
+                    SectionRead::NotFollowed,
+                    SectionRead::Confirmed(vec![STATUS.to_owned()])
+                ])
+            );
+            let view = vs.view(&mixed.iface).unwrap();
+            assert_eq!(view.heartbeats(), 1);
+            assert_eq!(view.owner_time(), Some(known));
+            // A map bit of 0 on the collection's own key is a section read
+            // (`absent`), so its group is applied.
+            let absent = Group::of(0, &mixed, &[None, None]).unwrap();
+            vs.apply_owner(
+                Class::Link,
+                Tag::new(0).unwrap(),
+                st(9, 1),
+                &put(absent),
+                through,
+                ms(30),
+            );
+            assert_eq!(vs.view(&mixed.iface).unwrap().heartbeats(), 2);
         }
 
         #[test]
