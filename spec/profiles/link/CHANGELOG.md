@@ -38,6 +38,21 @@ its faces. This text lets the `link` class's cross.
 - **Its longest put** is stated bit by bit: every `link` collection's
   longest section, a size per group, 8 bytes of envelope.
 
+**Added: Appendix B, "What a horizon costs a medium".** Guidance, no
+rule.
+- **A table** prices a day of three heartbeats and of one owner
+  heartbeat, at horizons from 60 s to 3,600 s, on RF and on LoRa at SF7,
+  SF9 and SF12. It is computed from core §7.5's layouts on the model of
+  `docs/zk2/constrained-overhead-review.md`'s Appendix A: each put alone
+  in its SDU, the lean stack and the face's 3-byte frame.
+- **What it says.** At a 60-s horizon LoRa does not carry heartbeats in
+  either form. The owner heartbeat about halves the bill, and only a
+  longer horizon divides it. A deployment states that horizon in its own
+  contracts. The standard profiles' horizons cannot move, and nothing of
+  theirs crosses a face.
+- **The figures** were computed twice, by two scripts that shared no
+  code.
+
 **The header** restates `link.v1` text 0.20, and is written against core
 0.108, whose §7.5 defines the owner heartbeat.
 
