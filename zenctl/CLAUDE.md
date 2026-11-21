@@ -239,7 +239,20 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   an assumed 4; `timing` and `arbitration` take the routers'
   `--face-policy`, `telemetry`'s stays the face's it reads across;
   `tests/cmd/routers-binding.trycmd`, and `live_zk2.rs`'s
-  `alarms_told_the_forks_binding_watch_its_wait_before_close`); #990 V8: `get state`, `watch` and `call`
+  `alarms_told_the_forks_binding_watch_its_wait_before_close`; and
+  `watchdog` and `record --on`, whose `alert-firing` rule builds the same
+  reader, take `--binding` too, a flag of their own words since neither
+  takes `--lease` or `--wait-before-close`, through
+  `cmd::watchdog::rule_routers` → `zk2::routers_of` into
+  `WatchdogSpec::routers` and `TriggerSpec::routers`; their `--face-policy`
+  stays `AcrossFaceArgs`', the face read across, where no `alert-firing`
+  rule is asked, so the routers' sense of it is not offered there;
+  `zk2::routers_of` is the rule over a `[transport]` in hand, which a verb
+  reading across a face takes from the far side it read for its session
+  (`telemetry`, `watchdog`, `record --on`), so its policy is read once and
+  refused in one place, and `zk2::routers` reads the routers' policy from
+  its file; `--binding` parses by `Binding`'s `FromStr`, the model's one
+  list of names); #990 V8: `get state`, `watch` and `call`
   take `cli::OwnerFaceArgs` (`--across-face`, the revision `--contracts`
   holds, never presence, `zk2::held_across` refusing one it does not
   name, exit 2; `--face-policy F --face N`, `zk2::across` →

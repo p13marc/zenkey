@@ -83,6 +83,7 @@ fn spec(rule: &str, semantics: Option<PreambleSemantics>, give_up: Duration) -> 
         across_face: false,
         served: None,
         catalogs: Default::default(),
+        routers: Default::default(),
     }
 }
 

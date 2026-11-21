@@ -129,6 +129,12 @@ pub struct TriggerSpec {
     /// `alert-firing` rule's reader dates a GET's confirmations under the
     /// catalog each owner's descriptor names, read through these (#1087).
     pub catalogs: crate::model::deployment::Catalogs,
+    /// The routers' lease, keep-alives and `wait_before_close`, which an
+    /// `alert-firing` rule's reader reads its window and its own stall by,
+    /// as the watchdog's
+    /// [`crate::judge::condition::WatchdogSpec::routers`]: the deployment's
+    /// word, its binding's defaults or zenoh 1.10.1's (#1011).
+    pub routers: zenkey_model::budget::Routers,
 }
 
 /// What a trigger capture reports as it runs — the frontend renders these;
@@ -451,8 +457,7 @@ where
             spec.timeout,
             spec.clocks_synced,
             &spec.catalogs,
-            // A trigger is told no binding: zenoh 1.10.1's (#1011).
-            zenkey_model::budget::Routers::default(),
+            spec.routers,
         )
         .await
     } else {

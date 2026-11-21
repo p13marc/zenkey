@@ -596,7 +596,10 @@ fn check_id(s: &str) -> Result<zenkey_fleet::report::CheckId, String> {
 
 /// The zenoh the deployment's routers run (#1011's item 3): flattened into
 /// every verb that takes `--lease` or `--wait-before-close`, each of which
-/// resolves the three through `cmd::zk2::routers`.
+/// resolves the three through `cmd::zk2::routers`. `watchdog` and `record
+/// --on` take neither flag and state `--binding` in their own words, for
+/// their `alert-firing` readers, through the same rule
+/// (`cmd::watchdog::rule_routers`).
 #[derive(clap::Args, Clone, Copy, Default)]
 pub(crate) struct BindingArgs {
     // Parsed by `Binding`'s `FromStr`, the model's one list of names.
@@ -2893,6 +2896,13 @@ pub(crate) struct RecordArgs {
     /// --clocks-synced`. Without it, those rules read unobservable.
     #[arg(long, requires = "on")]
     pub(crate) clocks_synced: bool,
+    /// With --on: the zenoh the deployment's routers run, by its `link.v2`
+    /// name (§2.4), zenoh-1.10.1 or zm-1.10.2-r1, for an `alert-firing`
+    /// rule's reader, as `watchdog --binding`. Omitted, zenoh 1.10.1's
+    /// (#1011).
+    #[arg(long, value_name = "NAME", requires = "on",
+          add = ArgValueCandidates::new(completion::bindings))]
+    pub(crate) binding: Option<zenkey_model::link::Binding>,
     /// Leave the revisions' bundles out of the header (`.zrec` version 4):
     /// a reader of the file then needs --contracts to decode it.
     #[arg(long)]
@@ -3254,6 +3264,14 @@ pub(crate) struct WatchdogArgs {
     /// listens to no status, so without it those rules read unobservable.
     #[arg(long)]
     pub(crate) clocks_synced: bool,
+    /// The zenoh the deployment's routers run, by its `link.v2` name
+    /// (§2.4): zenoh-1.10.1 or zm-1.10.2-r1. An `alert-firing` rule's
+    /// reader reads its window and its own stall by that zenoh's lease,
+    /// keep-alives and wait_before_close (`link.v2` §2.19): zm-1.10.2-r1
+    /// waits 10 s before it closes, zenoh 1.10.1 5 s. No other rule reads
+    /// them. Omitted, zenoh 1.10.1's (#1011).
+    #[arg(long, value_name = "NAME", add = ArgValueCandidates::new(completion::bindings))]
+    pub(crate) binding: Option<zenkey_model::link::Binding>,
     #[command(flatten)]
     pub(crate) contracts: ContractArgs,
     #[command(flatten)]

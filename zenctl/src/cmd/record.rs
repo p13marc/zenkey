@@ -58,6 +58,7 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
         every,
         preamble,
         clocks_synced,
+        binding,
         overwrite,
         no_bundles,
         contracts,
@@ -117,6 +118,8 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
     };
     // The one catalog given: what an `alert-firing` rule dates under (#1087).
     let catalogs = zenkey_fleet::Catalogs::new(catalog.iter().cloned().collect());
+    // The routers that rule's reader reads by, as the watchdog's (#1011).
+    let routers = super::watchdog::rule_routers(face.as_ref(), binding)?;
     // What served the scope as the capture is armed (`.zrec` version 4),
     // as plain `record` reads it: one presence read, or across a face the
     // contracts in hand; the catalog and the bundles beside.
@@ -134,6 +137,7 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
     let triggered = Triggered {
         served: served_by,
         catalogs,
+        routers,
         contracts,
         rules: on,
         pre: super::positive_secs("--pre", pre)?,
@@ -404,6 +408,8 @@ struct Triggered {
     served: ZrecHeader,
     /// The catalogs given: an `alert-firing` rule's dates (#1087).
     catalogs: zenkey_fleet::Catalogs,
+    /// The routers an `alert-firing` rule's reader reads by (#1011).
+    routers: zenkey_model::budget::Routers,
 }
 
 async fn run_triggered(
@@ -465,6 +471,7 @@ async fn run_triggered(
         across_face: t.across_face,
         served: Some(t.served),
         catalogs: t.catalogs,
+        routers: t.routers,
     };
 
     eprintln!(

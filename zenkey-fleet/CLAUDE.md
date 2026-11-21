@@ -119,9 +119,9 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   zenkey_model::budget::Routers`, zenoh 1.10.1's by default, in place of a
   `lease` and a `wait_before_close`, so its stall bound reads the routers'
   own keep-alives and `check conform` hands its nested telemetry and
-  timing readers all three, and `WatchdogSpec::routers` reaches an
-  `alert-firing` rule's reader through `RuleAlarms::spec`, a trigger's
-  reading by zenoh 1.10.1's, #1011); the latest GET's answered keys and each key's last arrival, so a
+  timing readers all three, and `WatchdogSpec::routers` and
+  `TriggerSpec::routers` reach an `alert-firing` rule's reader through
+  `RuleAlarms::spec`, #1011); the latest GET's answered keys and each key's last arrival, so a
   key that GET left out reaches the judge as `left_out` and loses its
   sample once its owner is established, a reply dated by its GET's ask
   (text 0.5, F-136), and a receive path that could not be watched is a
