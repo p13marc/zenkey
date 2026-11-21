@@ -6216,8 +6216,8 @@ def _round111_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "entry's node, whose four members hold 947 B, said to exceed 1 KB with them alone; F-536, 1 KB and "
                 "512 B with no figure for the first and no word on what a member's count holds; F-537, no sentence "
                 "has an owner that holds the authoring file state its minor, where presence.md §2 expects it; "
-                "F-538, the four members an owner \"cannot shorten\", and `token` written at its default; F-539, "
-                "\"every empty member\" beside a required `bindings`",
+                "F-538, \"every empty member\" beside a required `bindings`; F-539, desired.v1's scenarios.md §8, "
+                "which still asks `\"params\": {}` of an unbound role",
                 missing(core, "So an owner MAY exceed 1 KB with `interfaces`, `capabilities`, `requires` and "
                               "`profiles`.",
                         "- **What an owner cannot shorten.** Four members state what the instance implements, "
@@ -6232,6 +6232,10 @@ def _round111_readings(root: Path) -> list[tuple[str, Any, Any]]:
                           "Half of 1 KB leaves `meta` its zid",
                           "the reference still writes it in every entry: 13 B an entry")
                 + missing(sc, "Step 1's entries, from authoring files, state each file's `minor`.")
+                + missing(flat("profiles/desired/scenarios.md"),
+                          "1. The descriptor lists `task` with `\"bindings\": []` and `\"params\": {}` (core §3.2).")
+                + missing(rules, "| An owner whose descriptor exceeds 1 KB SHOULD leave out every empty member. | "
+                                 "none cited |")
                 + [q for q in ("1,024 B", "1 KB (1,024", "An owner that holds its revision's authoring file",
                                "An owner that holds the authoring file") if q in core[core.find("### 3.3"):
                                                                                     core.find("## 4. State")]],

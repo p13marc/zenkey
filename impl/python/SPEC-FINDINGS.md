@@ -26928,3 +26928,279 @@ out as printed** (`link_v2.keep_alives_a_gap`, `link_v2.keep_alives`):
   - F-529 to F-534.
 
   F-365 stays open as #965's.
+
+## At core 0.107
+
+Round 111 read core 0.107 (#1126, #1127: a descriptor's `minor` where
+its revision has one, its empty members left out, and what may exceed
+1 KB) at e46b040b, the head of the spec PR's branch. It read cold:
+- core §3.3 whole, §9.5 and §9.8, with §3.2's unbound role, §9.1's
+  `minor` and §9.6 beside them;
+- `scenarios/presence.md` §2 whole;
+- the changelog's entry, `descriptor.schema.json`, the two new
+  descriptor fixtures and `RULES.md`'s §3.3 rows.
+
+zk2py diffed `spec/` and `examples/zk2/` between round 110's b530d5a2
+and e46b040b. `spec/CLAUDE.md` moved too, and the barrier keeps it
+unread. Nothing under `examples/zk2/` moved. **No rule changed beyond
+what the changelog states:** `RULES.md` lists 277 rules, 274 before,
+the owner 88, and its three new rows are the entry's.
+
+F-529 to F-534 stay open: their answers are not on this branch.
+
+**The changelog's claims, checked.**
+- **The fixtures.** `expect.json` lists 60 cases, `ok-no-minor` clean
+  and `d000-minor-null` D000. `ok-no-minor`'s entry states `iface` and
+  `contract` alone, and `ok-minimal` states no `requires`,
+  `unavailable` or `cardinality`.
+- **The schema.** `minor` left an entry's `required`, its type an
+  integer still. The seven defaults that are an empty list or object
+  are the entry's seven, and `token`'s is `true`.
+- **§3.2, §3.3's checks and §9.8** read as the entry quotes them.
+- **`RULES.md`:** the MUST NOT and the two SHOULDs, and the 1 KB
+  SHOULD's row shows its MAY.
+- **"An entry is at least 100 B, 71 of them its fingerprint":** the
+  shortest entry, a four-character interface id and no other member, is
+  101 B.
+- **The measurement,** in part. `zenctl gen` of e46b040b, given the
+  three authoring files at `h-c2a95e41d7f0/rf0`, serves 1,167 B:
+  `interfaces` 513, `capabilities` 351 and `profiles` 41 as printed,
+  its marker 60 B and a comma. The entry's 1,184 B is not reproduced:
+  it states no address, run width or catalog, and a 16-bit run with a
+  catalog id would make the 17 B.
+- **"So zenoh-modem's node exceeds 1 KB with the four members alone"**
+  does not follow from the entry's own figures (F-535).
+- **Not checked:** the reference's warning of a descriptor whose other
+  members exceed 512 B, which no run here drew.
+
+**Whether a checker and an owner can be written from §3.3 alone.**
+- **A checker: yes.** `minor` is optional, an integer of the record's
+  `uint64` where stated, and `null` is D000. zk2py's reads the schema
+  at run time, so no line of it moved: 60 of 60. A reading holds the
+  sentence apart from the fixtures: no `minor`, 0, 7 and 2^64−1 are
+  clean; `null`, a string, a boolean, `1.0`, `1e0`, −1 and 2^64 are
+  D000.
+- **An owner: yes, but for one choice the text leaves open** (F-537):
+  whether an owner that holds the authoring file states its minor.
+
+**What zk2py's owner does, and why the text allows it.**
+- **`minor`:** stated only where the revision has one, "as its
+  authoring file states it". None for a revision held as its bundle
+  alone (`bundle.held`, new), and none for a file that states none
+  (W104), by the MUST NOT. Before, it wrote 0 for both.
+- **Empty members: left out, at every size.** "A member whose schema
+  default is an empty list or object reads as that default when absent.
+  So an owner MAY leave it out when it holds nothing". That is
+  `capabilities`, `requires`, `profiles` and `meta`, an entry's
+  `unavailable` and `cardinality`, and a requirement's `params`. Left
+  out always, "Over 1 KB"'s first SHOULD holds without the owner
+  measuring first.
+- **Kept:** `token`, whose default is `true`, no empty list or object,
+  and an unbound role's `bindings`, which the schema requires.
+- **Over 1 KB** with its other members beyond 512 B, the owner leaves
+  out `meta.host`, the one member it writes for display alone, and says
+  so on stderr. An address that alone takes them beyond 512 B it cannot
+  shorten, and says so.
+
+**The size rule, computed from §3.3 as worded** on zenoh-modem's node
+shape: `modem.v3`, `config.v1` and `health.v1`, `freshness.v2`'s
+standard interface beside them, and the 30 capabilities `modem.v3`
+gates on.
+
+| | zk2py's owner | `zenctl gen` |
+|---|---|---|
+| The descriptor | 1,116 B | 1,167 B |
+| `interfaces`, with its name | 536 B | 526 B |
+| `capabilities`, with its name | 366 B | 366 B |
+| `profiles`, with its name | 52 B | 52 B |
+| The four members | 954 B | 944 B |
+| The others | 153 B | 214 B |
+| Commas and braces | 9 B | 9 B |
+
+- zk2py holds `freshness.v2`'s authoring file and states its minor 0,
+  10 B. The reference holds its bundle and states none.
+- Both are over 1 KB, write no empty member, and keep the others
+  within 512 B: both SHOULDs of "Over 1 KB" hold.
+- **"Over 1 KB" can be decided from the text alone,** but for a few
+  bytes at each bound: what 1 KB is, and whether a member's count holds
+  its comma (F-536).
+- **"What an owner cannot shorten" cannot.** The four members of either
+  descriptor are within 1 KB, so whether the MAY covers it turns on
+  what "exceed 1 KB with" means (F-535). The heading also says more
+  than the rule: an entry's `"token":true` is 13 B an owner may leave
+  out by the schema's default, which the entry notes and keeps.
+
+**Measured** (zenoh-python routers, zenoh 1.10.1; the black boxes of
+e46b040b):
+- **`presence.md` §2 step 8,** in four pairings. The owner example
+  with `--health` and no contract file states no `minor` for
+  `health.v1` and `freshness.v2`, whose files state 1 and 0. zk2py's
+  owner, holding `zk2py_echo.v1`'s bundle alone, states none, and
+  `zenctl service list` and `service show` read it so. Each leaves out
+  `capabilities`, `requires`, `unavailable` and `cardinality`. Step 1's
+  entries, from files, state 0 and 1.
+- **§9.8.** Two providers of `zk2py_bringup.v1`, one from its bundle
+  alone and one stating its file's 1: zk2py classifies both ways,
+  undecided. A 0 read for the missing minor would have ordered them,
+  compatible.
+- **Round 110's carry,** no finding from it:
+  - `link.v2` `scenarios-v2.md` §1 and §2 on routers, on zk2py's
+    blocks and on `zenctl acl gen`'s, and §4 on the reference's
+    generated pair: each as its section expects;
+  - `zenctl watch`, which its help says subscribes an event resource
+    through the runtime's consumer, shows zk2py's three occurrences as
+    events, and `state.md` §8 step 4's three samples as `undecodable`.
+
+**The reference, observed** (not findings):
+- **`zenctl desired`** reads two differing reports on one key as
+  `report_invalid`, where `desired.v1` §2.10 has "S4's GET answers the
+  later". Two checks of `desired_scenarios`' tool shapes fail on it,
+  with round 110's zk2py too. Not analysed this round.
+- **A file that states no minor** (W104): the owner example states
+  none, as zk2py does.
+- **`zenctl doctor --check contract-drift`** over that pair is
+  unobservable, "their minors do not say", and not established once
+  both state one.
+- **`zenctl service show`** prints `minor 1` beside an entry that
+  states it and nothing beside one that states none.
+- **`zenctl watch`** on an events key prints a delete with `"kind":
+  "put"`, a payload of 0 B and its 6-byte attachment.
+
+### F-535 · ambiguity · core §3.3 "What an owner cannot shorten": "MAY exceed 1 KB with" the four members, their own bytes or the descriptor's?
+
+> §3.3: "An owner's descriptor SHOULD stay within 1 KB. … So an owner
+> MAY exceed 1 KB with `interfaces`, `capabilities`, `requires` and
+> `profiles`." `CHANGELOG.md`, 0.107: "The four members hold 947 B
+> (`interfaces` 513, `capabilities` 351, `profiles` 41, and their
+> names), and the others 237 B, 61 of them `zenctl gen`'s marker. So
+> zenoh-modem's node exceeds 1 KB with the four members alone, and
+> meets the rule as now worded."
+
+- **Two readings.**
+  - The four members' own bytes exceed 1 KB. Then the entry's node is
+    not excepted: its four hold 947 B, and it passes 1 KB only with
+    the 237 B of the others.
+  - The descriptor exceeds 1 KB while its other members stay small,
+    within the 512 B of "Over 1 KB". Then the node is excepted, and so
+    is a descriptor of 520 B in the four and 510 B in the others.
+- **The entry against its figures.** 947 B is within 1 KB, at 1,000 or
+  at 1,024. The node exceeds 1 KB with the four members and the others
+  together, never "with the four members alone".
+- **Computed** (zk2py's owner, the same shape): 1,116 B, 954 B of them
+  the four.
+- **What zk2py does:** the second reading. `descriptor.Size.within` is
+  `four` for a descriptor over 1 KB whose others are within 512 B, and
+  the walk holds the 1 KB SHOULD met on it.
+- **Fix:** say which. For the second: "A descriptor that exceeds 1 KB
+  keeps this SHOULD when its other members are within 512 B together."
+- **Changes:** which descriptors keep the SHOULD; the entry's sentence.
+
+### F-536 · ambiguity · core §3.3 "Size": "1 KB" has no figure, and "each counted with its name" no word on a member's comma
+
+> §3.3: "An owner whose descriptor exceeds 1 KB SHOULD leave out every
+> empty member. That owner SHOULD also keep every member but
+> `interfaces`, `capabilities`, `requires` and `profiles` within 512 B
+> together, each counted with its name." `CHANGELOG.md`, 0.107: "Half
+> of 1 KB leaves `meta` its zid", and "The four members hold 947 B
+> (`interfaces` 513, `capabilities` 351, `profiles` 41, and their
+> names)".
+
+- **1 KB.** §3.3 gives it no figure. The entry's "Half of 1 KB" beside
+  512 B makes it 1,024 B, and the core writes "1,024 bytes" and
+  "1,000 B" elsewhere where it means each. A descriptor of 1,001 to
+  1,024 B is over by one reading and within by the other.
+- **A member's count.** 513 + 351 + 41 is 905, and the three names,
+  quoted and with their colons, are 39 B. The entry's 947 holds 3 B
+  more, a comma a member. By "counted with its name" alone a member is
+  its name and its value, and the commas and the two braces are no
+  member's.
+- **What zk2py does:** 1,024 B, and a member from its name's opening
+  quote to its value's last byte, as written. So the four are 944 B
+  where the entry counts 947.
+- **Fix:** "1 KB (1,024 B)", and what a member's count holds: "its
+  name, its value and the comma after it", or without the comma.
+- **Changes:** a few bytes at each bound.
+
+### F-537 · ambiguity · core §3.3 `minor`: no sentence has an owner that holds the authoring file state its minor
+
+> §3.3: "**`minor`** is the minor of the contract revision the entry
+> names, as its authoring file states it (§9.1). A bundle keeps no
+> minor (§9.5), so an owner that holds only the revision's bundle
+> leaves the member out. An owner MUST NOT state a minor its revision
+> does not have." `presence.md` §2, Expected 8: "Step 1's entries, from
+> authoring files, state each file's `minor`." `CHANGELOG.md`, 0.107:
+> "The reference states a revision's minor where it holds the authoring
+> file's contract".
+
+- **What is missing.** The bullet says what the member's value is, when
+  an owner leaves it out, and what it must never state. Nothing says an
+  owner that holds the file states it. `run` and `catalog` each have
+  their sentence: "An owner MUST state its run there", "An owner given
+  a catalog MUST state its id there".
+- **Two readings.** It is the owner's choice, as any optional member
+  is. Or it is asked, as the scenario expects. An owner that never
+  states a `minor` keeps every rule of §3.3, and fails `presence.md`
+  §2 Expected 8's second sentence.
+- **What rests on it:** §9.8's order, which a tool takes "when both
+  state one".
+- **A file that states none** (W104) is a second case the bullet does
+  not name. The MUST NOT decides it: its revision has none. The owner
+  example leaves it out (observed), and so does zk2py.
+- **What zk2py does:** it states the file's minor wherever the file
+  states one.
+- **Fix:** "An owner that holds the revision's authoring file SHOULD
+  state its minor, where the file states one."
+- **Changes:** one sentence, a rule if it is a SHOULD or a MUST.
+
+### F-538 · minor · core §3.3 "Over 1 KB": "leave out every empty member", which by its letter holds two the schema requires
+
+> §3.3: "An owner whose descriptor exceeds 1 KB SHOULD leave out every
+> empty member." And: "A role the configuration leaves unbound is
+> listed with `"bindings": []` (§3.2)." `RULES.md` lists the first
+> sentence alone, "none cited". `descriptor.schema.json` requires
+> `bindings` of a requirement and `interfaces` of the descriptor.
+
+- **The error.** The bullet above defines the members an owner may
+  leave out: those "whose schema default is an empty list or object".
+  The SHOULD says "every empty member". An unbound role's
+  `"bindings": []` and a pure consumer's `"interfaces": []` are empty
+  members with no default, and a descriptor that leaves either out is
+  D000. `RULES.md` shows the sentence without the bullet above it.
+- **What zk2py does:** it reads the SHOULD as the bullet's members, and
+  keeps `bindings` and `interfaces`.
+- **Fix:** "SHOULD leave out every member it may leave out (above)".
+- **Changes:** wording, and `RULES.md`'s row.
+
+### F-539 · minor · `desired.v1` `scenarios.md` §8: Expected 1 still asks `"params": {}` of an unbound role, citing core §3.2
+
+> `profiles/desired/scenarios.md` §8, Expected 1: "The descriptor lists
+> `task` with `"bindings": []` and `"params": {}` (core §3.2)." Core
+> §3.2, since 0.107: "with `"bindings": []` and no parameter bound
+> (R3)". `CHANGELOG.md`, 0.107: "§3.2 follows: an unbound optional
+> role is listed with `"bindings": []` 'and no parameter bound', where
+> it said `"params": {}`."
+
+- **The error.** The scenario quotes the sentence 0.107 replaced.
+- **Measured** (`desired_scenarios --only 8`): the owner example's
+  target, `--desired-unbound`, lists `task` with `"bindings": []`,
+  `"optional": true` and no `params` member. zk2py's does the same.
+  Read by its letter, Expected 1 fails on both.
+- **What zk2py does:** its runner reads an absent `params` as empty,
+  as §3.3's "Empty members" says a reader does.
+- **Fix:** "with `"bindings": []` and no parameter bound (core §3.2)".
+- **Changes:** one scenario's wording.
+
+### Counts at core 0.107
+
+539 entries.
+- **New: F-535 to F-539:**
+  - three ambiguities: F-535, F-536 and F-537;
+  - two minor errors: F-538 and F-539.
+  None is a blocker.
+- **Answered this round:** none. Core 0.107 answers no finding.
+- **Open:**
+  - F-437 to F-441;
+  - F-529 to F-534, whose answers are not on this branch;
+  - F-535 to F-539.
+
+  F-365 stays open as #965's.
