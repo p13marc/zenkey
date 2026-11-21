@@ -6382,15 +6382,35 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
 
     # The first reading where no case of owner.json goes: the envelope's
     # refusals first, and a form that is not 6.
+    def token_on(payload: bytes, key_token: str) -> str:
+        try:
+            oh.read(payload, key_token)
+            return "read"
+        except oh.Refused as e:
+            return e.token
+
     out.append(("core 0.108 §7.5, \"The envelope's parse comes first\": no byte and CH alone are the parse's short, "
                 "whatever CH's tag; CH, run and seq with a tag are tag; a delete's CH on a put is the parse's "
-                "sample_kind. A mutation, a frame or a snapshot on an owner heartbeat's key is a form the parse "
-                "accepts of a put, and §7.5 names no refusal for it (F-540): zk2py's own is form, as on a "
-                "heartbeat's key",
+                "sample_kind, and on a stream key a snapshot is its key_kind. A mutation or a frame on a stream "
+                "key is a form the parse accepts of a put, and §7.5 names no refusal for it on an owner "
+                "heartbeat's key, nor on a heartbeat's (F-540): zk2py's own is form; read by the list as "
+                "written, W2's payload under a mutation's CH passes tag and its body reads",
                 [token(b""), token(b"\xc5"), token(bytes.fromhex("c5000700")), token(bytes.fromhex("c50007000001")),
-                 token(bytes.fromhex("200007000001")), token(bytes.fromhex("00") + w2_payload[1:]),
-                 token(bytes.fromhex("a0") + w2_payload[1:]), token(bytes.fromhex("e0") + w2_payload[1:])],
-                ["short", "short", "short", "tag", "sample_kind", "form", "form", "form"]))
+                 token(bytes.fromhex("200007000001")), token_on(bytes.fromhex("e0") + w2_payload[1:], "stream"),
+                 token_on(bytes.fromhex("00") + w2_payload[1:], "stream"),
+                 token_on(bytes.fromhex("a0") + w2_payload[1:], "stream"),
+                 zk2c.parse(bytes.fromhex("00") + w2_payload[1:], "put", "stream").tag,
+                 len(oh.read_body(zk2c.parse(bytes.fromhex("00") + w2_payload[1:], "put", "stream").record or b"")
+                     .groups)]
+                + missing(core, "A put carries a mutation, an event, a heartbeat, a frame or a snapshot"),
+                ["short", "short", "short", "tag", "sample_kind", "key_kind", "form", "form", 0, 3]))
+    out.append(("F-544 (open): §7.5's \"That group alone\" cites owner.json, whose groups cases each read one group, "
+                "and whose reads use no catalog: no case reads a refused group beside another",
+                [sorted({k for c in own["groups"] for k in c if k not in ("note", "names", "holds", "expect")}),
+                 sum(1 for ln in rules.splitlines()
+                     if "An implementation MUST read each other group as it would with the refused one left out" in ln
+                     and "`[F: heartbeat/owner.json]`" in ln)],
+                [["group"], 1]))
     # "MUST NOT choose the layout by a payload's bytes", and F-541: CH's tag
     # does tell most payloads apart.
     either = own["either"][0]

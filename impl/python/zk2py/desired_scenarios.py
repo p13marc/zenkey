@@ -1143,10 +1143,13 @@ class Fake:
         self.entities = [self.session.declare_queryable(key, zenoh.handlers.Callback(
             lambda q: q.reply(key, data, encoding="application/json")), complete=True)]
         for prefix, replies in answers.items():
-            def answer(q: Any, replies: list[tuple[bytes, bool]] = replies, prefix: str = prefix) -> None:
-                for payload, stamped in replies:
+            def answer(q: Any, replies: list[tuple[Any, ...]] = replies, prefix: str = prefix) -> None:
+                # (payload, stamped), or (payload, stamped, encoding): a third
+                # member is the reply's Encoding, as an enveloped put's
+                # zenoh/bytes (round 112)
+                for payload, stamped, *enc in replies:
                     kw = {"timestamp": self.session.new_timestamp()} if stamped else {}
-                    q.reply(prefix, payload, encoding="application/json", **kw)
+                    q.reply(prefix, payload, encoding=enc[0] if enc else "application/json", **kw)
 
             self.entities.append(self.session.declare_queryable(prefix, zenoh.handlers.Callback(answer),
                                                                 complete=False))
@@ -1166,11 +1169,31 @@ class Fake:
         live.close(self.session)
 
 
+#: Two reports on one key that differ (F-212, and F-545 since round 112):
+#: bare, as round 59 wrote the shape; in envelopes of one run, where §4.2's
+#: merge keeps the higher seq; and of two runs, two instances', where a tool
+#: keeps the later arrival. desired.v1 §2.10: "Two instances' reports on one
+#: key are not two". The reference's ``zenctl desired`` reads each as two
+#: that differ, ``report_invalid`` (observed since round 110; round 105's
+#: read the later). Its checks here are known by F-545, by name.
+TWO_ON_ONE_KEY = (
+    "two readable reports on one key, differing, with no envelope: the merge keeps the later by its Zenoh "
+    "timestamp, which reads as the report (F-212, core §4.2)",
+    "two readable reports on one key, differing, in envelopes of one run: the merge keeps the higher seq, which "
+    "reads as the report (core §4.2)",
+    "two instances' reports on one key, differing, in envelopes of two runs: a tool keeps the later arrival, which "
+    "reads as the report (desired.v1 §2.10, core §4.2)",
+)
+#: What the reference answers of each, observed on fc16a564.
+TWO_OBSERVED = {q: ("unobservable", "report_invalid") for q in ("converged", "refused", "last_known", "in_force")}
+
+
 def section_tool_shapes(ctx: Ctx) -> None:
     """zk2py's own, beyond scenarios.md: §2.17's 0.4 readings no scenario
     makes, built by test sessions, asked of both tools with the contracts
     held offline (core §8.5), each against the text."""
     from . import desired_tool as dt
+    from . import zk2c
     from .contract import load_contract
     from .desired_live import contract
 
@@ -1210,8 +1233,19 @@ def section_tool_shapes(ctx: Ctx) -> None:
          target_doc([AUTHOR], two), {two_a: [(conv, True)], two_b: [(conv2, True)]}, author_doc(),
          {d_prefix: [(doc, True)]},
          {q: ("unobservable", "report_invalid") for q in ("converged", "refused", "last_known", "in_force")}),
-        ("two readable reports on one key, differing: S4's Latest keeps the later, which reads as the report "
-         "(F-212)", target_doc([AUTHOR]), {rp_prefix: [(conv, True), (conv2, True)]}, author_doc(),
+        (TWO_ON_ONE_KEY[0], target_doc([AUTHOR]), {rp_prefix: [(conv, True), (conv2, True)]}, author_doc(),
+         {d_prefix: [(doc, True)]},
+         {"converged": ("not_yet", "other_epoch"), "refused": ("no", "converged"), "last_known": ("no", "current"),
+          "in_force": ("yes", "desired")}),
+        (TWO_ON_ONE_KEY[1], target_doc([AUTHOR]),
+         {rp_prefix: [(zk2c.mutation(zk2c.InBand(16, 7, 1), conv), False, zk2c.ENCODING),
+                      (zk2c.mutation(zk2c.InBand(16, 7, 2), conv2), False, zk2c.ENCODING)]}, author_doc(),
+         {d_prefix: [(doc, True)]},
+         {"converged": ("not_yet", "other_epoch"), "refused": ("no", "converged"), "last_known": ("no", "current"),
+          "in_force": ("yes", "desired")}),
+        (TWO_ON_ONE_KEY[2], target_doc([AUTHOR]),
+         {rp_prefix: [(zk2c.mutation(zk2c.InBand(16, 7, 5), conv), False, zk2c.ENCODING),
+                      (zk2c.mutation(zk2c.InBand(16, 9, 1), conv2), False, zk2c.ENCODING)]}, author_doc(),
          {d_prefix: [(doc, True)]},
          {"converged": ("not_yet", "other_epoch"), "refused": ("no", "converged"), "last_known": ("no", "current"),
           "in_force": ("yes", "desired")}),
@@ -1437,6 +1471,15 @@ def section_tool_shapes(ctx: Ctx) -> None:
                 cargs = [x for q in paths for x in ("--contracts", q)] + (["--role", role] if role != "task" else [])
                 rc, zdoc, err = zenctl(["desired", TARGET, "-c", bus.ep1, "--timeout", "1", *cargs])
                 z = _z_answers(_z_row(zdoc, role))
+                if name in TWO_ON_ONE_KEY:
+                    # known by F-545: the reference reads the two as two
+                    # that differ. Either answer is recorded, and which.
+                    rp.check(sec, f"zenctl desired, known by F-545: {name}", z in (want, TWO_OBSERVED),
+                             ("XPASS: the report, as zk2py reads it" if z == want else
+                              "two_differ, report_invalid, where §2.10 has them not two") + f"; exit {rc}")
+                    if z != m:
+                        disagree.append(f"{name} (F-545): zk2py {m}, zenctl {z}")
+                    continue
                 rp.check(sec, f"zenctl desired: {name}", z == want, f"{z}, exit {rc}{(' ' + err[-200:]) if z is None else ''}")
                 if z != m:
                     disagree.append(f"{name}: zk2py {m}, zenctl {z}")
