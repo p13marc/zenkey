@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.109** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.110** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -1020,7 +1020,7 @@ and reports these codes. `[F: descriptors/]`
 | # | Rule | Evidence |
 |---|---|---|
 | S1 | **Owner:** every state mutation, put **and** delete, MUST carry its in-band stamp (§4.3): a put in its payload's envelope, a delete in its attachment (§7.5). On a resource §4.3's table lists, the owner MUST also set a Zenoh timestamp on each mutation. | `[Sc: state.md §1]` |
-| S2 | **Owner:** the owner's state queryables cover its interfaces' `state/**` and `@state/**`. It MUST answer a GET over them per collection, as "Answering a state GET" below says: a collection read with the collection's snapshot, a member read with a snapshot of each member it reaches, and a member of a per-key resource with a reply of its own. An owner's per-key reply MUST carry the in-band stamp of the mutation it represents: a reply as the bytes the mutation put, a `reply_del` as the delete's attachment. It MUST also carry the mutation's Zenoh timestamp, where the mutation carried one. | `[Sc: state.md §1, §2, §14]` |
+| S2 | **Owner:** the owner's state queryables cover its interfaces' `state/**` and `@state/**`. It MUST answer a GET over them per collection, as "Answering a state GET" below says: a collection read with the collection's snapshot, a member read with a snapshot of each member it reaches, and a member of a per-key resource with a reply of its own. An owner's per-key reply MUST carry the in-band stamp of the mutation it represents: a reply as the bytes the mutation put, a `reply_del` as the delete's attachment. It MUST also carry the mutation's Zenoh timestamp, where the mutation carried one. A conditional read's answer is the one exception (below). | `[Sc: state.md §1, §2, §14]` |
 | S3 | **Owner:** for a key it deleted within the tombstone window, the owner MUST answer a GET with the deletion's stamp (S2): a tombstone in a snapshot, or a per-key resource's `reply_del`. The window is 60 s, unless the deployment configures the owner with another. A deployment MUST configure it to at least the longest outage it expects between an archive and the owner, for each resource the archive records whose deletes only a tombstone proves (§4.4). Those are each per-key resource, each collection with no snapshot key, and each collection an archive aligns from a peer archive. Across a constrained face, the outage is the face's maximum (§8.5). [`link.v1`](profiles/link/v1.md) §2.11 floors the window of every state behind the face at it, and [`link.v2`](profiles/link/v2.md) §2.11 that of each resource whose deletes only a tombstone proves. | `[Sc: state.md §2, §6, §14]` |
 | S4 | **Consumer:** a state GET MUST be addressed to the owner's keys, with target `All` and consolidation `None` set explicitly. The consumer MUST merge the GET's replies per key, each snapshot's entries among them, as a late joiner's seed merges them (below). **Deployment:** MUST NOT run a storage that answers on an owner's `state/**` or `@state/**` keys. | `[Sc: state.md §3, §14]` |
 | S5 | **Consumer:** last-known state MUST be read from an archive (§4.4), explicitly. **Owner of an archive:** §4.4. | `[Sc: state.md §4–§6, §9]` |
@@ -1060,6 +1060,10 @@ interface it exposes, with its members (§7.5).
     no member at, live or deleted within the window, with a snapshot of no
     entry on that key. It is the owner's word that the member had no value
     as of its asof. `[Sc: state.md §14]`
+  - **A conditional read** is the one exception to these two answers. It
+    is a member read of one concrete key that names the mutation its
+    reader holds, and its owner can answer with that stamp alone ("A
+    conditional read", below).
   - zenoh refuses a reply on a key the query does not intersect (§4.1).
     So a member read's answer cannot ride the snapshot key, and a reader
     that wants a collection whole makes a collection read.
@@ -1283,6 +1287,102 @@ from S4's GET and follows a subscription.
   that no zk2 owner has, foreign keys (§1.7), are outside S4, and a storage
   may answer them.
 - **What a seed cannot know**: [`observer.md`](observer.md) §4.1.
+
+**A conditional read.** A reader that holds a member's value can ask
+whether it is still current, and be answered without the value. Its GET
+carries a **held stamp** (§7.5): the in-band stamp of the mutation it
+holds for the member. An owner whose member is unchanged answers with
+that held stamp alone.
+
+- **What it is.** A conditional read is a member read of one concrete
+  key, whose GET carries a held stamp that §7.5's parse accepts. Its
+  member is of a collection the owner answers by snapshot.
+  - **One concrete key** is a selector with no wildcard: no `*`, no `**`
+    and no `$*` chunk.
+- **The owner's answer.** An owner SHOULD answer a conditional read with
+  the held stamp alone when the member's last mutation carries exactly
+  that stamp: the same run, in width and value, and the same seq.
+  `[F: envelope/held.json]` `[Sc: state.md §16]`
+  - **The member's last mutation** is its last put, or its delete within
+    the window (S3). Its stamp is the one a snapshot would list for the
+    member: its live entry's, or its tombstone's.
+  - **The answer** is one reply on the member's key. Its payload is the
+    held stamp the GET carried (§7.5).
+- **Otherwise whole.** An owner MUST NOT answer a GET with a held stamp
+  in any other case. It answers every other GET as it answers one with no
+  payload (above). `[F: envelope/held.json]` `[Sc: state.md §16]`
+  - **Another stamp** is answered with the member's snapshot: another
+    seq, another run, or the same run's value at the other width.
+  - **No member held,** live or deleted within the window, is answered
+    with a snapshot of no entry.
+  - **A payload §7.5 refuses** is answered whole too. It is never
+    refused, and never left unanswered. A state GET has no error form,
+    and silence is no verdict (O5). So a refusal would cost the reader
+    its read, where the whole answer is always right.
+  - **On any other GET** a held stamp is ignored: a collection read, a
+    member read whose selector is not one concrete key, and a per-key
+    resource's read.
+  - **An owner built before this version** reads no payload on a state
+    GET. It answers every conditional read whole.
+- **Why one member only.** A collection has no single stamp. A reader
+  that missed one member's change and heard a later member's would name
+  the later stamp, and be told "unchanged".
+- **What a reader sends.** A consumer or a tool MUST NOT send a held
+  stamp other than the in-band stamp of the mutation it holds for that
+  member, as the owner wrote it. `[F: seed/held.json]`
+  - **That stamp** is its put's envelope's, its delete's attachment's,
+    or its snapshot entry's: the entry's own run or the header's, and
+    the entry's seq.
+  - **Never** a snapshot's asof, a Zenoh timestamp, nor another key's
+    stamp. A reader that holds nothing for the member sends none, and
+    neither does one that holds a value with no envelope.
+  - **Why.** A run is never reused, and its seq never wraps (S7). So one
+    stamp names one mutation. "Unchanged" names the value a reader holds
+    only when the reader holds that mutation.
+- **A held stamp in answer.** A held stamp is the owner's answer only as
+  a reply to the GET that carried the same one, on that GET's one
+  concrete key. The same one has the same run, in width and value, and
+  the same seq. A consumer or a tool MUST NOT read any other held stamp
+  as unchanged. `[F: seed/held.json]` `[Sc: state.md §16]`
+  - **The others** are a held stamp that differs from the one its GET
+    carried, one in reply to a GET that carried none, one on another key,
+    and one heard on a subscription.
+  - **Such a held stamp establishes nothing.** The reader merges nothing
+    for it. It counts it undecodable, refused as `held`.
+- **What unchanged says.** When the owner answered, the member's last
+  mutation was the one the stamp names. The reader keeps what it holds:
+  a held stamp carries no value, and merges none.
+  `[F: seed/held.json]`
+  - **The mutation it names counts as heard again.** Where the reader
+    still holds that mutation, the answer counts as the mutation heard
+    again, by the GET. The omission rule's guard reads it so (above): a
+    value under another run, heard again after the GET was asked, is
+    kept.
+  - **A later value stands.** Where the reader holds another value by
+    then, heard while its GET was out, it keeps that value. An answer
+    never steps a member back.
+  - **Nothing held.** Where the reader holds nothing for the member by
+    then, its GET gave it no value. It reads again, with no held stamp.
+- **What unchanged does not say.**
+  - **A read is one instant.** A mutation the owner makes after it
+    answers reaches the reader by its subscription, or at its next read.
+  - **No time, and no confirmation.** A held stamp carries neither a
+    snapshot's time nor an entry's confirmation. A reader that ages a
+    member from its GET asks with no held stamp
+    ([`freshness.v2`](profiles/freshness/v2.md) §2.6).
+  - **No absence.** A conditional read that draws no reply is silence
+    (O5).
+- **A snapshot in answer.** A consumer or a tool that sent a held stamp
+  MUST accept a snapshot in answer, and merge it as any member read's
+  (above). `[F: seed/held.json]` `[Sc: state.md §16]`
+  - An owner sends one when the member changed. An owner built before
+    this version sends one always.
+- **Across a constrained face** (§8.5), a conditional read saves the
+  value's bytes and no others. The held stamp rides the GET as a payload,
+  which costs its own bytes and 3 more. The reply still carries its key
+  as text, and its replier's id (Appendix B, "A conditional read's
+  bytes"). So it pays for a value larger than what the request grows by.
+  A reader that asks less often saves more.
 
 A **tool** checks S4 against the routers' storage admin space: [`observer.md`](observer.md) §4.2.
 - **The admin space is off by default** in zenoh 1.10.1 (Appendix B). A
@@ -2146,7 +2246,8 @@ an owner cuts one into pages (below). An owner answers a state GET with
 snapshots, and a reader merges them, as §4.2 says.
 
 **The layouts.** A put carries an envelope as its payload, and a delete as
-its attachment. A GET's reply carries a snapshot as its payload. A call's
+its attachment. A GET's reply carries a snapshot as its payload. A state
+GET and its reply can each carry a held stamp as their payload. A call's
 query, reply and reply error carry a form as their payload:
 
 ```text
@@ -2157,6 +2258,8 @@ heartbeat, a put's payload           CH · run · seq · body
 owner heartbeat, a put's payload     CH · run · seq · body
 frame, a put's payload               CH · run · seq · body
 snapshot, a GET reply's payload      CH · run · asof · body
+held stamp, a state GET's payload    CH · run · seq
+held stamp, a GET reply's payload    CH · run · seq
 request, a query's payload           CH · record
 value, a reply's payload             CH · run · seq · record
 error, a reply error's payload       CH · run · seq · error
@@ -2187,6 +2290,7 @@ A snapshot's is its collection's type's, as a mutation's is.
   follows or not. It is 0 for an operation that declares none.
 - **An owner heartbeat's** tag is 0. Each of its groups carries its own
   (below).
+- **A held stamp's** tag is 0, and its width bit its run's (below).
 
 **The forms.** Each form has one code. This version defines all eight:
 
@@ -2205,6 +2309,9 @@ A value carried by a query is a **request**. It has no run and no seq.
 
 A heartbeat has a second layout, the **owner heartbeat**, which covers
 several interfaces in one put (below). It keeps form 6's code.
+
+A snapshot's header with no body is a **held stamp**: one member's
+stamp, on a state GET and on its reply (below). It keeps form 7's code.
 
 **The run and the seq.** The run is an unsigned integer of 16 or 32 bits,
 as CH's width bit says. The seq is an unsigned 24-bit integer, from 0 to
@@ -2288,6 +2395,8 @@ Encoding is 1 byte, and `zenoh/bytes` costs none (Appendix B).
   6 bytes over its id and its record, while each is below 128 bytes. A
   tombstone adds 5 bytes over its id. An entry's own run adds 2 or 4, and
   its confirmation's time 6.
+- **A held stamp** is 6 bytes, or 8 with a 32-bit run, as a delete's
+  attachment is.
 
 **The event** (form 4) is an occurrence's put on an `events` key whose
 last chunk is an occurrence chunk (§1.2, §2.6).
@@ -2318,6 +2427,9 @@ key is (§1.1). The parser knows what carries the bytes, its **sample**:
   (S2) or carries a snapshot;
 - a delete's attachment, or a `reply_del`'s (S2);
 - a call's query, its reply or its `reply_err`, each one's payload.
+
+A state GET's payload is a fourth sample. It carries a held stamp, which
+has a parse of its own (below).
 
 For a frame, an event and a snapshot it also knows its key, which the
 grammar reads alone: its kind token, and an event key's last chunk. It
@@ -2773,6 +2885,69 @@ An implementation that cuts a snapshot into pages MUST cut it so.
 of each index from 0 to a page whose more bit is 0, all on one key with
 one CH, run, asof, time and coll. It then holds every entry the snapshot
 has.
+
+**The held stamp.** A **held stamp** is a snapshot's header with no
+body: `CH · run · seq`. It names one mutation of one state member by its
+in-band stamp. A reader that holds the member's value sends it on a state
+GET, to ask whether that mutation is still the member's last. An owner
+sends it back as that GET's reply, to say that it is. §4.2 says who sends
+one and what each concludes ("A conditional read").
+
+- **CH** is form 7, the run's width bit and tag 0. It is `0xe0` with a
+  16-bit run, and `0xf0` with a 32-bit run. A held stamp carries no
+  record, so its tag is 0, as a delete's is.
+- **Its run and seq** are the mutation's, written as an envelope writes
+  them (above). The seq's place holds the mutation's seq, never an asof.
+- **Its sample** has the Encoding `zenoh/bytes`, on a GET and on a reply
+  alike.
+- **Why form 7.** Every form code is taken. A page with no entry is 16
+  bytes or more (above), so no page is a header alone.
+
+An implementation that writes a held stamp MUST write it so: CH with
+form 7 and tag 0, the run and the seq, and no byte after.
+`[F: envelope/held.json]`
+
+**A held stamp on a state GET.** A state GET is a GET on an owner's
+state keys (S2, S4). Its payload is read in three steps, in this order:
+1. **No payload, or a payload of no byte,** carries no held stamp.
+   Nothing is parsed, and nothing is refused.
+2. **A payload under any Encoding but exactly `zenoh/bytes`** is no held
+   stamp, whatever its bytes (`encoding`). `zenoh/bytes` with a schema
+   suffix is another Encoding.
+3. **Any other payload** is parsed, without the contract and without the
+   GET's key.
+
+An implementation MUST refuse a state GET's payload at step 3 for the
+first of these that applies, in this order, naming the refusal:
+- a form other than 7 (`sample_kind`);
+- a tag other than 0 (`tag`);
+- fewer bytes than CH, the run and the seq need (`short`);
+- a byte after the seq (`trailing`).
+
+`[F: envelope/held.json]`
+
+A GET whose payload is refused, at step 2 or step 3, carries no held
+stamp. Its owner answers it as it answers a GET with no payload (§4.2).
+
+**A held stamp on a reply.** A GET's reply is parsed as a put's payload
+is (above). Where that parse accepts a snapshot's envelope with no byte
+after its seq, the reply carries a held stamp, never a page. Its body is
+not read. An implementation MUST refuse a held stamp on a reply whose tag
+is not 0 (`tag`). `[F: envelope/held.json]`
+- **The bytes decide which.** A page's body is 10 bytes or more. So a
+  form-7 reply is a held stamp or a page by its length alone: its
+  header's 6 or 8 bytes, or more. A reader needs neither the contract
+  nor its own request to tell.
+- **The request decides what it answers.** Whether a held stamp answers
+  the GET that drew it is §4.2's. The reader compares it with the one
+  that GET carried.
+- **Read as a page,** the same bytes are a body cut `short` (above). A
+  reader built before this version refuses them so, and merges nothing.
+- **Heard on a subscription,** a held stamp is no owner's answer, as a
+  snapshot heard there is none (above).
+
+Every held stamp an implementation accepts MUST write back to the same
+bytes. `[F: envelope/held.json]`
 
 ### 7.6 Packed records
 
@@ -5508,6 +5683,24 @@ Measured by [`scenarios/constrained.md`](scenarios/constrained.md) §7
 - a GET's reply carried its whole key, though the far client had
   subscribed to it exactly.
 
+**A conditional read's bytes** (§4.2). Computed from zenoh 1.10.1's
+layouts through the wire baseline's model
+([`wire-baseline`](../docs/zk2/measurements/wire-baseline/README.md)).
+None was measured:
+1. **A query's payload rides an extension:** a byte of header, its
+   length, its Encoding, then the payload (zenoh-codec's
+   `zenoh/mod.rs:255–328`). Under `zenoh/bytes` that is 3 bytes over a
+   payload of up to 126 bytes. So a 6-byte held stamp makes a 12-byte
+   request 21 bytes.
+2. **An unchanged reply** on a 59-byte key is 94 bytes. Of them 61 are
+   its key (fact 5 of "Keys across a face") and 20 its replier's id. A
+   6-byte final follows it.
+3. **A changed reply** is the member's snapshot. For a 44-byte record it
+   is a 66-byte page, in a 154-byte reply.
+4. **On zenoh-modem's simulated radio**, under the lean stack, with the
+   face's 3-byte frame: the request is a 40-byte SDU. The unchanged
+   reply and its final are 119 bytes, and the changed ones 179.
+
 **Measured for the rules above**, each with the rule it serves:
 - **State's and events' QoS** (§2.4): spike S5 lost 10,917 of 100,000
   values put with `drop` on their way to a storage.
@@ -5769,14 +5962,14 @@ section each was written against, whose pointer leads on.
 | `conformance/compat/` | §9.7 retention, §9.8, R4 |
 | `conformance/descriptors/` | §3.3 |
 | `conformance/budget/` | §2.7, `lossless.json` and the reader's stall included |
-| `conformance/seed/` | §4.2 a late joiner's merge: `merge.json` the Zenoh timestamps' order, unstamped samples, and a tool's across two ids; `inband.json` §4.3's in-band stamps, plain and serial order, and a tool's and a consumer's across two runs; `snapshot.json` a seed over snapshots, their pages, asof, the omission rule and the revision that maps a collection's index |
+| `conformance/seed/` | §4.2 a late joiner's merge: `merge.json` the Zenoh timestamps' order, unstamped samples, and a tool's across two ids; `inband.json` §4.3's in-band stamps, plain and serial order, and a tool's and a consumer's across two runs; `snapshot.json` a seed over snapshots, their pages, asof, the omission rule and the revision that maps a collection's index; `held.json` a conditional read's reader: the held stamp it sends, and its merge of the answer |
 | `conformance/errors/` | §5.2: `forms.json` §7.5's error form, and every reply error it refuses read as the transport's, a router's `Timeout`, a querier's and one under another `Encoding` among them |
-| `conformance/envelope/` | §7.5, a call's forms, an event and a snapshot's envelope included; `calls.json` §5.1's and §5.2's forms by an operation's types |
+| `conformance/envelope/` | §7.5, a call's forms, an event and a snapshot's envelope included; `calls.json` §5.1's and §5.2's forms by an operation's types; `held.json` the held stamp, on a state GET and on its reply, and §4.2's answer of an owner to a conditional read |
 | `conformance/snapshot/` | §7.5, a snapshot's pages: their bytes, their reading and the paging rule |
 | `conformance/frame/` | §7.7 |
 | `conformance/catalog/` | §8.6 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
-| `scenarios/state.md` | §4; §1 in-band stamps through a router that stamps nothing and one that stamps, and §8.2's session posture; §7 runs, a record's and a random draw's, the run before the seq wraps, and a consumer's and a tool's late joiner across two runs, after their seed and inside it; §8 a replay filtered and ordered by each event's time, against the seqs, an unknown time and a run change among them, and two puts that carry no event; §9 an archive within a run and across two; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node; §13 a stream key's seq wrapping, and kept across a takeover; §14 a collection's snapshot in pages, a member read, a page lost, `Latest`'s control, a delete beyond the window and two instances answering; §15 a stray `reply_del`, and an owner on an earlier revision whose state is per key |
+| `scenarios/state.md` | §4; §1 in-band stamps through a router that stamps nothing and one that stamps, and §8.2's session posture; §7 runs, a record's and a random draw's, the run before the seq wraps, and a consumer's and a tool's late joiner across two runs, after their seed and inside it; §8 a replay filtered and ordered by each event's time, against the seqs, an unknown time and a run change among them, and two puts that carry no event; §9 an archive within a run and across two; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node; §13 a stream key's seq wrapping, and kept across a takeover; §14 a collection's snapshot in pages, a member read, a page lost, `Latest`'s control, a delete beyond the window and two instances answering; §15 a stray `reply_del`, and an owner on an earlier revision whose state is per key; §16 a conditional read answered by the held stamp alone, and whole after a put, for another stamp, for a payload that is no held stamp, on every other kind of GET, after a delete and across a restart, and a reader's merge of each answer |
 | `scenarios/operations.md` | §5, §6; §9 a call's forms for each kind of type, the as-of mark, an owner's error beside a router's `Timeout`, a querier's and a malformed one, an earlier version's envelope read as the transport's, and a request under another `Encoding` refused |
 | `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2; §4 the handler rule on the watch session's round trip; §7–§9 what a complete presence read is: a session cut off, before a read or while it runs, a withdrawal heard live, a read beside a liveliness subscriber, each observing the reader's own verdict; §10 the round trip at a population, its GET matching no token, subscribers without history and a namespace's, a round trip lost with its transport, and a read that runs to the interests timeout; a watch session in no namespace on the wire keys, a round trip through a watch session cut off, and a move unconfirming what a reader holds; a reopen telling every token, the round trip after it waiting for them, and one round trip and one read at a time; step 10's counts, the reader's own sessions'; what a black box is judged on there, at what period its output is sampled, and one that prints nothing while its link is cut; Appendix B |
 | `scenarios/bindings.md` | §3.2; §6 a binding's order kept by the descriptor |
@@ -5944,6 +6137,12 @@ brief:
     snapshot's page as `snapshot/bodies.json` reads one, with its hex.
     They give what it holds after the last arrival, and each snapshot's
     pages, whether it is complete, and what its omission rule dropped.
+  - **`held.json`**: what a reader holds for one member → the held stamp
+    it may send, or none (`asks`). Then `snapshot.json`'s cases with
+    `asked`, the GET's key and the held stamp it carried or `null`, and
+    arrivals that may be a held stamp (`cases`). They add each held
+    stamp's reading, `unchanged` or `held`, and whether the reader reads
+    again.
 - **`envelope/`**: one byte → CH's form, run width and tag
   (`vectors.json`'s `headers`). An envelope's or a form's bytes in hex,
   and the sample that carries them → the parse, or the refusal's token,
@@ -5968,6 +6167,13 @@ brief:
     [`observer.md`](observer.md) §7.3). A key and a put's payload under
     `zenoh/bytes` → how it reads: plain, its form, or the refusal's token
     (`reads`).
+  - **`held.json`:** a stamp → a held stamp's bytes (`writes`). A state
+    GET's `Encoding` and payload → the held stamp it carries, `null` for
+    none, or the refusal's token (`gets`). A GET reply's payload → a held
+    stamp, a page, another form's name, or the refusal's token
+    (`replies`). A state GET, its payload and the last mutation its owner
+    holds for the member → `held` with the reply's bytes, or `whole`
+    (`answers`).
 - **`snapshot/`**: a page of a snapshot → its bytes in hex and their
   size, or the writer's refusal (`bodies.json`'s `writes`). A page's bytes,
   CH to its last tombstone → the page, or the reader's refusal, the first
