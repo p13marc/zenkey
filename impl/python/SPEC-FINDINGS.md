@@ -28541,3 +28541,379 @@ Not findings but where one is named.
   this branch; F-560 to F-564.
 
   F-365 stays open as #965's.
+
+## At freshness.v2 0.10 and link.v2 0.21
+
+Round 115 read the branch `chunk-1110-h3` at 547d202a (#1110's H3), merged
+under round 114's head: `freshness.v2` 0.10, whose §3 names the cause of
+an owner that sends heartbeats alone and whose `scenarios-v2.md` now holds
+§8; `link.v2` 0.21, Appendix B's "What a horizon costs a medium"; and the
+reference's owner, which can now send owner heartbeats (`owner
+--owner-heartbeat --catalog`). It read cold:
+- `scenarios-v2.md` §8, with the conventions and §4 and §7, which it
+  cites;
+- `freshness.v2` §2.4, §2.5 and §3 once more, as an owner's author;
+- `link.v2` Appendix B, with §2.9, §2.18 and §2.19 beside it;
+- the two changelog entries, and the two contracts the reference keeps
+  for §8 (`zenkey/tests/contracts/dial.v1.toml`, `pulse.v1.toml`).
+
+zk2py diffed `spec/`, `examples/zk2/` and `zenkey/tests/contracts/`
+between 1374e566's tree and this one. `spec/CLAUDE.md` moved too, and the
+barrier keeps it unread. `RULES.md` did not move: 286 rules, and the
+walk's 296 rows keep their verdicts. No rule, fixture or section number
+changed.
+
+### §8, from its text
+
+zk2py wrote `freshness_v2_s8_live` from §8 alone, and computed its
+figures from core §7.5's layouts before any bus (`readings`):
+- the host key's owner heartbeat holds three groups, `beacon.v2`'s with
+  the map `1 0 0` and 3 live members: 223 bits of body, 34 bytes on a
+  16-bit run and 36 on a 32-bit one;
+- the link key's holds `beacon.v2`'s group alone, the map `0 0 1`: 19
+  bytes on a 16-bit run;
+- `dial.v1` and `pulse.v1`, copied from the text, have the fingerprints
+  of the reference's two files;
+- both plans' Expected hold on zk2py's generator, and on `zenctl acl
+  gen`'s block, key for key.
+
+**They are the text's figures, on the first count.** No line of
+zk2py's owner, reader or plans moved to run §8.
+
+**§8 can be run from its text alone.** What the text leaves to the
+runner changes no Expected:
+- **step 3's policy** beyond `expose`, `interval_s` and "a `[transport]`
+  its linter accepts": zk2py takes `link`'s scenarios' Conventions'
+  transport and face keys. Step 4's is "§7's `link.v1` policy", of which
+  §7 states the same two keys;
+- **the catalog's epoch**, which no Expected reads;
+- **how a reader learns the catalog its owner names** (F-557, open): S,
+  P and F are given its id, "Every reader below holds it";
+- **what an owner puts of its own at its start.** Both owners put a
+  value on each static state they expose before their tokens. So "S
+  hears each put once" is read of step 1's six puts.
+
+### §8, live, in the pairings the black boxes allow
+
+zenoh-python routers, zenoh 1.10.1; the black boxes of 547d202a.
+
+| Pairing | Steps 1 and 2 | Step 3 (`link.v2`) | Step 4 (`link.v1`) |
+|---|---|---|---|
+| zk2py's owner, zk2py's readers | 22/22 | 7/7 | 4/4 |
+| the reference's owner, zk2py's readers | 22/22, two of them not §8's (below) | 7/7 | 4/4 |
+| zk2py's owner, `zenctl watch --catalog` and `zenctl echo --catalog` | 21/21 | 5/5 | 4/4 |
+
+**The reference's owner read by zk2py's reader, per Expected** (the
+first time an owner heartbeat of the reference's reaches zk2py):
+- **The descriptor:** the four interfaces, the catalog's id `5fad1e06`,
+  and `freshness.v2` at revision 1.1 with nothing unavailable. Met.
+- **One form:** H hears no put on any `heartbeat/<iface>` key. Met.
+- **The `host` key:** an owner heartbeat every 0.95 s (the largest gap
+  0.952 s), the first 0.7 ms after the instance token, form 6, CH's tag
+  0, seqs consecutive in one run; three groups, indices 0, 1 and 2, tags 6, 1 and 12;
+  `dial.v1`'s and `pulse.v1`'s each vouching for their member, each
+  digest the one zk2py computes over the put's stamp. Met.
+- **`beacon.v2`'s map `1 0 0`, and 34 or 36 bytes: not met, and not
+  §8's owner.** The owner example takes no capability (its usage), so
+  it exposes `route`: its map is `1 1 0`, its body 256 bits, its payload
+  40 bytes on a 32-bit run and 38 on a 16-bit one. That is `route`'s
+  section, 33 bits by core §7.5, and nothing else: `peer/{peer}`'s
+  section holds 3 live members, all vouched for, its digest zk2py's.
+- **The `link` key:** every 0.95 s, its seqs its own, one group,
+  `beacon.v2`'s, the map `0 0 1`, `status` vouched for; 21 bytes on a
+  32-bit run and 19 on a 16-bit one (`--run-file`). Met.
+- **Confirmed:** S hears each of step 1's puts once, and judges the six
+  members fresh 5 s after them. Met.
+- **One interface's reader:** P, holding `pulse.v1` and the catalog,
+  subscribes to the host key alone, skips groups 0 and 1 `not_followed`,
+  and judges `status` fresh. Met.
+- **A lost owner heartbeat:** the first S reads on each key after the
+  heal follows a gap; its reading names `peer/{peer}`, `route`,
+  `dial.v1`'s `config` and `pulse.v1`'s `status` on the host key, and
+  `status` on the link key; the next on each key ends it. Met.
+- **A divergence in one group:** `beacon.v2`'s group diverges twice on
+  `peer/{peer}` while `dial.v1`'s and `pulse.v1`'s groups and the link
+  key's `status` confirm; one re-read, of `peer/{peer}` alone; the next
+  host owner heartbeat confirms the three. Met.
+- **Steps 3 and 4:** F hears no put on the host key and every link put
+  the near side hears, 5 of 5, each `beacon.v2`'s group alone with
+  `0 0 1`; it judges the link key fresh at the end. Under the `link.v1`
+  plan it hears neither key. Met.
+
+**The two owners' puts, side by side.** What a subscriber sees of each
+put is the same from both: the Encoding `zenoh/bytes`, priority `data`,
+`drop`, not express, no attachment, a time counted from the catalog's
+epoch. The bytes:
+- **§8's state, the reference's owner beside zk2py's:** the link key's
+  puts are the same in everything but the run, the seq, the time and
+  the digest, which is over the run. The host key's differ by `route`
+  alone, as above.
+
+  | Key | Owner | Payload |
+  |---|---|---|
+  | host | zk2py, 36 B | `d019819f5c00000105ae127dc0cc0062b84f1fc28a6e008915a3d8a236016117169b1b8a` |
+  | host | reference, 40 B | `d0e612c88700000105ae1389484c0064cdcac8c7ba6e815c636f00448bebf8797500b08b3baeb89b` |
+  | link | zk2py, 21 B | `d019819f5c00000105ae127dc0c400624294d999d1` |
+  | link | reference, 21 B | `d0e612c88700000105ae13894844006243405e8363` |
+
+- **The same state for both** (zk2py's owner given the capability
+  `routing`, which is not §8's owner; each a fresh run file, so run 0):
+  **the two owners' puts are the same bytes but for the 42 bits of the
+  time**, on both keys.
+
+  | Key | Owner | Payload |
+  |---|---|---|
+  | host | zk2py, 38 B | `c0000000000105ae13bef08c0064cd90cc11e26f092510a900448aa71bd3c500b08aa77375bd` |
+  | host | reference, 38 B | `c0000000000105ae13afaecc0064cd90cc11e26f092510a900448aa71bd3c500b08aa77375bd` |
+  | link | zk2py, 19 B | `c0000000000105ae13bef044006243ca71a545` |
+  | link | reference, 19 B | `c0000000000105ae13afaec4006243ca71a545` |
+
+**Where the two owners differ**, none of it in a put's bytes:
+- **`route`:** the black box cannot be §8's owner. zk2py's is.
+- **Turned on with no catalog:** the reference's owner does not start,
+  "--owner-heartbeat: give --catalog", no token declared. zk2py's
+  starts, sends heartbeats alone and lists the resource unavailable,
+  cause `config`: §2.4, "An owner given no catalog writes no index. It
+  sends heartbeats alone."
+- **The period:** 0.949 s and 0.951 s measured, the smallest gap on
+  the host key: each 0.95 of half the shortest horizon.
+- **The `unavailable` entry:** the reference's holds `"reason": null`,
+  zk2py's no `reason`.
+
+**zk2py's owner read by the reference** (as in round 113, now by §8's
+steps): four `zenctl watch --catalog` readers confirm their members on
+their class's key, each hearing step 1's puts once; one given
+`pulse.v1`'s file alone confirms by the host key's group 2; after the
+heal each marks its first row `lost` and the next not; the watch on
+`peer/{peer}` reads two rows diverged, then confirms the three. `zenctl
+echo --catalog` shows three groups on the host key and one on the link
+key, and no put on a heartbeat key. Across the face, `zenctl echo
+--across-face --catalog` declares 9 selectors, hears 5 link puts and no
+host put under the `link.v2` plan, and nothing under the `link.v1` one.
+
+**What a reader of the reference's does not show:** `zenctl` judges no
+freshness and prints no list of the collections a gap loses. "Its
+reading names all four `host` collections" is read as each watch's own
+`lost` row, and no watch follows `route`.
+
+### §3: the cause, on each side
+
+`freshness_v2_s8_live --only cause`, each owner in five configurations.
+
+| Configuration | zk2py's owner | The reference's owner |
+|---|---|---|
+| not turned on, no catalog | `config` | `config` |
+| not turned on, the catalog | `config` | `config` |
+| turned on, no catalog | `config` | does not start |
+| turned on, a catalog that lists none of its interfaces | `config` | `config` |
+| turned on, a catalog that lists `dial.v1` alone | exposed; a host group of index 1, heartbeats for `beacon.v2` and `pulse.v1` | the same |
+
+- **Against the text now:** zk2py's `config` is §3's first cause, "it is
+  not turned on, or the owner was given no catalog". It was zk2py's own
+  choice in round 113. No line of the owner moved.
+- **Against the reference:** it listed `build` on fcc2f65b (round 113),
+  and lists `config` now, as the entry says.
+- **The fourth row** is neither of §3's two ways (F-568).
+
+### Appendix B's table, recomputed
+
+`readings` holds the count.
+- **The payloads come out** of core §7.5: a heartbeat of one member is
+  16 bytes on a 16-bit run, and the owner heartbeat of three 33. W2's
+  35 is round 112's reading.
+- **The puts a day come out,** 5 of 5: 86,400 / (0.475 × the horizon),
+  rounded.
+- **RF's column comes out,** 10 of 10, from the text's SDUs of 39 and
+  56 bytes on the unrounded count. The SDU does not come out of the
+  sentence that states it: 16 + 3 is 19, and each SDU is 23 bytes over
+  its payload (F-565).
+- **LoRa's three columns do not come out of the text** (F-566). From
+  its three air times of a 39-byte SDU the three heartbeats' figures
+  match in 2 cells of 15. The owner heartbeat's 15 have no air time in
+  the text.
+- **They come out with what the text does not state:** a LoRa frame's
+  time on air by the modem maker's published formula, at 125 kHz, coding
+  rate 4/5, 8 preamble symbols, an explicit header and a CRC. SF7's and
+  SF9's 20 figures are then exact. SF12's 10 are exact with 51-byte
+  tiles each under a header of 3, 4 or 5 bytes.
+- **The sentences under the table come out:** the duty's shares, 176 KB
+  and 245 KB for W2 (two heartbeats at a 60 s horizon and the 17-byte
+  one at 900 s; three every 28.5 s would be 358 KB), SBD's 51 and 152.
+  "87 %" is 86 % from the table's rounded 747 s, and 87 % from the air
+  time before rounding.
+
+### The changelogs' claims, checked
+
+- **freshness.v2 0.10:** §3's two causes are in the text; §8 is in the
+  file and its intro names two tests; "34 bytes on a 16-bit run and 19
+  on the `link` key" and "36 bytes on a 32-bit run" are §7.5's; the
+  reference lists `config`; with the option and no catalog it does not
+  start, nothing declared; an interface its catalog does not list keeps
+  its heartbeat. Each measured.
+- **Not checked:** "Nothing in §8 changed but the intro's sentence":
+  0.9's §8 was never on a tree zk2py read. "A standby's group is left
+  out": not run. `ServiceConfig::owner_heartbeat`, a name of the
+  reference's source.
+- **link.v2 0.21:** the table is there, guidance, no rule. "computed
+  twice, by two scripts that shared no code": not checkable. Its model
+  is under `docs/`, which the barrier keeps unread.
+
+### The mend
+
+`py-carry-r114.md`, item by item.
+- **F-547 and F-549** are resolved (below).
+- **The reference as an owner heartbeat's owner:** run, both
+  directions (above).
+- **Another form on a heartbeat's own key, on a bus:**
+  `owner_heartbeat_live --forms`, 4/4. Beside each owner's heartbeats
+  for `beacon.v2`, a mutation whose record is a heartbeat's body, then a
+  heartbeat's bytes under `application/octet-stream`, each stamped as
+  the owner's next. zk2py's reader refuses each `form` and reads the
+  owner's put of that seq in sequence; `zenctl watch` prints one
+  confirmation row at that seq. The same two puts on the link class key
+  beside the reference's owner heartbeats: refused `form`, 2/2
+  (`freshness_v2_s8_live --only forms`).
+- **`--peer-config` with a file zenoh refuses:** `link_v2_live --only
+  peer`, 12/12, and F-567.
+- **zenohd as a black box:** not run. `bin/current` holds none.
+- **`zenctl gen` at 513 B and 512 B:** the text says "within 512 B",
+  which is at most 512. The tool warned at a rest of 513 B and not at
+  512 B (round 114's measurement, not made again). They agree.
+- **review-bot's notes on #1143:** its three were done in round 114
+  (25a01b49). The carry list holds no later one, and the barrier keeps
+  the tracker unread.
+
+### The answers
+
+- **F-547, resolved.** `scenarios-v2.md` holds §8, headed with the
+  rules it runs, and it runs as worded.
+- **F-549, resolved.** §3: "Such an owner lists it `unavailable`, with
+  the cause that says why it is absent there (core §3.3). The cause is
+  `config` where the deployment's configuration leaves the owner
+  heartbeat out … It is `build` where the owner's implementation sends
+  none." It is zk2py's first reading, with a cause for each case.
+- **F-548 and F-550 to F-564 stay open:** their answers are not on this
+  branch.
+
+### F-565 · minor · `link.v2` Appendix B, "How it is priced": 16 and 3 bytes named, and SDUs 23 bytes over their payloads
+
+> "Each put is alone in its SDU, on a 16-bit run, under the lean stack's
+> 16 bytes and the face's 3-byte frame. A heartbeat of one member is a
+> 16-byte payload in a 39-byte SDU. The owner heartbeat of three is 33
+> bytes in 56." And: "a 35-byte payload in a 58-byte SDU". Core
+> `CHANGELOG.md`, 0.108: "At a 39-byte put in a 58-byte SDU every
+> 28.5 s". The same appendix, of the measured batches: "zenoh's message
+> is 8 B longer than its payload, a put's 5 B and a frame's 3 B".
+
+- **The error.** 16 + 16 + 3 is 35, and the SDU is 39. Each of the three
+  SDUs is 23 bytes over its payload. The 4 bytes the sentence does not
+  name are, by core's entry, the put's own. The appendix's other
+  paragraph gives a put 5.
+- **What zk2py does:** it recomputes RF's column from the stated SDUs.
+- **Fix:** "a 16-byte payload is a 20-byte put, in a 39-byte SDU", with
+  why a put is 4 bytes here and 5 above.
+- **Changes:** one sentence.
+
+### F-566 · gap · `link.v2` Appendix B's table: LoRa's columns cannot be recomputed from the text
+
+> "An SDU of 39 bytes takes 0.08 s at SF7, 0.27 s at SF9 and 2.1 s at
+> SF12, in tiles." "SF10 to SF12 carry 51 bytes, below zenoh's floor: a
+> fragment layer below zenoh carries the 224 B batch in tiles."
+> `CHANGELOG.md`, link.v2 0.21: "It is computed from core §7.5's layouts
+> on the model of `docs/zk2/constrained-overhead-review.md`'s Appendix
+> A".
+
+- **The gap.** The table holds 30 LoRa figures. The text gives an air
+  time for the 39-byte SDU alone, rounded to one or two digits, and
+  none for the 56-byte one. It names no bandwidth, coding rate,
+  preamble or header, and no tile's header. The model is in a file
+  outside `spec/`.
+- **Recomputed:** from the three air times, 2 of the 15 three-heartbeat
+  figures match (the 3,600 s row at SF7 and SF9), and the others are
+  within 4 %. The owner heartbeat's 15 cannot be had: scaling the air
+  time by bytes gives 348 s where the table has 327, and 9,143 s where
+  it has 10,977.
+- **With a LoRa modem's published air time** (125 kHz, 4/5, 8 preamble
+  symbols, explicit header, CRC, the low data rate optimisation at
+  SF12) all 20 of SF7's and SF9's come out, and SF12's 10 with 51-byte
+  tiles under a 3, 4 or 5-byte header.
+- **Fix:** the air time of a 56-byte SDU at each spreading factor, each
+  to the millisecond, or the radio's five parameters and the tile's
+  header.
+- **Changes:** one bullet. It is guidance, and no rule.
+
+### F-567 · ambiguity · `link.v2` §2.19 and §5: a far end's file that zenoh refuses, and the router's own rows
+
+> §2.19: "A tool checks a router's configuration against the policy,
+> and the far end's against the near router's." "**Through zenoh's own
+> loader.** A file that loader refuses gives the tool no configuration.
+> … The tool names zenoh's refusal, and asks none of §5's questions of
+> that file." §5: "**Not asked:** the file is one the tool's loader
+> refuses, the refusal named, as in each row that reads the file", and
+> of the two ends: "**Not asked:** no far end's configuration was
+> read."
+
+- **The ambiguity.** A check reads two files. Where the far end's is
+  the one refused, the row of the two ends is not asked. The three rows
+  that read the router's file read one that loads. "Of that file" leaves
+  them asked. A tool that stops at the first refusal asks none.
+- **Measured** (`link_v2_live --only peer`; a router's file that loads,
+  and a far end's with a `null` or a string lease, or a `null`
+  `keep_alive`). Under `zenoh-1.10.1`, `zenctl check face` names
+  zenoh's refusal of the far end's file and ends at exit 2 with no row,
+  the router's rows unasked. Under `zm-1.10.2-r1` it reports
+  `peer_differs` at the key, and so does zk2py's check under either
+  binding. A far end's file that is no JSON5 ends at exit 2 under both.
+- **What zk2py does:** it reads both files as data, and asks every row.
+- **Fix:** one sentence under "Through zenoh's own loader": whether a
+  refused far end's file leaves the router's rows asked.
+- **Changes:** what an operator learns of a good router beside a bad
+  far end's file.
+
+### F-568 · minor · `freshness.v2` §3: two ways a deployment leaves the owner heartbeat out, where §2.4 has a third
+
+> §3: "The cause is `config` where the deployment's configuration
+> leaves the owner heartbeat out: it is not turned on, or the owner was
+> given no catalog." §2.4: "An owner given no catalog writes no index.
+> It sends heartbeats alone. So does an owner for an interface its
+> catalog does not list."
+
+- **The error.** An owner turned on, under a catalog that lists none of
+  the interfaces it serves, sends heartbeats alone too. The sentence
+  after the colon names two cases, and this is neither.
+- **Measured:** both owners list `config` there
+  (`freshness_v2_s8_live --only cause`).
+- **Fix:** "or its catalog lists none of its interfaces".
+- **Changes:** one clause.
+
+### Not run
+
+- **§8 with the reference's owner as §8's owner:** the example exposes
+  `route`, so two Expected are read at `1 1 0` and 256 bits;
+- **steps 3 and 4 on the block `zenctl acl gen` writes:** it binds
+  principals by user names, and the owner example presents none. R1 ran
+  each plan's denies, zk2py's, on the sessions the face's link protocol
+  selects, under `allow`. The reference's stream deny of `freshness.v2`
+  is zk2py's key for key, compared and not run;
+- **the reference's `consume`** as an owner heartbeat's reader: it takes
+  no catalog;
+- **a standby's group left out,** an owner of more than 15 interfaces,
+  and an owner heartbeat under the clock guard;
+- **W2 again with an owner heartbeat:** it is zenoh-modem's;
+- **zenohd,** and F-531's far router;
+- **`zenctl gen`'s boundary again,** and the live runners not named
+  here.
+
+### Counts at freshness.v2 0.10 and link.v2 0.21
+
+568 entries.
+- **New: F-565 to F-568:**
+  - one gap: F-566;
+  - one ambiguity: F-567;
+  - two minor errors: F-565 and F-568.
+  None is a blocker.
+- **Answered this round:** F-547 and F-549, each resolved.
+- **Open:** F-437 to F-441; F-548 and F-550 to F-564, whose answers are
+  not on this branch; F-565 to F-568.
+
+  F-365 stays open as #965's.
