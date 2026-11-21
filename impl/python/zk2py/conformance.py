@@ -5271,6 +5271,7 @@ def _round104_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out += _round107_readings(root)
     out += _round108_readings(root)
     out += _round109_readings(root)
+    out += _round110_readings(root)
     return out
 
 
@@ -5936,6 +5937,346 @@ def _round109_readings(root: Path) -> list[tuple[str, Any, Any]]:
                         "of the two so.")
                 + [q for q in ("The consumer counts each undecodable, refused as `form`",) if q in st], []))
     return out
+
+
+def _round110_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """link.v2 0.15 (#1107), 0.16 and 0.17 (#1108), and core 0.106 (round 109
+    answered), read cold (#609, round 110): each version and its entry, the
+    rules as their texts state them, what the changelogs claim of their
+    fixtures, §2.16's and Appendix B's worked figures computed from the text
+    alone, and the texts round 110's findings quote. The fixtures are the
+    link family's ``v2/`` files; the live half is ``stamp_live``
+    (scenarios-v2.md §3), ``link_v2_live`` (§4 and §5) and ``events_live``
+    (state.md §8)."""
+    import math
+    import re
+    import tomllib
+
+    from . import link_v2
+
+    spec = root.parent
+    repo = spec.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    def header(rel: str) -> tuple[str | None, str | None]:
+        t = flat(rel)
+        v = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+)", t)
+        w = re.search(r"\| \*\*Written against\*\* \| core (\d+\.\d+)", t)
+        return (v.group(1) if v else None, w.group(1) if w else None)
+
+    core, l2 = flat("core.md"), flat("profiles/link/v2.md")
+    sc2, log = flat("profiles/link/scenarios-v2.md"), flat("profiles/link/CHANGELOG.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    core_v = f"{m.group(1)}.{m.group(2)}" if m else None
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.106 or later and link.v2 0.17 or later, each with its entry, link.v2 0.15's and 0.16's too; observer "
+         "stays 0.33; link.v2 still written against core 0.100",
+         [_at_least(core_v, "0.106"), _at_least(header("profiles/link/v2.md")[0], "0.17"), header("observer.md")[0],
+          header("profiles/link/v2.md")[1]]
+         + entry("CHANGELOG.md", "0.106", "a delete with no attachment on an events key")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 0.17", "`keep_alive_not_suppressed` at the interval")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 0.16", "editorial")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 0.15", "the end that opens"),
+         [True, True, "0.33", "0.100"]),
+    ]
+    # link.v2 0.15: `opens` as §2.1, §2.3, §2.5, §2.18, §2.19 and §5 state it
+    out.append(("link.v2 0.15 §2.1, §2.3, §2.5, §2.18, §2.19 and §5: a face's opens, far where none is stated, near "
+                "only on a south-region face, checked against attach only when attach is valid, a link.v1 policy's "
+                "unknown_field; near_opens_user, the generator's MUST; the far end's credentials in its block; a "
+                "null read as left out; §5's row",
+                missing(l2, "| `opens` | `\"far\"` or `\"near\"`; `\"near\"` only with `attach = \"south-region\"` | "
+                            "no; `\"far\"` | Which end opens the face's links (§2.5). |",
+                        "**`opens`.** A value other than `\"far\"` or `\"near\"` is `bad_value`. So is `\"near\"` "
+                        "with `attach = \"client\"` or `\"device\"`.",
+                        "It is checked against `attach` only when `attach` is valid.",
+                        "It knows no `events` or `opens` either, each its `unknown_field`.",
+                        "| `near_opens_user` | the face | `opens` | The near router opens the face, and its far "
+                        "principal is a user name (§2.5). |",
+                        "A generator MUST refuse a deployment whose face the near router opens, when it binds the "
+                        "face's far principal by a user name (`near_opens_user`, §2.3).",
+                        "So a subject selected by a user name matches only a session over a link the router "
+                        "accepted. A CN matches either way: each end of an mTLS link reads the other's certificate.",
+                        "**Its credentials.** The faces other than device faces may share one far principal, a user "
+                        "name. Then the block names it, as `transport.auth.usrpwd.user`. Its `password` and "
+                        "`dictionary_file` are placeholders, since both are the deployment's (§2.5).",
+                        "A device's session presents its own principal's user.",
+                        "A `null` reads as left out: as the value, at a mode, or as the `mode`. zenoh 1.10.1 fills "
+                        "each such optional value with its default.",
+                        "| Can the near router bind the far principal by its user name? | The far end opens the face "
+                        "(§2.5). | `near_opens_user`, an error. |"), []))
+    # 0.15's evidence, counted
+    v2 = spec / "profiles" / "link" / "conformance" / "v2"
+    lints, plan_doc, tr = (_load_json(v2 / "lints.json")["cases"], _load_json(v2 / "plan.json"),
+                           _load_json(v2 / "transport.json")["cases"])
+    plan = plan_doc["cases"]
+    opens_l = [i for i, c in enumerate(lints) if "opens  " in c["policy"]]
+    with_users = [i for i, c in enumerate(plan) if "users" in c]
+    nulls = [i for i, c in enumerate(tr) if c["router"].get("mode", 0) is None
+             or c["router"].get("timestamping/enabled", 0) is None
+             or (isinstance(c["router"].get("timestamping/enabled"), dict)
+                 and None in c["router"]["timestamping/enabled"].values())]
+    out.append(("link.v2 0.15's evidence as zk2py counts it: v2/lints.json 75 cases, six with opens (69 to 74, from "
+                "0), three of them drawing bad_value at opens and the link.v1 one unknown_field; v2/plan.json gained "
+                "three with users (41 to 43), the first refused near_opens_user alone and the other two planned; "
+                "v2/transport.json 24, three with a null (21 to 23), two warning face_timestamping; scenarios-v2.md "
+                "gains §4",
+                [len(lints), opens_l, [[f["code"] for f in lints[i]["expect"]] for i in opens_l],
+                 with_users, [sorted(plan[i]["expect"]) if "refused" not in plan[i]["expect"]
+                              else [f["code"] + " " + f["at"] for f in plan[i]["expect"]["refused"]]
+                              for i in with_users],
+                 len(tr), nulls, [[f["code"] for f in tr[i]["expect"]["findings"]] for i in nulls]]
+                + missing(sc2, "## §4 The far end opens a face bound by a user name (§2.5, §2.18)")
+                + missing(log, "`v2/lints.json` gains six cases, 75 in all", "`v2/plan.json` gains three, 44 in all",
+                          "`v2/transport.json` gains three, 24 in all"),
+                [75, [69, 70, 71, 72, 73, 74], [[], [], ["bad_value"], ["bad_value"], ["bad_value", "bad_value"],
+                                                ["unknown_field"]],
+                 [41, 42, 43], [["near_opens_user opens"], ["binding", "catalog", "faces", "transport"],
+                                ["binding", "catalog", "faces", "transport"]],
+                 24, [21, 22, 23], [["face_timestamping"], ["face_timestamping"], []]]))
+    # zk2py's far block over §4's policy, offline (§4 Expected 1 and 4)
+    from .link_v2_live import LATE_MS, s4_policy
+
+    enr = tomllib.loads((repo / "examples" / "zk2" / "link" / "radio.enrollment.toml").read_text(encoding="utf-8"))
+    users = [p["user"] for p in enr["principal"] if "user" in p]
+    pol4, f4 = link_v2.parse_policy(s4_policy())
+    two = s4_policy() + s4_policy().split("[face.radio]")[1].replace('"ground-router"', '"ground"').replace(
+        '"unixsock-stream"', '"serial"').join(["[face.lane]", ""])
+    pol_two, f_two = link_v2.parse_policy(two)
+    got4: list[Any] = [f4, f_two]
+    if pol4 is not None and pol_two is not None:
+        blk = link_v2.far_block(pol4, users)
+        got4 += [blk["transport"].get("auth"), {k: v for k, v in blk["transport"].items() if k != "auth"}
+                 == link_v2.block(pol4)["transport"], "auth" in link_v2.far_block(pol4)["transport"],
+                 "auth" in link_v2.far_block(pol4, [u for u in users if u != "ground-router"])["transport"],
+                 "auth" in link_v2.far_block(pol_two, users)["transport"],
+                 [f["code"] + " " + f["at"] for f in link_v2.near_opens_user(
+                     link_v2.parse_policy(s4_policy("near"))[0], users)],
+                 link_v2.near_opens_user(link_v2.parse_policy(s4_policy("near"))[0],
+                                         [u for u in users if u != "ground-router"])]
+    out.append(("zk2py's far end's block over scenarios-v2.md §4's policy and link.v1's scenarios' enrollment: it "
+                "names ground-router as transport.auth.usrpwd.user beside placeholders, the rest the near block's; "
+                "none with no deployment's users, none where the far principal is bound by a CN, none where two "
+                "faces share no far principal (the reference's --far-config names none there either, observed); "
+                "opens = \"near\" refused near_opens_user at opens, and not where the far principal is no user",
+                got4, [[], [], {"usrpwd": {"user": "ground-router", "password": link_v2.PASSWORD_PLACEHOLDER,
+                                           "dictionary_file": link_v2.DICTIONARY_PLACEHOLDER}},
+                       True, False, False, False, ["near_opens_user opens"], []]))
+    # link.v2 0.17: §2.16 as the text states it, and its figures computed
+    out.append(("link.v2 0.17 §2.16 and §2.3: an end sends a keep-alive one interval after the later of its last "
+                "batch and its last keep-alive; ⌈C/I⌉ − 1 a gap where C is no whole multiple of I, between C/I − 1 "
+                "and C/I where it is; the plan warns at the interval or above it; §0's interval",
+                missing(l2, "**Data spares the keep-alives.** An end sends a keep-alive one interval I after the "
+                            "later of the last batch it sent and its last keep-alive. I is `lease_ms` / "
+                            "`keep_alive`. What it receives does not count.",
+                        "So between two batches a cadence C apart, an end sends ⌈C/I⌉ − 1 keep-alives where C is no "
+                        "whole multiple of I. That is none when C is below I, and one when C is between I and 2I.",
+                        "When C is a whole multiple of I, the last of them falls due when the next batch does. It "
+                        "goes first when that batch is later on its schedule than the one before. So the end sends "
+                        "between C/I − 1 and C/I keep-alives a gap.",
+                        "The plan warns of a face whose shortest crossing cadence is the keep-alive interval or "
+                        "above it: cadence × `keep_alive` ≥ `lease_ms`, in milliseconds "
+                        "(`keep_alive_not_suppressed`).",
+                        "| `keep_alive_not_suppressed` | The face's shortest crossing cadence is the keep-alive "
+                        "interval or above it (§2.16). `at` is `transport.keep_alive`. |",
+                        "**The keep-alive interval**: `lease_ms` / `keep_alive`.")
+                + [q for q in ("So an uplink that sends data at least once an interval sends no keep-alive.",)
+                   if q in l2], []))
+    # scenarios-v2.md §5, computed from §2.16's rule alone
+    step3 = re.search(r"3\. C is 500 ms, two intervals\. Each put is sent late on its schedule by ([0-9, and]+) ms in "
+                      r"turn: (\d+) of the 16 later than the put before\.", sc2)
+    late = tuple(int(x) for x in re.findall(r"\d+", step3.group(1))) if step3 else ()
+    later = sum(b > a for a, b in zip(late, late[1:]))
+    sched = lambda c, lt: [c * k + lt[k] for k in range(17)]  # noqa: E731
+    none = (0,) * 17
+    out.append(("scenarios-v2.md §5's figures, computed from §2.16's rule alone at I 250 ms: the lateness the text "
+                "lists is 17 values, 8 of the 16 later than the put before; R's counts over 16 gaps are 0 at C 125 "
+                "ms, 16 at 375, 24 at 500 under the lateness and 8 at 250, as Expected 1 to 4 print them; each "
+                "within §2.16's bounds a gap, 0, 1, 1 to 2 and 0 to 1",
+                [late == LATE_MS, len(late), later, int(step3.group(2)) if step3 else None,
+                 [link_v2.keep_alives(sched(c, lt), 250) for c, lt in ((125, none), (375, none), (500, late or none),
+                                                                       (250, late or none))],
+                 [link_v2.keep_alives_a_gap(c, 1000, 4) for c in (125, 375, 500, 250)]]
+                + missing(sc2, "1. No keep-alive.", "2. 16, one a gap.",
+                          "3. 24: one a gap, and one more before each of the 8 later puts.",
+                          "4. 8, one before each later put, and none before the others."),
+                [True, 17, 8, 8, [0, 16, 24, 8], [(0, 0), (1, 1), (1, 2), (0, 1)]]))
+    # §2.16's and Appendix B's worked figures
+    idle = lambda lease_s, ka: 2 * 86_400 * ka // lease_s  # noqa: E731
+    closes = lambda lease_s, ka: round(idle(lease_s, ka) * 0.05 ** (ka - 1), 2)  # noqa: E731
+    gaps = lambda cadence_s: 86_400 // cadence_s  # noqa: E731
+    sf7 = link_v2.keep_alives_a_gap(60_000, 120_000, 4)
+    rf = link_v2.keep_alives_a_gap(60_000, 240_000, 4)
+    sf12_old = link_v2.keep_alives_a_gap(900_000, 1_080_000, 4)
+    figures = {
+        "the table's keep-alives a day": [idle(240, 4), idle(120, 4), idle(480, 4), idle(1080, 4), idle(3600, 2)],
+        "its false closes a day": [closes(240, 4), closes(120, 4), closes(480, 4), closes(1080, 4)],
+        "zenoh's defaults, a day": [idle(10, 4), idle(10, 4) // 2],
+        "scenarios §1": [4 * 4 // 2, 2 * 86_400 * 4 // 2],
+        "SF7 a gap, and a day": [sf7, gaps(60) * sf7[0], gaps(60) * sf7[1], 2160 * 2 == gaps(60) * (sf7[0] + sf7[1]),
+                                 round(111 * 1440 / 2160)],
+        "RF a gap, and a day": [rf, gaps(60) * rf[0], gaps(60) * rf[1], round(100 * 336 / gaps(60))],
+        "SF12 at 3,600 s": [3_600_000 // 4, idle(3600, 4), closes(3600, 4),
+                            link_v2.keep_alives_a_gap(900_000, 3_600_000, 4)],
+        "SF12 at 1,080 s": [1_080_000 // 4, sf12_old, gaps(900) * sf12_old[0], math.ceil(900 / 270) - 1],
+        "SF9 and SBD": [480_000 // 4, 3_600_000 // 2],
+    }
+    out.append(("link.v2 §2.16's and Appendix B's worked figures, computed from the text alone, come out as printed: "
+                "the table's 2,880, 5,760, 1,440, 640 and 96 keep-alives a day and 0.36, 0.72, 0.18 and 0.08 false "
+                "closes; 69,120 and 34,560 at zenoh's defaults; scenarios §1's 8 in 4 s and 345,600 a day; at SF7 "
+                "(I 30 s, a frame a minute) 1 to 2 a gap, 1,440 to 2,880 a day, the measured 2,160 half-way and "
+                "111 s to 74 s in proportion; on RF (I 60 s, the cadence) 0 to 1 a gap, the measured 0 and 336 "
+                "within, 336 being 23 % of the gaps; SF12 at 3,600 s an interval of 900 s, 192 a day idle, 0.02 "
+                "false closes, 0 to 1 a gap; at 1,080 s an interval of 270 s, 3 a gap, 288 a day; SF9's interval "
+                "120 s and SBD's 1,800 s",
+                [figures]
+                + missing(l2, "| RF (2,400) | 240 s / 4 | 2,880 | 0.36 |", "| LoRa SF7 (5,469) | 120 s / 4 | 5,760 | "
+                              "0.72 |", "| LoRa SF9 (1,758) | 480 s / 4 | 1,440 | 0.18 |",
+                          "| LoRa SF12 (293) | 1,080 s / 4 | 640 | 0.08 |",
+                          "| SBD (2,400, store and forward) | 3,600 s / 2 | 96 |",
+                          "sends 69,120 keep-alives a day over an idle link",
+                          "A far end left at zenoh's defaults sends 34,560 keep-alives a day",
+                          "The uplink sent 2,160 keep-alives a day, 111 s of air. One a gap would be 1,440, and 74 "
+                          "s. So half the gaps held a second one",
+                          "The uplink sent none bare, and 336 a day under the lean stack.",
+                          "192 keep-alives a day on an idle link, 0.02 false closes.",
+                          "At 1,080 s, the 270 s interval cost 288 keep-alives a day, half the duty.")
+                + missing(sc2, "R counts 7 to 9 keep-alives each way: 4 s × 4 / 2 s", "or 345,600 a day")
+                + missing(log, "went first in 23 % of them"),
+                [{"the table's keep-alives a day": [2880, 5760, 1440, 640, 96],
+                  "its false closes a day": [0.36, 0.72, 0.18, 0.08],
+                  "zenoh's defaults, a day": [69120, 34560], "scenarios §1": [8, 345600],
+                  "SF7 a gap, and a day": [(1, 2), 1440, 2880, True, 74],
+                  "RF a gap, and a day": [(0, 1), 0, 1440, 23],
+                  "SF12 at 3,600 s": [900_000, 192, 0.02, (0, 1)],
+                  "SF12 at 1,080 s": [270_000, (3, 3), 288, 3], "SF9 and SBD": [120_000, 1_800_000]}]))
+    # 0.17's evidence, counted: who draws the warning, and case 44 (F-529)
+    def draws(c: dict[str, Any]) -> bool:
+        return any(f["code"] == "keep_alive_not_suppressed" for fp in c["expect"].get("faces", [])
+                   for f in fp["findings"])
+
+    drawn = [i for i, c in enumerate(plan) if draws(c)]
+    c44 = plan[44] if len(plan) > 44 else {"policy": "", "expect": {}, "note": "", "implements": {}}
+    ifs44 = _link_interfaces(c44) if c44["policy"] else {}
+
+    def planned44(text: str) -> Any:
+        p = link_v2.plan(text, c44["implements"], ifs44, c44.get("catalog"))
+        if "refused" in p:
+            return [f["code"] for f in p["refused"]]
+        return any(f["code"] == "keep_alive_not_suppressed" for fp in p["faces"] for f in fp["findings"])
+
+    reach = c44["policy"].replace("every_s = 45, keyframe_s = 900", "every_s = 45")
+    at_i = c44["policy"].replace("every_s = 45, keyframe_s = 900", "every_s = 60")
+    out.append(("link.v2 0.17's evidence as zk2py counts it: v2/plan.json 45 cases; keep_alive_not_suppressed is "
+                "drawn by 6, 15 and 19, above their intervals as before, and now by the eleven the entry names, "
+                "each at its interval. F-529: case 44, the entry's case of a cadence below the interval, expects a "
+                "refusal, keyframe_unreachable (probe.v1's frames/link reaches a full record every 15 frames, 675 "
+                "s at 45 s, under the 900 s asked), so it shows no plan, and nothing of the warning; zk2py plans "
+                "its face with the keyframe_s left out and draws none, and at 60 s draws it",
+                [len(plan), drawn, c44["expect"].get("refused", [{}])[0].get("code"),
+                 "the plan warns no `keep_alive_not_suppressed`" in c44["note"], reach != c44["policy"],
+                 planned44(c44["policy"]), planned44(reach), planned44(at_i)]
+                + missing(log, "`v2/plan.json` gains case 44** (from 0): case 5's face with its frame every 45 s, "
+                               "below the 60-s interval, which draws no `keep_alive_not_suppressed`.",
+                          "Cases 5, 8, 9, 12, 14, 16, 17, 18, 20, 22 and 23 draw it now, each at its interval"),
+                [45, [5, 6, 8, 9, 12, 14, 15, 16, 17, 18, 19, 20, 22, 23], "keyframe_unreachable", True, True,
+                 ["keyframe_unreachable"], False, True]))
+    # F-530 to F-534, each text as its finding quotes it, so an answer moves it
+    desc = " ".join(plan_doc["description"].split())
+    out.append(("F-530 (open): v2/plan.json's description states every optional member of a case but users, which "
+                "three cases carry and link.v2 0.15's entry alone explains",
+                ["`users`" in desc, "`narrow`" in desc and "`catalog`" in desc, with_users]
+                + missing(log, "A case may give `users`, the principals the deployment binds by a user name."),
+                [False, True, [41, 42, 43]]))
+    out.append(("F-531 (open): link.v2 §2.18 says the far end runs none of the block unfilled, since zenoh loads no "
+                "user without a password and opens no dictionary it cannot read; measured (link_v2_live), a "
+                "zenoh 1.10.1 router starts with a usrpwd user and no password, or the placeholder one, once its "
+                "dictionary is filled in, and attaches to nothing",
+                missing(l2, "zenoh loads no user without a password, and opens no dictionary it cannot read, so the "
+                            "far end runs none of it unfilled."), []))
+    conv = link_v2.parse_policy(_scenarios_v2_policy(spec))[0]
+    null_timeout = [f["code"] + " " + f["at"] for f in link_v2.check_transport(
+        _scenarios_v2_policy(spec), {**link_v2.read_config(link_v2.block(conv)), "routing/interests/timeout": None}
+    )["findings"]] if conv is not None else None
+    eight = [p for p, _, _ in link_v2.TRANSPORT.values()]
+    out.append(("F-532 (open): link.v2 §2.19 reads a null as left out in three places, timestamping/enabled, a mode "
+                "of it and mode, for zenoh's reason that it fills an optional value with its default; "
+                "routing/interests/timeout is a fourth value zenoh 1.10.1 loads as null (measured on zenoh-python, "
+                "the other seven keys refused), which the text does not name: zk2py reads it as stated, "
+                "transport_differs, as the reference's check face does (observed); no v2/transport.json case "
+                "states a null among the eight keys",
+                missing(l2, "A `null` reads as left out: as the value, at a mode, or as the `mode`. zenoh 1.10.1 "
+                            "fills each such optional value with its default.")
+                + [null_timeout, [i for i, c in enumerate(tr) for r in (c["router"], c.get("peer") or {})
+                                  if any(r.get(p, 0) is None for p in eight)]],
+                [["transport_differs transport.interests_timeout_ms"], []]))
+    zm = repo / "examples" / "zk2" / "zenoh-modem"
+    zflat = lambda rel: " ".join((zm / rel).read_text(encoding="utf-8").split())  # noqa: E731
+    linkmd, mig, sf7face = zflat("link.md"), zflat("MIGRATION.md"), zflat("faces/zenohd-lora0-sf7.face.toml")
+    out.append(("F-533 (open): zenoh-modem's mapping still prices its faces' keep-alives by the rule link.v2 0.17 "
+                "replaced, and lists warnings its plans no longer stop at: link.md's \"A batch sent resets its "
+                "end's keep-alive interval … so data replaces every keep-alive the uplink would send\", its table's "
+                "warnings for RF, SF9, SF12 and SBD without keep_alive_not_suppressed, SF7's one keep-alive "
+                "between two frames, 1,440 a day and 74 s; MIGRATION.md §3.1's warnings and §3.3, and §6's rows "
+                "that hold #1107 and #1108 open beside its own §3.2 and §3.4; plan.json's cases 14, 16, 17 and 18, "
+                "the faces' plans, draw the warning, and Appendix B measures 2,160 a day and 111 s",
+                missing(linkmd, "**Keep-alives.** A batch sent resets its end's keep-alive interval.",
+                        "so data > replaces every keep-alive the uplink would send.",
+                        "so the uplink pays one keep-alive between two frames, 74 s of air a day",
+                        "| 240 s / 4, 240 s | 10 s | 222 | `frames/fast`, 60 s | 120 | `frame_unlisted` |")
+                + missing(sf7face, "the uplink pays one keep-alive between two # frames, 1,440 a day and 74 s of air")
+                + missing(mig, "on 3.3, `keep_alive_not_suppressed` at SF7, and `frame_over_batch` at SF9",
+                          "At four frame intervals a lease, the frames replace every uplink keep-alive.",
+                          "neither the policy nor `--far-config`'s block says so yet | #1107 |",
+                          "2,160 a day, where §2.16 counts 1,440 | Budget SF7's uplink at the measured count | "
+                          "#1108 |",
+                          "Since `link.v2` 0.15 (#1107) its `transport` also names the far principal's usrpwd "
+                          "`user`")
+                + [[i for i in (14, 16, 17, 18) if draws(plan[i])]], [[14, 16, 17, 18]]))
+    modem = [i for i, c in enumerate(plan) if "zm-1.10.2-r1" in c["policy"] and "modem.v3" in c["policy"]]
+    out.append(("F-534 (open): link.v2 Appendix B says zenoh-modem's faces' plans are plan.json's last five cases; "
+                "they are cases 14 to 18 of 45",
+                missing(l2, "Their plans are `plan.json`'s last five cases.") + [modem, len(plan)],
+                [[14, 15, 16, 17, 18], 45]))
+    # review-bot's note 5 on #1121: stamps() reads a shape the text does not
+    # name as stamping. No spec case hits it; zk2py's own cases pin it.
+    shapes_ok = lambda r: (r.get("mode") in (None, "router", "peer", "client")  # noqa: E731
+                           and (r.get("timestamping/enabled") is None
+                                or isinstance(r["timestamping/enabled"], bool)
+                                or (isinstance(r["timestamping/enabled"], dict)
+                                    and all(k in ("router", "peer", "client") and (v is None or isinstance(v, bool))
+                                            for k, v in r["timestamping/enabled"].items()))))
+    out.append(("link_v2.stamps over a shape §2.19 does not name (a mode that is none of the three, a value that is "
+                "neither a boolean nor a value per mode of booleans): read as stamping, zk2py's own reading, so the "
+                "warning stands until the file shows timestamping off; no v2/transport.json case states such a "
+                "router or far end, so no fixture rests on it (review-bot's note on #1121)",
+                [[i for i, c in enumerate(tr) if not shapes_ok(c["router"]) or not shapes_ok(c.get("peer") or {})],
+                 [link_v2.stamps(r) for r in ({"mode": "gateway"}, {"timestamping/enabled": "off"},
+                                              {"timestamping/enabled": 0}, {"timestamping/enabled": {"router": "no"}},
+                                              {"timestamping/enabled": {"relay": False}},
+                                              {"mode": "peer", "timestamping/enabled": []})],
+                 [link_v2.stamps(r) for r in ({"mode": None, "timestamping/enabled": None},
+                                              {"mode": "peer", "timestamping/enabled": {"peer": None}},
+                                              {"timestamping/enabled": {"router": None, "peer": False}},
+                                              {"timestamping/enabled": {"router": False}})]],
+                [[], [True] * 6, [True, False, True, False]]))
+    return out
+
+
+def _scenarios_v2_policy(spec: Path) -> str:
+    """``scenarios-v2.md``'s Conventions' face policy, as the text writes it."""
+    import re
+
+    text = (spec / "profiles" / "link" / "scenarios-v2.md").read_text(encoding="utf-8")
+    conv = re.search(r"\*\*The face policy\*\*, unless a section changes it:\n\n  ```toml\n(.*?)\n  ```", text, re.S)
+    return "\n".join(line.removeprefix("  ") for line in conv.group(1).splitlines()) + "\n" if conv else ""
 
 
 def _round107_readings(root: Path) -> list[tuple[str, Any, Any]]:

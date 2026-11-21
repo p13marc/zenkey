@@ -7234,6 +7234,125 @@ two objects, core §8.2's "Nothing checks this posture", and §8 Expected
 F-436, re-run, is closed. See
 "At core 0.105 and link.v2 0.14" in `SPEC-FINDINGS.md`.
 
+## `link.v2` 0.15 to 0.17 and core 0.106: the end that opens, keep-alives beside data, and round 109 answered (round 110)
+
+Round 110 read main 5265cc52, which takes:
+- **link.v2 0.15** (#1107): a face's `opens`, `"far"` where none is
+  stated and `"near"` only on a `south-region` face; §2.5's MUST, a
+  generator refuses a face the near router opens whose far principal is
+  bound by a user name (`near_opens_user`); §2.18, the far end's block
+  names that user beside placeholders; §2.19, a `null` read as left
+  out; `scenarios-v2.md` §4;
+- **link.v2 0.16:** round 109's F-524 and F-525 answered, editorial;
+- **link.v2 0.17** (#1108): §2.16's "Data spares the keep-alives" as
+  zenoh's timer counts them, `keep_alive_not_suppressed` at the
+  interval or above it, Appendix B's "Keep-alives beside frames", and
+  `scenarios-v2.md` §5;
+- **core 0.106:** F-526 to F-528 answered, editorial.
+
+No rule changed beyond what the changelogs state.
+
+### Its walk of `RULES.md` at 0.106
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 90 | 78 | 3 | 9 |
+| consumer | 33 | 29 | 0 | 4 |
+| caller | 18 | 18 | 0 | 0 |
+| observer | 104 | 99 | 3 | 2 |
+| static, in every class | 68 | 66 | 0 | 2 |
+
+- **284 rows walked of 284, none without a verdict.** 29 verdicts are
+  beyond the index. `RULES.md` did not move.
+- **The re-key came first,** in the commit that brings `just
+  py-conformance` level (6649 of 6649).
+
+### What round 110 changed in zk2py
+
+- **`link_v2`** (0.15 to 0.17):
+  - `parse_policy` reads `opens` (`FaceV2.opens`);
+  - `plan` takes `users`, the principals the deployment binds by a user
+    name, and refuses `near_opens_user`. Given none, it does not ask;
+  - `far_block` given them names the far principal that the faces other
+    than device faces share, as `transport.auth.usrpwd.user`, beside
+    two placeholders. The text gives a placeholder no spelling, so
+    these are zk2py's;
+  - `merge`: a configuration and a block, key by key, the block's value
+    kept (§2.18 at 0.16);
+  - `stamps` reads a `null` as left out;
+  - `keep_alives_a_gap`, §2.16's bounds between two batches, and
+    `keep_alives`, the timer over a schedule of batches;
+  - `keep_alive_not_suppressed` at `cadence × keep_alive ≥ lease_ms`.
+- **`zk2c.read_delete`** (core 0.106's note on F-527): a delete with no
+  attachment carries no envelope. On a state key it is core §4.2's
+  sample with no envelope, ordered by its Zenoh timestamp, where zk2py
+  refused it `short`. On an events key it stays `form`
+  (`live.no_event`).
+- **`link_v2_live`,** new: `scenarios-v2.md` §4 and §5.
+- **`stamp_live`:** §3 re-keyed to 0.16. `fault` is what the section
+  expects, and `oper` is beside it.
+- **The mend** (`py-carry-r109.md`, review-bot's notes on #1121):
+  1. `events_live`'s capture line is split, and a missing capture fails
+     the run by name;
+  2. the capture's three rows are checked before the delete's row is
+     read, and the run returns there when they are not;
+  3. `blackbox.workdir`: a working directory under `$ZK2PY_SCRATCH`,
+     created where missing, else under the platform's temporary
+     directory. `stamp_live`, `events_live`'s capture and
+     `link_v2_live` use it;
+  4. it is a `TemporaryDirectory`, so a run's `users.txt` goes with it;
+  5. `stamps()` on a shape the text does not name: a reading shows that
+     no `transport.json` case states one, and pins zk2py's own.
+
+**`just py-conformance`: 6663 of 6663** on 5265cc52. Of them, `link` 343
+(`v2/lints.json` 75 of 75, `v2/plan.json` 45 of 45, `v2/transport.json`
+24 of 24, the family whole) and `readings` 1022.
+
+### §2.16's figures, computed
+
+From the text alone, each as printed: the table's keep-alives a day and
+false closes; 1 to 2 a gap at LoRa SF7, where the measured 2,160 a day
+is one and a half; 0 to 1 a gap on RF; SF12's 192 a day idle at 3,600 s
+and 288 a day at 1,080 s; `scenarios-v2.md` §5's 0, 16, 24 and 8. The
+reading in the `readings` family holds each figure.
+
+### Live
+
+On the black boxes of 5265cc52. Every router is zenoh-python's, zenoh
+1.10.1: `bin/current` holds no zenohd.
+
+| Runner | What | Result |
+|---|---|---|
+| `stamp_live --only near` | `scenarios-v2.md` §3 as 0.16 words it: F's occurrence of `fault` carries no timestamp under N's block, and N's own in the control; zk2py's check and `zenctl check face` over N's file; beside it `oper` with its owner's stamp both ways, and each stamp's 26 bytes | 11/11 |
+| `stamp_live --only far` | the far end's block, as in round 109 | 4/4 |
+| `link_v2_live --only s4` | `scenarios-v2.md` §4 whole. F, a router from zk2py's far block with its placeholders filled in, opens the face as `ground-router`, and G receives `oper`; F refuses a session with no user, and one with a user its dictionary lacks; `opens = "near"` is refused by zk2py's plan and by `zenctl acl gen`; N opening to F, presenting `router`, is let in and G receives nothing of 20 puts. Beside it, the far block unfilled, and with its dictionary alone filled in (F-531) | 11/11 |
+| `link_v2_live --only s5` | `scenarios-v2.md` §5: N's lease 1,000 ms, 17 puts a step, N's keep-alives toward F counted by a relay: 0, 16, 24 and 8 | 5/5 |
+| `events_live` | whole: `state.md` §8 with Expected 5's count, the subscription three and the replay two, from zk2py's owner under 16-bit runs and 32-bit draws; a delete heard and a `reply_del` replayed with each kind of attachment (`form`, `form`, `short`, `sample_kind`, `trailing`); `zenctl record` and `zenctl replay`; `zenctl echo` and `get`; the owner example | 24/24 |
+| `stray_live`, `far_side_live`, `state_pairings`, `packed_live` | rerun over `zk2c.read_delete` and `link_v2` | 7/7, 16/16, 118/118, 27/27 |
+
+**The reference, observed (not findings):**
+- **`zenctl acl gen`** refuses §4's policy with `opens = "near"`,
+  `near_opens_user` at `opens`, exit 2.
+- **`zenctl acl gen --far-config`** names `ground-router` as the usrpwd
+  user beside its own two placeholders, and names none for two faces of
+  two far principals, as zk2py does.
+- **`zenctl check face`** over zk2py's N reports no `face_timestamping`
+  under the block and `face_timestamping` in the control, and exits 1
+  under both, as in round 109.
+
+**Not run:** a zenohd black box, none being in `bin/current`; a Rust
+consumer of an event, which no black box is; the reference's own
+generated pair on routers (§4 ran zk2py's blocks, and read the
+reference's far block); `scenarios-v2.md` §1 and §2 on routers; F-531's
+measurement on zenohd.
+
+Round 110 found F-529 to F-534: an ambiguity (a `null`
+`routing/interests/timeout`) and five minor errors (`plan.json`'s case
+44 expects a refusal; its description names no `users`; §2.18's "runs
+none of it unfilled"; zenoh-modem's notes on the old keep-alive rule;
+Appendix B's "last five cases"). None is a blocker. F-524 to F-528 are
+answered. See "At core 0.106 and link.v2 0.17" in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -7436,7 +7555,9 @@ impl/python/
     link_scenarios.py link.v1   scenarios.md §1–§13 on zenoh-python routers, over examples/zk2/link/
     link_v2.py        link.v2   the policy, the plan, the transport block and its checks (round 96); the contract
                                 side and frames per face, exposure.json (0.3, round 99); timestamping off in the
-                                block, the far end's block, and face_timestamping (0.13, round 109)
+                                block, the far end's block, and face_timestamping (0.13, round 109); a face's
+                                opens, near_opens_user, the far end's user, a null left out (0.15), the block
+                                merged (0.16), and §2.16's keep-alives beside data (0.17) (round 110)
     far_side.py       §8.1 §8.5 a far side across a face: the reply timeout, a subscription's horizon, Redeclaring
                                 (core 0.91, observer 0.23, link.v2 0.4; round 99)
     far_side_live.py  §8.1 §8.5 constrained.md §8 and §9 in process, a proxy dropping a batch the far client sends
@@ -7520,9 +7641,14 @@ impl/python/
     events_live.py    §2.6 §7.5 scenarios/state.md §8 live: zk2py's owner and consumer, the owner example's events,
                                 zenctl echo and get, over a union storage stand-in (round 107); step 4's two puts
                                 that carry no event, from zk2py and replayed by zenctl replay (round 108); step 4's
-                                delete, and deletes and reply_dels by their attachments (round 109)
+                                delete, and deletes and reply_dels by their attachments (round 109); Expected 5's
+                                count as core 0.106 states it (round 110)
     stamp_live.py     link.v2   scenarios-v2.md §3 on a zenoh-python N run from zk2py's generated configuration,
-                                zenctl check face over it, and a far router from the far end's block (round 109)
+                                zenctl check face over it, and a far router from the far end's block (round 109);
+                                §3 as 0.16 words it, F hearing `fault` (round 110)
+    link_v2_live.py   link.v2   scenarios-v2.md §4, the far end opening a face bound by a user name, with zenctl
+                                acl gen beside zk2py's generator, and §5, N's keep-alives beside puts counted by a
+                                relay (round 110)
     stray_live.py     §4.2      scenarios/state.md §15, a stray reply_del and an owner on an earlier revision
                                 (round 107); the readers given the owner's revision (step 3, round 108)
     archive_live.py   §4.4 S5   scenarios/state.md §4 to §6: the Rust archive aligning from zk2py's owner
@@ -7551,7 +7677,9 @@ impl/python/
     adminspace.py     observer §4.3, App. B a router or a peer in a process of its own, the load beside it, the @/** recorder,
                                 and the freeze measurement (never a suite), under access control too (0.50)
     blackbox.py                 where the live runners find the reference's black boxes: $ZK2PY_BLACKBOX, else
-                                /srv/dev/scratch/zenkey/bin/current (the mend, round 103)
+                                /srv/dev/scratch/zenkey/bin/current (the mend, round 103); workdir, a runner's
+                                working directory under $ZK2PY_SCRATCH or the temporary directory, removed at its
+                                end (the mend, round 110)
     proc.py                     helper processes for the measurements: a router, a publisher, a consumer that stops
     checks.py                   a live runner's checks: known failures by identity, XFAIL and XPASS, the exit
   interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan, sysinfo,
