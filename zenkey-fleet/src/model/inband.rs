@@ -551,7 +551,7 @@ pub fn group_unread_words(token: &str) -> &'static str {
 /// ```text
 /// host, run 0007, seq 5, time unknown, 2 groups
 /// #0 alpha.v1, tag 11, 34 bits: state/status 0000000a vouched
-/// #900 tag 11, 34 bits: unread, unknown_index: the catalog holds no entry at its index (core §8.6)
+/// #900, tag 11, 34 bits: unread, unknown_index: the catalog holds no entry at its index (core §8.6)
 /// ```
 ///
 /// A templated section says its live count and the ranks it vouches for.

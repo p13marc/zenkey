@@ -71,6 +71,16 @@ deliberately no edges: a merged ordering shows when things were seen on which cl
 
 ```
 
+A `--catalog` that does not read is refused with `--from` too, though a
+capture's lanes are placed with none: the flag is never passed over.
+
+```console
+$ zenctl timeline --from tests/cmd/fixtures/owner-heartbeat.zrec --contracts ../zenkey/tests/contracts/trio --catalog tests/cmd/fixtures/no-such-catalog.json --format table --color never
+? 2
+Error: --catalog tests/cmd/fixtures/no-such-catalog.json: No such file or directory (os error 2)
+
+```
+
 `replay` writes them back as it recorded them, in a namespace of its own.
 
 ```console
