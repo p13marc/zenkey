@@ -580,14 +580,19 @@ def _freshness_apply(path: Path) -> list[Result]:
 
     data = _load_json(path)
     lay = _load_json(path.parents[3] / "conformance" / "heartbeat" / "layouts.json")
-    layouts = {}
+    layouts, contracts = {}, {}
     with tempfile.TemporaryDirectory() as tmp:
         for name, text in lay["contracts"].items():
             c = load_contract(Path(tmp) / f"{name}.toml", text=text)
+            contracts[name] = c
             layouts[name] = heartbeat.layout_of(c.canonical, c.fingerprint)
     out: list[Result] = []
     for i, c in enumerate(data["cases"]):
-        for what, got, want in freshness_v2.apply_case(layouts[c["layout"]], c):
+        # Text 0.9: "Cases with a `catalog` are §2.5's rule for an owner
+        # heartbeat" (a null catalog among them: the member is there).
+        steps = freshness_v2.apply_owner_case(contracts, c) if "catalog" in c \
+            else freshness_v2.apply_case(layouts[c["layout"]], c)
+        for what, got, want in steps:
             out.append(_check(f"apply.json {i}: {c['note']}: {what}", got, want))
     return out
 
@@ -4231,11 +4236,16 @@ annotations = { "timing.period_ms" = 60000, "freshness.ttl_s" = 100 }
     # core 0.86's Consume: the heartbeat a binding needs.
     use = acl.Use("health.v1", ["lab/svc"], ["state/status"])
     out.append(("core §11.1 (0.86): Consume holds the subscription to each named provider's heartbeat covering a bound "
-                "freshness.v2 interface; zk2py's generator grants it, and none for a binding of no collection",
-                missing(core, "the subscription to each named provider's `…/freshness.v2/stream/heartbeat/<iface>`")
+                "freshness.v2 interface; zk2py's generator grants it, and none for a binding of no collection; with "
+                "it, as freshness.v2 0.9 adopts core 0.108 (round 113), the provider's owner heartbeat key for each "
+                "class those collections have, health.v1's status being host",
+                missing(core, "the subscription to each named provider's `…/freshness.v2/stream/heartbeat/<iface>`",
+                        "With it goes the subscription to that provider's owner heartbeat key, "
+                        "`…/freshness.v2/stream/heartbeats/<class>`, for each class those collections have")
                 + [acl.heartbeat_selectors(use, {"health.v1": [hc]}),
                    acl.heartbeat_selectors(acl.Use("health.v1", ["lab/svc"], ["stream/faults"]), {"health.v1": [hc]})],
-                [["zk2/lab/svc/freshness.v2/stream/heartbeat/health.v1"], []]))
+                [["zk2/lab/svc/freshness.v2/stream/heartbeat/health.v1",
+                  "zk2/lab/svc/freshness.v2/stream/heartbeats/host"], []]))
     # F-456: a published revision's review.
     out.append(("F-456: core §9.8 asks a human to accept a review before publication, and §9.7's history records no "
                 "acceptance; zk2py's reading: a revision whose bundle is published is accepted",
@@ -4593,16 +4603,22 @@ annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "1" }
                 "and timed_downsampled, frame_unlisted and keep_alive_not_suppressed (steps 3 to 6, on routers, "
                 "not run)",
                 missing(flat("profiles/link/scenarios-v2.md"), "It denies `frames/detail` and `setpoint` by name.")
-                + [[(d["id"], d["key_exprs"]) for d in face_plan.get("deny", [])[3:4]],
+                # Since link.v2 0.19 (round 113) the plan also denies the
+                # `host` class's owner heartbeat key by name, before
+                # probe.v1's stream deny, and lists the `link` class's as
+                # evidence: Expected 1 names neither (F-551).
+                + [[(d["id"], d["key_exprs"]) for d in face_plan.get("deny", []) if d["id"].startswith("stream")],
                    [r["key_expr"] for r in (face_plan.get("downsampling") or {}).get("rules", [])],
                    [(x["code"], x["at"]) for x in face_plan.get("findings", [])],
                    [e for x in face_plan.get("liveness", []) for e in x["evidence"]]],
-                [[("stream:probe.v1", ["zk2/*/*/probe.v1/stream/frames/detail/**",
+                [[("stream:freshness.v2", ["zk2/*/*/freshness.v2/stream/heartbeats/host/**"]),
+                  ("stream:probe.v1", ["zk2/*/*/probe.v1/stream/frames/detail/**",
                                        "zk2/*/*/probe.v1/stream/setpoint/**"])],
                  ["zk2/lab/probe-a/probe.v1/stream/level"],
                  [("frame_unlisted", "probe.v1/stream/frames/detail"), ("timed_downsampled", "probe.v1/stream/setpoint"),
                   ("keep_alive_not_suppressed", "transport.keep_alive")],
-                 ["freshness.v2/stream/heartbeat/probe.v1", "probe.v1/state/status", "probe.v1/stream/frames/link"]]))
+                 ["freshness.v2/stream/heartbeat/probe.v1", "freshness.v2/stream/heartbeats/link",
+                  "probe.v1/state/status", "probe.v1/stream/frames/link"]]))
 
     # #983's last "Done when" item (main 2ed6d968, the coordinator's addition
     # to round 99): modem.v3's frames and gendev.v1's frames/sample, written
@@ -5747,13 +5763,13 @@ def _round109_readings(root: Path) -> list[tuple[str, Any, Any]]:
     core_v = f"{m.group(1)}.{m.group(2)}" if m else None
     out: list[tuple[str, Any, Any]] = [
         ("core 0.105 or later and link.v2 0.14 or later, each with its entry, link.v2 0.13's too; observer stays "
-         "0.33; link.v2 still written against core 0.100",
+         "0.33; link.v2 written against core 0.100 then, 0.108 since its 0.19 (round 113)",
          [_at_least(core_v, "0.105"), _at_least(header("profiles/link/v2.md")[0], "0.14"),
           header("observer.md")[0], header("profiles/link/v2.md")[1]]
          + entry("CHANGELOG.md", "0.105", "a delete on an events key")
          + entry("profiles/link/CHANGELOG.md", "link.v2 0.14", "editorial")
          + entry("profiles/link/CHANGELOG.md", "link.v2 0.13", "the near router's timestamping off"),
-         [True, True, "0.33", "0.100"]),
+         [True, True, "0.33", "0.108"]),
     ]
     # link.v2 0.13: §2.18's MUST, §2.19's reading and code, §5's row
     out.append(("link.v2 0.13 §2.18, §2.19 and §5: a generator writes the near router's timestamping off for a "
@@ -6151,7 +6167,8 @@ def _round111_readings(root: Path) -> list[tuple[str, Any, Any]]:
             e.pop("minor")
     shortest = '{"iface":"a.v1","contract":"sha256:' + "0" * 64 + '"}'
     out.append(("core 0.107 §3.3 \"Size\", zenoh-modem's node shape on zk2py's owner: four entries, each file's "
-                "minor (4, 1, 1, 0), 30 capabilities, three profiles; `interfaces` 523 B (513 B as the reference "
+                "minor (4, 1, 1, and freshness.v2's 1 since its revision 1.1, round 113; 0 before, a digit either "
+                "way), 30 capabilities, three profiles; `interfaces` 523 B (513 B as the reference "
                 "holds freshness.v2, its bundle alone, the entry's figure), `capabilities` 351 B and `profiles` 41 B "
                 "as the entry measures, 39 B of names; the four members 954 B, the others 144 B, the header and "
                 "meta's zid, 1,107 B at the address lab/sized, a 32-bit run and a 32-digit zid: over 1 KB, no "
@@ -6161,9 +6178,9 @@ def _round111_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  compact(node["profiles"]), sum(len(f'"{n}":') for n in ("interfaces", "capabilities", "profiles")),
                  sized.four, sized.others, sized.total, sized.over, sized.should, sized.empty, sized.within,
                  fresh.minor],
-                [[("modem.v3", 4), ("config.v1", 1), ("health.v1", 1), ("freshness.v2", 0)], 30,
+                [[("modem.v3", 4), ("config.v1", 1), ("health.v1", 1), ("freshness.v2", 1)], 30,
                  ["freshness.v2", "link.v1", "telemetry.v2"], 523, 513, 351, 41, 39, 954, 144, 1107, True, [], [],
-                 "four", 0]))
+                 "four", 1]))
     out.append(("core 0.107 §3.3, \"An entry is at least 100 B, 71 of them its fingerprint\": the shortest entry, an "
                 "interface id of four characters and no other member, is 101 B, and a fingerprint 71; "
                 "`\"token\":true` is 13 B an entry and `\"minor\":0` 10 B, each with its comma, as the entry counts "
@@ -6617,8 +6634,8 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
             return None
         return next((n for n, word in enumerate(("RF", "SF7", "SF9", "SF12", "SBD")) if word in mm.group(1)), None)
 
-    out.append(("link.v2 0.18's evidence as zk2py counts it (F-529, resolved): v2/plan.json 46 cases, v2/transport.json "
-                "27; case 44 asks a full record every 675 s at 45 s, plans, draws frame_over_interval and no "
+    out.append(("link.v2 0.18's evidence as zk2py counts it (F-529, resolved): v2/plan.json 46 cases then, 48 since "
+                "0.19 (round 113), v2/transport.json 27; case 44 asks a full record every 675 s at 45 s, plans, draws frame_over_interval and no "
                 "keep_alive_not_suppressed; case 45 is case 5's face under a lease of 240,001 ms and draws none, "
                 "where case 5 at 240,000 ms does: §2.16's inequality pinned on both sides; transport.json's cases "
                 "24 to 26 state a null among the eight keys, the lease and twice routing/interests/timeout, drawing "
@@ -6628,7 +6645,7 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  lease_of(case(5)), draws(case(5)), with_null,
                  [[f["code"] + " " + f["at"] for f in tr[i]["expect"]["findings"]] for i in sorted(with_null)]]
                 + missing(llog, "`v2/plan.json` gains case 45", "`v2/transport.json` gains cases 24 to 26."),
-                [46, 27, True, False, False, True, 240_001, False, 240_000, True,
+                [48, 27, True, False, False, True, 240_001, False, 240_000, True,
                  {24: ["transport/link/tx/lease"], 25: ["routing/interests/timeout"],
                   26: ["routing/interests/timeout"]},
                  [["transport_differs transport.lease_ms"], ["transport_differs transport.interests_timeout_ms"], []]]))
@@ -6636,10 +6653,10 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
     modem = [i for i, c in enumerate(plan) if "zm-1.10.2-r1" in c["policy"] and "modem.v3" in c["policy"]]
     out.append(("F-530 and F-534, resolved (link.v2 0.18): v2/plan.json's description says what a case's users is; "
                 "Appendix B names zenoh-modem's plans as cases 14 to 18, which hold RF, LoRa at SF7, SF9 and SF12, "
-                "then SBD, in that order, of 46",
+                "then SBD, in that order, of 46 then and 48 since 0.19",
                 ["A case may give `users`, the principals the deployment binds by a user name" in desc, modem,
                  [medium(plan[i]["note"]) for i in modem], len(plan)],
-                [True, [14, 15, 16, 17, 18], [0, 1, 2, 3, 4], 46]))
+                [True, [14, 15, 16, 17, 18], [0, 1, 2, 3, 4], 48]))
     zm = repo / "examples" / "zk2" / "zenoh-modem"
     zflat = lambda rel: " ".join((zm / rel).read_text(encoding="utf-8").split())  # noqa: E731
     # link.md's notes are block quotes: their lines' "> " is no word of theirs.
@@ -6714,14 +6731,14 @@ def _round110_readings(root: Path) -> list[tuple[str, Any, Any]]:
     core_v = f"{m.group(1)}.{m.group(2)}" if m else None
     out: list[tuple[str, Any, Any]] = [
         ("core 0.106 or later and link.v2 0.17 or later, each with its entry, link.v2 0.15's and 0.16's too; observer "
-         "stays 0.33; link.v2 still written against core 0.100",
+         "stays 0.33; link.v2 written against core 0.100 then, 0.108 since its 0.19 (round 113)",
          [_at_least(core_v, "0.106"), _at_least(header("profiles/link/v2.md")[0], "0.17"), header("observer.md")[0],
           header("profiles/link/v2.md")[1]]
          + entry("CHANGELOG.md", "0.106", "a delete with no attachment on an events key")
          + entry("profiles/link/CHANGELOG.md", "link.v2 0.17", "`keep_alive_not_suppressed` at the interval")
          + entry("profiles/link/CHANGELOG.md", "link.v2 0.16", "editorial")
          + entry("profiles/link/CHANGELOG.md", "link.v2 0.15", "the end that opens"),
-         [True, True, "0.33", "0.100"]),
+         [True, True, "0.33", "0.108"]),
     ]
     # link.v2 0.15: `opens` as §2.1, §2.3, §2.5, §2.18, §2.19 and §5 state it
     out.append(("link.v2 0.15 §2.1, §2.3, §2.5, §2.18, §2.19 and §5: a face's opens, far where none is stated, near "
@@ -6903,10 +6920,10 @@ def _round110_readings(root: Path) -> list[tuple[str, Any, Any]]:
 
     out.append(("link.v2 0.17's evidence as zk2py counts it: keep_alive_not_suppressed is drawn by 6, 15 and 19, "
                 "above their intervals as before, and by the eleven the entry names, each at its interval; "
-                "v2/plan.json held 45 cases then, 46 since 0.18",
+                "v2/plan.json held 45 cases then, 46 since 0.18 and 48 since 0.19 (round 113)",
                 [len(plan), [i for i, c in enumerate(plan) if draws(c)]]
                 + missing(log, "Cases 5, 8, 9, 12, 14, 16, 17, 18, 20, 22 and 23 draw it now, each at its interval"),
-                [46, [5, 6, 8, 9, 12, 14, 15, 16, 17, 18, 19, 20, 22, 23]]))
+                [48, [5, 6, 8, 9, 12, 14, 15, 16, 17, 18, 19, 20, 22, 23]]))
     # review-bot's note 5 on #1121: stamps() reads a shape the text does not
     # name as stamping. No spec case hits it; zk2py's own cases pin it.
     shapes_ok = lambda r: (r.get("mode") in (None, "router", "peer", "client")  # noqa: E731
@@ -7323,13 +7340,15 @@ def _round105_readings(root: Path) -> list[tuple[str, Any, Any]]:
                    for w in (16, 32)], [975, 977]))
     l2 = (spec / "profiles" / "link" / "conformance" / "v2" / "plan.json").read_text(encoding="utf-8")
     # #1099 (main d5a83804, round 107) moved the faces and the cases on to
-    # 29bf7d47 together: the answer holds, the cases following the faces.
+    # 29bf7d47 together, and #1137 (main c4e1065a, round 113) on to 8982cc41:
+    # the answer holds, the cases following the faces.
     out.append(("F-505 answered (link.v2 0.11): v2/plan.json's cases 14 to 18 carry face policies naming the catalog "
-                "zenoh-modem's faces name, 29bf7d47 since #1099, and no case names e3a529fe in a policy",
-                [r'catalog  = \"e3a529fe\"' in l2, r'catalog  = \"29bf7d47\"' in l2,
-                 'catalog  = "29bf7d47"' in (spec.parent / "examples" / "zk2" / "zenoh-modem" / "faces" /
+                "zenoh-modem's faces name, 8982cc41 since #1137 (29bf7d47 since #1099), and no case names e3a529fe "
+                "or 29bf7d47 in a policy",
+                [r'catalog  = \"e3a529fe\"' in l2, r'catalog  = \"29bf7d47\"' in l2, r'catalog  = \"8982cc41\"' in l2,
+                 'catalog  = "8982cc41"' in (spec.parent / "examples" / "zk2" / "zenoh-modem" / "faces" /
                                             "zenohd-rf0.face.toml").read_text(encoding="utf-8")],
-                [False, True, True]))
+                [False, False, True, True]))
     out.append(("F-506 answered (core 0.102) in core §4.3 \"Minting\": a last confirmation at each put and heartbeat, "
                 "a delete's carried by nothing; freshness.v2 §2.4 mints the times at each put since its text 0.8 "
                 "(F-515's answer, round 108)",
@@ -7684,17 +7703,25 @@ def _modem33_readings(root: Path) -> list[tuple[str, Any, Any]]:
     fv2c = load_contract(spec / "profiles" / "freshness" / "freshness.v2.toml")
     # #1099 (round 107): catalog.json appends modem.v3 3.4 at index 10,
     # 29bf7d47 succeeding 0ff6bf6d.
-    out.append(("zenoh-modem's catalog.json is 29bf7d47 (since #1099; 0ff6bf6d since #1080), its index 8 modem.v3 "
-                "3.3's fingerprint, its index 9 freshness.v2's and its index 10 modem.v3 3.4's; its lineage's last, "
-                "0ff6bf6d, is the catalog of its first ten entries, which it succeeds, and e3a529fe of its first nine "
-                "(core §8.6)",
-                [catalog.catalog_id(cat_doc), cat_doc["entries"][8], cat_doc["entries"][9], cat_doc["entries"][-1],
-                 cat_doc["lineage"][-2:], catalog.catalog_id(prev), succeeds],
-                ["29bf7d47", {"contract": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+    # #1137 (round 113): it appends freshness.v2's revision 1.1 at index 11,
+    # "beside 1.0 at index 9": 8982cc41 succeeding 29bf7d47 (freshness.v2
+    # 0.9's entry). The file at main is 1.1; 1.0 is its published bundle.
+    fv2_10 = "sha256:8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890"
+    held_10 = (spec / "profiles" / ".history" / "freshness.v2" / f"{fv2_10.removeprefix('sha256:')}.bundle.json")
+    out.append(("zenoh-modem's catalog.json is 8982cc41 (since #1137; 29bf7d47 since #1099, 0ff6bf6d since #1080), its "
+                "index 8 modem.v3 3.3's fingerprint, its index 9 freshness.v2's revision 1.0, published, its index 10 "
+                "modem.v3 3.4's and its index 11 freshness.v2's revision 1.1, the standard contract's at main; its "
+                "lineage's last, 29bf7d47, is the catalog of its first eleven entries, which it succeeds, and "
+                "0ff6bf6d of its first ten (core §8.6)",
+                [catalog.catalog_id(cat_doc), cat_doc["entries"][8], cat_doc["entries"][9], cat_doc["entries"][10],
+                 cat_doc["entries"][-1], cat_doc["lineage"][-2:], catalog.catalog_id(prev), succeeds,
+                 held_10.is_file(), fv2c.minor],
+                ["8982cc41", {"contract": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
                               "iface": "modem.v3", "index": 8},
-                 {"contract": fv2c.fingerprint, "iface": "freshness.v2", "index": 9},
+                 {"contract": fv2_10, "iface": "freshness.v2", "index": 9},
                  {"contract": c.fingerprint, "iface": "modem.v3", "index": 10},
-                 [{"entries": 9, "id": "e3a529fe"}, {"entries": 10, "id": "0ff6bf6d"}], "0ff6bf6d", True]))
+                 {"contract": fv2c.fingerprint, "iface": "freshness.v2", "index": 11},
+                 [{"entries": 10, "id": "0ff6bf6d"}, {"entries": 11, "id": "29bf7d47"}], "29bf7d47", True, True, 1]))
     # Each face file, planned by zk2py with catalog.json, is its plan.json case.
     cases = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "plan.json")["cases"]
     faces = {"zenohd-rf0": 14, "zenohd-lora0-sf7": 15, "zenohd-lora0-sf9": 16, "zenohd-lora0-sf12": 17,
@@ -7727,8 +7754,8 @@ def _modem33_readings(root: Path) -> list[tuple[str, Any, Any]]:
                                                                  "oper_change")]
     lora = [sorted(json_events + ["zk2/*/*/modem.v3/events/face/device_fault/**"])]
     out.append(("zenoh-modem's five faces (link.v2 0.8 Appendix B), each planned by zk2py with catalog.json as its "
-                "v2/plan.json case 14 to 18, whole (F-505 answered by link.v2 0.11; since #1099 the cases and the "
-                "faces carry 29bf7d47): one frame each at its cadence, liveness evidence, the two others "
+                "v2/plan.json case 14 to 18, whole (F-505 answered by link.v2 0.11; since #1137 the cases and the "
+                "faces carry 8982cc41, round 113): one frame each at its cadence, liveness evidence, the two others "
                 "frame_unlisted; SF7 keep_alive_not_suppressed, above its interval, and since link.v2 0.17 (#1108, "
                 "round 110) RF, SF9, SF12 and SBD too, each at its interval; SF9 frame_over_batch (216 B over 117 B); "
                 "no_arq but on SBD. Since link.v2 0.12 (#1098, round 108) each face lists its events (Appendix B): RF the three "
@@ -7736,21 +7763,21 @@ def _modem33_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "on RF alone; SF7 and SF9 the two rare ones, face/device_fault denied by name; SF12 and SBD none, "
                 "every event denied whole",
                 planned,
-                {"zenohd-rf0": [True, "29bf7d47", "29bf7d47", [("frames/fast", 60, None)],
+                {"zenohd-rf0": [True, "8982cc41", "8982cc41", [("frames/fast", 60, None)],
                                 ["modem.v3/stream/frames/fast"], ["keep_alive_not_suppressed", "not_packed"],
                                 ["no_arq"],
                                 ["device_fault", "identity_change", "oper_change"], [json_events]],
-                 "zenohd-lora0-sf7": [True, "29bf7d47", "29bf7d47", [("frames/fast", 60, None)],
+                 "zenohd-lora0-sf7": [True, "8982cc41", "8982cc41", [("frames/fast", 60, None)],
                                       ["modem.v3/stream/frames/fast"], ["keep_alive_not_suppressed"], ["no_arq"],
                                       ["identity_change", "oper_change"], lora],
-                 "zenohd-lora0-sf9": [True, "29bf7d47", "29bf7d47", [("frames/fast", 120, 900)],
+                 "zenohd-lora0-sf9": [True, "8982cc41", "8982cc41", [("frames/fast", 120, 900)],
                                       ["modem.v3/stream/frames/fast"],
                                       ["frame_over_batch", "keep_alive_not_suppressed"], ["no_arq"],
                                       ["identity_change", "oper_change"], lora],
-                 "zenohd-lora0-sf12": [True, "29bf7d47", "29bf7d47", [("frames/slow", 900, 3600)],
+                 "zenohd-lora0-sf12": [True, "8982cc41", "8982cc41", [("frames/slow", 900, 3600)],
                                        ["modem.v3/stream/frames/slow"], ["keep_alive_not_suppressed"], ["no_arq"],
                                        [], every],
-                 "zenohd-sat0": [True, "29bf7d47", "29bf7d47", [("frames/paid", 1800, None)],
+                 "zenohd-sat0": [True, "8982cc41", "8982cc41", [("frames/paid", 1800, None)],
                                  ["modem.v3/stream/frames/paid"], ["keep_alive_not_suppressed"], [], [], every]}))
     return out
 

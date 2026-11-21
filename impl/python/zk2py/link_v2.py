@@ -597,7 +597,8 @@ class FaceReading:
         return r.frame["interval_ms"] if r.frame is not None else None
 
     def after(self, listed: list[str], res: dict[str, list[link.Resource]], crossing: Any,
-              beats: dict[str, bool]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+              beats: dict[str, bool], owners: list[tuple[str, list[str]]] | None = None,
+              with_heartbeat: set[str] | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """§2.3's warnings this face draws of its own, and its ``frames``
         member (§2.3: "each listed frame that crosses it, as {resource,
         every_s, keyframe_s}, sorted by name. It is absent for a face with no
@@ -635,6 +636,29 @@ class FaceReading:
                 warn("horizon_under_face", HEARTBEAT_AT + i)                           # §2.12
             # §2.16: "each crossing heartbeat's period, half its horizon"
             cadences.append(h * 500)
+        if any(beats.values()):
+            # 0.19 §2.9 "A crossing heartbeat, wherever one is weighed":
+            # "Where the link key crosses, the plan reads it as a heartbeat
+            # of each listed service that implements an interface whose
+            # heartbeat crosses." One finding at the key, however many
+            # services draw it.
+            under = over = False
+            for _addr, ifs in owners or []:
+                mine = [i for i in ifs if i in (with_heartbeat or set())]
+                if any(beats.get(i) for i in ifs):
+                    h = owner_heartbeat_horizon([res[i] for i in mine])
+                    if h is not None:
+                        under = under or (self.f.horizon_s is not None and h < self.f.horizon_s)
+                        cadences.append(h * 500)
+                # §2.16: "The plan warns of a face the link key crosses when
+                # a listed service's longest owner heartbeat is above
+                # batch_bytes".
+                longest = owner_heartbeat_longest([res[i] for i in mine])
+                over = over or (longest is not None and longest > self.transport["batch_bytes"])
+            if under:
+                warn("horizon_under_face", OWNER_HEARTBEAT_AT)                         # §2.9, §2.12
+            if over:
+                warn("block_over_batch", OWNER_HEARTBEAT_AT)                           # §2.16
         # §2.16 (0.17): "The plan warns of a face whose shortest crossing
         # cadence is the keep-alive interval or above it: cadence ×
         # keep_alive ≥ lease_ms, in milliseconds". 0.3 to 0.16 read >.
@@ -647,6 +671,73 @@ class FaceReading:
             if name in self.crossed and self.crossed[name].frame is not None:
                 rows.append({"resource": name, **self.f.frames[name]})
         return out, {"frames": rows}
+
+
+#: 0.19 §2.3: "An owner heartbeat's is freshness.v2/stream/heartbeats/link".
+OWNER_HEARTBEAT_AT = "freshness.v2/stream/heartbeats/link"
+
+
+def _collections(resources: list[link.Resource]) -> list[link.Resource]:
+    """An interface's collections as the plan reads them: its states with a
+    horizon above 0, the revisions read together (link.v1 §2.3, §2.9)."""
+    return [r for r in resources if r.token in ("state", "@state") and r.horizon().horizon == "within"]
+
+
+def owner_heartbeat_horizon(interfaces: list[list[link.Resource]]) -> int | None:
+    """0.19 §2.9: "Its horizon is the shortest among the link collections
+    of the service's listed interfaces, each read as link.v1 §2.3 reads
+    it." ``interfaces`` are the service's listed interfaces that have a
+    heartbeat, each its resources; None with no ``link`` collection."""
+    hs = [r.horizon().ttl_s for rs in interfaces for r in _collections(rs) if r.exposure() == "link"]
+    return min(hs) if hs else None
+
+
+def leb128_bits(n: int) -> int:
+    """§2.16: "The size is core §7.5's integer over the bits after it: 8
+    bits below 128, 16 below 16,384, and so on."""
+    out = 8
+    while n >= 128:
+        n >>= 7
+        out += 8
+    return out
+
+
+#: core §2.2's no ceiling (core 0.57: ``"unbounded"`` is 4294967295).
+NO_CEILING = 2 ** 32 - 1
+
+
+def owner_heartbeat_longest_bits(interfaces: list[list[link.Resource]]) -> int | None:
+    """0.19 §2.16 "Its longest put", the body's bits: "The body is 46 bits,
+    then a group for each listed interface of the service that has a link
+    collection. A group is 14 bits, its size, a map bit for each collection
+    of the interface, and each link collection's longest section." "A
+    section of one member is 33 bits. A templated one of cardinality c is
+    33 + ⌈log₂(c + 1)⌉ + c bits". None where no interface has a ``link``
+    collection: "It sends no owner heartbeat that would hold no group"
+    (freshness.v2 §2.4)."""
+    bits, groups = 46, 0
+    for rs in interfaces:
+        cols = _collections(rs)
+        mine = [r for r in cols if r.exposure() == "link"]
+        if not mine:
+            continue
+        groups += 1
+        after = len(cols)
+        for r in mine:
+            if link.has_parameter(r.template):
+                c = NO_CEILING if r.cardinality is None else r.cardinality
+                after += 33 + c.bit_length() + c
+            else:
+                after += 33
+        bits += 14 + leb128_bits(after) + after
+    return bits if groups else None
+
+
+def owner_heartbeat_longest(interfaces: list[list[link.Resource]]) -> int | None:
+    """Its longest put in bytes: "8 bytes of envelope, then its body's bits,
+    rounded up to whole bytes"."""
+    bits = owner_heartbeat_longest_bits(interfaces)
+    return None if bits is None else link.ENVELOPE_BYTES + (bits + 7) // 8
 
 
 def heartbeat_horizon(resources: list[link.Resource]) -> int | None:

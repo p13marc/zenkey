@@ -521,6 +521,88 @@ def apply_case(layout: heartbeat.Layout, case: dict[str, Any]) -> list[tuple[str
     return out
 
 
+def _fixture_group(g: dict[str, Any]) -> dict[str, Any]:
+    """A group's answer in ``apply.json``'s spelling."""
+    out: dict[str, Any] = {"index": g["index"]}
+    if "refused" in g:
+        out["refused"] = g["refused"]
+    elif "answer" in g:
+        out[g["answer"]] = True
+    else:
+        out["sections"] = g["sections"]
+    return out
+
+
+def apply_owner_case(contracts: dict[str, Any], case: dict[str, Any]) -> list[tuple[str, Any, Any]]:
+    """One ``apply.json`` case with a ``catalog`` (text 0.9) through a
+    :class:`Reader`: each heartbeat's and owner heartbeat's answer and each
+    check, as (what, got, want). ``contracts`` are the layouts' contracts,
+    by name. "`catalog` is the catalog the owner names, which the subscriber
+    holds: the layouts its entries name, in index order, an entry `{iface,
+    contract}` naming a revision of `iface` that is no layout's; or `null`
+    where the owner names none." """
+    from . import catalog as cat
+
+    if case["catalog"] is None:
+        r = Reader()
+    else:
+        entries = [(contracts[e].interface, contracts[e].fingerprint) if isinstance(e, str)
+                   else (e["iface"], e["contract"]) for e in case["catalog"]]
+        c = cat.Catalog(epoch=0, entries=entries, id="00000000")
+        r = Reader([c], c.id)
+    names = {}  # interface id -> layout name
+    for name, follows in case["follows"].items():
+        v = r.follow(contracts[name].canonical, contracts[name].fingerprint, follows)
+        names[v.layout.interface] = name
+    read_on: list[str] = []  # the keys one has been read on, a class or a layout
+    out = []
+    for i, step in enumerate(case["steps"]):
+        at = step.get("at")
+        if "put" in step or "delete" in step:
+            m = step.get("put") or step["delete"]
+            for v in r.views.values():
+                v.mutate(m["key"], _stamp(m["stamp"]), at, "put" in step)
+        elif "read" in step:
+            rd = step["read"]
+            r.views[contracts[rd["layout"]].interface].read(
+                rd["collection"], rd["asked"], at, [(m["key"], _stamp(m["stamp"])) for m in rd["live"]])
+        elif "heartbeat" in step:
+            h = step["heartbeat"]
+            got = r.heartbeat(contracts[h["layout"]].interface, h["tag"], _stamp(h["stamp"]),
+                              bytes.fromhex(h["body"]), at)
+            if "read" in got and h["layout"] not in read_on:
+                read_on.append(h["layout"])
+            out.append((f"step {i}: the heartbeat at {at}", got, step["expect"]))
+        elif "owner_heartbeat" in step:
+            h = step["owner_heartbeat"]
+            got = r.owner_heartbeat(h["class"], h["tag"], _stamp(h["stamp"]), bytes.fromhex(h["body"]), at)
+            if "read" in got:
+                if h["class"] not in read_on:
+                    read_on.append(h["class"])
+                got = {"read": {"gap": got["read"]["gap"],
+                                "groups": [_fixture_group(g) for g in got["read"]["groups"]]}}
+            out.append((f"step {i}: the owner heartbeat at {at}", got, step["expect"]))
+        elif "check" in step:
+            want = step["check"]
+            due: dict[str, list[str]] = {}
+            for iface, resource in r.reread_due():
+                due.setdefault(names[iface], []).append(resource)
+            lost: dict[str, list[str]] = {}
+            for iface, v in r.views.items():
+                mine = [c.resource for c in v.layout.collections
+                        if c.resource in v.follows and r.lost_delivery(iface, c.resource)]
+                if mine:
+                    lost[names[iface]] = mine
+            gap = {k: (r.keys[k].gap if k in CLASSES else r.views[contracts[k].interface].gap) for k in read_on}
+            confirmed = {k: next((v.confirmed(k) for v in r.views.values() if v.collection_of(k) is not None), None)
+                         for k in want["confirmed"]}
+            out.append((f"step {i}: the check", {"reread_due": due, "gap": gap, "lost": lost, "confirmed": confirmed},
+                        want))
+        else:
+            out.append((f"step {i}", sorted(step), "a step apply.json defines"))
+    return out
+
+
 # -- the runtime half: a subscriber (§2.5) ---------------------------------------------
 
 @dataclass
@@ -569,7 +651,7 @@ class Subscriber:
 
     def __init__(self, session: Any, address: str, canonical: dict[str, Any], fingerprint: str,
                  follows: Iterable[str] | None = None, seed: bool = False, reread: bool = True,
-                 get_timeout: float = 1.0, wait_s: float = 0.2):
+                 get_timeout: float = 1.0, wait_s: float = 0.2, reader: "Reader | None" = None):
         import zenoh
 
         from . import seed_snapshot as ss
@@ -588,6 +670,12 @@ class Subscriber:
                            for i, r in enumerate(x for x in canonical["resources"] if x["token"] == t)}
         self.follows = list(follows) if follows is not None else [c.resource for c in self.layout.collections]
         self.view = View(self.layout, self.follows, address)
+        #: text 0.9: the provider's reader over its owner heartbeat keys,
+        #: which this interface's view sits behind (:class:`Provider`); None
+        #: for a subscriber that reads heartbeats alone
+        self.reader = reader
+        if reader is not None:
+            reader.follow(canonical, fingerprint, view=self.view)
         self.reread_enabled = reread
         self.get_timeout = get_timeout
         self.lock = threading.RLock()
@@ -738,6 +826,12 @@ class Subscriber:
             h = self.heard.get(key)
             m = self.view.members.get(key)
             gap = self.view.gap
+            if self.reader is not None:
+                # text 0.9 "A lost owner heartbeat": "read every member of
+                # the collections that key covers as v1 §2.5 rule 3 reads a
+                # lost delivery"
+                c = self.view.collection_of(key)
+                gap = gap or (c is not None and self.reader.lost_delivery(self.layout.interface, c.resource))
             last = self.last_conf.get(key)
         if (m is not None and not m.live) or (m is None and h is not None and h.kind == "delete"):
             return freshness.Subscription(now - self.declared_ns, not gap, freshness.Delivery("delete", 0))
@@ -759,6 +853,160 @@ class Subscriber:
                 s.undeclare()
             except Exception:  # noqa: BLE001 - closing anyway
                 pass
+
+
+@dataclass
+class OwnerHeartbeatRecord:
+    """One owner heartbeat as a provider's subscriber heard it."""
+
+    arrival_ns: int
+    cls: str
+    stamp: zk2c.InBand | None
+    payload: bytes
+    answer: dict[str, Any]
+
+
+def descriptor_catalog(session: Any, address: str, timeout: float = 1.0) -> str | None:
+    """The id of the catalog ``address``'s present instance names in its
+    descriptor (core §3.3: "An owner given a catalog MUST state its id"), or
+    None: no instance read, or it names none."""
+    import json
+
+    from . import live
+
+    pres = live.list_presence(session, f"zk2/{address}/@zk/instance/*")
+    if not pres.instances:
+        return None
+    d = live.get_descriptor(session, f"zk2/{address}/@zk/instance/{pres.instances[0]['instance']}", timeout=timeout)
+    if len(d) != 1 or not d[0].ok:
+        return None
+    return json.loads(d[0].payload).get("catalog")
+
+
+class Provider:
+    """§2.5 on a session for one provider, both forms (text 0.9): a
+    :class:`Subscriber` per interface followed, each on its collections and
+    its interface's heartbeat key, and the provider's owner heartbeat keys,
+    "one for each class that the collections it follows have", read through
+    one :class:`Reader` in front of the subscribers' views.
+
+    - ``revisions``: ``(canonical, fingerprint, follows)`` per interface,
+      ``follows`` None for every collection;
+    - ``held``: the catalogs the reader holds (core §8.6);
+    - ``named``: the id of the catalog the owner names; None reads it from
+      the owner's descriptor, at the start and, while none was read, after
+      each owner heartbeat heard ("The catalog is needed to confirm. A
+      reader that does not hold the catalog its owner names reads no
+      group");
+    - ``seed``: the interfaces seeded by their own S4 GET at the start."""
+
+    def __init__(self, session: Any, address: str, revisions: Iterable[tuple[dict[str, Any], str, Any]],
+                 held: Iterable[Any] = (), named: str | None = None, seed: Iterable[str] = (),
+                 reread: bool = True, get_timeout: float = 1.0, wait_s: float = 0.2):
+        import zenoh
+
+        self.session, self.address = session, address
+        self.lock = threading.RLock()
+        self.reader = Reader(held, named)
+        self._named_given = named is not None
+        self._naming = False
+        self.owner_heartbeats: list[OwnerHeartbeatRecord] = []
+        self.closed = False
+        seed = set(seed)
+        self.subs: dict[str, Subscriber] = {}
+        pending = []
+        for canonical, fingerprint, follows in revisions:
+            iface = canonical["interface"]
+            self.subs[iface] = Subscriber(session, address, canonical, fingerprint, follows, seed=False,
+                                          reread=reread, get_timeout=get_timeout, wait_s=0.0, reader=self.reader)
+            if iface in seed:
+                pending.append(iface)
+        system, service = address.split("/")
+        self.keys = {cls: owner_heartbeat_key(system, service, cls) for cls in self.reader.followed_classes()}
+        self.class_subs = [session.declare_subscriber(key, zenoh.handlers.Callback(
+            lambda sample, cls=cls: self._owner_beat(cls, sample))) for cls, key in self.keys.items()]
+        if not self._named_given:
+            self._name()
+        if wait_s:
+            time.sleep(wait_s)
+        for iface in pending:
+            for resource in list(self.subs[iface].selectors):
+                self.subs[iface]._read(resource, seed=True)
+
+    def _name(self) -> None:
+        try:
+            got = descriptor_catalog(self.session, self.address)
+        except Exception:  # noqa: BLE001 - no descriptor read names none
+            got = None
+        with self.lock:
+            if got is not None:
+                self.reader.named = got
+            self._naming = False
+
+    def _owner_beat(self, cls: str, sample: Any) -> None:
+        at = time.monotonic_ns()
+        if "*" in str(sample.key_expr):
+            return  # core R6
+        payload = sample.payload.to_bytes()
+        due: list[tuple[str, str]] = []
+        name = False
+        with self.lock:
+            # each view is its subscriber's, mutated under that subscriber's
+            # lock by the puts it hears: hold them all for the one read
+            locks = [self.subs[i].lock for i in sorted(self.subs)]
+            for lk in locks:
+                lk.acquire()
+            try:
+                answer = self.reader.owner_heartbeat_put(cls, payload, at)
+            finally:
+                for lk in reversed(locks):
+                    lk.release()
+            stamp = None
+            try:
+                stamp = zk2c.parse(payload, "put").stamp
+            except zk2c.Refused:
+                pass
+            self.owner_heartbeats.append(OwnerHeartbeatRecord(at, cls, stamp, payload, answer))
+            for g in answer.get("read", {}).get("groups", []):
+                sub = self.subs.get(g.get("iface", ""))
+                if sub is None:
+                    continue
+                with sub.lock:
+                    for sec in (g.get("sections") or {}).values():
+                        if isinstance(sec, dict):
+                            for k in sec["confirmed"]:
+                                sub.last_conf[k] = at
+                                h = sub.heard.get(k)
+                                if h is not None:
+                                    h.last_confirmation = max(h.last_confirmation, at)
+                    if sub.reread_enabled:
+                        mine = [r for r in sub.view.reread_due() if r not in sub._reading]
+                        sub._reading.update(mine)
+                        due += [(sub.layout.interface, r) for r in mine]
+            if self.reader.named is None and not self._named_given and not self._naming:
+                self._naming = name = True
+        if name:
+            threading.Thread(target=self._name, daemon=True).start()
+        for iface, resource in due:
+            threading.Thread(target=self.subs[iface]._read, args=(resource,), daemon=True).start()
+
+    def answers(self, cls: str | None = None, since_ns: int = 0) -> list[OwnerHeartbeatRecord]:
+        with self.lock:
+            return [h for h in self.owner_heartbeats if h.arrival_ns >= since_ns and (cls is None or h.cls == cls)]
+
+    def judge(self, key: str, now_ns: int | None = None) -> freshness.Verdict:
+        iface = key.split("/")[3]
+        return self.subs[iface].judge(key, now_ns)
+
+    def close(self) -> None:
+        self.closed = True
+        for s in self.class_subs:
+            try:
+                s.undeclare()
+            except Exception:  # noqa: BLE001 - closing anyway
+                pass
+        for sub in self.subs.values():
+            sub.close()
 
 
 def _collection_key(prefix: str, token: str, template: str) -> str | None:

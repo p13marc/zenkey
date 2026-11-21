@@ -452,6 +452,12 @@ class Resource:
     block: bool = False
     longest_put: int | None = None
     timed: bool = False
+    #: link.v2 0.19 §2.16: a templated resource's cardinality (core §2.2),
+    #: the largest any declaring revision states, which an owner heartbeat's
+    #: longest put reads of a collection; None where a declaring revision
+    #: states none: "a templated one that states none is read there as no
+    #: ceiling" (v2/plan.json).
+    cardinality: int | None = None
 
     @property
     def name(self) -> str:
@@ -493,6 +499,13 @@ def uses_of(entry: Any) -> list[list[str]]:
 #: §2.9 (0.11): the standard contract's interface, and its one resource's
 #: template, which the carve-out replaces by one per heartbeat
 HEARTBEAT_IFACE, HEARTBEAT_TEMPLATE = "freshness.v2", "heartbeat/{iface}"
+#: §2.7 (0.20): "The carve holds freshness.v2's template heartbeats/{class}
+#: too, which never crosses (§2.9). It holds it whichever revision of that
+#: contract is given, and where none is."
+OWNER_HEARTBEAT_TEMPLATE = "heartbeats/{class}"
+#: link.v2 0.19 §2.9: "freshness.v2's stream carve holds the two keys as
+#: templates, heartbeats/link and heartbeats/host."
+OWNER_HEARTBEAT_LINK, OWNER_HEARTBEAT_HOST = "heartbeats/link", "heartbeats/host"
 
 
 def heartbeat_of(entry: Any, resources: list["Resource"]) -> bool:
@@ -620,6 +633,8 @@ def _contract_side(r: Resource, rows: list[dict[str, Any]]) -> Resource:
     puts = [p for p in puts if p is not None]
     r.longest_put = max(puts) if puts else None
     r.timed = any("timing.deadline_ms" in (row.get("annotations") or {}) for row in rows)
+    cards = [row.get("cardinality") for row in rows]
+    r.cardinality = None if any(c is None for c in cards) else max(cards)
     return r
 
 
@@ -680,8 +695,9 @@ def resources_of(contract: Any) -> list[dict[str, Any]]:
     out = []
     for r in contract.canonical["resources"]:
         row = {"template": r["template"], "token": r["token"], "annotations": dict(r["annotations"]),
-               "type": (r.get("type") or {}).get("kind"), "congestion": r.get("congestion")}
-        for k in ("type", "congestion"):
+               "type": (r.get("type") or {}).get("kind"), "congestion": r.get("congestion"),
+               "cardinality": r.get("cardinality")}
+        for k in ("type", "congestion", "cardinality"):
             if row[k] is None:
                 del row[k]
         facts = frame_facts(contract, r) if r.get("frame") is not None else None
@@ -723,13 +739,20 @@ def plan(policy_text: str, implements: dict[str, list[str]], interfaces: dict[st
 
 def _heartbeat_denies(deny: list[dict[str, Any]], beats: dict[str, bool], listed: list[str],
                       res: dict[str, list["Resource"]], crosses: dict[tuple[str, str, str], bool],
-                      expose: str) -> list[dict[str, Any]]:
+                      expose: str, by_class: bool = False) -> list[dict[str, Any]]:
     """§2.7 (0.11) "Heartbeats in the denies": "For the token stream, the
     interface freshness.v2 is carved from its heartbeats (§2.9), in place of
     its own templated resource. Each listed interface I with a heartbeat
     gives it the template heartbeat/<I>, which crosses exactly when I's
     heartbeat does." The stream denies are derived again with that: a
-    crossing heartbeat counts as a crossing stream of freshness.v2."""
+    crossing heartbeat counts as a crossing stream of freshness.v2.
+
+    The owner heartbeat keys with them (0.20): the template
+    ``heartbeats/{class}``, "which never crosses", held "whichever revision
+    of that contract is given, and where none is". With ``by_class``, a
+    link.v2 policy's face (link.v2 0.19 §2.9): the two keys as templates,
+    ``heartbeats/link``, which crosses "exactly when a listed interface's
+    heartbeat crosses", and ``heartbeats/host``, which never does."""
     if HEARTBEAT_IFACE not in listed:
         return deny
     k = "stream"
@@ -738,8 +761,14 @@ def _heartbeat_denies(deny: list[dict[str, Any]], beats: dict[str, bool], listed
     for i in listed:
         items = [(r.name, r.template, crosses[(r.iface, r.token, r.template)]) for r in res[i] if r.token == k]
         if i == HEARTBEAT_IFACE:
-            items = [x for x in items if x[1] != HEARTBEAT_TEMPLATE]
+            items = [x for x in items if x[1] not in (HEARTBEAT_TEMPLATE, OWNER_HEARTBEAT_TEMPLATE)]
             items += [(f"{HEARTBEAT_IFACE}/{k}/heartbeat/{b}", f"heartbeat/{b}", c) for b, c in sorted(beats.items())]
+            if by_class:
+                items += [(f"{HEARTBEAT_IFACE}/{k}/{OWNER_HEARTBEAT_LINK}", OWNER_HEARTBEAT_LINK,
+                           any(beats.values())),
+                          (f"{HEARTBEAT_IFACE}/{k}/{OWNER_HEARTBEAT_HOST}", OWNER_HEARTBEAT_HOST, False)]
+            else:
+                items.append((f"{HEARTBEAT_IFACE}/{k}/{OWNER_HEARTBEAT_TEMPLATE}", OWNER_HEARTBEAT_TEMPLATE, False))
         stream_items[i] = items
     any_cross = any(c for items in stream_items.values() for _, _, c in items)
     mine: list[dict[str, Any]] = []
@@ -849,7 +878,12 @@ def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
     beats = {i: any(r.token in ("state", "@state") and r.horizon().horizon == "within" and crossing_res(r)
                     for r in res[i])
              for i in listed if i in interfaces and heartbeat_of(interfaces[i], res[i])}
-    deny = _heartbeat_denies(deny, beats, listed, res, crosses, expose)
+    deny = _heartbeat_denies(deny, beats, listed, res, crosses, expose, by_class=v2 is not None)
+    # link.v2 0.19 §2.9: "A generator MUST let …/freshness.v2/stream/
+    # heartbeats/link cross a face exactly when a listed interface's
+    # heartbeat crosses it"; under link.v1 (0.20) "No owner heartbeat
+    # crosses", and it "is no liveness evidence here".
+    link_key = v2 is not None and expose == "link" and any(beats.values())
     rules = []
     if expose == "link":
         for i in listed:
@@ -908,6 +942,12 @@ def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
         # for each listed service implementing an interface whose heartbeat
         # crosses."
         evidence |= {f"{HEARTBEAT_IFACE}/stream/heartbeat/{i}" for i in ifs if beats.get(i)}
+        if link_key and any(beats.get(i) for i in ifs):
+            # link.v2 0.19 §2.9: "Where the link key crosses, the plan reads
+            # it as a heartbeat of each listed service that implements an
+            # interface whose heartbeat crosses. It is that service's
+            # liveness evidence, listed as freshness.v2/stream/heartbeats/link".
+            evidence.add(f"{HEARTBEAT_IFACE}/stream/{OWNER_HEARTBEAT_LINK}")
         evidence = sorted(evidence, key=_bytes)
         liveness.append({"service": addr, "evidence": evidence})
     if face.attach == "client":
@@ -920,7 +960,8 @@ def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
                                         {"filters": [{"region_names": [face.region]}]}]}}
     members: dict[str, Any] = {}
     if v2 is not None and expose == "link":
-        more, members = v2.after(listed, res, crossing_res, beats)
+        more, members = v2.after(listed, res, crossing_res, beats, owners,
+                                 {i for i in listed if i in interfaces and heartbeat_of(interfaces[i], res[i])})
         warnings += more
     return {"name": face.name, "far": face.far, "attach": attach, "deny": deny, "downsampling": downsampling,
             "windows": sorted(windows, key=lambda w: _bytes(w["service"])),
