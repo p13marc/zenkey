@@ -938,7 +938,11 @@ def _link_v2(path: Path) -> list[Result]:
                 out.append(_check(f"v2 exposure: {c['note']}", link_v2.exposure(c), c["expect"]))
         elif f.name == "plan.json":
             for c in data["cases"]:
-                got = link_v2.plan(c["policy"], c["implements"], _link_interfaces(c), c.get("catalog"))
+                # 0.15: "A case may give `users`, the principals the
+                # deployment binds by a user name" (the changelog's words;
+                # the file's description names no `users`; round 110's findings).
+                got = link_v2.plan(c["policy"], c["implements"], _link_interfaces(c), c.get("catalog"),
+                                   users=c.get("users"))
                 if "narrow" in c:
                     pol, _ = link_v2.parse_policy(c["policy"])
                     got["narrowed"] = None if pol is None else {n: link_v2.narrowed(pol, n) for n in c["narrow"]}
@@ -5579,7 +5583,8 @@ def _round108_readings(root: Path) -> list[tuple[str, Any, Any]]:
                             "no; only with `expose = \"link\"` | The event resources that cross the face (§2.7). |",
                         "**`frames`, `events` and `horizon_s`** on a face whose `expose` is `\"none\"` are "
                         "`bad_value`, as its `interval_s` is: nothing crosses there.",
-                        "It knows no `events` either, its `unknown_field`.",
+                        # link.v2 0.15 (round 110): `opens` beside it
+                        "It knows no `events` or `opens` either, each its `unknown_field`.",
                         "**`events` is one value.** An entry that is not a string, or not an interface id, `/` and a "
                         "template (core §2.2), and an entry repeated are each `bad_value` at `events`, reported once. "
                         "An empty `events` lists no event.",
@@ -5596,12 +5601,14 @@ def _round108_readings(root: Path) -> list[tuple[str, Any, Any]]:
     plan = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "plan.json")["cases"]
     lints = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "lints.json")["cases"]
     faces = _load_json(root / "scope" / "faces.json")["cases"]
-    out.append(("link.v2 0.12's evidence as zk2py counts it: v2/plan.json 41 cases, 4 of them a face with events "
-                "over an inline probe.v1 (37 to 40, from 0), the last, an event listed and not exposed, added after "
-                "the entry, which says 40; v2/lints.json 69, 6 with events; scope/faces.json 19",
-                [len(plan), [i for i, c in enumerate(plan) if "events  " in c["policy"] and "interfaces" in c],
-                 len(lints), sum("events" in c["policy"] for c in lints), len(faces)],
-                [41, [37, 38, 39, 40], 69, 6, 19]))
+    out.append(("link.v2 0.12's evidence as zk2py counts it: v2/plan.json's first 41 cases, 4 of them a face with "
+                "events over an inline probe.v1 (37 to 40, from 0), the last, an event listed and not exposed, added "
+                "after the entry, which says 40; v2/lints.json's first 69, 6 with events; scope/faces.json 19 "
+                "(link.v2 0.15 and 0.17 add cases after them, round 110)",
+                [len(plan) >= 41, [i for i, c in enumerate(plan[:41]) if "events  " in c["policy"]
+                                   and "interfaces" in c],
+                 len(lints) >= 69, sum("events" in c["policy"] for c in lints[:69]), len(faces)],
+                [True, [37, 38, 39, 40], True, 6, 19]))
     # core 0.104 §2.6 and state.md §8
     out.append(("core 0.104 §2.6: a consumer MUST NOT deliver a put on an events key that carries no event, heard "
                 "or replayed, counted undecodable, form; why, and where one comes from; state.md §8 step 4 and "
@@ -5618,9 +5625,11 @@ def _round108_readings(root: Path) -> list[tuple[str, Any, Any]]:
                         "core or by a broken writer.")
                 + missing(st, "One is a mutation (§7.5's form 0) under `zenoh/bytes`. The other is a JSON document "
                               "under `application/json`, with no envelope.",
+                          # core 0.106 (F-528's answer, round 110): the
+                          # subscription counts the three, the replay two
                           "5. None of step 4's three samples is delivered, by the subscription or by the replay. The "
-                          "consumer counts each undecodable, refused as `form`: each carries no event, in an envelope "
-                          "§7.5's parse accepts or in none (core §2.6).",
+                          "subscription counts each of the three undecodable, refused as `form`: each carries no "
+                          "event, in an envelope §7.5's parse accepts or in none (core §2.6).",
                           "The owner writes the recent ones newest first, so among them a later seq carries an "
                           "earlier time."), []))
     # zk2py's consumer over §2.6's new rule, offline: carries.json's reads on
@@ -5662,7 +5671,7 @@ def _round108_readings(root: Path) -> list[tuple[str, Any, Any]]:
                              "empty `events`, an entry that names no event (`event_unknown`), and an event the face "
                              "lists and its contract does not expose `link`.",
                         "This line said three cases, 40 in all, until link.v2 0.14's erratum (F-519).")
-                + [len(plan)], [41]))
+                + [len(plan) >= 41], [True]))
     out.append(("F-520 answered (link.v2 0.14): §5's rows ask of a face with no `events` and no `frames`, and §2.1's "
                 "\"lists no event\" stands",
                 missing(l2, "It is exposed, and the face lists it, or has no `events` (§2.7).",
@@ -5771,10 +5780,12 @@ def _round109_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 missing(sc2, "## §3 The near router stamps nothing (§2.18, §2.19; core §8.2)",
                         "The owner is `lab/radio-a`, a client session of N on the near side as `radio-a`, its "
                         "timestamping off (core §8.2). F attaches to N over the face directly.",
-                        "1. N's configuration states timestamping off for a router and a peer. 2. F's sample of "
-                        "`oper` carries no timestamp. 3. The tool reports no finding. 4. In the control, F's sample "
-                        "carries a timestamp, N's own, its id N's zid. The tool reports `face_timestamping` at "
-                        "`timestamping`."), []))
+                        # link.v2 0.16 (F-524's answer, round 110): F hears
+                        # `fault`, an event no owner stamps
+                        "1. N's configuration states timestamping off for a router and a peer. 2. F's occurrence of "
+                        "`fault` carries no timestamp. 3. The tool reports no finding. 4. In the control, F's "
+                        "occurrence carries a timestamp, N's own, its id N's zid. The tool reports "
+                        "`face_timestamping` at `timestamping`."), []))
     # The changelog's evidence, counted
     tr = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "transport.json")["cases"]
     off = [{"key": "timestamping", "path": "timestamping/enabled/router", "value": False},
@@ -5784,14 +5795,15 @@ def _round109_readings(root: Path) -> list[tuple[str, Any, Any]]:
                                                                                          "peer": False}]
     nothing = [i for i, c in enumerate(tr) if not c["router"]]
     warned = [i for i, c in enumerate(tr) if any(f["code"] == "face_timestamping" for f in c["expect"]["findings"])]
-    out.append(("link.v2 0.13's evidence as zk2py counts it: v2/transport.json 21 cases, five new (16 to 20, from 0); "
-                "every emit but link.v1's (15) ends with timestamping off for a router and a peer; each router "
-                "stated as the generator writes it states timestamping off too; the three routers that state "
+    out.append(("link.v2 0.13's evidence as zk2py counts it: v2/transport.json's first 21 cases, five new (16 to 20, "
+                "from 0); every emit but link.v1's (15) ends with timestamping off for a router and a peer; each "
+                "router stated as the generator writes it states timestamping off too; the three routers that state "
                 "nothing under a link.v2 policy (1, 3, 4) and three of the new five (16, 17, 19) warn "
-                "face_timestamping",
-                [len(tr), [i for i, c in enumerate(tr) if c["expect"]["emit"][-2:] != off],
-                 [i for i in stated if i not in as_written], [i for i in nothing], warned],
-                [21, [15], [17, 18, 19, 20], [1, 3, 4, 15], [1, 3, 4, 16, 17, 19]]))
+                "face_timestamping (link.v2 0.15 adds three cases after them, round 110)",
+                [len(tr) >= 21, [i for i, c in enumerate(tr) if c["expect"]["emit"][-2:] != off],
+                 [i for i in stated if i not in as_written and i < 21], [i for i in nothing],
+                 [i for i in warned if i < 21]],
+                [True, [15], [17, 18, 19, 20], [1, 3, 4, 15], [1, 3, 4, 16, 17, 19]]))
     # zk2py's block and check over scenarios-v2.md's own policy (§3 Expected
     # 1, 3 and 4's tool, offline)
     text = (spec / "profiles" / "link" / "scenarios-v2.md").read_text(encoding="utf-8")
@@ -5859,38 +5871,70 @@ def _round109_readings(root: Path) -> list[tuple[str, Any, Any]]:
     radio = load_contract(spec.parent / "examples" / "zk2" / "link" / "radio.v1.toml")
     oper = next(r for r in radio.canonical["resources"] if r["token"] == "state" and r["template"] == "oper")
     clog = flat("CHANGELOG.md")
-    out.append(("F-524 (open): scenarios-v2.md §3 has F hear oper with no timestamp, and N's in the control, where "
-                "core §4.3's table has its owner stamp each mutation: radio.v1 uses freshness.v1, and oper declares "
-                "freshness.ttl_s",
-                missing(sc2, "2. F subscribes to `zk2/lab/radio-a/radio.v1/state/oper`, a state the face lets cross "
-                             "whole.", "2. F's sample of `oper` carries no timestamp.",
-                        "In the control, F's sample carries a timestamp, N's own, its id N's zid.")
+    log = flat("profiles/link/CHANGELOG.md")
+    out.append(("F-524 answered (link.v2 0.16): scenarios-v2.md §3 has F hear `fault`, an event that crosses whole "
+                "and that core §4.3's table lists no owner's timestamp for, with why; oper, which radio.v1's owner "
+                "stamps (freshness.v1, freshness.ttl_s), is §3's no longer",
+                missing(sc2, "2. F subscribes to `zk2/lab/radio-a/radio.v1/events/fault/*`, an event the face lets "
+                             "cross whole. The owner publishes `fault` until F receives an occurrence.",
+                        "**Why `fault`.** An owner sets no Zenoh timestamp on an event: core §4.3's table lists none. "
+                        "So a timestamp on F's occurrence is a router's.",
+                        "2. F's occurrence of `fault` carries no timestamp.",
+                        "4. In the control, F's occurrence carries a timestamp, N's own, its id N's zid.")
+                + [q for q in ("2. F's sample of `oper` carries no timestamp.",) if q in sc2]
                 + missing(core, "| A state whose contract declares `freshness.ttl_s` above 0, and does not use "
                                 "`freshness.v2` |")
+                + missing(log, "F subscribes to `…/radio.v1/events/fault/*`, an event that crosses whole")
                 + ["freshness.v1" in radio.canonical["uses"], keeps_timestamp(radio, oper)], [True, True]))
-    out.append(("F-525 (open): link.v2 §2.18 says the block is the transport and routing objects, and merges a "
-                "router's own transport alone, where 0.13 adds a third, timestamping, and counts three",
-                missing(l2, "The block is the router's top-level `transport` and `routing` objects.",
-                        "merges the two: a JSON5 object holds one `transport` key.",
-                        "a generator writes the same three objects for the far end"), []))
-    out.append(("F-526 (open): core §8.2 says nothing checks a face router's timestamping, which link.v2 0.13's "
-                "face_timestamping checks",
-                missing(core, "Nothing checks this posture at this version.")
+    out.append(("F-525 answered (link.v2 0.16): §2.18's block is the transport, routing and timestamping objects, a "
+                "configuration that holds one of them merges the two key by key, and the merged file keeps the "
+                "block's value (link_v2.merge)",
+                missing(l2, "The block is the router's top-level `transport`, `routing` and `timestamping` objects "
+                            "(below). A JSON5 object holds one key of each name. So a router configuration that "
+                            "already holds one of them merges the two, key by key.",
+                        "Where both state a key, the merged file keeps the block's value.",
+                        "a generator writes the same three objects for the far end")
+                + [q for q in ("The block is the router's top-level `transport` and `routing` objects.",) if q in l2]
+                + [link_v2.merge({"timestamping": {"drop_future_timestamp": True, "enabled": True},
+                                  "transport": {"auth": {"usrpwd": {"user": "n"}}, "link": {"tx": {"lease": 1}}}},
+                                 {"timestamping": {"enabled": {"router": False, "peer": False}},
+                                  "transport": {"link": {"tx": {"lease": 2000}}}})],
+                [{"timestamping": {"drop_future_timestamp": True, "enabled": {"router": False, "peer": False}},
+                  "transport": {"auth": {"usrpwd": {"user": "n"}}, "link": {"tx": {"lease": 2000}}}}]))
+    out.append(("F-526 answered (core 0.106): §8.2 says link.v2 §2.19's face_timestamping checks the posture, for a "
+                "router whose face policy is link.v2's, and nothing a router under a link.v1 policy",
+                missing(core, "**What checks it.** [`link.v2`](profiles/link/v2.md) §2.19's `face_timestamping` does, "
+                              "for a router whose face policy is `link.v2`'s. Nothing checks a router under a "
+                              "`link.v1` policy.")
+                + [q for q in ("Nothing checks this posture at this version.",) if q in core]
                 + missing(l2, "where core §8.2 says a deployment SHOULD stamp none (§2.18)."), []))
-    out.append(("F-527 (open): core §2.6 counts a sample that carries no envelope form, and §7.5's parse refuses no "
-                "byte at all short: a delete on an events key with no attachment reads either way; 0.105's entry "
-                "says form, zk2py's reading, where its state readers say short",
-                missing(core, "Any other is refused as `form`, as §4.2 counts a stray `reply_del`: its envelope reads "
-                              "as another form, or it carries none.", "no byte at all, so no CH (`short`)")
-                + missing(clog, "A refused attachment is counted by its refusal, and one that reads as a delete, or "
-                                "none, as `form`.")
+    out.append(("F-527 answered (core 0.106): §2.6 says a delete carries its envelope in its attachment, one with "
+                "none carries none, form, and an empty one is refused short; Appendix B says zenoh tells an empty "
+                "attachment from none; zk2py counts so on an events key, and on a state key reads a delete with no "
+                "attachment as §4.2's sample with no envelope, refused for nothing, where it read short until "
+                "round 110",
+                missing(core, "**A delete** carries its envelope in its attachment (§7.5). One with no attachment "
+                              "carries none, so it is `form`. An empty attachment is still one, which zenoh tells "
+                              "from none (Appendix B): the parse finds no byte at all, and refuses it `short`.",
+                        "A put's or a delete's attachment is an optional extension, sent whenever one is given, an "
+                        "empty one too", "So a receiver tells an empty attachment from none.")
+                + missing(clog, "A state key's delete with no attachment** is still §4.2's sample with no envelope, "
+                                "one that broke S1, as the reference reads it.")
                 + [live.no_event(k, live.delete_read(k, zk2c.ENCODING, None), deleted=True),
-                   zk2c.read_delete(k, zk2c.ENCODING, None).refusal], ["form", "short"]))
-    out.append(("F-528 (open): state.md §8 Expected 5 counts each of step 4's three by the subscription or by the "
-                "replay, where the backend keeps no delete to replay",
+                   live.no_event(k, live.delete_read(k, zk2c.ENCODING, b""), deleted=True),
+                   (lambda r: [r.enveloped, r.refusal])(zk2c.read_delete("zk2/lab/s/a.v1/state/x", zk2c.ENCODING,
+                                                                         None)),
+                   zk2c.read_delete("zk2/lab/s/a.v1/state/x", zk2c.ENCODING, b"").refusal],
+                ["form", "short", [False, None], "short"]))
+    out.append(("F-528 answered (core 0.106): state.md §8 Expected 5 has the subscription count step 4's three, and "
+                "the replay return its two puts alone and count the two, the storage holding no value under the "
+                "deleted key",
                 missing(st, "The backend kept all 1,005 puts, step 4's two among them.",
-                        "5. None of step 4's three samples is delivered, by the subscription or by the replay. The "
-                        "consumer counts each undecodable, refused as `form`"), []))
+                        "The subscription counts each of the three undecodable, refused as `form`: each carries no "
+                        "event, in an envelope §7.5's parse accepts or in none (core §2.6). The replay returns step "
+                        "4's two puts alone, since the storage holds no value under the deleted key, and counts each "
+                        "of the two so.")
+                + [q for q in ("The consumer counts each undecodable, refused as `form`",) if q in st], []))
     return out
 
 
@@ -6682,25 +6726,29 @@ def _modem33_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("zenoh-modem's five faces (link.v2 0.8 Appendix B), each planned by zk2py with catalog.json as its "
                 "v2/plan.json case 14 to 18, whole (F-505 answered by link.v2 0.11; since #1099 the cases and the "
                 "faces carry 29bf7d47): one frame each at its cadence, liveness evidence, the two others "
-                "frame_unlisted; SF7 keep_alive_not_suppressed, SF9 frame_over_batch (216 B over 117 B); no_arq but "
-                "on SBD. Since link.v2 0.12 (#1098, round 108) each face lists its events (Appendix B): RF the three "
+                "frame_unlisted; SF7 keep_alive_not_suppressed, above its interval, and since link.v2 0.17 (#1108, "
+                "round 110) RF, SF9, SF12 and SBD too, each at its interval; SF9 frame_over_batch (216 B over 117 B); "
+                "no_arq but on SBD. Since link.v2 0.12 (#1098, round 108) each face lists its events (Appendix B): RF the three "
                 "face/ events, its plan denying the four JSON ones by name, and face/device_fault, JSON, not_packed "
                 "on RF alone; SF7 and SF9 the two rare ones, face/device_fault denied by name; SF12 and SBD none, "
                 "every event denied whole",
                 planned,
                 {"zenohd-rf0": [True, "29bf7d47", "29bf7d47", [("frames/fast", 60, None)],
-                                ["modem.v3/stream/frames/fast"], ["not_packed"], ["no_arq"],
+                                ["modem.v3/stream/frames/fast"], ["keep_alive_not_suppressed", "not_packed"],
+                                ["no_arq"],
                                 ["device_fault", "identity_change", "oper_change"], [json_events]],
                  "zenohd-lora0-sf7": [True, "29bf7d47", "29bf7d47", [("frames/fast", 60, None)],
                                       ["modem.v3/stream/frames/fast"], ["keep_alive_not_suppressed"], ["no_arq"],
                                       ["identity_change", "oper_change"], lora],
                  "zenohd-lora0-sf9": [True, "29bf7d47", "29bf7d47", [("frames/fast", 120, 900)],
-                                      ["modem.v3/stream/frames/fast"], ["frame_over_batch"], ["no_arq"],
+                                      ["modem.v3/stream/frames/fast"],
+                                      ["frame_over_batch", "keep_alive_not_suppressed"], ["no_arq"],
                                       ["identity_change", "oper_change"], lora],
                  "zenohd-lora0-sf12": [True, "29bf7d47", "29bf7d47", [("frames/slow", 900, 3600)],
-                                       ["modem.v3/stream/frames/slow"], [], ["no_arq"], [], every],
+                                       ["modem.v3/stream/frames/slow"], ["keep_alive_not_suppressed"], ["no_arq"],
+                                       [], every],
                  "zenohd-sat0": [True, "29bf7d47", "29bf7d47", [("frames/paid", 1800, None)],
-                                 ["modem.v3/stream/frames/paid"], [], [], [], every]}))
+                                 ["modem.v3/stream/frames/paid"], ["keep_alive_not_suppressed"], [], [], every]}))
     return out
 
 
