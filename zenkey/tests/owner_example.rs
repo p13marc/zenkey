@@ -2827,6 +2827,133 @@ async fn the_owner_example_states_its_catalog() {
     assert!(e.contains("refused [member]"), "{e}");
 }
 
+/// `--owner-heartbeat` (#1110's H3; `freshness.v2` §2.4): under
+/// `--catalog`, the owner confirms the three interfaces of
+/// `scenarios-v2.md` §8 by one owner heartbeat per class, three groups on
+/// the `host` key and one on the `link` key, and puts on no
+/// `heartbeat/<iface>` key. Its descriptor exposes `heartbeats/{class}`.
+/// Without `--catalog` the option is refused, naming it, and `--help` says
+/// so.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_sends_owner_heartbeats() {
+    use zenkey::model::canonical::Fingerprint;
+    use zenkey::model::catalog::Catalog;
+    use zenkey::model::heartbeat::OwnerHeartbeat;
+    use zenkey::model::wire::Envelope;
+
+    for piece in [
+        "[--owner-heartbeat]",
+        "--owner-heartbeat: the owner confirms its interfaces by owner heartbeats",
+        "It needs\n--catalog <path>",
+        "Off unless given",
+    ] {
+        assert!(owner::HELP.contains(piece), "--help names {piece:?}");
+    }
+
+    let (_r1, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let beats = tool
+        .declare_subscriber("zk2/ex/w2/freshness.v2/stream/**")
+        .with(flume::unbounded::<Sample>())
+        .await
+        .unwrap();
+    let names = ["beacon.v2", "dial.v1", "pulse.v1"];
+    let mut catalog = Catalog::new(0).unwrap();
+    for name in names {
+        let k = common::contract(name);
+        catalog.push(k.iface.clone(), Fingerprint::of(&k)).unwrap();
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("catalog.json");
+    std::fs::write(&file, catalog.to_jcs()).unwrap();
+    let file = file.display().to_string();
+    let contracts: Vec<String> = names
+        .iter()
+        .map(|n| {
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(format!("tests/contracts/{n}.toml"))
+                .display()
+                .to_string()
+        })
+        .collect();
+    let mut args = vec![
+        "--connect",
+        ep.as_str(),
+        "--catalog",
+        file.as_str(),
+        "--owner-heartbeat",
+        "ex/w2",
+    ];
+    args.extend(contracts.iter().map(String::as_str));
+    let o = spawn_owner(&args);
+    assert_eq!(line(&o.lines).await, format!("connected {ep}"));
+    let ready = line(&o.lines).await;
+    let instance = ready
+        .rsplit('/')
+        .next()
+        .unwrap()
+        .parse()
+        .unwrap_or_else(|e| panic!("{ready}: {e}"));
+
+    // Two owner heartbeats on each class's key, and nothing else under
+    // freshness.v2's stream.
+    let (mut host, mut link) = (Vec::new(), Vec::new());
+    while host.len() < 2 || link.len() < 2 {
+        let s = tokio::time::timeout(SETTLE, beats.recv_async())
+            .await
+            .expect("an owner heartbeat")
+            .unwrap();
+        let bytes = s.payload().to_bytes();
+        let e = Envelope::parse(&bytes).expect("an envelope");
+        let hb = OwnerHeartbeat::of(&e).expect("an owner heartbeat");
+        let indices: Vec<u16> = hb.groups.iter().map(|g| g.index).collect();
+        match s.key_expr().as_str() {
+            "zk2/ex/w2/freshness.v2/stream/heartbeats/host" => host.push(indices),
+            "zk2/ex/w2/freshness.v2/stream/heartbeats/link" => link.push(indices),
+            other => panic!("{other}: a covered interface sends no heartbeat of its own"),
+        }
+    }
+    assert!(host.iter().all(|i| i == &[0, 1, 2]), "{host:?}");
+    assert!(link.iter().all(|i| i == &[0]), "{link:?}");
+
+    // The descriptor states the catalog and serves the resource.
+    let addr: zenkey::model::grammar::Addr = "ex/w2".parse().unwrap();
+    let d = common::eventually_some("the descriptor", || async {
+        presence::descriptor(&tool, &addr, &instance, T)
+            .await
+            .ok()?
+            .into_descriptor()
+            .ok()
+    })
+    .await;
+    assert_eq!(d.stated_catalog(), Some(catalog.id()));
+    let fv2 = d
+        .interfaces
+        .iter()
+        .find(|e| e.iface == "freshness.v2")
+        .expect("the descriptor lists freshness.v2");
+    assert!(
+        fv2.unavailable.is_empty(),
+        "it serves heartbeats/{{class}}: {:?}",
+        fv2.unavailable
+    );
+    o.stop().await;
+
+    // Without --catalog the option is refused before anything is opened.
+    let mut args: Vec<String> = ["--connect", ep.as_str(), "--owner-heartbeat", "ex/w2"]
+        .iter()
+        .map(|a| (*a).to_owned())
+        .collect();
+    args.extend(contracts.iter().cloned());
+    let Err(e) = owner::Options::parse(&args) else {
+        panic!("--owner-heartbeat without --catalog was accepted")
+    };
+    assert!(
+        e.contains("--owner-heartbeat") && e.contains("--catalog"),
+        "{e}"
+    );
+}
+
 /// `--frames` (#981 K3, core §7.7): `linkframes.v1` implemented and its
 /// frame resources written through the runtime's frame writer from
 /// standard input, a frame's seqs one per record, a lost frame taking its

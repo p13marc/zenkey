@@ -216,6 +216,7 @@ async fn gen_writes_a_frame_resource_as_frames() {
         elect: None,
         run_store: None,
         catalog: None,
+        owner_heartbeat: false,
     };
     let plan = gen_plan(&spec).unwrap();
     let link = plan

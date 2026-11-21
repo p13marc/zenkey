@@ -1,6 +1,6 @@
 """``link.v2``'s ``scenarios-v2.md`` §1, §4 and §5, live, on in-process
 zenoh-python routers (zenoh 1.10.1; #609, rounds 110 and 111): ``python -m
-zk2py.link_v2_live [--only s1|s1ref|s4|s4ref|s5|null]``. §3 is
+zk2py.link_v2_live [--only s1|s1ref|s4|s4ref|s5|null|peer]``. §3 is
 :mod:`zk2py.stamp_live`'s.
 
 - **s1**, "The router runs the block" (§2.16, §2.18, §2.19; round 111, the
@@ -1103,12 +1103,99 @@ def _null(work: str) -> list[Result]:
     return out
 
 
+def _zenctl_peer(work: str, name: str, policy_text: str, router: dict[str, Any], peer_text: str,
+                 ) -> tuple[int, list[str], int, str]:
+    """``zenctl check face --peer-config`` over a router's file and a far
+    end's: its exit, its finding rows of §2.19's codes as ``<code> <at>``,
+    the count of its stdout's lines, and its stderr's first line."""
+    files = {}
+    for what, text in (("policy.face.toml", policy_text), ("router.json5", json.dumps(router, indent=1)),
+                       ("peer.json5", peer_text)):
+        files[what] = os.path.join(work, f"{name}-{what}")
+        with open(files[what], "w") as f:
+            f.write(text)
+    p = subprocess.run([str(BLACKBOX / "zenctl"), "check", "face", "--face-policy", files["policy.face.toml"],
+                        "--enrollment", str(ENROLLMENT), "--contracts", str(RADIO), "--peer-config",
+                        files["peer.json5"], files["router.json5"]], capture_output=True, text=True, timeout=120)
+    rows = []
+    for line in p.stdout.splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("row") == "finding" and row.get("code") in (
+                "transport_differs", "wait_under_lease", "face_timestamping", "peer_differs"):
+            rows.append(f"{row['code']} {row.get('at')}")
+    return (p.returncode, sorted(rows), len([ln for ln in p.stdout.splitlines() if ln.strip()]),
+            (p.stderr.strip().splitlines() or [""])[0][:220])
+
+
+def run_peer() -> list[Result]:
+    with workdir("zk2py-peer-") as work:
+        try:
+            return _peer(work)
+        except Exception as e:  # noqa: BLE001 - a run that could not finish is a failure
+            return [("a far end's file zenoh refuses: the run finished", False, f"{type(e).__name__}: {e}")]
+
+
+def _peer(work: str) -> list[Result]:
+    """link.v2 0.20 §2.19, "A file zenoh refuses", of the far end's file
+    (round 115, the carry of round 114): N's configuration as zk2py's
+    generator writes it, which every tool loads, beside a far end's file
+    with a ``null`` or a string at its lease, a ``null`` at its
+    ``keep_alive``, and one that is no JSON5; a far end's that states the
+    router's two values, and one whose lease differs, as the controls. For
+    each, ``zenctl check face --peer-config`` (a black box) under both
+    bindings, and :func:`zk2py.link_v2.check_transport`, which reads a
+    configuration's keys as data under either."""
+    from . import link_v2
+
+    out: list[Result] = []
+    stock = conventions_policy()
+    fork = stock.replace('"zenoh-1.10.1"', '"zm-1.10.2-r1"')
+    face = f"unixsock-stream/{os.path.join(work, 'face.sock')}"
+
+    def tx(lease: Any, keep_alive: Any) -> dict[str, Any]:
+        return {"transport": {"link": {"tx": {"lease": lease, "keep_alive": keep_alive}}}}
+
+    cases = [("the router's lease and keep_alive", tx(2000, 4), []),
+             ("another lease", tx(4000, 4), ["peer_differs transport.lease_ms"]),
+             ("a null lease", tx(None, 4), ["peer_differs transport.lease_ms"]),
+             ("a string lease", tx("2000", 4), ["peer_differs transport.lease_ms"]),
+             ("a null keep_alive", tx(2000, None), ["peer_differs transport.keep_alive"])]
+    refused_by_zenoh = {"a null lease", "a string lease", "a null keep_alive"}
+    for binding, text in (("zenoh-1.10.1", stock), ("zm-1.10.2-r1", fork)):
+        conf, _ = near_config(text, work, "tcp/127.0.0.1:0", face)
+        for what, peer, want in cases:
+            mine = sorted(f"{f['code']} {f['at']}" for f in link_v2.check_transport(
+                text, link_v2.read_config(conf), peer=link_v2.read_config(peer))["findings"])
+            code, rows, lines, err = _zenctl_peer(work, f"{binding}-{what.replace(' ', '-')}", text, conf,
+                                                  json.dumps(peer))
+            if binding == "zenoh-1.10.1" and what in refused_by_zenoh:
+                out.append((f"the far end's file with {what}, binding zenoh-1.10.1: zenctl check face, through "
+                            "zenoh's loader, names zenoh's refusal of the far end's file and ends at exit 2 with no "
+                            "row at all, the router's own rows unasked too; zk2py's check, as data, reports "
+                            f"{want} (§2.19 \"A file zenoh refuses\", F-567)",
+                            code == 2 and "zenoh refused the config" in err and "peer.json5" in err and lines == 0
+                            and mine == want, f"exit {code}; {lines} lines of stdout; {err}; zk2py {mine}"))
+            else:
+                out.append((f"the far end's file with {what}, binding {binding}: zenctl check face reports "
+                            f"{want or 'no transport finding'}, as zk2py's check does",
+                            rows == want and mine == want and lines > 0, f"exit {code}; zenctl {rows}; zk2py {mine}"))
+        code, rows, lines, err = _zenctl_peer(work, f"{binding}-nojson", text, conf, "{ this is not : json5 ")
+        out.append((f"a far end's file that is no JSON5, binding {binding}: zenctl check face names its loader's "
+                    "refusal, prints no row and ends at exit 2",
+                    code == 2 and lines == 0 and ("refused the config" in err or "does not parse" in err),
+                    f"exit {code}; {lines} lines; {err}"))
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.link_v2_live", description=__doc__.split("\n")[0])
-    ap.add_argument("--only", action="append", choices=("s1", "s1ref", "s4", "s4ref", "s5", "null"))
+    ap.add_argument("--only", action="append", choices=("s1", "s1ref", "s4", "s4ref", "s5", "null", "peer"))
     args = ap.parse_args(argv)
     runs = {"s1": run_s1, "s1ref": lambda: run_s1(True), "s4": run_s4, "s4ref": run_s4_ref, "s5": run_s5,
-            "null": run_null}
+            "null": run_null, "peer": run_peer}
     failed = 0
     for name in args.only or list(runs):
         for what, ok, detail in runs[name]():

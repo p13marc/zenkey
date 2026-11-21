@@ -124,6 +124,28 @@ its standard input.
   before it (`consumer::{HeartbeatRead, HeartbeatSection}`;
   [#990](https://git.marcpardo.eu/marcpardo/zenkey/issues/990)'s V6).
   `inband::event_time` reads an event's time from its sample.
+- **Added: the owner heartbeat**
+  ([#1110](https://git.marcpardo.eu/marcpardo/zenkey/issues/1110),
+  `freshness.v2` 0.9 and 0.10). An owner given a catalog may confirm
+  several interfaces in one put per class of exposure, on
+  `…/freshness.v2/stream/heartbeats/<class>`, in place of one heartbeat
+  per interface.
+  - **`ServiceConfig::owner_heartbeat`**, off unless the deployment sets
+    it (`owner_heartbeat: true` in a config file). It needs
+    `ServiceBuilder::catalog`: a service with the option and no catalog
+    does not start. Each implemented interface the catalog lists is
+    covered, up to 15 on a key; any other keeps its heartbeat.
+  - **Turn it on once the readers read it.** A consumer subscribes to an
+    owner's class keys only when it holds a catalog
+    (`Consumer::with_catalog`, or a service's own). A reader given none,
+    or one built before this release, reads every member of a covered
+    interface stale.
+  - **A descriptor** of a `freshness.v2` owner lists the standard
+    contract's revision 1.1 (`9e07704d…`), and its
+    `stream/heartbeats/{class}` unavailable, cause `config`, unless its
+    owner heartbeats cover an interface.
+  - `Consumer::subscribe_heartbeats` hands one `HeartbeatRead` per group
+    read for its interface, `group` naming the class and the index.
 - **Removed, and what to use instead:**
   - `writer::ulid` and `writer::ulid_time`: an event's key ends in its
     occurrence chunk (`zenkey_model::chunk::occurrence` reads it), its
@@ -141,9 +163,10 @@ either:
 
 - **The wire and the profiles.** These are still open, and a 0.22
   service and a 0.23 one may not understand each other:
-  - `freshness.v2`'s heartbeat, one put per interface, which the
-    maintainer is deciding
-    ([#1110](https://git.marcpardo.eu/marcpardo/zenkey/issues/1110));
+  - `freshness.v2`'s owner heartbeat
+    ([#1110](https://git.marcpardo.eu/marcpardo/zenkey/issues/1110)):
+    its bytes and its option are in this tree, off by default, and its
+    cost on a real link is not measured again yet;
   - `link.v2`'s subjects by user name, in progress
     ([#1107](https://git.marcpardo.eu/marcpardo/zenkey/issues/1107));
   - #980's C3, the archive attachment, and C5, the compact descriptor.

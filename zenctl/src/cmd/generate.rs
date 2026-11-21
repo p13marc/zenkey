@@ -51,6 +51,7 @@ pub async fn run(cli: crate::cli::GenArgs) -> Result<()> {
         seed,
         dry_run,
         run_file,
+        owner_heartbeat,
         i_know,
         contracts,
         ns: _,
@@ -64,6 +65,15 @@ pub async fn run(cli: crate::cli::GenArgs) -> Result<()> {
         .one()
         .map_err(|e| unaskable!("--catalog: {e}"))?
         .cloned();
+    // freshness.v2 §2.4: a group names its interface by its index in the
+    // catalog. The runtime refuses the option with none at start; here it
+    // is refused before a session.
+    if owner_heartbeat && catalog.is_none() {
+        return Err(unaskable!(
+            "--owner-heartbeat needs --catalog <PATH>: an owner heartbeat names each \
+             interface it covers by its index in the deployment catalog (freshness.v2 §2.4)"
+        ));
+    }
     let members = members
         .iter()
         .map(|m| MemberArg::parse(m))
@@ -106,6 +116,7 @@ pub async fn run(cli: crate::cli::GenArgs) -> Result<()> {
         elect: None,
         run_store,
         catalog,
+        owner_heartbeat,
     };
     let plan: GenPlan = zenkey_fleet::gen_plan(&spec)?;
 

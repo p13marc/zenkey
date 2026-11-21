@@ -157,6 +157,13 @@ pub struct GenSpec {
     /// `--catalog`): its descriptor states the id, and its packed `time`
     /// fields count from the catalog's epoch. `None`: from 0.
     pub catalog: Option<zenkey_model::catalog::Catalog>,
+    /// The mock owner confirms its interfaces by owner heartbeats
+    /// (`freshness.v2` §2.4, `--owner-heartbeat`; #1110's H3): one put per
+    /// class of exposure in place of the heartbeat of each interface
+    /// `catalog` lists (`zenkey::ServiceConfig::owner_heartbeat`). The
+    /// runtime refuses it with no catalog, at start. `false`: heartbeats
+    /// alone, as before.
+    pub owner_heartbeat: bool,
 }
 
 impl std::fmt::Debug for GenSpec {
@@ -174,6 +181,7 @@ impl std::fmt::Debug for GenSpec {
             .field("elect", &self.elect)
             .field("run_store", &self.run_store.is_some())
             .field("catalog", &self.catalog.as_ref().map(|c| c.id()))
+            .field("owner_heartbeat", &self.owner_heartbeat)
             .finish()
     }
 }
@@ -767,14 +775,18 @@ pub async fn run_gen(
             .iter()
             .flat_map(|r| r.contract().resources.iter()),
     );
+    let mut config = config(
+        &spec.address,
+        held,
+        &spec.bindings,
+        marker(&spec.tool, Some(spec.seed)),
+    );
+    // freshness.v2 §2.4 (#1110's H3): the deployment's decision, and the
+    // runtime's to refuse with no catalog.
+    config.owner_heartbeat = spec.owner_heartbeat;
     let mut b = builder(
         session,
-        config(
-            &spec.address,
-            held,
-            &spec.bindings,
-            marker(&spec.tool, Some(spec.seed)),
-        ),
+        config,
         spec.run_store.as_ref(),
         spec.catalog.as_ref(),
     )?;
@@ -1260,6 +1272,7 @@ mod tests {
             elect: None,
             run_store: None,
             catalog: None,
+            owner_heartbeat: false,
         }
     }
 

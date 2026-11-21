@@ -1,7 +1,10 @@
-//! `spec/profiles/freshness/scenarios-v2.md` §1–§7 (`freshness.v2`, #978's
-//! F3), one test per section, named after it, and §2's step 6, a
-//! candidate's, in a test of its own; #1080's heartbeat time under a
-//! catalog's epoch, beside the same owner's frames, is the last test.
+//! `spec/profiles/freshness/scenarios-v2.md` §1–§8 (`freshness.v2`, #978's
+//! F3; §8 is #1110's H3, an owner sending owner heartbeats), one test per
+//! section, named after it. §2's step 6, a candidate's, has a test of its
+//! own, and so have §8's steps 3 and 4, which run a face's plan on R1.
+//! #1080's heartbeat time under a catalog's epoch, beside the same owner's
+//! frames, follows §7; three tests of the owner heartbeat that are no
+//! scenario's are last.
 //!
 //! Common setup: R1 is a router (timestamping on, a router's default); the
 //! owner `lab/beacon` implements `beacon.v2` with every resource exposed
@@ -1181,4 +1184,1457 @@ async fn a_heartbeats_time_counts_from_the_catalogs_epoch() {
         "the snapshot's time under the epoch, {reply_ms} ms, the wall clock {wall:?}"
     );
     svc.close().await.unwrap();
+}
+
+// --- §8: an owner heartbeat (#1110's H3) ------------------------------------
+
+use zenkey::consumer::{HeartbeatRead, HeartbeatSection};
+use zenkey::model::canonical::Fingerprint;
+use zenkey::model::catalog::Catalog;
+use zenkey::model::heartbeat::{Class, OwnerHeartbeat, Section};
+use zenkey::model::wire::Run;
+
+const W2: &str = "lab/w2";
+const W2_HOST: &str = "zk2/lab/w2/freshness.v2/stream/heartbeats/host";
+const W2_LINK: &str = "zk2/lab/w2/freshness.v2/stream/heartbeats/link";
+const W2_HEARTBEATS: &str = "zk2/lab/w2/freshness.v2/stream/heartbeat/*";
+/// §8's three interfaces, in the catalog's order: indices 0, 1 and 2.
+const W2_IFACES: [&str; 3] = ["beacon.v2", "dial.v1", "pulse.v1"];
+
+fn w2_key(iface: &str, rest: &str) -> String {
+    format!("zk2/lab/w2/{iface}/state/{rest}")
+}
+
+/// §8's catalog: `beacon.v2` at index 0, `dial.v1` at 1, `pulse.v1` at 2.
+fn w2_catalog() -> Catalog {
+    let mut c = Catalog::new(0).unwrap();
+    for name in W2_IFACES {
+        let k = contract(name);
+        c.push(k.iface.clone(), Fingerprint::of(&k)).unwrap();
+    }
+    c
+}
+
+/// `lab/w2`'s writers.
+struct W2Owner {
+    svc: Service,
+    status: StateWriter,
+    peers: BTreeMap<String, StateWriter>,
+    config: StateWriter,
+    pulse: StateWriter,
+    _rest: Vec<StateWriter>,
+}
+
+/// Brings up `lab/w2` under §8's catalog, covering its three interfaces by
+/// owner heartbeats: `beacon.v2` as the conventions say (every resource
+/// exposed but `route`, a writer for each of `peers`), `dial.v1` and
+/// `pulse.v1`. Its runs are 16-bit ones from `runs` when given, else
+/// random 32-bit draws.
+async fn w2_owner(s: &zenoh::Session, peers: &[&str], runs: Option<&std::path::Path>) -> W2Owner {
+    let mut b = ServiceBuilder::new(s, config(W2).owner_heartbeat());
+    if let Some(file) = runs {
+        b.run_store(Arc::new(zenkey::run::FileRunStore::new(file)))
+            .unwrap();
+    }
+    b.catalog(w2_catalog()).unwrap();
+    for name in W2_IFACES {
+        b.implement(imp(name)).unwrap();
+    }
+    let none = Bindings::new();
+    let status = b
+        .declare_state_writer(&beacon(), STATUS, &none)
+        .await
+        .unwrap();
+    let mut by = BTreeMap::new();
+    for p in peers {
+        by.insert(
+            (*p).to_owned(),
+            b.declare_state_writer(&beacon(), PEER, &bind(p))
+                .await
+                .unwrap(),
+        );
+    }
+    b.expose(&beacon(), PEER).unwrap();
+    let mut rest = Vec::new();
+    for r in ["state/intent", "state/note"] {
+        rest.push(b.declare_state_writer(&beacon(), r, &none).await.unwrap());
+    }
+    b.expose(&beacon(), LEVEL).unwrap();
+    let config = b
+        .declare_state_writer(&"dial.v1".parse().unwrap(), "state/config", &none)
+        .await
+        .unwrap();
+    let pulse = b
+        .declare_state_writer(&"pulse.v1".parse().unwrap(), STATUS, &none)
+        .await
+        .unwrap();
+    let svc = b.start().await.unwrap();
+    W2Owner {
+        svc,
+        status,
+        peers: by,
+        config,
+        pulse,
+        _rest: rest,
+    }
+}
+
+/// One put on an owner heartbeat key, as H reads it with no contract.
+#[derive(Debug, Clone)]
+struct OwnerBeat {
+    at: Instant,
+    /// The payload's length: CH, the run, the seq and the body.
+    len: usize,
+    stamp: Stamp,
+    hb: OwnerHeartbeat,
+}
+
+type OwnerBeats = Arc<Mutex<Vec<OwnerBeat>>>;
+
+/// H: a raw subscriber on an owner heartbeat key. Each put is core §7.5's
+/// form 6 with CH's tag 0, read as the key says: an owner heartbeat.
+async fn owner_heartbeats(
+    s: &zenoh::Session,
+    key: &str,
+) -> (zenoh::pubsub::Subscriber<()>, OwnerBeats) {
+    let beats: OwnerBeats = Arc::default();
+    let w = Arc::clone(&beats);
+    let sub = s
+        .declare_subscriber(key)
+        .callback(move |sample| {
+            let at = Instant::now();
+            assert_eq!(sample.kind(), SampleKind::Put, "a put");
+            let bytes = sample.payload().to_bytes();
+            let e = Envelope::parse(&bytes).expect("an envelope");
+            assert_eq!(e.form, Form::Heartbeat, "core §7.5's form 6");
+            assert_eq!(e.tag, Tag::NONE, "CH's tag 0: each group carries its own");
+            let hb = OwnerHeartbeat::of(&e).expect("an owner heartbeat");
+            w.lock().unwrap().push(OwnerBeat {
+                at,
+                len: bytes.len(),
+                stamp: e.stamp,
+                hb,
+            });
+        })
+        .await
+        .unwrap();
+    (sub, beats)
+}
+
+fn owner_beats_after(b: &OwnerBeats, t: Instant) -> Vec<OwnerBeat> {
+    b.lock()
+        .unwrap()
+        .iter()
+        .filter(|x| x.at > t)
+        .cloned()
+        .collect()
+}
+
+/// The puts heard on `key`, counted: for a key nothing may be put on.
+async fn puts_on(
+    s: &zenoh::Session,
+    key: &str,
+) -> (zenoh::pubsub::Subscriber<()>, Arc<Mutex<Vec<String>>>) {
+    let heard: Arc<Mutex<Vec<String>>> = Arc::default();
+    let w = Arc::clone(&heard);
+    let sub = s
+        .declare_subscriber(key)
+        .callback(move |sample| w.lock().unwrap().push(sample.key_expr().to_string()))
+        .await
+        .unwrap();
+    (sub, heard)
+}
+
+/// The sections of `name`'s group in `hb`, read as a holder of `cat` and
+/// of the revision reads them (core §7.5): the index through the catalog,
+/// the tag the revision's, then the sections with its layout.
+fn group_of(hb: &OwnerHeartbeat, cat: &Catalog, name: &str) -> Vec<Option<Section>> {
+    let l = Layout::of(&contract(name));
+    let index = cat.index_of(&l.iface, &l.fingerprint).expect("listed");
+    let g = hb
+        .group(index)
+        .unwrap_or_else(|| panic!("no group at index {index} ({name}): {hb:?}"));
+    let entry = g
+        .entry(std::slice::from_ref(cat), Some(cat.id()))
+        .expect("an index of the catalog");
+    assert_eq!(entry.iface, l.iface, "the index names {name}");
+    assert!(g.tag_is(&l), "{name}'s group carries its revision's tag");
+    g.read(&l).expect("sections of the revision's layout")
+}
+
+fn indices(hb: &OwnerHeartbeat) -> Vec<u16> {
+    hb.groups.iter().map(|g| g.index).collect()
+}
+
+/// The owner heartbeats of one key over a window: at least every 1 s plus
+/// jitter, their seqs consecutive within one run.
+fn assert_owner_cadence(got: &[OwnerBeat], what: &str) {
+    assert!(
+        got.len() >= 5,
+        "{what}: an owner heartbeat at least every 1 s: {}",
+        got.len()
+    );
+    for w in got.windows(2) {
+        assert!(
+            w[1].at.duration_since(w[0].at) <= Duration::from_secs(1) + JITTER,
+            "{what}: at most half the shortest horizon apart, plus jitter"
+        );
+        assert_eq!(w[0].stamp.run, w[1].stamp.run, "{what}: one run");
+        assert_eq!(
+            w[1].stamp.seq.get(),
+            w[0].stamp.seq.get() + 1,
+            "{what}: the key's own consecutive seqs"
+        );
+    }
+}
+
+/// One collection as S or P follows it: its deliveries, and each
+/// heartbeat or group its view read.
+struct Follower {
+    sub: Subscription,
+    log: Log,
+    read: Arc<Mutex<Vec<HeartbeatRead>>>,
+}
+
+impl Follower {
+    fn reads_after(&self, t: Instant) -> Vec<HeartbeatRead> {
+        self.read
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|h| h.arrival > t)
+            .cloned()
+            .collect()
+    }
+}
+
+/// A tool's consumer of `iface` at `lab/w2`, holding that revision and the
+/// catalog and no other contract, following `resource`.
+async fn follow(s: &zenoh::Session, iface: &str, resource: &str, cat: &Catalog) -> Follower {
+    let c = Consumer::for_tool(s, Arc::new(contract(iface)), &[W2], &Default::default())
+        .unwrap()
+        .with_reread_timeout(T)
+        .with_catalog(cat);
+    let log: Log = Arc::default();
+    let read: Arc<Mutex<Vec<HeartbeatRead>>> = Arc::default();
+    let (w, k) = (Arc::clone(&log), Arc::clone(&read));
+    let sub = c
+        .subscribe_heartbeats(
+            resource,
+            move |d: Delivery| {
+                w.lock().unwrap().push(Rec {
+                    stamp: d.sample.timestamp().copied(),
+                    inband: d.inband,
+                });
+            },
+            move |h: HeartbeatRead| k.lock().unwrap().push(h),
+        )
+        .await
+        .unwrap();
+    Follower { sub, log, read }
+}
+
+/// Waits until `f`'s view has read an owner heartbeat. Its subscription to
+/// the collection was declared before the one to the class key, on one
+/// session, so the owner's writers match it by then.
+async fn following(f: &Follower, what: &str) {
+    eventually(what, || async { f.sub.owner_heartbeats() >= 1 }).await;
+}
+
+/// §8, steps 1 and 2: `lab/w2` covers three interfaces by owner
+/// heartbeats under a catalog. No heartbeat of an interface is sent; the
+/// `host` key carries three groups and the `link` key one, each at least
+/// every half of its shortest horizon on its own seqs, with no bit of
+/// the other class; S, and P bound to one interface alone, judge every
+/// member fresh past its horizon. Then a cut: one owner heartbeat lost
+/// on each key is lost for every group, a missed put diverges one group
+/// while the groups beside it confirm, and S re-reads that collection
+/// once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s8_an_owner_heartbeat() {
+    let (_r1, ep1) = router(None).await;
+    let link = link_to(&ep1).await;
+    let (_r2, ep2) = router_via(&link).await;
+    let os = client(&ep1).await;
+    let hs = client(&ep1).await;
+    let ps = client(&ep1).await;
+    let ss = retrying_client(&ep2).await;
+    let cat = w2_catalog();
+    assert_eq!(
+        cat.entries()
+            .iter()
+            .map(|e| e.iface.to_string())
+            .collect::<Vec<_>>(),
+        W2_IFACES,
+        "the catalog's three entries, at indices 0, 1 and 2"
+    );
+
+    // H: both owner heartbeat keys, and every heartbeat key of the owner.
+    let (_hh, host) = owner_heartbeats(&hs, W2_HOST).await;
+    let (_hl, linkk) = owner_heartbeats(&hs, W2_LINK).await;
+    let (_hi, per_iface) = puts_on(&hs, W2_HEARTBEATS).await;
+
+    // The owner, on 16-bit runs.
+    let runs = tempfile::tempdir().unwrap();
+    let o = w2_owner(&os, &["a", "b", "c"], Some(&runs.path().join("run"))).await;
+    let descriptor: serde_json::Value = serde_json::from_slice(&o.svc.descriptor_bytes()).unwrap();
+    let listed: Vec<&str> = descriptor["interfaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["iface"].as_str().unwrap())
+        .collect();
+    for iface in ["beacon.v2", "dial.v1", "pulse.v1", "freshness.v2"] {
+        assert!(listed.contains(&iface), "the descriptor lists {iface}");
+    }
+    assert_eq!(
+        descriptor["catalog"],
+        cat.id().hex(),
+        "the descriptor states the catalog's id"
+    );
+    assert_eq!(
+        o.svc.owner_heartbeat_cover(),
+        [
+            (beacon(), 0),
+            ("dial.v1".parse().unwrap(), 1),
+            ("pulse.v1".parse().unwrap(), 2)
+        ],
+        "the owner covers the three interfaces"
+    );
+    let fv2 = descriptor["interfaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["iface"] == "freshness.v2")
+        .unwrap();
+    assert!(
+        fv2.get("unavailable").is_none(),
+        "it serves `heartbeats/{{class}}`, so lists nothing unavailable: {fv2}"
+    );
+
+    // S: every collection of the three interfaces. P: pulse.v1's alone.
+    let s_peer = follow(&ss, "beacon.v2", PEER, &cat).await;
+    let s_route = follow(&ss, "beacon.v2", "state/route", &cat).await;
+    let s_status = follow(&ss, "beacon.v2", STATUS, &cat).await;
+    let s_config = follow(&ss, "dial.v1", "state/config", &cat).await;
+    let s_pulse = follow(&ss, "pulse.v1", STATUS, &cat).await;
+    let p = follow(&ps, "pulse.v1", STATUS, &cat).await;
+    for (f, what) in [
+        (&s_peer, "S follows peer/{peer}"),
+        (&s_route, "S follows route"),
+        (&s_status, "S follows status"),
+        (&s_config, "S follows dial.v1's config"),
+        (&s_pulse, "S follows pulse.v1's status"),
+        (&p, "P follows pulse.v1's status"),
+    ] {
+        following(f, what).await;
+    }
+
+    // 1. The puts, then 5 s with nothing else.
+    let st_status = o.status.put("up").await.unwrap().stamp;
+    let mut st_peers = Vec::new();
+    for peer in ["a", "b", "c"] {
+        st_peers.push(o.peers[peer].put("1").await.unwrap().stamp);
+    }
+    let st_config = o.config.put("x").await.unwrap().stamp;
+    let st_pulse = o.pulse.put("ok").await.unwrap().stamp;
+    let t0 = Instant::now();
+    until(t0, Duration::from_secs(5)).await;
+
+    // One form: no heartbeat of an interface, from the owner's start on.
+    assert_eq!(
+        *per_iface.lock().unwrap(),
+        Vec::<String>::new(),
+        "H hears no put on any heartbeat/<iface> key"
+    );
+
+    // The `host` key.
+    let got = owner_beats_after(&host, t0);
+    assert_owner_cadence(&got, "host");
+    let Run::U16(_) = got[0].stamp.run else {
+        panic!("a 16-bit run from the record: {:?}", got[0].stamp.run)
+    };
+    assert_eq!(
+        descriptor["run"],
+        got[0].stamp.run.hex(),
+        "the key's stamp carries the run the descriptor states"
+    );
+    let (ka, kb, kc) = (
+        w2_key("beacon.v2", "peer/a"),
+        w2_key("beacon.v2", "peer/b"),
+        w2_key("beacon.v2", "peer/c"),
+    );
+    let (k_status, k_config, k_pulse) = (
+        w2_key("beacon.v2", "status"),
+        w2_key("dial.v1", "config"),
+        w2_key("pulse.v1", "status"),
+    );
+    // What each holds, read from those written after the last put: one
+    // written between two of the puts can arrive just after them.
+    for b in got.iter().filter(|b| b.at > t0 + JITTER) {
+        assert_eq!(indices(&b.hb), [0, 1, 2], "three groups, ascending");
+        let s = group_of(&b.hb, &cat, "beacon.v2");
+        assert!(
+            s[0].is_some() && s[1].is_none() && s[2].is_none(),
+            "beacon.v2's map 1 0 0: status is another class's, route not exposed"
+        );
+        let peers = s[0].as_ref().unwrap();
+        assert_eq!(
+            peers.digest,
+            Digest::of([
+                (ka.as_str(), st_peers[0]),
+                (kb.as_str(), st_peers[1]),
+                (kc.as_str(), st_peers[2])
+            ]),
+            "over the three peers' stamps"
+        );
+        assert_eq!(peers.members.live(), Some(3));
+        assert_eq!(peers.members.vouched(), [0, 1, 2], "all vouched for");
+        let d = group_of(&b.hb, &cat, "dial.v1");
+        assert_eq!(
+            d,
+            [Some(Section {
+                digest: Digest::of([(k_config.as_str(), st_config)]),
+                members: Members::One { vouched: true }
+            })],
+            "dial.v1's group vouches for its one member"
+        );
+        let q = group_of(&b.hb, &cat, "pulse.v1");
+        assert_eq!(
+            q,
+            [Some(Section {
+                digest: Digest::of([(k_pulse.as_str(), st_pulse)]),
+                members: Members::One { vouched: true }
+            })],
+            "pulse.v1's group vouches for its one member"
+        );
+        assert_eq!(b.hb.record().unwrap().bits, 223, "223 bits of body");
+        assert_eq!(b.len, 34, "34 bytes on a 16-bit run");
+    }
+
+    // The `link` key: its own seqs, one group, no bit of a `host`
+    // collection.
+    let got_link = owner_beats_after(&linkk, t0);
+    assert_owner_cadence(&got_link, "link");
+    for b in got_link.iter().filter(|b| b.at > t0 + JITTER) {
+        assert_eq!(indices(&b.hb), [0], "beacon.v2's group alone");
+        let s = group_of(&b.hb, &cat, "beacon.v2");
+        assert_eq!(
+            s,
+            [
+                None,
+                None,
+                Some(Section {
+                    digest: Digest::of([(k_status.as_str(), st_status)]),
+                    members: Members::One { vouched: true }
+                })
+            ],
+            "the map 0 0 1: status, vouched for"
+        );
+        assert_eq!(b.len, 19, "19 bytes on a 16-bit run");
+    }
+
+    // Confirmed: S heard each put once, and judges every member fresh past
+    // its horizon, 5 s after the puts.
+    for (f, n, what) in [
+        (&s_peer, 3, "peer/{peer}"),
+        (&s_route, 0, "route"),
+        (&s_status, 1, "status"),
+        (&s_config, 1, "config"),
+        (&s_pulse, 1, "pulse.v1's status"),
+    ] {
+        assert_eq!(
+            f.log.lock().unwrap().len(),
+            n,
+            "S hears each put of {what} once"
+        );
+    }
+    for (f, key, horizon) in [
+        (&s_peer, &ka, 4),
+        (&s_peer, &kb, 4),
+        (&s_peer, &kc, 4),
+        (&s_status, &k_status, 2),
+        (&s_config, &k_config, 2),
+        (&s_pulse, &k_pulse, 2),
+        // One interface's reader.
+        (&p, &k_pulse, 2),
+    ] {
+        assert_eq!(
+            verdict(&ttl(horizon), &f.sub.freshness(key)),
+            (Verdict::Fresh, Reason::WithinHorizon),
+            "{key}: fresh 5 s after its put, past its horizon"
+        );
+        assert_eq!(f.sub.rereads(), 0, "{key}: confirmed with no re-read");
+    }
+    // P read its group behind two groups whose revisions it does not hold.
+    let p_reads = p.reads_after(t0);
+    assert!(p_reads.len() >= 5, "P reads each `host` owner heartbeat");
+    for h in &p_reads {
+        let g = h.group.expect("a group of an owner heartbeat");
+        assert_eq!((g.class, g.index), (Class::Host, 2), "pulse.v1's group");
+        assert_eq!(
+            h.section,
+            HeartbeatSection::Confirmed(vec![k_pulse.clone()]),
+            "its one member confirmed"
+        );
+        assert!(!h.lost);
+    }
+
+    // 2. The cut, a put S never hears, the heal 2.5 s later, then 6 s.
+    link.cut();
+    let cut = Instant::now();
+    o.peers["a"].put("2").await.unwrap();
+    until(cut, Duration::from_millis(2500)).await;
+    link.heal();
+    let healed = Instant::now();
+
+    // A lost owner heartbeat: the first S reads on each key after the heal
+    // follows a gap, lost for every group on it; the next is in sequence.
+    let hosts = [
+        (&s_peer, "peer/{peer}"),
+        (&s_route, "route"),
+        (&s_config, "dial.v1's config"),
+        (&s_pulse, "pulse.v1's status"),
+    ];
+    for (f, what, class) in hosts
+        .iter()
+        .map(|(f, what)| (*f, *what, Class::Host))
+        .chain([(&s_status, "status", Class::Link)])
+    {
+        eventually(
+            &format!("{what}: two owner heartbeats after the heal"),
+            || async { f.reads_after(cut).len() >= 2 },
+        )
+        .await;
+        let reads = f.reads_after(cut);
+        assert!(reads[0].arrival > healed, "{what}: nothing crossed the cut");
+        assert!(
+            reads[0].lost,
+            "{what}: the first owner heartbeat after the heal follows a gap on its key"
+        );
+        assert_eq!(reads[0].group.map(|g| g.class), Some(class), "{what}");
+        assert!(
+            !reads[1].lost
+                && reads[1].heartbeat.seq.get() == reads[0].heartbeat.seq.get() + 1
+                && reads[1].heartbeat.run == reads[0].heartbeat.run,
+            "{what}: the next one arrives in sequence, and ends that"
+        );
+    }
+
+    // A divergence in one group: S's view holds peer/a's old stamp, so
+    // beacon.v2's group diverges on peer/{peer}, twice in a row, while the
+    // groups beside it confirm their members in the same owner heartbeats.
+    eventually("S re-reads peer/{peer}", || async {
+        s_peer.sub.rereads() == 1
+    })
+    .await;
+    let reread = s_peer.sub.last_reread().unwrap();
+    let diverged: Vec<HeartbeatRead> = s_peer
+        .reads_after(cut)
+        .into_iter()
+        .filter(|h| h.arrival < reread)
+        .collect();
+    // Two in a row ask for the re-read. Its answer replaces the view a
+    // moment later, so under load a third can be read before it lands.
+    assert!(
+        (2..=3).contains(&diverged.len()),
+        "two in a row, then the re-read: {diverged:#?}"
+    );
+    assert_eq!(
+        diverged[1].heartbeat.seq.get(),
+        diverged[0].heartbeat.seq.get() + 1,
+        "in a row"
+    );
+    for h in &diverged {
+        assert_eq!(h.section, HeartbeatSection::Diverged, "{h:?}");
+        for (f, key) in [(&s_config, &k_config), (&s_pulse, &k_pulse)] {
+            let beside = f
+                .reads_after(cut)
+                .into_iter()
+                .find(|x| x.heartbeat == h.heartbeat)
+                .unwrap_or_else(|| panic!("{key}: no group read in {:?}", h.heartbeat));
+            assert_eq!(
+                beside.section,
+                HeartbeatSection::Confirmed(vec![key.clone()]),
+                "{key}: its group confirms in the owner heartbeat where peer/{{peer}} diverges"
+            );
+        }
+        // route's map bit is 0 in the same group: nothing confirmed there.
+        let route = s_route
+            .reads_after(cut)
+            .into_iter()
+            .find(|x| x.heartbeat == h.heartbeat)
+            .expect("the group read for route");
+        assert_eq!(route.section, HeartbeatSection::Absent);
+    }
+    for h in s_status.reads_after(cut) {
+        assert_eq!(
+            h.section,
+            HeartbeatSection::Confirmed(vec![k_status.clone()]),
+            "status confirms on the `link` key throughout"
+        );
+    }
+    // The next `host` owner heartbeat confirms its three members.
+    eventually("the three peers confirmed after the re-read", || async {
+        s_peer.reads_after(reread).iter().any(|h| {
+            h.section == HeartbeatSection::Confirmed(vec![ka.clone(), kb.clone(), kc.clone()])
+        })
+    })
+    .await;
+    let after = s_peer.reads_after(reread);
+    assert_eq!(
+        after[0].section,
+        HeartbeatSection::Confirmed(vec![ka.clone(), kb.clone(), kc.clone()]),
+        "the next one, no later"
+    );
+    until(healed, Duration::from_secs(6)).await;
+    assert_eq!(s_peer.sub.rereads(), 1, "once");
+    for f in [&s_route, &s_status, &s_config, &s_pulse] {
+        assert_eq!(f.sub.rereads(), 0, "no other collection is re-read");
+    }
+    assert_eq!(
+        s_peer.log.lock().unwrap().len(),
+        3,
+        "the lost change was never delivered"
+    );
+    for (f, key) in [
+        (&s_peer, &ka),
+        (&s_status, &k_status),
+        (&s_config, &k_config),
+        (&s_pulse, &k_pulse),
+    ] {
+        assert!(!f.sub.lost(key), "{key}: no longer read as a lost delivery");
+        assert!(
+            matches!(
+                f.sub.freshness(key),
+                Observation::Subscribed { complete: true, .. }
+            ),
+            "{key}: complete again"
+        );
+    }
+    assert_eq!(
+        *per_iface.lock().unwrap(),
+        Vec::<String>::new(),
+        "still no heartbeat of an interface"
+    );
+    o.svc.close().await.unwrap();
+}
+
+/// §8's faces: R1's one face `rf` toward F, selected by its link protocol,
+/// a unix stream socket here, where the owner and H are R1's clients over
+/// tcp.
+const FACE_PROTOCOL: &str = "unixsock-stream";
+
+/// Step 3's `link.v2` policy: `expose = "link"`, `interval_s = 2`, and a
+/// `[transport]` its linter accepts.
+const W2_V2_POLICY: &str = r#"profile  = "link.v2"
+system   = "lab"
+services = ["w2"]
+binding  = "zenoh-1.10.1"
+
+[transport]
+lease_ms             = 10000
+keep_alive           = 4
+wait_before_close_ms = 10000
+sequence             = "16bit"
+batch_bytes          = 1000
+
+[face.rf]
+far              = "far"
+attach           = "client"
+select           = { link_protocols = ["unixsock-stream"] }
+class            = "constrained"
+expose           = "link"
+interval_s       = 2
+max_outage_s     = 60
+link_bps         = 64000
+loss_ppm         = 0
+arq              = true
+reply_timeout_ms = 1000
+"#;
+
+/// Step 4's policy: §7's `link.v1` one, with `lab/w2` listed.
+const W2_V1_POLICY: &str = r#"
+system   = "lab"
+services = ["w2"]
+
+[face.rf]
+far          = "far"
+attach       = "client"
+select       = { link_protocols = ["unixsock-stream"] }
+class        = "constrained"
+expose       = "link"
+interval_s   = 2
+max_outage_s = 60
+batch_bytes  = 1000
+link_bps     = 64000
+"#;
+
+/// The face `rf`'s plan under `policy`: the deployment lists `lab/w2`
+/// implementing the three interfaces and `freshness.v2`, and the far side
+/// holds §8's catalog.
+fn w2_plan(policy: &str) -> zenkey::model::link::FacePlan {
+    use zenkey::model::link;
+    let parsed = link::parse(policy);
+    let policy = parsed
+        .policy
+        .unwrap_or_else(|| panic!("a face policy: {:?}", parsed.findings));
+    let mut d = link::Deployment::default();
+    d.implements.insert(
+        "w2".to_owned(),
+        W2_IFACES
+            .iter()
+            .map(|i| (*i).to_owned())
+            .chain(["freshness.v2".to_owned()])
+            .collect(),
+    );
+    for name in W2_IFACES {
+        d.add_contract(&contract(name));
+    }
+    d.add_contract(zenkey::heartbeat::implementation().contract());
+    d.catalog = Some(w2_catalog());
+    let mut plans = link::plan(&policy, &d).expect("a plan");
+    assert_eq!(plans.len(), 1, "one face");
+    plans.remove(0)
+}
+
+/// Every key expression of `plan`'s deny `id`.
+fn denied<'p>(plan: &'p zenkey::model::link::FacePlan, id: &str) -> &'p [String] {
+    plan.deny
+        .iter()
+        .find(|d| d.id == id)
+        .map(|d| d.key_exprs.as_slice())
+        .unwrap_or_else(|| {
+            panic!(
+                "no deny {id:?} among {:?}",
+                plan.deny.iter().map(|d| &d.id).collect::<Vec<_>>()
+            )
+        })
+}
+
+/// R1 running `plan`: its denies on the sessions the face selects, by
+/// their link protocol, under `allow`, and its downsampling block. It
+/// listens on loopback tcp for the near side and on a unix stream socket
+/// for the face. Returns the router, the near endpoint and the face's.
+async fn r1_running(
+    plan: &zenkey::model::link::FacePlan,
+    dir: &std::path::Path,
+) -> (zenoh::Session, String, String) {
+    let rules: Vec<serde_json::Value> = plan
+        .deny
+        .iter()
+        .map(|d| {
+            let mut rule = serde_json::to_value(d).unwrap();
+            rule["permission"] = "deny".into();
+            rule
+        })
+        .collect();
+    let ids: Vec<&serde_json::Value> = rules.iter().map(|r| &r["id"]).collect();
+    let acl = serde_json::json!({
+        "enabled": true,
+        "default_permission": "allow",
+        "rules": rules,
+        "subjects": [{"id": "far", "link_protocols": [FACE_PROTOCOL]}],
+        "policies": [{"rules": ids, "subjects": ["far"]}],
+    })
+    .to_string();
+    let face = format!("{FACE_PROTOCOL}/{}", dir.join("rf.sock").display());
+    let listen = format!("[\"tcp/127.0.0.1:0\", \"{face}\"]");
+    let mut extra = vec![("access_control", acl), ("listen/endpoints", listen)];
+    if let Some(ds) = &plan.downsampling {
+        extra.push(("downsampling", serde_json::to_string(&[ds]).unwrap()));
+    }
+    let extra: Vec<(&str, &str)> = extra.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let (r1, near) = router_with(None, &extra).await;
+    (r1, near, face)
+}
+
+/// The owner `lab/w2` behind R1 at `near`, its members put; F on `face`,
+/// subscribed to `beacon.v2`'s `status`, which crosses, and heard its put:
+/// so F's session is across the face and its subscriptions stand before
+/// the window opens.
+async fn w2_across(near: &str, face: &str) -> (W2Owner, zenoh::Session, zenoh::Session) {
+    let os = client(near).await;
+    let fs = client(face).await;
+    let heard: Arc<Mutex<Vec<String>>> = Arc::default();
+    let w = Arc::clone(&heard);
+    let status = fs
+        .declare_subscriber(w2_key("beacon.v2", "status"))
+        .callback(move |sample| w.lock().unwrap().push(sample.key_expr().to_string()))
+        .await
+        .unwrap();
+    let o = w2_owner(&os, &["a", "b", "c"], None).await;
+    matched(o.status.writer()).await;
+    o.status.put("up").await.unwrap();
+    for peer in ["a", "b", "c"] {
+        o.peers[peer].put("1").await.unwrap();
+    }
+    o.config.put("x").await.unwrap();
+    o.pulse.put("ok").await.unwrap();
+    eventually("F hears status across the face", || async {
+        !heard.lock().unwrap().is_empty()
+    })
+    .await;
+    status.undeclare().await.unwrap();
+    (o, os, fs)
+}
+
+/// §8, steps 3 and 4: across a `link.v2` face the plan denies the `host`
+/// class's key and lets the `link` class's cross, never downsampled, with
+/// `beacon.v2`'s group alone and no bit of a `host` collection, and it is
+/// the far side's liveness evidence. Under `link.v1`'s policy neither key
+/// crosses. R1 runs each plan: its denies on the face's sessions, and its
+/// downsampling block.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s8_an_owner_heartbeat_across_a_face() {
+    let cat = w2_catalog();
+    let link_key = zenoh::key_expr::KeyExpr::try_from(W2_LINK).unwrap();
+    let host_key = zenoh::key_expr::KeyExpr::try_from(W2_HOST).unwrap();
+    let reaches = |plan: &zenkey::model::link::FacePlan, key: &zenoh::key_expr::KeyExpr| {
+        plan.deny
+            .iter()
+            .flat_map(|d| &d.key_exprs)
+            .filter(|k| {
+                zenoh::key_expr::KeyExpr::try_from(k.as_str())
+                    .unwrap()
+                    .intersects(key)
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+
+    // 3. The plan under link.v2.
+    let plan = w2_plan(W2_V2_POLICY);
+    let stream = denied(&plan, "stream:freshness.v2");
+    assert_eq!(
+        stream,
+        [
+            "zk2/*/*/freshness.v2/stream/heartbeat/dial.v1/**",
+            "zk2/*/*/freshness.v2/stream/heartbeat/pulse.v1/**",
+            "zk2/*/*/freshness.v2/stream/heartbeats/host/**",
+        ],
+        "the `host` key, and the heartbeat keys of dial.v1 and pulse.v1"
+    );
+    assert_eq!(
+        reaches(&plan, &link_key),
+        Vec::<String>::new(),
+        "it holds nothing of heartbeats/link"
+    );
+    let live = plan
+        .liveness
+        .iter()
+        .find(|l| l.service == W2)
+        .expect("lab/w2's liveness");
+    assert!(
+        live.evidence
+            .contains(&"freshness.v2/stream/heartbeats/link".to_owned()),
+        "{live:?}"
+    );
+    if let Some(ds) = &plan.downsampling {
+        for rule in &ds.rules {
+            let k = zenoh::key_expr::KeyExpr::try_from(rule.key_expr.as_str()).unwrap();
+            assert!(
+                !k.intersects(&link_key),
+                "{k}: an owner heartbeat is never downsampled"
+            );
+        }
+    }
+
+    // R1 runs it. The owner and H are its clients on the near side, F over
+    // the face's link protocol.
+    let dir = tempfile::tempdir().unwrap();
+    {
+        let (_r1, near, face) = r1_running(&plan, dir.path()).await;
+        let hs = client(&near).await;
+        let (_hh, h_host) = owner_heartbeats(&hs, W2_HOST).await;
+        let (o, _os, fs) = w2_across(&near, &face).await;
+        let (_fh, f_host) = puts_on(&fs, W2_HOST).await;
+        let (_fl, f_link) = owner_heartbeats(&fs, W2_LINK).await;
+        eventually("F hears a `link` owner heartbeat", || async {
+            !f_link.lock().unwrap().is_empty()
+        })
+        .await;
+        let t0 = Instant::now();
+        until(t0, Duration::from_secs(5)).await;
+
+        // The `host` class stays home: put on the near side all along, in
+        // 36 bytes on this owner's 32-bit run, and never heard by F.
+        let near_host = owner_beats_after(&h_host, t0);
+        assert_owner_cadence(&near_host, "host, on the near side");
+        for b in &near_host {
+            assert!(matches!(b.stamp.run, Run::U32(_)), "a 32-bit run");
+            assert_eq!(indices(&b.hb), [0, 1, 2]);
+            assert_eq!(b.len, 36, "36 bytes on a 32-bit run");
+        }
+        assert_eq!(
+            *f_host.lock().unwrap(),
+            Vec::<String>::new(),
+            "F hears no put on the `host` key"
+        );
+        // The `link` key crosses, never downsampled, with beacon.v2's
+        // group alone and no bit of peer/{peer}.
+        let got = owner_beats_after(&f_link, t0);
+        assert_owner_cadence(&got, "link, across the face");
+        for b in &got {
+            assert_eq!(indices(&b.hb), [0], "beacon.v2's group alone");
+            let s = group_of(&b.hb, &cat, "beacon.v2");
+            assert!(
+                s[0].is_none() && s[1].is_none(),
+                "the map 0 0 1: no bit of peer/{{peer}} crosses"
+            );
+            assert_eq!(
+                s[2].as_ref().map(|x| x.members.clone()),
+                Some(Members::One { vouched: true }),
+                "status, vouched for"
+            );
+        }
+        // Liveness: the `link` key fresh by its horizon, the shortest among
+        // the `link` collections its groups cover (2 s).
+        let horizon = layout().class_horizon(Class::Link).unwrap();
+        assert_eq!(horizon, Duration::from_secs(2));
+        let last = got.last().unwrap().at;
+        let seen = Observation::Subscribed {
+            last: Some(zenkey::model::freshness::Last::Put(last.elapsed())),
+            listened: t0.elapsed(),
+            complete: true,
+        };
+        assert_eq!(
+            verdict(&Horizon::Within(horizon), &seen).0,
+            Verdict::Fresh,
+            "lab/w2 is live across the face"
+        );
+        o.svc.close().await.unwrap();
+    }
+
+    // 4. The same under §7's link.v1 policy, with lab/w2 listed.
+    let plan = w2_plan(W2_V1_POLICY);
+    let stream = denied(&plan, "stream:freshness.v2");
+    assert!(
+        stream.contains(&"zk2/*/*/freshness.v2/stream/heartbeats/**".to_owned()),
+        "both classes' keys: {stream:?}"
+    );
+    assert!(!reaches(&plan, &link_key).is_empty() && !reaches(&plan, &host_key).is_empty());
+    let dir = tempfile::tempdir().unwrap();
+    let (_r1, near, face) = r1_running(&plan, dir.path()).await;
+    let hs = client(&near).await;
+    let (_hh, h_host) = owner_heartbeats(&hs, W2_HOST).await;
+    let (_hl, h_link) = owner_heartbeats(&hs, W2_LINK).await;
+    let (o, _os, fs) = w2_across(&near, &face).await;
+    let (_fh, f_host) = puts_on(&fs, W2_HOST).await;
+    let (_fl, f_link) = puts_on(&fs, W2_LINK).await;
+    eventually("the owner heartbeats go out on the near side", || async {
+        !h_host.lock().unwrap().is_empty() && !h_link.lock().unwrap().is_empty()
+    })
+    .await;
+    let t0 = Instant::now();
+    until(t0, Duration::from_secs(5)).await;
+    assert_owner_cadence(&owner_beats_after(&h_host, t0), "host, on the near side");
+    assert_owner_cadence(&owner_beats_after(&h_link, t0), "link, on the near side");
+    assert_eq!(
+        (f_host.lock().unwrap().len(), f_link.lock().unwrap().len()),
+        (0, 0),
+        "F hears no owner heartbeat on either key"
+    );
+    o.svc.close().await.unwrap();
+}
+
+// --- The owner heartbeat, no scenario's (#1110's H3) ------------------------
+
+/// `freshness.v2`'s entry in a descriptor: what it lists unavailable.
+fn fv2_unavailable(svc: &Service) -> serde_json::Value {
+    let d: serde_json::Value = serde_json::from_slice(&svc.descriptor_bytes()).unwrap();
+    d["interfaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["iface"] == "freshness.v2")
+        .expect("the descriptor lists freshness.v2")
+        .get("unavailable")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null)
+}
+
+/// The owner heartbeat is the deployment's to turn on (v2 §2.4, "Readers
+/// first"). An owner given a catalog and no `owner_heartbeat` sends its
+/// interfaces' heartbeats alone, and lists `heartbeats/{class}`
+/// unavailable, cause `config` (core §3.3: why the resource is absent
+/// here). One with the option and no catalog does not start, nothing
+/// declared: a group names its interface by its index in the catalog.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_heartbeat_is_off_unless_the_deployment_sets_it() {
+    let (_r1, ep) = router(None).await;
+    let os = client(&ep).await;
+    let hs = client(&ep).await;
+    let (_hh, host) = puts_on(&hs, W2_HOST).await;
+    let (_hl, linkk) = puts_on(&hs, W2_LINK).await;
+    let (_hi, per_iface) = puts_on(&hs, W2_HEARTBEATS).await;
+    let none = Bindings::new();
+
+    // Off: the catalog alone turns nothing on.
+    let mut b = ServiceBuilder::new(&os, config(W2));
+    b.catalog(w2_catalog()).unwrap();
+    for name in ["dial.v1", "pulse.v1"] {
+        b.implement(imp(name)).unwrap();
+    }
+    let _config = b
+        .declare_state_writer(&"dial.v1".parse().unwrap(), "state/config", &none)
+        .await
+        .unwrap();
+    let _pulse = b
+        .declare_state_writer(&"pulse.v1".parse().unwrap(), STATUS, &none)
+        .await
+        .unwrap();
+    let svc = b.start().await.unwrap();
+    assert!(svc.owner_heartbeat_cover().is_empty());
+    let listed = fv2_unavailable(&svc);
+    assert_eq!(listed.as_array().map(Vec::len), Some(1), "{listed}");
+    assert_eq!(
+        (&listed[0]["resource"], &listed[0]["cause"]),
+        (
+            &serde_json::json!("stream/heartbeats/{class}"),
+            &serde_json::json!("config")
+        ),
+        "left out by the deployment's configuration: {listed}"
+    );
+    eventually("each interface's heartbeat, twice", || async {
+        let heard = per_iface.lock().unwrap();
+        ["dial.v1", "pulse.v1"].iter().all(|i| {
+            heard
+                .iter()
+                .filter(|k| k.ends_with(&format!("/heartbeat/{i}")))
+                .count()
+                >= 2
+        })
+    })
+    .await;
+    assert_eq!(
+        (host.lock().unwrap().len(), linkk.lock().unwrap().len()),
+        (0, 0),
+        "no owner heartbeat"
+    );
+    svc.close().await.unwrap();
+
+    // On, with no catalog: refused at step 2, nothing declared.
+    let mut b = ServiceBuilder::new(&os, config(W2).owner_heartbeat());
+    b.implement(imp("pulse.v1")).unwrap();
+    let _pulse = b
+        .declare_state_writer(&"pulse.v1".parse().unwrap(), STATUS, &none)
+        .await
+        .unwrap();
+    let Err(e) = b.start().await else {
+        panic!("a service with `owner_heartbeat` and no catalog started")
+    };
+    assert!(
+        matches!(&e, Error::NotExposed(why) if why.contains("owner_heartbeat") && why.contains("catalog")),
+        "{e}"
+    );
+    let tokens = hs
+        .liveliness()
+        .get("zk2/lab/w2/@zk/**")
+        .await
+        .unwrap()
+        .into_iter()
+        .count();
+    assert_eq!(tokens, 0, "no token of an instance that never started");
+}
+
+/// Which interfaces is the owner's choice, interface by interface (v2
+/// §2.4): one its catalog does not list keeps its heartbeat, beside the
+/// group of one it lists, and never both forms for either.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_interface_the_catalog_does_not_list_keeps_its_heartbeat() {
+    let (_r1, ep) = router(None).await;
+    let os = client(&ep).await;
+    let hs = client(&ep).await;
+    let (_hh, host) = owner_heartbeats(&hs, W2_HOST).await;
+    let (_hl, linkk) = puts_on(&hs, W2_LINK).await;
+    let (_hi, per_iface) = puts_on(&hs, W2_HEARTBEATS).await;
+    // The catalog lists dial.v1 alone.
+    let mut cat = Catalog::new(0).unwrap();
+    let dial = contract("dial.v1");
+    cat.push(dial.iface.clone(), Fingerprint::of(&dial))
+        .unwrap();
+
+    let none = Bindings::new();
+    let mut b = ServiceBuilder::new(&os, config(W2).owner_heartbeat());
+    b.catalog(cat.clone()).unwrap();
+    for name in ["dial.v1", "pulse.v1"] {
+        b.implement(imp(name)).unwrap();
+    }
+    let _config = b
+        .declare_state_writer(&dial.iface, "state/config", &none)
+        .await
+        .unwrap();
+    let _pulse = b
+        .declare_state_writer(&"pulse.v1".parse().unwrap(), STATUS, &none)
+        .await
+        .unwrap();
+    let svc = b.start().await.unwrap();
+    assert_eq!(svc.owner_heartbeat_cover(), [(dial.iface.clone(), 0)]);
+    assert_eq!(fv2_unavailable(&svc), serde_json::Value::Null);
+    eventually("two of each form", || async {
+        host.lock().unwrap().len() >= 2 && per_iface.lock().unwrap().len() >= 2
+    })
+    .await;
+    for b in host.lock().unwrap().iter() {
+        assert_eq!(indices(&b.hb), [0], "dial.v1's group alone");
+        group_of(&b.hb, &cat, "dial.v1");
+    }
+    for key in per_iface.lock().unwrap().iter() {
+        assert!(
+            key.ends_with("/heartbeat/pulse.v1"),
+            "{key}: pulse.v1 keeps its heartbeat, and dial.v1 sends none"
+        );
+    }
+    assert_eq!(
+        linkk.lock().unwrap().len(),
+        0,
+        "no collection of the `link` class, so no put on its key"
+    );
+    svc.close().await.unwrap();
+}
+
+/// A standby's group is left out (v2 §2.4; `redundancy.v1` §2.4), and an
+/// owner heartbeat that would hold no group is not sent. A serves the
+/// governed `beacon.v2` and `pulse.v1`; B, a candidate of the governed
+/// interface alone, stands by and puts nothing on either owner heartbeat
+/// key. Once A closes, B takes over, and its owner heartbeats begin, in
+/// its own run, with the governed interface's group.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_standbys_group_is_left_out() {
+    const PAIR: &str = "lab/pair";
+    const HOST: &str = "zk2/lab/pair/freshness.v2/stream/heartbeats/host";
+    let (_r1, ep) = router(None).await;
+    let hs = client(&ep).await;
+    let governed = contract("beacon-governed.v2");
+    let mut cat = Catalog::new(0).unwrap();
+    cat.push(governed.iface.clone(), Fingerprint::of(&governed))
+        .unwrap();
+    let pulse = contract("pulse.v1");
+    cat.push(pulse.iface.clone(), Fingerprint::of(&pulse))
+        .unwrap();
+    let (_hh, host) = owner_heartbeats(&hs, HOST).await;
+    let (_hi, per_iface) = puts_on(&hs, "zk2/lab/pair/freshness.v2/stream/heartbeat/*").await;
+    let none = Bindings::new();
+
+    // A: both interfaces, serving.
+    let (a_claim, a_watch, a_read) = (
+        stamping(&ep).await,
+        stamping(&ep).await,
+        stamping(&ep).await,
+    );
+    let mut a = ServiceBuilder::new(&a_claim, config(PAIR).owner_heartbeat());
+    a.catalog(cat.clone()).unwrap();
+    a.implement(zenkey::Implementation::new(governed.clone()))
+        .unwrap();
+    a.implement(imp("pulse.v1")).unwrap();
+    let _a_status = a
+        .declare_state_writer(&beacon(), STATUS, &none)
+        .await
+        .unwrap();
+    let _a_pulse = a
+        .declare_state_writer(&pulse.iface, STATUS, &none)
+        .await
+        .unwrap();
+    let a_red = a
+        .redundancy(RedundancyStartup::new(a_read).with_watch(a_watch))
+        .unwrap();
+    let a_svc = a.start().await.unwrap();
+    tokio::time::timeout(SETTLE, a_red.until(&beacon(), Role::Serving))
+        .await
+        .expect("A serves");
+    eventually("A's owner heartbeat holds both groups", || async {
+        host.lock()
+            .unwrap()
+            .last()
+            .is_some_and(|b| indices(&b.hb) == [0, 1])
+    })
+    .await;
+    let a_run = host.lock().unwrap().last().unwrap().stamp.run;
+
+    // B: the governed interface alone, standing by behind A.
+    let (b_claim, b_watch, b_read) = (
+        stamping(&ep).await,
+        stamping(&ep).await,
+        stamping(&ep).await,
+    );
+    let mut b = ServiceBuilder::new(&b_claim, config(PAIR).owner_heartbeat());
+    b.catalog(cat.clone()).unwrap();
+    b.implement(zenkey::Implementation::new(governed)).unwrap();
+    let _b_status = b
+        .declare_state_writer(&beacon(), STATUS, &none)
+        .await
+        .unwrap();
+    let b_red = b
+        .redundancy(RedundancyStartup::new(b_read).with_watch(b_watch))
+        .unwrap();
+    let b_svc = b.start().await.unwrap();
+    assert_eq!(b_svc.owner_heartbeat_cover(), [(beacon(), 0)]);
+    eventually("B stands by behind A", || async {
+        b_red.standing(&beacon()).why
+            == Some(zenkey::model::redundancy::Why::Incumbent(
+                a_svc.instance().clone(),
+            ))
+    })
+    .await;
+    // Over two of its periods and more: nothing in B's run.
+    let standing = Instant::now();
+    until(standing, Duration::from_millis(2500)).await;
+    assert_eq!(b_red.role(&beacon()), Role::Standby);
+    let all = host.lock().unwrap().clone();
+    assert!(
+        all.iter().all(|x| x.stamp.run == a_run),
+        "a standby sends no owner heartbeat that would hold no group"
+    );
+    assert!(
+        owner_beats_after(&host, standing)
+            .iter()
+            .all(|x| indices(&x.hb) == [0, 1]),
+        "A's go on, both groups"
+    );
+
+    // A closes; B takes over, and its group goes out.
+    a_svc.close().await.unwrap();
+    tokio::time::timeout(SETTLE, b_red.until(&beacon(), Role::Serving))
+        .await
+        .expect("B takes over");
+    eventually(
+        "B's owner heartbeat, the governed interface's group",
+        || async {
+            host.lock()
+                .unwrap()
+                .last()
+                .is_some_and(|x| x.stamp.run != a_run && indices(&x.hb) == [0])
+        },
+    )
+    .await;
+    assert_eq!(
+        *per_iface.lock().unwrap(),
+        Vec::<String>::new(),
+        "never a heartbeat of a covered interface"
+    );
+    b_svc.close().await.unwrap();
+}
+
+/// A standby interface never stalls its class key (review of #1144). B
+/// implements the governed `beacon.v2` and the ungoverned `pulse.v1`, and
+/// stands by on the first behind A. Its `host` owner heartbeat keeps
+/// coming at its period, in its own run, with `pulse.v1`'s group alone:
+/// the governed interface's gate is asked at once and never waited for.
+/// Once A closes, B takes over, and the governed interface's group
+/// returns beside it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_standby_interface_never_stalls_the_groups_beside_it() {
+    const PAIR: &str = "lab/pair";
+    const HOST: &str = "zk2/lab/pair/freshness.v2/stream/heartbeats/host";
+    let (_r1, ep) = router(None).await;
+    let hs = client(&ep).await;
+    let governed = contract("beacon-governed.v2");
+    let pulse = contract("pulse.v1");
+    let mut cat = Catalog::new(0).unwrap();
+    cat.push(governed.iface.clone(), Fingerprint::of(&governed))
+        .unwrap();
+    cat.push(pulse.iface.clone(), Fingerprint::of(&pulse))
+        .unwrap();
+    let (_hh, host) = owner_heartbeats(&hs, HOST).await;
+    let (_hi, per_iface) = puts_on(&hs, "zk2/lab/pair/freshness.v2/stream/heartbeat/*").await;
+    let none = Bindings::new();
+
+    // A: the governed interface alone, serving.
+    let (a_claim, a_watch, a_read) = (
+        stamping(&ep).await,
+        stamping(&ep).await,
+        stamping(&ep).await,
+    );
+    let mut a = ServiceBuilder::new(&a_claim, config(PAIR).owner_heartbeat());
+    a.catalog(cat.clone()).unwrap();
+    a.implement(zenkey::Implementation::new(governed.clone()))
+        .unwrap();
+    let _a_status = a
+        .declare_state_writer(&beacon(), STATUS, &none)
+        .await
+        .unwrap();
+    let a_red = a
+        .redundancy(RedundancyStartup::new(a_read).with_watch(a_watch))
+        .unwrap();
+    let a_svc = a.start().await.unwrap();
+    tokio::time::timeout(SETTLE, a_red.until(&beacon(), Role::Serving))
+        .await
+        .expect("A serves");
+    eventually("A's owner heartbeat, its one group", || async {
+        host.lock()
+            .unwrap()
+            .last()
+            .is_some_and(|b| indices(&b.hb) == [0])
+    })
+    .await;
+    let a_run = host.lock().unwrap().last().unwrap().stamp.run;
+
+    // B: both interfaces, standing by on the governed one behind A.
+    let (b_claim, b_watch, b_read) = (
+        stamping(&ep).await,
+        stamping(&ep).await,
+        stamping(&ep).await,
+    );
+    let mut b = ServiceBuilder::new(&b_claim, config(PAIR).owner_heartbeat());
+    b.catalog(cat.clone()).unwrap();
+    b.implement(zenkey::Implementation::new(governed)).unwrap();
+    b.implement(imp("pulse.v1")).unwrap();
+    let _b_status = b
+        .declare_state_writer(&beacon(), STATUS, &none)
+        .await
+        .unwrap();
+    let b_pulse = b
+        .declare_state_writer(&pulse.iface, STATUS, &none)
+        .await
+        .unwrap();
+    let b_red = b
+        .redundancy(RedundancyStartup::new(b_read).with_watch(b_watch))
+        .unwrap();
+    let b_svc = b.start().await.unwrap();
+    assert_eq!(
+        b_svc.owner_heartbeat_cover(),
+        [(beacon(), 0), (pulse.iface.clone(), 1)]
+    );
+    b_pulse.put("ok").await.unwrap();
+    eventually("B stands by behind A", || async {
+        b_red.standing(&beacon()).why
+            == Some(zenkey::model::redundancy::Why::Incumbent(
+                a_svc.instance().clone(),
+            ))
+    })
+    .await;
+    let of_b = |since: Instant| -> Vec<OwnerBeat> {
+        owner_beats_after(&host, since)
+            .into_iter()
+            .filter(|x| x.stamp.run != a_run)
+            .collect()
+    };
+
+    // 5 s standing by: B's class key at its period, pulse.v1's group alone.
+    let standing = Instant::now();
+    until(standing, Duration::from_secs(5)).await;
+    assert_eq!(b_red.role(&beacon()), Role::Standby);
+    let while_standing = of_b(standing);
+    assert_owner_cadence(&while_standing, "B's host key while it stands by");
+    for x in &while_standing {
+        assert_eq!(
+            indices(&x.hb),
+            [1],
+            "pulse.v1's group alone: the standby's is left out"
+        );
+        assert_eq!(
+            group_of(&x.hb, &cat, "pulse.v1")[0]
+                .as_ref()
+                .map(|s| s.members.clone()),
+            Some(Members::One { vouched: true }),
+            "and its member is vouched for all along"
+        );
+    }
+
+    // A closes; B takes over, and the governed interface's group returns.
+    a_svc.close().await.unwrap();
+    tokio::time::timeout(SETTLE, b_red.until(&beacon(), Role::Serving))
+        .await
+        .expect("B takes over");
+    let taken = Instant::now();
+    eventually("B's owner heartbeat holds both groups", || async {
+        of_b(taken).last().is_some_and(|x| indices(&x.hb) == [0, 1])
+    })
+    .await;
+    // One sequence throughout: the group's return opens no gap on the key.
+    let all = of_b(standing);
+    for w in all.windows(2) {
+        assert_eq!(
+            w[1].stamp.seq.get(),
+            w[0].stamp.seq.get() + 1,
+            "the key's own consecutive seqs across the takeover"
+        );
+    }
+    assert_eq!(
+        *per_iface.lock().unwrap(),
+        Vec::<String>::new(),
+        "never a heartbeat of a covered interface"
+    );
+    b_svc.close().await.unwrap();
+}
+
+/// An owner on `freshness.v2`'s revision 1.0, which declares no owner
+/// heartbeat key (review of #1144): implemented by the application before
+/// any contract that uses the profile, it stays the service's revision.
+/// The service starts, sends each interface's heartbeat, and lists no
+/// `heartbeats/{class}` row, which its contract does not declare (D005).
+/// With `owner_heartbeat` set under a catalog it starts all the same and
+/// covers nothing: it has no key to put an owner heartbeat on.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_owner_on_the_first_revision_sends_heartbeats_alone() {
+    const FIRST: &str = "8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890";
+    let bundle = std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "../spec/profiles/.history/freshness.v2/{FIRST}.bundle.json"
+        )),
+    )
+    .unwrap();
+    let first = zenkey::Implementation::from_bundle(&bundle).unwrap();
+    assert!(
+        first.resource(zenkey::heartbeat::HEARTBEAT).is_ok()
+            && first.resource(zenkey::heartbeat::OWNER_HEARTBEATS).is_err(),
+        "revision 1.0: the heartbeat's key alone"
+    );
+    let (_r1, ep) = router(None).await;
+    let hs = client(&ep).await;
+    let (_hh, host) = puts_on(&hs, W2_HOST).await;
+    let (_hi, per_iface) = puts_on(&hs, W2_HEARTBEATS).await;
+    let none = Bindings::new();
+    for on in [false, true] {
+        let os = client(&ep).await;
+        let cfg = if on {
+            config(W2).owner_heartbeat()
+        } else {
+            config(W2)
+        };
+        let mut b = ServiceBuilder::new(&os, cfg);
+        b.catalog(w2_catalog()).unwrap();
+        b.implement(first.clone()).unwrap();
+        b.implement(imp("pulse.v1")).unwrap();
+        let _pulse = b
+            .declare_state_writer(&"pulse.v1".parse().unwrap(), STATUS, &none)
+            .await
+            .unwrap();
+        let svc = b
+            .start()
+            .await
+            .unwrap_or_else(|e| panic!("owner_heartbeat {on}: {e}"));
+        assert!(
+            svc.owner_heartbeat_cover().is_empty(),
+            "nothing to cover with"
+        );
+        let d: serde_json::Value = serde_json::from_slice(&svc.descriptor_bytes()).unwrap();
+        let fv2 = d["interfaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["iface"] == "freshness.v2")
+            .expect("freshness.v2 listed")
+            .clone();
+        assert_eq!(fv2["contract"], format!("sha256:{FIRST}"), "{fv2}");
+        assert!(
+            fv2.get("unavailable").is_none(),
+            "no row for a resource its revision does not declare: {fv2}"
+        );
+        let before = per_iface.lock().unwrap().len();
+        eventually("pulse.v1's heartbeat, twice", || async {
+            per_iface.lock().unwrap().len() >= before + 2
+        })
+        .await;
+        assert!(
+            per_iface
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|k| k.ends_with("/heartbeat/pulse.v1"))
+        );
+        svc.close().await.unwrap();
+    }
+    assert_eq!(host.lock().unwrap().len(), 0, "no owner heartbeat");
 }

@@ -6,6 +6,19 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — an owner that sends owner heartbeats (#1110's H3)
+
+`freshness.v2` 0.10 §2.4, §3; observer 0.34 §7.5. The runtime's owner
+sends owner heartbeats with `ServiceConfig::owner_heartbeat` set, off by
+default. One flag is new, `gen --owner-heartbeat`. No exit code changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| `gen`: its mock owner sends one heartbeat per interface | `gen --owner-heartbeat --catalog FILE`: one owner heartbeat per class in place of the heartbeat of each interface the catalog lists; without `--catalog` it is refused before any session, exit 2 | off unless given: a reader with no catalog reads a covered interface's members stale. `serve` has no such flag |
+| every `freshness.v2` owner's descriptor lists `stream/heartbeats/{class}` `unavailable`, cause `build` | cause `config`; an owner whose owner heartbeats cover an interface exposes it and lists nothing there | core §3.3: the cause says why the resource is absent here, and it is the deployment's configuration, the option or the catalog. `gen` without `--owner-heartbeat`, and `serve`, send heartbeats alone and state `config` |
+| `watch --catalog` over an owner heartbeat: read from hand-written puts | read against the runtime's owner too: a `confirmation` row per group read for the interface, its `key` the class key and `group` its index | `tests/live_zk2.rs`'s `watch_reads_a_real_owners_owner_heartbeats`, over the owner of `freshness.v2`'s scenarios §8 |
+| `watch` of a collection whose owner sends owner heartbeats, with no `--catalog` | no `confirmation` row, and `heartbeats` 0 in the summary: the class key is not declared, and such an owner puts on no `heartbeat/<iface>` key | observer §7.5 gives a tool given no catalog no such scope. Give `--catalog` to read a covered interface's confirmations |
+
 ## Unreleased (`main`, zk2) — another form on a heartbeat's key (zk2py round 112)
 
 Core 0.109 §7.5, "Another form on a heartbeat's key".

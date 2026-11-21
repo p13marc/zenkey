@@ -12963,3 +12963,186 @@ async fn get_state_reads_an_owner_answering_in_snapshots() {
         "{none}"
     );
 }
+
+/// #1110's H3 (`freshness.v2` §2.4, §2.5; observer 0.34 §7.5): `watch
+/// --catalog` against a real owner that sends owner heartbeats.
+/// `lab/w2` is `scenarios-v2.md` §8's owner: `beacon.v2`, `dial.v1` and
+/// `pulse.v1` under a catalog that lists them at indices 0, 1 and 2, its
+/// `ServiceConfig::owner_heartbeat` set, so it puts on no
+/// `heartbeat/<iface>` key. A watch of `pulse.v1`'s status reads its group
+/// on the `host` key, index 2, behind two groups of revisions it was not
+/// asked for, and confirms the member; a watch of `beacon.v2`'s status
+/// reads the `link` key's one group. With no `--catalog` the tool
+/// declares no class key (observer §7.5), so it prints no confirmation at
+/// all: the regression `freshness.v2` §2.4's "Readers first" names.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn watch_reads_a_real_owners_owner_heartbeats() {
+    use zenkey::model::canonical::Fingerprint;
+    use zenkey::model::catalog::Catalog;
+
+    let mut bus = Bus::bare(None).await;
+    let names = ["beacon.v2", "dial.v1", "pulse.v1"];
+    let mut catalog = Catalog::new(0).expect("a catalog");
+    for name in names {
+        let c = scenario_contract(name);
+        catalog
+            .push(c.iface.clone(), Fingerprint::of(&c))
+            .expect("an entry");
+    }
+    let dir = tempfile::tempdir().expect("a directory");
+    let file = dir.path().join("catalog.json");
+    std::fs::write(&file, catalog.to_jcs()).expect("the catalog's file");
+    let file = file.to_str().expect("a UTF-8 path");
+
+    let cfg = ServiceConfig::new("lab/w2".parse().expect("an address")).owner_heartbeat();
+    let mut b = ServiceBuilder::new(&bus.owners, cfg);
+    b.catalog(catalog.clone()).expect("the catalog first");
+    for name in names {
+        b.implement(Implementation::new(scenario_contract(name)))
+            .expect("implement");
+    }
+    let none = Bindings::new();
+    let mut writers = Vec::new();
+    for (i, r, v) in [
+        ("beacon.v2", "state/status", "up"),
+        ("beacon.v2", "state/intent", "hold"),
+        ("beacon.v2", "state/note", "n"),
+        ("dial.v1", "state/config", "x"),
+        ("pulse.v1", "state/status", "ok"),
+    ] {
+        let w = b
+            .declare_state_writer(&iface(i), r, &none)
+            .await
+            .expect("a state writer");
+        writers.push((w, v));
+    }
+    for r in ["state/peer/{peer}", "stream/level"] {
+        b.expose(&iface("beacon.v2"), r).expect("exposed");
+    }
+    let svc = b.start().await.expect("lab/w2 starts");
+    assert_eq!(svc.owner_heartbeat_cover().len(), 3, "the three covered");
+    for (w, v) in &writers {
+        w.put(*v).await.expect("a put");
+    }
+    bus.services.push(svc);
+    wait_for(&bus, &["lab/w2"]).await;
+
+    let lines = |r: &Run| -> Vec<Value> {
+        r.stdout
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .collect()
+    };
+    let confirmations = |r: &Run| -> Vec<Value> {
+        lines(r)
+            .into_iter()
+            .filter(|l| l["row"] == "confirmation")
+            .collect()
+    };
+    for (iface_name, class, group, member) in [
+        ("pulse.v1", "host", 2, "zk2/lab/w2/pulse.v1/state/status"),
+        ("beacon.v2", "link", 0, "zk2/lab/w2/beacon.v2/state/status"),
+    ] {
+        let args = [
+            "watch",
+            "lab/w2",
+            iface_name,
+            "state/status",
+            "--catalog",
+            file,
+            "--for",
+            "5",
+            "--format",
+            "ndjson",
+        ];
+        let run = bus
+            .until(&args, |r| {
+                confirmations(r)
+                    .iter()
+                    .any(|c| c["confirmed"] == json!([member]))
+            })
+            .await;
+        let rows = confirmations(&run);
+        assert!(!rows.is_empty(), "no confirmation row: {run}");
+        for c in &rows {
+            assert_eq!(c["provider"], "lab/w2", "{c}");
+            assert_eq!(
+                c["key"],
+                format!("zk2/lab/w2/freshness.v2/stream/heartbeats/{class}"),
+                "the {class} class's key, never heartbeat/{iface_name}: {c}"
+            );
+            assert_eq!(c["group"], group, "its index in the owner's catalog: {c}");
+        }
+        assert!(
+            rows.iter().any(|c| c["confirmed"] == json!([member])),
+            "{member} confirmed by its group: {run}"
+        );
+        let seqs: Vec<u64> = rows
+            .iter()
+            .filter_map(|c| c["heartbeat"]["seq"].as_u64())
+            .collect();
+        assert!(
+            seqs.windows(2).all(|w| w[1] == w[0] + 1),
+            "the class key's own consecutive seqs: {seqs:?}"
+        );
+        let summary = lines(&run)
+            .into_iter()
+            .find(|l| l["row"] == "summary")
+            .expect("a summary");
+        assert_eq!(summary["heartbeats"], rows.len() as u64, "{summary}");
+        assert_eq!(summary["heartbeats_lost"], 0, "{summary}");
+    }
+
+    // The table form names the class key and the group.
+    let run = bus
+        .until(
+            &[
+                "watch",
+                "lab/w2",
+                "pulse.v1",
+                "state/status",
+                "--catalog",
+                file,
+                "--for",
+                "5",
+                "--format",
+                "table",
+            ],
+            |r| r.stdout.contains("confirmed by heartbeat"),
+        )
+        .await;
+    assert!(
+        run.stdout
+            .contains("zk2/lab/w2/freshness.v2/stream/heartbeats/host  [lab/w2]")
+            && run.stdout.contains("group 2 of its owner's catalog")
+            && run
+                .stdout
+                .contains("confirmed by heartbeat: zk2/lab/w2/pulse.v1/state/status"),
+        "{run}"
+    );
+
+    // No catalog: no class key declared, so no group read and nothing
+    // confirmed, over more than two of the owner's periods.
+    let run = bus
+        .zenctl(&[
+            "watch",
+            "lab/w2",
+            "pulse.v1",
+            "state/status",
+            "--for",
+            "3",
+            "--format",
+            "ndjson",
+        ])
+        .await;
+    assert_eq!(
+        confirmations(&run),
+        Vec::<Value>::new(),
+        "a reader given no catalog reads no owner heartbeat: {run}"
+    );
+    let summary = lines(&run)
+        .into_iter()
+        .find(|l| l["row"] == "summary")
+        .expect("a summary");
+    assert_eq!(summary["heartbeats"], 0, "{summary}");
+}

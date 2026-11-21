@@ -721,13 +721,23 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   where none is stated, and the doctor's `contract-drift` orders two
   revisions only by minors stated. `tests/mock_owner.rs`'
   `gen_of_zenoh_modems_node_meets_the_size_rule_and_states_true_minors`
-  runs zenoh-modem's node shape (1,344 B before, 1,184 B now). Since
-  core 0.109 it asserts the rule and no figure: over 1 KB, `meets()`
-  over the bytes served (`Descriptor::size_of`), no empty member, and
-  the descriptor writing back byte for byte. The fixture
-  `descriptors/ok-over-1kb` is that node as recorded before #1110's H2b
-  (1,184 B), whose owner also lists `freshness.v2`'s optional
-  `stream/heartbeats/{class}` unavailable and serves a longer one.
+  runs zenoh-modem's node shape (1,344 B before, 1,184 B at core
+  0.107). Since core 0.109 it asserts the rule and no figure: over 1 KB,
+  `meets()` over the bytes served (`Descriptor::size_of`), no empty
+  member, and the descriptor writing back byte for byte. The fixture
+  `descriptors/ok-over-1kb` records the 0.107 owner, before #1110's H2b
+  (1,184 B, its `health.v1` from its authoring file). Today's owner also
+  lists `freshness.v2`'s optional `stream/heartbeats/{class}`
+  unavailable, cause `config`, while it sends heartbeats alone: the
+  test's node (its `health.v1` from its bundle, so no minor) is 1,262 B
+  so, a rest of 237 B, measured at #1110's H3.
+  #1110's H3: `GenSpec::owner_heartbeat` (`zenctl gen
+  --owner-heartbeat`) sets `ServiceConfig::owner_heartbeat` on the mock
+  owner, which the runtime refuses with no `GenSpec::catalog`; `ServeSpec`
+  has none. The same test runs the node again with it: 1,174 B, nothing
+  listed unavailable under `freshness.v2`, one owner heartbeat on the
+  `host` key with a group at each interface's index in zenoh-modem's
+  catalog, and no put on a `heartbeat/<iface>` key.
   Core 0.109 §7.5, "Another form on a heartbeat's key" (review-bot on
   #1143): `model::inband::no_heartbeat(key, encoding, &Payload)` is the
   tools' gate, the reason naming `form`, and `no_heartbeat_check` its

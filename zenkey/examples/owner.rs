@@ -18,6 +18,7 @@
 //!     [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>]
 //!     [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go]
 //!     [--timing] [--frames] [--no-hlc] [--hlc] [--run-file <path>] [--catalog <path>]
+//!     [--owner-heartbeat]
 //!     [--arbitrate <entry>[,<entry>...]] [--arbitrate-no-watch] [--watch-connect <endpoint>]
 //!     [--clock-bound-ms <ms>] [--commander] [--commander-lead-ms <ms>]
 //!     <address> <contract.toml>...
@@ -159,6 +160,13 @@
 //!   its own time, under its own id, so a subscriber still reads which
 //!   instance wrote it, and its guard holds every state write while the
 //!   offset clock is ahead (core §4.3, "A candidate's").
+//!
+//! `--owner-heartbeat` (#1110's H3) has the owner confirm its interfaces by
+//! owner heartbeats (`freshness.v2` §2.4): one put per class of exposure on
+//! `…/freshness.v2/stream/heartbeats/<class>`, a group for each interface
+//! it implements that the catalog lists and that has a collection of the
+//! class, and no heartbeat of such an interface. It needs `--catalog`, and
+//! is refused without it before anything is opened. Off unless given.
 //!
 //! `--tokenless <iface>` puts an interface in the deployment's tokenless
 //! set (core §8.1, U22): `health.v1`, for one. `--first-hop` configures
@@ -759,6 +767,10 @@ pub struct Options {
     /// §8.6), its id stated in the descriptor (§3.3) and its epoch the one
     /// packed `time` fields count from.
     pub catalog: Option<PathBuf>,
+    /// `--owner-heartbeat`: its interfaces confirmed by owner heartbeats
+    /// under the catalog (`freshness.v2` §2.4; #1110), never without
+    /// `--catalog`.
+    pub owner_heartbeat: bool,
     /// `--arbitrate <entry>,…`: `rudder.v1` implemented, its role `cmd`
     /// bound to the entries in their order and arbitrated
     /// (`arbitration.v1`, #909), unless a contract file implements it.
@@ -818,12 +830,23 @@ usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
     [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>]
     [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go]
     [--timing] [--frames] [--no-hlc] [--hlc] [--run-file <path>] [--catalog <path>]
+    [--owner-heartbeat]
     [--arbitrate <entry>[,<entry>...]] [--arbitrate-no-watch] [--watch-connect <endpoint>]
     [--clock-bound-ms <ms>] [--commander] [--commander-lead-ms <ms>]
     <system>/<service>|@hostid.v1/<service> <contract.toml>...
 
 --first-hop: an owner on a first hop (core §8.1, §8.4): every interface it
 implements tokenless, its instance token alone held, and no bundle held.
+
+--owner-heartbeat: the owner confirms its interfaces by owner heartbeats
+(freshness.v2 §2.4): one put per class of exposure, on
+zk2/<system>/<service>/freshness.v2/stream/heartbeats/link and .../host, a
+group for each interface it implements that the catalog lists and that has a
+collection of the class, and no heartbeat of such an interface. It needs
+--catalog <path>: a group names its interface by its index there. An
+interface the catalog does not list keeps its heartbeat. Off unless given: a
+reader with no catalog, or one that reads heartbeats alone, reads a covered
+interface's members stale.
 
 Standard output, first:
   listening tcp/127.0.0.1:<port>       a router on an ephemeral port (with --connect:
@@ -1214,6 +1237,9 @@ timing.v1 (spec/profiles/timing/v1.md)
   --catalog <path>                the deployment catalog it writes under (core §8.6):
                                   its id stated in the descriptor, its epoch the one
                                   packed time fields count from
+  --owner-heartbeat               with --catalog: one owner heartbeat per class in
+                                  place of each listed interface's heartbeat
+                                  (freshness.v2 §2.4)
   --no-hlc                        with --connect, the session's HLC off (the
                                   default; with --standby the runtime refuses
                                   it, redundancy.v1 §2.10): the
@@ -1366,6 +1392,7 @@ impl Options {
              [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>] \
              [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go] \
              [--timing] [--no-hlc] [--hlc] [--run-file <path>] [--catalog <path>] \
+             [--owner-heartbeat] \
              [--arbitrate <entry>[,<entry>...]] [--arbitrate-no-watch] \
              [--watch-connect <endpoint>] [--clock-bound-ms <ms>] \
              [--commander] [--commander-lead-ms <ms>] \
@@ -1424,6 +1451,7 @@ impl Options {
             hlc: false,
             run_file: None,
             catalog: None,
+            owner_heartbeat: false,
             arbitrate: None,
             arbitrate_watch: true,
             watch_connect: None,
@@ -1727,6 +1755,10 @@ impl Options {
                     o.catalog = Some(PathBuf::from(value));
                     rest = tail;
                 }
+                [flag, tail @ ..] if flag == "--owner-heartbeat" => {
+                    o.owner_heartbeat = true;
+                    rest = tail;
+                }
                 [flag, value, tail @ ..] if flag == "--arbitrate" => {
                     let entries: Vec<String> = value
                         .split(',')
@@ -1805,6 +1837,15 @@ impl Options {
         if o.peer && o.connect.is_none() {
             return Err("--peer: give --connect, the peers' only endpoint".to_owned());
         }
+        // freshness.v2 §2.4: a group names its interface by its index in
+        // the deployment catalog.
+        if o.owner_heartbeat && o.catalog.is_none() {
+            return Err(
+                "--owner-heartbeat: give --catalog <path>, the deployment catalog an owner \
+                 heartbeat's groups name their interfaces through (freshness.v2 §2.4)"
+                    .to_owned(),
+            );
+        }
         if o.arbitrate.is_none()
             && (!o.arbitrate_watch || o.watch_connect.is_some() || o.clock_bound_ms.is_some())
         {
@@ -1881,6 +1922,9 @@ pub async fn run_with(
     }
     if opts.first_hop {
         config = config.first_hop();
+    }
+    if opts.owner_heartbeat {
+        config = config.owner_heartbeat();
     }
     config.clock_reference = opts.clock_reference.clone();
     let mut imps = Vec::new();

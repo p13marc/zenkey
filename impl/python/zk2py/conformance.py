@@ -5298,6 +5298,7 @@ def _round104_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out += _round112_readings(root)
     out += _round113_readings(root)
     out += _round114_readings(root)
+    out += _round115_readings(root)
     return out
 
 
@@ -6297,6 +6298,262 @@ def _round111_readings(root: Path) -> list[tuple[str, Any, Any]]:
     return out
 
 
+def _round115_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """``freshness.v2`` 0.10 and ``link.v2`` 0.21, read cold (#609, round
+    115): each version and its entry, F-547's and F-549's answers as the
+    text states them, ``scenarios-v2.md`` §8's figures computed from core
+    §7.5's layouts, and Appendix B's table recomputed."""
+    import re
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log_ = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log_)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    def header(rel: str) -> tuple[str | None, str | None]:
+        t = flat(rel)
+        v = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+)", t)
+        w = re.search(r"\| \*\*Written against\*\* \| core (\d+\.\d+)", t)
+        return (v.group(1) if v else None, w.group(1) if w else None)
+
+    rules = (spec / "RULES.md").read_text(encoding="utf-8")
+    once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
+    out: list[tuple[str, Any, Any]] = [
+        ("freshness.v2 0.10 or later and link.v2 0.21 or later, both still written against core 0.108, each with its "
+         "entry, both editorial; RULES.md lists 286 rules, as round 114 left it",
+         [_at_least(header("profiles/freshness/v2.md")[0], "0.10"), header("profiles/freshness/v2.md")[1],
+          _at_least(header("profiles/link/v2.md")[0], "0.21"), header("profiles/link/v2.md")[1],
+          int(once.group(1)) if once else None]
+         + entry("profiles/freshness/CHANGELOG.md", "`v2.md` 0.10", "no rule changed")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 0.21", "what a horizon costs a medium, no rule changed"),
+         [True, "0.108", True, "0.108", 286]),
+    ]
+    out += _s8_readings(spec)
+    out += _appendix_b_cost_readings(spec)
+    # -- the texts round 115's findings quote, so that an answer moves each ---------------
+    fv, l2, core = flat("profiles/freshness/v2.md"), flat("profiles/link/v2.md"), flat("core.md")
+    out.append(("round 115's findings, the texts they quote: F-565, Appendix B names 19 of an SDU's 23 bytes over "
+                "its payload, where core's 0.108 entry calls the other 4 the put; F-567, §2.19 says a tool whose "
+                "loader refuses a file \"asks none of §5's questions of that file\", and §5's row of the two ends "
+                "says \"Not asked\" of a far end's configuration that was not read, neither saying what becomes "
+                "of the router's own rows; F-568, §3's two ways an owner's deployment leaves the owner heartbeat "
+                "out, where §2.4 has a third, a catalog that does not list its interfaces",
+                missing(l2, "under the lean stack's 16 bytes and the face's 3-byte frame",
+                        "The tool names zenoh's refusal, and asks none of §5's questions of that file.",
+                        "**Not asked:** no far end's configuration was read.")
+                + missing(flat("CHANGELOG.md"), "At a 39-byte put in a 58-byte SDU every 28.5 s")
+                + missing(fv, "it is not turned on, or the owner was given no catalog.",
+                          "So does an owner for an interface its catalog does not list."), []))
+    # The carry of round 114: the text's "within 512 B" against zenctl gen's
+    # boundary, which warned at a rest of 513 B and not at 512 B.
+    from . import descriptor as dsc
+
+    out.append(("core §3.3's MAY, \"while the rest of its descriptor is within 512 B\" (the carry of round 114): "
+                "within is at most, zk2py's bound 512, so a rest of 512 B meets it and 513 B does not, where zenctl "
+                "gen of 1374e566 said nothing at 512 B and warned \"with a rest of 513 B\": the text and the tool "
+                "agree",
+                [dsc.REST, 512 <= dsc.REST, 513 <= dsc.REST]
+                + missing(core, "So an owner MAY exceed 1 KB while the rest of its descriptor is within 512 B."),
+                [512, True, False]))
+    return out
+
+
+def _s8_readings(spec: Path) -> list[tuple[str, Any, Any]]:
+    """``scenarios-v2.md`` §8's figures, computed from core §7.5's layouts
+    before any bus: the two contracts as the text states them, each key's
+    groups, maps and sizes, both plans' Expected, and the answers to F-547
+    and F-549 as the text states them."""
+    from . import freshness_v2 as f2, freshness_v2_s8_live as s8, heartbeat, owner_heartbeat as oh, zk2c
+    from .contract import load_contract
+
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    sc, fv, flog = flat("profiles/freshness/scenarios-v2.md"), flat("profiles/freshness/v2.md"), \
+        flat("profiles/freshness/CHANGELOG.md")
+    cs = s8.contracts()
+    theirs = [load_contract(spec.parent / "zenkey" / "tests" / "contracts" / f.name) for f in s8.FILES]
+    lo = {c.interface: heartbeat.layout_of(c.canonical, c.fingerprint) for c in cs}
+    classes = {c.interface: f2.classes_of(c.canonical) for c in cs}
+    out: list[tuple[str, Any, Any]] = []
+    out.append(("freshness.v2 scenarios §8, its two contracts: dial.v1 and pulse.v1 copied from the text have the "
+                "fingerprints of the files the reference keeps (zenkey/tests/contracts/), as beacon.v2 has; each "
+                "has one collection, of the host class, at 2 s; beacon.v2's status is link and its peer/{peer} and "
+                "route host; so each class key's shortest horizon is 2 s",
+                [[c.fingerprint == t.fingerprint for c, t in zip(cs, theirs)],
+                 [[(c.resource, c.ttl_s, classes[n][c.resource]) for c in lo[n].collections] for n in sorted(lo)]]
+                + missing(sc, "So each key's shortest horizon is 2 s, and its owner heartbeats are at most 1 s apart."),
+                [[True, True, True],
+                 [[("state/peer/{peer}", 4, "host"), ("state/route", 4, "host"), ("state/status", 2, "link")],
+                  [("state/config", 2, "host")], [("state/status", 2, "host")]]]))
+
+    def dg(*keys: str) -> str:
+        return f"{heartbeat.digest((k, 16, 7, i) for i, k in enumerate(keys)):08x}"
+
+    host = [oh.group_of(0, lo["beacon.v2"], {"state/peer/{peer}": {"digest": dg(*s8.PEERS), "live": 3,
+                                                                  "vouched": [0, 1, 2]}}),
+            oh.group_of(1, lo["dial.v1"], {"state/config": {"digest": dg(s8.CONFIG), "vouched": True}}),
+            oh.group_of(2, lo["pulse.v1"], {"state/status": {"digest": dg(s8.PSTATUS), "vouched": True}})]
+    link_g = [oh.group_of(0, lo["beacon.v2"], {"state/status": {"digest": dg(s8.STATUS), "vouched": True}})]
+    out.append(("freshness.v2 scenarios §8, Expected's figures from core §7.5's layouts: the host key's owner "
+                "heartbeat holds three groups, beacon.v2's with the map 1 0 0 and 3 live members, 223 bits of "
+                "body, 34 bytes on a 16-bit run and 36 on a 32-bit one; the link key's holds beacon.v2's group "
+                "alone, the map 0 0 1, 19 bytes on a 16-bit run",
+                [len(oh.body_bits(None, host)), [g.bits[:3] for g in host[:1]],
+                 len(oh.write(zk2c.InBand(16, 7, 1), None, host)), len(oh.write(zk2c.InBand(32, 7, 1), None, host)),
+                 link_g[0].bits[:3], len(oh.write(zk2c.InBand(16, 7, 1), None, link_g)),
+                 len(oh.write(zk2c.InBand(32, 7, 1), None, link_g))]
+                + missing(sc, "Its payload is 34 bytes on a 16-bit run, and 36 on a 32-bit one: 223 bits of body.",
+                          "Its payload is 19 bytes on a 16-bit run."),
+                [223, ["100"], 34, 36, "001", 19, 21]))
+    f3, _ = s8._plan(True)
+    f4, _ = s8._plan(False)
+
+    def deny(f: dict[str, Any]) -> list[str]:
+        return sorted(k for d in f["deny"] if d["id"] == "stream:freshness.v2" for k in d["key_exprs"])
+
+    def evidence(f: dict[str, Any]) -> list[str]:
+        return [e for x in f["liveness"] if x["service"] == "lab/w2" for e in x["evidence"] if "freshness.v2" in e]
+
+    out.append(("freshness.v2 scenarios §8, \"The plan\" (step 3) and \"Under link.v1\" (step 4), on zk2py's "
+                "generator: the link.v2 plan's stream deny of freshness.v2 holds the host key and the heartbeat "
+                "keys of dial.v1 and pulse.v1, nothing of heartbeats/link, and lab/w2's evidence lists the link "
+                "key; the link.v1 plan's holds heartbeats/** and lists no owner heartbeat key",
+                [deny(f3), evidence(f3), deny(f4), evidence(f4)]
+                + missing(sc, "Its stream deny of `freshness.v2` holds `zk2/*/*/freshness.v2/stream/heartbeats/host/**`, "
+                              "and the heartbeat keys of `dial.v1` and `pulse.v1`.",
+                          "The plan's stream deny of `freshness.v2` holds `zk2/*/*/freshness.v2/stream/heartbeats/**`."),
+                [["zk2/*/*/freshness.v2/stream/heartbeat/dial.v1/**", "zk2/*/*/freshness.v2/stream/heartbeat/pulse.v1/**",
+                  "zk2/*/*/freshness.v2/stream/heartbeats/host/**"],
+                 ["freshness.v2/stream/heartbeat/beacon.v2", "freshness.v2/stream/heartbeats/link"],
+                 ["zk2/*/*/freshness.v2/stream/heartbeat/dial.v1/**", "zk2/*/*/freshness.v2/stream/heartbeat/pulse.v1/**",
+                  "zk2/*/*/freshness.v2/stream/heartbeats/**"],
+                 ["freshness.v2/stream/heartbeat/beacon.v2"]]))
+    out.append(("F-549, resolved (freshness.v2 0.10 §3): an owner that sends heartbeats alone lists "
+                "heartbeats/{class} unavailable, `config` where the deployment's configuration leaves the owner "
+                "heartbeat out and `build` where the implementation sends none; the entry says the reference "
+                "lists `config` now",
+                missing(fv, "Such an owner lists it `unavailable`, with the cause that says why it is absent there "
+                            "(core §3.3).")
+                + missing(flog, "**Answered: zk2py round 113's F-549, an ambiguity.**",
+                          "It lists `config` now, since what leaves the resource out is its option or its catalog."),
+                []))
+    return out
+
+
+def _appendix_b_cost_readings(spec: Path) -> list[tuple[str, Any, Any]]:
+    """``link.v2`` 0.21's Appendix B, "What a horizon costs a medium",
+    recomputed (round 115): the payloads from core §7.5's layouts, the puts
+    a day and RF's column from the text's own figures, and LoRa's columns,
+    which the text's figures do not give (F-566)."""
+    import math
+    import re
+
+    from . import owner_heartbeat as oh
+
+    raw = (spec / "profiles" / "link" / "v2.md").read_text(encoding="utf-8")
+    l2 = " ".join(raw.split())
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def num(x: str) -> int:
+        return int(x.replace(",", ""))
+
+    table: dict[int, list[int]] = {}
+    for m in re.finditer(r"^\| ([\d,]+) s \| ([\d,]+) \| ([\d,]+) / ([\d,]+) KB \| ([\d,]+) / ([\d,]+) s \| "
+                         r"([\d,]+) / ([\d,]+) s \| ([\d,]+) / ([\d,]+) s \|$", raw, re.M):
+        table[num(m.group(1))] = [num(g) for g in m.groups()[1:]]
+    # core §7.5: a heartbeat of one collection of one member, and an owner
+    # heartbeat of three groups of one such collection each, on a 16-bit run
+    beat = 6 + (42 + 1 + 33 + 7) // 8
+    owner = oh.size_of(16, [34, 34, 34])
+    out: list[tuple[str, Any, Any]] = []
+    out.append(("link.v2 0.21 Appendix B, \"How it is priced\", the payloads from core §7.5's layouts: a heartbeat "
+                "of one member is 16 bytes on a 16-bit run and the owner heartbeat of three 33; the text's SDUs, 39 "
+                "and 56 bytes, are each 23 bytes over the payload, where it names \"the lean stack's 16 bytes and "
+                "the face's 3-byte frame\", 19 (F-565)",
+                [beat, owner, 39 - beat, 56 - owner, 58 - 35, sorted(table)]
+                + missing(l2, "under the lean stack's 16 bytes and the face's 3-byte frame. A heartbeat of one member "
+                              "is a 16-byte payload in a 39-byte SDU. The owner heartbeat of three is 33 bytes in 56.",
+                          "a 35-byte payload in a 58-byte SDU every 28.5 s"),
+                [16, 33, 23, 23, 23, [60, 300, 600, 1800, 3600]]))
+
+    def puts(h: int) -> float:
+        return 86_400 / (0.475 * h)
+
+    got_puts = {h: round(puts(h)) for h in table}
+    got_rf = {h: [round(3 * 39 * puts(h) / 1000), round(56 * puts(h) / 1000)] for h in table}
+    out.append(("link.v2 0.21 Appendix B's table, from the text's own figures: the puts a day per key are "
+                "86,400 / (0.475 × the horizon), rounded, 5 of 5; RF's column is three 39-byte SDUs and one 56-byte "
+                "SDU a put, in KB of 1,000 B, on the unrounded count, 10 of 10",
+                [got_puts == {h: v[0] for h, v in table.items()}, got_rf == {h: v[1:3] for h, v in table.items()}],
+                [True, True]))
+
+    def air(pl: int, sf: int) -> float:
+        """A LoRa frame's time on air by the modem maker's published
+        formula, at 125 kHz, coding rate 4/5, 8 preamble symbols, an
+        explicit header and a CRC, the low data rate optimisation at SF11
+        and SF12. None of it is in ``spec/``."""
+        ts = (2 ** sf) / 125_000
+        de = 1 if sf >= 11 else 0
+        n = 8 + max(math.ceil((8 * pl - 4 * sf + 28 + 16) / (4 * (sf - 2 * de))) * 5, 0)
+        return (8 + 4.25 + n) * ts
+
+    def tiles(n: int, sf: int, header: int, cap: int = 51) -> float:
+        total, left = 0.0, n
+        while left > 0:
+            take = min(left, cap - header)
+            total += air(take + header, sf)
+            left -= take
+        return total
+
+    by_text = {h: [round(3 * round(puts(h)) * a) for a in (0.08, 0.27, 2.1)] for h in table}
+    text_ok = sum(by_text[h][i] == table[h][3 + 2 * i] for h in table for i in range(3))
+    model = {h: [round(3 * puts(h) * air(39, 7)), round(puts(h) * air(56, 7)),
+                 round(3 * puts(h) * air(39, 9)), round(puts(h) * air(56, 9))] for h in table}
+    fits = [hd for hd in range(0, 9)
+            if all([round(3 * puts(h) * tiles(39, 12, hd)), round(puts(h) * tiles(56, 12, hd))] == table[h][7:9]
+                   for h in table)]
+    out.append(("link.v2 0.21 Appendix B's table, LoRa's columns (F-566): from the text's three air times of a "
+                "39-byte SDU, 0.08 s, 0.27 s and 2.1 s, the three heartbeats' figures come out in 2 cells of 15, and "
+                "the owner heartbeat's 15 have no air time in the text at all; with a LoRa frame's time on air by "
+                "the modem maker's formula (125 kHz, 4/5, 8 preamble symbols, explicit header, CRC; none of it in "
+                "spec/) SF7's and SF9's 20 figures come out, and SF12's 10 with 51-byte tiles each under a header "
+                "of 3, 4 or 5 bytes, which the text does not state either",
+                [text_ok, model == {h: v[3:7] for h, v in table.items()}, fits,
+                 [round(air(39, 7), 2), round(air(39, 9), 2), round(tiles(39, 12, 3), 1)]]
+                + missing(l2, "An SDU of 39 bytes takes 0.08 s at SF7, 0.27 s at SF9 and 2.1 s at SF12, in tiles."),
+                [2, True, [3, 4, 5], [0.08, 0.27, 2.1]]))
+    duty = lambda h, i: round(100 * table[h][i] / 864)  # noqa: E731
+    unrounded = round(100 * 3 * puts(60) * air(39, 7) / 864)
+    w2_owner = round(58 * puts(60) / 1000)
+    w2_three = round(((39 + 39) * puts(60) + 40 * puts(900)) / 1000)
+    w2_alike = round((39 + 39 + 40) * puts(60) / 1000)
+    out.append(("link.v2 0.21 Appendix B's sentences, from its table and its figures: the duty's shares, 87 % "
+                "(86 % from the table's rounded 747 s, 87 % from the air time before rounding) and "
+                "38 % of SF7's at 60 s, 8 % of SF7's and 25 % of SF9's at 300 s, 12 % of SF9's at 600 s, 42 % and "
+                "21 % of SF12's at 1,800 s and 3,600 s; W2's owner heartbeat 176 KB a day; its three heartbeats "
+                "245 KB with two at a 60 s horizon and the 17-byte one at 900 s, alarms.v1's, where three every "
+                "28.5 s would be 358 KB; SBD's 51 and 152 messages a day",
+                [[duty(60, 3), unrounded, duty(60, 4), duty(300, 4), duty(300, 6), duty(600, 6), duty(1800, 8),
+                  duty(3600, 8)], w2_owner, w2_three, w2_alike, [round(puts(3600)), round(3 * puts(3600))]]
+                + missing(l2, "Three heartbeats take 87 % of SF7's duty, and the owner heartbeat 38 %",
+                          "W2's three interfaces cost 176 KB a day on RF as one owner heartbeat",
+                          "Their three heartbeats cost 245 KB, each alone in its SDU.",
+                          "an owner heartbeat is 51 messages a day across SBD, and three heartbeats 152"),
+                [[86, 87, 38, 8, 25, 12, 42, 21], 176, 245, 358, [51, 152]]))
+    return out
+
+
 def _round114_readings(root: Path) -> list[tuple[str, Any, Any]]:
     """Core 0.109, ``desired.v1`` 0.14, ``redundancy.v1`` 0.11 and
     ``link.v2`` 0.20, the answers to F-535 to F-546, read cold (#609, round
@@ -7036,12 +7293,17 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("freshness.v2 0.9 §2.4 \"Which interfaces\", zk2py's owner: given the catalog and asked, it covers "
                 "the three by their indices and exposes heartbeats/{class}; an interface its catalog does not list "
                 "keeps its heartbeat; given no catalog it covers none, whatever it is asked; and an owner that "
-                "sends heartbeats alone lists heartbeats/{class} unavailable, cause config, zk2py's choice (§3, "
-                "F-549), 74 bytes of its freshness.v2 entry",
+                "sends heartbeats alone lists heartbeats/{class} unavailable, cause config: zk2py's choice in round "
+                "113, and the text's since freshness.v2 0.10, \"it is not turned on, or the owner was given no "
+                "catalog\" (§3, F-549 resolved, round 115), 74 bytes of its freshness.v2 entry",
                 [cover(three, order, True), cover(three, ["alert.v1", "hb.v1", "vital.v1"], True),
                  cover(three, order, ["knob.v1"]), cover(three, None, True), cover(three, order, None), len(member)]
                 + missing(fv, "The resource is `optional`: an owner that sends heartbeats alone does not expose it "
-                              "(core §3.3)."),
+                              "(core §3.3).",
+                          "The cause is `config` where the deployment's configuration leaves the owner heartbeat "
+                          "out: it is not turned on, or the owner was given no catalog. It is `build` where the "
+                          "owner's implementation sends none.",
+                          "An owner whose owner heartbeats cover an interface exposes it."),
                 [({"alert.v1": 0, "knob.v1": 2, "vital.v1": 4}, None), ({"alert.v1": 0, "vital.v1": 2}, None),
                  ({"knob.v1": 2}, None), ({}, "config"), ({}, "config"), 74]))
 
@@ -7129,11 +7391,14 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  [["zk2/*/*/freshness.v2/stream/heartbeats/**"]]]))
     # -- the texts round 113's findings quote ---------------------------------------------
     sc = (spec / "profiles" / "freshness" / "scenarios-v2.md").read_text(encoding="utf-8")
-    out.append(("F-547: freshness.v2 0.9 cites `[Sc: §8]` six times, three of them the owner's MUSTs' one evidence, "
-                "and its entry says scenarios-v2.md §8 runs an owner heartbeat on a bus; the file holds §1 to §7",
+    out.append(("F-547, resolved (freshness.v2 0.10, round 115): freshness.v2 cites `[Sc: §8]` six times, three of "
+                "them the owner's MUSTs' one evidence, and scenarios-v2.md holds §1 to §8, where round 113 read §1 to "
+                "§7; its §8 is headed with the rules it runs",
                 [fv.count("`[Sc: §8]`"), re.findall(r"^## §(\d+) ", sc, re.M)]
-                + missing(flog, "`scenarios-v2.md` §8 runs an owner heartbeat on a bus."),
-                [6, ["1", "2", "3", "4", "5", "6", "7"]]))
+                + missing(flog, "`scenarios-v2.md` §8 runs an owner heartbeat on a bus.",
+                          "**Answered: F-547, a gap.** `scenarios-v2.md` §8 is in the text")
+                + missing(sc, "## §8 An owner heartbeat (§2.4, §2.5, §2.9; link.v2 §2.9)"),
+                [6, ["1", "2", "3", "4", "5", "6", "7", "8"]]))
     out.append(("F-550 and F-551: link.v2 0.19's entry says what its text does not, that a group is counted for an "
                 "interface that has a heartbeat, and that no case pins it; §2.9 calls a collection the revisions "
                 "disagree on a link collection, where link.v1 §2.3 reads it host",

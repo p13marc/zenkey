@@ -118,6 +118,18 @@ impl Gate {
         Ok(g)
     }
 
+    /// [`Gate::write`] for a caller that must not wait: the guard when the
+    /// gate is open and no step-down is closing its writes, `None`
+    /// otherwise, at once. `write` returns [`Error::Standby`] at once while
+    /// the instance stands by, but it queues behind a step-down's
+    /// [`Gate::close_writes`], which itself waits for every write already
+    /// admitted; a writer that holds other interfaces' guards, as an owner
+    /// heartbeat does, would hold them for as long.
+    pub(crate) fn try_write(&self) -> Option<tokio::sync::RwLockReadGuard<'_, ()>> {
+        let g = self.writes.try_read().ok()?;
+        self.is_open().then_some(g)
+    }
+
     /// Adds `slot`, declaring it now when the gate is open: a resource
     /// declared while the instance serves is declared at once.
     pub(crate) async fn join(&self, slot: Arc<dyn Slot>) -> Result<()> {
@@ -309,5 +321,52 @@ impl Slot for QSlot {
 
     fn unexpose(&self) -> BoxFuture<'_, Result<()>> {
         Box::pin(self.undeclare())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// What an owner heartbeat rests on (`freshness.v2` §2.4, review of
+    /// #1144). A gate standing by refuses a write at once, by either door.
+    /// While a step-down closes the writes behind one still in flight,
+    /// `write` queues until that write is published, and `try_write`
+    /// answers at once, `None`: a writer holding other interfaces' guards
+    /// leaves this one's group out, and waits for nothing.
+    #[tokio::test]
+    async fn try_write_never_waits_behind_a_step_down() {
+        let gate = Gate::new("beacon.v2".parse().unwrap());
+        // Standing by: refused at once.
+        assert!(matches!(gate.write().await, Err(Error::Standby(_))));
+        assert!(gate.try_write().is_none());
+        // Serving: admitted.
+        gate.expose().await.unwrap();
+        let in_flight = gate.write().await.expect("admitted while it serves");
+        assert!(gate.try_write().is_some());
+
+        // A step-down begins, and waits for the write in flight.
+        let closing = tokio::spawn({
+            let gate = Arc::clone(&gate);
+            async move { gate.close_writes().await }
+        });
+        while gate.is_open() {
+            tokio::task::yield_now().await;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!closing.is_finished(), "it waits for the write admitted");
+        assert!(gate.try_write().is_none(), "left out, at once");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), gate.write())
+                .await
+                .is_err(),
+            "`write` queues behind the step-down"
+        );
+        // The write is published: the step-down goes on, and both refuse.
+        drop(in_flight);
+        closing.await.unwrap();
+        assert!(matches!(gate.write().await, Err(Error::Standby(_))));
+        assert!(gate.try_write().is_none());
     }
 }
