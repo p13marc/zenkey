@@ -61,7 +61,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .blackbox import BLACKBOX
+from .blackbox import BLACKBOX, workdir
 
 REPO = Path(__file__).resolve().parents[3]
 JOURNAL = REPO / "zenkey" / "tests" / "contracts" / "journal.v1.toml"
@@ -317,8 +317,9 @@ def _section8(width: int, connect: str, tool: Any, storage: UnionStorage) -> tup
     three = sorted(no_event_keys + [deleted])
     out.append((f"{tag}: Expected 5: none of step 4's three samples is delivered, by the subscription or by the "
                 "replay; the consumer counts each undecodable, refused as form: each carries no event, in an "
-                "envelope §7.5's parse accepts or in none (core 0.105 §2.6). The subscription counts the three; the "
-                "backend keeps no delete, so the replay returns and counts the two puts",
+                "envelope §7.5's parse accepts or in none (core §2.6). The subscription counts each of the three; "
+                "the replay returns step 4's two puts alone, the storage holding no value under the deleted key, and "
+                "counts each of the two so (core 0.106's Expected 5, F-528's answer)",
                 not live_got and live_bad == [(k, "form") for k in three]
                 and sorted(rp.undecodable) == [(k, "form") for k in no_event_keys]
                 and not set(three) & set(got) and deleted not in storage.held,
@@ -405,9 +406,11 @@ def run_delete() -> list[Result]:
         with heard.lock:
             got = (list(heard.delivered), sorted(heard.undecodable))
         want = sorted((k, w) for _, k, _, w in cases)
-        out.append(("beyond §8 (core 0.105): a delete on an events key, heard by zk2py's subscription with each kind "
-                    "of attachment, is never delivered, and is counted by the parse's refusal (short, sample_kind, "
-                    "trailing), else form (a delete, or none)", got == ([], want), f"{got}"))
+        out.append(("beyond §8 (core 0.106 §2.6, \"A delete\"): a delete on an events key, heard by zk2py's "
+                    "subscription with each kind of attachment, is never delivered, and is counted by the parse's "
+                    "refusal (an empty attachment short, a mutation sample_kind, a byte after the seq trailing), "
+                    "else form (a delete's envelope, or no attachment, which carries none)", got == ([], want),
+                    f"{got}"))
 
         def answer(query: Any) -> None:
             for _, k, a, _ in cases:
@@ -606,12 +609,15 @@ def run_replayed() -> list[Result]:
     and that it writes an owner's keys) publishes them on a second, beside
     the owner example putting two occurrences. zk2py's consumer subscribes
     before both, then replays from the stand-in storage."""
+    with workdir("zk2py-zrec-") as work:
+        return _replayed(Path(work) / "no-event.zrec")
+
+
+def _replayed(capture: Path) -> list[Result]:
     from . import live
     from .live_interop import Owner as Exe, _r1
 
     out: list[Result] = []
-    work = Path(tempfile.mkdtemp(prefix="zk2py-zrec-", dir="/srv/dev/scratch/zenkey/py"))
-    capture = work / "no-event.zrec"
     intruders = _no_events(16, 7)
     ra, epa, _ = _r1(timestamping=True)
     try:
@@ -625,14 +631,23 @@ def run_replayed() -> list[Result]:
         w.close()
     finally:
         ra.close()
-    rows = [json.loads(x) for x in capture.read_text(encoding="utf-8").splitlines()[1:] if x.strip()]         if capture.exists() else []
+    if not capture.exists():
+        # No capture, no run: every later check reads its rows.
+        return [("replayed: zenctl record wrote its capture", False,
+                 f"{capture} is missing; exit {rec.returncode}; {se.strip()[-300:]}")]
+    lines = capture.read_text(encoding="utf-8").splitlines()
+    rows = [json.loads(x) for x in lines[1:] if x.strip()]
+    captured = [(x.get("key"), x.get("encoding")) for x in rows[:2]] == [(k, e) for k, _, e in intruders] \
+        and len(rows) == 3 and rows[2].get("key") == deleted
     out.append(("replayed: zenctl record captures zk2py's two puts whole, each under its Encoding, and its delete",
-                [(x.get("key"), x.get("encoding")) for x in rows[:2]] == [(k, e) for k, _, e in intruders]
-                and len(rows) == 3 and rows[2].get("key") == deleted,
+                captured,
                 f"exit {rec.returncode}; {[(x.get('key'), x.get('encoding')) for x in rows]}; {se.strip()[-200:]}"))
+    if not captured:
+        # The replay's checks compare with these three rows: without them
+        # they would pass or fail for the capture's reason, not their own.
+        return out
     out.append(("replayed: the capture's row of the delete (reported: its kind, and whether it keeps the "
-                "attachment)", True,
-                f"{ {k: v for k, v in rows[2].items() if k not in ('key',)} if len(rows) > 2 else None }"))
+                "attachment)", True, f"{ {k: v for k, v in rows[2].items() if k not in ('key',)} }"))
     r, ep, _ = _r1(timestamping=True)
     tool = live.open_client(ep)
     storage = UnionStorage(r)
@@ -675,7 +690,8 @@ def run_replayed() -> list[Result]:
                     f"{rp_out.stderr.strip()[-200:]}"))
         out.append(("replayed: zk2py's consumer delivers the owner example's two occurrences, by the subscription "
                     "and by the replay, and none of step 4's three; the subscription counts each undecodable, form, "
-                    "and the replay the two puts the backend kept (core 0.105 §2.6, state.md §8 Expected 5)",
+                    "and the replay the two puts the backend kept (core §2.6, state.md §8 Expected 5 as core 0.106 "
+                    "counts it)",
                     live_keys == sorted(real) and live_bad == want_live
                     and sorted(o.key for o in rp.delivered) == sorted(real) and sorted(rp.undecodable) == want_bad,
                     f"subscription {live_keys} {live_bad}; replay {[o.key for o in rp.delivered]} "
