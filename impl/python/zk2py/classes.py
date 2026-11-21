@@ -163,19 +163,24 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "owner.Owner._descriptor_doc writes an entry's minor only where its Contract has one: the authoring file's, "
      "none for a file that states none (W104) and none for a revision held as its bundle alone (bundle.held)  "
      "(readings; presence_scenarios §2 step 8, zenctl reading it too) (round 111, core 0.107)"),
+    # core 0.109 (#1126, #1127; F-535 to F-538 answered): the SHOULD on
+    # `minor`, one size rule where 0.107 had two, and what is left out.
+    ("owner", "core §3.3", "An owner that holds the revision's authoring file SHOULD state the file's minor", MET,
+     "owner.Owner._descriptor_doc: an entry states its Contract's minor wherever its authoring file states one, as "
+     "it did since round 111 (readings; presence_scenarios §2 step 8) (round 114, core 0.109)"),
     ("owner", "core §3.3", "An owner's descriptor SHOULD stay within 1 KB", MET,
-     "owner.Owner._descriptor measures each descriptor it writes (descriptor.size, Owner.descriptor_size). Beyond "
-     "1 KB it is the four members that exceed, its others kept within 512 B, which zk2py reads the MAY to allow  "
-     "(F-535); zenoh-modem's node shape is 1,116 B on zk2py's owner, 954 B of them the four (readings) (round 111, "
-     "core 0.107; not met before, when it neither measured nor warned)"),
-    ("owner", "core §3.3", "An owner whose descriptor exceeds 1 KB SHOULD leave out every empty member", MET,
-     "owner.Owner._descriptor_doc leaves out every member whose schema default is an empty list or object, at "
-     "every size: capabilities, requires, profiles, meta, an entry's unavailable and cardinality, a requirement's "
-     "params (readings: descriptor.size finds none written) (round 111, core 0.107)"),
-    ("owner", "core §3.3", "That owner SHOULD also keep every member but", MET,
-     "owner.Owner._descriptor: the others are the header and meta's zid and host. Over 1 KB with them beyond "
-     "512 B, it leaves meta.host out and says so on stderr (Owner.size_note); an address that alone exceeds "
-     "512 B it cannot shorten, and says so (readings) (round 111, core 0.107)"),
+     "owner.Owner._descriptor measures each descriptor it writes, the bytes it puts and answers (descriptor.size, "
+     "Owner.descriptor_size): within 1,024 B, or beyond it with the rest within 512 B, the size less each of the "
+     "four members stated and a comma each (Size.rest, Size.meets). Beyond both it leaves meta.host out and says so "
+     "on stderr (Owner.size_note); an address that alone takes the rest beyond 512 B it cannot shorten, says so, "
+     "and misses the SHOULD there (readings: zenoh-modem's node shape, 1,107 B with a rest of 150 B; "
+     "descriptors/ok-over-1kb counted 1,184 B and 237 B) (round 114, core 0.109; round 111 read 0.107's MAY so, "
+     "F-535)"),
+    ("owner", "core §3.3", "An owner whose descriptor exceeds 1 KB SHOULD leave out every member that holds", MET,
+     "owner.Owner._descriptor_doc leaves out each of the seven when it holds nothing, at every size: capabilities, "
+     "requires, profiles, meta, an entry's unavailable and cardinality, a requirement's params; interfaces and "
+     "bindings stay (readings: descriptor.size finds none written) (round 111, core 0.107; the sentence is "
+     "0.109's)"),
     ("owner", "core §3.3", "At the constrained level (§12), it MUST fit", NA,
      "zk2py claims no class at the constrained level"),
     ("owner", "core §3.3", "The owner MUST put the descriptor on its", MET,
@@ -800,10 +805,21 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "heartbeat.write in the form read (heartbeat family: every accepted read written back) (round 96, core 0.81)"),
     # core 0.108 (#1110): the owner heartbeat's six static rules (round 112).
     ("static", "core §7.5", "An implementation MUST NOT choose the layout by a payload's bytes", MET,
-     "owner_heartbeat.read and heartbeat.read are two functions, each called by what its caller holds of the key; "
-     "neither reads a byte to pick the other, and no zk2py reader tries one then the other (heartbeat family: "
-     "owner.json's either, one body accepted by both; readings: the same payload read both ways) (round 112, core "
-     "0.108)"),
+     "owner_heartbeat.read and heartbeat.read_put are two functions, each called by what its caller holds of the "
+     "key; neither reads a byte to pick the other, CH's tag among them, and no zk2py reader tries one then the "
+     "other (heartbeat family: owner.json's either, one body accepted by both; readings: the same payload read "
+     "both ways) (round 112, core 0.108; \"CH's tag among them\" is 0.109's)"),
+    # core 0.109 (F-540's answer, and the review of 0.108): two static rules.
+    ("static", "core §7.5", "An implementation MUST NOT allocate from a size", MET,
+     "owner_heartbeat._Bits.raw compares a group's size with the bits the body has left before it takes one, and "
+     "refuses short; a group's bits are copied from the body, never built from the size (heartbeat family: "
+     "owner.json's read of a size of 2^32 − 1 over a few bytes, short) (round 114, core 0.109; so since round 112)"),
+    ("static", "core §7.5", "An implementation that reads a heartbeat or an owner heartbeat MUST refuse a put of "
+     "another form", MET,
+     "heartbeat.put_of, the gate of both readings: the parse, then form for a mutation or a frame, before a tag or "
+     "a body is read, and form for a put with no envelope. owner_heartbeat.read, heartbeat.read_put and zk2py's "
+     "subscribers (freshness_v2.Subscriber and Provider, freshness.Subscriber) go through it (heartbeat family: "
+     "owner.json's forms, each on both keys) (round 114, core 0.109; zk2py's own token since round 96 and 112)"),
     ("static", "core §7.5", "An implementation that writes an owner heartbeat MUST write it so", MET,
      "owner_heartbeat.write: CH's tag 0, the groups ordered by index, none, sixteen or one index twice refused, "
      "each size its sections' count of bits in LEB128 (heartbeat family: owner.json's 12 writes; readings: "
