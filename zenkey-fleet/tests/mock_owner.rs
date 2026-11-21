@@ -267,7 +267,10 @@ async fn gen_of_zenoh_modems_node_meets_the_size_rule_and_states_true_minors() {
     );
 
     // The size rule. 1,344 B before core 0.107, which wrote every empty
-    // member and a `minor` of 0 for each revision.
+    // member and a `minor` of 0 for each revision; 1,184 B after it. Since
+    // #1110's H2b the runtime embeds `freshness.v2`'s revision 1.1, whose
+    // optional `stream/heartbeats/{class}` an owner that sends heartbeats
+    // alone lists `unavailable` (core §3.3): 76 B more, 1,260 B.
     let size = d.size();
     assert_eq!(size.bytes, bytes.len(), "the reference writes it compact");
     assert_eq!(
@@ -276,7 +279,7 @@ async fn gen_of_zenoh_modems_node_meets_the_size_rule_and_states_true_minors() {
         "every capability modem.v3 gates on"
     );
     assert!(
-        size.bytes > SIZE_BYTES && size.bytes < 1_200,
+        size.bytes > SIZE_BYTES && size.bytes < 1_280,
         "over 1 KB with four entries and 30 capabilities: {size:?}"
     );
     assert!(size.other <= OTHER_BYTES / 2, "{size:?}: {text}");

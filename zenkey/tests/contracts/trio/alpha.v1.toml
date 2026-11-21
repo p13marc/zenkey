@@ -1,0 +1,14 @@
+# One of three interfaces one owner heartbeat covers (#1110's H2b,
+# `tests/owner_heartbeat.rs`): a collection of the `host` class. It uses
+# `freshness.v1` so that its owner, re-puts off, confirms nothing itself:
+# the test writes the owner heartbeats.
+[interface]
+name  = "alpha"
+major = 1
+minor = 0
+uses  = ["freshness.v1"]
+
+[resources.status]
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 2 }

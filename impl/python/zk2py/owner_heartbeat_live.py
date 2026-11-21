@@ -101,6 +101,16 @@ def run_owner(endpoint: str, catalog_path: str) -> int:
                 o.delete_state(words[1])
             elif words[0] == "lose":
                 o.ohb_lose = frozenset(o.ohb_lose) | {words[1]}
+            elif words[0] == "miss":
+                # a put the owner makes and no reader hears: its stamp moves,
+                # and the put is dropped at the publisher (a test rig's)
+                with o._writes:
+                    real = o._publishers[words[1]]
+                    o._publishers[words[1]] = _Dropped()
+                    try:
+                        o.set_state(words[1], words[2].encode())
+                    finally:
+                        o._publishers[words[1]] = real
             elif words[0] == "report":
                 print("report " + json.dumps({
                     "owner_heartbeats": [[cls, ib.seq, sorted(v)] for cls, ib, v in o.owner_heartbeats_sent],
@@ -117,6 +127,13 @@ def run_owner(endpoint: str, catalog_path: str) -> int:
             print(f"refused {line.strip()}: {type(e).__name__}: {e}", flush=True)
     o.close()
     return 0
+
+
+class _Dropped:
+    """A publisher whose puts go nowhere."""
+
+    def put(self, *a: Any, **k: Any) -> None:
+        return None
 
 
 class Child:
@@ -279,10 +296,17 @@ def reference(session: Any, endpoint: str) -> None:
         if p.wait_for("ready ", 120) is None:
             print("NOTE the reference's owner did not start", flush=True)
             return
-        entry = _entry(session, "lab/ref")
+        entry = None
+        for _ in range(10):  # its instance token may trail its ready line
+            entry = _entry(session, "lab/ref")
+            if entry is not None:
+                break
+            time.sleep(0.3)
         std = fv2.standard_contract()
-        which = "1.1" if entry and entry.get("contract") == std.fingerprint else "another revision than 1.1"
-        print(f"NOTE the reference's owner implements freshness.v2 at {which}: {json.dumps(entry)}", flush=True)
+        which = "no entry read" if entry is None else "revision 1.1" if entry.get("contract") == std.fingerprint \
+            else "another revision than 1.1"
+        print(f"NOTE the reference's owner, sending heartbeats alone, implements freshness.v2 at {which}: "
+              f"{json.dumps(entry)}", flush=True)
     finally:
         p.close()
 
@@ -477,12 +501,306 @@ def run() -> int:
     return 1 if failed else 0
 
 
+# -- the reference's readers beside zk2py's owner (round 113, #1110's H2c) ----------------
+
+class Watch:
+    """``zenctl watch``, a black box: the reference's consumer on one
+    resource, its ndjson rows and its stderr."""
+
+    def __init__(self, ep: str, iface: str, resource: str, catalog: str | None, for_s: float):
+        from .blackbox import BLACKBOX
+
+        argv = [str(BLACKBOX / "zenctl"), "watch", ADDRESS, iface, resource, "--for", f"{for_s:g}", "--format",
+                "ndjson", "-c", ep, *[a for f in FILES for a in ("--contracts", str(f))],
+                *(["--catalog", catalog] if catalog else [])]
+        self.p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.rows: list[dict[str, Any]] = []
+        self.err: list[str] = []
+        self._t = threading.Thread(target=self._pump, daemon=True)
+        self._t.start()
+        threading.Thread(target=lambda: self.err.extend(self.p.stderr), daemon=True).start()
+
+    def _pump(self) -> None:
+        for line in self.p.stdout:
+            try:
+                self.rows.append(json.loads(line))
+            except ValueError:
+                pass
+
+    def wait(self, timeout: float = 40.0) -> None:
+        try:
+            self.p.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            self.p.kill()  # the process this runner started, by its own handle
+            self.p.wait()
+        self._t.join(timeout=2.0)
+
+    def confirmations(self, key_class: str = "link") -> dict[int, dict[str, Any]]:
+        """Its confirmation rows on one class key, by the heartbeat's seq."""
+        return {r["heartbeat"]["seq"]: r for r in list(self.rows)
+                if r.get("row") == "confirmation" and r.get("key", "").endswith(f"/heartbeats/{key_class}")}
+
+    def summary(self) -> dict[str, Any]:
+        return next((r for r in self.rows if r.get("row") == "summary"), {})
+
+
+def _zecho(ep: str, extra: list[str], count: int, timeout: float = 20.0) -> tuple[list[dict[str, Any]], str]:
+    """``zenctl echo``, a black box: its ndjson rows and its stderr."""
+    from .blackbox import BLACKBOX
+
+    argv = [str(BLACKBOX / "zenctl"), "echo", *extra, "--count", str(count), "--format", "ndjson", "-c", ep,
+            *[a for f in FILES for a in ("--contracts", str(f))]]
+    p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        out, err = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        p.kill()  # the process this runner started, by its own handle
+        out, err = p.communicate()
+    rows = []
+    for line in out.splitlines():
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            pass
+    return rows, err
+
+
+def _pyecho(ep: str, extra: list[str], window: float) -> list[dict[str, Any]]:
+    """zk2py's echo tool, a process of its own: its rows."""
+    import os
+
+    env = dict(os.environ, PYTHONPATH=str(REPO / "impl" / "python"))
+    p = subprocess.run([sys.executable, "-m", "zk2py.echo_tool", "-c", ep, "--for", f"{window:g}",
+                        *[a for f in FILES for a in ("--contracts", str(f))], *extra],
+                       capture_output=True, text=True, timeout=60, env=env)
+    try:
+        return json.loads(p.stdout)["samples"]
+    except (ValueError, KeyError):
+        return []
+
+
+def run_reference() -> int:
+    """zk2py's owner under a catalog, and the reference's readers: ``zenctl
+    watch`` (the runtime's consumer) and ``zenctl echo``, each with the
+    catalog and without, zk2py's Provider and echo tool beside them on the
+    same puts.
+
+    1. The owner puts its six members. Every reader starts after, a late
+       joiner. Five seconds.
+    2. The owner makes a put of b's config that no reader hears. 3.5 s.
+    3. The owner loses one ``link`` owner heartbeat. Three seconds."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from . import across, live
+    from .blackbox import workdir
+    from .live_interop import _r1
+
+    rows: list[tuple[str, bool, str]] = []
+
+    def check(name: str, ok: bool, detail: str = "") -> bool:
+        rows.append((name, bool(ok), detail))
+        print(f"{'PASS' if ok else 'FAIL'} {name}" + (f": {detail}" if detail else ""), flush=True)
+        return bool(ok)
+
+    def note(text: str) -> None:
+        print(f"NOTE {text}", flush=True)
+
+    contracts = _contracts()
+    held = cat.read(json.dumps(catalog_doc()))
+    router, endpoint, _ = _r1()
+    session = live.open_client(endpoint)
+    child = None
+    s = None
+    watches: dict[str, Watch] = {}
+    try:
+        with workdir("zk2py-ohb-ref-") as tmp:
+            path = str(Path(tmp) / "catalog.json")
+            Path(path).write_text(json.dumps(catalog_doc()))
+            child = Child(endpoint, path)
+            if not check("the owner process starts", child.wait_for("ready ", 60) is not None,
+                         "\n".join(child.err[-5:])):
+                return 1
+            for k in [STATUS, CONFIG, *PEERS, *ALARMS]:
+                child.command(f"put {k} v1")
+            # Step 1: every reader a late joiner.
+            for_s = 13.0
+            on_key = Watch(endpoint, "freshness.v2", "heartbeats/{class}", path, 4.0)
+            watches = {"a": Watch(endpoint, A, "status", path, for_s), "b": Watch(endpoint, B, "config", path, for_s),
+                       "c": Watch(endpoint, C, "alarms/{alarm}", path, for_s),
+                       "peer": Watch(endpoint, A, "peer/{peer}", path, for_s),
+                       "none": Watch(endpoint, A, "status", None, for_s)}
+            s = fv2.Provider(session, ADDRESS, [(c.canonical, c.fingerprint, None) for c in contracts], held=[held],
+                             wait_s=0.0)
+            sel = f"zk2/{ADDRESS}/freshness.v2/stream/heartbeats/*"
+            pool = ThreadPoolExecutor(max_workers=6)
+            echo_cat = pool.submit(_zecho, endpoint, [sel, "--catalog", path], 3)
+            echo_none = pool.submit(_zecho, endpoint, [sel], 3)
+            echo_face_cat = pool.submit(_zecho, endpoint, ["--across-face", ADDRESS, "--catalog", path], 2, 6.0)
+            echo_face_none = pool.submit(_zecho, endpoint, ["--across-face", ADDRESS], 2, 6.0)
+            py_cat = pool.submit(_pyecho, endpoint, ["--catalog", path, sel], 4.0)
+            py_none = pool.submit(_pyecho, endpoint, [sel], 4.0)
+            time.sleep(5.0)
+            settled = max((h.stamp.seq for h in s.answers("link") if h.stamp is not None), default=-1)
+            # Step 2: a put no reader hears.
+            child.command(f"miss {CONFIG} v3")
+            time.sleep(3.5)
+            # Step 3: one lost.
+            child.command("lose link")
+            time.sleep(3.0)
+            for w in watches.values():
+                w.wait()
+            got = child.command("report", "report ")
+            rep = json.loads(got.split(" ", 1)[1]) if got else {}
+            lost_seq = next((x[1] for x in rep.get("lost", []) if x[0] == "link"), None)
+
+            # -- zenctl watch, given the catalog ---------------------------------------------
+            za, zb, zc = (watches[n].confirmations() for n in "abc")
+            mine = {h.stamp.seq: h.answer for h in s.answers("link") if h.stamp is not None and "read" in h.answer}
+
+            def py(seq: int, n: int, resource: str) -> Any:
+                groups = mine.get(seq, {}).get("read", {}).get("groups", [])
+                if n >= len(groups):
+                    return None  # no such group read: the check fails, and the run goes on
+                g = groups[n]
+                return (g.get("sections") or {}).get(resource, g.get("answer") or g.get("refused"))
+
+            res = {"a": (0, "state/status", [STATUS]), "b": (1, "state/config", [CONFIG]),
+                   "c": (2, "state/alarms/{alarm}", ALARMS)}
+            one = [q for q in sorted(za) if q in zb and q in zc and q <= settled
+                   and all(z[q]["confirmed"] == res[n][2] for n, z in (("a", za), ("b", zb), ("c", zc)))]
+            check("the reference's consumer reads zk2py's owner heartbeat: three interfaces confirmed by one put, "
+                  "zenctl watch on a's status, b's config and c's alarms each printing a confirmation row for the "
+                  "same seq on …/heartbeats/link, by its group 0, 1 and 2, the members zk2py's reader confirms by it",
+                  bool(one) and [za[one[0]]["group"], zb[one[0]]["group"], zc[one[0]]["group"]] == [0, 1, 2]
+                  and one[0] in mine and all(py(one[0], *res[n][:2]) == {"confirmed": res[n][2]} for n in "abc"),
+                  f"seqs {one[:6]} of the run")
+            zp = watches["peer"].confirmations("host")
+            check("a's host collection is confirmed to the reference's consumer on …/heartbeats/host alone, and no "
+                  "row of the three link watchers names the host key",
+                  bool(zp) and any(r["confirmed"] == PEERS for r in zp.values())
+                  and not any(watches[n].confirmations("host") for n in "abc")
+                  and not watches["peer"].confirmations("link"), f"{len(zp)} rows")
+            # every heartbeat both sides read, from the settled one on: the same word
+            differ = []
+            for n, z in (("a", za), ("b", zb), ("c", zc)):
+                for q in sorted(z):
+                    if q < settled or q not in mine:
+                        continue
+                    theirs = ("diverged" if z[q]["diverged"] else {"confirmed": z[q]["confirmed"]}, z[q]["lost"])
+                    ours = (py(q, *res[n][:2]), mine[q].get("read", {}).get("gap"))
+                    if theirs != ours:
+                        differ.append(f"seq {q}, {n}: zenctl {json.dumps(theirs)}, zk2py {json.dumps(ours)}")
+            compared = sum(1 for z in (za, zb, zc) for q in z if q >= settled and q in mine)
+            check("from the settled heartbeat on, each group both sides read draws the same word from both: "
+                  "confirmed with the same members or diverged, and lost or not", compared >= 15 and not differ,
+                  f"{compared} group readings compared; " + ("; ".join(differ[:4]) or "none differs"))
+            # a divergence in one group
+            div = [q for q in sorted(zb) if q > settled and zb[q]["diverged"]]
+            check("a divergence in one group: after a put of b's config no reader heard, zenctl watch reads b's "
+                  "group diverged twice while a's and c's groups of the same two puts confirm; then it confirms "
+                  "config again, having read it again as §2.5's SHOULD says; zk2py's reader the same, seq for seq",
+                  len(div) == 2 and all(za.get(q, {}).get("confirmed") == [STATUS]
+                                        and zc.get(q, {}).get("confirmed") == ALARMS for q in div)
+                  and any(q > div[-1] and zb[q]["confirmed"] == [CONFIG] for q in zb)
+                  and [q for q in sorted(mine) if q > settled and py(q, 1, "state/config") == "diverged"] == div,
+                  f"diverged at {div}")
+            # one lost
+            lost_rows = {n: [q for q, r in z.items() if r["lost"]] for n, z in (("a", za), ("b", zb), ("c", zc))}
+            my_gaps = [q for q, a in mine.items() if a["read"]["gap"]]
+            check("one lost: the owner took a seq and put nothing; each of the three watchers marks the next row "
+                  "lost, that seq plus 1, still confirming its members, and the one after not lost; zk2py's reader "
+                  "reads the same put after a gap; the host watcher marks none; each summary counts one lost",
+                  lost_seq is not None and all(v == [lost_seq + 1] for v in lost_rows.values())
+                  and my_gaps == [lost_seq + 1] and all(lost_seq + 2 in z for z in (za, zb, zc))
+                  and not any(r["lost"] for r in zp.values())
+                  and [watches[n].summary().get("heartbeats_lost") for n in ("a", "b", "c", "peer")] == [1, 1, 1, 0]
+                  and za.get(lost_seq + 1, {}).get("confirmed") == [STATUS],
+                  f"the owner lost seq {lost_seq}; zenctl lost at {lost_rows}; zk2py's gap at {my_gaps}")
+            # -- a reader given no catalog ---------------------------------------------------
+            wn = watches["none"]
+            kinds = sorted({r.get("row", "?") for r in wn.rows})
+            check("a reader given no catalog: zenctl watch prints no confirmation row, counts no heartbeat in its "
+                  "summary and says nothing on stderr; zk2py's reader given none reads each group unknown_catalog "
+                  "(owner_heartbeat_live's N). Neither confirms a member",
+                  "confirmation" not in kinds and wn.summary().get("heartbeats") == 0 and not wn.err,
+                  f"rows {kinds}; summary heartbeats {wn.summary().get('heartbeats')}, lost "
+                  f"{wn.summary().get('heartbeats_lost')}; stderr {wn.err[:2]}")
+            note("zenctl watch with no catalog shows a covered interface exactly as it shows an owner that sends "
+                 "no heartbeat: nothing says its members are unconfirmed, or that a catalog is missing (F-556)")
+            on_key.wait()
+            shown = sorted({(r.get("payload", {}).get("as"), r.get("payload", {}).get("declared"),
+                            "groups" in json.dumps(r)) for r in on_key.rows if r.get("row") == "sample"})
+            note("zenctl watch on the owner heartbeat's own resource, freshness.v2 heartbeats/{class}, given the "
+                 f"catalog, shows each put as (as, declared, any group shown): {shown}; observer §7.3 has a tool "
+                 "show its groups, as zenctl echo does (the reference, observed)")
+            # -- zenctl echo -----------------------------------------------------------------
+            zrows, _ = echo_cat.result()
+            prow = {(r["key"], (r.get("envelope") or {}).get("seq")): r for r in py_cat.result()
+                    if r.get("heartbeat")}
+            both = [(z, prow[(z["key"], z["value"]["seq"])]) for z in zrows
+                    if (z["key"], z.get("value", {}).get("seq")) in prow]
+            same = [all(pg["index"] == zg["index"] and pg["tag"] == zg["tag"] and pg["bits"] == zg["size"]
+                        and pg.get("iface") == zg.get("covers") and pg["vouches"] == zg.get("sections")
+                        for pg, zg in zip(p_["heartbeat"]["groups"], z["value"]["groups"]))
+                    and len(p_["heartbeat"]["groups"]) == len(z["value"]["groups"]) for z, p_ in both]
+            check("zenctl echo given the catalog shows each owner heartbeat's groups, each with the interface its "
+                  "index names and its sections; zk2py's echo tool shows the same of the same puts: index, tag, "
+                  "size, interface and what each group vouches for (observer §7.3, §7.5)",
+                  len(zrows) == 3 and bool(both) and all(same),
+                  f"{len(zrows)} rows of zenctl's, {len(both)} puts both showed")
+            zrows, _ = echo_none.result()
+            prow = {(r["key"], (r.get("envelope") or {}).get("seq")): r for r in py_none.result() if r.get("heartbeat")}
+            both = [(z, prow[(z["key"], z["value"]["seq"])]) for z in zrows
+                    if (z["key"], z.get("value", {}).get("seq")) in prow]
+            check("given no catalog, both show every group by its index, its tag and its size, and read none: "
+                  "zenctl echo names each unread, unknown_catalog",
+                  len(zrows) == 3 and bool(both)
+                  and all([(g["index"], g["tag"], g["size"]) for g in z["value"]["groups"]]
+                          == [(g["index"], g["tag"], g["bits"]) for g in p_["heartbeat"]["groups"]]
+                          and all(g.get("unread") == "unknown_catalog" and "sections" not in g
+                                  for g in z["value"]["groups"])
+                          and all(g["vouches"] is None for g in p_["heartbeat"]["groups"]) for z, p_ in both),
+                  json.dumps(zrows[0]["value"]["groups"])[:200] if zrows else "no row")
+            # -- the scope across a face, no policy ------------------------------------------
+            for fut, given, want_n in ((echo_face_cat, True, 9), (echo_face_none, False, 7)):
+                _, err = fut.result()
+                line = next((ln for ln in err.splitlines() if ln.startswith("echoing ")), "")
+                theirs = sorted(x.strip() for x in line.removeprefix("echoing ").split(" — ")[0].split(" + "))
+                ours = sorted(across.scopes(contracts, [ADDRESS], catalog_given=given).scopes)
+                check(f"across a face with no policy, {'given the catalog' if given else 'given no catalog'}: "
+                      f"zenctl echo declares {want_n} selectors, zk2py's scopes key for key, "
+                      + ("the two owner heartbeat keys among them" if given else "no owner heartbeat key among "
+                         "them") + " (observer 0.34 §7.5)",
+                      theirs == ours and len(ours) == want_n
+                      and (sum("/heartbeats/" in x for x in ours) == (2 if given else 0)), f"{len(theirs)} and "
+                      f"{len(ours)}; only zenctl's {sorted(set(theirs) - set(ours))[:3]}, only zk2py's "
+                      f"{sorted(set(ours) - set(theirs))[:3]}")
+            pool.shutdown(wait=False)
+    finally:
+        if s is not None:
+            s.close()
+        for w in watches.values():
+            if w.p.poll() is None:
+                w.p.kill()  # the process this runner started, by its own handle
+        if child is not None:
+            child.close()
+        session.close()
+        router.close()
+    failed = [r for r in rows if not r[1]]
+    print(f"owner_heartbeat_live --reference: {len(rows) - len(failed)}/{len(rows)}", flush=True)
+    return 1 if failed else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.owner_heartbeat_live", description=__doc__.split("\n")[0])
     ap.add_argument("--owner", nargs=2, metavar=("ENDPOINT", "CATALOG"), help="run the owner process")
+    ap.add_argument("--reference", action="store_true",
+                    help="zk2py's owner with the reference's readers, zenctl watch and zenctl echo (black boxes)")
     args = ap.parse_args(argv)
     if args.owner:
         return run_owner(*args.owner)
+    if args.reference:
+        return run_reference()
     return run()
 
 

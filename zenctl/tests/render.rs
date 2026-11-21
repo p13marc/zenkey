@@ -4549,6 +4549,7 @@ fn a_heartbeat_row_says_lost_and_diverged() {
     let c = zenkey_fleet::report::WatchConfirmation {
         provider: "lab/n1".into(),
         key: "zk2/lab/n1/freshness.v2/stream/heartbeat/hb.v1".into(),
+        group: None,
         heartbeat: zenkey_fleet::report::InbandStamp {
             run: "0007".into(),
             seq: 5,

@@ -813,6 +813,17 @@ impl<'a> Lens<'a> {
         stamp: zenkey_model::wire::Stamp,
         tag: zenkey_model::wire::Tag,
     ) -> (PayloadRendering, Conformance, Option<ChosenByTag>) {
+        // Core §7.5: the key says which layout a put carries. An owner
+        // heartbeat is not read by the steps that choose a key's revision
+        // (observer §7.5): each group names its own.
+        if let Some((addr, class)) = self
+            .relative(wire)
+            .and_then(zenkey_model::heartbeat::owner_class)
+        {
+            let (rendering, conformance) =
+                self.owner_heartbeat(key, &addr, class, body, stamp, tag);
+            return (rendering, conformance, None);
+        }
         let Some((addr, revision)) = self.covered_revision(wire, tag) else {
             if resolution.resolved.is_some() {
                 let declared = inband::heartbeat_declared(key);
@@ -859,6 +870,60 @@ impl<'a> Lens<'a> {
                 )
             }
         }
+    }
+
+    /// An owner heartbeat heard from `addr` on its key of `class` (core
+    /// §7.5; observer 0.34 §7.3, §7.5; #1110): its groups by index, tag
+    /// and size, each read with the revision its index names in the
+    /// catalog the tool was given, read through the one its owner names
+    /// (with no descriptor in hand, the one held: the deployment's word),
+    /// and shown by its envelope where the tool cannot read it. Given no
+    /// catalog, every group is.
+    fn owner_heartbeat(
+        &self,
+        key: &str,
+        addr: &Addr,
+        class: zenkey_model::heartbeat::Class,
+        body: &[u8],
+        stamp: zenkey_model::wire::Stamp,
+        tag: zenkey_model::wire::Tag,
+    ) -> (PayloadRendering, Conformance) {
+        let dating = self.dating_of(addr);
+        let through = zenkey_model::freshness::Catalogs {
+            held: self.deployment.map_or(&[], Catalogs::held),
+            named: dating.catalog,
+        };
+        inband::owner_heartbeat_check(
+            key,
+            class,
+            stamp,
+            tag,
+            body,
+            through,
+            |entry| match self.held_revision(&entry.iface, &entry.contract) {
+                Some(rev) => {
+                    inband::GroupRevision::Held(zenkey_model::heartbeat::Layout::of(rev.contract()))
+                }
+                None => inband::GroupRevision::NotHeld,
+            },
+            dating,
+        )
+    }
+
+    /// The revision of `iface` whose fingerprint is `fp`, where the tool
+    /// holds it: retrieved or recorded, or given offline.
+    fn held_revision(
+        &self,
+        iface: &IfaceId,
+        fp: &zenkey_model::canonical::Fingerprint,
+    ) -> Option<Arc<Revision>> {
+        if let Some(ContractState::Held(rev)) = self.contracts.state(iface, fp) {
+            return Some(rev);
+        }
+        self.offline?
+            .of_iface(iface)
+            .find(|r| r.fingerprint() == fp)
+            .cloned()
     }
 
     /// A snapshot's page heard on `wire` (#977's E2): its key resolved by

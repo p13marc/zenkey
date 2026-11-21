@@ -13,6 +13,57 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.34 — 2026-11-21: an owner heartbeat's scope across a face, and its groups' revisions (#1110)
+
+Core 0.108 defines the owner heartbeat, and `freshness.v2` 0.9 adopts it:
+one put for several interfaces, on
+`…/freshness.v2/stream/heartbeats/<class>`
+([`CHANGELOG.md`](CHANGELOG.md)). Two of §7.5's rules named the
+heartbeat by its per-interface key alone. This text, written against
+core 0.108, follows.
+
+**Added: §7.5, "The owner heartbeat", a scope.**
+- **Before:** a tool across a face declared each heartbeat's exact key,
+  and a `freshness.v2` contract in hand added no scope. So it would
+  never hear an owner heartbeat.
+- **Now:** a tool given a catalog also has a scope for each owner
+  heartbeat key, for each class that a collection in hand has. An owner
+  under a catalog may send either form, and a tool cannot tell which
+  before it hears one.
+- **With a face policy** it declares the `link` class's key where the
+  plan lets it cross (`link.v2` §2.9), and never the `host` class's. A
+  `link.v1` policy's plan lets neither cross.
+- **Given no catalog** it has no such scope: it could read no group.
+
+**Added: §7.5, "The revision of a key", an owner heartbeat's groups.**
+- **Before:** the MUST chose a heartbeat's revision among those of "the
+  key's interface". An owner heartbeat's key names a class.
+- **Now:** an owner heartbeat is not read by those steps. A tool MUST
+  read a group with the revision its index names in the catalog it was
+  given, as core §8.6 reads an index. The group's tag is its check.
+- **Without a catalog**, or for a group it cannot read, a tool shows the
+  group by its index, its tag and its size.
+
+**Added: §7.3, "An owner heartbeat".** What a tool shows of one: its
+groups with no contract, and what a group vouches for with its revision.
+No rule: the MUST NOT on a heartbeat's body binds it as written.
+
+**Evidence.** `conformance/scope/faces.json` gains ten cases, each
+stating whether the tool was given a catalog. Its 19 cases state none
+and stand as they were. The new ones were computed twice, by two
+readings of this text. The group rule cites the core's
+`heartbeat/owner.json`, whose `groups` cases read an index through a
+catalog and check the tag. `envelope/tags.json` is unchanged: its cases
+choose one revision for a key, which an owner heartbeat has none of.
+
+**Deliberately not changed.**
+- **The heartbeat's scope and its revision.** Both rules hold for the
+  per-interface key.
+- **§7.3's MUST NOT.** A tool reads no heartbeat's body as a record, an
+  owner heartbeat's among them.
+- **Declaring again after silence.** An owner heartbeat's horizon is core
+  §8.5's, the shortest of the collections its groups cover.
+
 ## 0.33 — 2026-11-08: an event's revision across a face (#609, #980)
 
 zk2py round 107 read 0.30 to 0.32 cold, and filed F-512 against §7.5.

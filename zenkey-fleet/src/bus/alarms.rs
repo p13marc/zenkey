@@ -157,7 +157,8 @@ enum Delivery {
         held: bool,
         at: Instant,
     },
-    /// A heartbeat covering alarms.v1 (core §7.5's form 6; #978's F2).
+    /// A heartbeat covering alarms.v1 (core §7.5's form 6; #978's F2), or
+    /// an owner heartbeat on its class's key (#1110): the key says which.
     Heartbeat {
         key: String,
         stamp: zenkey_model::wire::Stamp,
@@ -475,6 +476,9 @@ pub struct AlarmFeed {
     _tokens: Option<zenoh::pubsub::Subscriber<()>>,
     _data: Option<zenoh::pubsub::Subscriber<()>>,
     _heartbeats: Option<zenoh::pubsub::Subscriber<()>>,
+    /// The owners' owner heartbeat key of alarms.v1's collection's class
+    /// (`freshness.v2` §2.5, "Both forms"; #1110).
+    _owner_heartbeats: Option<zenoh::pubsub::Subscriber<()>>,
     discarded: Arc<AtomicU64>,
     stall: Option<Result<StallWatch, String>>,
     stall_seen: StallSeen,
@@ -521,7 +525,8 @@ impl AlarmFeed {
             }
         };
         let mut feed = AlarmFeed {
-            book: AlarmBook::new(scope, spec.book()),
+            book: AlarmBook::new(scope, spec.book())
+                .with_catalogs(spec.catalogs.held().iter().cloned()),
             session: session.clone(),
             watch,
             barrier: None,
@@ -532,6 +537,7 @@ impl AlarmFeed {
             _tokens: None,
             _data: None,
             _heartbeats: None,
+            _owner_heartbeats: None,
             discarded: Arc::default(),
             stall: None,
             stall_seen: StallSeen::default(),
@@ -590,6 +596,7 @@ impl AlarmFeed {
         self.moves_seen = barrier.moves();
         self.barrier = Some(barrier);
         let q = queue.clone();
+        let oq = queue.clone();
         let hq = queue;
         let discarded = Arc::clone(&self.discarded);
         let data = crate::bus::teardown::declared(
@@ -630,11 +637,37 @@ impl AlarmFeed {
                 }),
         )
         .await?;
+        // An owner may confirm its alarms by owner heartbeats in place of
+        // that heartbeat, and a reader cannot tell which before it hears
+        // one (`freshness.v2` §2.5, "Both forms"): the class's key too, in
+        // the same queue.
+        let owner_heartbeats = crate::bus::teardown::declared(
+            "alarms' owner heartbeats",
+            scope.owner_heartbeat_selector(),
+            self.session
+                .declare_subscriber(scope.owner_heartbeat_selector())
+                .callback(move |s: Sample| {
+                    let at = Instant::now();
+                    if let crate::model::inband::Read::Heartbeat { sample, stamp, tag } =
+                        crate::model::inband::read(s)
+                    {
+                        oq.send(Delivery::Heartbeat {
+                            key: sample.key_expr().as_str().to_owned(),
+                            stamp,
+                            tag,
+                            body: sample.payload().to_bytes().into_owned(),
+                            at,
+                        });
+                    }
+                }),
+        )
+        .await?;
         self.book.subscribed(Instant::now());
         self.stall = Some(StallWatch::start(&self.session).await);
         self._tokens = Some(tokens);
         self._data = Some(data);
         self._heartbeats = Some(heartbeats);
+        self._owner_heartbeats = Some(owner_heartbeats);
         self.rx = Some(rx);
         Ok(())
     }
@@ -817,7 +850,13 @@ impl AlarmFeed {
                 body,
                 at,
             } => {
-                self.book.heartbeat(&key, stamp, tag, &body, at);
+                // Core §7.5: the layout is the key's to say, never the
+                // bytes'.
+                if zenkey_model::heartbeat::owner_class(&key).is_some() {
+                    self.book.owner_heartbeat(&key, stamp, tag, &body, at);
+                } else {
+                    self.book.heartbeat(&key, stamp, tag, &body, at);
+                }
             }
         }
         out.extend(self.check_stall(now, wall));

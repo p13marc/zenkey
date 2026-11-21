@@ -351,7 +351,7 @@ pub fn heartbeat_value(
     body: &[u8],
     dating: crate::model::deployment::Dating,
 ) -> Result<serde_json::Value, String> {
-    use zenkey_model::heartbeat::{Heartbeat, Members, Time};
+    use zenkey_model::heartbeat::Heartbeat;
     if tag != layout.tag {
         return Err(format!(
             "its tag {} is not {}'s {} ({})",
@@ -362,8 +362,32 @@ pub fn heartbeat_value(
         ));
     }
     let hb = Heartbeat::parse(body, layout).map_err(|r| format!("its body is refused: {r}"))?;
-    let mut sections = serde_json::Map::new();
-    for (c, s) in layout.collections.iter().zip(&hb.sections) {
+    let sections = sections_value(layout, &hb.sections);
+    let (time, dated) = time_value(hb.time, dating);
+    let mut v = serde_json::json!({
+        "covers": layout.iface.to_string(),
+        "covered": layout.fingerprint.to_string(),
+        "run": stamp.run.hex(),
+        "seq": stamp.seq.get(),
+        "time": time,
+        "sections": sections,
+    });
+    if let Some(d) = dated {
+        v["dated"] = serde_json::to_value(d).unwrap_or_default();
+    }
+    Ok(v)
+}
+
+/// A heartbeat's sections, or a group's, as a tool shows them: each by its
+/// collection's `<kind token>/<template>`, with its digest and what it
+/// vouches for; a map bit of 0 has none.
+fn sections_value(
+    layout: &zenkey_model::heartbeat::Layout,
+    sections: &[Option<zenkey_model::heartbeat::Section>],
+) -> serde_json::Map<String, serde_json::Value> {
+    use zenkey_model::heartbeat::Members;
+    let mut out = serde_json::Map::new();
+    for (c, s) in layout.collections.iter().zip(sections) {
         let Some(s) = s else { continue };
         let v = match &s.members {
             Members::One { vouched } => {
@@ -383,29 +407,161 @@ pub fn heartbeat_value(
                 v
             }
         };
-        sections.insert(c.resource(), v);
+        out.insert(c.resource(), v);
     }
-    let (time, dated) = match hb.time {
+    out
+}
+
+/// A heartbeat's time as a tool shows it, and its date after the number
+/// (the tooling guide's O8), from the epoch in force for its owner, named.
+fn time_value(
+    time: zenkey_model::heartbeat::Time,
+    dating: crate::model::deployment::Dating,
+) -> (serde_json::Value, Option<crate::report::Dated>) {
+    use zenkey_model::heartbeat::Time;
+    match time {
         Time::Unknown => (serde_json::Value::Null, None),
         Time::At { secs, ms } => (
             serde_json::json!({"s": secs, "ms": ms}),
-            // The date after the number (the tooling guide's O8), from the
-            // epoch in force for its owner, named.
             Some(dating.dated_from(i128::from(secs) * 1000 + i128::from(ms))),
         ),
-    };
+    }
+}
+
+/// What a tool holds of the revision an owner heartbeat's group names
+/// (observer 0.34 §7.5, "An owner heartbeat"): what `revision` answers a
+/// catalog's entry with in [`owner_heartbeat_value`].
+pub enum GroupRevision {
+    /// The revision the index names, held: the group's sections are read
+    /// with it.
+    Held(zenkey_model::heartbeat::Layout),
+    /// The tool does not hold it: the group is shown by its envelope.
+    NotHeld,
+}
+
+/// An owner heartbeat as a tool shows it (core §7.5's second layout of
+/// form 6; observer 0.34 §7.3, §7.5): `{"class", "run", "seq", "time",
+/// "groups"}`, each group by its `index`, its `tag` and its `size` in
+/// bits, the three a tool needs no contract for.
+///
+/// A group is read with the revision its index names in the catalog the
+/// tool was given, never one a key would choose: `through` is the catalogs
+/// held and the one its owner names (core §8.6), and `revision` says
+/// whether the tool holds what an entry names. A group read gains
+/// `covers`, `covered` and its `sections`, as a heartbeat's. One that is
+/// not is shown by its envelope with `unread`, why: `unknown_catalog` or
+/// `unknown_index` (core §8.6 refuses its index, every group where the
+/// tool was given no catalog), `not_held` (with what the index names),
+/// `tag` (the group's tag is not that revision's: the bytes disagree with
+/// the deployment's word), or the token core §7.5 refuses its sections
+/// by. The put's other groups are read all the same.
+///
+/// The second value says whether every group was read.
+///
+/// # Errors
+/// Core §7.5 refuses the owner heartbeat whole: its token, in words.
+pub fn owner_heartbeat_value(
+    class: zenkey_model::heartbeat::Class,
+    stamp: wire::Stamp,
+    tag: wire::Tag,
+    body: &[u8],
+    through: zenkey_model::freshness::Catalogs<'_>,
+    revision: impl Fn(&zenkey_model::catalog::Entry) -> GroupRevision,
+    dating: crate::model::deployment::Dating,
+) -> Result<(serde_json::Value, bool), String> {
+    let hb = zenkey_model::heartbeat::OwnerHeartbeat::parse(tag, body)
+        .map_err(|r| format!("the owner heartbeat is refused: {}", r.token()))?;
+    let mut whole = true;
+    let mut groups = Vec::with_capacity(hb.groups.len());
+    for g in &hb.groups {
+        let mut v = serde_json::json!({
+            "index": g.index,
+            "tag": g.tag.get(),
+            "size": g.size(),
+        });
+        let read = match g.entry(through.held, through.named) {
+            Err(r) => Err(r.token().to_owned()),
+            Ok(entry) => {
+                v["covers"] = entry.iface.to_string().into();
+                v["covered"] = entry.contract.to_string().into();
+                match revision(entry) {
+                    GroupRevision::NotHeld => Err("not_held".to_owned()),
+                    GroupRevision::Held(layout) if !g.tag_is(&layout) => Err("tag".to_owned()),
+                    GroupRevision::Held(layout) => g
+                        .read(&layout)
+                        .map(|sections| sections_value(&layout, &sections))
+                        .map_err(|r| r.token().to_owned()),
+                }
+            }
+        };
+        match read {
+            Ok(sections) => v["sections"] = sections.into(),
+            Err(why) => {
+                whole = false;
+                v["unread"] = why.into();
+            }
+        }
+        groups.push(v);
+    }
+    let (time, dated) = time_value(hb.time, dating);
     let mut v = serde_json::json!({
-        "covers": layout.iface.to_string(),
-        "covered": layout.fingerprint.to_string(),
+        "class": class.as_str(),
         "run": stamp.run.hex(),
         "seq": stamp.seq.get(),
         "time": time,
-        "sections": sections,
+        "groups": groups,
     });
     if let Some(d) = dated {
         v["dated"] = serde_json::to_value(d).unwrap_or_default();
     }
-    Ok(v)
+    Ok((v, whole))
+}
+
+/// An owner heartbeat read by [`owner_heartbeat_value`]: its groups and
+/// valid, or undecodable where core §7.5 refuses it whole. A group shown
+/// by its envelope leaves it valid: the put is well formed, and what the
+/// tool could not read is named in the group.
+#[allow(clippy::too_many_arguments)]
+pub fn owner_heartbeat_check(
+    key: &str,
+    class: zenkey_model::heartbeat::Class,
+    stamp: wire::Stamp,
+    tag: wire::Tag,
+    body: &[u8],
+    through: zenkey_model::freshness::Catalogs<'_>,
+    revision: impl Fn(&zenkey_model::catalog::Entry) -> GroupRevision,
+    dating: crate::model::deployment::Dating,
+) -> (PayloadRendering, Conformance) {
+    let declared = heartbeat_declared(key);
+    match owner_heartbeat_value(class, stamp, tag, body, through, revision, dating) {
+        Ok((value, _)) => (
+            PayloadRendering {
+                key: key.to_owned(),
+                size: body.len(),
+                resource: None,
+                rendered: Rendered::Value {
+                    declared,
+                    value,
+                    epoch_assumed: None,
+                    dated: None,
+                    bounds: None,
+                },
+            },
+            Conformance::Valid,
+        ),
+        Err(reason) => (
+            PayloadRendering {
+                key: key.to_owned(),
+                size: body.len(),
+                resource: None,
+                rendered: Rendered::Undecodable {
+                    declared: declared.clone(),
+                    reason: reason.clone(),
+                },
+            },
+            Conformance::Undecodable { declared, reason },
+        ),
+    }
 }
 
 /// Why a heartbeat where a record of a resource's type was read is
@@ -498,8 +654,13 @@ pub fn heartbeat_check(
     }
 }
 
-/// What a heartbeat is declared as: the form, and the interface it covers.
+/// What a heartbeat is declared as: the form, and the interface it
+/// covers, or for an owner heartbeat the class its key names. The key says
+/// which of the two layouts a put carries, never its bytes (core §7.5).
 pub fn heartbeat_declared(key: &str) -> String {
+    if let Some((_, class)) = zenkey_model::heartbeat::owner_class(key) {
+        return format!("zk2c owner heartbeat ({class})");
+    }
     match zenkey_model::heartbeat::covered(key) {
         Some((_, iface)) => format!("zk2c heartbeat ({iface})"),
         None => "zk2c heartbeat".to_owned(),

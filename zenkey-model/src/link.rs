@@ -1692,6 +1692,23 @@ pub fn redeclare_heartbeat_horizon(c: &Contract) -> Option<std::time::Duration> 
     crate::heartbeat::Layout::of(c).horizon()
 }
 
+/// The horizon of a subscription to an owner heartbeat key of `class`,
+/// as a reader holding `c` alone can tell it (core §8.5, `freshness.v2`
+/// §2.4): the shortest of `c`'s collections of that class, where `c` uses
+/// `freshness.v2` and has one. A reader holding several revisions of one
+/// provider takes the shortest among them
+/// ([`freshness::Views::class_horizon`]).
+#[must_use]
+pub fn redeclare_owner_heartbeat_horizon(
+    c: &Contract,
+    class: crate::heartbeat::Class,
+) -> Option<std::time::Duration> {
+    if !freshness::uses_v2(c) {
+        return None;
+    }
+    crate::heartbeat::Layout::of(c).class_horizon(class)
+}
+
 /// What [`parse`] read: the policy when no error refused it, and every
 /// finding, sorted.
 #[derive(Debug, Clone)]
