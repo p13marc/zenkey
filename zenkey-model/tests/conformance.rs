@@ -604,6 +604,48 @@ fn descriptors() {
     }
 }
 
+/// `spec/conformance/descriptors/ok-over-1kb.json` (core §3.3, 0.109):
+/// one owner's descriptor byte for byte as it served it, on one line. Its
+/// size is the 1,184 B before the file's newline and its rest 237 B, the
+/// count every implementation must reach: the three of the four members
+/// it states are 526 B, 366 B and 52 B with a comma each. The reference
+/// wrote it, so it writes it back unchanged. Never blessed.
+#[test]
+fn the_descriptor_over_1_kb_counts_as_the_text_says() {
+    use zenkey_model::descriptor::{Descriptor, SIZE_BYTES, Size};
+    let path = spec().join("conformance/descriptors/ok-over-1kb.json");
+    let file = std::fs::read_to_string(&path).unwrap();
+    let line = file.strip_suffix('\n').expect("one line and its newline");
+    assert!(!line.contains('\n'), "one line");
+    let d: Descriptor = serde_json::from_str(line).unwrap();
+    let size = d.size_of(line.as_bytes());
+    assert_eq!(
+        size,
+        Size {
+            bytes: 1184,
+            other: 237
+        }
+    );
+    assert!(size.bytes > SIZE_BYTES && size.meets());
+    assert_eq!(serde_json::to_string(&d).unwrap(), line, "it round-trips");
+    assert_eq!(d.size().unwrap(), size, "as it serializes here");
+    // A member from its name's opening quote to its value's last byte:
+    // 526 B, 366 B and 52 B, and one comma with each, 947 B.
+    let member = |name: &str, value: String| name.len() + 3 + value.len();
+    let stated = [
+        member("interfaces", serde_json::to_string(&d.interfaces).unwrap()),
+        member(
+            "capabilities",
+            serde_json::to_string(&d.capabilities).unwrap(),
+        ),
+        member("profiles", serde_json::to_string(&d.profiles).unwrap()),
+    ];
+    assert_eq!(stated, [526, 366, 52]);
+    assert!(d.requires.is_empty(), "three of the four");
+    assert_eq!(stated.iter().sum::<usize>() + 3, 947);
+    assert_eq!(size.bytes - 947, size.other);
+}
+
 /// `spec/descriptor.schema.json` is generated from the descriptor types.
 #[test]
 fn descriptor_schema_is_current() {

@@ -139,10 +139,10 @@ pub(crate) fn build(
 /// contracts implemented. A finding is a bug in the runtime or its caller,
 /// so it refuses rather than serve a descriptor a tool would reject.
 pub(crate) fn encode_checked(desc: &Descriptor, impls: &[ImplState]) -> Result<Vec<u8>> {
-    let bytes = serde_json::to_vec(desc).expect("a descriptor serializes");
-    let text = std::str::from_utf8(&bytes).expect("JSON is UTF-8");
+    let text = serde_json::to_string(desc)
+        .map_err(|e| Error::Descriptor(format!("the descriptor does not serialize: {e}")))?;
     let contracts: Vec<_> = impls.iter().map(|s| s.imp.contract()).collect();
-    let (_, report) = d::check(text, &contracts);
+    let (_, report) = d::check(&text, &contracts);
     if report.has_errors() {
         let codes: Vec<String> = report
             .errors()
@@ -150,27 +150,30 @@ pub(crate) fn encode_checked(desc: &Descriptor, impls: &[ImplState]) -> Result<V
             .collect();
         return Err(Error::Descriptor(codes.join("; ")));
     }
-    // §3.3's size rule: over 1 KB only with the four members an owner
-    // cannot shorten, the others within 512 B together.
-    let size = desc.size();
+    // §3.3's size rule, over the bytes served: within 1 KB, or over it
+    // while the rest is within 512 B, the rest being the document less
+    // its interfaces, capabilities, requires and profiles.
+    let size = desc.size_of(text.as_bytes());
     if !size.meets() {
         tracing::warn!(
             service = desc.service,
             bytes = size.bytes,
             other = size.other,
-            "the descriptor is over the 1 KB it SHOULD stay within, with more than 512 B \
-             beside its interfaces, capabilities, requires and profiles (spec §3.3)"
+            "the descriptor is over the 1 KB it SHOULD stay within, with a rest of {} B, over \
+             the {} B that lets it exceed 1 KB (core §3.3)",
+            size.other,
+            d::OTHER_BYTES
         );
     } else if size.bytes > d::SIZE_BYTES {
         tracing::debug!(
             service = desc.service,
             bytes = size.bytes,
             other = size.other,
-            "the descriptor is over 1 KB with its interfaces, capabilities, requires and \
-             profiles, which it may be (spec §3.3)"
+            "the descriptor is over 1 KB, which it may be: its rest is within {} B (core §3.3)",
+            d::OTHER_BYTES
         );
     }
-    Ok(bytes)
+    Ok(text.into_bytes())
 }
 
 #[cfg(test)]
