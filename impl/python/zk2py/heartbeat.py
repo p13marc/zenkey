@@ -174,14 +174,16 @@ def digest(members: Iterable[tuple[str, int, int, int]]) -> int:
 # -- bits ------------------------------------------------------------------------------
 
 class _Bits:
-    """A body's bits, most significant first, read in order."""
+    """A body's bits, most significant first, read in order. ``start`` and
+    ``end`` bound a run of bits within ``data``, as an owner heartbeat's
+    group's sections are (core 0.108): ``noun`` names what ends."""
 
-    def __init__(self, data: bytes):
-        self.data, self.pos, self.total = data, 0, len(data) * 8
+    def __init__(self, data: bytes, start: int = 0, end: int | None = None, noun: str = "the body"):
+        self.data, self.pos, self.total, self.noun = data, start, len(data) * 8 if end is None else end, noun
 
     def take(self, n: int, what: str) -> int:
         if self.pos + n > self.total:
-            raise Refused("short", f"the body ends before {what} ({n} bits at bit {self.pos}, {self.total} held)")
+            raise Refused("short", f"{self.noun} ends before {what} ({n} bits at bit {self.pos}, {self.total} held)")
         v = 0
         for i in range(self.pos, self.pos + n):
             v = (v << 1) | ((self.data[i >> 3] >> (7 - (i & 7))) & 1)
@@ -200,27 +202,37 @@ def _list_shorter(live: int, count: int) -> bool:
     return live.bit_length() + count * _rank_bits(live) < live
 
 
-def write_bits(layout: Layout, value: dict[str, Any]) -> str:
-    """The body's bits before the pad, as a string of 0 and 1. Raises
-    :class:`ValueError` for a value no body holds."""
+def _put(out: list[str], v: int, n: int, what: str) -> None:
+    if not 0 <= v < (1 << n):
+        raise ValueError(f"{what}: {v} does not fit {n} bits")
+    if n:
+        out.append(format(v, f"0{n}b"))
+
+
+def time_bits(t: dict[str, int] | None) -> str:
+    """The 42-bit time: 32 bits of seconds, then 10 of milliseconds; all
+    ones for the unknown time, None."""
     out: list[str] = []
-
-    def put(v: int, n: int, what: str) -> None:
-        if not 0 <= v < (1 << n):
-            raise ValueError(f"{what}: {v} does not fit {n} bits")
-        if n:
-            out.append(format(v, f"0{n}b"))
-
-    t = value.get("time")
     if t is None:
-        put(UNKNOWN_S, SECOND_BITS, "the time's seconds")
-        put(UNKNOWN_MS, MS_BITS, "the time's milliseconds")
+        _put(out, UNKNOWN_S, SECOND_BITS, "the time's seconds")
+        _put(out, UNKNOWN_MS, MS_BITS, "the time's milliseconds")
     else:
         if not 0 <= t["ms"] <= 999:
             raise ValueError(f"{t['ms']} ms: a known time's milliseconds are 0 to 999")
-        put(t["s"], SECOND_BITS, "the time's seconds")
-        put(t["ms"], MS_BITS, "the time's milliseconds")
-    sections = value.get("sections", {})
+        _put(out, t["s"], SECOND_BITS, "the time's seconds")
+        _put(out, t["ms"], MS_BITS, "the time's milliseconds")
+    return "".join(out)
+
+
+def sections_bits(layout: Layout, sections: dict[str, Any]) -> str:
+    """"The map, then a section for each map bit set": a heartbeat's body
+    between its time and its pad, which an owner heartbeat's group holds
+    whole (core 0.108)."""
+    out: list[str] = []
+
+    def put(v: int, n: int, what: str) -> None:
+        _put(out, v, n, what)
+
     unknown = set(sections) - {c.resource for c in layout.collections}
     if unknown:
         raise ValueError(f"sections of no collection: {sorted(unknown)}")
@@ -255,6 +267,12 @@ def write_bits(layout: Layout, value: dict[str, Any]) -> str:
     return "".join(out)
 
 
+def write_bits(layout: Layout, value: dict[str, Any]) -> str:
+    """The body's bits before the pad, as a string of 0 and 1. Raises
+    :class:`ValueError` for a value no body holds."""
+    return time_bits(value.get("time")) + sections_bits(layout, value.get("sections", {}))
+
+
 def write(layout: Layout, value: dict[str, Any]) -> bytes:
     """The body's bytes: its bits, then zero bits to the next whole byte."""
     bits = write_bits(layout, value)
@@ -262,16 +280,22 @@ def write(layout: Layout, value: dict[str, Any]) -> bytes:
     return int(bits, 2).to_bytes(len(bits) // 8, "big") if bits else b""
 
 
-def read(layout: Layout, data: bytes) -> dict[str, Any]:
-    """A body read with its covered revision's layout, or :class:`Refused`
-    for the first reason that applies, in §7.5's order. A templated
-    section's value names the ``form`` it was read in."""
-    b = _Bits(bytes(data))
+def read_time(b: _Bits) -> dict[str, int] | None:
+    """The 42-bit time, read whole, then judged: "All 42 bits set say the
+    owner's clock is unknown. Any other millisecond code from 1000 up is
+    unused" (``code``)."""
     s = b.take(SECOND_BITS, "the time's seconds")
     ms = b.take(MS_BITS, "the time's milliseconds")
     if ms >= 1000 and not (s == UNKNOWN_S and ms == UNKNOWN_MS):
         raise Refused("code", f"a millisecond code of {ms}, unused")
-    out: dict[str, Any] = {"time": None if ms >= 1000 else {"s": s, "ms": ms}, "sections": {}}
+    return None if ms >= 1000 else {"s": s, "ms": ms}
+
+
+def read_sections(layout: Layout, b: _Bits) -> dict[str, Any]:
+    """The map and each marked collection's section, field by field:
+    ``short`` where the bits end before a field, ``code`` for a field's
+    unused code, the first field that draws a refusal deciding."""
+    out: dict[str, Any] = {}
     marked = [c for c in layout.collections if b.take(1, f"{c.resource}'s map bit")]
     for c in marked:
         d = b.take(DIGEST_BITS, f"{c.resource}'s digest")
@@ -297,7 +321,17 @@ def read(layout: Layout, data: bytes) -> dict[str, Any]:
                         raise Refused("code", f"{c.resource}: a rank of {r} after {ranks}, of {live} live")
                     ranks.append(r)
                 sec.update(form="list", live=live, vouched=ranks)
-        out["sections"][c.resource] = sec
+        out[c.resource] = sec
+    return out
+
+
+def read(layout: Layout, data: bytes) -> dict[str, Any]:
+    """A body read with its covered revision's layout, or :class:`Refused`
+    for the first reason that applies, in §7.5's order. A templated
+    section's value names the ``form`` it was read in."""
+    b = _Bits(bytes(data))
+    out: dict[str, Any] = {"time": read_time(b)}
+    out["sections"] = read_sections(layout, b)
     used = (b.pos + 7) // 8
     if len(b.data) > used:
         raise Refused("trailing", f"{len(b.data) - used} bytes after the pad")
