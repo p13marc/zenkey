@@ -2188,8 +2188,13 @@ class Owner:
 
         §3: "The resource is `optional`: an owner that sends heartbeats
         alone does not expose it (core §3.3)", so it lists
-        ``stream/heartbeats/{class}`` unavailable; the cause is zk2py's
-        choice, ``config``: §3 names none (F-549)."""
+        ``stream/heartbeats/{class}`` unavailable. Its cause is ``config``:
+        text 0.10 (F-549's answer), "`config` where the deployment's
+        configuration leaves the owner heartbeat out: it is not turned on,
+        or the owner was given no catalog". A catalog that lists none of its
+        interfaces is the deployment's too, and reads ``config`` here
+        (F-568). ``build`` is never zk2py's: its implementation sends them.
+        "An owner whose owner heartbeats cover an interface exposes it." """
         from . import owner_heartbeat as oh
 
         self.ohb_index = {}

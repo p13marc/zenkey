@@ -1,0 +1,13 @@
+# freshness.v2's scenarios-v2.md §8 (text 0.10), copied from the text: the
+# second contract of one collection, and the one P is bound to alone. No
+# `link.exposure`, so its collection is `host`.
+[interface]
+name  = "pulse"
+major = 1
+minor = 0
+uses  = ["freshness.v2"]
+
+[resources.status]                         # one member
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 2 }

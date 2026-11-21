@@ -1,0 +1,13 @@
+# freshness.v2's scenarios-v2.md §8 (text 0.10), copied from the text: one of
+# the two contracts of one collection each that `lab/w2` implements beside
+# `beacon.v2`, "W2's shape". No `link.exposure`, so its collection is `host`.
+[interface]
+name  = "dial"
+major = 1
+minor = 0
+uses  = ["freshness.v2"]
+
+[resources.config]                         # one member
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 2 }
