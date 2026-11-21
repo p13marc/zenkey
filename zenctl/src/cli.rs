@@ -3980,13 +3980,16 @@ pub(crate) struct TelemetryArgs {
     /// The deployment's link lease, seconds: with --wait-before-close, the
     /// longest this reader may stall before it counts a loss, which leaves
     /// every pair across it without presence (spec §2.7, 0.27). Default:
-    /// --face-policy's, else --binding's, else zenoh 1.10.1's 10 s.
+    /// across a face, the `[transport]` of --face-policy, which here is
+    /// given only with --across-face and --face; else --binding's; else
+    /// zenoh 1.10.1's 10 s.
     #[arg(long, value_name = "SECS")]
     pub(crate) lease: Option<f64>,
     /// The routers' wait_before_close, seconds (spec §2.7, 0.27): this
     /// reader may stall no longer than it, nor than --lease less one of the
-    /// routers' keep-alive intervals. Default: --face-policy's, else
-    /// --binding's, else zenoh 1.10.1's 5 s.
+    /// routers' keep-alive intervals. Default: across a face, the
+    /// `[transport]` of --face-policy, which here is given only with
+    /// --across-face and --face; else --binding's; else zenoh 1.10.1's 5 s.
     #[arg(long, value_name = "SECS")]
     pub(crate) wait_before_close: Option<f64>,
     #[command(flatten)]
@@ -4013,8 +4016,11 @@ pub(crate) struct TelemetryArgs {
     /// default --timeout is the face's `reply_timeout_ms` (core §8.1), and
     /// that transport's lease and wait_before_close are the defaults of
     /// --lease and --wait-before-close, its keep_alive the stall bound's
-    /// (#1011). A `link.v1` policy states none of that and is refused,
-    /// exit 2.
+    /// (#1011). The file is read once, before any session opens, and only
+    /// with --across-face and --face: without them the flag is refused, so
+    /// a reader on the routers' own side names their zenoh with --binding,
+    /// or states --lease and --wait-before-close. A `link.v1` policy
+    /// states none of that and is refused, exit 2.
     #[arg(long = "face-policy", value_name = "FILE", requires_all = ["across_face", "face"])]
     pub(crate) face_policy: Option<PathBuf>,
     /// The face of --face-policy, by its name (`[face.<name>]`).
