@@ -7823,6 +7823,84 @@ the link texts' exception). None is a blocker. F-542 is resolved. See
 "At freshness.v2 0.9, link.v2 0.19 and link.v1 0.20" in
 `SPEC-FINDINGS.md`.
 
+## `observer.md` 0.34: an owner heartbeat's scope across a face, and the two implementations on one bus (round 113, second part)
+
+The second part of round 113 read main's next chunks at fcc2f65b
+(#1110's H2c), merged under round 113's head on `chunk-py-r113b`:
+- **`observer.md` 0.34**, §7.5: a tool given a catalog has a scope for
+  each owner heartbeat key; with a face policy the `link` class's where
+  the plan lets it cross, never the `host` class's, and neither under a
+  `link.v1` policy. A group is read with the revision its index names
+  in the catalog given. §7.3: what a tool shows of one;
+- **`scope/faces.json`**, 29 cases, ten stating `catalog`;
+- **`apply.json`**: case 18's note reworded, no vector moved;
+- **the reference reads owner heartbeats** given a catalog. It sends
+  none.
+
+### The scope, from the text first
+
+`across`'s owner heartbeat scope was written from §7.5 alone and
+committed (1bde3d53) before the ten cases were opened. **29 of 29 on the
+first run: no case wrong, and no line of `across` changed after.**
+
+- **`across.scopes(…, catalog_given=…)`:** with a catalog, each class a
+  collection of a `freshness.v2` contract in hand has adds its key under
+  each address. With a policy, what the plan's denies leave, the `host`
+  key and a `link.v1` policy's both held off by name too. To GET, none.
+  The plan is derived without the catalog: "The catalog adds that scope
+  alone."
+- **`echo_tool`:** a put on `…/freshness.v2/stream/heartbeats/<class>`
+  is told by its key and kept from §7.5's three steps. Each group is
+  shown by its index, its tag and its size, and, given `--catalog`, read
+  with the revision its index names, the tag its check. `--across-face`
+  declares the class keys given `--catalog`, each with its horizon.
+- **The walk:** 294 rows of 294, `RULES.md` 284 rules. The one new row
+  is met by `echo_tool.owner_heartbeat_of`.
+
+**`just py-conformance`: 6936 of 6936** on fcc2f65b. Of them, `scope` 29
+and `readings` 1069: five more.
+
+### Live
+
+On the black boxes of fcc2f65b.
+
+| Runner | What | Result |
+|---|---|---|
+| `owner_heartbeat_live --reference`, new | zk2py's owner under a catalog, a process of its own, with the reference's readers: `zenctl watch --catalog` (the runtime's consumer) on a's status, b's config, c's alarms and a's peers, one more with no catalog, `zenctl echo` with the catalog and without, zk2py's `Provider` and echo tool beside them on the same puts. Three interfaces confirmed by one put, by groups 0, 1 and 2 of one seq. A put of b's config no reader heard: b's group diverged twice while a's and c's confirm, then confirmed after a re-read, at the same seqs on both sides. One lost: each watcher's next row `lost`, zk2py's a gap. 24 group readings compared, none differs. `zenctl echo`'s groups are zk2py's echo tool's: index, tag, size, interface, sections. Across a face with no policy, its selectors are zk2py's scopes, 9 with the catalog and 7 without | 11/11, three runs |
+| `owner_heartbeat_live` | whole, with the reference's owner's descriptor as a note | 25/25 |
+| `across_live`, `far_side_live`, `constrained_live`, `link_v2_frames_live` | whole, over the echo tool and `across` as they are now | 8/8, 16/16, 14/14, 20/20 |
+
+**The two sides disagree nowhere on what they read.** What the
+reference shows differently:
+- `zenctl watch` given no catalog prints no confirmation row and
+  `"heartbeats":0`, with nothing on stderr: a covered interface looks
+  like one whose owner sends no heartbeat (F-556);
+- `zenctl watch` on `heartbeats/{class}` itself shows each put
+  `"as":"undecodable"`, declared `zk2c owner heartbeat (link)`, and no
+  group; `zenctl echo` shows the groups;
+- the reference's owner, sending heartbeats alone, now implements the
+  standard contract's revision 1.1 and lists `heartbeats/{class}`
+  unavailable with the cause `build`, where zk2py's says `config`
+  (F-549).
+
+**Not run:**
+- `consume` as an owner heartbeat's reader: the example takes no
+  catalog and subscribes to nothing;
+- the reference as an owner heartbeat's owner: it sends none;
+- an owner heartbeat across a face on routers from a real owner, and a
+  tool's declaring again after two of its horizons;
+- zenohd, and F-531's far router;
+- the live runners not named in the table.
+
+Round 113's second part found F-556 to F-559: two gaps (a reader that
+holds no catalog, whose stale members only the changelog states and of
+which no text says what a tool shows; an owner heartbeat heard before
+the subscriber knows the catalog its owner names) and two minor errors
+(`faces.json` pins no `link.v1` policy, no GET and no `host` collection
+beside a crossing key; §7.5's "every group where it was given no
+catalog", of a tool with no scope for the key). See "At observer 0.34"
+in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -7888,16 +7966,17 @@ the link texts' exception). None is a blocker. F-542 is resolved. See
 - **Of the owner heartbeat** (`freshness.v2` 0.9, round 113): zk2py's
   owner sends one per class under a catalog, and
   `freshness_v2.Provider` reads both forms. Not covered:
-  - zk2py's `health.v1`, `alarms.v1` and `config` readers and its echo
-    tool subscribe to no owner heartbeat key. To them a covered
-    interface's members go stale, §2.4's "Readers first";
-  - an owner heartbeat against the reference, whose owner sends none
-    and whose consumers read none on this main;
+  - zk2py's `health.v1`, `alarms.v1` and `config` readers subscribe to
+    no owner heartbeat key. To them a covered interface's members go
+    stale, §2.4's "Readers first". Its echo tool shows one, and
+    declares its key across a face given a catalog (observer 0.34);
+  - the reference as an owner heartbeat's owner: it sends none. Its
+    readers read zk2py's (`owner_heartbeat_live --reference`);
   - one across a face on routers from a real owner, and its longest put
     against a router's batch: `link_v2`'s figure is computed, never
     sent;
-  - a tool's scope across a face (observer §7.5) names no class key:
-    `observer.md` stays 0.33.
+  - a tool declaring an owner heartbeat's scope again after two of its
+    horizons of silence: the horizon is computed, and no run cuts one.
 - **A collection's snapshot** (core 0.97, round 103): zk2py reads, writes
   and cuts pages, and its echo tool shows one. Its owners answer a GET
   per key and its readers read with `Latest`, as S2 to S4 still say: no
@@ -8033,7 +8112,9 @@ impl/python/
                                 Provider, both forms on a session (round 113)
     owner_heartbeat_live.py freshness.v2 0.9 §2.4, §2.5, §3: an owner heartbeat between two zk2py processes, three
                                 interfaces in one put, one lost, a divergence in one group, a host collection
-                                never on the link key, a reader with no catalog, an owner with none (round 113)
+                                never on the link key, a reader with no catalog, an owner with none (round 113);
+                                --reference: zk2py's owner with zenctl watch and zenctl echo, given the catalog
+                                and not, zk2py's reader and echo tool beside them (observer 0.34)
     freshness_v2_scenarios.py freshness.v2 scenarios-v2.md §1–§7 in three pairings: zk2py's owner and readers, the
                                 Rust owner with zk2py's, zk2py's owner with zenctl watch and get state (round 96)
     health.py         health.v1 levels, §2.11's reader, roll-ups, codes, the payloads, the owner half
@@ -8137,7 +8218,9 @@ impl/python/
     config_remint_live.py config.v1 0.13 §2.12: the re-mint's refusals in order, and its wait for step 1's
                                 undo, live (round 105)
     across.py         observer §7.3 §7.5 reading across a face: the scopes by the face's plan, a selector
-                                given, the revision of a key in three steps, CH's tag (round 106)
+                                given, the revision of a key in three steps, CH's tag (round 106); an owner
+                                heartbeat's key, given a catalog, written before faces.json's ten cases were
+                                opened (observer 0.34, round 113)
     across_live.py    observer §7.5, live: zk2py's echo across zenoh-modem's RF face against the owner example
                                 (round 106; modem.v3 3.4's scopes, round 107); zenctl echo across LoRa SF7's
                                 face hearing the two events it lists of zk2py's owner (--only lora, round 108)

@@ -270,6 +270,78 @@ def heartbeat_of(key: str, read: Any, size: int, held: "Held | None") -> dict[st
     return out
 
 
+def is_owner_heartbeat_key(key: str) -> bool:
+    """freshness.v2 0.9 §3: ``zk2/<system>/<service>/freshness.v2/stream/heartbeats/<class>``.
+    "A reader tells an owner heartbeat from a heartbeat by its key, never by
+    its bytes." """
+    c = key.split("/")
+    return len(c) == 7 and c[0] == "zk2" and c[3:6] == ["freshness.v2", "stream", "heartbeats"]
+
+
+def owner_heartbeat_of(key: str, read: Any, size: int, held: "Held | None") -> dict[str, Any]:
+    """An owner heartbeat's row member (observer 0.34 §7.3, §7.5). "A tool
+    needs no contract to show its groups, each by its index, its tag and its
+    size. Given a catalog, it shows what a group vouches for with the
+    revision the group's index names." §7.5: "A tool MUST read an owner
+    heartbeat's group with the revision its index names in the catalog the
+    tool was given, as core §8.6 reads an index, and never with one these
+    steps would choose." "The tag is its check … Where they differ it says
+    so, and shows the group by its envelope". "By its envelope is by its
+    index, its tag and its size. A tool shows so each group it cannot read:
+    every group where it was given no catalog, one whose index core §8.6
+    refuses, and one whose revision it does not hold. It reads the put's
+    other groups all the same." The body is never sniffed."""
+    from . import catalog as cat
+    from . import heartbeat, owner_heartbeat as oh
+
+    out: dict[str, Any] = {"form": "owner_heartbeat", "class": key.split("/")[-1], "bytes": size, "groups": None}
+    if read.tag != 0:
+        out["says"] = f"undecodable: CH's tag is {read.tag}, and an owner heartbeat's is 0 (tag, core §7.5)"
+        return out
+    try:
+        body = oh.read_body(read.record or b"")
+    except oh.Refused as e:
+        out["says"] = f"undecodable: the owner heartbeat is refused whole ({e.token}, core §7.5)"
+        return out
+    out["time"] = body.time
+    catalog = None if held is None else held.catalog
+    groups = []
+    for g in body.groups:
+        row: dict[str, Any] = {"index": g.index, "tag": g.tag, "bits": g.size, "vouches": None}
+        if catalog is None:
+            row["says"] = "no catalog given: shown by its index, its tag and its size"
+        else:
+            try:
+                entry = cat.resolve([catalog], catalog.id, g.index).entry
+            except cat.Refused as e:
+                row["says"] = f"its index is refused ({e.token}, core §8.6): shown by its envelope"
+                groups.append(row)
+                continue
+            assert entry is not None and held is not None
+            row["iface"] = entry[0]
+            rev = held.revisions.get(entry[1])
+            if rev is None:
+                row["says"] = f"the revision of {entry[0]} its index names is not held: shown by its envelope"
+            else:
+                lo = heartbeat.layout_of(rev.canonical, rev.fingerprint)
+                if g.tag != lo.tag:
+                    row["says"] = (f"its tag {g.tag} is not that revision's {lo.tag}: the bytes disagree with the "
+                                   "deployment's word, and it is shown by its envelope")
+                else:
+                    try:
+                        row["vouches"] = oh.read_sections(lo, g.bits)
+                        row["says"] = f"read with the revision of {entry[0]} its index names in the catalog"
+                    except oh.Refused as e:
+                        row["says"] = f"undecodable: its sections are refused ({e.token}, core §7.5)"
+        groups.append(row)
+    out["groups"] = groups
+    out["says"] = (f"an owner heartbeat of the class {out['class']}: {len(groups)} groups, "
+                   + ("each read with the revision its index names in the catalog given, where the catalog lists "
+                      "it and the tool holds it" if catalog is not None else
+                      "shown by their envelopes, no catalog given") + " (observer §7.3, §7.5)")
+    return out
+
+
 def snapshot_of(key: str, read: Any, size: int) -> dict[str, Any]:
     """A snapshot's row member (core §7.5, 0.97): a snapshot carries "a body
     there instead, never a record of the resource's type", and "A snapshot's
@@ -343,7 +415,10 @@ def row_of(key: str, delete: bool, size: int, encoding: str, payload: bytes | No
     choice = None
     found = None
     if held is not None and data_key and read is not None and not delete and payload is not None \
-            and read.tag is not None and read.form in ("mutation", "event", "frame", "heartbeat"):
+            and read.tag is not None and read.form in ("mutation", "event", "frame", "heartbeat") \
+            and not (read.form == "heartbeat" and is_owner_heartbeat_key(key)):
+        # (observer 0.34: "An owner heartbeat is not read by these steps …
+        # never with one these steps would choose")
         # observer 0.29 §7.5: the revision chosen in three steps, CH's tag
         # checked as §7.3 says. An event (core 0.101) carries its record's
         # type's tag as a mutation does; observer 0.33 names it among the
@@ -386,7 +461,10 @@ def row_of(key: str, delete: bool, size: int, encoding: str, payload: bytes | No
     snap = None
     if read is not None and not delete and payload is not None and read.form == "heartbeat":
         # observer §7.3 (0.20): never read as a record, never sniffed
-        beat = heartbeat_of(key, read, size, held)
+        # observer 0.34: an owner heartbeat "is form 6 too, told by its key
+        # and never by its bytes"
+        beat = owner_heartbeat_of(key, read, size, held) if is_owner_heartbeat_key(key) \
+            else heartbeat_of(key, read, size, held)
     elif read is not None and not delete and payload is not None and read.form == "snapshot":
         # core §7.5 (0.97): a body, never a record of the resource's type
         snap = snapshot_of(key, read, size)
@@ -694,7 +772,11 @@ def main(argv: list[str] | None = None) -> int:
         # what the face's plan lets cross; each heartbeat's exact key; a
         # selector given narrowed to them, and one that meets none refused
         pol = None if args.face_policy is None else Path(args.face_policy).read_text(encoding="utf-8")
-        sc = across_mod.scopes(held.contracts, args.across_face, "samples", pol, args.face, catalog_doc)
+        # observer 0.34: a tool given a catalog has a scope for each owner
+        # heartbeat key too; "The catalog adds that scope alone. A plan is
+        # derived as it is without one", so the plan is given none.
+        sc = across_mod.scopes(held.contracts, args.across_face, "samples", pol, args.face, None,
+                               catalog_given=held_catalog is not None)
         if sc.plan_refused is not None:
             print(f"echo: the face's plan is refused ({', '.join(sc.plan_refused)}): no scope (observer §7.5)",
                   file=sys.stderr)
@@ -712,6 +794,13 @@ def main(argv: list[str] | None = None) -> int:
                 hb = across_mod.heartbeat_key(a, c.interface)
                 if hb in watched:
                     horizons[hb] = far_side.heartbeat_horizon_s(c)
+            # core §8.5 (as freshness.v2 0.9 adopts it): "An owner
+            # heartbeat's is the shortest of the collections its groups
+            # cover", here the class's collections of the contracts in hand
+            for cls in across_mod.owner_heartbeat_classes(held.contracts):
+                key = across_mod.owner_heartbeat_key(a, cls)
+                if key in watched:
+                    horizons[key] = far_side.owner_heartbeat_horizon_s(held.contracts, cls)
     else:
         try:
             scope = scope_of(selector)

@@ -141,6 +141,24 @@ def resource_horizon_s(contract: Any, r: dict[str, Any]) -> float | None:
     return float(h.ttl_s) if h.horizon == "within" else None
 
 
+def owner_heartbeat_horizon_s(contracts: list[Any], cls: str) -> float | None:
+    """An owner heartbeat's horizon across a face (core §8.5, with
+    freshness.v2 0.9): "the shortest of the collections its groups cover",
+    read over the contracts in hand: their collections of the class
+    ``cls``. None with none."""
+    from . import freshness, freshness_v2
+
+    hs = []
+    for c in contracts:
+        if not freshness_v2.uses_v2(c.canonical) or c.interface == freshness_v2.PROFILE:
+            continue
+        for r in c.canonical["resources"]:
+            h = freshness.horizon("state", r["annotations"]) if r["token"] in ("state", "@state") else None
+            if h is not None and h.horizon == "within" and freshness_v2.class_of(r["token"], r["annotations"]) == cls:
+                hs.append(h.ttl_s)
+    return float(min(hs)) if hs else None
+
+
 def heartbeat_horizon_s(contract: Any) -> float | None:
     """A heartbeat's horizon: "the shortest horizon of the collections it
     covers" (core §8.5, freshness.v2 §2.4), the covered contract's states

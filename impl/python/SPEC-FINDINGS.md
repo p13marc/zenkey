@@ -27803,7 +27803,10 @@ decide it (F-550).
   - The owner implements revision 1.0, which has no such resource.
 - **Measured:** the reference's owner of c4e1065a does the second. Its
   `freshness.v2` entry names `8756e6a6…`, revision 1.0, with no
-  `unavailable`.
+  `unavailable`. Its owner of fcc2f65b does the first, with the cause
+  `build`: `"unavailable":[{"resource":"stream/heartbeats/{class}",
+  "cause":"build","reason":null}]`, 88 bytes. So the two implementations
+  name two causes for one fact.
 - **What zk2py does:** the first, with the cause `config`, its own
   choice. An owner that covers an interface exposes the resource.
 - **Fix:** say which revision an owner that sends heartbeats alone
@@ -27934,5 +27937,168 @@ decide it (F-550).
   - F-535 to F-541 and F-543 to F-546, whose answers are not on this
     main;
   - F-547 to F-555.
+
+  F-365 stays open as #965's.
+
+## At observer 0.34
+
+The second part of round 113 read main's next chunks at fcc2f65b (#1110's
+H2c), merged under zk2py's round 113 head: `observer.md` 0.34, §7.5's
+scope for an owner heartbeat's key and its groups' revisions, and §7.3's
+paragraph; `scope/faces.json`, 29 cases; `RULES.md`, 284 rules, the one
+new row §7.5's. `spec/CLAUDE.md` moved too, and the barrier keeps it
+unread. In `apply.json` one note moved, case 18's, and no vector: the 32
+cases compare equal but for it. `faces.json`'s first 19 cases are as they
+were.
+
+### The scope, written from §7.5 before its cases
+
+zk2py wrote `across`'s owner heartbeat scope from §7.5 alone and
+committed it (1bde3d53) before it opened `faces.json`'s ten new cases.
+**29 of 29 on the first run: no case wrong, and no line of `across`
+changed after.** The runner passes each case's `catalog` flag, and
+decides nothing.
+
+### The two implementations, on one bus
+
+zk2py's owner sends owner heartbeats under a catalog. The reference's
+consumer reads them through `zenctl watch --catalog`, and `zenctl echo`
+shows them (`owner_heartbeat_live --reference`, 11 of 11, twice):
+- **three interfaces confirmed by one put:** the watchers on a's status,
+  b's config and c's alarms each print a confirmation row for the same
+  seq of `…/heartbeats/link`, by groups 0, 1 and 2, with the members
+  zk2py's reader confirms by it. a's `host` collection is confirmed on
+  `…/heartbeats/host` alone;
+- **one lost:** each watcher marks the next row `lost`, as zk2py's
+  reader reads a gap, and each summary counts one;
+- **a divergence in one group:** after a put of b's config no reader
+  heard, b's group reads diverged twice while a's and c's confirm, then
+  confirms again after a re-read, on both sides at the same seqs;
+- **24 group readings compared** from the settled heartbeat on: none
+  differs;
+- **`zenctl echo`** given the catalog shows each group's interface and
+  sections, as zk2py's echo tool does; given none, both show index, tag
+  and size, and `zenctl echo` names each `unread`, `unknown_catalog`;
+- **across a face with no policy,** `zenctl echo` declares zk2py's
+  scopes key for key: 9 given the catalog, 7 given none.
+
+**Nowhere do the two sides disagree on what they read.** Two things the
+reference shows differently, neither a finding against the texts:
+- `zenctl watch` given no catalog prints no confirmation row, counts
+  `"heartbeats":0` and says nothing on stderr (F-556);
+- `zenctl watch` on `freshness.v2`'s `heartbeats/{class}` itself, given
+  the catalog, shows each put `"as":"undecodable"`, declared `zk2c
+  owner heartbeat (link)`, and no group, where `zenctl echo` shows them.
+
+`consume`, the reference's consumer example, takes no catalog and
+subscribes to nothing: it reads presence, one state and one operation,
+and ends. It was not run as an owner heartbeat's reader.
+
+### How a subscriber learns the catalog its owner names
+
+The question, answered from the texts alone:
+- **How it learns it:** core §8.6 decides. "An owner given a catalog
+  counts its `time` fields from the catalog's epoch, and states its id
+  in its descriptor (§3.3)." "Across a constrained face no descriptor
+  crosses (§8.5). There, which catalog an owner writes under is the
+  deployment's word, as its bindings are (R7)." `freshness.v2` §2.5 says
+  only "Core §8.6 refuses its index", and never names the descriptor.
+- **What it does with the first one while it finds out:** no sentence
+  decides it (F-557).
+
+### F-556 · gap · a reader that holds no catalog: only the changelog says its covered members go stale, and no text says what a tool shows
+
+> `freshness/CHANGELOG.md`, 0.9, "What it risks": "**The catalog is
+> needed to confirm.** A reader that does not hold the catalog its
+> owner names reads no group, and its members go stale."
+> `freshness.v2` §2.5: "**No index.** Core §8.6 refuses its index
+> (`unknown_catalog`, `unknown_index`): the group confirms nothing."
+> §2.4: "**Readers first.** A reader that reads heartbeats alone
+> subscribes to no owner heartbeat key. To it, a covered interface's
+> members go stale." Observer §7.5: "**Given no catalog** a tool could
+> read no group (core §8.6). It has no such scope."
+
+- **The gap.** The consequence is in the entry alone. `v2.md` says a
+  group "confirms nothing", and "Readers first" speaks of a reader of
+  text 0.8. No text has a reader, or a tool, say that an owner's
+  confirmations are out of its reach for want of a catalog.
+- **Measured:** `zenctl watch` given no catalog shows an owner that
+  covers an interface exactly as one that sends no heartbeat: no row,
+  `"heartbeats":0`, no word on stderr. The owner's descriptor names
+  `54dc05e8`, which the tool could read.
+- **What zk2py does:** its reader reads each group `unknown_catalog`
+  and its members go stale by its judgement; its echo tool shows each
+  group by its envelope, and says no catalog was given.
+- **Fix:** the entry's sentence in §2.5, and in observer §8.2 or §5 a
+  tool's word: an owner whose descriptor names a catalog the tool does
+  not hold has confirmations it cannot read, which is no finding about
+  the owner.
+- **Changes:** what an operator learns from a tool run with no catalog.
+
+### F-557 · gap · `freshness.v2` §2.5: an owner heartbeat heard before the subscriber knows the catalog its owner names
+
+> Core §8.6: "A reader reads an index … through the catalog the owner
+> names." "A reader MUST refuse … an index from an owner that names no
+> catalog (`unknown_catalog`)". Core R7: "a binding MUST NOT require
+> presence." `freshness.v2` §2.5, step 3: "**No index.** Core §8.6
+> refuses its index".
+
+- **The gap.** A consumer subscribes at once, without presence. The
+  id its owner names is in a descriptor it reads later, or never: a
+  tokenless owner, a read that fails. An owner heartbeat can arrive
+  first. The owner names a catalog, so §8.6's "names no catalog" is not
+  that case, and nothing else names it.
+- **Three readings:** refuse each group `unknown_catalog` until the id
+  is known, the put still a read one that moves the key's sequence and
+  names no interface; hold the put; or read through the one catalog
+  held.
+- **What zk2py does:** the first. Its `Provider` reads the descriptor
+  once at the start and again after each owner heartbeat heard while it
+  knows no id. A reader given the id reads from the first put.
+- **Fix:** one sentence in §2.5: where the subscriber learns the id
+  (core §3.3's `catalog`, or the deployment's word across a face), and
+  that until then a group's index is refused `unknown_catalog`.
+- **Changes:** what the first owner heartbeats confirm to a subscriber
+  that starts beside its owner.
+
+### F-558 · minor · `scope/faces.json`: three clauses of §7.5's scope no case pins
+
+> §7.5: "It is never the `host` class's, and neither under a `link.v1`
+> policy (`link.v1` §2.9)". "to GET, each state resource."
+
+- **The error.** Of the ten cases that state `catalog`, none has a
+  `link.v1` policy, none a GET, and none a `host` collection in hand
+  beside a `link` key that crosses: zenoh-modem's contracts have `host`
+  collections alone and nothing crossing, and `probe.v1` a `link` one
+  alone.
+- **What zk2py does:** each as the text says, pinned by its own cases
+  (`readings`): no class key under `v2/plan.json`'s case 10's policy,
+  the link key alone for contracts of both classes, none to GET.
+- **Fix:** three cases.
+- **Changes:** the fixture.
+
+### F-559 · minor · observer §7.5: "every group where it was given no catalog", of a tool that has no scope for the key
+
+> §7.5, "The revision of a key": "A tool shows so each group it cannot
+> read: every group where it was given no catalog". §7.5, "The scope":
+> "**Given no catalog** a tool could read no group (core §8.6). It has
+> no such scope." `faces.json`, case 23: the key given with no catalog
+> is refused.
+
+- **The error.** Across a face, a tool given no catalog declares no
+  owner heartbeat key and refuses one it is given. It hears no group to
+  show by its envelope. The clause is §7.3's, of a tool that reads by a
+  selector on the near side, where `zenctl echo` does show them so.
+- **Fix:** "(a tool that reads by no scope, §7.3)" after the clause, or
+  the clause moved there.
+- **Changes:** one clause.
+
+### Counts at observer 0.34
+
+559 entries.
+- **New: F-556 to F-559:** two gaps, F-556 and F-557, and two minor
+  errors, F-558 and F-559. None is a blocker.
+- **Open:** F-437 to F-441; F-535 to F-541 and F-543 to F-546; F-547 to
+  F-559.
 
   F-365 stays open as #965's.
