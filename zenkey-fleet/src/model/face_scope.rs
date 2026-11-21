@@ -14,6 +14,16 @@
 //! tool rides it, where under `<ns>/zk2/**` it would carry its key's text
 //! after `zk2` (core Appendix B).
 //!
+//! **Given a catalog** ([`FaceScope::of_given`]; observer 0.34 §7.5, "The
+//! owner heartbeat"), the scope holds each owner heartbeat key too,
+//! `…/freshness.v2/stream/heartbeats/<class>`, for each class a collection
+//! of the contracts in hand that use `freshness.v2` has: an owner may
+//! confirm an interface by owner heartbeats in place of its heartbeat, and
+//! a tool cannot tell which before it hears one. Given none it has no such
+//! scope, since it could read no group (core §8.6). With a face it is the
+//! `link` class's alone, where the plan lets it cross (`link.v2` §2.9):
+//! never the `host` class's, and neither under a `link.v1` policy.
+//!
 //! **With a face policy and its face**, the scopes are what the face's plan
 //! lets cross (`link.v2` §2.3), the plan derived from the policy and the
 //! contracts in hand, each service the policy lists, and each device of
@@ -196,6 +206,24 @@ impl FaceScope {
         reads: Reads,
         face: Option<Face<'_>>,
     ) -> Result<FaceScope, Refusal> {
+        Self::of_given(addresses, contracts, namespace, reads, face, false)
+    }
+
+    /// [`FaceScope::of`], for a tool that says whether it was given a
+    /// deployment catalog (core §8.6): given one (`catalog`), a
+    /// subscription's scope also holds each owner heartbeat key (observer
+    /// §7.5, "The owner heartbeat"), for each class a collection of the
+    /// contracts in hand has, and with a face the `link` class's alone,
+    /// where the plan lets it cross. The catalog adds those scopes alone:
+    /// the plan is derived as it is without one.
+    pub fn of_given(
+        addresses: &[Addr],
+        contracts: &ContractSet,
+        namespace: &str,
+        reads: Reads,
+        face: Option<Face<'_>>,
+        catalog: bool,
+    ) -> Result<FaceScope, Refusal> {
         if addresses.is_empty() {
             return Err(Refusal::NoAddress);
         }
@@ -274,6 +302,35 @@ impl FaceScope {
                 let h = covering.iter().fold(None, |acc, c| {
                     shorter(acc, link::redeclare_heartbeat_horizon(c))
                 });
+                scope.add(key, h);
+            }
+            if !catalog {
+                continue;
+            }
+            // Observer §7.5, "The owner heartbeat": each class a collection
+            // in hand has; across a face, the one its plan lets cross.
+            let layouts: Vec<zenkey_model::heartbeat::Layout> = held
+                .iter()
+                .map(|r| r.contract())
+                .filter(|c| has_heartbeat(c))
+                .map(zenkey_model::heartbeat::Layout::of)
+                .collect();
+            for class in zenkey_model::heartbeat::Class::ALL {
+                let h = layouts
+                    .iter()
+                    .fold(None, |acc, l| shorter(acc, l.class_horizon(class)));
+                if !layouts.iter().any(|l| l.classes().contains(&class))
+                    || plan
+                        .as_ref()
+                        .is_some_and(|p| !p.owner_heartbeat_crosses(class))
+                {
+                    continue;
+                }
+                let key = zenkey_model::heartbeat::owner_key(
+                    addr.system.as_str(),
+                    addr.service.as_str(),
+                    class,
+                );
                 scope.add(key, h);
             }
         }

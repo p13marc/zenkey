@@ -50,7 +50,8 @@ pub async fn run(cli: crate::cli::WatchArgs) -> Result<()> {
     }
     // Core §8.6: the catalogs given, the deployment's word for the epoch,
     // and the catalog a date names (the tooling guide's O8).
-    let epoch = zk2::load_catalogs(&cli.contracts)?.dating(zenkey_fleet::CatalogStated::Unread);
+    let catalogs = zk2::load_catalogs(&cli.contracts)?;
+    let epoch = catalogs.dating(zenkey_fleet::CatalogStated::Unread);
     let target = ResolvedTarget::parse(&cli.address)?;
     let values = zk2::bindings(&cli.params);
     let window = cli
@@ -85,6 +86,8 @@ pub async fn run(cli: crate::cli::WatchArgs) -> Result<()> {
         &values,
         epoch,
         dep.far(),
+        // An owner heartbeat's groups are read through them (core §8.6).
+        &catalogs,
     )
     .await?;
 
