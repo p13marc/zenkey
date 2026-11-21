@@ -898,7 +898,7 @@ pub fn size_bits(bits: u128) -> u128 {
 /// covered revision's index in the catalog its owner names, the tag the
 /// owner wrote with, and the group's sections, unread. Their count of bits
 /// is the group's size.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Group {
     /// The covered revision's index in the deployment catalog, at most
     /// [`MAX_INDEX`].
@@ -910,6 +910,35 @@ pub struct Group {
     /// of its own, so `sections.bits` is its size whatever the bytes hold
     /// after them.
     pub sections: Record,
+}
+
+/// Two groups are equal when they write the same bits: their index, their
+/// tag, their size, and the sections' bits the size counts. What a
+/// [`Record`]'s bytes hold past `sections.bits` is no part of a group, so
+/// it is no part of its equality.
+impl PartialEq for Group {
+    fn eq(&self, other: &Self) -> bool {
+        self.index == other.index
+            && self.tag == other.tag
+            && self.sections.bits == other.sections.bits
+            && counted(&self.sections) == counted(&other.sections)
+    }
+}
+
+impl Eq for Group {}
+
+/// The bytes a record's `bits` count, the last one's uncounted low bits
+/// read as 0: every whole byte, then the counted bits of a partial one.
+/// A record whose bytes end early gives what it has.
+fn counted(r: &Record) -> (&[u8], Option<u8>) {
+    let whole = usize::try_from(r.bits / 8)
+        .unwrap_or(usize::MAX)
+        .min(r.bytes.len());
+    let rest = (r.bits % 8) as u32;
+    let partial = (rest > 0)
+        .then(|| r.bytes.get(whole).map(|b| b & (0xff << (8 - rest))))
+        .flatten();
+    (&r.bytes[..whole], partial)
 }
 
 /// Why one group of an owner heartbeat is not read, in core §7.5's order.
@@ -1042,7 +1071,11 @@ impl Group {
 /// groups, in ascending order of their indices.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnerHeartbeat {
+    /// The owner's time when it wrote the put, as a heartbeat's: from the
+    /// deployment epoch, or unknown.
     pub time: Time,
+    /// Its groups, one for each interface it covers: from 1 to
+    /// [`MAX_GROUPS`], in ascending order of their indices, none twice.
     pub groups: Vec<Group>,
 }
 
@@ -1512,6 +1545,65 @@ annotations = { "freshness.ttl_s" = 60 }
         }
         // Past what a size can state, the count still grows.
         assert_eq!(size_bits(1 << 35), 48);
+    }
+
+    /// A group's equality reads the bits its size counts, as its writer
+    /// does: bits past them in the record's bytes are not the group's.
+    #[test]
+    fn two_groups_that_write_the_same_bits_are_equal() {
+        let tag = Tag::new(5).unwrap();
+        let group = |bytes: &[u8], bits: u64| Group {
+            index: 3,
+            tag,
+            sections: Record {
+                bytes: bytes.to_vec(),
+                bits,
+            },
+        };
+        // 11 bits: a whole byte and the top three of the next.
+        let a = group(&[0b1010_1010, 0b1010_0000], 11);
+        let stray = group(&[0b1010_1010, 0b1011_1111], 11);
+        let longer = group(&[0b1010_1010, 0b1010_0000, 0xff], 11);
+        assert_eq!(a, stray, "bits past the size, in the last counted byte");
+        assert_eq!(a, longer, "a byte past the size");
+        let write = |g: &Group| {
+            OwnerHeartbeat {
+                time: Time::Unknown,
+                groups: vec![g.clone()],
+            }
+            .write()
+            .unwrap()
+        };
+        assert_eq!(write(&a), write(&stray));
+        assert_eq!(write(&a), write(&longer));
+        // A counted bit, the size, the index and the tag each tell two apart.
+        assert_ne!(a, group(&[0b1010_1010, 0b1000_0000], 11));
+        assert_ne!(a, group(&[0b0010_1010, 0b1010_0000], 11));
+        assert_ne!(a, group(&[0b1010_1010, 0b1010_0000], 12));
+        assert_ne!(a, group(&[0b1010_1010, 0b1010_0000], 8));
+        assert_ne!(
+            a,
+            Group {
+                index: 4,
+                ..a.clone()
+            }
+        );
+        assert_ne!(
+            a,
+            Group {
+                tag: Tag::new(6).unwrap(),
+                ..a.clone()
+            }
+        );
+        // Whole bytes alone, and no bits at all.
+        assert_eq!(group(&[7, 9], 8), group(&[7], 8));
+        assert_eq!(group(&[], 0), group(&[0xff], 0));
+        // The equality an owner heartbeat's rests on.
+        let hb = |g: &Group| OwnerHeartbeat {
+            time: Time::Unknown,
+            groups: vec![g.clone()],
+        };
+        assert_eq!(hb(&a), hb(&stray));
     }
 
     #[test]
