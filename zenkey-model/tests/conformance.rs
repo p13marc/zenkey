@@ -1940,6 +1940,254 @@ fn heartbeat_digest_vectors() {
     }
 }
 
+/// A string of `0` and `1` as the bits of a group's sections.
+fn owner_bits(v: &Value) -> zenkey_model::packed::Record {
+    let mut w = zenkey_model::packed::BitWriter::new();
+    for c in v.as_str().expect("sections").chars() {
+        match c {
+            '0' => w.bit(false),
+            '1' => w.bit(true),
+            other => panic!("a bit {other:?}"),
+        }
+    }
+    w.finish()
+}
+
+/// A group as `owner.json` writes it: its index, its tag and its sections'
+/// bits.
+fn owner_group(v: &Value) -> zenkey_model::heartbeat::Group {
+    zenkey_model::heartbeat::Group {
+        index: u16::try_from(v["index"].as_u64().expect("index")).expect("an index"),
+        tag: zenkey_model::wire::Tag::new(v["tag"].as_u64().expect("tag") as u8).expect("a tag"),
+        sections: owner_bits(&v["sections"]),
+    }
+}
+
+/// `owner.json`'s value as an owner heartbeat: the time and the groups.
+fn owner_of(v: &Value) -> zenkey_model::heartbeat::OwnerHeartbeat {
+    use zenkey_model::heartbeat::{OwnerHeartbeat, Time};
+    let time = match &v["time"] {
+        Value::Null => Time::Unknown,
+        t => Time::At {
+            secs: u32::try_from(t["s"].as_u64().expect("s")).expect("32 bits of seconds"),
+            ms: u16::try_from(t["ms"].as_u64().expect("ms")).expect("ms"),
+        },
+    };
+    OwnerHeartbeat {
+        time,
+        groups: v["groups"]
+            .as_array()
+            .expect("groups")
+            .iter()
+            .map(owner_group)
+            .collect(),
+    }
+}
+
+/// An owner heartbeat's time and groups as `owner.json` writes them.
+fn owner_value(hb: &zenkey_model::heartbeat::OwnerHeartbeat) -> Value {
+    use zenkey_model::heartbeat::Time;
+    let time = match hb.time {
+        Time::Unknown => Value::Null,
+        Time::At { secs, ms } => json!({"s": secs, "ms": ms}),
+    };
+    let groups: Vec<Value> = hb
+        .groups
+        .iter()
+        .map(|g| {
+            json!({
+                "index": g.index,
+                "tag": g.tag.get(),
+                "sections": g.sections.bit_string(),
+            })
+        })
+        .collect();
+    json!({"time": time, "groups": groups})
+}
+
+/// `spec/conformance/heartbeat/owner.json` (core §7.5, 0.108; #1110 H1):
+/// an owner heartbeat's value → its body's bits, pad and the put's
+/// payload; a payload whose envelope parses as form 6 → the value, its
+/// groups' sections unread, or the refusal, the first in §7.5's order,
+/// with no contract and no catalog; the catalog an owner names, those a
+/// reader holds and one group → the revision its index names, whether its
+/// tag is that revision's and its sections, or the refusal of that group
+/// alone; and one body read as an owner heartbeat's and as a heartbeat's.
+/// Every value read writes back to its payload, and every sections read to
+/// the group's bits. Computed twice, by two readings of the text that
+/// shared no code, never blessed.
+#[test]
+fn heartbeat_owner_vectors() {
+    use zenkey_model::catalog::{Catalog, CatalogId};
+    use zenkey_model::heartbeat::{Group, Heartbeat, OwnerHeartbeat};
+    use zenkey_model::wire::{Envelope, Form, Run, Tag};
+    let doc = read_json(&spec().join("conformance/heartbeat/owner.json"));
+    let layouts = heartbeat_layouts();
+
+    // The catalogs: each reads, each entry is a layout of `layouts.json`,
+    // `second` succeeds `first` and `other` stands apart.
+    let catalogs: BTreeMap<String, Catalog> = doc["catalogs"]
+        .as_object()
+        .expect("catalogs")
+        .iter()
+        .map(|(name, v)| {
+            let c =
+                Catalog::parse(&v.to_string()).unwrap_or_else(|e| panic!("catalog {name}: {e}"));
+            (name.clone(), c)
+        })
+        .collect();
+    let layout_of = |e: &zenkey_model::catalog::Entry| {
+        layouts
+            .iter()
+            .find(|(_, l)| l.iface == e.iface && l.fingerprint == e.contract)
+            .unwrap_or_else(|| panic!("{} {}: no layout of layouts.json", e.iface, e.contract))
+    };
+    for c in catalogs.values() {
+        for e in c.entries() {
+            layout_of(e);
+        }
+    }
+    assert_eq!(catalogs["second"].succeeds(&catalogs["first"]), Ok(()));
+    assert!(catalogs["other"].succeeds(&catalogs["first"]).is_err());
+    assert!(catalogs["first"].succeeds(&catalogs["other"]).is_err());
+    assert!(catalogs["other"].succeeds(&catalogs["second"]).is_err());
+    assert!(catalogs["second"].succeeds(&catalogs["other"]).is_err());
+
+    let writes = doc["writes"].as_array().expect("writes");
+    assert_eq!(writes.len(), 12, "writes");
+    for case in writes {
+        let note = &case["note"];
+        let hb = owner_of(&case["value"]);
+        let r = hb.record().unwrap_or_else(|e| panic!("{note}: {e}"));
+        let payload = hb
+            .envelope(stamp_of(&case["value"], note))
+            .unwrap_or_else(|e| panic!("{note}: {e}"));
+        let got = json!({
+            "bits": r.bit_string(),
+            "pad": r.pad(),
+            "hex": hex(&payload),
+            "bytes": payload.len(),
+        });
+        assert_eq!(case["expect"], got, "write: {note}");
+    }
+
+    let reads = doc["reads"].as_array().expect("reads");
+    assert_eq!(reads.len(), 45, "reads");
+    let mut refused = std::collections::BTreeSet::new();
+    let mut accepted = 0;
+    for case in reads {
+        let note = &case["note"];
+        let bytes = unhex(case["hex"].as_str().expect("hex"));
+        // The envelope's parse comes first, and accepts every case as
+        // form 6: the body is the owner heartbeat's to read.
+        let env = Envelope::parse(&bytes).unwrap_or_else(|e| panic!("{note}: envelope {e}"));
+        assert_eq!(env.form, Form::Heartbeat, "{note}: form 6");
+        let got = match OwnerHeartbeat::parse(env.tag, env.record) {
+            Ok(hb) => {
+                accepted += 1;
+                assert_eq!(
+                    hb.envelope(env.stamp).expect("writes back"),
+                    bytes,
+                    "{note}: writes back"
+                );
+                let mut v = owner_value(&hb);
+                let (width, run) = match env.stamp.run {
+                    Run::U16(r) => (16, u64::from(r)),
+                    Run::U32(r) => (32, u64::from(r)),
+                };
+                v["run_width"] = json!(width);
+                v["run"] = json!(run);
+                v["seq"] = json!(env.stamp.seq.get());
+                v
+            }
+            Err(r) => {
+                refused.insert(r.token());
+                json!({"refused": r.token()})
+            }
+        };
+        assert_eq!(case["expect"], got, "read: {note}");
+    }
+    assert!(accepted >= writes.len(), "every write is read back");
+    assert_eq!(
+        refused.into_iter().collect::<Vec<_>>(),
+        ["code", "leb128", "order", "pad", "short", "tag", "trailing"],
+        "every refusal of the first reading pinned"
+    );
+
+    let groups = doc["groups"].as_array().expect("groups");
+    assert_eq!(groups.len(), 32, "groups");
+    let mut refused = std::collections::BTreeSet::new();
+    for case in groups {
+        let note = &case["note"];
+        let named: Option<CatalogId> = case["names"].as_str().map(|n| catalogs[n].id());
+        let held: Vec<Catalog> = case["holds"]
+            .as_array()
+            .expect("holds")
+            .iter()
+            .map(|n| catalogs[n.as_str().expect("a catalog's name")].clone())
+            .collect();
+        let group = owner_group(&case["group"]);
+        let read = group.entry(&held, named).and_then(|e| {
+            let (name, l) = layout_of(e);
+            let sections = group.read(l)?;
+            // Every sections read write back to the group's bits, in the
+            // form read.
+            let again = Group::of(group.index, l, &sections).expect("writes back");
+            assert_eq!(again.sections, group.sections, "{note}: writes back");
+            let value = heartbeat_value(
+                &Heartbeat {
+                    time: zenkey_model::heartbeat::Time::Unknown,
+                    sections,
+                },
+                l,
+            );
+            Ok(json!({
+                "layout": name,
+                "tag": group.tag_is(l),
+                "sections": value["sections"],
+            }))
+        });
+        let got = read.unwrap_or_else(|r| {
+            refused.insert(r.token());
+            json!({"refused": r.token()})
+        });
+        assert_eq!(case["expect"], got, "group: {note}");
+    }
+    assert_eq!(
+        refused.into_iter().collect::<Vec<_>>(),
+        [
+            "code",
+            "short",
+            "trailing",
+            "unknown_catalog",
+            "unknown_index"
+        ],
+        "every refusal of a group pinned"
+    );
+
+    // One body, two readings, each accepted: the key says which layout a
+    // put carries, never the bytes.
+    let either = doc["either"].as_array().expect("either");
+    assert_eq!(either.len(), 1, "either");
+    for case in either {
+        let note = &case["note"];
+        let body = unhex(case["body"].as_str().expect("body"));
+        let owner = OwnerHeartbeat::parse(Tag::NONE, &body)
+            .unwrap_or_else(|e| panic!("{note}: as an owner heartbeat: {e}"));
+        assert_eq!(case["owner"], owner_value(&owner), "either: {note}");
+        assert_eq!(owner.write().expect("writes back"), body, "{note}");
+        let l = &layouts[case["heartbeat"]["layout"].as_str().expect("layout")];
+        let hb =
+            Heartbeat::parse(&body, l).unwrap_or_else(|e| panic!("{note}: as a heartbeat: {e}"));
+        assert_eq!(
+            case["heartbeat"]["expect"],
+            heartbeat_value(&hb, l),
+            "either: {note}"
+        );
+        assert_eq!(hb.write(l).expect("writes back"), body, "{note}");
+    }
+}
+
 /// An instant in milliseconds since the Unix epoch in RFC 3339, UTC, to
 /// the millisecond: the civil date by days from 1970-01-01 (H. Hinnant's
 /// `civil_from_days`), so `times.json`'s `utc` is checked against its

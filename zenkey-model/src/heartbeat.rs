@@ -31,6 +31,29 @@
 //! (v2 §2.4), and a reader confirms by it as [`crate::freshness::View`]
 //! reads it (v2 §2.5, `spec/profiles/freshness/conformance/apply.json`).
 //! The refusals' tokens are `spec/conformance/heartbeat/bodies.json`'s.
+//!
+//! **The owner heartbeat** (core 0.108; #1110's H1, adopted by no rule
+//! yet) is form 6's second layout: one put for several interfaces an
+//! owner serves, a [`Group`] for each.
+//!
+//! ```text
+//! owner heartbeat, a put's payload   CH · run · seq · body      CH: form 6 · run width · tag 0
+//! body       time · groups · that many groups · pad
+//! groups     4 bits: the count of groups, from 1 to 15
+//! group      index10 · tag4 · size · sections
+//! size       unsigned LEB128, each byte the body's next 8 bits: the sections' count of bits
+//! sections   map · a section for each map bit set, as a heartbeat's body between its time and its pad
+//! ```
+//!
+//! It is read in two steps. [`OwnerHeartbeat::parse`] reads the groups
+//! with no contract, each one's sections taken unread, and refuses the
+//! whole put ([`OwnerRefusal`]). [`Group::entry`] then reads a group's
+//! index through the catalog its owner names (core §8.6) and
+//! [`Group::read`] its sections with that revision's [`Layout`], each
+//! refusing that group alone ([`GroupRefusal`]). Nothing in the bytes
+//! tells the two layouts apart: the caller says which one a key carries,
+//! and calls [`Heartbeat::parse`] or [`OwnerHeartbeat::parse`]. The
+//! tokens are `spec/conformance/heartbeat/owner.json`'s.
 
 use std::time::Duration;
 
@@ -38,10 +61,12 @@ use sha2::{Digest as _, Sha256};
 use thiserror::Error;
 
 use crate::canonical::Fingerprint;
+use crate::catalog::{self, Catalog, CatalogId};
+use crate::collection::{IntegerRefusal, read_integer, write_integer};
 use crate::contract::Contract;
 use crate::freshness::{Horizon, horizon_of};
 use crate::grammar::{IfaceId, KindToken, ZkKey, parse};
-use crate::packed::{BitReader, BitWriter, ReadRefusal};
+use crate::packed::{BitReader, BitWriter, ReadRefusal, Record};
 use crate::template::Template;
 use crate::wire::{self, Run, Stamp, Tag};
 
@@ -517,8 +542,152 @@ pub enum WriteError {
     Ranks(usize),
 }
 
-fn take(r: &mut BitReader<'_>, width: u32) -> Result<u64, BodyRefusal> {
-    r.take(width).map_err(|_| BodyRefusal::Short)
+/// Bits read in order, `short` where they end: a whole body's, or the
+/// bits of one group's sections, which end where its size says and not at
+/// a byte.
+struct Bits<'a> {
+    r: BitReader<'a>,
+    left: u64,
+}
+
+impl<'a> Bits<'a> {
+    /// Every bit of `bytes`.
+    fn whole(bytes: &'a [u8]) -> Self {
+        Bits {
+            r: BitReader::new(bytes),
+            left: bytes.len() as u64 * 8,
+        }
+    }
+
+    /// A record's bits, its pad left out.
+    fn of(record: &'a Record) -> Self {
+        Bits {
+            r: BitReader::new(&record.bytes),
+            left: record.bits.min(record.bytes.len() as u64 * 8),
+        }
+    }
+
+    fn take(&mut self, width: u32) -> Result<u64, BodyRefusal> {
+        if u64::from(width) > self.left {
+            return Err(BodyRefusal::Short);
+        }
+        self.left -= u64::from(width);
+        self.r.take(width).map_err(|_| BodyRefusal::Short)
+    }
+
+    /// The whole body's end: no byte after its pad, then every pad bit 0.
+    fn end(self) -> Result<(), BodyRefusal> {
+        self.r.end().map_err(|e| match e {
+            ReadRefusal::Pad => BodyRefusal::Pad,
+            _ => BodyRefusal::Trailing,
+        })
+    }
+}
+
+/// A body's map and sections under `layout`, field by field: what a
+/// heartbeat's body holds between its time and its pad, and what a
+/// group's sections are.
+fn read_sections(r: &mut Bits<'_>, layout: &Layout) -> Result<Vec<Option<Section>>, BodyRefusal> {
+    let mut map = Vec::with_capacity(layout.collections.len());
+    for _ in &layout.collections {
+        map.push(r.take(1)? == 1);
+    }
+    let mut sections = Vec::with_capacity(map.len());
+    for (c, on) in layout.collections.iter().zip(map) {
+        if !on {
+            sections.push(None);
+            continue;
+        }
+        let digest = Digest(r.take(32)? as u32);
+        let members = match (c.cardinality, c.live_bits()) {
+            (Some(card), Some(w)) => {
+                let live = r.take(w)?;
+                if live > card {
+                    return Err(BodyRefusal::Code);
+                }
+                if r.take(1)? == 0 {
+                    let mut bits = Vec::new();
+                    for _ in 0..live {
+                        bits.push(r.take(1)? == 1);
+                    }
+                    Members::Bitmap(bits)
+                } else {
+                    let count = r.take(bits_for(u128::from(live) + 1))?;
+                    if count > live {
+                        return Err(BodyRefusal::Code);
+                    }
+                    let rw = bits_for(u128::from(live));
+                    let mut ranks: Vec<u64> = Vec::new();
+                    for _ in 0..count {
+                        let rank = r.take(rw)?;
+                        if rank >= live || ranks.last().is_some_and(|p| rank <= *p) {
+                            return Err(BodyRefusal::Code);
+                        }
+                        ranks.push(rank);
+                    }
+                    Members::List { live, ranks }
+                }
+            }
+            _ => Members::One {
+                vouched: r.take(1)? == 1,
+            },
+        };
+        sections.push(Some(Section { digest, members }));
+    }
+    Ok(sections)
+}
+
+/// The map and sections under `layout`, written: [`read_sections`]'s
+/// inverse.
+fn write_sections(
+    w: &mut BitWriter,
+    layout: &Layout,
+    sections: &[Option<Section>],
+) -> Result<(), WriteError> {
+    if sections.len() != layout.collections.len() {
+        return Err(WriteError::Sections {
+            need: layout.collections.len(),
+            have: sections.len(),
+        });
+    }
+    for s in sections {
+        w.bit(s.is_some());
+    }
+    for (i, (c, s)) in layout.collections.iter().zip(sections).enumerate() {
+        let Some(s) = s else { continue };
+        w.push(u64::from(s.digest.0), 32);
+        match (&s.members, c.cardinality, c.live_bits()) {
+            (Members::One { vouched }, None, _) => w.bit(*vouched),
+            (Members::Bitmap(bits), Some(card), Some(lw)) => {
+                let live = bits.len() as u64;
+                if live > card {
+                    return Err(WriteError::Live(i));
+                }
+                w.push(live, lw);
+                w.bit(false);
+                for b in bits {
+                    w.bit(*b);
+                }
+            }
+            (Members::List { live, ranks }, Some(card), Some(lw)) => {
+                if *live > card {
+                    return Err(WriteError::Live(i));
+                }
+                if ranks.windows(2).any(|p| p[0] >= p[1]) || ranks.iter().any(|r| r >= live) {
+                    return Err(WriteError::Ranks(i));
+                }
+                w.push(*live, lw);
+                w.bit(true);
+                w.push(ranks.len() as u64, bits_for(u128::from(*live) + 1));
+                let rw = bits_for(u128::from(*live));
+                for r in ranks {
+                    w.push(*r, rw);
+                }
+            }
+            _ => return Err(WriteError::Shape(i)),
+        }
+    }
+    Ok(())
 }
 
 impl Heartbeat {
@@ -531,58 +700,10 @@ impl Heartbeat {
     /// # Errors
     /// The [`BodyRefusal`].
     pub fn parse(body: &[u8], layout: &Layout) -> Result<Heartbeat, BodyRefusal> {
-        let mut r = BitReader::new(body);
-        let time = Time::from_code(take(&mut r, TIME_BITS)?)?;
-        let mut map = Vec::with_capacity(layout.collections.len());
-        for _ in &layout.collections {
-            map.push(take(&mut r, 1)? == 1);
-        }
-        let mut sections = Vec::with_capacity(map.len());
-        for (c, on) in layout.collections.iter().zip(map) {
-            if !on {
-                sections.push(None);
-                continue;
-            }
-            let digest = Digest(take(&mut r, 32)? as u32);
-            let members = match (c.cardinality, c.live_bits()) {
-                (Some(card), Some(w)) => {
-                    let live = take(&mut r, w)?;
-                    if live > card {
-                        return Err(BodyRefusal::Code);
-                    }
-                    if take(&mut r, 1)? == 0 {
-                        let mut bits = Vec::new();
-                        for _ in 0..live {
-                            bits.push(take(&mut r, 1)? == 1);
-                        }
-                        Members::Bitmap(bits)
-                    } else {
-                        let count = take(&mut r, bits_for(u128::from(live) + 1))?;
-                        if count > live {
-                            return Err(BodyRefusal::Code);
-                        }
-                        let rw = bits_for(u128::from(live));
-                        let mut ranks: Vec<u64> = Vec::new();
-                        for _ in 0..count {
-                            let rank = take(&mut r, rw)?;
-                            if rank >= live || ranks.last().is_some_and(|p| rank <= *p) {
-                                return Err(BodyRefusal::Code);
-                            }
-                            ranks.push(rank);
-                        }
-                        Members::List { live, ranks }
-                    }
-                }
-                _ => Members::One {
-                    vouched: take(&mut r, 1)? == 1,
-                },
-            };
-            sections.push(Some(Section { digest, members }));
-        }
-        r.end().map_err(|e| match e {
-            ReadRefusal::Pad => BodyRefusal::Pad,
-            _ => BodyRefusal::Trailing,
-        })?;
+        let mut r = Bits::whole(body);
+        let time = Time::from_code(r.take(TIME_BITS)?)?;
+        let sections = read_sections(&mut r, layout)?;
+        r.end()?;
         Ok(Heartbeat { time, sections })
     }
 
@@ -593,51 +714,9 @@ impl Heartbeat {
     /// collection's shape, a live count within the cardinality, and ranks
     /// ascending below it.
     pub fn record(&self, layout: &Layout) -> Result<crate::packed::Record, WriteError> {
-        if self.sections.len() != layout.collections.len() {
-            return Err(WriteError::Sections {
-                need: layout.collections.len(),
-                have: self.sections.len(),
-            });
-        }
         let mut w = BitWriter::new();
         w.push(self.time.code(), TIME_BITS);
-        for s in &self.sections {
-            w.bit(s.is_some());
-        }
-        for (i, (c, s)) in layout.collections.iter().zip(&self.sections).enumerate() {
-            let Some(s) = s else { continue };
-            w.push(u64::from(s.digest.0), 32);
-            match (&s.members, c.cardinality, c.live_bits()) {
-                (Members::One { vouched }, None, _) => w.bit(*vouched),
-                (Members::Bitmap(bits), Some(card), Some(lw)) => {
-                    let live = bits.len() as u64;
-                    if live > card {
-                        return Err(WriteError::Live(i));
-                    }
-                    w.push(live, lw);
-                    w.bit(false);
-                    for b in bits {
-                        w.bit(*b);
-                    }
-                }
-                (Members::List { live, ranks }, Some(card), Some(lw)) => {
-                    if *live > card {
-                        return Err(WriteError::Live(i));
-                    }
-                    if ranks.windows(2).any(|p| p[0] >= p[1]) || ranks.iter().any(|r| r >= live) {
-                        return Err(WriteError::Ranks(i));
-                    }
-                    w.push(*live, lw);
-                    w.bit(true);
-                    w.push(ranks.len() as u64, bits_for(u128::from(*live) + 1));
-                    let rw = bits_for(u128::from(*live));
-                    for r in ranks {
-                        w.push(*r, rw);
-                    }
-                }
-                _ => return Err(WriteError::Shape(i)),
-            }
-        }
+        write_sections(&mut w, layout, &self.sections)?;
         Ok(w.finish())
     }
 
@@ -659,6 +738,377 @@ impl Heartbeat {
         Ok(wire::Envelope {
             form: wire::Form::Heartbeat,
             tag: layout.tag,
+            stamp,
+            record: &body,
+        }
+        .write())
+    }
+}
+
+/// The width of an owner heartbeat's count of groups.
+pub const GROUPS_BITS: u32 = 4;
+
+/// The most groups an owner heartbeat holds: its count is 4 bits, and 0 is
+/// unused.
+pub const MAX_GROUPS: usize = 15;
+
+/// The width of a group's index: a deployment catalog holds at most 1,024
+/// entries (core §8.6).
+pub const INDEX_BITS: u32 = 10;
+
+/// The highest index a group names.
+pub const MAX_INDEX: u16 = (1 << INDEX_BITS) - 1;
+
+/// One covered interface's part of an owner heartbeat (core §7.5): the
+/// covered revision's index in the catalog its owner names, the tag the
+/// owner wrote with, and the group's sections, unread. Their count of bits
+/// is the group's size.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Group {
+    /// The covered revision's index in the deployment catalog, at most
+    /// [`MAX_INDEX`].
+    pub index: u16,
+    /// The covered revision's tag, as a heartbeat's CH carries it.
+    pub tag: Tag,
+    /// The sections' bits: a map bit for each collection of the covered
+    /// revision, then a section for each map bit set. A group has no pad
+    /// of its own, so `sections.bits` is its size whatever the bytes hold
+    /// after them.
+    pub sections: Record,
+}
+
+/// Why one group of an owner heartbeat is not read, in core §7.5's order.
+/// It refuses that group alone: every other group reads as it would with
+/// this one left out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Error)]
+pub enum GroupRefusal {
+    /// The reader holds neither the catalog its owner names nor one whose
+    /// lineage holds it, or the owner names none (core §8.6).
+    #[error("unknown_catalog: no catalog held is or succeeds the one its owner names")]
+    UnknownCatalog,
+    /// The index is at or above the count it is read through (core §8.6).
+    #[error("unknown_index: the index is at or above the count it is read through")]
+    UnknownIndex,
+    /// The sections end before a bit their fields need.
+    #[error("short: the sections end before a bit their fields need")]
+    Short,
+    /// A code is unused: a live count above the cardinality, a count above
+    /// the live count, or a rank not below the live count or not above the
+    /// one before it.
+    #[error("code: an unused code")]
+    Code,
+    /// A bit after the sections' last field.
+    #[error("trailing: a bit after the sections' last field")]
+    Trailing,
+}
+
+impl GroupRefusal {
+    /// The token `spec/conformance/heartbeat/owner.json` pins.
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            GroupRefusal::UnknownCatalog => "unknown_catalog",
+            GroupRefusal::UnknownIndex => "unknown_index",
+            GroupRefusal::Short => "short",
+            GroupRefusal::Code => "code",
+            GroupRefusal::Trailing => "trailing",
+        }
+    }
+}
+
+impl From<catalog::ReadRefusal> for GroupRefusal {
+    fn from(r: catalog::ReadRefusal) -> Self {
+        match r {
+            catalog::ReadRefusal::UnknownCatalog => GroupRefusal::UnknownCatalog,
+            catalog::ReadRefusal::UnknownIndex => GroupRefusal::UnknownIndex,
+        }
+    }
+}
+
+impl Group {
+    /// A group covering `layout`'s revision at `index`: its tag the
+    /// layout's, its sections these, one for each collection (`None` for a
+    /// map bit of 0).
+    ///
+    /// # Errors
+    /// A [`WriteError`], as [`Heartbeat::record`].
+    pub fn of(
+        index: u16,
+        layout: &Layout,
+        sections: &[Option<Section>],
+    ) -> Result<Group, WriteError> {
+        let mut w = BitWriter::new();
+        write_sections(&mut w, layout, sections)?;
+        Ok(Group {
+            index,
+            tag: layout.tag,
+            sections: w.finish(),
+        })
+    }
+
+    /// The group's size: the count of bits in its sections.
+    #[must_use]
+    pub fn size(&self) -> u64 {
+        self.sections.bits
+    }
+
+    /// The revision the group's index names, read through the catalog its
+    /// owner names among those the reader holds (core §8.6,
+    /// [`catalog::through`]). A reader then reads the sections with that
+    /// revision's layout ([`Group::read`]), or skips the group where it
+    /// does not hold the revision.
+    ///
+    /// # Errors
+    /// [`GroupRefusal::UnknownCatalog`] when the owner names no catalog,
+    /// or no catalog held is or succeeds the one it names;
+    /// [`GroupRefusal::UnknownIndex`] at or above the count read through.
+    pub fn entry<'c>(
+        &self,
+        held: &'c [Catalog],
+        named: Option<CatalogId>,
+    ) -> Result<&'c catalog::Entry, GroupRefusal> {
+        let named = named.ok_or(GroupRefusal::UnknownCatalog)?;
+        Ok(catalog::through(held, named)?.entry(self.index)?)
+    }
+
+    /// Whether the group's tag is `layout`'s. It is a check, as a
+    /// heartbeat's is: another tag refuses nothing here, the sections read
+    /// the same, and what a reader concludes is `freshness.v2`'s to say.
+    #[must_use]
+    pub fn tag_is(&self, layout: &Layout) -> bool {
+        self.tag == layout.tag
+    }
+
+    /// The group's sections read with its covered revision's layout, one
+    /// for each collection (`None` for a map bit of 0), or the first
+    /// refusal that applies (core §7.5): the fields in order (`short`,
+    /// `code`), then a bit after the last field (`trailing`). The index is
+    /// read first, by [`Group::entry`].
+    ///
+    /// # Errors
+    /// [`GroupRefusal::Short`], [`GroupRefusal::Code`] or
+    /// [`GroupRefusal::Trailing`].
+    pub fn read(&self, layout: &Layout) -> Result<Vec<Option<Section>>, GroupRefusal> {
+        let mut r = Bits::of(&self.sections);
+        // The fields refuse `short` or `code` alone: a group's bits have no
+        // pad, and what follows their last field is judged below.
+        let sections = read_sections(&mut r, layout).map_err(|e| match e {
+            BodyRefusal::Code => GroupRefusal::Code,
+            _ => GroupRefusal::Short,
+        })?;
+        if r.left > 0 {
+            return Err(GroupRefusal::Trailing);
+        }
+        Ok(sections)
+    }
+}
+
+/// An owner heartbeat's body, read without any contract: its time and its
+/// groups, in ascending order of their indices.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnerHeartbeat {
+    pub time: Time,
+    pub groups: Vec<Group>,
+}
+
+/// Why a put on an owner heartbeat's key is not an owner heartbeat, in
+/// core §7.5's order. It refuses the whole put, every group with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Error)]
+pub enum OwnerRefusal {
+    /// CH's tag is not 0.
+    #[error("tag: CH's tag is not 0")]
+    Tag,
+    /// The body ends before a bit its fields need, a size's or a group's
+    /// sections' among them.
+    #[error("short: the body ends before a bit its fields need")]
+    Short,
+    /// A code is unused: a millisecond code from 1000 up but the unknown
+    /// time's, or a count of 0 groups.
+    #[error("code: an unused code")]
+    Code,
+    /// A group's index is not above the index of the group before it.
+    #[error("order: a group's index is not above the one before it")]
+    Order,
+    /// A size's fifth byte has its high bit set, it is above 2^32 − 1, or
+    /// it is not in its shortest form.
+    #[error("leb128: a size that is not LEB128 in its shortest form, at most 2^32 − 1")]
+    Leb128,
+    /// A byte after the pad.
+    #[error("trailing: a byte after the pad")]
+    Trailing,
+    /// A bit of the pad is 1.
+    #[error("pad: a bit of the pad is 1")]
+    Pad,
+}
+
+impl OwnerRefusal {
+    /// The token `spec/conformance/heartbeat/owner.json` pins.
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            OwnerRefusal::Tag => "tag",
+            OwnerRefusal::Short => "short",
+            OwnerRefusal::Code => "code",
+            OwnerRefusal::Order => "order",
+            OwnerRefusal::Leb128 => "leb128",
+            OwnerRefusal::Trailing => "trailing",
+            OwnerRefusal::Pad => "pad",
+        }
+    }
+}
+
+impl From<BodyRefusal> for OwnerRefusal {
+    fn from(r: BodyRefusal) -> Self {
+        match r {
+            BodyRefusal::Short => OwnerRefusal::Short,
+            BodyRefusal::Code => OwnerRefusal::Code,
+            BodyRefusal::Trailing => OwnerRefusal::Trailing,
+            BodyRefusal::Pad => OwnerRefusal::Pad,
+        }
+    }
+}
+
+/// Why an owner heartbeat cannot be written (core §7.5's writer's rule).
+/// A group is named by its position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum OwnerWriteError {
+    /// No group, or more than [`MAX_GROUPS`].
+    #[error("{0} groups: an owner heartbeat holds from 1 to 15")]
+    Groups(usize),
+    /// A group's index is above [`MAX_INDEX`].
+    #[error("group {0}: an index above 1023")]
+    Index(usize),
+    /// A group's index is not above the index of the group before it.
+    #[error("group {0}: its index is not above the one before it")]
+    Order(usize),
+    /// A group's sections are more bits than their bytes hold, or more
+    /// than 2^32 − 1.
+    #[error("group {0}: its sections are not a size's count of bits")]
+    Size(usize),
+}
+
+impl OwnerHeartbeat {
+    /// A put's body on an owner heartbeat's key, after the envelope's
+    /// parse gave CH's `tag` and the stamp: the groups read with no
+    /// contract and no catalog, each one's sections taken unread, or the
+    /// first refusal that applies (core §7.5): CH's tag not 0 (`tag`),
+    /// then the fields in order, each read whole and then judged (`short`,
+    /// `code`, `order`, `leb128`), then a byte after the pad (`trailing`),
+    /// then a pad bit set (`pad`).
+    ///
+    /// The caller knows the key carries this layout: a heartbeat's body
+    /// can read as an owner heartbeat's, and the reverse.
+    ///
+    /// # Errors
+    /// The [`OwnerRefusal`].
+    pub fn parse(tag: Tag, body: &[u8]) -> Result<OwnerHeartbeat, OwnerRefusal> {
+        if tag != Tag::NONE {
+            return Err(OwnerRefusal::Tag);
+        }
+        let mut r = Bits::whole(body);
+        let time = Time::from_code(r.take(TIME_BITS)?)?;
+        let count = r.take(GROUPS_BITS)?;
+        if count == 0 {
+            return Err(OwnerRefusal::Code);
+        }
+        let mut groups: Vec<Group> = Vec::with_capacity(count as usize);
+        for _ in 0..count {
+            let index = r.take(INDEX_BITS)? as u16;
+            if groups.last().is_some_and(|g| index <= g.index) {
+                return Err(OwnerRefusal::Order);
+            }
+            let tag = Tag::new(r.take(4)? as u8).expect("four bits are a tag");
+            let size = read_integer(|| r.take(8).ok().map(|b| b as u8)).map_err(|e| match e {
+                IntegerRefusal::Short => OwnerRefusal::Short,
+                IntegerRefusal::Leb128 => OwnerRefusal::Leb128,
+            })?;
+            // Never allocated from the size: the bits are copied as the
+            // body gives them, and it ends where it ends.
+            let mut sections = BitWriter::new();
+            let mut left = u64::from(size);
+            while left > 0 {
+                let n = left.min(64) as u32;
+                sections.push(r.take(n)?, n);
+                left -= u64::from(n);
+            }
+            groups.push(Group {
+                index,
+                tag,
+                sections: sections.finish(),
+            });
+        }
+        r.end()?;
+        Ok(OwnerHeartbeat { time, groups })
+    }
+
+    /// The group of an index, `None` where the owner heartbeat holds none:
+    /// how a reader bound to one interface finds its own behind the
+    /// others'.
+    #[must_use]
+    pub fn group(&self, index: u16) -> Option<&Group> {
+        self.groups.iter().find(|g| g.index == index)
+    }
+
+    /// The body's bits and pad ([`Record`]).
+    ///
+    /// # Errors
+    /// An [`OwnerWriteError`]: from 1 to 15 groups, in ascending order of
+    /// their indices, none above 1023, each one's size the count of bits
+    /// in its sections.
+    pub fn record(&self) -> Result<Record, OwnerWriteError> {
+        if self.groups.is_empty() || self.groups.len() > MAX_GROUPS {
+            return Err(OwnerWriteError::Groups(self.groups.len()));
+        }
+        let mut w = BitWriter::new();
+        w.push(self.time.code(), TIME_BITS);
+        w.push(self.groups.len() as u64, GROUPS_BITS);
+        let mut size = Vec::with_capacity(5);
+        for (i, g) in self.groups.iter().enumerate() {
+            if g.index > MAX_INDEX {
+                return Err(OwnerWriteError::Index(i));
+            }
+            if i > 0 && g.index <= self.groups[i - 1].index {
+                return Err(OwnerWriteError::Order(i));
+            }
+            let bits = u32::try_from(g.sections.bits).map_err(|_| OwnerWriteError::Size(i))?;
+            let mut r = Bits::of(&g.sections);
+            if r.left != g.sections.bits {
+                return Err(OwnerWriteError::Size(i));
+            }
+            w.push(u64::from(g.index), INDEX_BITS);
+            w.push(u64::from(g.tag.get()), 4);
+            size.clear();
+            write_integer(&mut size, bits);
+            for b in &size {
+                w.push(u64::from(*b), 8);
+            }
+            while r.left > 0 {
+                let n = r.left.min(64) as u32;
+                let v = r.take(n).map_err(|_| OwnerWriteError::Size(i))?;
+                w.push(v, n);
+            }
+        }
+        Ok(w.finish())
+    }
+
+    /// The body's bytes, its pad included.
+    ///
+    /// # Errors
+    /// As [`OwnerHeartbeat::record`].
+    pub fn write(&self) -> Result<Vec<u8>, OwnerWriteError> {
+        self.record().map(|r| r.bytes)
+    }
+
+    /// The owner heartbeat as a put's payload: CH (form 6, the run's
+    /// width, tag 0), the stamp, then the body.
+    ///
+    /// # Errors
+    /// As [`OwnerHeartbeat::record`].
+    pub fn envelope(&self, stamp: Stamp) -> Result<Vec<u8>, OwnerWriteError> {
+        let body = self.write()?;
+        Ok(wire::Envelope {
+            form: wire::Form::Heartbeat,
+            tag: Tag::NONE,
             stamp,
             record: &body,
         }
@@ -723,5 +1173,301 @@ mod tests {
         assert_eq!(covered("zk2/h/s/health.v1/stream/heartbeat/x.v1"), None);
         assert_eq!(covered("zk2/h/s/freshness.v2/state/heartbeat/x.v1"), None);
         assert_eq!(covered("demo/tick"), None);
+    }
+
+    /// A string of `0` and `1` as a record's bits.
+    fn bits(s: &str) -> Record {
+        let mut w = BitWriter::new();
+        for c in s.chars() {
+            w.bit(c == '1');
+        }
+        w.finish()
+    }
+
+    fn group(index: u16, sections: &str) -> Group {
+        Group {
+            index,
+            tag: Tag::new((index % 16) as u8).unwrap(),
+            sections: bits(sections),
+        }
+    }
+
+    fn owner(groups: Vec<Group>) -> OwnerHeartbeat {
+        OwnerHeartbeat {
+            time: Time::At {
+                secs: 3600,
+                ms: 250,
+            },
+            groups,
+        }
+    }
+
+    /// A revision with a templated collection of at most 5 and a
+    /// collection of one member.
+    fn layout() -> Layout {
+        let text = r#"
+[interface]
+name  = "pair"
+major = 1
+minor = 0
+uses  = ["freshness.v2"]
+
+[resources."peer/{peer}"]
+kind        = "state"
+type        = { raw = "text/plain" }
+params      = { peer = "string" }
+cardinality = 5
+annotations = { "freshness.ttl_s" = 60 }
+
+[resources.status]
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 60 }
+"#;
+        let loaded = crate::contract::load_str(text, std::path::Path::new("."), None);
+        Layout::of(&loaded.contract.expect("the contract loads"))
+    }
+
+    #[test]
+    fn an_owner_heartbeat_holds_from_1_to_15_groups() {
+        assert_eq!(owner(vec![]).record(), Err(OwnerWriteError::Groups(0)));
+        let many = |n: u16| owner((0..n).map(|i| group(i, "1")).collect());
+        assert!(many(1).record().is_ok());
+        assert!(many(15).record().is_ok());
+        assert_eq!(many(16).record(), Err(OwnerWriteError::Groups(16)));
+        assert_eq!(
+            many(16).envelope(stamp(7, 1)),
+            Err(OwnerWriteError::Groups(16))
+        );
+    }
+
+    #[test]
+    fn a_writer_refuses_indices_that_do_not_ascend() {
+        let of = |indices: &[u16]| owner(indices.iter().map(|i| group(*i, "10")).collect());
+        assert!(of(&[0, 2, 1023]).record().is_ok());
+        // Descending, and the same index twice: the group at fault named
+        // by its position.
+        assert_eq!(of(&[4, 2]).record(), Err(OwnerWriteError::Order(1)));
+        assert_eq!(of(&[2, 4, 4]).record(), Err(OwnerWriteError::Order(2)));
+        assert_eq!(of(&[0, 9, 3, 12]).record(), Err(OwnerWriteError::Order(2)));
+        // An index 10 bits cannot hold is refused, never written modulo
+        // 1,024.
+        assert_eq!(of(&[1024]).record(), Err(OwnerWriteError::Index(0)));
+        assert_eq!(of(&[5, 2000]).record(), Err(OwnerWriteError::Index(1)));
+    }
+
+    #[test]
+    fn a_writer_refuses_sections_that_are_not_their_bytes_bits() {
+        let mut g = group(3, "1011");
+        g.sections.bits = 9;
+        assert_eq!(owner(vec![g]).record(), Err(OwnerWriteError::Size(0)));
+        // Bits set after the sections' count are no part of the group.
+        let mut g = group(3, "1011");
+        g.sections.bytes[0] |= 0x0f;
+        let written = owner(vec![g]).write().unwrap();
+        assert_eq!(written, owner(vec![group(3, "1011")]).write().unwrap());
+    }
+
+    #[test]
+    fn a_size_is_the_sections_count_of_bits_wherever_it_falls() {
+        // 46 bits of time and count, 14 of index and tag: the size starts
+        // at bit 60, on no byte boundary.
+        let body = owner(vec![group(4, &"1".repeat(128))]).write().unwrap();
+        // 128 is 0x80 0x01, the low seven bits first.
+        assert_eq!(body[7] & 0x0f, 0x8);
+        assert_eq!(body[8], 0x00);
+        assert_eq!(body[9] >> 4, 0x1);
+        let read = OwnerHeartbeat::parse(Tag::NONE, &body).unwrap();
+        assert_eq!(read.groups[0].size(), 128);
+        assert_eq!(read.group(4), Some(&group(4, &"1".repeat(128))));
+        assert_eq!(read.group(5), None);
+    }
+
+    /// A xorshift generator: the same owner heartbeats on every run.
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n
+        }
+    }
+
+    #[test]
+    fn every_owner_heartbeat_written_reads_back_and_no_prefix_of_it_does() {
+        let mut rng = Rng(0x1110_0108_2026_1121);
+        for round in 0..300 {
+            let count = 1 + rng.below(15);
+            let mut indices: Vec<u16> = (0..count).map(|_| rng.below(1024) as u16).collect();
+            indices.sort_unstable();
+            indices.dedup();
+            let groups: Vec<Group> = indices
+                .iter()
+                .map(|i| {
+                    // Sizes on both sides of each LEB128 length: 0, 127,
+                    // 128 and 16,384 among them.
+                    let len = match rng.below(8) {
+                        0 => 0,
+                        1 => 127 + rng.below(3),
+                        2 => 16_383 + rng.below(3),
+                        _ => rng.below(200),
+                    };
+                    let s: String = (0..len)
+                        .map(|_| if rng.below(2) == 1 { '1' } else { '0' })
+                        .collect();
+                    Group {
+                        index: *i,
+                        tag: Tag::new(rng.below(16) as u8).unwrap(),
+                        sections: bits(&s),
+                    }
+                })
+                .collect();
+            let time = if rng.below(10) == 0 {
+                Time::Unknown
+            } else {
+                Time::At {
+                    secs: rng.next() as u32,
+                    ms: rng.below(1000) as u16,
+                }
+            };
+            let hb = OwnerHeartbeat { time, groups };
+            let record = hb.record().unwrap();
+            let expected: u64 = 46
+                + hb.groups
+                    .iter()
+                    .map(|g| {
+                        let size = crate::collection::integer_bytes(g.size() as u32) as u64;
+                        14 + 8 * size + g.size()
+                    })
+                    .sum::<u64>();
+            assert_eq!(record.bits, expected, "round {round}: the body's bits");
+            assert!(record.pad() < 8);
+            assert_eq!(
+                OwnerHeartbeat::parse(Tag::NONE, &record.bytes),
+                Ok(hb.clone()),
+                "round {round}: reads back"
+            );
+            assert_eq!(
+                OwnerHeartbeat::parse(Tag::new(1).unwrap(), &record.bytes),
+                Err(OwnerRefusal::Tag)
+            );
+            // A body cut anywhere lacks a bit a field needs: the pad is
+            // under a byte, so the last byte holds one.
+            for cut in [0, 1, 5, 6, record.bytes.len() / 2, record.bytes.len() - 1] {
+                assert_eq!(
+                    OwnerHeartbeat::parse(Tag::NONE, &record.bytes[..cut]),
+                    Err(OwnerRefusal::Short),
+                    "round {round}: cut at {cut}"
+                );
+            }
+            let payload = hb.envelope(stamp(7, round)).unwrap();
+            let env = wire::Envelope::parse(&payload).unwrap();
+            assert!(env.is_heartbeat());
+            assert_eq!((env.tag, env.stamp), (Tag::NONE, stamp(7, round)));
+            assert_eq!(OwnerHeartbeat::parse(env.tag, env.record), Ok(hb));
+        }
+    }
+
+    #[test]
+    fn a_group_reads_and_writes_its_sections_by_its_revisions_layout() {
+        let l = layout();
+        let sections = vec![
+            Some(Section {
+                digest: Digest::from_u32(0xdead_beef),
+                members: Members::templated(3, [0, 2]),
+            }),
+            Some(Section {
+                digest: Digest::from_u32(0x0bad_cafe),
+                members: Members::One { vouched: true },
+            }),
+        ];
+        let g = Group::of(9, &l, &sections).unwrap();
+        // The map's 2 bits; 32 + 3 + 1 + 3 for the bitmap; 32 + 1.
+        assert_eq!(g.size(), 2 + 39 + 33);
+        assert!(g.tag_is(&l));
+        assert_eq!(g.read(&l), Ok(sections.clone()));
+        // A heartbeat's body between its time and its pad is the same
+        // bits.
+        let body = Heartbeat {
+            time: Time::Unknown,
+            sections: sections.clone(),
+        }
+        .record(&l)
+        .unwrap();
+        assert_eq!(
+            body.bit_string()[TIME_BITS as usize..],
+            g.sections.bit_string()
+        );
+        // Every map bit 0 is the map alone, and a section the layout has
+        // no collection for is the writer's refusal.
+        let none = Group::of(9, &l, &[None, None]).unwrap();
+        assert_eq!((none.size(), none.read(&l)), (2, Ok(vec![None, None])));
+        assert_eq!(
+            Group::of(9, &l, &sections[..1]),
+            Err(WriteError::Sections { need: 2, have: 1 })
+        );
+    }
+
+    #[test]
+    fn a_refused_group_leaves_the_others_read() {
+        let l = layout();
+        let one = [
+            None,
+            Some(Section {
+                digest: Digest::from_u32(1),
+                members: Members::One { vouched: true },
+            }),
+        ];
+        let good = |index| Group::of(index, &l, &one).unwrap();
+        let mut long = good(5);
+        long.sections = bits(&(long.sections.bit_string() + "0"));
+        let mut cut = good(6);
+        cut.sections = bits(&cut.sections.bit_string()[..20]);
+        // Six live where the cardinality is 5.
+        let over = Group {
+            index: 7,
+            tag: l.tag,
+            sections: bits(&format!("10{}110", "0".repeat(32))),
+        };
+        let hb = owner(vec![good(2), long, cut, over, good(8)]);
+        let read = OwnerHeartbeat::parse(Tag::NONE, &hb.write().unwrap()).unwrap();
+        let got: Vec<_> = read.groups.iter().map(|g| g.read(&l)).collect();
+        assert_eq!(
+            got,
+            [
+                Ok(one.to_vec()),
+                Err(GroupRefusal::Trailing),
+                Err(GroupRefusal::Short),
+                Err(GroupRefusal::Code),
+                Ok(one.to_vec()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_group_reads_its_index_through_the_catalog_its_owner_names() {
+        let l = layout();
+        let mut first = Catalog::new(1_767_225_600).unwrap();
+        first.push(l.iface.clone(), l.fingerprint.clone()).unwrap();
+        let named = Some(first.id());
+        let held = [first];
+        let g = Group::of(0, &l, &[None, None]).unwrap();
+        let entry = g.entry(&held, named).unwrap();
+        assert_eq!((&entry.iface, &entry.contract), (&l.iface, &l.fingerprint));
+        let mut past = g.clone();
+        past.index = 1;
+        assert_eq!(past.entry(&held, named), Err(GroupRefusal::UnknownIndex));
+        // No catalog named, none held, and another's id: never a guess.
+        assert_eq!(g.entry(&held, None), Err(GroupRefusal::UnknownCatalog));
+        assert_eq!(g.entry(&[], named), Err(GroupRefusal::UnknownCatalog));
+        let other = CatalogId::from_hex("00000000");
+        assert!(other.is_some());
+        assert_eq!(g.entry(&held, other), Err(GroupRefusal::UnknownCatalog));
     }
 }

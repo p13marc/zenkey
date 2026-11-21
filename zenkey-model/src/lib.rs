@@ -147,7 +147,11 @@
 //!   a horizon above 0) as a [`heartbeat::Layout`] with its tag, a body
 //!   read and written with them and §7.5's refusals, and a collection's
 //!   [`heartbeat::Digest`]. `freshness.v2` adopts it (core 0.82; #978's
-//!   F3): [`freshness::uses_v2`], and a reader's [`freshness::View`].
+//!   F3): [`freshness::uses_v2`], and a reader's [`freshness::View`]. Its
+//!   second layout, the owner heartbeat (core 0.108; #1110's H1, adopted
+//!   by no rule yet), is a [`heartbeat::OwnerHeartbeat`] of
+//!   [`heartbeat::Group`]s, one for each covered interface: the groups
+//!   read with no contract, then each one's sections with its revision.
 //! - [`collection`]: the zk2c envelope's form 7, a collection's snapshot
 //!   (core §7.5, 0.97; #977's E1): a GET reply's page, its body read and
 //!   written with §7.5's refusals, a snapshot cut into pages under a page
