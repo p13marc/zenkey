@@ -4,6 +4,19 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — an owner that sends owner heartbeats (#1110's H3)
+
+`freshness.v2` 0.10 §2.4; observer 0.34 §7.5. The runtime's owner sends
+owner heartbeats with `ServiceConfig::owner_heartbeat` set, off by
+default. No flag, badge or file of zengui's changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| no scene held an owner heartbeat | shots scene `inspector-owner-heartbeat`: `lab/w2`, the owner of `freshness.v2`'s scenarios §8, its `host` class key selected. OWNER HEARTBEATS · THIS WINDOW'S VIEW reads 2 owner heartbeats, 1 after one lost, and the latest one's three groups: `#0 beacon.v2` and `#1 dial.v1` read, `#2 pulse.v1` diverged from this window's view. Its History holds both puts, 34 B each, `<zk2c owner heartbeat (host), 28 bytes>` | `World::owner_heartbeats`: one instance of four interfaces whose descriptor states its catalog, the window given the same catalog and the standard `freshness.v2` contract. A scene holds no session: its owner heartbeats are written by the model's writer, group by group as the runtime's owner writes them |
+| a `freshness.v2` owner's descriptor lists `stream/heartbeats/{class}` unavailable, cause `build` | cause `config`; an owner whose owner heartbeats cover an interface lists nothing there | core §3.3; the nodes pane shows a descriptor's word unchanged |
+
+One scene is new. No other scene's pixels move.
+
 ## Unreleased (`main`, zk2) — an owner heartbeat's groups (#1110)
 
 Core §7.5; `freshness.v2` §2.5; observer 0.34 §7.3, §7.5. No owner sends

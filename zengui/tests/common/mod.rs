@@ -77,6 +77,19 @@ pub fn packed_contract_paths() -> Vec<PathBuf> {
     paths
 }
 
+/// The owner-heartbeat world's contracts (#1110's H3): [`contract_paths`],
+/// the three of `freshness.v2`'s scenarios §8, `beacon.v2`, `dial.v1` and
+/// `pulse.v1`, which `lab/w2` implements, and `freshness.v2`'s standard
+/// contract, which its descriptor names: a scene retrieves no bundle, so
+/// the window is given it as `--contracts` gives one.
+pub fn w2_contract_paths() -> Vec<PathBuf> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut paths = contract_paths();
+    paths.extend(W2_IFACES.map(|i| root.join(format!("../zenkey/tests/contracts/{i}.toml"))));
+    paths.push(root.join("../spec/profiles/freshness/freshness.v2.toml"));
+    paths
+}
+
 /// Settings for a window with no bus behind it: nothing to dial, the
 /// contracts named (they arrive as a message instead), the default scope.
 pub fn settings() -> Settings {
@@ -840,14 +853,43 @@ pub fn packed_envelope(n: u32, record: &[u8]) -> Vec<u8> {
     .write()
 }
 
+/// `lab/w2`, the owner of `freshness.v2`'s scenarios §8 (#1110's H3): it
+/// implements [`W2_IFACES`] under a catalog that lists them at indices 0,
+/// 1 and 2, and confirms them by owner heartbeats.
+pub const W2: &str = "lab/w2";
+
+/// `lab/w2`'s interfaces, in its catalog's order.
+pub const W2_IFACES: [&str; 3] = ["beacon.v2", "dial.v1", "pulse.v1"];
+
+/// `lab/w2`'s owner heartbeat keys, the `host` class's and the `link`
+/// class's (`freshness.v2` §3).
+pub const W2_HOST: &str = "zk2/lab/w2/freshness.v2/stream/heartbeats/host";
+pub const W2_LINK: &str = "zk2/lab/w2/freshness.v2/stream/heartbeats/link";
+
+/// The catalog `lab/w2` was given, and the window with it: `set`'s
+/// revisions of [`W2_IFACES`] at indices 0, 1 and 2.
+pub fn w2_catalog(set: &zenkey_fleet::ContractSet) -> zenkey_model::catalog::Catalog {
+    let mut c = zenkey_model::catalog::Catalog::new(0).expect("a catalog");
+    for name in W2_IFACES {
+        let iface: zenkey_model::grammar::IfaceId = name.parse().expect("an interface");
+        let rev = set.of_iface(&iface).next().expect("held");
+        c.push(iface, rev.fingerprint().clone()).expect("an entry");
+    }
+    c
+}
+
 /// The deployment the lens sees (#614, FL6a), as a catalog built by hand
 /// from tokens and descriptors with the real fingerprints of what
 /// [`contracts`] loaded — the fleet's own skeleton tests' recipe — and the
 /// presence projection seeded from the same read: `robot1/nav` serving
 /// `nav.v2` and `host-a/tc` serving `tc.netif.v1`, each with one instance.
+/// An address named again is the same instance implementing one interface
+/// more; `named` is the address whose descriptor states a catalog, and its
+/// id (core §3.3).
 fn deployment(
     set: &zenkey_fleet::ContractSet,
     addresses: &[(&str, &str)],
+    named: Option<(&str, zenkey_model::catalog::CatalogId)>,
 ) -> (
     Arc<zenkey_fleet::Catalog>,
     zenkey_fleet::LivePresence,
@@ -861,45 +903,58 @@ fn deployment(
 
     let mut keys = Vec::new();
     let mut descriptors = BTreeMap::new();
+    let mut instances: BTreeMap<&str, InstanceId> = BTreeMap::new();
     for (id, (address, iface)) in (1u64..).zip(addresses.iter().copied()) {
         let addr: Addr = address.parse().expect("an address");
         let iface: IfaceId = iface.parse().expect("an interface");
-        let revision = set.of_iface(&iface).next().expect("held");
-        let instance = InstanceId::from_u64(id);
-        keys.push(instance_key(&addr, &instance).expect("a key").to_string());
+        let fingerprint = set
+            .of_iface(&iface)
+            .next()
+            .expect("held")
+            .fingerprint()
+            .clone();
+        let first = !instances.contains_key(address);
+        let instance = instances
+            .entry(address)
+            .or_insert_with(|| InstanceId::from_u64(id))
+            .clone();
+        if first {
+            keys.push(instance_key(&addr, &instance).expect("a key").to_string());
+        }
         keys.push(
-            alive_key(
-                &addr,
-                &iface,
-                &instance,
-                &revision.fingerprint().hex().fp16(),
-            )
-            .expect("a key")
-            .to_string(),
+            alive_key(&addr, &iface, &instance, &fingerprint.hex().fp16())
+                .expect("a key")
+                .to_string(),
         );
-        descriptors.insert(
-            (addr, instance.clone()),
-            DescriptorRead::Served(Box::new(Descriptor {
-                format: "zk2-descriptor/0.1".into(),
-                service: address.into(),
-                instance: instance.to_string(),
-                run: None,
-                catalog: None,
-                interfaces: vec![InterfaceEntry {
-                    iface: iface.to_string(),
-                    contract: revision.fingerprint().to_string(),
-                    minor: Some(0),
-                    standby: false,
-                    token: true,
-                    unavailable: Vec::new(),
-                    cardinality: BTreeMap::new(),
-                }],
-                capabilities: Vec::new(),
-                requires: Vec::new(),
-                profiles: Vec::new(),
-                meta: BTreeMap::new(),
-            })),
-        );
+        let entry = InterfaceEntry {
+            iface: iface.to_string(),
+            contract: fingerprint.to_string(),
+            minor: Some(0),
+            standby: false,
+            token: true,
+            unavailable: Vec::new(),
+            cardinality: BTreeMap::new(),
+        };
+        match descriptors.get_mut(&(addr.clone(), instance.clone())) {
+            Some(DescriptorRead::Served(d)) => d.interfaces.push(entry),
+            _ => {
+                descriptors.insert(
+                    (addr, instance.clone()),
+                    DescriptorRead::Served(Box::new(Descriptor {
+                        format: "zk2-descriptor/0.1".into(),
+                        service: address.into(),
+                        instance: instance.to_string(),
+                        run: None,
+                        catalog: named.filter(|(a, _)| *a == address).map(|(_, id)| id.hex()),
+                        interfaces: vec![entry],
+                        capabilities: Vec::new(),
+                        requires: Vec::new(),
+                        profiles: Vec::new(),
+                        meta: BTreeMap::new(),
+                    })),
+                );
+            }
+        }
     }
     let mut observed = Observed::from_keys("zk2/*/*/@zk/**", &keys, true);
     observed.descriptors = Some(descriptors);
@@ -987,12 +1042,61 @@ impl World {
         w
     }
 
+    /// The world with `lab/w2` beside it (#1110's H3): `freshness.v2`'s
+    /// scenarios §8's owner, implementing [`W2_IFACES`] and `freshness.v2`
+    /// in one instance whose descriptor states its catalog, which the
+    /// window was given too ([`w2_catalog`], loaded as `--catalog` loads
+    /// one). It publishes nothing of its own each tick: the scene sends
+    /// its members and its owner heartbeats ([`World::tick_samples`]).
+    pub fn owner_heartbeats() -> World {
+        static NTH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let paths = w2_contract_paths();
+        let set = zengui::services::contracts::load_all(&paths).set;
+        let catalog = w2_catalog(&set);
+        // The catalog as a file, read as a reader reads one.
+        let file = std::env::temp_dir().join(format!(
+            "zengui-w2-catalog-{}-{}.json",
+            std::process::id(),
+            NTH.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        std::fs::write(&file, catalog.to_jcs()).expect("the catalog's file");
+        let contracts = Arc::new(zengui::services::contracts::load_with(
+            &paths,
+            std::slice::from_ref(&file),
+        ));
+        let _ = std::fs::remove_file(&file);
+        assert_eq!(
+            contracts
+                .catalogs
+                .held()
+                .iter()
+                .map(|c| c.id())
+                .collect::<Vec<_>>(),
+            [catalog.id()],
+            "the catalog loads: {:?}",
+            contracts.problems
+        );
+        let mut addresses = World::ADDRESSES.to_vec();
+        addresses.extend(W2_IFACES.map(|i| (W2, i)));
+        addresses.push((W2, zenkey_model::heartbeat::PROFILE));
+        World::build_named(contracts, &addresses, false, Some((W2, catalog.id())))
+    }
+
     fn build(
         contracts: Arc<zengui::services::contracts::LoadedContracts>,
         addresses: &[(&str, &str)],
         metered: bool,
     ) -> World {
-        let (catalog, presence, seeded, observed) = deployment(&contracts.set, addresses);
+        World::build_named(contracts, addresses, metered, None)
+    }
+
+    fn build_named(
+        contracts: Arc<zengui::services::contracts::LoadedContracts>,
+        addresses: &[(&str, &str)],
+        metered: bool,
+        named: Option<(&str, zenkey_model::catalog::CatalogId)>,
+    ) -> World {
+        let (catalog, presence, seeded, observed) = deployment(&contracts.set, addresses, named);
         let lens =
             zenkey_fleet::Lens::new("", Some(&catalog), &*contracts.set).offline(&contracts.set);
         let axes = FEEDS

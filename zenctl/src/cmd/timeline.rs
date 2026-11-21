@@ -43,7 +43,11 @@ pub async fn run(cli: crate::cli::TimelineArgs) -> Result<()> {
     let dep = Deployment::resolve(&cli.ns)?;
     let contracts = zk2::load_contracts(&cli.contracts)?;
     // Given a catalog, the scope across a face holds the owner heartbeat
-    // key that crosses it (observer 0.34 §7.5).
+    // key that crosses it (observer 0.34 §7.5). Only the live window uses
+    // it: a capture's lanes are placed by key, and `from_zrec` loads none,
+    // so this is the one read. It is made on both paths so that a
+    // `--catalog` that does not read is refused, exit 2, with `--from` as
+    // without it (`tests/cmd/owner-heartbeat.trycmd`), never passed over.
     let catalog = !zk2::load_catalogs(&cli.contracts)?.is_empty();
     let crate::cli::TimelineArgs {
         selectors,

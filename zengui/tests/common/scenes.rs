@@ -363,6 +363,17 @@ pub const ALL: &[Scene] = &[
         build: inspector_freshness_quiet,
         landmark: "vouched · 1 member(s) confirmed",
     },
+    // An owner heartbeat in the Inspector (#1110's H3): `lab/w2`, the
+    // owner of freshness.v2's scenarios §8, confirms three interfaces in
+    // one put on its `host` key. The window read two, the second after
+    // one lost and with pulse.v1's group out of step with its view.
+    Scene {
+        name: "inspector-owner-heartbeat",
+        // Tall, so the History's two puts sit on screen below the section.
+        size: (1440.0, 1800.0),
+        build: inspector_owner_heartbeat,
+        landmark: "1 collection(s) diverged from this window's view",
+    },
     Scene {
         name: "inspector-metric-counter",
         size: DESKTOP,
@@ -1719,6 +1730,156 @@ fn inspector_freshness_quiet(theme: ThemeChoice) -> Zengui {
     send(
         &mut app,
         Message::Subject(SubjectMsg::Select(Subject::Key(beat.into()))),
+    );
+    preset(&mut app, LayoutPreset::Explore);
+    app
+}
+
+/// `lab/w2`'s `host` owner heartbeat key selected (#1110's H3;
+/// `freshness.v2` §2.4, §2.5): the owner of scenarios §8, under a catalog
+/// listing `beacon.v2`, `dial.v1` and `pulse.v1` at indices 0, 1 and 2,
+/// which the window holds too. Its members are put in their envelopes (run
+/// 7), then its owner heartbeats go out as the runtime's owner writes
+/// them: on each class's key, a group per interface with a collection of
+/// the class, the map bits of that class alone. The window reads the
+/// `host` key's seq 0 in step, hears no seq 1, and reads seq 2 after the
+/// owner put `pulse.v1`'s status again unheard: one lost before it with
+/// every group it held, `beacon.v2`'s and `dial.v1`'s groups vouched, and
+/// `pulse.v1`'s diverged from this window's view.
+fn inspector_owner_heartbeat(theme: ThemeChoice) -> Zengui {
+    use zenkey_model::heartbeat::{
+        Class, Digest, Group, Layout, Members, OwnerHeartbeat, Section, Time,
+    };
+    use zenkey_model::wire::{Envelope, Form, Run, Seq, Stamp, Tag};
+    let stamp = |seq: u32| Stamp {
+        run: Run::U16(7),
+        seq: Seq::new(seq).expect("a seq"),
+    };
+    let key = |iface: &str, rest: &str| format!("zk2/{}/{iface}/state/{rest}", super::W2);
+    let mut app = window(prefs(theme));
+    let mut world = World::owner_heartbeats();
+    world.connect(&mut app);
+    world.tick(&mut app);
+    let contracts = world.contracts();
+    let catalog = super::w2_catalog(&contracts.set);
+    let layouts: Vec<Layout> = catalog
+        .entries()
+        .iter()
+        .map(|e| {
+            let rev = contracts.set.of_iface(&e.iface).next().expect("held");
+            Layout::of(rev.contract())
+        })
+        .collect();
+
+    // The members, each put once: (interface, collection, key, seq).
+    let members = [
+        ("beacon.v2", "state/status", key("beacon.v2", "status"), 0),
+        (
+            "beacon.v2",
+            "state/peer/{peer}",
+            key("beacon.v2", "peer/a"),
+            1,
+        ),
+        (
+            "beacon.v2",
+            "state/peer/{peer}",
+            key("beacon.v2", "peer/b"),
+            2,
+        ),
+        (
+            "beacon.v2",
+            "state/peer/{peer}",
+            key("beacon.v2", "peer/c"),
+            3,
+        ),
+        ("dial.v1", "state/config", key("dial.v1", "config"), 4),
+        ("pulse.v1", "state/status", key("pulse.v1", "status"), 5),
+    ];
+    let puts: Vec<(&str, Vec<u8>, &str)> = members
+        .iter()
+        .map(|(_, _, k, seq)| {
+            let put = Envelope {
+                form: Form::Mutation,
+                tag: Tag::NONE,
+                stamp: stamp(*seq),
+                record: b"up",
+            }
+            .write();
+            (k.as_str(), put, "zenoh/bytes")
+        })
+        .collect();
+    world.tick_samples(&mut app, &puts);
+
+    // An owner heartbeat of `class` at `seq`, as the owner holds its
+    // members then: `pulse` the seq of pulse.v1's status.
+    let owner_heartbeat = |class: Class, seq: u32, pulse: u32| {
+        let groups: Vec<Group> = layouts
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.collections.iter().any(|c| c.class == class))
+            .map(|(index, l)| {
+                let sections: Vec<Option<Section>> = l
+                    .collections
+                    .iter()
+                    .map(|c| {
+                        let live: Vec<(&str, Stamp)> = members
+                            .iter()
+                            .filter(|(i, r, ..)| *i == l.iface.to_string() && *r == c.resource())
+                            .map(|(i, _, k, s)| {
+                                let seq = if *i == "pulse.v1" { pulse } else { *s };
+                                (k.as_str(), stamp(seq))
+                            })
+                            .collect();
+                        // `route` is gated on a capability the owner does
+                        // not hold: its map bit is 0.
+                        (c.class == class && c.resource() != "state/route").then(|| Section {
+                            digest: Digest::of(live.iter().copied()),
+                            members: if c.is_templated() {
+                                Members::templated(live.len() as u64, 0..live.len() as u64)
+                            } else {
+                                Members::One { vouched: true }
+                            },
+                        })
+                    })
+                    .collect();
+                Group::of(index as u16, l, &sections).expect("a group")
+            })
+            .collect();
+        OwnerHeartbeat {
+            time: Time::At {
+                secs: 1_795_000_000,
+                ms: 0,
+            },
+            groups,
+        }
+        .envelope(stamp(seq))
+        .expect("an owner heartbeat")
+    };
+    // Selected before its puts arrive, so the History holds them both.
+    send(
+        &mut app,
+        Message::Subject(SubjectMsg::Select(Subject::Key(super::W2_HOST.into()))),
+    );
+    for (seq, pulse) in [(0, 5), (2, 6)] {
+        world.tick_samples(
+            &mut app,
+            &[
+                (
+                    super::W2_HOST,
+                    owner_heartbeat(Class::Host, seq, pulse),
+                    "zenoh/bytes",
+                ),
+                (
+                    super::W2_LINK,
+                    owner_heartbeat(Class::Link, seq, pulse),
+                    "zenoh/bytes",
+                ),
+            ],
+        );
+    }
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::Reveal(super::W2_HOST.into())),
     );
     preset(&mut app, LayoutPreset::Explore);
     app

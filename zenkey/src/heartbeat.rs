@@ -33,6 +33,21 @@
 //!   until a write of it goes through (F-461). Its time is unknown while
 //!   the guard holds: the owner's clock is ahead, and the time is its word
 //!   of it.
+//! - **The owner heartbeat** (v2 §2.4, text 0.9; #1110's H3), behind
+//!   [`crate::ServiceConfig::owner_heartbeat()`], off unless the deployment
+//!   sets it: one put per class of exposure on
+//!   `…/freshness.v2/stream/heartbeats/<class>` (`OwnerBeat`), a group
+//!   for each interface the service implements that its catalog lists and
+//!   that has a collection of the class, in ascending order of their
+//!   indices. A group's map holds the collections of the key's class
+//!   alone. A covered interface runs no task of its own (never both
+//!   forms), and an interface the catalog does not list, or a sixteenth
+//!   on a key, keeps its heartbeat. A governed interface's group is left
+//!   out while its instance stands by, and a put that would hold no group
+//!   is not sent. Every [`REFRESH_LEAD`] × half the shortest horizon among
+//!   the collections of the key's class, on the key's own stream seq, in
+//!   the run the descriptor states: a reader finds the owner's catalog by
+//!   it.
 //! - **The time** counts from the deployment epoch (core §7.6, §8.6;
 //!   v2 §2.4, #1080): the catalog's the service was given, the one its
 //!   frames and packed records count from, else 0 (Unix seconds). An
@@ -43,9 +58,10 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use zenkey_model::grammar::IfaceId;
-use zenkey_model::heartbeat::{Layout, Time};
+use zenkey_model::heartbeat::{Class, Group, Layout, OwnerHeartbeat, Time};
 use zenoh::key_expr::OwnedKeyExpr;
 
+use crate::gate::Gate;
 use crate::implementation::Implementation;
 use crate::state::{Minter, REFRESH_LEAD, Store};
 use crate::writer::Writer;
@@ -70,9 +86,15 @@ pub const HEARTBEAT: &str = "stream/heartbeat/{iface}";
 pub const PARAM: &str = "iface";
 
 /// The owner heartbeat's resource (revision 1.1, optional), as the
-/// descriptor names it. No owner sends one yet (#1110's H3), so a service
-/// lists it unavailable.
+/// descriptor names it. A service exposes it while its owner heartbeats
+/// cover an interface ([`crate::ServiceConfig::owner_heartbeat()`]), and
+/// otherwise lists it unavailable, cause `config`: core §3.3's cause says
+/// "why the resource is absent here", and here it is the deployment's
+/// configuration that leaves it out, the option or the catalog.
 pub const OWNER_HEARTBEATS: &str = "stream/heartbeats/{class}";
+
+/// Its template's parameter: the class, `link` or `host`.
+pub const OWNER_PARAM: &str = "class";
 
 static IMPLEMENTATION: LazyLock<Implementation> = LazyLock::new(|| {
     Implementation::from_bundle(BUNDLE).expect("the published freshness.v2 bundle verifies")
@@ -104,6 +126,52 @@ pub fn period(layout: &Layout) -> Option<Duration> {
         .horizon()
         .map(|h| (h / 2).mul_f64(REFRESH_LEAD))
         .filter(|p| !p.is_zero())
+}
+
+/// How often a class's owner heartbeat goes out (v2 §2.4, "The period"):
+/// [`REFRESH_LEAD`] of half the shortest horizon among the collections of
+/// `class` in `layouts`, the revisions its groups cover. `None` where none
+/// of them has a collection of the class, which sends none.
+#[must_use]
+pub fn owner_period<'a>(
+    layouts: impl IntoIterator<Item = &'a Layout>,
+    class: Class,
+) -> Option<Duration> {
+    layouts
+        .into_iter()
+        .filter_map(|l| l.class_horizon(class))
+        .min()
+        .map(|h| (h / 2).mul_f64(REFRESH_LEAD))
+        .filter(|p| !p.is_zero())
+}
+
+/// The interfaces a service's owner heartbeats cover (v2 §2.4, "Which
+/// interfaces"), from `candidates`: each interface it implements that has
+/// a collection, with the index its catalog lists its revision at and the
+/// classes its collections have. In ascending order of the indices, as a
+/// put's groups go. An owner heartbeat holds at most 15 groups (core
+/// §7.5), so an interface that would be a sixteenth on either of its
+/// classes' keys is left out, whole: it keeps its heartbeat, and each of
+/// its collections one key and one sequence.
+#[must_use]
+pub(crate) fn cover(mut candidates: Vec<(u16, IfaceId, Vec<Class>)>) -> Vec<(IfaceId, u16)> {
+    candidates.sort_by_key(|(index, ..)| *index);
+    let mut held = [0usize; Class::ALL.len()];
+    let slot = |c: Class| Class::ALL.iter().position(|x| *x == c).expect("a class");
+    let mut covered = Vec::new();
+    for (index, iface, classes) in candidates {
+        if classes
+            .iter()
+            .any(|c| held[slot(*c)] >= zenkey_model::heartbeat::MAX_GROUPS)
+        {
+            continue;
+        }
+        for c in classes {
+            held[slot(c)] += 1;
+        }
+        covered.push((iface, index));
+    }
+    covered
 }
 
 /// A heartbeat's time for the owner's clock reading `wall`, under the
@@ -209,6 +277,142 @@ impl Beat {
     }
 }
 
+/// One covered interface's group on a class's owner heartbeat key.
+pub(crate) struct Covered {
+    /// The revision's index in the catalog the service was given.
+    pub(crate) index: u16,
+    pub(crate) layout: Arc<Layout>,
+    /// For each collection in map order, its map bit on this key: whether
+    /// it is of the key's class and this instance exposes it (v2 §2.4,
+    /// "Only its class"). Fixed at start, as exposure is.
+    pub(crate) exposed: Vec<bool>,
+    /// A governed interface's gate: its group is left out while the
+    /// instance stands by (`redundancy.v1` §2.4).
+    pub(crate) gate: Option<Arc<Gate>>,
+}
+
+/// One class's owner heartbeat, as its task sends it (v2 §2.4).
+pub(crate) struct OwnerBeat {
+    /// The class key's writer. `freshness.v2` is no governed interface, so
+    /// it is declared at once; each group asks its own interface's gate.
+    pub(crate) writer: Writer,
+    pub(crate) class: Class,
+    /// Its groups, in ascending order of their indices.
+    pub(crate) groups: Vec<Covered>,
+    pub(crate) store: Arc<Store>,
+    pub(crate) minter: Arc<Minter>,
+    pub(crate) period: Duration,
+    /// The deployment epoch its time counts from: the catalog's.
+    pub(crate) epoch: i64,
+}
+
+impl OwnerBeat {
+    /// Sends one owner heartbeat now: a group for each covered interface
+    /// the instance serves, and nothing when it serves none of them.
+    pub(crate) async fn once(&self) {
+        let Ok(admitted) = self.writer.serving().await else {
+            return;
+        };
+        // redundancy.v1 §2.4: a standby writes nothing of the interface, so
+        // its group is left out. Each serving interface's write guard is
+        // held until the put is made, so a step-down waits for it.
+        let mut serving = Vec::with_capacity(self.groups.len());
+        for g in &self.groups {
+            match &g.gate {
+                None => serving.push((g, None)),
+                Some(gate) => {
+                    if let Ok(guard) = gate.write().await {
+                        serving.push((g, Some(guard)));
+                    }
+                }
+            }
+        }
+        // One instant for the put, as a heartbeat's: the body's time, and
+        // the confirmation of each member any group vouches for.
+        let at = self.minter.time();
+        let time = if self.minter.is_ahead() {
+            Time::Unknown
+        } else {
+            time_at(at.get_time().to_system_time(), self.epoch)
+        };
+        let class = self.class;
+        let mut groups = Vec::with_capacity(serving.len());
+        let mut vouched = Vec::new();
+        for (g, _) in &serving {
+            let iface = g.layout.iface.to_string();
+            let Some((hb, v)) = self.store.heartbeat(&iface, &g.exposed, time) else {
+                continue;
+            };
+            match Group::of(g.index, &g.layout, &hb.sections) {
+                Ok(group) => {
+                    groups.push(group);
+                    vouched.extend(v);
+                }
+                // Its group is left out, and the others go: one interface's
+                // sections that cannot be written take nothing from the
+                // interfaces beside it.
+                Err(e) => tracing::warn!(
+                    %iface, %class,
+                    "freshness.v2: a group of an owner heartbeat could not be written: {e}"
+                ),
+            }
+        }
+        // v2 §2.4: no owner heartbeat that would hold no group.
+        if groups.is_empty() {
+            return;
+        }
+        // The body before the seq, as a heartbeat's: one that cannot be
+        // written takes none, so its readers read no gap (§2.5).
+        let body = match (OwnerHeartbeat { time, groups }).write() {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!(%class, "freshness.v2: an owner heartbeat could not be written: {e}");
+                return;
+            }
+        };
+        let key = OwnedKeyExpr::from(self.writer.key_expr().clone().into_owned());
+        // The key's own seq, in the run the descriptor states (core §4.3):
+        // a reader finds the catalog the indices are read through by it.
+        let stamped = self.minter.mint_stream(&key, self.writer.is_stamped());
+        let bytes = zenkey_model::wire::Envelope {
+            form: zenkey_model::wire::Form::Heartbeat,
+            tag: zenkey_model::wire::Tag::NONE,
+            stamp: stamped.stamp,
+            record: &body,
+        }
+        .write();
+        match self
+            .writer
+            .put_stamped(&admitted, bytes.into(), None, stamped)
+            .await
+        {
+            Ok(()) => self.store.confirm(&vouched, at),
+            Err(e) => {
+                self.minter.unmint_stream(&key, stamped.stamp);
+                tracing::warn!(%class, "freshness.v2: an owner heartbeat failed: {e}");
+            }
+        }
+    }
+
+    /// Sends one at once, then one every period, until the service closes.
+    pub(crate) async fn run(self, mut closed: tokio::sync::watch::Receiver<bool>) {
+        loop {
+            if *closed.borrow() {
+                return;
+            }
+            self.once().await;
+            tokio::select! {
+                () = tokio::time::sleep(self.period) => {}
+                changed = closed.changed() => {
+                    if changed.is_err() {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// A service's heartbeat tasks: aborted when dropped, so a service dropped
 /// unclosed sends none after its tokens go.
 #[derive(Default)]
@@ -279,6 +483,100 @@ mod tests {
         assert_eq!(imp.iface().to_string(), "freshness.v2");
         assert_eq!(imp.fingerprint().hex().as_str(), FINGERPRINT);
         assert!(imp.resource(HEARTBEAT).is_ok());
+        let owner = imp.resource(OWNER_HEARTBEATS).unwrap();
+        assert!(owner.optional, "revision 1.1's owner heartbeat key");
+        assert_eq!(
+            owner.template.params().map(|(p, _)| p).collect::<Vec<_>>(),
+            [OWNER_PARAM],
+            "its one parameter, the class"
+        );
+    }
+
+    /// v2 §2.4, "Which interfaces": an owner heartbeat holds at most 15
+    /// groups (core §7.5), so a sixteenth interface on a key keeps its
+    /// heartbeat, whole, and the groups go in ascending order of their
+    /// indices whatever order the service implemented them in.
+    #[test]
+    fn a_sixteenth_interface_on_a_key_keeps_its_heartbeat() {
+        let iface = |n: u16| -> IfaceId { format!("i{n}.v1").parse().unwrap() };
+        // Seventeen interfaces with a `host` collection, given highest
+        // index first; the one at index 3 has a `link` collection too.
+        let candidates: Vec<(u16, IfaceId, Vec<Class>)> = (0..17u16)
+            .rev()
+            .map(|n| {
+                let classes = if n == 3 {
+                    vec![Class::Link, Class::Host]
+                } else {
+                    vec![Class::Host]
+                };
+                (n * 2, iface(n), classes)
+            })
+            .collect();
+        let covered = cover(candidates);
+        assert_eq!(
+            covered,
+            (0..15u16).map(|n| (iface(n), n * 2)).collect::<Vec<_>>(),
+            "the fifteen lowest indices, ascending"
+        );
+
+        // An interface of both classes whose `host` group would be the
+        // sixteenth is left out of the `link` key too: never both forms.
+        let mut candidates: Vec<(u16, IfaceId, Vec<Class>)> = (0..15u16)
+            .map(|n| (n, iface(n), vec![Class::Host]))
+            .collect();
+        candidates.push((15, iface(15), vec![Class::Link, Class::Host]));
+        candidates.push((16, iface(16), vec![Class::Link]));
+        let covered = cover(candidates);
+        assert_eq!(covered.len(), 16);
+        assert!(
+            !covered.contains(&(iface(15), 15)),
+            "it keeps its heartbeat"
+        );
+        assert!(
+            covered.contains(&(iface(16), 16)),
+            "the `link` key has room"
+        );
+        assert!(cover(Vec::new()).is_empty());
+    }
+
+    /// v2 §2.4, "The period": per key, at most half the shortest horizon
+    /// among the collections of its class that its groups cover.
+    #[test]
+    fn an_owner_heartbeats_period_is_its_classs_shortest_half_horizon() {
+        use zenkey_model::contract::load_str;
+        let layout = |name: &str, body: &str| {
+            let text = format!(
+                "[interface]\nname = \"{name}\"\nmajor = 1\nminor = 0\n\
+                 uses = [\"freshness.v2\", \"link.v1\"]\n{body}"
+            );
+            let l = load_str(&text, std::path::Path::new("."), None);
+            Layout::of(&l.contract.unwrap_or_else(|| panic!("{}", l.report)))
+        };
+        let state = |name: &str, ttl: u64, link: bool| {
+            let exposure = if link {
+                ", \"link.exposure\" = \"link\""
+            } else {
+                ""
+            };
+            format!(
+                "[resources.{name}]\nkind = \"state\"\ntype = {{ raw = \"text/plain\" }}\n\
+                 annotations = {{ \"freshness.ttl_s\" = {ttl}{exposure} }}\n"
+            )
+        };
+        let a = layout("a", &(state("slow", 900, false) + &state("far", 60, true)));
+        let b = layout("b", &state("fast", 10, false));
+        let both = [&a, &b];
+        assert_eq!(
+            owner_period(both, Class::Host),
+            Some(Duration::from_secs(5).mul_f64(REFRESH_LEAD)),
+            "the 900-s collection rides the 10-s one's period"
+        );
+        assert_eq!(
+            owner_period(both, Class::Link),
+            Some(Duration::from_secs(30).mul_f64(REFRESH_LEAD)),
+            "the `link` key's own, whatever the `host` key's"
+        );
+        assert_eq!(owner_period([&b], Class::Link), None, "no group, no put");
     }
 
     /// A seq minted for a heartbeat never sent is given back, so the next

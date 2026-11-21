@@ -142,6 +142,25 @@ pub struct ServiceConfig {
     /// refuses `archive.v1` and a governed interface, each of which needs
     /// presence on its peers' side of the face.
     pub first_hop: bool,
+    /// The owner confirms its interfaces by owner heartbeats
+    /// (`freshness.v2` §2.4, #1110): one put per class of exposure, `link`
+    /// and `host`, on `…/freshness.v2/stream/heartbeats/<class>`, with a
+    /// group for each interface it implements that the catalog it was
+    /// given lists and that has a collection of that class. A covered
+    /// interface sends no heartbeat of its own.
+    ///
+    /// **Off unless set, and the deployment's decision.** A reader that
+    /// reads heartbeats alone, or one given no catalog, subscribes to no
+    /// owner heartbeat key, and to it every member of a covered interface
+    /// goes stale: the safe side, and a regression. A deployment sets it
+    /// once its readers read owner heartbeats and hold the catalog
+    /// (§2.5, "Readers first"). It needs a catalog
+    /// ([`crate::ServiceBuilder::catalog`]): a group names its interface
+    /// by its index there, so a service with this set and no catalog does
+    /// not start. An interface whose collections cross a `link.v1` face
+    /// must keep its own heartbeat (§2.9), so an owner behind one leaves
+    /// this off.
+    pub owner_heartbeat: bool,
     /// The capabilities this instance holds (§3.3). A resource gated on one
     /// it does not hold is not exposed, and need not be listed unavailable.
     pub capabilities: BTreeSet<String>,
@@ -231,6 +250,8 @@ struct RawConfig {
     #[serde(default)]
     first_hop: bool,
     #[serde(default)]
+    owner_heartbeat: bool,
+    #[serde(default)]
     capabilities: BTreeSet<String>,
     #[serde(default)]
     bindings: BTreeMap<String, Binding>,
@@ -267,6 +288,7 @@ impl TryFrom<RawConfig> for ServiceConfig {
             address,
             tokenless: raw.tokenless,
             first_hop: raw.first_hop,
+            owner_heartbeat: raw.owner_heartbeat,
             capabilities: raw.capabilities,
             bindings: raw.bindings,
             tombstone_window_s: raw.tombstone_window_s,
@@ -291,6 +313,7 @@ impl ServiceConfig {
             address,
             tokenless: BTreeSet::new(),
             first_hop: false,
+            owner_heartbeat: false,
             capabilities: BTreeSet::new(),
             bindings: BTreeMap::new(),
             tombstone_window_s: None,
@@ -336,6 +359,15 @@ impl ServiceConfig {
         self
     }
 
+    /// Confirms its interfaces by owner heartbeats (`freshness.v2` §2.4,
+    /// #1110), under the catalog the service is given: see
+    /// [`ServiceConfig::owner_heartbeat`](struct.ServiceConfig.html#structfield.owner_heartbeat).
+    #[must_use]
+    pub fn owner_heartbeat(mut self) -> Self {
+        self.owner_heartbeat = true;
+        self
+    }
+
     /// Adds a held capability.
     #[must_use]
     pub fn capability(mut self, name: &str) -> Self {
@@ -378,6 +410,24 @@ mod tests {
         ] {
             assert!(serde_json::from_str::<ServiceConfig>(bad).is_err(), "{bad}");
         }
+    }
+
+    /// `freshness.v2` §2.4 (#1110): the owner heartbeat is the
+    /// deployment's to turn on, and off where its configuration says
+    /// nothing.
+    #[test]
+    fn the_owner_heartbeat_is_off_unless_set() {
+        let c: ServiceConfig = serde_json::from_str(r#"{"address": "lab/w2"}"#).unwrap();
+        assert!(!c.owner_heartbeat);
+        assert!(!ServiceConfig::new("lab/w2".parse().unwrap()).owner_heartbeat);
+        let c: ServiceConfig =
+            serde_json::from_str(r#"{"address": "lab/w2", "owner_heartbeat": true}"#).unwrap();
+        assert!(c.owner_heartbeat);
+        assert!(
+            ServiceConfig::new("lab/w2".parse().unwrap())
+                .owner_heartbeat()
+                .owner_heartbeat
+        );
     }
 
     /// `hostid.v1` §2.3: the recommended spelling, in TOML as the profile

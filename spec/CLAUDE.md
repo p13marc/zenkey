@@ -637,6 +637,18 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   merge), where it answered `two_differ`;
   `redundancy.v1` 0.11 repairs the same in §2.10's "A seed" and its
   scenarios' §9. 286 rules (owner 88, implementation 75).
+  `freshness.v2` 0.10 (#1110's H3, editorial, answering zk2py round
+  113's F-547 and F-549): the reference's owner sends owner heartbeats,
+  behind `ServiceConfig::owner_heartbeat`, off unless set, and runs
+  `scenarios-v2.md` §8 as written, in two tests
+  (`s8_an_owner_heartbeat`, `s8_an_owner_heartbeat_across_a_face`), so
+  every `[Sc: §8]` has its evidence. §3 says which cause an owner that
+  sends heartbeats alone lists for `heartbeats/{class}`: `config` where
+  the deployment's configuration leaves the owner heartbeat out, `build`
+  where the implementation sends none (core §3.3's cause says why the
+  resource is absent here), and that an owner whose owner heartbeats
+  cover an interface exposes it. No rule, fixture or keyword moved: 286
+  rules.
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`
@@ -701,6 +713,13 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   file through zenoh's own loader names zenoh's refusal and asks no
   question (`zenctl check face` under `zenoh-1.10.1`, exit 2; as data
   under `zm-1.10.2-r1`).
+  Text 0.21 (#1110's G, editorial) adds Appendix B's "What a horizon
+  costs a medium": a day of three heartbeats and of one owner heartbeat
+  at horizons from 60 s to 3,600 s, on RF and LoRa SF7, SF9 and SF12,
+  from the report's model, never measured. At 60 s LoRa carries neither
+  form, the owner heartbeat about halves the bill and only a longer
+  horizon divides it, which a deployment states in its own contracts. No
+  rule, and no per-face horizon.
   zenoh-modem's notes price each face's uplink keep-alives at the fewest
   and the most (SF12 927 s and SBD 144 messages at the most, over their
   budgets), and the fleet's `zenoh_modem_events_fit_each_face_budget`
