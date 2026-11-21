@@ -602,8 +602,23 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   (a new last argument, `&Catalogs`) hand the catalogs to the runtime's
   consumer, and `report::WatchConfirmation::group` is a group's index,
   its `key` the class key. `tests/owner_heartbeat.rs` runs the lens and
-  the scope session-free. zengui's book, zenwatch and `.zrec`'s replay
-  are the tools' chunk. Since F5 no tcgui state is on core §4.3's table: a test
+  the scope session-free. H2c, the tools' half: `inband::
+  owner_heartbeat_lines` (a person's line per group),
+  `group_unread_words` and `is_owner_heartbeat_declared`;
+  `Lens::owner_catalogs(addr)` and `revision_held(iface, fp)`, public for
+  a window that makes its own views of the groups (zengui's book);
+  `tests/owner_heartbeat.rs` also writes zenctl's
+  `tests/cmd/fixtures/owner-heartbeat.{zrec,catalog.json}` from the
+  model's writer (`OWNER_HEARTBEAT_BLESS=1`,
+  `the_zrec_fixture_is_what_the_writer_writes`) and reads the capture
+  through the recorded lens: a version 4 header keeps a catalog's id,
+  epoch and lineage and no entry, so a group's index is read only with
+  the catalog given, else `unknown_catalog`; `tests/record.rs`'
+  `a_capture_replays_an_owner_heartbeat_intact` records one live and
+  replays it onto a second bus; `tests/owner_heartbeat_live.rs` puts
+  them from an owner's session until the health window
+  (`Heard::Heartbeat`, none given no catalog) and the alarm feed's class
+  key subscriber have read one. Since F5 no tcgui state is on core §4.3's table: a test
   that needs row 1 reads `zenkey/tests/contracts/beacon.v1.toml` or runs
   `tc.netif.v1`'s published revision 1.0 from its bundle
   (`zk2_observe`'s timeline); `tests/link_face.rs`' `v2_s1_the_router_runs_the_block` runs

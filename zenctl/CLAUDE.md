@@ -222,7 +222,19 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   not the view's, nothing confirmed; `absent`, its map bit 0, omitted
   when false), and the summary's `heartbeats`, `heartbeats_lost` and
   `heartbeats_diverged`, each the reader's word, no finding about the
-  owner (`freshness.v2` §5); #988 L4: `--face-policy F
+  owner (`freshness.v2` §5); #1110's H2c (observer 0.34): a group of an
+  owner heartbeat is a `confirmation` row too (`group`, the class key,
+  `render::confirmation_lines`' head line and loss words, pinned in
+  `tests/render.rs`), read only with `--catalog`; `echo`, `get`,
+  `record`, `timeline` and `replay` over a class key read it through the
+  fleet's lens, the table a line per group
+  (`inband::owner_heartbeat_lines`), an unread group naming its rung;
+  `tests/cmd/owner-heartbeat.trycmd` over `fixtures/owner-heartbeat.zrec`
+  and its catalog (written from real output, never `just snapshots`;
+  regenerate the fixture with the fleet's `OWNER_HEARTBEAT_BLESS=1`); and
+  every `--across-face` verb passes whether `--catalog` was given
+  (`zk2::FaceScope::of_given`; `of`, given none, is the tests'), so the
+  scope holds the class key that crosses; #988 L4: `--face-policy F
   --face NAME` in `AcrossFaceArgs` (`zk2::far_side`, a `link.v2` face, exit
   2 otherwise), `FaceScope::deployment` → `Deployment::across` (the face's
   `reply_timeout_ms` the default `--timeout` below a flag or context, every
