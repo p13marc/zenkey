@@ -334,8 +334,38 @@ def converged_on(rep: Any, stamp: str | None, rev: int, last_known: bool = False
     return rep == want
 
 
+class DesiredReport(Report):
+    """The runner's report, with a third outcome beside a pass and a
+    failure: a **known divergence**, a check where the reference answers
+    other than the text, pinned to the answer it gives and named by its
+    finding. It is counted apart from the passes (review-bot on PR #1138).
+
+    :meth:`diverges` takes what the reference answered against both:
+    - the pinned answer: ``KNOWN``, kept in :attr:`known`, in neither count;
+    - the text's answer: ``XPASS``, a failure. The reference stopped
+      diverging, and the expectation and the finding are to be updated;
+    - any other: ``FAIL``. It drifted to a third answer."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        #: (section, name, finding, detail), each a divergence as pinned
+        self.known: list[tuple[str, str, str, str]] = []
+
+    def diverges(self, section: str, name: str, finding: str, pinned: bool, as_text: bool, detail: str = "") -> None:
+        with self.lock:
+            if pinned and not as_text:
+                self.known.append((section, name, finding, detail))
+                print(f"KNOWN [{section}] {name} (diverges, {finding}): {detail}", flush=True)
+                return
+            word = "XPASS" if as_text else "FAIL"
+            why = (f"known to diverge by {finding} and answers as the text does now: update the expectation and "
+                   "the finding") if as_text else f"neither the text's answer nor the one {finding} pins"
+            self.rows.append((section, name, False, f"{word}: {why}: {detail}"))
+            print(f"{word} [{section}] {name}: {why}: {detail}", flush=True)
+
+
 class Ctx:
-    def __init__(self, report: Report, author: Any, target: Any, watch: bool) -> None:
+    def __init__(self, report: DesiredReport, author: Any, target: Any, watch: bool) -> None:
         self.report, self.author_impl, self.target_impl, self.watch = report, author, target, watch
 
     def target_flags(self, *extra: str) -> list[str]:
@@ -1175,7 +1205,8 @@ class Fake:
 #: keeps the later arrival. desired.v1 §2.10: "Two instances' reports on one
 #: key are not two". The reference's ``zenctl desired`` reads each as two
 #: that differ, ``report_invalid`` (observed since round 110; round 105's
-#: read the later). Its checks here are known by F-545, by name.
+#: read the later). Each is a known divergence, pinned to that answer and
+#: named F-545 (:meth:`DesiredReport.diverges`): never a pass.
 TWO_ON_ONE_KEY = (
     "two readable reports on one key, differing, with no envelope: the merge keeps the later by its Zenoh "
     "timestamp, which reads as the report (F-212, core §4.2)",
@@ -1472,11 +1503,14 @@ def section_tool_shapes(ctx: Ctx) -> None:
                 rc, zdoc, err = zenctl(["desired", TARGET, "-c", bus.ep1, "--timeout", "1", *cargs])
                 z = _z_answers(_z_row(zdoc, role))
                 if name in TWO_ON_ONE_KEY:
-                    # known by F-545: the reference reads the two as two
-                    # that differ. Either answer is recorded, and which.
-                    rp.check(sec, f"zenctl desired, known by F-545: {name}", z in (want, TWO_OBSERVED),
-                             ("XPASS: the report, as zk2py reads it" if z == want else
-                              "two_differ, report_invalid, where §2.10 has them not two") + f"; exit {rc}")
+                    # A known divergence (F-545), pinned: the reference
+                    # answers report_invalid of all four questions, and its
+                    # row calls the report unreadable. Counted apart from
+                    # the passes; the text's answer, or any third, fails.
+                    zrep = _row_of_zenctl(_z_row(zdoc, role)).get("report")
+                    rp.diverges(sec, f"zenctl desired: {name}", "F-545",
+                                pinned=z == TWO_OBSERVED and zrep == "unreadable", as_text=z == want,
+                                detail=f"zenctl {z}, its row's report {zrep!r}, exit {rc}; the text's answer {want}")
                     if z != m:
                         disagree.append(f"{name} (F-545): zk2py {m}, zenctl {z}")
                     continue
@@ -1955,7 +1989,7 @@ def main(argv: list[str] | None = None) -> int:
         if p != "zk2py" and not Path(p).is_file():
             print(f"error: {p} not found", file=sys.stderr)
             return 2
-    report = Report()
+    report = DesiredReport()
     ctx = Ctx(report, author if author == "zk2py" else Path(author), target if target == "zk2py" else Path(target),
               watch=not args.poll)
     for name, fn in SECTIONS.items():
@@ -1972,11 +2006,15 @@ def main(argv: list[str] | None = None) -> int:
     failed = len(report.rows) - passed
     a = "zk2py" if author == "zk2py" else "rust"
     t = "zk2py" if target == "zk2py" else "rust"
+    known = (f", {len(report.known)} known divergence{'s' if len(report.known) != 1 else ''} "
+             f"({', '.join(sorted({k[2] for k in report.known}))}), counted apart") if report.known else ""
     print(f"desired scenarios ({a} author, {t} target{', polling' if args.poll else ''}): {passed} passed, "
-          f"{failed} failed" + (f", {len(report.not_run)} not run" if report.not_run else ""))
+          f"{failed} failed{known}" + (f", {len(report.not_run)} not run" if report.not_run else ""))
     for sec, name, ok, detail in report.rows:
         if not ok:
             print(f"FAIL [{sec}] {name}: {detail}")
+    for sec, name, finding, detail in report.known:
+        print(f"KNOWN [{sec}] {name} ({finding}): {detail}")
     return 1 if failed else 0
 
 

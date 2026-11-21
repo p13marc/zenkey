@@ -6260,7 +6260,7 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
     import random
     import re
 
-    from . import catalog as cat, classes, heartbeat, link_v2, owner_heartbeat as oh, zk2c
+    from . import catalog as cat, heartbeat, link_v2, owner_heartbeat as oh, zk2c
     from .contract import load_contract
 
     spec = root.parent
@@ -6320,7 +6320,6 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
     hb_dir = root / "heartbeat"
     own = _load_json(hb_dir / "owner.json")
     lay = _load_json(hb_dir / "layouts.json")
-    rows = classes._rules_md(spec)
     rules = (spec / "RULES.md").read_text(encoding="utf-8")
     once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
     static = re.search(r"^\| \[Implementation: the static rules\]\([^)]*\) \| (\d+) \|", rules, re.M)
@@ -6505,7 +6504,12 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
               for i in sorted(rng.sample(range(1024), rng.randrange(1, 16)))]
         payload = oh.write(zk2c.InBand(rng.choice((16, 32)), 7, rng.randrange(1 << 24)),
                            rng.choice((None, {"s": rng.randrange(1 << 32), "ms": rng.randrange(1000)})), gs)
-        put = oh.read(payload)
+        try:
+            put = oh.read(payload)
+        except oh.Refused as e:
+            # A written one the reader refuses is one row's failure, never the family's.
+            stray.append(f"{payload.hex()}: a written owner heartbeat refused {e.token}")
+            continue
         if list(put.body.groups) != gs or oh.write_back(put) != payload \
                 or len(payload) != oh.size_of(put.stamp.width, [g.size for g in gs]):
             stray.append(f"{payload.hex()}: a written owner heartbeat not read back")
@@ -6599,15 +6603,29 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
         mm = re.search(r"lease_ms\s*=\s*(\d+)", c["policy"])
         return int(mm.group(1)) if mm else None
 
+    def case(i: int) -> dict[str, Any]:
+        """``plan.json``'s case ``i``, or one that holds nothing where the
+        file is shorter: the row then disagrees, and the family goes on."""
+        return plan[i] if i < len(plan) else {"policy": "", "expect": {}, "note": ""}
+
+    def medium(note: str) -> int | None:
+        """Which of Appendix B's five media a zenoh-modem case's note names,
+        by its place in the appendix's order; None where the note names
+        none, a value the expectation disagrees with."""
+        mm = re.search(r"zenoh-modem's (\w+(?: router at)? ?\w*)", note)
+        if mm is None:
+            return None
+        return next((n for n, word in enumerate(("RF", "SF7", "SF9", "SF12", "SBD")) if word in mm.group(1)), None)
+
     out.append(("link.v2 0.18's evidence as zk2py counts it (F-529, resolved): v2/plan.json 46 cases, v2/transport.json "
                 "27; case 44 asks a full record every 675 s at 45 s, plans, draws frame_over_interval and no "
                 "keep_alive_not_suppressed; case 45 is case 5's face under a lease of 240,001 ms and draws none, "
                 "where case 5 at 240,000 ms does: §2.16's inequality pinned on both sides; transport.json's cases "
                 "24 to 26 state a null among the eight keys, the lease and twice routing/interests/timeout, drawing "
                 "transport_differs at the lease, at the interests timeout under a policy at 40,000 ms, and nothing",
-                [len(plan), len(tr), "keyframe_s = 675" in plan[44]["policy"], "refused" in plan[44]["expect"],
-                 draws(plan[44]), draws(plan[44], "frame_over_interval"), lease_of(plan[45]), draws(plan[45]),
-                 lease_of(plan[5]), draws(plan[5]), with_null,
+                [len(plan), len(tr), "keyframe_s = 675" in case(44)["policy"], "refused" in case(44)["expect"],
+                 draws(case(44)), draws(case(44), "frame_over_interval"), lease_of(case(45)), draws(case(45)),
+                 lease_of(case(5)), draws(case(5)), with_null,
                  [[f["code"] + " " + f["at"] for f in tr[i]["expect"]["findings"]] for i in sorted(with_null)]]
                 + missing(llog, "`v2/plan.json` gains case 45", "`v2/transport.json` gains cases 24 to 26."),
                 [46, 27, True, False, False, True, 240_001, False, 240_000, True,
@@ -6616,12 +6634,11 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  [["transport_differs transport.lease_ms"], ["transport_differs transport.interests_timeout_ms"], []]]))
     desc = " ".join(plan_doc["description"].split())
     modem = [i for i, c in enumerate(plan) if "zm-1.10.2-r1" in c["policy"] and "modem.v3" in c["policy"]]
-    order = [re.search(r"zenoh-modem's (\w+(?: router at)? ?\w*)", plan[i]["note"]).group(1) for i in modem]
     out.append(("F-530 and F-534, resolved (link.v2 0.18): v2/plan.json's description says what a case's users is; "
                 "Appendix B names zenoh-modem's plans as cases 14 to 18, which hold RF, LoRa at SF7, SF9 and SF12, "
                 "then SBD, in that order, of 46",
                 ["A case may give `users`, the principals the deployment binds by a user name" in desc, modem,
-                 [("RF" in o, "SF7" in o, "SF9" in o, "SF12" in o, "SBD" in o).index(True) for o in order], len(plan)],
+                 [medium(plan[i]["note"]) for i in modem], len(plan)],
                 [True, [14, 15, 16, 17, 18], [0, 1, 2, 3, 4], 46]))
     zm = repo / "examples" / "zk2" / "zenoh-modem"
     zflat = lambda rel: " ".join((zm / rel).read_text(encoding="utf-8").split())  # noqa: E731
@@ -6641,7 +6658,7 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "#1107 nor #1108; the sentences the finding quoted are gone",
                 [{k: (n * lo, n * hi) for k, (n, (lo, hi)) in per_day.items()},
                  [302 + 74, 302 + 148, 534 + 119, 785 + 142, 48 + 48, 48 + 48 + 48],
-                 [i for i in (14, 15, 16, 17, 18) if draws(plan[i])],
+                 [i for i in (14, 15, 16, 17, 18) if draws(case(i))],
                  rows_warned]
                 + missing(linkmd, "at most 1,440 a day on RF, 720 at SF9 (119 s of air), 96 at SF12 (142 s) and 48 on "
                                   "SBD, each a paid message.",

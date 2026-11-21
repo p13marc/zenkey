@@ -27599,7 +27599,9 @@ without it.
   rounds 110 to 112 reads two. zk2py's GET merges per key, and round
   110's zk2py, run as round 111's control, failed the same two checks.
 - **What zk2py does:** the first reading. Its runner holds the three
-  shapes, and names the reference's answer as known by this finding.
+  shapes, and pins the reference's answer as a known divergence by
+  this finding, counted apart from its passes: the text's answer from
+  the reference fails the run until the expectation is updated.
 - **Fix:** "Two instances' reports on one key are not two: a tool
   merges S4's replies per key (core §4.2) and reads the one the merge
   keeps." And a `slices.json` case that gives a tool both replies.

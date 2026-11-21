@@ -7636,10 +7636,10 @@ On the black boxes of fc16a564. Every router is zenoh-python's, zenoh
 | Runner | What | Result |
 |---|---|---|
 | `link_v2_live --only null`, new | N's configuration as zk2py's generator writes it, a `null` at each of the eight keys in turn. zenoh-python refuses the file at each of the seven and loads it at `routing/interests/timeout`, and a router opens from that file. zk2py's check: `transport_differs` at each of the seven, no `wait_under_lease`, nothing at the interests timeout. **`zenctl check face`** under `zm-1.10.2-r1`: the same eight answers. Under `zenoh-1.10.1` it loads the file through zenoh, and ends at exit 2 for each of the seven and for a string lease (F-546). Under a policy at 40,000 ms the `null` interests timeout is `transport_differs` by both | 36/36 |
-| `desired_scenarios --only tool-shapes` | the mend: two differing reports on one key, with no envelope, in envelopes of one run and of two. zk2py's tool reads the one its merge keeps. `zenctl desired` reads each as two that differ, `report_invalid`: known by F-545, by name | 93/93, 3 of them known by F-545 |
+| `desired_scenarios`, its tool shapes | the mend: two differing reports on one key, with no envelope, in envelopes of one run and of two. zk2py's tool reads the one its merge keeps. `zenctl desired` reads each as two that differ, `report_invalid`. Each is a **known divergence**, pinned to that answer and named F-545: counted apart from the passes, and a failure (`XPASS`) if the reference answers as the text does, or `FAIL` on any third answer (review-bot on PR #1138) | 90/90, and 3 known divergences (F-545) |
 | `freshness_v2_scenarios`, `heartbeat_epoch_live` | whole, over `heartbeat`'s sections read and written apart from the time | 112/112, 8/8 |
 | `stamp_live`, `link_v2_live`, `link_v2_frames_live` | whole, over `link_v2`'s reading of a `null` | 15/15, 71/71 (the 36 of `null` among them), 11/11 |
-| `desired_scenarios` | zk2py's parties, whole, with the three shapes | 196/196 |
+| `desired_scenarios` | zk2py's parties, whole, the tool shapes among them | 193/193, and the 3 known divergences |
 
 **The mend** (`py-carry-r111.md`):
 1. **F-529 to F-534:** each answer holds, and the walk is re-keyed.
@@ -7648,7 +7648,8 @@ On the black boxes of fc16a564. Every router is zenoh-python's, zenoh
    reports on one key, in any order, enveloped or not, of one run or
    two. `desired.v1` §2.10 has them "not two", by a sentence that rests
    on `Latest`, which core 0.100's S4 replaced (F-545). zk2py keeps its
-   reading, the merge's, and its runner names the reference's.
+   reading, the merge's, and its runner pins the reference's as a
+   known divergence, counted apart from its passes.
 3. **1,167 B and 1,184 B:** a member's presence and a run's width.
    `zenctl gen --run-file … --catalog examples/zk2/zenoh-modem/catalog.json`
    serves 1,184 B: `"catalog":"29bf7d47"` and its comma are 21 B more,
