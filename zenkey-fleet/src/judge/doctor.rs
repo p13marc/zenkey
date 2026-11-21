@@ -2704,7 +2704,11 @@ fn contract_drift(p: &Presence<'_>) -> CheckReport {
             else {
                 continue;
             };
-            minors.entry(fp.clone()).or_default().insert(e.minor);
+            // A descriptor stating none (an owner holding only the bundle,
+            // §3.3) neither gives an order nor disagrees with one.
+            if let Some(m) = e.minor {
+                minors.entry(fp.clone()).or_default().insert(m);
+            }
             by_iface
                 .entry(iface)
                 .or_default()

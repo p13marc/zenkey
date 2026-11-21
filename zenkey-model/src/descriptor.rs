@@ -6,7 +6,9 @@
 //! gated on a capability the instance does not hold, minus the listed
 //! `unavailable` exceptions.
 //!
-//! `spec/descriptor.schema.json` is generated from these types (schemars),
+//! `spec/descriptor.schema.json` is generated from these types (schemars;
+//! a member left out when empty states its `default` through `extend`,
+//! since schemars derives none for a member that skips serializing it),
 //! and [`check`] reports findings with stable `D…` codes, which
 //! `spec/conformance/descriptors/` pins.
 
@@ -64,19 +66,27 @@ pub struct Descriptor {
     /// The interfaces this instance implements.
     pub interfaces: Vec<InterfaceEntry>,
     /// The capabilities this instance holds, naming the `capability:` gates
-    /// of its contracts.
-    #[serde(default)]
+    /// of its contracts. Written only when one is held: absent is none
+    /// (§3.3).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(extend("default" = []))]
     pub capabilities: Vec<String>,
-    /// Every requirement, with its bindings as declared (R3).
-    #[serde(default)]
+    /// Every requirement, with its bindings as declared (R3). Written only
+    /// when there is one: absent is none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(extend("default" = []))]
     pub requires: Vec<RequireEntry>,
-    /// The profiles this instance follows, as `<name>.v<major>`.
-    #[serde(default)]
+    /// The profiles this instance follows, as `<name>.v<major>`. Written
+    /// only when it follows one: absent is none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(extend("default" = []))]
     pub profiles: Vec<String>,
     /// Host, process, build: informative, never interpreted. `zid` is the
     /// owner's session zid, which an owner SHOULD state: a tool attributes
-    /// a state stamp to the owner by it (§3.3, 0.10; S1).
-    #[serde(default)]
+    /// a state stamp to the owner by it (§3.3, 0.10; S1). Written only when
+    /// it holds a member.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(extend("default" = {}))]
     pub meta: BTreeMap<String, Value>,
 }
 
@@ -88,8 +98,18 @@ pub struct InterfaceEntry {
     pub iface: String,
     /// The contract's fingerprint, `sha256:` + 64 lowercase hex digits.
     pub contract: String,
-    /// The contract's informative minor.
-    pub minor: u64,
+    /// The minor of the contract revision the entry names, as its authoring
+    /// file states it (§3.3). An owner that holds only the revision's bundle,
+    /// which keeps no minor (§9.5), leaves it out, never writing one its
+    /// revision does not have; a checker reads it as optional, and
+    /// `null` is D000.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "some_u64"
+    )]
+    #[schemars(with = "u64")]
+    pub minor: Option<u64>,
     /// Whether the instance stands by on this interface (§3.3, §6, 0.39):
     /// it lists it, and serves none of it now. Written only when `true`;
     /// absent is serving.
@@ -100,12 +120,16 @@ pub struct InterfaceEntry {
     #[serde(default = "yes")]
     pub token: bool,
     /// Optional resources that are absent here although no missing
-    /// capability implies it.
-    #[serde(default)]
+    /// capability implies it. Written only when one is listed: absent is
+    /// none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(extend("default" = []))]
     pub unavailable: Vec<Unavailable>,
     /// A lower population bound for this instance, per templated resource,
-    /// keyed `<kind token>/<template>`.
-    #[serde(default)]
+    /// keyed `<kind token>/<template>`. Written only when one is stated:
+    /// absent is none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(extend("default" = {}))]
     pub cardinality: BTreeMap<String, u64>,
 }
 
@@ -145,8 +169,10 @@ pub struct RequireEntry {
     /// Service addresses, `<system>/<service>`; either chunk may be `*`.
     pub bindings: Vec<String>,
     /// Template parameters bound by the binding (R2): parameter name →
-    /// `self.system`, `self.service`, or a value.
-    #[serde(default)]
+    /// `self.system`, `self.service`, or a value. Written only when one is
+    /// bound: absent is none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(extend("default" = {}))]
     pub params: BTreeMap<String, String>,
     /// Whether the role is optional: the instance works without a provider
     /// (§3.2, 0.10). Written only when `true`; absent is required. A role a
@@ -164,6 +190,11 @@ fn is_false(b: &bool) -> bool {
 /// An optional member present as a string: `null` is not its shape (D000).
 fn some_string<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     String::deserialize(d).map(Some)
+}
+
+/// An optional member present as an integer: `null` is not its shape (D000).
+fn some_u64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {
+    u64::deserialize(d).map(Some)
 }
 
 /// Parses and checks a descriptor. `contracts` are the contracts it is
@@ -460,7 +491,67 @@ fn check_exposure(
     }
 }
 
+/// The bytes an owner's descriptor SHOULD stay within (core §3.3).
+pub const SIZE_BYTES: usize = 1024;
+
+/// What a descriptor over [`SIZE_BYTES`] SHOULD keep its other members
+/// within, together: every member but `interfaces`, `capabilities`,
+/// `requires` and `profiles`, which an owner cannot shorten (core §3.3).
+pub const OTHER_BYTES: usize = 512;
+
+/// A descriptor's bytes against core §3.3's size rule, as
+/// [`Descriptor::size`] counts them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Size {
+    /// The whole descriptor's.
+    pub bytes: usize,
+    /// Its members' beside `interfaces`, `capabilities`, `requires` and
+    /// `profiles`, each counted with its name, and the braces.
+    pub other: usize,
+}
+
+impl Size {
+    /// Whether the descriptor meets the rule: within [`SIZE_BYTES`], or
+    /// over it with the four members an owner cannot shorten, its other
+    /// members within [`OTHER_BYTES`].
+    #[must_use]
+    pub fn meets(&self) -> bool {
+        self.bytes <= SIZE_BYTES || self.other <= OTHER_BYTES
+    }
+}
+
 impl Descriptor {
+    /// This descriptor's size as it serializes here: compact JSON, every
+    /// empty member left out (core §3.3). Each of `interfaces`,
+    /// `capabilities`, `requires` and `profiles` it writes counts its
+    /// name, its value and one separator; the rest is `other`.
+    #[must_use]
+    pub fn size(&self) -> Size {
+        fn member<T: Serialize>(name: &str, value: &T, written: bool) -> usize {
+            if !written {
+                return 0;
+            }
+            let value = serde_json::to_vec(value).expect("a descriptor serializes");
+            // `"name":` + the value + `,`.
+            name.len() + 3 + value.len() + 1
+        }
+        let bytes = serde_json::to_vec(self)
+            .expect("a descriptor serializes")
+            .len();
+        let lists = member("interfaces", &self.interfaces, true)
+            + member(
+                "capabilities",
+                &self.capabilities,
+                !self.capabilities.is_empty(),
+            )
+            + member("requires", &self.requires, !self.requires.is_empty())
+            + member("profiles", &self.profiles, !self.profiles.is_empty());
+        Size {
+            bytes,
+            other: bytes - lists,
+        }
+    }
+
     /// The run the descriptor states (core §3.3), `None` when it states
     /// none or spells it otherwise than 4 or 8 lowercase hex digits (D002).
     #[must_use]
@@ -586,5 +677,85 @@ mod tests {
         let mut other = d("", "");
         other.interfaces[0].iface = "u.v1".into();
         assert!(other.exposed(&c).is_none());
+    }
+
+    /// §3.3: a member the schema defaults is written only when it holds
+    /// something (#1126), and `minor` only when the revision has one
+    /// (#1127); each reads back as it was, and a `null` minor is D000.
+    #[test]
+    fn empty_members_and_an_unknown_minor_are_left_out() {
+        let fp = format!("sha256:{}", "0".repeat(64));
+        let mut d: Descriptor = serde_json::from_str(&format!(
+            r#"{{"format": "zk2-descriptor/0.1", "service": "s/t", "instance": "000000000000000a",
+                "interfaces": [{{"iface": "t.v1", "contract": "{fp}"}}]}}"#
+        ))
+        .unwrap();
+        assert_eq!(d.interfaces[0].minor, None);
+        assert!(d.interfaces[0].token, "absent is true");
+        let text = serde_json::to_string(&d).unwrap();
+        assert_eq!(
+            text,
+            format!(
+                r#"{{"format":"zk2-descriptor/0.1","service":"s/t","instance":"000000000000000a","interfaces":[{{"iface":"t.v1","contract":"{fp}","token":true}}]}}"#
+            )
+        );
+        d.interfaces[0].minor = Some(4);
+        let text = serde_json::to_string(&d).unwrap();
+        assert!(text.contains(r#""minor":4"#), "{text}");
+        assert_eq!(serde_json::from_str::<Descriptor>(&text).unwrap(), d);
+        let null = text.replace(r#""minor":4"#, r#""minor":null"#);
+        let (_, report) = super::check(&null, &[]);
+        assert_eq!(report.codes(), ["D000"], "{report}");
+    }
+
+    /// §3.3's size rule: within 1 KB, or over it with the four members an
+    /// owner cannot shorten, the others within 512 B together.
+    #[test]
+    fn a_descriptor_over_1_kb_is_judged_by_its_other_members() {
+        let fp = format!("sha256:{}", "0".repeat(64));
+        let mut d: Descriptor = serde_json::from_str(&format!(
+            r#"{{"format": "zk2-descriptor/0.1", "service": "s/t", "instance": "000000000000000a",
+                "interfaces": [{{"iface": "t.v1", "contract": "{fp}"}}],
+                "meta": {{"zid": "1"}}}}"#
+        ))
+        .unwrap();
+        let text = serde_json::to_string(&d).unwrap();
+        let small = d.size();
+        assert_eq!(small.bytes, text.len());
+        // `{"format":…,"service":…,"instance":…,"meta":{"zid":"1"}}`.
+        let other = text.len()
+            - format!(r#""interfaces":[{{"iface":"t.v1","contract":"{fp}","token":true}}],"#).len();
+        assert_eq!(small.other, other);
+        assert!(small.bytes <= super::SIZE_BYTES && small.meets());
+
+        // Many interfaces and capabilities: over 1 KB by what it must state.
+        let entry = d.interfaces[0].clone();
+        for n in 2..=8 {
+            let mut e = entry.clone();
+            e.iface = format!("t{n}.v1");
+            d.interfaces.push(e);
+        }
+        d.capabilities = (0..30).map(|n| format!("capability_{n}")).collect();
+        d.profiles = vec!["freshness.v2".into()];
+        let many = d.size();
+        assert_eq!(many.bytes, serde_json::to_string(&d).unwrap().len());
+        assert!(many.bytes > super::SIZE_BYTES, "{many:?}");
+        assert_eq!(many.other, other, "the four lists count for nothing");
+        assert!(many.meets());
+
+        // The same lists beside a `meta` of its own 600 B: not met.
+        d.meta.insert("build".into(), "x".repeat(600).into());
+        let padded = d.size();
+        assert!(
+            padded.other > super::OTHER_BYTES && !padded.meets(),
+            "{padded:?}"
+        );
+        // A small descriptor may spend its 1 KB as it likes.
+        d.interfaces.truncate(1);
+        d.capabilities.clear();
+        d.profiles.clear();
+        let lone = d.size();
+        assert!(lone.other > super::OTHER_BYTES && lone.bytes <= super::SIZE_BYTES);
+        assert!(lone.meets());
     }
 }

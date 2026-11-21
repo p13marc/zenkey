@@ -20,6 +20,11 @@
         "D000"
       ]
     },
+    "d000-minor-null": {
+      "codes": [
+        "D000"
+      ]
+    },
     "d000-run-null": {
       "codes": [
         "D000"
@@ -238,6 +243,9 @@
       "codes": []
     },
     "ok-minimal": {
+      "codes": []
+    },
+    "ok-no-minor": {
       "codes": []
     },
     "ok-optional-role": {

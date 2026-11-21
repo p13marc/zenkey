@@ -1,0 +1,14 @@
+{
+ "format": "zk2-descriptor/0.1",
+ "service": "vehicle-01/navigation",
+ "instance": "3fa9c2d41b7e0012",
+ "interfaces": [
+  {
+   "iface": "nav.v2",
+   "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd"
+  }
+ ],
+ "meta": {
+  "note": "an entry that states no minor, as an owner holding only the revision's bundle writes it, and leaves out every member whose default is empty (core §3.3)"
+ }
+}

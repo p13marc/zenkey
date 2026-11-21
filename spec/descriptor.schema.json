@@ -5,7 +5,7 @@
   "type": "object",
   "properties": {
     "capabilities": {
-      "description": "The capabilities this instance holds, naming the `capability:` gates\nof its contracts.",
+      "description": "The capabilities this instance holds, naming the `capability:` gates\nof its contracts. Written only when one is held: absent is none\n(§3.3).",
       "type": "array",
       "default": [],
       "items": {
@@ -32,13 +32,13 @@
       }
     },
     "meta": {
-      "description": "Host, process, build: informative, never interpreted. `zid` is the\nowner's session zid, which an owner SHOULD state: a tool attributes\na state stamp to the owner by it (§3.3, 0.10; S1).",
+      "description": "Host, process, build: informative, never interpreted. `zid` is the\nowner's session zid, which an owner SHOULD state: a tool attributes\na state stamp to the owner by it (§3.3, 0.10; S1). Written only when\nit holds a member.",
       "type": "object",
       "additionalProperties": true,
       "default": {}
     },
     "profiles": {
-      "description": "The profiles this instance follows, as `<name>.v<major>`.",
+      "description": "The profiles this instance follows, as `<name>.v<major>`. Written\nonly when it follows one: absent is none.",
       "type": "array",
       "default": [],
       "items": {
@@ -46,7 +46,7 @@
       }
     },
     "requires": {
-      "description": "Every requirement, with its bindings as declared (R3).",
+      "description": "Every requirement, with its bindings as declared (R3). Written only\nwhen there is one: absent is none.",
       "type": "array",
       "default": [],
       "items": {
@@ -84,7 +84,7 @@
       "type": "object",
       "properties": {
         "cardinality": {
-          "description": "A lower population bound for this instance, per templated resource,\nkeyed `<kind token>/<template>`.",
+          "description": "A lower population bound for this instance, per templated resource,\nkeyed `<kind token>/<template>`. Written only when one is stated:\nabsent is none.",
           "type": "object",
           "additionalProperties": {
             "type": "integer",
@@ -102,7 +102,7 @@
           "type": "string"
         },
         "minor": {
-          "description": "The contract's informative minor.",
+          "description": "The minor of the contract revision the entry names, as its authoring\nfile states it (§3.3). An owner that holds only the revision's bundle,\nwhich keeps no minor (§9.5), leaves it out, never writing one its\nrevision does not have; a checker reads it as optional, and\n`null` is D000.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
@@ -117,7 +117,7 @@
           "default": true
         },
         "unavailable": {
-          "description": "Optional resources that are absent here although no missing\ncapability implies it.",
+          "description": "Optional resources that are absent here although no missing\ncapability implies it. Written only when one is listed: absent is\nnone.",
           "type": "array",
           "default": [],
           "items": {
@@ -128,8 +128,7 @@
       "additionalProperties": false,
       "required": [
         "iface",
-        "contract",
-        "minor"
+        "contract"
       ]
     },
     "RequireEntry": {
@@ -160,7 +159,7 @@
           "type": "boolean"
         },
         "params": {
-          "description": "Template parameters bound by the binding (R2): parameter name →\n`self.system`, `self.service`, or a value.",
+          "description": "Template parameters bound by the binding (R2): parameter name →\n`self.system`, `self.service`, or a value. Written only when one is\nbound: absent is none.",
           "type": "object",
           "additionalProperties": {
             "type": "string"

@@ -104,7 +104,7 @@ fn catalog(instances: &[Inst<'_>]) -> Catalog {
                     .map(|(iface, contract, token)| InterfaceEntry {
                         iface: iface.clone(),
                         contract: contract.clone(),
-                        minor: 0,
+                        minor: Some(0),
                         standby: false,
                         token: *token,
                         unavailable: Vec::new(),

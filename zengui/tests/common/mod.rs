@@ -887,7 +887,7 @@ fn deployment(
                 interfaces: vec![InterfaceEntry {
                     iface: iface.to_string(),
                     contract: revision.fingerprint().to_string(),
-                    minor: 0,
+                    minor: Some(0),
                     standby: false,
                     token: true,
                     unavailable: Vec::new(),
@@ -1183,7 +1183,7 @@ impl World {
                 interfaces: vec![InterfaceEntry {
                     iface: zenkey_model::config::IFACE.into(),
                     contract: format!("sha256:{}", zenkey::config_v1::FINGERPRINT),
-                    minor: 0,
+                    minor: Some(0),
                     standby: false,
                     token: true,
                     unavailable: Vec::new(),
@@ -1236,7 +1236,7 @@ impl World {
                     interfaces: vec![InterfaceEntry {
                         iface: rev.iface().to_string(),
                         contract: rev.fingerprint().to_string(),
-                        minor: 0,
+                        minor: Some(0),
                         standby: !serving,
                         token: true,
                         unavailable: Vec::new(),
@@ -1334,7 +1334,7 @@ impl World {
                 interfaces: vec![InterfaceEntry {
                     iface: rudder.iface().to_string(),
                     contract: rudder.fingerprint().to_string(),
-                    minor: 0,
+                    minor: Some(0),
                     standby: false,
                     token: true,
                     unavailable: Vec::new(),
