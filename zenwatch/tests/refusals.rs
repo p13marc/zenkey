@@ -245,3 +245,42 @@ fn across_a_face_a_rule_is_narrowed_to_the_faces_scope_or_refused() {
     );
     refused(&half, "a policy needs the face");
 }
+
+/// Given a catalog (the top-level `catalog`), the scope across a face
+/// holds the owner heartbeat key that crosses it (observer 0.34 §7.5;
+/// #1110): a rule on the `link` class's key loads across the RF medium's
+/// face. Given none the tool has no such scope, so the same rule meets
+/// none and is refused; and the `host` class's key crosses no face.
+#[test]
+fn across_a_face_a_catalog_adds_the_link_owner_heartbeat_key() {
+    // SAFETY: a test-local config root nobody else reads, set once.
+    let home = tempfile::tempdir().unwrap();
+    unsafe { std::env::set_var("ZENKEY_EXPLORER_CONFIG_DIR", home.path()) };
+    let dir = tempfile::tempdir().unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let probe = root.join("spec/profiles/link/conformance/contracts/probe.v1.toml");
+    let policy = root.join("examples/zk2/link/media/rf.face.toml");
+    let catalog = root.join("examples/zk2/zenoh-modem/catalog.json");
+    let body = |class: &str, catalog: Option<&Path>| {
+        format!(
+            r#"across_face: {{ addresses: ["lab/radio-a"], contracts: [{probe:?}], policy: {policy:?}, face: "radio" }},
+               publish: false,{}
+               rules: [{{ name: "beat", rule: "rate-below zk2/lab/radio-a/freshness.v2/stream/heartbeats/{class} 1", sinks: ["hook"] }}]"#,
+            catalog.map_or(String::new(), |c| format!(" catalog: [{c:?}],"))
+        )
+    };
+    let link = "zk2/lab/radio-a/freshness.v2/stream/heartbeats/link";
+    let given = config(dir.path(), "given.json5", &body("link", Some(&catalog)));
+    let loaded = zenwatch::load_checked(&given, &DeploymentArgs::default()).expect("runnable");
+    let a = loaded.across.expect("across a face");
+    assert_eq!(a.selectors, [link]);
+    assert!(
+        a.scope.selectors().iter().any(|s| s == link),
+        "{:?}",
+        a.scope.selectors()
+    );
+    let none = config(dir.path(), "none.json5", &body("link", None));
+    refused(&none, "reaches none of the selectors across the face");
+    let host = config(dir.path(), "host.json5", &body("host", Some(&catalog)));
+    refused(&host, "reaches none of the selectors across the face");
+}
