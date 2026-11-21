@@ -5298,6 +5298,7 @@ def _round104_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out += _round112_readings(root)
     out += _round113_readings(root)
     out += _round114_readings(root)
+    out += _round115_readings(root)
     return out
 
 
@@ -6297,6 +6298,45 @@ def _round111_readings(root: Path) -> list[tuple[str, Any, Any]]:
     return out
 
 
+def _round115_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """``freshness.v2`` 0.10 and ``link.v2`` 0.21, read cold (#609, round
+    115): each version and its entry, F-547's and F-549's answers as the
+    text states them, ``scenarios-v2.md`` §8's figures computed from core
+    §7.5's layouts, and Appendix B's table recomputed."""
+    import re
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log_ = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log_)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    def header(rel: str) -> tuple[str | None, str | None]:
+        t = flat(rel)
+        v = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+)", t)
+        w = re.search(r"\| \*\*Written against\*\* \| core (\d+\.\d+)", t)
+        return (v.group(1) if v else None, w.group(1) if w else None)
+
+    rules = (spec / "RULES.md").read_text(encoding="utf-8")
+    once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
+    out: list[tuple[str, Any, Any]] = [
+        ("freshness.v2 0.10 or later and link.v2 0.21 or later, both still written against core 0.108, each with its "
+         "entry, both editorial; RULES.md lists 286 rules, as round 114 left it",
+         [_at_least(header("profiles/freshness/v2.md")[0], "0.10"), header("profiles/freshness/v2.md")[1],
+          _at_least(header("profiles/link/v2.md")[0], "0.21"), header("profiles/link/v2.md")[1],
+          int(once.group(1)) if once else None]
+         + entry("profiles/freshness/CHANGELOG.md", "`v2.md` 0.10", "no rule changed")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 0.21", "what a horizon costs a medium, no rule changed"),
+         [True, "0.108", True, "0.108", 286]),
+    ]
+    return out
+
+
 def _round114_readings(root: Path) -> list[tuple[str, Any, Any]]:
     """Core 0.109, ``desired.v1`` 0.14, ``redundancy.v1`` 0.11 and
     ``link.v2`` 0.20, the answers to F-535 to F-546, read cold (#609, round
@@ -7036,12 +7076,17 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("freshness.v2 0.9 §2.4 \"Which interfaces\", zk2py's owner: given the catalog and asked, it covers "
                 "the three by their indices and exposes heartbeats/{class}; an interface its catalog does not list "
                 "keeps its heartbeat; given no catalog it covers none, whatever it is asked; and an owner that "
-                "sends heartbeats alone lists heartbeats/{class} unavailable, cause config, zk2py's choice (§3, "
-                "F-549), 74 bytes of its freshness.v2 entry",
+                "sends heartbeats alone lists heartbeats/{class} unavailable, cause config: zk2py's choice in round "
+                "113, and the text's since freshness.v2 0.10, \"it is not turned on, or the owner was given no "
+                "catalog\" (§3, F-549 resolved, round 115), 74 bytes of its freshness.v2 entry",
                 [cover(three, order, True), cover(three, ["alert.v1", "hb.v1", "vital.v1"], True),
                  cover(three, order, ["knob.v1"]), cover(three, None, True), cover(three, order, None), len(member)]
                 + missing(fv, "The resource is `optional`: an owner that sends heartbeats alone does not expose it "
-                              "(core §3.3)."),
+                              "(core §3.3).",
+                          "The cause is `config` where the deployment's configuration leaves the owner heartbeat "
+                          "out: it is not turned on, or the owner was given no catalog. It is `build` where the "
+                          "owner's implementation sends none.",
+                          "An owner whose owner heartbeats cover an interface exposes it."),
                 [({"alert.v1": 0, "knob.v1": 2, "vital.v1": 4}, None), ({"alert.v1": 0, "vital.v1": 2}, None),
                  ({"knob.v1": 2}, None), ({}, "config"), ({}, "config"), 74]))
 
@@ -7129,11 +7174,14 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  [["zk2/*/*/freshness.v2/stream/heartbeats/**"]]]))
     # -- the texts round 113's findings quote ---------------------------------------------
     sc = (spec / "profiles" / "freshness" / "scenarios-v2.md").read_text(encoding="utf-8")
-    out.append(("F-547: freshness.v2 0.9 cites `[Sc: §8]` six times, three of them the owner's MUSTs' one evidence, "
-                "and its entry says scenarios-v2.md §8 runs an owner heartbeat on a bus; the file holds §1 to §7",
+    out.append(("F-547, resolved (freshness.v2 0.10, round 115): freshness.v2 cites `[Sc: §8]` six times, three of "
+                "them the owner's MUSTs' one evidence, and scenarios-v2.md holds §1 to §8, where round 113 read §1 to "
+                "§7; its §8 is headed with the rules it runs",
                 [fv.count("`[Sc: §8]`"), re.findall(r"^## §(\d+) ", sc, re.M)]
-                + missing(flog, "`scenarios-v2.md` §8 runs an owner heartbeat on a bus."),
-                [6, ["1", "2", "3", "4", "5", "6", "7"]]))
+                + missing(flog, "`scenarios-v2.md` §8 runs an owner heartbeat on a bus.",
+                          "**Answered: F-547, a gap.** `scenarios-v2.md` §8 is in the text")
+                + missing(sc, "## §8 An owner heartbeat (§2.4, §2.5, §2.9; link.v2 §2.9)"),
+                [6, ["1", "2", "3", "4", "5", "6", "7", "8"]]))
     out.append(("F-550 and F-551: link.v2 0.19's entry says what its text does not, that a group is counted for an "
                 "interface that has a heartbeat, and that no case pins it; §2.9 calls a collection the revisions "
                 "disagree on a link collection, where link.v1 §2.3 reads it host",
