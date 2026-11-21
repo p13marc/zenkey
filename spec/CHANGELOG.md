@@ -3,6 +3,73 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.108 — 2026-11-21: §7.5, the owner heartbeat: form 6 with a group per interface (#1110)
+
+`freshness.v2` sends one heartbeat per interface. On W2's RF link its
+three cost 238 KB a day, where the first model said 52 KB (#1110). Each
+is a put of its own, with its own envelope and most often its own SDU.
+The maintainer chose one heartbeat per owner and class of exposure. This
+version defines its bytes. `freshness.v2` 0.9 adopts it
+([`profiles/freshness/CHANGELOG.md`](profiles/freshness/CHANGELOG.md)).
+
+**Added: §7.5, "The owner heartbeat".**
+- **The layout.** A put's payload, `CH · run · seq · body`, form 6 with
+  CH's tag 0. The body is the 42-bit time, a 4-bit count of groups from 1
+  to 15, the groups in ascending order of their indices, and one pad.
+- **A group** is `index · tag · size · sections`. The index is 10 bits,
+  the covered revision's in the deployment catalog (§8.6). The tag is 4
+  bits, the one a heartbeat's CH carries. The sections are a heartbeat's
+  body between its time and its pad, over that revision's collections.
+- **The size** is the count of bits in the group's sections, an unsigned
+  LEB128 integer as a snapshot's is. It takes 8 bits while a group is
+  under 128 bits.
+- **Two readings.** The groups are read with no contract, as an envelope
+  is parsed. A refusal there refuses the owner heartbeat: `tag`, `short`,
+  `code`, `order`, `leb128`, `trailing`, `pad`. Then each group's
+  sections are read with its revision. A refusal there refuses that
+  group alone: `unknown_catalog`, `unknown_index`, `short`, `code`,
+  `trailing`.
+- **The key says which layout.** A heartbeat and an owner heartbeat are
+  both form 6, and one body can read as either. So an implementation
+  MUST NOT choose the layout by a payload's bytes.
+- **Six rules**, all static: the layout by the key, the writer's, the
+  two readings' refusals, the round trip, and a refused group read alone.
+
+**Why a size, which #1110's design did not have.** The design's group
+was `index · tag · sections`. Its length is then known only to a reader
+that holds the group's revision.
+- A consumer bound to one interface holds that interface's revision
+  alone. It could not find its group behind another interface's.
+- A group whose index the reader's catalog does not hold would take
+  every later group with it. The design asked that it be refused alone.
+- With the size, the first reading needs no contract. A tool shows an
+  owner heartbeat's groups by index and size with no revision in hand.
+
+**What it costs.** W2's three interfaces take a 35-byte payload on a
+16-bit run: 226 bits of body after the 6 bytes of CH, run and seq. The
+design said 32, without the three sizes. At a 39-byte put in a 58-byte
+SDU every 28.5 s, that is 176 KB a day, where the design said 167 KB.
+Today's three heartbeats, each alone in its SDU, cost 245 KB on the same
+basis.
+
+**Evidence.** `conformance/heartbeat/owner.json` is new: 12 writes, 45
+reads, 32 groups read through three catalogs, and one body that reads
+both ways. `layouts.json` gains four revisions: `alert.v1`, `knob.v1`
+and `vital.v1`, W2's three in shape, and `mixed.v1`, whose collections
+are of two exposures. Both files' cases were computed twice, by two
+readings of this text that shared no code, and the two agreed on every
+case.
+
+**Deliberately not changed.**
+- **The heartbeat.** Its layout, its refusals and its fixtures are as
+  they were. An owner given no catalog writes no other.
+- **The envelope's parse.** An owner heartbeat is form 6, so the parse
+  reads it as it reads a heartbeat: CH, the run, the seq, the body
+  unread.
+- **§8.6.** A group's index is read as that section already reads one.
+- **No class in the core.** Which collections a group's map marks, and
+  on which key, is `freshness.v2`'s to say.
+
 ## 0.106 — 2026-11-08: editorial: a delete with no attachment on an events key, `state.md` §8's replay count, and §8.2's posture checked, no rule changed (#609, #980, #1106)
 
 zk2py round 109 read 0.105 cold, beside `link.v2` 0.13 and 0.14. It

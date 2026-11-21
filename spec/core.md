@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.106** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.108** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -2104,6 +2104,7 @@ mutation, a put's payload            CH · run · seq · record
 delete, a delete's attachment        CH · run · seq
 event, a put's payload               CH · t32 · ms16 · record
 heartbeat, a put's payload           CH · run · seq · body
+owner heartbeat, a put's payload     CH · run · seq · body
 frame, a put's payload               CH · run · seq · body
 snapshot, a GET reply's payload      CH · run · asof · body
 request, a query's payload           CH · record
@@ -2134,6 +2135,8 @@ A snapshot's is its collection's type's, as a mutation's is.
   type's on a summary reply (O6).
 - **An error's** is the operation's `error` type's, whether a detail
   follows or not. It is 0 for an operation that declares none.
+- **An owner heartbeat's** tag is 0. Each of its groups carries its own
+  (below).
 
 **The forms.** Each form has one code. This version defines all eight:
 
@@ -2149,6 +2152,9 @@ A snapshot's is its collection's type's, as a mutation's is.
 | 7 | snapshot | a collection's state, a GET reply's payload, in pages (below) |
 
 A value carried by a query is a **request**. It has no run and no seq.
+
+A heartbeat has a second layout, the **owner heartbeat**, which covers
+several interfaces in one put (below). It keeps form 6's code.
 
 **The run and the seq.** The run is an unsigned integer of 16 or 32 bits,
 as CH's width bit says. The seq is an unsigned 24-bit integer, from 0 to
@@ -2175,6 +2181,9 @@ the contract names the type.
   the `response` type says, or the `summary` type on a summary reply.
 - **A form's sample** has the Encoding `zenoh/bytes` too: a query, a
   reply and a reply error alike.
+- **An owner heartbeat's body** is read in two steps: its groups without
+  any contract, then each group's sections with its covered revision's
+  collections (below).
 
 **After an error's seq** come one byte, then a message and a detail,
 each where the byte says so:
@@ -2220,6 +2229,10 @@ Encoding is 1 byte, and `zenoh/bytes` costs none (Appendix B).
 - **A request** is 1 byte over its record, and a value 6 or 8.
 - **An error** is 7 bytes, or 9 with a 32-bit run. A message adds its
   length and a byte, and a detail its own bytes.
+- **An owner heartbeat** is 6 or 8 bytes over its body, as a heartbeat
+  is. Its body is 46 bits, then 14 bits and a size for each group, over
+  the groups' sections. A size is 8 bits while its group's sections are
+  under 128 bits.
 - **A snapshot's page** with no entry is 16 bytes, or 18 with a 32-bit
   run, while each integer in it fits one byte (below). A live entry adds
   6 bytes over its id and its record, while each is below 128 bytes. A
@@ -2401,6 +2414,123 @@ that applies, in this order, naming the refusal:
 
 Every body an implementation accepts MUST write back to the same bytes.
 `[F: heartbeat/bodies.json]`
+
+**The owner heartbeat.** An **owner heartbeat** is a put an owner sends
+for several interfaces it serves at once. It holds one **group** for each
+interface it covers. A group vouches for that interface's members as a
+heartbeat's body does. This section defines its bytes and how they are
+read.
+
+- **It is form 6** too, on a key of its own. Which of the two layouts a
+  put carries is its key's to say, and
+  [`freshness.v2`](profiles/freshness/v2.md) §3 names both keys. Nothing
+  in the bytes tells the two apart. An implementation MUST NOT choose
+  the layout by a payload's bytes. `[F: heartbeat/owner.json]`
+- **CH's tag** is 0. Each group carries its covered revision's tag.
+- **Its run and seq** are its key's, as a heartbeat's are. A gap in the
+  seqs is an owner heartbeat lost, with every group it held.
+- **A catalog names the revisions.** A group names its covered revision
+  by its index in the deployment catalog (§8.6). So an owner given no
+  catalog writes no owner heartbeat.
+- **Who sends one**, on which key, and what each group covers, is
+  `freshness.v2`'s to say.
+
+```text
+body       time · groups · that many groups · pad
+time       42 bits, as a heartbeat's
+groups     4 bits: the count of groups, from 1 to 15
+group      index · tag · size · sections
+index      10 bits: the covered revision's index in the catalog
+tag        4 bits: the covered revision's tag, as a heartbeat's CH carries it
+size       an integer: the count of bits in the group's sections
+sections   map · a section for each map bit set, in map order
+pad        zero bits up to the next whole byte, fewer than 8
+```
+
+- **The fields** are bit fields, most significant bit first, with no
+  padding between them, as a heartbeat's body's are.
+- **The time** is a heartbeat's, with its unknown time and its unused
+  codes.
+- **The count** of groups is 4 bits, so an owner heartbeat holds at most
+  15 groups. A count of 0 is unused.
+- **The groups** come in ascending order of their indices, and no index
+  comes twice.
+- **The size** is an integer as a snapshot's is (below): unsigned
+  LEB128, in its shortest form, at most 5 bytes and at most 2^32 − 1.
+  Each of its bytes is the next 8 bits of the body, wherever they fall.
+  A size is 8 bits while the sections are under 128 bits.
+- **The sections** are a heartbeat's body between its time and its pad:
+  the map, then a section for each map bit set. They are read with the
+  covered revision's collections (above). A group has no pad of its own.
+- **Why a size.** A reader bound to one interface holds that interface's
+  revision alone. With the size it skips the groups of the others, whose
+  sections it cannot read. And a group whose index its catalog does not
+  hold loses only itself, never the groups after it.
+- **Why a tag beside the index.** The index names a revision in the
+  owner's catalog. The tag says which revision the owner wrote with. A
+  reader whose catalog gives that index another revision reads a tag
+  that is not its revision's, 15 times in 16.
+
+An implementation that writes an owner heartbeat MUST write it so: CH's
+tag 0, from 1 to 15 groups in ascending order of their indices, and each
+group's size the count of bits in its sections.
+`[F: heartbeat/owner.json]`
+
+**Reading an owner heartbeat** takes two steps. The first reads the
+groups without any contract, as an envelope is parsed. The second reads
+a group's sections with its covered revision's collections.
+
+**The groups.** The envelope's parse comes first (above). An
+implementation MUST then refuse an owner heartbeat for the
+first of these that applies, in this order, naming the refusal:
+- CH's tag is not 0 (`tag`);
+- reading the body's fields in order:
+  - the body ends before a bit its fields need, a size's or a group's
+    sections' among them (`short`);
+  - a code is unused (`code`): a millisecond code from 1000 up but the
+    unknown time's, or a count of 0 groups;
+  - a group's index is not above the index of the group before it
+    (`order`);
+  - a size is refused as a snapshot's integer is (`leb128`): its fifth
+    byte has its high bit set, whatever follows it, it is above
+    2^32 − 1, or it is not in its shortest form;
+- the body holds a byte after its pad (`trailing`);
+- a bit of the pad is 1 (`pad`).
+
+`[F: heartbeat/owner.json]`
+
+Each field is read whole, then judged, and the first field that draws a
+refusal decides. So an unused code is refused before a later field cut
+short, and an index out of order before its own group's size.
+
+An implementation MUST write every owner heartbeat it accepts back to
+the same bytes. `[F: heartbeat/owner.json]`
+
+**A group's sections.** A reader reads the groups it has a use for, and
+skips every other by its size, one whose revision it does not hold among
+them. It reads a group's index through the
+catalog its owner names, as §8.6 says, and the group's sections with the
+revision that entry names. An implementation MUST refuse a group for
+the first of these that applies, in this order, naming the refusal:
+- §8.6 refuses its index (`unknown_catalog`, `unknown_index`);
+- reading the sections' fields in order:
+  - the sections end before a bit their fields need (`short`);
+  - a code is unused (`code`): a live count above c, a count above the
+    live count, or a rank not below the live count or not above the rank
+    before it;
+- the sections hold a bit after their last field (`trailing`).
+
+`[F: heartbeat/owner.json]`
+
+- **Field by field**, as the groups are read: the first field that draws
+  a refusal decides.
+- **That group alone.** A refused group says nothing of the groups
+  beside it. An implementation MUST read each other group as it would
+  with the refused one left out. `[F: heartbeat/owner.json]`
+- **The tag is a check**, as a heartbeat's is. A reader compares it with
+  the tag of the revision the entry names. Another tag refuses nothing
+  here: the sections read the same. What a reader concludes from it is
+  `freshness.v2`'s to say.
 
 **The snapshot.** A snapshot answers a GET with one collection's state,
 in one or more pages. Each page is a GET's reply, with the snapshot's
