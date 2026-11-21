@@ -479,8 +479,10 @@ pub async fn observe(
     };
     let window = match (spec.window, &v2) {
         (None, _) | (Some(_), Some(Err(_))) => None,
-        (Some(_), None) => Some(Window::open(session, &address, t).await),
-        (Some(_), Some(Ok(target))) => Some(Window::open_v2(session, &address, target, t).await),
+        (Some(_), None) => Some(Window::open(session, &address, t, &spec.catalogs).await),
+        (Some(_), Some(Ok(target))) => {
+            Some(Window::open_v2(session, &address, target, t, &spec.catalogs).await)
+        }
     };
     if let Some(w) = spec.window {
         tokio::time::sleep((declared + w).saturating_duration_since(Instant::now())).await;
@@ -814,8 +816,15 @@ impl Window {
     /// the runtime's consumer, at once and without presence (R1), then seeds
     /// the view's and the status's views by S4's GET, as a late joiner does
     /// (`freshness.v2` §2.5; #978's F4): the owner's next heartbeat then
-    /// confirms what was put before the window.
-    async fn open(session: &Session, address: &Addr, timeout: Duration) -> Result<Window, String> {
+    /// confirms what was put before the window. An owner heartbeat's group
+    /// is read through `catalogs`, the ones the tool was given (core §8.6;
+    /// `freshness.v2` §2.5): with none, no group is read.
+    async fn open(
+        session: &Session,
+        address: &Addr,
+        timeout: Duration,
+        catalogs: &Catalogs,
+    ) -> Result<Window, String> {
         let provider = address.to_string();
         let consumer = zenkey::consumer::Consumer::for_tool(
             session,
@@ -823,7 +832,8 @@ impl Window {
             &[provider.as_str()],
             &BTreeMap::new(),
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+        .with_catalogs(catalogs.held().iter().cloned());
         let mut selectors = Vec::new();
         for r in [config_v1::VIEW, config_v1::STATUS, config_v1::CHANGE] {
             selectors.extend(
@@ -889,6 +899,7 @@ impl Window {
         address: &Addr,
         target: &V2Target,
         timeout: Duration,
+        catalogs: &Catalogs,
     ) -> Result<Window, String> {
         let provider = address.to_string();
         let consumer = zenkey::consumer::Consumer::for_tool(
@@ -898,7 +909,8 @@ impl Window {
             &BTreeMap::new(),
         )
         .map_err(|e| e.to_string())?
-        .with_deployment_epoch(target.epoch);
+        .with_deployment_epoch(target.epoch)
+        .with_catalogs(catalogs.held().iter().cloned());
         let mut selectors = Vec::new();
         for r in [zenkey::config_v2::RECORD, zenkey::config_v2::CHANGE] {
             selectors.extend(

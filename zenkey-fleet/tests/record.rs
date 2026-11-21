@@ -419,3 +419,178 @@ async fn a_slow_writer_does_not_become_the_captures_drops() {
         "no self-inflicted drop record"
     );
 }
+
+/// A capture that holds an owner heartbeat replays it byte for byte
+/// (#1110; core §7.5), on its class key and under `zenoh/bytes`, and what
+/// was replayed reads through the lens as what was recorded: its group,
+/// under the revision its index names in the catalog given.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_capture_replays_an_owner_heartbeat_intact() {
+    use zenkey_model::heartbeat::{
+        Class, Digest, Group, Layout, Members, OwnerHeartbeat, Section, Time, owner_key,
+    };
+    use zenkey_model::wire::{Run, Seq, Stamp};
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../zenkey/tests/contracts/trio/alpha.v1.toml");
+    let (set, problems) = zenkey_fleet::ContractSet::load_path(&path);
+    assert!(problems.is_empty(), "{problems:?}");
+    let rev = set.iter().next().expect("alpha.v1").clone();
+    let layout = Layout::of(rev.contract());
+    let mut catalog = zenkey_model::catalog::Catalog::new(0).unwrap();
+    catalog
+        .push(rev.iface().clone(), rev.fingerprint().clone())
+        .unwrap();
+    let group = Group::of(
+        0,
+        &layout,
+        &[Some(Section {
+            digest: Digest::from_u32(0x0a),
+            members: Members::One { vouched: true },
+        })],
+    )
+    .unwrap();
+    let bytes = OwnerHeartbeat {
+        time: Time::Unknown,
+        groups: vec![group],
+    }
+    .envelope(Stamp {
+        run: Run::U16(7),
+        seq: Seq::new(3).unwrap(),
+    })
+    .unwrap();
+    let key = owner_key("lab", "trio", Class::Host);
+    let selector = "zk2/lab/trio/**";
+    // A heartbeat's QoS (freshness.v2 §3): reliable, drop, priority data.
+    let qos = WireQos {
+        priority: zenoh::qos::Priority::Data,
+        congestion: zenoh::qos::CongestionControl::Drop,
+        reliability: zenoh::qos::Reliability::Reliable,
+        express: false,
+    };
+
+    // --- capture side ------------------------------------------------
+    let (a, b) = peer_pair().await;
+    let monitor = zenkey_fleet::Monitor::start(&b, zenkey_fleet::MonitorSpec::default())
+        .await
+        .expect("monitor");
+    let mut events = monitor.events();
+    monitor.watch(selector).await.expect("watch");
+    let publication = declare_publication(&a, &key, qos, Some("zenoh/bytes"))
+        .await
+        .expect("declare");
+    let matching = publication.matching_events().await.expect("matching");
+    assert!(
+        tokio::time::timeout(util::SETTLE, matching.recv())
+            .await
+            .expect("matching within 5s")
+            .expect("listener alive")
+    );
+    publication.send(bytes.clone(), None).await.expect("send");
+    let buf = SharedBuf::default();
+    let sink = ZrecSink::spawn(buf.clone(), &header(selector))
+        .await
+        .expect("sink");
+    record(
+        &mut events,
+        &sink,
+        RecordBounds {
+            max_samples: Some(1),
+            max_duration: Some(Duration::from_secs(10)),
+        },
+        |_, _| {},
+    )
+    .await
+    .expect("record");
+    assert_eq!(sink.finish().await.expect("finish").samples, 1);
+    let file = buf.take();
+
+    // --- replay side (a second, unrelated bus) ------------------------
+    let (c, d) = peer_pair().await;
+    let replay_monitor = zenkey_fleet::Monitor::start(&d, zenkey_fleet::MonitorSpec::default())
+        .await
+        .expect("replay monitor");
+    let mut replayed = replay_monitor.events();
+    replay_monitor.watch(selector).await.expect("watch replay");
+    let gate = declare_publication(&c, &key, WireQos::DEFAULT, None)
+        .await
+        .expect("gate");
+    let gate_matching = gate.matching_events().await.expect("gate matching");
+    assert!(
+        tokio::time::timeout(util::SETTLE, gate_matching.recv())
+            .await
+            .expect("gate matching within 5s")
+            .expect("listener alive")
+    );
+    gate.undeclare().await.expect("undeclare gate");
+    let mut reader = ZrecSource::spawn(std::io::Cursor::new(file))
+        .await
+        .expect("reader");
+    let report = replay(
+        &mut reader,
+        zenkey_fleet::ReplaySpec {
+            target: ReplayTarget::Bus { session: &c },
+            speed: 1000.0,
+            // The key is one `lab/trio` owns (P3): the operator's word
+            // that no owner runs on this bus.
+            i_know: true,
+            default_qos: WireQos::DEFAULT,
+            seed_state: false,
+            namespace: None,
+        },
+        |_| {},
+    )
+    .await
+    .expect("replay");
+    assert_eq!(
+        (report.published, report.refused, report.malformed),
+        (1, 0, 0)
+    );
+    let view = loop {
+        let item = tokio::time::timeout(util::SETTLE, replayed.recv())
+            .await
+            .expect("replayed event within 5s")
+            .expect("stream alive");
+        if let zenkey_fleet::StreamItem::Event(zenkey_fleet::FleetEvent::Sample(s)) = item {
+            break s;
+        }
+    };
+    assert_eq!(view.key, key);
+    assert_eq!(view.encoding, "zenoh/bytes");
+    assert_eq!(view.payload.to_bytes().as_ref(), bytes.as_slice());
+    assert_eq!(
+        view.wire_qos(),
+        qos,
+        "the heartbeat's axes declared the replay"
+    );
+
+    // What was replayed reads as an owner heartbeat, its group under the
+    // revision its index names.
+    let held = zenkey_fleet::Catalogs::new(vec![catalog]);
+    let lens = zenkey_fleet::Lens::new("", None, &set)
+        .offline(&set)
+        .catalogs(&held);
+    let checked = lens.check(
+        &view.key,
+        zenkey_fleet::model::render::Member::Type,
+        Some(view.encoding.as_str()),
+        &view.payload.to_bytes(),
+    );
+    let zenkey_fleet::report::Rendered::Value {
+        declared, value, ..
+    } = checked.rendering.rendered
+    else {
+        panic!("read: {:?}", checked.conformance);
+    };
+    assert_eq!(declared, "zk2c owner heartbeat (host)");
+    assert_eq!(
+        value["groups"],
+        serde_json::json!([{
+            "index": 0,
+            "tag": layout.tag.get(),
+            "size": 34,
+            "covers": "alpha.v1",
+            "covered": rev.fingerprint().to_string(),
+            "sections": {"state/status": {"digest": "0000000a", "vouched": true}},
+        }])
+    );
+}

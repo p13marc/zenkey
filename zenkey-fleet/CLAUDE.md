@@ -578,9 +578,47 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   plan's denies as they are: `…/heartbeats/**` on a `link.v1` face a
   heartbeat crosses, `…/heartbeats/host/**` on a link.v2 one (link.v1
   0.20, link.v2 0.19), which `link_says` explains for `horizon_under_face`
-  and `block_over_batch` at `freshness.v2/stream/heartbeats/link`. No
-  reader here subscribes the key yet: `FaceScope`, the books and
-  `watch_across` are H2b's. Since F5 no tcgui state is on core §4.3's table: a test
+  and `block_over_batch` at `freshness.v2/stream/heartbeats/link`.
+  #1110's H2b (observer 0.34) makes the readers read it. `FaceScope::
+  of_given(…, catalog)` adds each owner heartbeat key for each class a
+  `freshness.v2` collection in hand has, with a face the one
+  `FacePlan::owner_heartbeat_crosses` lets cross, its horizon the
+  shortest `class_horizon`; `of` is it given none, and
+  `tests/face_scope.rs` passes `scope/faces.json`'s 29 cases as written.
+  The lens reads a put on a class key as an owner heartbeat
+  (`Lens::check_sample` → `inband::owner_heartbeat_check`/
+  `owner_heartbeat_value`, declared `zk2c owner heartbeat (<class>)`):
+  `{class, run, seq, time, groups}`, each group its `index`, `tag` and
+  `size`, read with the revision its index names (`covers`, `covered`,
+  `sections`) through the catalogs given and the one `dating_of` says the
+  owner names, else `unread`: `unknown_catalog`, `unknown_index`,
+  `not_held`, `tag`, or core §7.5's token; refused whole, undecodable.
+  `AlarmBook::owner_heartbeat` (`with_catalogs`, `AlarmScope::
+  owner_heartbeat_selector`, the feed's second heartbeat subscriber) folds
+  one into each owner's `freshness::Views`, the catalog named by the
+  descriptor stating the put's run (`InstanceSeen::catalog`), the last
+  held with no instance in hand; a reading is incomplete while
+  `Views::is_lost`. The health and config windows and `watch_across`
+  (a new last argument, `&Catalogs`) hand the catalogs to the runtime's
+  consumer, and `report::WatchConfirmation::group` is a group's index,
+  its `key` the class key. `tests/owner_heartbeat.rs` runs the lens and
+  the scope session-free. H2c, the tools' half: `inband::
+  owner_heartbeat_lines` (a person's line per group),
+  `group_unread_words` and `is_owner_heartbeat_declared`;
+  `Lens::owner_catalogs(addr)` and `revision_held(iface, fp)`, public for
+  a window that makes its own views of the groups (zengui's book);
+  `tests/owner_heartbeat.rs` also writes zenctl's
+  `tests/cmd/fixtures/owner-heartbeat.{zrec,catalog.json}` from the
+  model's writer (`OWNER_HEARTBEAT_BLESS=1`,
+  `the_zrec_fixture_is_what_the_writer_writes`) and reads the capture
+  through the recorded lens: a version 4 header keeps a catalog's id,
+  epoch and lineage and no entry, so a group's index is read only with
+  the catalog given, else `unknown_catalog`; `tests/record.rs`'
+  `a_capture_replays_an_owner_heartbeat_intact` records one live and
+  replays it onto a second bus; `tests/owner_heartbeat_live.rs` puts
+  them from an owner's session until the health window
+  (`Heard::Heartbeat`, none given no catalog) and the alarm feed's class
+  key subscriber have read one. Since F5 no tcgui state is on core §4.3's table: a test
   that needs row 1 reads `zenkey/tests/contracts/beacon.v1.toml` or runs
   `tc.netif.v1`'s published revision 1.0 from its bundle
   (`zk2_observe`'s timeline); `tests/link_face.rs`' `v2_s1_the_router_runs_the_block` runs

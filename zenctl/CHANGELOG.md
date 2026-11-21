@@ -6,6 +6,19 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — an owner heartbeat's groups (#1110)
+
+Core §7.5; `freshness.v2` §2.5; observer 0.34 §7.3, §7.5. No owner sends
+one until #1110's next chunk.
+
+| Before | Now | Notes |
+|---|---|---|
+| `watch` of a collection: a `confirmation` row per heartbeat on `…/freshness.v2/stream/heartbeat/<iface>` alone | also one per group read for the interface on the owner heartbeat key, `…/freshness.v2/stream/heartbeats/<class>`: its `key` the class key, `group` the group's index in the owner's catalog; the table's head line ends `group N of its owner's catalog`, and a loss reads "an owner heartbeat lost before it, with every group it held" | a group is read through `--catalog` and the catalog its owner's descriptor names. With no `--catalog` the class key is not subscribed: no group could be read, and nothing is confirmed by one. `group` is omitted for a heartbeat |
+| `echo`, `get`, `record`, `timeline` over a class key: its bytes shown as a heartbeat of no interface, by size | `zk2c owner heartbeat (<class>)`: its `groups`, each by `index`, `tag` and `size`, with `covers`, `covered` and `sections` where `--catalog` and the contracts in hand read it, else `unread` and the rung where its reading stopped (`unknown_catalog`, `unknown_index`, `not_held`, `tag`, or core §7.5's token); one refused whole is undecodable | the table form prints a line per group, `#0 alpha.v1, tag 11, 34 bits: state/status 0000000a vouched`, as it prints a frame's records. `timeline` keeps a class key's puts in one lane by the key's run and seq. A raw `get` reads a reply on a class key so too, though no stream answers one |
+| `echo --from FILE`, `timeline --from`, `replay` of a capture holding owner heartbeats | read and replayed as recorded. A version 4 header keeps the catalog's id, epoch and lineage, and no entry: `--catalog` (the header's or a successor) reads each group's index; without it every group is `unknown_catalog` | `tests/cmd/owner-heartbeat.trycmd` over `fixtures/owner-heartbeat.zrec`, which the fleet's `the_zrec_fixture_is_what_the_writer_writes` regenerates |
+| `--across-face` with `--catalog`: the scope held each heartbeat's key | also each owner heartbeat key a collection in hand has a class for, and with `--face-policy F --face N` the `link` class's alone, where the face's plan lets it cross; the `host` key given across a face is refused, exit 2 | observer 0.34 §7.5: `echo`, `rate`, `field`, `record`, `timeline`, `watchdog`; `snapshot`'s GET takes no heartbeat. Without `--catalog` the scope is as before |
+| every `freshness.v2` owner's descriptor names the standard contract's revision 1.0 | revision 1.1 (`9e07704d…`), its optional `stream/heartbeats/{class}` listed `unavailable`, cause `build` | `gen` and `serve` state it so; a descriptor grew by that entry |
+
 ## Unreleased (`main`, zk2) — a `null` among a router's transport keys (zk2py round 110)
 
 `link.v2` 0.18 §2.18, §2.19.

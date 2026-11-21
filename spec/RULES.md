@@ -55,9 +55,9 @@ The owner, consumer and caller sections each point to them.
 | [Consumer](#consumer) | 32 |
 | [Caller](#caller) | 17 |
 | [Deployment](#deployment) | 18 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 83, 27 of them a reader's |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 84, 27 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 73 |
-| Every rule, once | 283 |
+| Every rule, once | 284 |
 | [Rule ids](#rule-ids) | 85 |
 
 ## Owner
@@ -702,6 +702,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§7.5](observer.md#75-reading-across-a-face) | **A selector given.** … A tool MUST NOT drop silently a selector it was given that meets none of its scopes: it refuses the read, declaring none of the selectors, and names each such selector and why. | `[F: scope/faces.json]` |
 | [§7.5](observer.md#75-reading-across-a-face) | A tool across a constrained face whose medium repairs no lost frame SHOULD declare a scope again when it has heard nothing on it for two of its horizons while its session's transport stayed up, as core §8.5 says. | `[Sc: constrained.md §9]` |
 | [§7.5](observer.md#75-reading-across-a-face) | **The revision of a key.** … A tool that reads a mutation, an event, a frame or a heartbeat with no descriptor naming the owner's revision MUST read it with the revision chosen in this order. | `[F: envelope/tags.json]` |
+| [§7.5](observer.md#75-reading-across-a-face) | A tool MUST read an owner heartbeat's group with the revision its index names in the catalog the tool was given, as core §8.6 reads an index, and never with one these steps would choose. | `[F: heartbeat/owner.json]` |
 
 ### [observer §7.6 Frames](observer.md#76-frames)
 

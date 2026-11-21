@@ -50,22 +50,29 @@ use crate::implementation::Implementation;
 use crate::state::{Minter, REFRESH_LEAD, Store};
 use crate::writer::Writer;
 
-/// The standard contract's bundle, revision 2.0 as published in
-/// `spec/profiles/.history/freshness.v2/` (v2 §3), byte for byte.
+/// The standard contract's bundle, revision 1.1 as published in
+/// `spec/profiles/.history/freshness.v2/` (v2 §3), byte for byte: 1.0's
+/// `heartbeat/{iface}` and the optional `heartbeats/{class}`, the owner
+/// heartbeat's key (text 0.9; #1110).
 /// The crate reads it through `bundles/`, a link to that file, so its
 /// package carries the bytes (#929).
 pub const BUNDLE: &[u8] = include_bytes!(
-    "../bundles/freshness.v2/8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890.bundle.json"
+    "../bundles/freshness.v2/9e07704d114d5124a0d177a003c125ec01b80da0f3f1bad594ab300e0ae1e5d1.bundle.json"
 );
 
 /// Its fingerprint (v2 §3).
-pub const FINGERPRINT: &str = "8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890";
+pub const FINGERPRINT: &str = "9e07704d114d5124a0d177a003c125ec01b80da0f3f1bad594ab300e0ae1e5d1";
 
 /// The heartbeat's resource, as the descriptor names it.
 pub const HEARTBEAT: &str = "stream/heartbeat/{iface}";
 
 /// The template's parameter: the covered interface's id.
 pub const PARAM: &str = "iface";
+
+/// The owner heartbeat's resource (revision 1.1, optional), as the
+/// descriptor names it. No owner sends one yet (#1110's H3), so a service
+/// lists it unavailable.
+pub const OWNER_HEARTBEATS: &str = "stream/heartbeats/{class}";
 
 static IMPLEMENTATION: LazyLock<Implementation> = LazyLock::new(|| {
     Implementation::from_bundle(BUNDLE).expect("the published freshness.v2 bundle verifies")

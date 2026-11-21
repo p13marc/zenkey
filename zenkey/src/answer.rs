@@ -209,6 +209,76 @@ pub async fn owner_revision(
     }
 }
 
+/// What the owner of a key's descriptors say of the deployment catalog it
+/// writes under a run (core §8.6, "The epoch in force"; §3.3):
+/// [`owner_catalog`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OwnerCatalog {
+    /// What its descriptor stating the run names: a catalog's id, or none,
+    /// which refuses every index it writes (`unknown_catalog`).
+    Named(Option<zenkey_model::catalog::CatalogId>),
+    /// No descriptor reaches the reader, as across a constrained face: the
+    /// deployment's word decides (§8.6, R7).
+    Unreached,
+    /// A read that failed, or descriptors none of which states the run: no
+    /// word, and never a guess.
+    Unread,
+}
+
+/// The catalog the owner of `key` writes under `run`, as its descriptors
+/// say ([`OwnerCatalog`]): what a reader reads an owner heartbeat's
+/// indices through (core §7.5, §8.6; #1110). A key with a namespace in
+/// front asks its descriptors under that namespace, as [`owner_revision`]
+/// does.
+pub async fn owner_catalog(
+    session: &zenoh::Session,
+    key: &str,
+    run: Run,
+    timeout: Duration,
+) -> OwnerCatalog {
+    let Some((prefix, addr)) = owner_of(key) else {
+        return OwnerCatalog::Unreached;
+    };
+    let selector = format!(
+        "{prefix}zk2/{}/{}/@zk/instance/*",
+        addr.system, addr.service
+    );
+    let Ok(rx) = session
+        .get(&selector)
+        .consolidation(ConsolidationMode::None)
+        .timeout(timeout)
+        .with(flume::unbounded::<Reply>())
+        .await
+    else {
+        return OwnerCatalog::Unread;
+    };
+    let run = run.to_string();
+    let (mut heard, mut failed, mut named) = (false, false, None);
+    while let Ok(reply) = rx.recv_async().await {
+        let Ok(sample) = reply.result() else {
+            failed = true;
+            continue;
+        };
+        heard = true;
+        let bytes = sample.payload().to_bytes();
+        let d = std::str::from_utf8(&bytes)
+            .ok()
+            .and_then(|text| zenkey_model::descriptor::check(text, &[]).0);
+        match d {
+            Some(d) if d.run.as_deref() == Some(run.as_str()) => {
+                named = Some(d.stated_catalog());
+            }
+            Some(_) => {}
+            None => failed = true,
+        }
+    }
+    match named {
+        Some(c) => OwnerCatalog::Named(c),
+        None if !heard && !failed => OwnerCatalog::Unreached,
+        None => OwnerCatalog::Unread,
+    }
+}
+
 /// Logs a descriptor read that failed: at warning level the first time,
 /// then at debug.
 fn unread(key: &str, why: &str) {

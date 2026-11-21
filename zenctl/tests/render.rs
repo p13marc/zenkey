@@ -4549,6 +4549,7 @@ fn a_heartbeat_row_says_lost_and_diverged() {
     let c = zenkey_fleet::report::WatchConfirmation {
         provider: "lab/n1".into(),
         key: "zk2/lab/n1/freshness.v2/stream/heartbeat/hb.v1".into(),
+        group: None,
         heartbeat: zenkey_fleet::report::InbandStamp {
             run: "0007".into(),
             seq: 5,
@@ -4574,5 +4575,48 @@ fn a_heartbeat_row_says_lost_and_diverged() {
     assert!(
         !lines.iter().any(|l| l.contains("confirmed by heartbeat")),
         "{lines:#?}"
+    );
+}
+
+/// A group of an owner heartbeat is a `confirmation` row too (#1110): its
+/// head line names the class key it rode and its index in the owner's
+/// catalog, a loss is its key's, with every group it held, and its JSON
+/// carries `group`. Pinned whole.
+#[test]
+fn an_owner_heartbeats_group_row_names_its_class_key_and_index() {
+    let c = zenkey_fleet::report::WatchConfirmation {
+        provider: "lab/trio".into(),
+        key: "zk2/lab/trio/freshness.v2/stream/heartbeats/host".into(),
+        group: Some(2),
+        heartbeat: zenkey_fleet::report::InbandStamp {
+            run: "0007".into(),
+            seq: 5,
+        },
+        confirmed: vec!["zk2/lab/trio/charlie.v1/state/status".into()],
+        lost: true,
+        diverged: false,
+        absent: false,
+    };
+    assert_eq!(
+        zenctl::render::confirmation_lines(&c),
+        [
+            "zk2/lab/trio/freshness.v2/stream/heartbeats/host  [lab/trio]  in band run 0007, \
+             seq 5  group 2 of its owner's catalog",
+            "  <an owner heartbeat lost before it, with every group it held: its key's seqs \
+             skipped (freshness.v2 §2.5)>",
+            "  confirmed by heartbeat: zk2/lab/trio/charlie.v1/state/status",
+        ]
+    );
+    assert_eq!(
+        serde_json::to_value(&c).unwrap(),
+        serde_json::json!({
+            "provider": "lab/trio",
+            "key": "zk2/lab/trio/freshness.v2/stream/heartbeats/host",
+            "group": 2,
+            "heartbeat": {"run": "0007", "seq": 5},
+            "confirmed": ["zk2/lab/trio/charlie.v1/state/status"],
+            "lost": true,
+            "diverged": false,
+        })
     );
 }

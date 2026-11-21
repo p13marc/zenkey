@@ -153,11 +153,12 @@ pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
         .map_err(anyhow::Error::from)?;
     // Across a face the rules' selectors are narrowed to the scope the
     // contracts give (core §8.5), and watched in their place.
-    let face = zk2::FaceScope::of(
+    let face = zk2::FaceScope::of_given(
         &across_args,
         &contracts,
         dep.namespace(),
         zk2::Reads::Samples,
+        !catalogs.is_empty(),
     )?;
     let dep = match &face {
         Some(f) => f.deployment(dep),

@@ -492,7 +492,7 @@ pub async fn observe(
     let t = spec.timeout;
     let fresh = presence.is_none();
     let window = match spec.window {
-        Some(_) => Some(Window::open(session, &target, t).await),
+        Some(_) => Some(Window::open(session, &target, t, &spec.catalogs).await),
         None => None,
     };
     let presence = match (spec.face, presence) {
@@ -708,10 +708,17 @@ impl Window {
     /// F4): a status put before the window is in the view, so the owner's
     /// next heartbeat confirms it. A GET that fails seeds nothing, and the
     /// subscription re-reads after two heartbeats out of step.
+    ///
+    /// The subscription hears the owner's heartbeat and its owner
+    /// heartbeats (`freshness.v2` §2.5, "Both forms"), a group read through
+    /// `catalogs`, the ones the tool was given (core §8.6): with none, no
+    /// group is read, and an owner that sends owner heartbeats alone has
+    /// its status unconfirmed.
     async fn open(
         session: &Session,
         target: &HealthTarget,
         timeout: Duration,
+        catalogs: &crate::model::deployment::Catalogs,
     ) -> Result<Window, String> {
         let provider = target.provider();
         let consumer = zenkey::consumer::Consumer::for_tool(
@@ -720,7 +727,8 @@ impl Window {
             &[provider.as_str()],
             &BTreeMap::new(),
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+        .with_catalogs(catalogs.held().iter().cloned());
         let mut selectors = Vec::new();
         for r in [zenkey::health::STATUS, zenkey::health::FAULTS] {
             selectors.extend(
