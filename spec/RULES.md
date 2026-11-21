@@ -56,8 +56,8 @@ The owner, consumer and caller sections each point to them.
 | [Caller](#caller) | 17 |
 | [Deployment](#deployment) | 18 |
 | [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 84, 27 of them a reader's |
-| [Implementation: the static rules](#implementation-the-static-rules) | 73 |
-| Every rule, once | 284 |
+| [Implementation: the static rules](#implementation-the-static-rules) | 74 |
+| Every rule, once | 285 |
 | [Rule ids](#rule-ids) | 85 |
 
 ## Owner
@@ -122,16 +122,16 @@ The owner, consumer and caller sections each point to them.
 
 | Rule | Sentence | Evidence |
 |---|---|---|
+| [§3.3](core.md#33-the-descriptor-record) | An owner that holds the revision's authoring file SHOULD state the file's minor, where it states one. | `[Sc: presence.md §2]` |
 | [§3.3](core.md#33-the-descriptor-record) | An owner MUST NOT state a minor its revision does not have. | `[F: descriptors/ok-no-minor]` `[Sc: presence.md §2]` |
 | [§3.3](core.md#33-the-descriptor-record) | The owner's descriptor MUST NOT raise it [a template's bound]. | `[F: descriptors/d007-*]` |
 | [§3.3](core.md#33-the-descriptor-record) | An owner MUST state its run there, and MUST put its descriptor again when the run changes, before it writes under the new run. | `[F: descriptors/ok-run, d002-run-*]` `[Sc: state.md §1, §7]` |
 | [§3.3](core.md#33-the-descriptor-record) | An owner given a catalog MUST state its id there. | `[F: descriptors/ok-catalog, d002-catalog-*]` `[Sc: presence.md §2]` |
 | [§3.3](core.md#33-the-descriptor-record) | One member is used: an owner SHOULD state its session's zid as `meta.zid`, as the reference does. | none cited |
 | [§3.3](core.md#33-the-descriptor-record) | An owner SHOULD write `meta.zid` as zenoh writes it. | none cited |
-| [§3.3](core.md#33-the-descriptor-record) | An owner's descriptor SHOULD stay within 1 KB. *Except:* So an owner MAY exceed 1 KB with `interfaces`, `capabilities`, `requires` and `profiles`. | `[Sc: constrained.md §5]` |
+| [§3.3](core.md#33-the-descriptor-record) | An owner's descriptor SHOULD stay within 1 KB. *Except:* So an owner MAY exceed 1 KB while the rest of its descriptor is within 512 B. | `[Sc: constrained.md §5]` |
 | [§3.3](core.md#33-the-descriptor-record) | **Size.** … At the constrained level (§12), it [an owner's descriptor] MUST fit one fragment. | `[Sc: constrained.md §5]` |
-| [§3.3](core.md#33-the-descriptor-record) | An owner whose descriptor exceeds 1 KB SHOULD leave out every empty member. | none cited |
-| [§3.3](core.md#33-the-descriptor-record) | **Over 1 KB.** … That owner SHOULD also keep every member but `interfaces`, `capabilities`, `requires` and `profiles` within 512 B together, each counted with its name. | none cited |
+| [§3.3](core.md#33-the-descriptor-record) | An owner whose descriptor exceeds 1 KB SHOULD leave out every member that holds nothing and whose schema default is empty. | `[F: descriptors/ok-over-1kb]` |
 | [§3.3](core.md#33-the-descriptor-record) | The owner MUST put the descriptor on its instance key whenever it changes, and MUST answer a GET there with the current one. | `[Sc: presence.md §2]` |
 
 ### [core §4.2 Rules for owners and consumers](core.md#42-rules-for-owners-and-consumers)
@@ -809,6 +809,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§7.5](core.md#75-the-zk2c-envelope) | **Reading a body.** … An implementation MUST refuse a body for the first of these that applies, in this order, naming the refusal: (3 items) | `[F: heartbeat/bodies.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | Every body an implementation accepts MUST write back to the same bytes. | `[F: heartbeat/bodies.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | An implementation MUST NOT choose the layout by a payload's bytes. | `[F: heartbeat/owner.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | **The body bounds the sections, never the size.** … An implementation MUST NOT allocate from a size: it takes a group's bits only as the body holds them, and a size above the bits left is `short` (below). | `[F: heartbeat/owner.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | An implementation that writes an owner heartbeat MUST write it so: CH's tag 0, from 1 to 15 groups in ascending order of their indices, and each group's size the count of bits in its sections. | `[F: heartbeat/owner.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | **The groups.** … An implementation MUST then refuse an owner heartbeat for the first of these that applies, in this order, naming the refusal: (4 items) | `[F: heartbeat/owner.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | An implementation MUST write every owner heartbeat it accepts back to the same bytes. | `[F: heartbeat/owner.json]` |

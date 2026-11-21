@@ -343,8 +343,9 @@ holds v1 on `D`.
    its instance token. The test waits 3 s.
 
 **Expected.**
-1. The descriptor lists `task` with `"bindings": []` and `"params": {}`
-   (core §3.2). `Rp` holds `{source: baseline}`, with no key (§2.10,
+1. The descriptor lists `task` with `"bindings": []` and no parameter
+   bound (core §3.2). Its `params` is absent or `{}` (core §3.3). `Rp`
+   holds `{source: baseline}`, with no key (§2.10,
    §2.12). `Run` holds the baseline, and stays so: the target makes no
    GET of `D` (the author's queryable receives none: the owner example's
    `desired gets lab/worker` counts them) and acts on nothing.
