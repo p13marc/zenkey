@@ -518,6 +518,27 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   (the 1 KB SHOULD's entry shows the MAY, `EXCEPTED_BY`). zenoh-modem's
   node as `zenctl gen` runs it: 1,344 B before, 1,184 B now. 277 rules
   (owner 88).
+  Core 0.108 (#1110's H1) defines §7.5's owner heartbeat, form 6's second
+  layout, adopted by no rule until `freshness.v2` 0.9: a put's payload
+  `CH · run · seq · body` with CH's tag 0, the body the 42-bit time, a
+  4-bit count of 1 to 15 groups in ascending order of their indices, and
+  one pad. A group is `index10 · tag4 · size · sections`: the covered
+  revision's index in the deployment catalog (§8.6), its tag, the
+  sections' count of bits as a snapshot's integer (unsigned LEB128, each
+  byte the body's next 8 bits, on no byte boundary), and a heartbeat's map
+  and sections over that revision's collections, with no pad of its own.
+  The key says which layout a put carries, never the bytes (MUST NOT).
+  Two readings: the groups with no contract, refusing the whole put
+  (`tag`, then `short`, `code`, `order`, `leb128` field by field, then
+  `trailing`, `pad`), then each group's sections with its revision,
+  refusing that group alone (`unknown_catalog`, `unknown_index`, then
+  `short`, `code`, then `trailing`), the others read as if it were left
+  out. `conformance/heartbeat/owner.json` (12 writes, 45 reads, 32
+  groups through three catalogs, one body read both ways) is its
+  evidence, with `layouts.json`'s `alert.v1`, `knob.v1`, `vital.v1` and
+  `mixed.v1`: computed twice, by two readings of the text that shared no
+  code, never blessed, and the reference reads all 90 unchanged
+  (`heartbeat_owner_vectors`). 283 rules (implementation 73).
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`

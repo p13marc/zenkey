@@ -7,6 +7,7 @@
 //! delete, a delete's attachment    CH · run · seq
 //! event, a put's payload           CH · t32 · ms16 · record     (core 0.101, #980's C2a)
 //! heartbeat, a put's payload       CH · run · seq · body        (core 0.81, #978's F1)
+//! owner heartbeat, a put's payload CH · run · seq · body        (core 0.108, #1110's H1)
 //! frame, a put's payload           CH · run · seq · body        (core 0.83, #981's K1)
 //! snapshot, a GET reply's payload  CH · run · asof · body       (core 0.97, #977's E1)
 //! request, a query's payload       CH · record                  (core 0.92, C4a)
@@ -42,7 +43,10 @@
 //! against a type; `packed` (#979) is the first type kind to define one. A
 //! put carries a mutation, a heartbeat, a frame or a snapshot
 //! ([`Envelope::form`]); a heartbeat's body is read with its covered
-//! revision ([`crate::heartbeat`]), its tag that revision's, and a frame's
+//! revision ([`crate::heartbeat`]), its tag that revision's (an owner
+//! heartbeat is form 6 too, its tag 0 and its body
+//! [`crate::heartbeat::OwnerHeartbeat::parse`]'s: the key says which of
+//! the two a put carries, never the bytes), and a frame's
 //! with its declaration ([`crate::frame`]), its tag that declaration's. A
 //! snapshot's body (core 0.97, #977's E1) is taken unread, its asof in the
 //! seq's place, and read by [`crate::collection`], its tag its
@@ -99,7 +103,9 @@ pub enum Form {
     /// plain stream's key (core 0.83 §7.7, [`crate::frame`]).
     Frame,
     /// Code 6: an owner's confirmation of the state it holds for one
-    /// interface, a put's payload (core 0.81, [`crate::heartbeat`]).
+    /// interface, a put's payload (core 0.81, [`crate::heartbeat`]), or,
+    /// on an owner heartbeat's key, for several (core 0.108,
+    /// [`crate::heartbeat::OwnerHeartbeat`]).
     Heartbeat,
     /// Code 7: a collection's state, a GET reply's payload, in pages
     /// (core 0.97, [`crate::collection`]).
@@ -601,7 +607,8 @@ pub struct Envelope<'a> {
     pub form: Form,
     /// A mutation's: 0 unless the record's type kind defines a tag. A
     /// frame's: its declaration's ([`crate::frame::Layout::tag`]). A
-    /// heartbeat's: its covered revision's. A snapshot's: its collection's
+    /// heartbeat's: its covered revision's, and 0 for an owner
+    /// heartbeat, whose groups each carry one. A snapshot's: its collection's
     /// type's. A value's: its operation's `response` type's, or its
     /// `summary` type's on a summary reply.
     pub tag: Tag,
@@ -977,7 +984,10 @@ pub enum Reading<'a> {
     Framed(Envelope<'a>),
     /// A heartbeat (core 0.81, form 6): its body is read with its covered
     /// revision ([`crate::heartbeat::Heartbeat::parse`]), never decoded as
-    /// a record of the key's type. Its stamp is its key's.
+    /// a record of the key's type. Its stamp is its key's. An owner
+    /// heartbeat (core 0.108) reads so too, and its body is
+    /// [`crate::heartbeat::OwnerHeartbeat::parse`]'s: the caller knows
+    /// which of the two its key carries.
     Heartbeat(Envelope<'a>),
     /// An event (core 0.101, form 4) on an `events` key whose last chunk
     /// is an occurrence chunk: its time, then its record, which every later

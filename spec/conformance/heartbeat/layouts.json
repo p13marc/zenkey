@@ -2,7 +2,11 @@
   "description": "core §7.5, a heartbeat's collections. Written by an independent reading of the text (Python, standard library), checked, never blessed. `contracts` holds each revision's authoring text. `layouts`: a revision → its fingerprint, the heartbeat's tag (the low four bits of the fingerprint's last byte), and its collections in map order: each `state` or `@state` resource whose resolved `freshness.ttl_s` is above 0, by kind token then template, with its `cardinality` (`null` for a template with no parameter, one member), the width of its live count, ⌈log₂(cardinality + 1)⌉ bits (`null` with one member), and its horizon. A stream, a horizon of 0 and no horizon make no collection.",
   "contracts": {
     "hb.v1": "# core §7.5's heartbeat: a revision with four collections, three resources\n# that are none (a horizon of 0, none at all, and a stream's), and one\n# collection of each shape.\n[interface]\nname  = \"hb\"\nmajor = 1\nminor = 0\nuses  = [\"freshness.v1\"]\n\n[resources.link]                     # one member\nkind        = \"state\"\ntype        = { raw = \"text/plain\" }\nannotations = { \"freshness.ttl_s\" = 60 }\n\n[resources.\"peer/{peer}\"]            # templated: at most 5 live, 3 bits\nkind        = \"state\"\ntype        = { raw = \"text/plain\" }\nparams      = { peer = \"string\" }\ncardinality = 5\nannotations = { \"freshness.ttl_s\" = 60 }\n\n[resources.\"route/{dest}\"]           # @state, first in order: at most 2 live, 2 bits\nkind        = \"state\"\nexplicit    = true\ntype        = { raw = \"text/plain\" }\nparams      = { dest = \"string\" }\ncardinality = 2\nannotations = { \"freshness.ttl_s\" = 300 }\n\n[resources.\"sdu/{sdu}\"]              # no ceiling: 32 bits\nkind        = \"state\"\ntype        = { raw = \"text/plain\" }\nparams      = { sdu = \"string\" }\ncardinality = \"unbounded\"\nannotations = { \"freshness.ttl_s\" = 120 }\n\n[resources.mode]                     # never stale: no collection\nkind        = \"state\"\ntype        = { raw = \"text/plain\" }\nannotations = { \"freshness.ttl_s\" = 0 }\n\n[resources.note]                     # no horizon: no collection\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n\n[resources.level]                    # a stream confirms by sampling: no collection\nkind        = \"stream\"\ntype        = { raw = \"text/plain\" }\nannotations = { \"freshness.ttl_s\" = 60 }\n",
-    "bare.v1": "# core §7.5's heartbeat: a revision with no collection, so a body is its\n# time alone.\n[interface]\nname  = \"bare\"\nmajor = 1\nminor = 0\n\n[resources.note]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n\n[resources.level]\nkind = \"stream\"\ntype = { raw = \"text/plain\" }\n"
+    "bare.v1": "# core §7.5's heartbeat: a revision with no collection, so a body is its\n# time alone.\n[interface]\nname  = \"bare\"\nmajor = 1\nminor = 0\n\n[resources.note]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n\n[resources.level]\nkind = \"stream\"\ntype = { raw = \"text/plain\" }\n",
+    "alert.v1": "# core §7.5's owner heartbeat: W2's alarms.v1 in shape, one templated\n# collection, self-contained.\n[interface]\nname  = \"alert\"\nmajor = 1\nminor = 0\nuses  = [\"freshness.v2\"]\n\n[resources.\"alarms/{alert_key}\"]     # templated: at most 256 live, 9 bits\nkind        = \"state\"\ntype        = { raw = \"text/plain\" }\nparams      = { alert_key = \"string\" }\ncardinality = 256\nannotations = { \"freshness.ttl_s\" = 900 }\n",
+    "knob.v1": "# core §7.5's owner heartbeat: W2's rfcfg.v1 in shape, one collection of\n# one member, self-contained.\n[interface]\nname  = \"knob\"\nmajor = 1\nminor = 0\nuses  = [\"freshness.v2\"]\n\n[resources.config]                   # one member\nkind        = \"state\"\ntype        = { raw = \"text/plain\" }\nannotations = { \"freshness.ttl_s\" = 60 }\n",
+    "mixed.v1": "# core §7.5's owner heartbeat: a revision whose collections are of two\n# exposures, so freshness.v2 §2.4 puts them in two owner heartbeats.\n[interface]\nname  = \"mixed\"\nmajor = 1\nminor = 0\nuses  = [\"freshness.v2\", \"link.v1\"]\n\n[resources.\"peer/{peer}\"]            # host: at most 8 live, 4 bits\nkind        = \"state\"\ntype        = { raw = \"text/plain\" }\nparams      = { peer = \"string\" }\ncardinality = 8\nannotations = { \"freshness.ttl_s\" = 120 }\n\n[resources.status]                   # link\nkind        = \"state\"\ntype        = { raw = \"text/plain\" }\nannotations = { \"freshness.ttl_s\" = 60, \"link.exposure\" = \"link\" }\n\n[resources.uplink]                   # link\nkind        = \"state\"\ntype        = { raw = \"text/plain\" }\nannotations = { \"freshness.ttl_s\" = 300, \"link.exposure\" = \"link\" }\n",
+    "vital.v1": "# core §7.5's owner heartbeat: W2's health.v1 in shape, one collection of\n# one member, self-contained.\n[interface]\nname  = \"vital\"\nmajor = 1\nminor = 0\nuses  = [\"freshness.v2\"]\n\n[resources.status]                   # one member\nkind        = \"state\"\ntype        = { raw = \"text/plain\" }\nannotations = { \"freshness.ttl_s\" = 60 }\n"
   },
   "layouts": [
     {
@@ -41,6 +45,70 @@
       "fingerprint": "sha256:f3f37d5c6615d8bb1037343a9bde58e420b31e99f1f723fff149141bc1ebf2f3",
       "tag": 3,
       "collections": []
+    },
+    {
+      "contract": "alert.v1",
+      "fingerprint": "sha256:b613303ccf424c2d6753923a568f96d788b42b1f25ccba3ce614ba441b1c8f24",
+      "tag": 4,
+      "collections": [
+        {
+          "resource": "state/alarms/{alert_key}",
+          "cardinality": 256,
+          "live_bits": 9,
+          "ttl_s": 900
+        }
+      ]
+    },
+    {
+      "contract": "knob.v1",
+      "fingerprint": "sha256:15b39c7eea083633c3033c0074f1e2a8e0ecb2fa48001e9eeba8889568a28f85",
+      "tag": 5,
+      "collections": [
+        {
+          "resource": "state/config",
+          "cardinality": null,
+          "live_bits": null,
+          "ttl_s": 60
+        }
+      ]
+    },
+    {
+      "contract": "mixed.v1",
+      "fingerprint": "sha256:559ebea9a4099f340bee33a9129e32b310e2315f8f110c73dfb50bd0320f78f7",
+      "tag": 7,
+      "collections": [
+        {
+          "resource": "state/peer/{peer}",
+          "cardinality": 8,
+          "live_bits": 4,
+          "ttl_s": 120
+        },
+        {
+          "resource": "state/status",
+          "cardinality": null,
+          "live_bits": null,
+          "ttl_s": 60
+        },
+        {
+          "resource": "state/uplink",
+          "cardinality": null,
+          "live_bits": null,
+          "ttl_s": 300
+        }
+      ]
+    },
+    {
+      "contract": "vital.v1",
+      "fingerprint": "sha256:316b321ea1fea81d14034cb0034c28c8928bf888baac388ed4dce4dd09c5b2f8",
+      "tag": 8,
+      "collections": [
+        {
+          "resource": "state/status",
+          "cardinality": null,
+          "live_bits": null,
+          "ttl_s": 60
+        }
+      ]
     }
   ]
 }

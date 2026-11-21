@@ -284,7 +284,10 @@ pub const fn integer_bytes(v: u32) -> usize {
     }
 }
 
-fn write_integer(out: &mut Vec<u8>, mut v: u32) {
+/// An integer's bytes in LEB128's shortest form, appended to `out`: the
+/// one writer of a snapshot's integers and of an owner heartbeat's sizes
+/// ([`crate::heartbeat::OwnerHeartbeat`]).
+pub(crate) fn write_integer(out: &mut Vec<u8>, mut v: u32) {
     loop {
         let byte = (v & 0x7f) as u8;
         v >>= 7;
@@ -294,6 +297,36 @@ fn write_integer(out: &mut Vec<u8>, mut v: u32) {
         }
         out.push(byte | 0x80);
     }
+}
+
+/// Why an integer does not read ([`read_integer`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IntegerRefusal {
+    /// The bytes end before the integer's last byte.
+    Short,
+    /// Its fifth byte has its high bit set, it is above 2^32 − 1, or it is
+    /// not in its shortest form.
+    Leb128,
+}
+
+/// An integer read a byte at a time from `next`, which gives `None` where
+/// the bytes end: unsigned LEB128, stopping at the fifth byte, whose high
+/// bit set is `leb128` whatever follows it. The one reader of a snapshot's
+/// integers and of an owner heartbeat's sizes, whose bytes fall on no byte
+/// boundary ([`crate::heartbeat::OwnerHeartbeat::parse`]).
+pub(crate) fn read_integer(mut next: impl FnMut() -> Option<u8>) -> Result<u32, IntegerRefusal> {
+    let mut v: u64 = 0;
+    for i in 0..5 {
+        let b = next().ok_or(IntegerRefusal::Short)?;
+        v |= u64::from(b & 0x7f) << (7 * i);
+        if b & 0x80 == 0 {
+            if b == 0 && i > 0 {
+                return Err(IntegerRefusal::Leb128);
+            }
+            return u32::try_from(v).map_err(|_| IntegerRefusal::Leb128);
+        }
+    }
+    Err(IntegerRefusal::Leb128)
 }
 
 /// A length as an integer, `leb128` above 2^32 − 1.
@@ -437,21 +470,12 @@ impl<'a> Reader<'a> {
         Ok(self.take(1)?[0])
     }
 
-    /// An integer: a byte at a time, stopping at the fifth, whose high bit
-    /// set is `leb128` whatever follows it.
+    /// An integer, by [`read_integer`] over the body's next bytes.
     fn integer(&mut self) -> Result<u32, BodyRefusal> {
-        let mut v: u64 = 0;
-        for i in 0..5 {
-            let b = self.byte()?;
-            v |= u64::from(b & 0x7f) << (7 * i);
-            if b & 0x80 == 0 {
-                if b == 0 && i > 0 {
-                    return Err(BodyRefusal::Leb128);
-                }
-                return u32::try_from(v).map_err(|_| BodyRefusal::Leb128);
-            }
-        }
-        Err(BodyRefusal::Leb128)
+        read_integer(|| self.byte().ok()).map_err(|e| match e {
+            IntegerRefusal::Short => BodyRefusal::Short,
+            IntegerRefusal::Leb128 => BodyRefusal::Leb128,
+        })
     }
 
     fn time(&mut self) -> Result<Time, BodyRefusal> {
