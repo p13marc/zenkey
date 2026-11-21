@@ -754,9 +754,9 @@ class Owner:
         self.hostid = hostid
         self.hostid_ephemeral = hostid_ephemeral
         self.meta_host = meta_host
-        #: core §3.3 "Size" (0.107): the last descriptor's size
+        #: core §3.3 "Size" (0.109): the last descriptor's size
         #: (:class:`zk2py.descriptor.Size`), and what the owner says of one
-        #: over 1 KB whose other members exceed 512 B
+        #: over 1 KB whose rest exceeds 512 B
         self.descriptor_size: Any = None
         self.size_note: str | None = None
         self.state_zid = state_zid

@@ -773,16 +773,27 @@ def _section2_step8(report: Report, sec: str, ep: str, tool: Any) -> None:
                      bool(entries) and not any("minor" in e for e in entries.values())
                      and all(c.minor is not None for c in files),
                      str({i: e.get("minor", "none") for i, e in entries.items()}))
-        left_out = [m for m in ("capabilities", "requires") if m not in (doc or {})] \
-            + sorted({m for e in entries.values() for m in ("unavailable", "cardinality") if m not in e})
-        empty = (doc or {}).get("capabilities", []) == [] and (doc or {}).get("requires", []) == [] \
-            and all(e.get("unavailable", []) == [] and e.get("cardinality", {}) == {} for e in entries.values())
-        report.check(sec, "8. it holds no capability and requires no role: `capabilities`, `requires`, and each "
-                          "entry's `unavailable` and `cardinality` read as empty, each left out (which the text "
-                          "lets an owner do, and does not ask of one within 1 KB)",
-                     doc is not None and empty and left_out == ["capabilities", "requires", "cardinality",
-                                                                "unavailable"],
-                     f"left out {left_out}; members {sorted(doc or {})}")
+        # Since fcc2f65b the owner example's `freshness.v2` entry is revision
+        # 1.1's and lists `stream/heartbeats/{class}` unavailable (F-549): a
+        # member that holds something, and written. Until round 114 this
+        # check asked every entry's `unavailable` to be empty, which that
+        # owner fails without breaking a sentence of step 8.
+        top_left = [m for m in ("capabilities", "requires") if m not in (doc or {})]
+        written_empty = [m for m in ("capabilities", "requires") if (doc or {}).get(m) in ([], {})] \
+            + sorted(f"{i}.{m}" for i, e in entries.items() for m in ("unavailable", "cardinality")
+                     if m in e and e[m] in ([], {}))
+        holding = {i: [u.get("resource") for u in e["unavailable"] if isinstance(u, dict)]
+                   for i, e in entries.items() if e.get("unavailable")}
+        report.check(sec, "8. it holds no capability and requires no role: `capabilities` and `requires` are left "
+                          "out, and no entry writes an `unavailable` or a `cardinality` that holds nothing (which "
+                          "the text lets an owner do, and does not ask of one within 1 KB); the one member that "
+                          "holds something is `freshness.v2`'s `unavailable`, its owner heartbeat key, where the "
+                          "owner sends heartbeats alone (F-549)",
+                     doc is not None and top_left == ["capabilities", "requires"] and not written_empty
+                     and not any("cardinality" in e for e in entries.values())
+                     and holding in ({}, {"freshness.v2": ["stream/heartbeats/{class}"]}),
+                     f"left out {top_left}; written empty {written_empty}; holding {holding}; members "
+                     f"{sorted(doc or {})}")
         if raw:
             z = dsc.size(raw)
             report.check(sec, "8. its descriptor as served writes no empty member, and is within 1 KB",

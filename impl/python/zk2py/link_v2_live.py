@@ -931,12 +931,21 @@ def _nulled(conf: dict[str, Any], path: str) -> dict[str, Any]:
     return out
 
 
-def _zenctl_transport(work: str, name: str, policy_text: str, conf: dict[str, Any]) -> tuple[int, list[str], str]:
+def _zenctl_transport(work: str, name: str, policy_text: str, conf: dict[str, Any] | str) -> tuple[int, list[str], str]:
     """``zenctl check face`` over a router's configuration file: its exit,
     its transport rows as ``<kind> <zenoh's key>`` (its stdout's JSON rows
-    whose kind is one of §2.19's codes), and its stderr's first line."""
+    whose kind is one of §2.19's codes), and its stderr's first line.
+    ``conf`` given as text is written as it is: a file that is no JSON5."""
+    code, rows, err, _ = _zenctl_face(work, name, policy_text, conf)
+    return code, rows, err
+
+
+def _zenctl_face(work: str, name: str, policy_text: str, conf: dict[str, Any] | str) -> tuple[int, list[str], str, int]:
+    """:func:`_zenctl_transport`, and the count of every line of its stdout:
+    a tool that asked no question of the file prints no row at all."""
     files = {}
-    for what, text in (("policy.face.toml", policy_text), ("router.json5", json.dumps(conf, indent=1))):
+    for what, text in (("policy.face.toml", policy_text),
+                       ("router.json5", conf if isinstance(conf, str) else json.dumps(conf, indent=1))):
         files[what] = os.path.join(work, f"{name}-{what}")
         with open(files[what], "w") as f:
             f.write(text)
@@ -952,7 +961,8 @@ def _zenctl_transport(work: str, name: str, policy_text: str, conf: dict[str, An
         if isinstance(row, dict) and row.get("kind") in ("transport_differs", "wait_under_lease",
                                                          "face_timestamping", "peer_differs"):
             rows.append(f"{row['kind']} {row.get('id')}")
-    return p.returncode, sorted(rows), (p.stderr.strip().splitlines() or [""])[0][:200]
+    return (p.returncode, sorted(rows), (p.stderr.strip().splitlines() or [""])[0][:200],
+            len([ln for ln in p.stdout.splitlines() if ln.strip()]))
 
 
 def run_null() -> list[Result]:
@@ -971,7 +981,17 @@ def _null(work: str) -> list[Result]:
     :func:`zk2py.link_v2.check_transport` reports, and what the Rust
     ``zenctl check face`` reports (a black box), under both bindings: it
     reads a ``zenoh-1.10.1`` router's file "through zenoh's own loader", and
-    a ``zm-1.10.2-r1`` one's "as data in zenoh's shapes" (its help). Then
+    a ``zm-1.10.2-r1`` one's "as data in zenoh's shapes" (its help).
+
+    link.v2 0.20 §2.19, "A file zenoh refuses" (F-546's answer, round 114),
+    names the two as two layers, and each is pinned here to its own answer:
+    "Through zenoh's own loader ... The tool names zenoh's refusal, and asks
+    none of §5's questions of that file. It read no key, so it reports no
+    ``transport_differs``"; "As data. A tool that reads the file's own tree
+    reports each such value at its key". Round 112 took either answer under
+    ``zenoh-1.10.1``. A file that is no JSON5 is refused by either loader
+    (§5: "Not asked: the file is one the tool's loader refuses, the refusal
+    named"). Then
     the same ``null`` ``routing/interests/timeout`` under a policy at 40,000
     ms, a string lease as the control of "as a string is", and a router
     opened from the file with the ``null``, on port 0."""
@@ -1009,27 +1029,52 @@ def _null(work: str) -> list[Result]:
                     ", as zk2py's check does", rows == ([] if left_out else [f"transport_differs {path}"]),
                     f"exit {code}; {rows}"))
         # zenoh-1.10.1: the reference loads the file through zenoh, which
-        # refuses a null at each of the seven. Observed, not a rule: exit 2.
-        code, rows, err = _zenctl_transport(work, f"stock-{key}", stock, nulled)
+        # refuses a null at each of the seven. link.v2 0.20 §2.19: that tool
+        # "names zenoh's refusal, and asks none of §5's questions of that
+        # file. It read no key, so it reports no transport_differs".
+        code, rows, err, lines = _zenctl_face(work, f"stock-{key}", stock, nulled)
         if left_out:
             out.append((f"a null {path}, binding zenoh-1.10.1: zenctl check face reports no transport finding",
                         rows == [] and code != 2, f"exit {code}; {rows}"))
         else:
-            out.append((f"a null {path}, binding zenoh-1.10.1: zenctl check face reports transport_differs, or "
-                        "names zenoh's refusal of the file and asks nothing (exit 2)",
-                        rows == [f"transport_differs {path}"] or (code == 2 and "zenoh refused the config" in err),
-                        f"exit {code}; {rows}; {err}"))
+            out.append((f"a null {path}, binding zenoh-1.10.1: zenctl check face, through zenoh's loader, names "
+                        "zenoh's refusal of the file, asks no question (no row at all) and ends at exit 2 "
+                        "(§2.19, \"A file zenoh refuses\")",
+                        code == 2 and "zenoh refused the config" in err and rows == [] and lines == 0,
+                        f"exit {code}; {rows}; {lines} lines of stdout; {err}"))
     # "as a string is": the control, a string lease under each binding.
     stringed = json.loads(json.dumps(conf))
     stringed["transport"]["link"]["tx"]["lease"] = "2000"
-    code, rows, err = _zenctl_transport(work, "stock-string", stock, stringed)
+    code, rows, err, lines = _zenctl_face(work, "stock-string", stock, stringed)
     stringed_fork = json.loads(json.dumps(conf_fork))
     stringed_fork["transport"]["link"]["tx"]["lease"] = "2000"
     code_f, rows_f, _ = _zenctl_transport(work, "fork-string", fork, stringed_fork)
-    out.append(("the control, a string lease: zenctl check face answers it as it answers a null lease under each "
-                "binding", (rows == ["transport_differs transport/link/tx/lease"] or code == 2)
-                and rows_f == ["transport_differs transport/link/tx/lease"],
-                f"zenoh-1.10.1: exit {code}; {rows}; {err}; zm-1.10.2-r1: exit {code_f}; {rows_f}"))
+    out.append(("the control, a string lease (\"and so is one with a string for its lease\"): zenctl check face "
+                "names zenoh's refusal and asks nothing under zenoh-1.10.1, and reports transport_differs at the "
+                "key under zm-1.10.2-r1",
+                code == 2 and "zenoh refused the config" in err and rows == [] and lines == 0
+                and rows_f == ["transport_differs transport/link/tx/lease"] and code_f == 1,
+                f"zenoh-1.10.1: exit {code}; {rows}; {lines} lines; {err}; zm-1.10.2-r1: exit {code_f}; {rows_f}"))
+    mine_s = [f["code"] + " " + f["at"] for f in link_v2.check_transport(stock, link_v2.read_config(stringed))["findings"]]
+    out.append(("the same string lease read as data by zk2py's check: transport_differs at the lease, and no "
+                "wait_under_lease (\"Both are true of one file\")", mine_s == ["transport_differs transport.lease_ms"],
+                f"{mine_s}"))
+    # "A file that loader refuses gives the tool no configuration": one zenoh
+    # refuses at a key that is none of the eight, and one that is no JSON5,
+    # which no reading as data can open either (§5's "Not asked").
+    bogus = json.loads(json.dumps(conf))
+    bogus["mode"] = "bogus"
+    code, rows, err, lines = _zenctl_face(work, "stock-mode", stock, bogus)
+    out.append(("a file zenoh refuses at none of the eight keys (a mode that is none), binding zenoh-1.10.1: zenctl "
+                "check face names zenoh's refusal, prints no row and ends at exit 2",
+                code == 2 and "zenoh refused the config" in err and lines == 0, f"exit {code}; {lines} lines; {err}"))
+    for binding, text in (("zenoh-1.10.1", stock), ("zm-1.10.2-r1", fork)):
+        code, rows, err, lines = _zenctl_face(work, f"nojson-{binding}", text, "{ this is not : json5 ")
+        out.append((f"a file that is no JSON5, binding {binding}: zenctl check face names its loader's refusal, "
+                    "prints no row and ends at exit 2 (§5: \"Not asked: the file is one the tool's loader "
+                    "refuses, the refusal named\")",
+                    code == 2 and lines == 0 and ("refused the config" in err or "does not parse" in err),
+                    f"exit {code}; {lines} lines; {err}"))
     # Case 25's shape: the same null under a policy whose interests timeout is 40,000 ms.
     at_40 = stock.replace("[transport]\n", "[transport]\ninterests_timeout_ms = 40000\n", 1)
     pol40, f40 = link_v2.parse_policy(at_40)
