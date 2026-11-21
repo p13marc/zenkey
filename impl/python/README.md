@@ -66,7 +66,7 @@ case name. It exits with:
 | sets | §9.2 | `sets` | E035, E036 |
 | bundles | §9.6 | `bundle` | the twelve verification steps and their tags. `seed.toml` also **builds** to `valid.bundle.json` byte for byte, and `contracts/ok-packed.toml` to `packed.bundle.json` (0.75). |
 | history | §9.7 | `history` | `[at, tag]` per history root |
-| descriptors | §3.3 | `descriptor` | the D codes (D012, a standby marked tokenless, since 0.39; `minor` optional and `null` D000 since 0.107, 60 cases), against `descriptors/contracts/nav.v2.toml`. That contract's fingerprint, computed here, is the `sha256:fea2…` the fixtures expect. |
+| descriptors | §3.3 | `descriptor` | the D codes (D012, a standby marked tokenless, since 0.39; `minor` optional and `null` D000 since 0.107; a descriptor over 1 KB drawing no code since 0.109, 61 cases), against `descriptors/contracts/nav.v2.toml`. That contract's fingerprint, computed here, is the `sha256:fea2…` the fixtures expect. |
 | errors | §5.2, §7.5 | `zk2c` | `forms.json`: the error form's 256 bytes, its writes and its reads by Encoding, an earlier core's three envelopes `encoding`. `cases.json`, the bare wire's envelope, went with core 0.99 (round 104). An unknown file there fails. |
 | envelope | §7.5, §5.1, §5.2 (0.72 to 0.94) | `zk2c`, `calls` | `vectors.json` (each header and case, accepted ones written back), `carries.json`, and `calls.json` (round 101): an operation's forms by its types' tags, its writes and its reads, a packed record under CH's tag |
 | budget | core §2.7, observer §5 (0.24, 0.25, 0.27) | `budget` | every file of `budget/`: `bounds.json` (the bound across instances), `population.json` (a GET's or a window's population against it), `rate.json` (an event's rate per member) and `lossless.json` (whether a window is shown to have lost no delivery, 0.25; its `reader_stall` and `stall_bounds`, 0.27). An unknown file there fails. |
@@ -7901,6 +7901,158 @@ beside a crossing key; §7.5's "every group where it was given no
 catalog", of a tool with no scope for the key). See "At observer 0.34"
 in `SPEC-FINDINGS.md`.
 
+## Core 0.109, `desired.v1` 0.14, `redundancy.v1` 0.11 and `link.v2` 0.20: rounds 111 and 112 answered (round 114)
+
+Round 114 read the branch `chunk-answers-code` at 1374e566, merged under
+round 113's head: the answers to zk2py's own F-535 to F-546.
+- **core 0.109:** §3.3's size made decidable (what is counted, the
+  rest, one rule in place of two, an owner's `minor` from its file, the
+  seven members an owner may leave out); §7.5's `form` on a heartbeat's
+  key, the layouts told apart by the key alone, the catalog a reader
+  needs, and a size never allocated from;
+- **`desired.v1` 0.14:** two reports on one key are merged per key, and
+  scenario §8's unbound role states no parameter bound;
+- **`redundancy.v1` 0.11:** a split's seed under consolidation `None`;
+- **`link.v2` 0.20:** §2.19's two layers of a file zenoh refuses, and
+  Appendix B's SF9 and SF12 runs.
+
+### The text first
+
+Both halves of core 0.109 were written from the text and committed
+(33746b0d) before `descriptors/ok-over-1kb` and `owner.json`'s `forms`
+and `beside` were opened.
+
+- **`descriptor.Size`** counts as "What is counted" and "The rest" say:
+  the document's bytes as written, 1 KB at 1,024 B, a member from its
+  name's opening quote to its value's last byte with one comma, and the
+  rest the size less each of the four stated. `Size.meets` is the one
+  rule: within 1 KB, or the rest within 512 B.
+- **`ok-over-1kb`, counted then:** 1,184 B before the file's newline,
+  947 B in the three members stated with a comma each, a rest of 237 B.
+  **They are the text's three figures, on the first count.**
+- **Two implementers must now reach the same two numbers** from the
+  same bytes: nothing in the count is left to choose. The reference's
+  own count agrees at the bound: `zenctl gen` warns "with a rest of
+  513 B" where zk2py computes 513 B, and says nothing at 512 B.
+- **`heartbeat.put_of`** is the gate of both readings: the envelope's
+  parse, then `form` for a put of another form, "before it reads a tag
+  or a body", and `form` for a put with no envelope.
+  `owner_heartbeat.read`, `heartbeat.read_put` and zk2py's three
+  heartbeat subscribers go through it.
+- **`owner_heartbeat.read_put_groups`** reads every group of one put,
+  each from its own bits, on past a refused one.
+- **`forms`: 5 of 5 on each key. `beside`: 9 of 9. No case was wrong on
+  the first run.** Round 112's reader already refused `form`, as its own
+  token, and already read each group alone: the entry says the authors
+  ran it over the 14 cases. So this first run says less than round
+  112's did.
+
+### Its walk of `RULES.md` at 0.109
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 93 | 82 | 2 | 9 |
+| consumer | 33 | 29 | 0 | 4 |
+| caller | 18 | 18 | 0 | 0 |
+| observer | 105 | 100 | 3 | 2 |
+| static, in every class | 76 | 74 | 0 | 2 |
+
+- **296 rows walked of 296, none without a verdict.** 29 verdicts are
+  beyond the index. `RULES.md` lists 286 rules, 284 before.
+- **The owner's rows:** the SHOULD on `minor` is new and met. The 512 B
+  SHOULD is gone into the 1 KB SHOULD's MAY, whose verdict is on the new
+  count.
+- **The two new static rows are met:** no allocation from a size, by
+  `owner_heartbeat._Bits.raw`, and `form`, by `heartbeat.put_of`.
+- **The re-key went with the text-first code,** in one commit: the 1 KB
+  row's verdict is on that commit's count.
+
+### What else round 114 changed in zk2py
+
+- **`redundancy_live.Follower.seed`** (`redundancy.v1` 0.11 §2.10). It
+  read the one reply its GET's merge kept per key, and so could discard
+  the higher incumbent's reply without looking at the lower's, which
+  had arrived. That was the `Latest` reading 0.11 replaced. It now
+  reads every reply on the key (`live.StateReading.every`, new), keeps
+  the followed incumbent's and discards the others.
+- **`desired_scenarios`:** the three shapes of two differing reports on
+  one key are plain checks. Seven shapes are new, one report converged
+  and one refused, which tell which reply a tool's merge keeps.
+- **`link_v2_live --only null`** pins each of §2.19's two layers to its
+  own answer, where round 112 took either under `zenoh-1.10.1`.
+- **`owner_heartbeat_live --reference`** puts a mutation, and an owner
+  heartbeat's bytes under an Encoding that carries no envelope, on the
+  link class key beside the owner's own puts.
+- **`presence_scenarios`,** a stale check of zk2py's own: §2 step 8
+  asked every entry's `unavailable` to be empty, and the owner example's
+  `freshness.v2` entry lists its owner heartbeat key since fcc2f65b.
+  Round 113 did not run the suite.
+- **`live_interop`,** a flake of zk2py's own: its health section
+  declared a raw liveliness subscriber on the session T reads presence
+  on, which core Appendix B says can answer a liveliness GET complete
+  and empty. The watch has a session of its own now.
+- **`link_v2`, `desired_tool`:** no line moved. zk2py's check already
+  read a file's keys as data, and its tool already merged.
+
+**`just py-conformance`: 6968 of 6968** on 1374e566. Of them,
+`descriptors` 61, `heartbeat` 314, 147 of them `owner.json`'s, and
+`readings` 1081.
+
+### Live
+
+On the black boxes of 1374e566. Every router is zenoh-python's, zenoh
+1.10.1.
+
+| Runner | What | Result |
+|---|---|---|
+| `zenctl gen`, by a script of this round | zenoh-modem's node, the three authoring files, read back from its instance key and counted by `descriptor.size`. Under a run file and the catalog: 1,271 B, a rest of 237 B. Under neither: 1,254 B, a rest of 220 B. At a service chunk of 294, 295, 296 and 297 characters, where zk2py computes a rest of 511, 512, 513 and 514 B: no warning at the first two, "with a rest of 513 B" and "514 B" at the last two. The descriptor at those lengths was not read back, as in round 112 | as stated |
+| `desired_scenarios --only tool-shapes`, under round 113's expectation | the three shapes of two differing reports on one key, still pinned as known divergences: `zenctl desired` answers each as the text does | 90 passed, 3 failed, each `XPASS` |
+| `desired_scenarios --only tool-shapes` | the same three as plain checks, `zenctl desired`'s answers against the text's and its row against zk2py's; and the seven shapes that tell which report is kept, on which the two tools agree | 110/110 |
+| `desired_scenarios` | zk2py's parties, whole; then the owner example as the target | 213/213, no known divergence; 86/86, 2 not run |
+| `redundancy_scenarios --only 9` | `scenarios.md` §9 with zk2py's candidates and with the owner example's: both incumbents' replies arrive on the one key, one of each id, and K takes A's and discards B's | 5/5 and 5/5 |
+| `redundancy_scenarios` | whole, in the two pairings, over the follower's new seed | 89/89 and 86/86 |
+| `link_v2_live --only null` | §2.19's two layers, each pinned. `zenoh-1.10.1`: exit 2, "zenoh refused the config" and no row, for a `null` at each of the seven keys, a string lease, a `mode` that is none and a file that is no JSON5. `zm-1.10.2-r1`: `transport_differs` at the key for the seven and the string lease, and exit 2 for the file that is no JSON5. zk2py's check: `transport_differs` for the string lease too | 40/40 |
+| `link_v2_live` | whole | 75/75, the 40 of `null` among them |
+| `owner_heartbeat_live --reference` | with one step more: beside the owner's puts on the `link` class key, a mutation whose record is an owner heartbeat's body, then an owner heartbeat's own bytes under `application/octet-stream`, each stamped as the owner's next. zk2py's reader refuses each `form` and reads the owner's put of that seq in sequence. Each of three `zenctl watch --catalog` readers prints one confirmation row at that seq, by the owner's put | 13/13 |
+| `owner_heartbeat_live` | whole, over the subscribers' gate | 25/25 |
+| `freshness_v2_scenarios`, `heartbeat_epoch_live` | the three pairings, and both owners, over the gate | 41/41, 41/41 and 30/30; 4/4 and 4/4 |
+| `health_scenarios`, `alarms_scenarios` | whole, over `freshness.Subscriber` through the gate | 31/31, 80/80 |
+| `presence_scenarios` | §1 to §10 in the four pairings. With the owner example, step 8's check of the empty members failed once in each pairing before it was re-keyed: zk2py's runner asked every entry's `unavailable` to be empty, and since fcc2f65b that owner's `freshness.v2` entry lists `stream/heartbeats/{class}`. Round 113 did not run the suite. The two pairings with zk2py's owner ran whole before the re-key, and §2 again after it, 11/11 and 8/8 | 103/103, 38/38, 97/97 and 37/37; 1, 6, 2 and 7 not run |
+| `live_interop` | whole, three times and a control | 490/490 once the health section's token watch had a session of its own. Before that, 486 and 489 of 490: T's presence read, beside its own liveliness subscriber, read a present owner `absent` (core Appendix B). Round 113's zk2py, run as the control, 489 of 490, the same check |
+
+**The reference, observed (not findings but where one is named):**
+- **`zenctl gen`** serves 1,254 B and 1,271 B for zenoh-modem's node,
+  where core 0.109's entry measured 1,167 B and 1,184 B on e46b040b's
+  black boxes: its `freshness.v2` entry lists `heartbeats/{class}`
+  unavailable since. The rest is 220 B and 237 B, unchanged.
+- **`zenctl check face` under `zm-1.10.2-r1`** draws no finding for a
+  `mode` that is none of zenoh's three, where zk2py's check draws
+  `face_timestamping` (F-562).
+
+**Not run:**
+- the reference as an owner heartbeat's owner: it sends none;
+- another form on a heartbeat's own key, on a bus: the new step puts on
+  the `link` class key alone;
+- `zenctl check face --peer-config` on a far end's file that zenoh
+  refuses;
+- a split whose seed loses A's reply: every run brought both;
+- the SF9 and SF12 runs, which are zenoh-modem's, under `docs/`;
+- zenohd as a black box, and F-531's far router;
+- the live runners not named in the table: none reads what this round
+  moved.
+
+Round 114 found F-560 to F-564: one ambiguity (`link.v2` §2.19's
+as-data layer and a `mode` zenoh refuses, on which the two tools differ)
+and four minor errors (core 0.109's entry counting 285 rules and an
+observer at 0.33, on a tree with 286 and 0.34; `desired.v1` and
+`redundancy.v1` stating core 0.100's S4 under a header written against
+core 0.73; `owner.json` holding no put with no envelope and no reader of
+one revision; core's Appendix C and E with no entry for
+`conformance/heartbeat/`). None is a blocker. F-535 to F-546 are
+resolved, each as `SPEC-FINDINGS.md` says. F-547 to F-559 stay open:
+their answers are not on this branch. See "At core 0.109, desired.v1
+0.14, redundancy.v1 0.11 and link.v2 0.20" in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -8055,8 +8207,9 @@ impl/python/
     sets.py           §9.2      E035, E036
     bundle.py         §9.6      build, verify; a revision held as its bundle alone (core §3.3, 0.107; round 111)
     history.py        §9.7      the history check
-    descriptor.py     §3.3      the D codes; "Size" as core 0.107 words it: the whole, each member with its name,
-                                the empty members written, what "Over 1 KB" asks (round 111)
+    descriptor.py     §3.3      the D codes; "Size" as core 0.109 counts it: the document's bytes, each member
+                                from its name's quote to its value's end, the rest (the size less each of the
+                                four stated, a comma each), the empty members written (rounds 111 and 114)
     catalog.py        §8.6      the deployment catalog: its reading, id, succession and a reader's resolution (round 95)
     cbor.py                     CBOR read and written (cbor's writer, round 101); envelope.py, the bare wire's
                                 error envelope, went with core 0.99 (round 104)
@@ -8095,11 +8248,14 @@ impl/python/
     freshness.py      freshness.v1 horizons, judgements, the clock trust, a subscriber, a tool's read
     freshness_scenarios.py freshness.v1 scenarios.md §1–§6 on an in-process router
     heartbeat.py      §7.5      the heartbeat: the tag, the collections, the body written and read, the digest
-                                (round 96); its sections read and written apart from its time (round 112)
+                                (round 96); its sections read and written apart from its time (round 112);
+                                put_of, the gate of both readings: the parse, then `form` for a put of another
+                                form or with no envelope (core 0.109, round 114)
     owner_heartbeat.py §7.5 §8.6 the owner heartbeat, form 6 with a group per covered interface: the groups read
                                 with no contract, each group's sections with its revision through the catalog,
                                 the writer and the round trip; written from the text before owner.json was
-                                opened (core 0.108, round 112)
+                                opened (core 0.108, round 112); every group of one put, on past a refused one,
+                                written before `forms` and `beside` were opened (core 0.109, round 114)
     snapshot.py       §7.5      the snapshot, form 7: a page read, written and written back, cut by the paging
                                 rule twice (by writing, by arithmetic), held complete (core 0.97, round 103)
     seed_snapshot.py  §4.2      a seed over snapshots, core 0.100's §4.2: the fixture's Seed, and the live
