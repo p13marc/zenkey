@@ -44,6 +44,24 @@ def revision(v: Verified):
     return Revision(v.contract, artifacts)
 
 
+def held(data: bytes, expect_fingerprint: str | None = None) -> Contract:
+    """A revision held as its bundle alone, "as generated code embeds one"
+    (``presence.md`` §2 step 8; core §9.6): the verified bundle's canonical
+    contract and fingerprint, the bytes kept to serve (§8.4), and no
+    ``minor``, since "A bundle keeps no minor (§9.5), so an owner that holds
+    only the revision's bundle leaves the member out" (core §3.3, 0.107).
+
+    Its ``schemas`` is ``None``: zk2py builds no resolver from a bundle's
+    artifacts, so an owner of such a revision encodes no packed record and
+    declares no frame of it. Raises :class:`BundleError` as :func:`verify`."""
+    from pathlib import Path
+
+    v = verify(data, expect_fingerprint)
+    return Contract(path=Path(f"<bundle {v.fingerprint}>"), interface=v.contract["interface"], minor=None,
+                    canonical=v.contract, canonical_bytes=jcs.dumps(v.contract), fingerprint=v.fingerprint,
+                    bundle=bytes(data))
+
+
 def extra_ids(contract: dict[str, Any]) -> set[str]:
     """§9.6: extras are exactly the documents that the ``views.document``
     annotations of the contract's resources reference. 0.5: "A

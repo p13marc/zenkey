@@ -5061,11 +5061,11 @@ def _round103_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "owner 76; 249 since core 0.99's one fewer (round 104); 262 and the owner 83 since core 0.100 "
                 "(round 105); 267 since observer 0.29's five (round 106); 268 since core 0.102's one, and 273 and the "
                 "owner 85 since core 0.103's five (round 107); 274 since core 0.104's one, the consumer's (round "
-                "108)",
+                "108); 277 and the owner 88 since core 0.107's three owner rules (round 111)",
                 missing(log, "`RULES.md` lists 250 rules, 4 more", "The owner class counts 76 where it counted 78",
                         "[`RULES.md`](RULES.md) lists 249 rules, 1 fewer", "`RULES.md` lists 262 rules, 13 more")
                 + [int(once.group(1)) if once else None, counted.get("Implementation: the static rules"),
-                   counted.get("Owner")], [274, 67, 85]))
+                   counted.get("Owner")], [277, 67, 88]))
     # §7.5's "Sizes", by zk2py's own writer.
     base = {"tag": 0, "run_width": 16, "run": 1, "asof": 9, "time": {"s": 3600, "ms": 250}, "index": 0,
             "more": False, "coll": 0, "live": [], "tombs": []}
@@ -5272,6 +5272,7 @@ def _round104_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out += _round108_readings(root)
     out += _round109_readings(root)
     out += _round110_readings(root)
+    out += _round111_readings(root)
     return out
 
 
@@ -5861,10 +5862,10 @@ def _round109_readings(root: Path) -> list[tuple[str, Any, Any]]:
     counts = dict(re.findall(r"^\| \[([A-Za-z][^\]]*)\]\(#[^)]*\) \| (\d+)", rules, re.M))
     every = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
     out.append(("core 0.105's figures: RULES.md lists 274 rules, as 0.104 did, the consumer's MUST NOT widened in "
-                "place (consumer 32); the row names a delete",
+                "place (consumer 32); the row names a delete; 277 since core 0.107 (round 111)",
                 [int(every.group(1)) if every else None, counts.get("Consumer"),
                  "or a delete on an events key, whether a subscription heard it" in rules],
-                [274, "32", True]))
+                [277, "32", True]))
     # Round 109's findings, each text as it quotes it, so an answer moves it
     from .contract import load_contract
     from .owner import keeps_timestamp
@@ -5936,6 +5937,305 @@ def _round109_readings(root: Path) -> list[tuple[str, Any, Any]]:
                         "4's two puts alone, since the storage holds no value under the deleted key, and counts each "
                         "of the two so.")
                 + [q for q in ("The consumer counts each undecodable, refused as `form`",) if q in st], []))
+    return out
+
+
+def _round111_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.107 (#1126, #1127), read cold (#609, round 111): a descriptor's
+    ``minor`` where its revision has one, its empty members left out, and
+    what may exceed 1 KB. The version and its entry, §3.3's and §9.8's rules
+    as their texts state them, what the changelog claims of its fixtures,
+    its schema and its figures, zk2py's checker and owner beside them,
+    zenoh-modem's node shape computed from §3.3 as worded, and the texts
+    round 111's findings quote. The fixtures are the descriptors family's;
+    the live half is ``presence_scenarios`` §2 step 8."""
+    import json
+    import re
+
+    from . import bundle, classes
+    from . import descriptor as dsc
+    from .compat import classify_pair
+    from .contract import load_contract
+    from .owner import Owner
+
+    spec = root.parent
+    repo = spec.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    core, log, sc = flat("core.md"), flat("CHANGELOG.md"), flat("scenarios/presence.md")
+    obs = flat("observer.md")
+    out: list[tuple[str, Any, Any]] = []
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    lines = (spec / "CHANGELOG.md").read_text(encoding="utf-8").splitlines()
+    out.append(("core 0.107 or later, with its entry (#1126, #1127); observer.md stays 0.33, as the entry says",
+                [m is not None and (int(m.group(1)), int(m.group(2))) >= (0, 107),
+                 any(ln.startswith("## 0.107 ") and "`minor` where its revision has one" in ln for ln in lines),
+                 bool(re.search(r"\| \*\*Text version\*\* \| 0\.33 ", obs)), "`observer.md` stays 0.33." in log],
+                [True, True, True, True]))
+    out.append(("core 0.107 §3.3, §3.2 and §9.8: the rules as their texts state them",
+                missing(core,
+                        "- **`minor`** is the minor of the contract revision the entry names, as its authoring file "
+                        "states it (§9.1).",
+                        "A bundle keeps no minor (§9.5), so an owner that holds only the revision's bundle leaves "
+                        "the member out. An owner MUST NOT state a minor its revision does not have.",
+                        "A checker reads `minor` as optional, so a descriptor that states none is not D000, and "
+                        "`null` is D000.",
+                        "- **Empty members.** A member whose schema default is an empty list or object reads as "
+                        "that default when absent. So an owner MAY leave it out when it holds nothing, as the "
+                        "reference does.",
+                        "- **Over 1 KB.** An owner whose descriptor exceeds 1 KB SHOULD leave out every empty "
+                        "member. That owner SHOULD also keep every member but `interfaces`, `capabilities`, "
+                        "`requires` and `profiles` within 512 B together, each counted with its name.",
+                        "`minor`, an integer from 0 to 2^64−1 that no check reads, nor whether it is stated (a tool "
+                        "MAY read it to order two revisions, §9.8)",
+                        "with `\"bindings\": []` and no parameter bound (R3)",
+                        "A tool that classifies them against each other MAY take the order from the `minor` their "
+                        "descriptors state, when both state one and the two differ. Otherwise it classifies both "
+                        "ways")
+                + [q for q in ("the `minor` their descriptors state, when the two differ",
+                               "with `\"bindings\": []` and `\"params\": {}` (R3)") if q in core]
+                + missing(sc, "8. An owner is started implementing a revision from its bundle alone, as generated "
+                              "code embeds one (core §9.6). It holds no capability and requires no role.",
+                          "8. Its entry states no `minor`, since a bundle keeps none (core §3.3, §9.5). Step 1's "
+                          "entries, from authoring files, state each file's `minor`. Its descriptor may leave out "
+                          "each member that holds nothing (core §3.3)"),
+                []))
+    # The changelog's claims of its fixtures, its schema and RULES.md.
+    dd = root / "descriptors"
+    expect = json.loads((dd / "expect.json").read_text(encoding="utf-8"))["cases"]
+    schema = json.loads((spec / "descriptor.schema.json").read_text(encoding="utf-8"))
+    defs = schema["$defs"]
+    defaults = {"capabilities": schema["properties"]["capabilities"].get("default"),
+                "requires": schema["properties"]["requires"].get("default"),
+                "profiles": schema["properties"]["profiles"].get("default"),
+                "meta": schema["properties"]["meta"].get("default"),
+                "unavailable": defs["InterfaceEntry"]["properties"]["unavailable"].get("default"),
+                "cardinality": defs["InterfaceEntry"]["properties"]["cardinality"].get("default"),
+                "params": defs["RequireEntry"]["properties"]["params"].get("default"),
+                "token": defs["InterfaceEntry"]["properties"]["token"].get("default")}
+    minimal = json.loads((dd / "ok-minimal.json").read_text(encoding="utf-8"))
+    no_minor = json.loads((dd / "ok-no-minor.json").read_text(encoding="utf-8"))
+    out.append(("core 0.107's entry, its fixtures and its schema: expect.json lists 60 cases, ok-no-minor clean and "
+                "d000-minor-null D000; `minor` left an entry's `required`, its type an integer still; the seven "
+                "members whose default is empty, and `token`'s default true; ok-minimal states no `requires`, "
+                "`unavailable` or `cardinality`, and ok-no-minor's entry states `iface` and `contract` alone; "
+                "`bindings` stays required",
+                [len(expect), expect.get("ok-no-minor", {}).get("codes"), expect.get("d000-minor-null", {}).get("codes"),
+                 sorted(defs["InterfaceEntry"]["required"]), defs["InterfaceEntry"]["properties"]["minor"]["type"],
+                 defaults, [k for k in ("requires", "unavailable", "cardinality") if k in json.dumps(minimal)],
+                 sorted(no_minor["interfaces"][0]), "bindings" in defs["RequireEntry"]["required"]],
+                [60, [], ["D000"], ["contract", "iface"], "integer",
+                 {"capabilities": [], "requires": [], "profiles": [], "meta": {}, "unavailable": [],
+                  "cardinality": {}, "params": {}, "token": True}, [], ["contract", "iface"], True]))
+    rows = classes._rules_md(spec)
+    owner33 = [r[3] for r in rows if r[0] == "owner" and r[1] == "core §3.3"]
+    rules = (spec / "RULES.md").read_text(encoding="utf-8")
+    once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
+    out.append(("core 0.107's figures: RULES.md lists 277 rules, 274 in 0.106, the owner's the MUST NOT on `minor` "
+                "and the two SHOULDs of a descriptor over 1 KB; the 1 KB SHOULD's row shows the MAY that excepts it",
+                missing(log, "`RULES.md` lists 277 rules, 274 in 0.106 (owner 88, 85 before)")
+                + [int(once.group(1)) if once else None,
+                   sum(1 for t in owner33 if "MUST NOT state a minor its revision does not have" in t),
+                   sum(1 for t in owner33 if "exceeds 1 KB SHOULD leave out every empty member" in t),
+                   sum(1 for t in owner33 if "That owner SHOULD also keep every member but" in t),
+                   sum(1 for t in owner33 if "SHOULD stay within 1 KB" in t and "So an owner MAY exceed 1 KB with" in t)],
+                [277, 1, 1, 1, 1]))
+    # The checker, by §3.3's sentences and the schema: `minor` optional, an
+    # integer of the record's uint64 where stated.
+    nav = load_contract(dd / "contracts" / "nav.v2.toml", spec_dir=spec)
+
+    def with_minor(text: str | None) -> list[str]:
+        e = '{"iface":"nav.v2","contract":"%s"%s}' % (nav.fingerprint, "" if text is None else f',"minor":{text}')
+        return dsc.check_descriptor(('{"format":"zk2-descriptor/0.1","service":"vehicle-01/navigation",'
+                                     '"instance":"3fa9c2d41b7e0012","interfaces":[%s]}' % e).encode(), [nav], spec)
+
+    out.append(("core 0.107 §3.3, the checker: a descriptor that states no `minor` is clean, one that states an "
+                "integer from 0 to 2^64−1 too, whatever the contract's own; `null`, a string, a boolean, a fraction, "
+                "a negative and 2^64 are D000",
+                {t: with_minor(None if t == "none" else t) for t in
+                 ("none", "0", "7", "18446744073709551615", "null", '"1"', "true", "1.0", "1e0", "-1",
+                  "18446744073709551616")},
+                {"none": [], "0": [], "7": [], "18446744073709551615": [], "null": ["D000"], '"1"': ["D000"],
+                 "true": ["D000"], "1.0": ["D000"], "1e0": ["D000"], "-1": ["D000"],
+                 "18446744073709551616": ["D000"]}))
+    # zk2py's owner, offline: the document it writes, with no session.
+    echo = load_contract(repo / "impl/python/interop/zk2py_echo.v1.toml", spec_dir=spec)
+    rev1 = load_contract(repo / "impl/python/interop/rev/zk2py_bringup.v1.toml", spec_dir=spec)
+    rev0 = load_contract(repo / "impl/python/interop/zk2py_bringup.v1.toml", spec_dir=spec)
+    w104 = load_contract(root / "contracts" / "w104-minor.toml", spec_dir=spec)
+    needs = load_contract(repo / "impl/python/interop/zk2py_needs.v1.toml", spec_dir=spec)
+    held = bundle.held(bundle.build(echo), echo.fingerprint)
+
+    def doc_of(contracts: list[Any], **kw: Any) -> dict[str, Any]:
+        o = Owner("lab", "sized", contracts, port=0, state_zid=False, **kw)
+        return o._descriptor_doc(o._plan(), "3fa9c2d41b7e0012", host=True)
+
+    def minors(contracts: list[Any]) -> list[Any]:
+        return [e.get("minor", "none") for e in doc_of(contracts)["interfaces"]]
+
+    out.append(("core 0.107 §3.3, zk2py's owner: an entry states its revision's minor where its authoring file "
+                "states one (0, and 1 for bringup's minor 1), and none for a file that states none (W104) or a "
+                "revision held as its bundle alone, whose fingerprint is its file's and whose bundle bytes it keeps; "
+                "the checker reports no code on either descriptor",
+                [(echo.minor, rev1.minor, w104.codes, w104.minor, held.minor), minors([echo]), minors([rev1]),
+                 minors([w104]), minors([held]), held.fingerprint == echo.fingerprint,
+                 held.bundle == bundle.build(echo),
+                 dsc.check_descriptor(json.dumps(doc_of([held])).encode(), [echo], spec),
+                 dsc.check_descriptor(json.dumps(doc_of([echo])).encode(), [echo], spec)],
+                [(0, 1, ["W104"], None, None), [0], [1], ["none"], ["none"], True, True, [], []]))
+    unbound = doc_of([needs], bindings={"upstream": ["lab/up"]})
+    bare = doc_of([held])
+    full = doc_of([nav], capabilities={"imu"}, unavailable={"state/covariance": "config"},
+                  cardinality={"nav.v2": {"state/tracks/{track}": 5}}, bindings={"cmd": ["vehicle-01/safety"]},
+                  params={"cmd": {"vehicle": "self.system"}})
+    out.append(("core 0.107 §3.3, \"Empty members\": zk2py's owner leaves out each member whose schema default is an "
+                "empty list or object, at every size (descriptor.size finds none written), keeps `token`, whose "
+                "default is true, and an unbound role's required `bindings`, with no `params` (§3.2); a member that "
+                "holds something is written",
+                [sorted(bare), sorted(bare["interfaces"][0]), dsc.size(json.dumps(bare).encode()).empty,
+                 sorted((r["role"], r["bindings"], "params" in r, r.get("optional", False))
+                        for r in unbound.get("requires", [])),
+                 dsc.size(json.dumps(unbound).encode()).empty,
+                 sorted(full), sorted(full["interfaces"][0]), sorted(full["requires"][0]),
+                 dsc.check_descriptor(json.dumps(full).encode(), [nav], spec),
+                 dsc.size(b'{"format":"zk2-descriptor/0.1","service":"a/b","instance":"3fa9c2d41b7e0012",'
+                          b'"interfaces":[{"iface":"a.v1","contract":"sha256:x","unavailable":[],"cardinality":{}}],'
+                          b'"capabilities":[],"requires":[{"role":"r","interface":"b.v1","bindings":[],"params":{}}],'
+                          b'"profiles":[],"meta":{}}').empty],
+                [["format", "instance", "interfaces", "service"], ["contract", "iface", "token"], [],
+                 [("peer", [], False, True), ("upstream", ["lab/up"], False, False)], [],
+                 ["capabilities", "format", "instance", "interfaces", "requires", "service"],
+                 ["cardinality", "contract", "iface", "minor", "token", "unavailable"],
+                 ["bindings", "declared_by", "interface", "params", "role"], [],
+                 ["capabilities", "profiles", "meta", "interfaces/0/unavailable", "interfaces/0/cardinality",
+                  "requires/0/params"]]))
+    # §9.8: the order between two revisions met on the bus.
+    ra = bundle.revision(bundle.verify(bundle.build(rev0)))
+    rb = bundle.revision(bundle.verify(bundle.build(rev1)))
+    out.append(("core 0.107 §9.8: two revisions are ordered by `minor` only when both descriptors state one and the "
+                "two differ; one that states none, the other, both, or two equal minors, are classified both ways, "
+                "here undecided, never ordered from a 0 no descriptor stated",
+                [classify_pair(ra, rb, 0, 1), classify_pair(rb, ra, 1, 0)[0], classify_pair(ra, rb, None, 1)[0],
+                 classify_pair(ra, rb, 0, None)[0], classify_pair(ra, rb, None, None)[0],
+                 classify_pair(ra, rb, 1, 1)[0], classify_pair(ra, rb, None, 1)[1].startswith("both ways")],
+                [("compatible", "ordered by minor 0 → 1"), "compatible", "undecided", "undecided", "undecided",
+                 "undecided", True]))
+    # The size rule, computed from §3.3 as worded on zenoh-modem's node shape:
+    # modem.v3, config.v1 and health.v1, freshness.v2's standard interface
+    # beside them, and the 30 capabilities modem.v3 gates on.
+    modem = load_contract(repo / "examples/zk2/zenoh-modem/modem.v3.toml", spec_dir=spec)
+    config = load_contract(spec / "profiles/config/config.v1.toml", spec_dir=spec)
+    health = load_contract(spec / "profiles/health/health.v1.toml", spec_dir=spec)
+    fresh = load_contract(spec / "profiles/freshness/freshness.v2.toml", spec_dir=spec)
+    caps = {g.removeprefix("capability:") for r in modem.canonical["resources"] for g in r["gate"]
+            if g.startswith("capability:")}
+    compact = lambda v: len(json.dumps(v, separators=(",", ":")).encode())  # noqa: E731
+    node = doc_of([modem, config, health], capabilities=caps)
+    node["run"] = "7cd7292b"
+    node["meta"] = {"zid": "286c60750afaa5c692cd96f2a99cb1f1"}
+    node = {k: node[k] for k in ("format", "service", "instance", "run", "interfaces", "capabilities", "profiles",
+                                 "meta")}
+    sized = dsc.size(json.dumps(node, separators=(",", ":")).encode())
+    # the reference's, which holds freshness.v2 as its bundle alone: its
+    # entry states no minor
+    as_ref = [dict(e) for e in node["interfaces"]]
+    for e in as_ref:
+        if e["iface"] == "freshness.v2":
+            e.pop("minor")
+    shortest = '{"iface":"a.v1","contract":"sha256:' + "0" * 64 + '"}'
+    out.append(("core 0.107 §3.3 \"Size\", zenoh-modem's node shape on zk2py's owner: four entries, each file's "
+                "minor (4, 1, 1, 0), 30 capabilities, three profiles; `interfaces` 523 B (513 B as the reference "
+                "holds freshness.v2, its bundle alone, the entry's figure), `capabilities` 351 B and `profiles` 41 B "
+                "as the entry measures, 39 B of names; the four members 954 B, the others 144 B, the header and "
+                "meta's zid, 1,107 B at the address lab/sized, a 32-bit run and a 32-digit zid: over 1 KB, no "
+                "empty member, the others within 512 B",
+                [[(e["iface"], e.get("minor")) for e in node["interfaces"]], len(node["capabilities"]),
+                 node["profiles"], compact(node["interfaces"]), compact(as_ref), compact(node["capabilities"]),
+                 compact(node["profiles"]), sum(len(f'"{n}":') for n in ("interfaces", "capabilities", "profiles")),
+                 sized.four, sized.others, sized.total, sized.over, sized.should, sized.empty, sized.within,
+                 fresh.minor],
+                [[("modem.v3", 4), ("config.v1", 1), ("health.v1", 1), ("freshness.v2", 0)], 30,
+                 ["freshness.v2", "link.v1", "telemetry.v2"], 523, 513, 351, 41, 39, 954, 144, 1107, True, [], [],
+                 "four", 0]))
+    out.append(("core 0.107 §3.3, \"An entry is at least 100 B, 71 of them its fingerprint\": the shortest entry, an "
+                "interface id of four characters and no other member, is 101 B, and a fingerprint 71; "
+                "`\"token\":true` is 13 B an entry and `\"minor\":0` 10 B, each with its comma, as the entry counts "
+                "the first",
+                [len(shortest), len("sha256:" + "0" * 64), len(',"token":true'), len(',"minor":0')],
+                [101, 71, 13, 10]))
+
+    def sizes(four_b: int, others_b: int, empty: bool = False) -> tuple[bool, list[str], str]:
+        """A descriptor whose four members and others are of those sizes."""
+        cap = "c" * (four_b - len('"interfaces":[]') - len('"capabilities":[""]'))
+        host = "h" * (others_b - len('"format":"zk2-descriptor/0.1"') - len('"service":"a/b"')
+                      - len('"instance":"3fa9c2d41b7e0012"') - len('"meta":{"host":""}'))
+        d = {"format": "zk2-descriptor/0.1", "service": "a/b", "instance": "3fa9c2d41b7e0012", "interfaces": [],
+             "capabilities": [cap], "meta": {"host": host}, **({"profiles": []} if empty else {})}
+        z = dsc.size(json.dumps(d, separators=(",", ":")).encode())
+        assert (z.four, z.others) == (four_b + (len('"profiles":[]') if empty else 0), others_b), (z.four, z.others)
+        return z.over, z.should, z.within
+
+    out.append(("core 0.107 §3.3 \"Over 1 KB\", as zk2py reads it (F-535, F-536): 1 KB is 1,024 B, a member is counted "
+                "from its name's quote to its value's end; within 1 KB neither SHOULD asks anything, an empty member "
+                "written included; beyond it an empty member written and others beyond 512 B are each named; others "
+                "of 512 B are within, 513 B beyond",
+                [sizes(600, 300), sizes(600, 300, empty=True), sizes(900, 200), sizes(900, 200, empty=True),
+                 sizes(600, 512), sizes(600, 513), sizes(300, 800, empty=True)],
+                [(False, [], "within"), (False, [], "within"), (True, [], "four"), (True, ["empty"], "four"),
+                 (True, [], "four"), (True, ["others"], "beyond"), (True, ["empty", "others"], "beyond")]))
+    # zk2py's owner over 1 KB with others beyond 512 B: meta.host goes.
+    import contextlib
+    import io
+
+    class _Zid:
+        def zid(self) -> str:
+            return "286c60750afaa5c692cd96f2a99cb1f1"
+
+    def written(host: str, service: str = "sized") -> tuple[bool, bool, bool, bool]:
+        o = Owner("lab", service, [modem, config, health], port=0, capabilities=caps, meta_host=host)
+        o.session = _Zid()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            data = o._descriptor(o._plan(), "3fa9c2d41b7e0012")
+        o.session = None
+        z = dsc.size(data)
+        return ("host" in json.loads(data).get("meta", {}), z.others <= dsc.OTHERS, o.size_note is not None,
+                "core §3.3" in err.getvalue())
+
+    out.append(("core 0.107 §3.3 \"Over 1 KB\", zk2py's owner of the node's shape: with a host name that keeps the "
+                "others within 512 B it writes `meta.host` and says nothing; with one that takes them beyond, it "
+                "leaves `meta.host` out, the others within 512 B again, and says so on stderr; an address that "
+                "alone takes them beyond it cannot shorten, and says so",
+                [written("modem-rf0.example.net"), written("h" * 400), written("x", "s" * 500)],
+                [(True, True, False, False), (False, True, True, True), (False, False, True, True)]))
+    # Round 111's findings, each text as it quotes it, so an answer moves it.
+    out.append(("round 111's findings, the texts they quote: F-535, §3.3's MAY \"with\" the four members, and the "
+                "entry's node, whose four members hold 947 B, said to exceed 1 KB with them alone; F-536, 1 KB and "
+                "512 B with no figure for the first and no word on what a member's count holds; F-537, no sentence "
+                "has an owner that holds the authoring file state its minor, where presence.md §2 expects it; "
+                "F-538, the four members an owner \"cannot shorten\", and `token` written at its default; F-539, "
+                "\"every empty member\" beside a required `bindings`",
+                missing(core, "So an owner MAY exceed 1 KB with `interfaces`, `capabilities`, `requires` and "
+                              "`profiles`.",
+                        "- **What an owner cannot shorten.** Four members state what the instance implements, "
+                        "holds, requires and follows.",
+                        "SHOULD leave out every empty member.",
+                        "A role the configuration leaves unbound is listed with `\"bindings\": []` (§3.2).",
+                        "and `true` otherwise, which is the default.")
+                + missing(log, "The four members hold 947 B (`interfaces` 513, `capabilities` 351, `profiles` 41, "
+                               "and their names), and the others 237 B",
+                          "So zenoh-modem's node exceeds 1 KB with the four members alone, and meets the rule as "
+                          "now worded.",
+                          "Half of 1 KB leaves `meta` its zid",
+                          "the reference still writes it in every entry: 13 B an entry")
+                + missing(sc, "Step 1's entries, from authoring files, state each file's `minor`.")
+                + [q for q in ("1,024 B", "1 KB (1,024", "An owner that holds its revision's authoring file",
+                               "An owner that holds the authoring file") if q in core[core.find("### 3.3"):
+                                                                                    core.find("## 4. State")]],
+                []))
     return out
 
 
@@ -7134,12 +7434,12 @@ def _core096_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("core 0.96's entry: RULES.md lists 246 rules, 0.95's 239, the core's four and observer 0.26's three; "
                 "250 since core 0.97's four, and core 0.98's still; 249 since core 0.99 (round 104); 262 since core "
                 "0.100's 13 (round 105); 267 since observer 0.29 (round 106); 273 since core 0.102's one and 0.103's "
-                "five (round 107); 274 since core 0.104's one (round 108)",
+                "five (round 107); 274 since core 0.104's one (round 108); 277 since core 0.107's three (round 111)",
                 missing(flat("CHANGELOG.md"), "lists 246 rules: 0.95's 239, these four and observer 0.26's three",
                         "`RULES.md` lists 250 rules, 4 more", "the index still lists 250 rules",
                         "lists 249 rules, 1 fewer", "`RULES.md` lists 262 rules, 13 more than 0.99's")
                 + missing(flat("observer-CHANGELOG.md"), "**`RULES.md`** counts 267 rules, 82 of them the observer's.")
-                + [int(once.group(1)) if once else None], [274]))
+                + [int(once.group(1)) if once else None], [277]))
     out.append(("core 0.96 §8.1, §8.4, §8.5 and observer 0.26 §3.6, §3.11: the rules as their texts state them",
                 missing(core, "Such an owner SHOULD put every interface it implements in its tokenless set.",
                         "Such an owner MUST NOT implement `archive.v1`, nor an interface whose contract uses "
@@ -7161,10 +7461,10 @@ def _core096_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("F-492 answered (core 0.98): RULES.md lists core §8.4's \"A deployment with such an owner SHOULD\" "
                 "under the deployment alone, and observer §3.11's \"A tool that knows an owner … MUST NOT\" under the "
                 "observer alone; the owner class counts 76, no text changed (83 since core 0.100's seven owner rules, "
-                "round 105; 85 since core 0.103's two, round 107)",
+                "round 105; 85 since core 0.103's two, round 107; 88 since core 0.107's three, round 111)",
                 missing(flat("CHANGELOG.md"), "It now reads the role a subject opens with, and each role joined to it",
                         "The owner class counts 76 where it counted 78", "§4.2 adds seven owner rules")
-                + [dep, tool, counted.get("Owner")], [["deployment"], ["observer"], 85]))
+                + [dep, tool, counted.get("Owner")], [["deployment"], ["observer"], 88]))
     out.append(("config.v1 0.10 §2.1: the SHOULD NOT on the tokenless set excepts a first hop; since 0.11 §2.12 names "
                 "the reference's restart of the configuration (F-480)",
                 ["The reference refuses the re-mint (`zenkey::config_v1`)" in cv1, "first hop" in cv1,

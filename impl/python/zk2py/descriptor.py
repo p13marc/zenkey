@@ -28,13 +28,22 @@ and counting (D000–D012; D006 alone is a warning), and "Cascades and scope":
    contract. A standby entry's ``unavailable`` and ``cardinality`` are
    checked as any entry's (D005–D007): they state what it will expose.
 
+Core 0.107: ``minor`` is optional, "so a descriptor that states none is not
+D000, and `null` is D000", and no check reads it "nor whether it is stated".
+The checker takes both from ``descriptor.schema.json``, read at run time:
+the member left ``required`` there, and its type stays ``integer``. So no
+line of this module moved. :func:`size` is §3.3's "Size" as 0.107 words it,
+which no check reads.
+
 This module follows that text. Before 0.5 these meanings were derived from
 the fixtures (SPEC-FINDINGS F-04, F-05).
 """
 
 from __future__ import annotations
 
+import json
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -48,6 +57,111 @@ from .shape import Checker, load_schema
 RUN = re.compile(r"[0-9a-f]{4}|[0-9a-f]{8}")
 
 FORMAT = "zk2-descriptor/0.1"
+
+#: core §3.3 "Size" (0.107): "Four members state what the instance
+#: implements, holds, requires and follows."
+FOUR = ("interfaces", "capabilities", "requires", "profiles")
+#: "An owner's descriptor SHOULD stay within 1 KB". The text gives 1 KB no
+#: figure; zk2py reads 1,024 B, twice the 512 B beside it (F-536).
+KB = 1024
+#: "within 512 B together, each counted with its name"
+OTHERS = 512
+#: "A member whose schema default is an empty list or object": the
+#: descriptor's, an entry's and a requirement's, by ``descriptor.schema.json``.
+EMPTY_TOP = ("capabilities", "requires", "profiles", "meta")
+EMPTY_ENTRY = ("unavailable", "cardinality")
+EMPTY_REQUIREMENT = ("params",)
+
+
+@dataclass
+class Size:
+    """A descriptor's bytes as core §3.3's "Size" counts them (0.107)."""
+
+    #: the descriptor's bytes, as written
+    total: int
+    #: each member of the document "counted with its name": from its name's
+    #: opening quote to its value's last byte, as written. The commas between
+    #: members and the document's braces are in no member (F-536).
+    members: dict[str, int] = field(default_factory=dict)
+    #: the empty members written, each by its path
+    empty: list[str] = field(default_factory=list)
+
+    @property
+    def four(self) -> int:
+        return sum(n for m, n in self.members.items() if m in FOUR)
+
+    @property
+    def others(self) -> int:
+        """"every member but `interfaces`, `capabilities`, `requires` and
+        `profiles`", together."""
+        return sum(n for m, n in self.members.items() if m not in FOUR)
+
+    @property
+    def over(self) -> bool:
+        """"An owner whose descriptor exceeds 1 KB"."""
+        return self.total > KB
+
+    @property
+    def should(self) -> list[str]:
+        """What "Over 1 KB" asks of this descriptor's owner and it does not
+        do: ``empty``, an empty member written, and ``others``, the other
+        members beyond 512 B. Empty for a descriptor within 1 KB, of which
+        neither SHOULD asks anything."""
+        if not self.over:
+            return []
+        return (["empty"] if self.empty else []) + (["others"] if self.others > OTHERS else [])
+
+    @property
+    def within(self) -> str:
+        """The 1 KB SHOULD, in zk2py's reading of its MAY (F-535):
+        ``within``, at most 1 KB; ``four``, beyond it and the other members
+        within 512 B, so that the four members are what exceeds; ``beyond``
+        otherwise."""
+        if not self.over:
+            return "within"
+        return "four" if self.others <= OTHERS else "beyond"
+
+
+def size(data: bytes) -> Size:
+    """The size of a descriptor's bytes (core §3.3, 0.107): the whole, each
+    member with its name, and the empty members it writes. Raises
+    ``ValueError`` on bytes that are no JSON object."""
+    text = data.decode("utf-8")
+    dec = json.JSONDecoder()
+
+    def skip(i: int) -> int:
+        while i < len(text) and text[i] in " \t\r\n":
+            i += 1
+        return i
+
+    i = skip(0)
+    if i >= len(text) or text[i] != "{":
+        raise ValueError("not a JSON object")
+    out = Size(len(data))
+    doc: dict[str, Any] = {}
+    i = skip(i + 1)
+    while i < len(text) and text[i] != "}":
+        start = i
+        name, i = dec.raw_decode(text, i)
+        if not isinstance(name, str):
+            raise ValueError("a member's name is no string")
+        i = skip(i)
+        if i >= len(text) or text[i] != ":":
+            raise ValueError("no colon after a member's name")
+        value, i = dec.raw_decode(text, skip(i + 1))
+        out.members[name] = len(text[start:i].encode("utf-8"))
+        doc[name] = value
+        i = skip(i)
+        if i < len(text) and text[i] == ",":
+            i = skip(i + 1)
+    out.empty = [m for m in EMPTY_TOP if m in doc and doc[m] in ([], {})]
+    for n, e in enumerate(doc.get("interfaces") or []):
+        if isinstance(e, dict):
+            out.empty += [f"interfaces/{n}/{m}" for m in EMPTY_ENTRY if m in e and e[m] in ([], {})]
+    for n, r in enumerate(doc.get("requires") or []):
+        if isinstance(r, dict):
+            out.empty += [f"requires/{n}/{m}" for m in EMPTY_REQUIREMENT if m in r and r[m] in ([], {})]
+    return out
 
 
 def check_descriptor(data: bytes, contracts: Contract | Sequence[Contract],

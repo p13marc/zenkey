@@ -152,8 +152,25 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "owner.Owner._descriptor's meta.zid, unless a test turns it off (state_zid)"),
     ("owner", "core §3.3", "An owner SHOULD write `meta.zid` as zenoh writes", MET,
      "owner.Owner._descriptor writes str(session.zid())"),
-    ("owner", "core §3.3", "An owner's descriptor SHOULD stay within 1 KB", NOT_MET,
-     "zk2py neither checks nor warns: an owner of enough contracts writes a longer descriptor"),
+    # core 0.107 (#1126, #1127): the descriptor's minor, its empty members
+    # and what may exceed 1 KB.
+    ("owner", "core §3.3", "An owner MUST NOT state a minor its revision does not have", MET,
+     "owner.Owner._descriptor_doc writes an entry's minor only where its Contract has one: the authoring file's, "
+     "none for a file that states none (W104) and none for a revision held as its bundle alone (bundle.held)  "
+     "(readings; presence_scenarios §2 step 8, zenctl reading it too) (round 111, core 0.107)"),
+    ("owner", "core §3.3", "An owner's descriptor SHOULD stay within 1 KB", MET,
+     "owner.Owner._descriptor measures each descriptor it writes (descriptor.size, Owner.descriptor_size). Beyond "
+     "1 KB it is the four members that exceed, its others kept within 512 B, which zk2py reads the MAY to allow  "
+     "(F-535); zenoh-modem's node shape is 1,116 B on zk2py's owner, 954 B of them the four (readings) (round 111, "
+     "core 0.107; not met before, when it neither measured nor warned)"),
+    ("owner", "core §3.3", "An owner whose descriptor exceeds 1 KB SHOULD leave out every empty member", MET,
+     "owner.Owner._descriptor_doc leaves out every member whose schema default is an empty list or object, at "
+     "every size: capabilities, requires, profiles, meta, an entry's unavailable and cardinality, a requirement's "
+     "params (readings: descriptor.size finds none written) (round 111, core 0.107)"),
+    ("owner", "core §3.3", "That owner SHOULD also keep every member but", MET,
+     "owner.Owner._descriptor: the others are the header and meta's zid and host. Over 1 KB with them beyond "
+     "512 B, it leaves meta.host out and says so on stderr (Owner.size_note); an address that alone exceeds "
+     "512 B it cannot shorten, and says so (readings) (round 111, core 0.107)"),
     ("owner", "core §3.3", "At the constrained level (§12), it MUST fit", NA,
      "zk2py claims no class at the constrained level"),
     ("owner", "core §3.3", "The owner MUST put the descriptor on its", MET,

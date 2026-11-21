@@ -994,11 +994,15 @@ def _operation_rules(v: Verdict, a: dict[str, Any], b: dict[str, Any]) -> None:
 def classify_pair(a: Revision, b: Revision, minor_a: int | None = None,
                   minor_b: int | None = None) -> tuple[str, str]:
     """Two revisions met on the bus, with no order of their own (§9.8,
-    0.10): "A tool that classifies them against each other MAY take the
-    order from the minor their descriptors state, when the two differ.
-    Otherwise it classifies both ways: the pair is clean only when both
-    directions are compatible, a finding when neither is, and undecided
-    when they disagree."
+    0.107): "A tool that classifies them against each other MAY take the
+    order from the `minor` their descriptors state, when both state one and
+    the two differ. Otherwise it classifies both ways: the pair is clean
+    only when both directions are compatible, a finding when neither is,
+    and undecided when they disagree."
+
+    ``minor_a`` and ``minor_b`` are what the two descriptors state, ``None``
+    for an entry that states none (core §3.3: an owner that holds only its
+    revision's bundle). One ``None`` is no order, never a 0.
 
     Returns (verdict, how). Ordered, the verdict is the class of the
     transition from the lower minor; both ways, it is ``clean``,

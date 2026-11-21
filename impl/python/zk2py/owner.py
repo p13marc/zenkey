@@ -601,7 +601,7 @@ class Owner:
           is unbound.
         - ``params``: a role's parameter bindings as configured (R2), listed
           in the descriptor for a bound role (R3); an unbound one lists
-          ``"params": {}`` (core §3.2).
+          ``"bindings": []`` "and no parameter bound" (core §3.2, 0.107).
         - ``capabilities``: the capabilities held (§3.3).
         - ``unavailable``: ``<kind token>/<template>`` → cause, for optional
           resources not exposed and listed so.
@@ -751,6 +751,11 @@ class Owner:
         self.hostid = hostid
         self.hostid_ephemeral = hostid_ephemeral
         self.meta_host = meta_host
+        #: core §3.3 "Size" (0.107): the last descriptor's size
+        #: (:class:`zk2py.descriptor.Size`), and what the owner says of one
+        #: over 1 KB whose other members exceed 512 B
+        self.descriptor_size: Any = None
+        self.size_note: str | None = None
         self.state_zid = state_zid
         #: hostid.v1 §2.8: whether this service's system is minted
         self.minted = False
@@ -1436,7 +1441,9 @@ class Owner:
             if bundles and not self.first_hop:
                 for c in self.contracts:
                     ckey = f"zk2/@zk/contract/{c.interface}/{c.fingerprint.removeprefix('sha256:')}"
-                    data = bundle.build(c)
+                    # A revision held as its bundle alone serves the bytes
+                    # it holds (core §8.4, §9.6).
+                    data = c.bundle if c.bundle is not None else bundle.build(c)
                     self._entities.append(s.declare_queryable(
                         ckey, zenoh.handlers.Callback(lambda q, data=data, ckey=ckey: q.reply(
                             ckey, data, encoding="application/json")), complete=True))
@@ -1685,8 +1692,59 @@ class Owner:
         role listed (an unbound one with empty bindings, an optional one
         with ``optional: true``), `unavailable` the listed resources only
         (exposure is compact), and ``meta.zid`` the session's zid, which an
-        owner SHOULD state (0.10): a tool attributes a state stamp by it."""
+        owner SHOULD state (0.10): a tool attributes a state stamp by it.
+
+        Core 0.107:
+        - **`minor`** is stated only where the revision has one: "the minor
+          of the contract revision the entry names, as its authoring file
+          states it". A revision held as its bundle alone
+          (:func:`zk2py.bundle.held`) has none, and neither has one whose
+          file states none (W104): "An owner MUST NOT state a minor its
+          revision does not have." Before, zk2py wrote 0 for both.
+        - **Empty members** are left out, at every size: "A member whose
+          schema default is an empty list or object reads as that default
+          when absent. So an owner MAY leave it out when it holds nothing".
+          That is `capabilities`, `requires`, `profiles` and `meta`, an
+          entry's `unavailable` and `cardinality`, and a requirement's
+          `params`. So "Over 1 KB"'s first SHOULD holds without the owner
+          measuring. `token` stays written: its default is `true`, no empty
+          list or object. `bindings` stays too, required by the schema.
+        - **Over 1 KB** with the other members beyond 512 B, the owner
+          leaves `meta.host` out, the one member it writes for display
+          alone, and says so (:attr:`size_note`)."""
         assert self.session is not None
+        doc = self._descriptor_doc(plan, instance, host=True)
+        data = json.dumps(doc, separators=(",", ":")).encode()
+        from . import descriptor as _descriptor
+
+        self.size_note = None
+        sized = _descriptor.size(data)
+        if "others" in sized.should and "host" in doc.get("meta", {}):
+            doc = self._descriptor_doc(plan, instance, host=False)
+            data = json.dumps(doc, separators=(",", ":")).encode()
+            self.size_note = (f"descriptor: {sized.total} B, over 1 KB, its members other than interfaces, "
+                              f"capabilities, requires and profiles {sized.others} B, over 512 B: meta.host left "
+                              "out (core §3.3)")
+            sized = _descriptor.size(data)
+        if "others" in sized.should:
+            self.size_note = (f"descriptor: {sized.total} B, over 1 KB, its members other than interfaces, "
+                              f"capabilities, requires and profiles {sized.others} B, over 512 B (core §3.3)")
+        if self.size_note is not None:
+            print(f"zk2py owner {self.system}/{self.service}: {self.size_note}", file=sys.stderr, flush=True)
+        #: the descriptor's size as core §3.3 counts it (0.107)
+        self.descriptor_size = sized
+        return data
+
+    def _descriptor_doc(self, plan: dict[str, list[tuple[dict[str, Any], str]]], instance: str | None,
+                        host: bool) -> dict[str, Any]:
+        def some(name: str, value: Any) -> dict[str, Any]:
+            """A member whose schema default is empty, written only when it
+            holds something (core §3.3, "Empty members")."""
+            return {name: value} if value else {}
+
+        meta = {**({"zid": str(self.session.zid())} if self.state_zid else {}),
+                **(({"host": self.meta_host} if self.meta_host is not None
+                    else {"host": socket.gethostname()} if self.minted else {}) if host else {})}
         doc = {
             "format": "zk2-descriptor/0.1",
             "service": f"{self.system}/{self.service}",
@@ -1697,35 +1755,37 @@ class Owner:
             # there"; one with none leaves the member out.
             **({"catalog": self.catalog.id} if self.catalog is not None else {}),
             "interfaces": [{
-                "iface": c.interface, "contract": c.fingerprint, "minor": c.minor or 0,
+                "iface": c.interface, "contract": c.fingerprint,
+                # core §3.3 (0.107): the revision's minor, where it has one.
+                **({"minor": c.minor} if c.minor is not None else {}),
                 "token": c.interface not in self.tokenless,
                 # core §3.3 (0.39): "Absent is serving"
                 **({"standby": True} if c.interface in self.standing_by else {}),
-                "unavailable": [{"resource": f"{r['token']}/{r['template']}",
-                                 "cause": self.unavailable[f"{r['token']}/{r['template']}"]}
-                                for r, status in plan[c.interface] if status == "listed"],
-                "cardinality": dict(self.cardinality.get(c.interface, {})),
+                **some("unavailable", [{"resource": f"{r['token']}/{r['template']}",
+                                        "cause": self.unavailable[f"{r['token']}/{r['template']}"]}
+                                       for r, status in plan[c.interface] if status == "listed"]),
+                **some("cardinality", dict(self.cardinality.get(c.interface, {}))),
             } for c in self.contracts],
-            "capabilities": sorted(self.capabilities),
+            **some("capabilities", sorted(self.capabilities)),
             # 0.10: `optional` is true for a role the instance works without,
             # "and absent otherwise"; for a contract's role "it repeats that
             # contract's [requires]".
-            "requires": [{
+            **some("requires", [{
                 "role": role, "interface": req["interface"], "declared_by": c.interface,
-                # R3 (0.20): "a self.system provider resolved".
+                # R3 (0.20): "a self.system provider resolved". An unbound
+                # role keeps `"bindings": []` "and no parameter bound" (§3.2,
+                # 0.107): `bindings` is required, `params` defaults empty.
                 "bindings": list(self.resolved_bindings.get(role, [])),
-                "params": dict(self.params.get(role, {})) if self.resolved_bindings.get(role) else {},
+                **some("params", dict(self.params.get(role, {})) if self.resolved_bindings.get(role) else {}),
                 **({"optional": True} if req["optional"] else {}),
-            } for c in self.contracts for role, req in c.canonical["requires"].items()],
+            } for c in self.contracts for role, req in c.canonical["requires"].items()]),
             # Core §3.3 (0.19): "the union of two sets": the contracts' uses,
             # and the derivation-only profiles the instance follows.
-            "profiles": profile_order({u for c in self.contracts for u in c.canonical["uses"]}
-                                      | ({"hostid.v1"} if self.minted else set())),
-            "meta": {**({"zid": str(self.session.zid())} if self.state_zid else {}),
-                     **({"host": self.meta_host} if self.meta_host is not None
-                        else {"host": socket.gethostname()} if self.minted else {})},
+            **some("profiles", profile_order({u for c in self.contracts for u in c.canonical["uses"]}
+                                             | ({"hostid.v1"} if self.minted else set()))),
+            **some("meta", meta),
         }
-        return json.dumps(doc, separators=(",", ":")).encode()
+        return doc
 
     # -- state mutations (S1–S3) ------------------------------------------
 
