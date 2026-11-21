@@ -594,30 +594,19 @@ fn check_id(s: &str) -> Result<zenkey_fleet::report::CheckId, String> {
     })
 }
 
-/// A zenoh binding by its `link.v2` name (§2.4), for `--binding`.
-fn binding_arg(s: &str) -> Result<zenkey_model::link::Binding, String> {
-    use zenkey_model::link::Binding;
-    Binding::parse(s).ok_or_else(|| {
-        format!(
-            "not a binding; one of: {}",
-            Binding::ALL.map(Binding::as_str).join(", ")
-        )
-    })
-}
-
 /// The zenoh the deployment's routers run (#1011's item 3): flattened into
 /// every verb that takes `--lease` or `--wait-before-close`, each of which
 /// resolves the three through `cmd::zk2::routers`.
 #[derive(clap::Args, Clone, Copy, Default)]
 pub(crate) struct BindingArgs {
+    // Parsed by `Binding`'s `FromStr`, the model's one list of names.
     /// The zenoh the deployment's routers run, by its `link.v2` name
     /// (§2.4): zenoh-1.10.1 or zm-1.10.2-r1. Its defaults are those of
     /// --lease and --wait-before-close, and its keep-alives the stall
     /// bound's, where no flag and no --face-policy states them (`link.v2`
     /// §2.19): zm-1.10.2-r1 waits 10 s before it closes, zenoh 1.10.1 5 s.
     /// Omitted, zenoh 1.10.1's.
-    #[arg(long, value_name = "NAME", value_parser = binding_arg,
-          add = ArgValueCandidates::new(completion::bindings))]
+    #[arg(long, value_name = "NAME", add = ArgValueCandidates::new(completion::bindings))]
     pub(crate) binding: Option<zenkey_model::link::Binding>,
 }
 

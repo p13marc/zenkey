@@ -117,7 +117,7 @@ pub struct Cli {
     /// 5 s), and the lease an owner stays present past a window. Omitted,
     /// zenoh 1.10.1's. No routers' face policy is read: `--face-policy` is
     /// the face the owners sit across.
-    #[arg(long, value_name = "NAME", value_parser = binding_arg)]
+    #[arg(long, value_name = "NAME")]
     pub binding: Option<zenkey_model::link::Binding>,
 
     /// v1's registry directories. Refused by name: zk2 reads contracts
@@ -241,17 +241,6 @@ pub struct Settings {
     /// The zenoh the deployment's routers run (`--binding`, #1011): zenoh
     /// 1.10.1 unless told. Launch only, as `across` is.
     pub binding: zenkey_model::link::Binding,
-}
-
-/// A zenoh binding by its `link.v2` name (§2.4), for `--binding`.
-fn binding_arg(s: &str) -> Result<zenkey_model::link::Binding, String> {
-    use zenkey_model::link::Binding;
-    Binding::parse(s).ok_or_else(|| {
-        format!(
-            "not a binding; one of: {}",
-            Binding::ALL.map(Binding::as_str).join(", ")
-        )
-    })
 }
 
 /// The owners `--across-face` names, and the face `--face-policy` and

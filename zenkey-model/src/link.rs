@@ -239,6 +239,18 @@ impl Binding {
     /// Every binding, in the order v2 §2.4 lists them.
     pub const ALL: [Binding; 2] = [Binding::Zenoh1_10_1, Binding::Zm1_10_2R1];
 
+    /// Every binding's name, in [`Binding::ALL`]'s order: the one list a
+    /// refusal offers ([`UnknownBinding`], and `Deserialize`'s).
+    pub const NAMES: [&'static str; Binding::ALL.len()] = {
+        let mut names = [""; Binding::ALL.len()];
+        let mut i = 0;
+        while i < names.len() {
+            names[i] = Binding::ALL[i].as_str();
+            i += 1;
+        }
+        names
+    };
+
     /// Its name in a policy.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -297,23 +309,37 @@ impl Serialize for Binding {
     }
 }
 
+/// A name that is no binding (v2 §2.4): what [`Binding`]'s `FromStr`
+/// refuses, said with the names it could have been.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnknownBinding(pub String);
+
+impl fmt::Display for UnknownBinding {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "not a binding; one of: {}", Binding::NAMES.join(", "))
+    }
+}
+
+impl std::error::Error for UnknownBinding {}
+
+/// A binding by its name in a policy, for a tool's flag (`--binding`): any
+/// other string is refused with the names it could have been.
+impl std::str::FromStr for Binding {
+    type Err = UnknownBinding;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Binding::parse(s).ok_or_else(|| UnknownBinding(s.to_owned()))
+    }
+}
+
 /// A binding by its name in a policy, for a tool's own configuration (a
 /// policy's `binding` is read by [`parse`], with its findings): any other
 /// string is refused with the names it could have been.
 impl<'de> serde::Deserialize<'de> for Binding {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        // Every binding's name, so a new one is offered without a second list.
-        const NAMES: [&str; Binding::ALL.len()] = {
-            let mut names = [""; Binding::ALL.len()];
-            let mut i = 0;
-            while i < names.len() {
-                names[i] = Binding::ALL[i].as_str();
-                i += 1;
-            }
-            names
-        };
         let name = String::deserialize(d)?;
-        Binding::parse(&name).ok_or_else(|| serde::de::Error::unknown_variant(&name, &NAMES))
+        Binding::parse(&name)
+            .ok_or_else(|| serde::de::Error::unknown_variant(&name, &Binding::NAMES))
     }
 }
 
@@ -4611,6 +4637,29 @@ mod tests {
             "{e}"
         );
         assert!(serde_json::from_value::<Binding>(Value::from(1)).is_err());
+    }
+
+    /// A binding parses from a tool's flag by its policy name, and any
+    /// other string is refused with the names it could have been, from the
+    /// one list, [`Binding::NAMES`], in [`Binding::ALL`]'s order.
+    #[test]
+    fn a_binding_parses_by_its_name() {
+        assert_eq!(Binding::NAMES, Binding::ALL.map(Binding::as_str));
+        for b in Binding::ALL {
+            assert_eq!(b.as_str().parse::<Binding>(), Ok(b));
+            assert_eq!(b.to_string().parse::<Binding>(), Ok(b));
+        }
+        let e = "zenoh-1.10.2".parse::<Binding>().unwrap_err();
+        assert_eq!(e, UnknownBinding("zenoh-1.10.2".to_owned()));
+        assert_eq!(
+            e.to_string(),
+            "not a binding; one of: zenoh-1.10.1, zm-1.10.2-r1"
+        );
+        assert!("".parse::<Binding>().is_err());
+        assert!(
+            "Zenoh-1.10.1".parse::<Binding>().is_err(),
+            "names are exact"
+        );
     }
 
     /// The zenoh facts the plan rests on (§0, §2.6, §2.7).
