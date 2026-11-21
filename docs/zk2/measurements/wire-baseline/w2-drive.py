@@ -57,8 +57,10 @@ and author.out (each owner's answers, stamped), and acts.jsonl.
 Standard library only.
 """
 import argparse
+import atexit
 import json
 import random
+import signal
 import socket
 import subprocess
 import sys
@@ -193,7 +195,25 @@ def main():
     device.wait("ready", 120)
     mark("device_ready")
     watches = []
+
+    def stop_watches():
+        """Each watch and the stamp.py it feeds, ended and waited for. Registered below, so
+        it also runs when the drive ends early: an owner that never answers, a probe's
+        timeout, the harness's SIGTERM. A second call finds nothing left."""
+        while watches:
+            w, stamp = watches.pop()
+            w.terminate()
+            for proc in (w, stamp):      # stamp.py ends at its input's end
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+
     if a.watch:
+        atexit.register(stop_watches)
+        # `wire.sh down` signals the drive: leave by SystemExit, so atexit runs.
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
         here = __file__.rsplit("/", 1)[0]
         for name, extra in (("watch-catalog", catalog), ("watch-none", [])):
             w = subprocess.Popen(
@@ -203,11 +223,11 @@ def main():
                  "--format", "ndjson"],
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                 stderr=open(f"{a.logs}/{name}.err", "w"))
-            subprocess.Popen([sys.executable, "-I", "-u", f"{here}/stamp.py",
-                              f"{a.logs}/{name}.jsonl", "--all"], stdin=w.stdout,
-                             stdout=subprocess.DEVNULL)
+            stamp = subprocess.Popen([sys.executable, "-I", "-u", f"{here}/stamp.py",
+                                      f"{a.logs}/{name}.jsonl", "--all"], stdin=w.stdout,
+                                     stdout=subprocess.DEVNULL)
             w.stdout.close()
-            watches.append(w)
+            watches.append((w, stamp))
     gen = None
     if a.zk2c:
         gen = subprocess.Popen([a.zenctl, "gen", "--namespace", "", DEVICE, "gendev.v1",
@@ -354,8 +374,7 @@ def main():
     mark("end")
     stop.set()
     json.dump(marks, open(f"{a.logs}/marks.json", "w"), indent=1)
-    for w in watches:
-        w.terminate()
+    stop_watches()
     if gen is not None:
         gen.terminate()
         try:

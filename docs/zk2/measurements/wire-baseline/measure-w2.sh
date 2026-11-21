@@ -89,9 +89,15 @@ if [[ ${ZK2C:-0} == 1 ]]; then
               "rfcfg|$REPO/spec/profiles/config/conformance/contracts/rfcfg.v1.toml|" \
               "worker|$REPO/zenkey/tests/contracts/worker.v1.toml|"; do
     IFS='|' read -r name contract sel <<<"$spec"
-    $W start "far-$name" bash -c "$BIN/zenctl echo $sel --namespace '' --across-face $DEV \
-      --contracts $contract ${CATALOG[*]} --no-decode --format ndjson -c tcp/127.0.0.1:$((BASE + 2)) \
-      | python3 -I -u $HERE/stamp.py $LOGS/far.jsonl"
+    # The reader's command line is a string for `bash -c`: each word that is a path or a
+    # selector goes in quoted (%q), so a directory with a space in it stays one word, and a
+    # selector's `**` is never a glob. An empty selector and an empty CATALOG add no word.
+    catalog_q=""
+    ((${#CATALOG[@]})) && catalog_q=$(printf ' %q' "${CATALOG[@]}")
+    $W start "far-$name" bash -c "$(printf %q "$BIN/zenctl") echo ${sel:+$(printf %q "$sel")} \
+      --namespace '' --across-face $DEV --contracts $(printf %q "$contract")$catalog_q \
+      --no-decode --format ndjson -c tcp/127.0.0.1:$((BASE + 2)) \
+      | python3 -I -u $(printf %q "$HERE/stamp.py") $(printf %q "$LOGS/far.jsonl")"
   done
   ZK2C_ARGS=(--zk2c --rfcfg "$REPO/spec/profiles/config/conformance/contracts/rfcfg.v1.toml")
   [[ ${RUN_FILE:-0} == 1 ]] && ZK2C_ARGS+=(--run-files)

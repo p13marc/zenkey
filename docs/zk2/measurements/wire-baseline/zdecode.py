@@ -126,7 +126,13 @@ def zenoh_body(r):
 
 
 def network(r):
-    """One network message: (kind, scope, suffix, mapping_sender, extra)."""
+    """One network message: (kind, scope, suffix, mapping_sender, extra).
+
+    `extra` is the kind's own: a key expression's id for `declare-keyexpr`, the request id
+    for `request` and every `response-*`, a push's payload length for `push-*`, and None
+    for the rest. decode() reads it under its kind alone, so a push's length is never
+    taken for an id.
+    """
     h = r.u8()
     mid = h & 0x1F
     z = bool(h & 0x80)
