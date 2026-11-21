@@ -56,8 +56,8 @@ The owner, consumer and caller sections each point to them.
 | [Caller](#caller) | 17 |
 | [Deployment](#deployment) | 18 |
 | [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 84, 27 of them a reader's |
-| [Implementation: the static rules](#implementation-the-static-rules) | 74 |
-| Every rule, once | 285 |
+| [Implementation: the static rules](#implementation-the-static-rules) | 75 |
+| Every rule, once | 286 |
 | [Rule ids](#rule-ids) | 85 |
 
 ## Owner
@@ -808,13 +808,14 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§7.5](core.md#75-the-zk2c-envelope) | An implementation MUST compute a digest so. | `[F: heartbeat/digests.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | **Reading a body.** … An implementation MUST refuse a body for the first of these that applies, in this order, naming the refusal: (3 items) | `[F: heartbeat/bodies.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | Every body an implementation accepts MUST write back to the same bytes. | `[F: heartbeat/bodies.json]` |
-| [§7.5](core.md#75-the-zk2c-envelope) | An implementation MUST NOT choose the layout by a payload's bytes. | `[F: heartbeat/owner.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | An implementation MUST NOT choose the layout by a payload's bytes, CH's tag among them. | `[F: heartbeat/owner.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | **The body bounds the sections, never the size.** … An implementation MUST NOT allocate from a size: it takes a group's bits only as the body holds them, and a size above the bits left is `short` (below). | `[F: heartbeat/owner.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | An implementation that writes an owner heartbeat MUST write it so: CH's tag 0, from 1 to 15 groups in ascending order of their indices, and each group's size the count of bits in its sections. | `[F: heartbeat/owner.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | **The groups.** … An implementation MUST then refuse an owner heartbeat for the first of these that applies, in this order, naming the refusal: (4 items) | `[F: heartbeat/owner.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | An implementation MUST write every owner heartbeat it accepts back to the same bytes. | `[F: heartbeat/owner.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | **A group's sections.** … An implementation MUST refuse a group for the first of these that applies, in this order, naming the refusal: (3 items) | `[F: heartbeat/owner.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | **That group alone.** … An implementation MUST read each other group as it would with the refused one left out. | `[F: heartbeat/owner.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | **Another form on a heartbeat's key.** … An implementation that reads a heartbeat or an owner heartbeat MUST refuse a put of another form on that key, naming `form`, before it reads a tag or a body. | `[F: heartbeat/owner.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | **Reading a snapshot's body.** … An implementation MUST refuse a body for the first of these that applies, reading its fields in order, naming the refusal: (8 items) | `[F: snapshot/bodies.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | An implementation MUST NOT write a page that this reading refuses. | `[F: snapshot/bodies.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | Every page an implementation accepts MUST write back to the same bytes. | `[F: snapshot/bodies.json]` |
