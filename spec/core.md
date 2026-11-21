@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.109** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.111** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -2539,6 +2539,9 @@ pad        zero bits up to the next whole byte, fewer than 8
   - **The tag finds no group.** It is a check, and 1 revision in 16
     shares it. §8.6's refusal stands whatever a group's tag says: never
     a guess.
+  - **Which catalog its owner names** is in the owner's descriptor, or
+    the deployment's word (§8.6). Where a reader learns it, and what it
+    does with a put heard before, is `freshness.v2` §2.5's to say.
 - **Why a tag beside the index.** The index names a revision in the
   owner's catalog. The tag says which revision the owner wrote with. A
   reader whose catalog gives that index another revision reads a tag
@@ -2582,7 +2585,8 @@ the same bytes. `[F: heartbeat/owner.json]`
 
 **A group's sections.** A reader reads the groups it has a use for, and
 skips every other by its size, one whose revision it does not hold among
-them. It reads a group's index through the
+them. `freshness.v2`'s `apply.json` holds such a reader, beside groups
+whose bits no revision accepts. It reads a group's index through the
 catalog its owner names, as §8.6 says, and the group's sections with the
 revision that entry names. An implementation MUST refuse a group for
 the first of these that applies, in this order, naming the refusal:
@@ -2619,6 +2623,10 @@ before it reads a tag or a body. `[F: heartbeat/owner.json]`
 - **The name is §2.6's,** for a put on an events key that carries no
   event: its envelope reads as another form, or it carries none. A put
   with no envelope on either key is refused the same way.
+  - **No envelope** is a put under another `Encoding` than
+    `zenoh/bytes` ([`observer.md`](observer.md) §7.3). Its bytes are not
+    parsed, a heartbeat's own bytes among them.
+    `envelope/carries.json` holds both keys under another `Encoding`.
 - **A heartbeat on an owner heartbeat's key** is form 6, in the other
   layout. Its CH carries its covered revision's tag, so it is refused
   `tag` 15 times in 16. Under tag 0 its body is read as an owner
@@ -5777,6 +5785,8 @@ section each was written against, whose pointer leads on.
 | `conformance/errors/` | §5.2: `forms.json` §7.5's error form, and every reply error it refuses read as the transport's, a router's `Timeout`, a querier's and one under another `Encoding` among them |
 | `conformance/envelope/` | §7.5, a call's forms, an event and a snapshot's envelope included; `calls.json` §5.1's and §5.2's forms by an operation's types |
 | `conformance/snapshot/` | §7.5, a snapshot's pages: their bytes, their reading and the paging rule |
+| `conformance/heartbeat/` | §7.5, a heartbeat and an owner heartbeat: a revision's collections and tag, a body's bytes and its refusals, a digest, a time under an epoch, an owner heartbeat's groups read with no contract and then through a catalog, another form on either key, and one body read both ways |
+| `conformance/packed/` | §7.6 |
 | `conformance/frame/` | §7.7 |
 | `conformance/catalog/` | §8.6 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
@@ -5984,6 +5994,29 @@ brief:
     with its time, and its record in hex.
   - Every page read writes back to its bytes, and every set of pages reads
     back to its snapshot's entries.
+- **`heartbeat/`**: a contract revision → its fingerprint, its tag and
+  its collections in map order (`layouts.json`, which holds each
+  revision's authoring text). A layout and a value → the body's bits
+  before the pad, its pad and its bytes in hex, or the writer's refusal
+  (`bodies.json`'s `writes`). A layout and a body's bytes → the value, or
+  the reader's refusal, the first in §7.5's order (`reads`).
+  - **`digests.json`:** members, each a key, a run and a seq → each
+    one's 32-bit value and their collection's digest.
+  - **`times.json`:** a deployment epoch and an instant → the 42-bit
+    time, the unknown time where the instant has no code. An epoch and a
+    time's bytes → the instant.
+  - **`owner.json`** holds the owner heartbeat. A value → the body's
+    bits, its pad and the put's payload (`writes`). A payload → the
+    value, its groups' sections unread, or the refusal (`reads`). A put
+    of another form → `form` (`forms`).
+  - Its `groups` give the catalog an owner names, the catalogs a reader
+    holds and one group → the revision its index names, whether its tag
+    is that revision's, and its sections, or that group's refusal. Its
+    `beside` reads every group of one payload so. Its `either` reads one
+    body as both layouts.
+  - A section is its digest, then `vouched` for one member, or the live
+    count, the ranks vouched for and the form written, `bitmap` or
+    `list`.
 - **`frame/`**: one packed document, shared by every case (`schema`).
   A record type and a `frame` table → the frame form, its sha256, its
   tag, the count's and the offset's widths, and the span (`layouts.json`).

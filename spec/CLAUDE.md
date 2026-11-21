@@ -658,6 +658,40 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   resource is absent here), and that an owner whose owner heartbeats
   cover an interface exposes it. No rule, fixture or keyword moved: 286
   rules.
+  Core 0.111, observer 0.35, `freshness.v2` 0.11 and `link.v2` 0.22
+  answer zk2py rounds 113 to 115's F-548 and F-550 to F-568, all
+  editorial: no MUST or SHOULD moved, 286 rules (0.110 is #986's J1).
+  `freshness.v2` §2.5, "The catalog its owner names": the id is in the
+  descriptor that states the put's run, the deployment's word (the
+  catalog provisioned) where no descriptor answers; before it knows, a
+  subscriber refuses each group `unknown_catalog` or holds the put, in
+  order and bounded, never a guess; without the catalog it reads no
+  group, its members go stale, no finding about the owner (§5), and one
+  that holds no catalog need not subscribe to a class key. A class is
+  one revision's (§2.4). `apply.json` holds 37 cases, 22 over owner
+  heartbeats: the five new ones (named within the run and again after
+  another run, a `revision` group naming its interface, one count
+  across runs, a collection not followed in a read group, `other_class`
+  ending no row) were written by hand over bodies the file held, and
+  `freshness_v2_apply`'s count moves with them. `link.v2`: §2.9 and
+  §2.16 count each listed interface with a heartbeat and a `link`
+  collection, one the revisions disagree on read `host`; §2.19, as
+  data, reads a refused `mode` as `router` and a refused
+  `timestamping/enabled` at its mode's default (`v2/transport.json`'s
+  cases 27 to 30, written by hand, 31 cases), and a refusal is of the
+  file refused, a tool free to ask the router's rows or to stop with no
+  verdict; Appendix B: an SDU is 23 B over its payload (put 4, frame 3,
+  lean stack 16, as #1110's H4 measured), LoRa's columns derivable from
+  the modem maker's formula and the SF12 tile, W2 measured 176.6 KB and
+  226.8 KB. Observer §7.5: a tool MAY refuse a `link.v1` policy as its
+  face policy; `scope/faces.json` holds 33 cases, the last four by hand
+  (a GET given a catalog, a `host` collection beside a crossing `link`
+  key), and `face_scope.rs`'s count moves with them. Core: Appendix C
+  and E index `conformance/heartbeat/` and `packed/`;
+  `envelope/carries.json` holds both heartbeat keys under another
+  `Encoding` (29 cases); `profiles/README.md` says a header's "written
+  against" is the core its rules were last read whole against. The
+  code half is `/srv/dev/scratch/zenkey/p/r115-code.md`.
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`

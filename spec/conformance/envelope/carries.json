@@ -156,6 +156,24 @@
       "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/01j9zk6q6x5m2f4a8c0d3e7b9h",
       "encoding": "zenoh/bytes",
       "expect": false
+    },
+    {
+      "note": "an owner heartbeat's key under another Encoding: no envelope, so its bytes are not parsed, an owner heartbeat's own among them; a heartbeat's reader refuses the put `form` (core §7.5), which no case here states",
+      "key": "zk2/lab/n1/freshness.v2/stream/heartbeats/host",
+      "encoding": "application/octet-stream",
+      "expect": false
+    },
+    {
+      "note": "a heartbeat's key under another Encoding: no envelope either",
+      "key": "zk2/lab/beacon/freshness.v2/stream/heartbeat/beacon.v2",
+      "encoding": "application/octet-stream",
+      "expect": false
+    },
+    {
+      "note": "an owner heartbeat's key under zenoh/bytes: a stream key, so the put carries an envelope",
+      "key": "zk2/lab/n1/freshness.v2/stream/heartbeats/host",
+      "encoding": "zenoh/bytes",
+      "expect": true
     }
   ],
   "reads": [

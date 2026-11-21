@@ -75,7 +75,10 @@ thing in the same place.
   - the text version, `0.N`;
   - the status: `experimental`, `draft` or `accepted`, as the process
     below says;
-  - the core version the text is written against;
+  - the core version the text is written against: the one its rules
+    were last read whole against. An entry may restate one sentence over
+    a later core's rule. It then names that core in the changelog, and
+    the header stays;
   - the profiles it uses, or "none".
 - **§0, conventions.** By reference to core §0: the keywords, the roles and
   the evidence tags. A profile adds terms of its own here. In a profile:
