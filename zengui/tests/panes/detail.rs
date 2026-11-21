@@ -841,6 +841,7 @@ fn inspector<'a>(
         why: Box::leak(Box::default()),
         consumers: Box::leak(Box::default()),
         freshness: None,
+        owner_heartbeats: None,
         sp: sp(),
     }
 }
