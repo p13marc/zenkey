@@ -5,7 +5,8 @@ the core's scenarios ([`../../scenarios/README.md`](../../scenarios/README.md)):
 a setup, steps, and expected observations. The reference runtime runs §1
 to §7 (`zenkey/tests/profile_freshness_v2.rs`, one test per section,
 named after it). §2's step 6 has a test of its own,
-`s2_a_candidates_held_put_clears_its_bit`.
+`s2_a_candidates_held_put_clears_its_bit`. §8 is not run yet: the
+reference's owner sends no owner heartbeat.
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.4) are v2.md's rules; core
@@ -14,8 +15,9 @@ named after it). §2's step 6 has a test of its own,
   is. The owner, the subscribers S and the GET reader G are its clients,
   unless a section says otherwise. The owner's session runs with
   timestamping off (core §8.2). Timeouts are 1 s unless stated.
-- **The contract.** Every section uses `beacon.v2`. The reference keeps
-  it as `zenkey/tests/contracts/beacon.v2.toml`:
+- **The contract.** Every section uses `beacon.v2`, and §8 adds two of
+  its own. The reference keeps it as
+  `zenkey/tests/contracts/beacon.v2.toml`:
 
   ```toml
   [interface]
@@ -258,3 +260,121 @@ protocol.
   jitter, and `level` at most once every 2 s.
 - **Liveness.** F judges the heartbeat key fresh at the end of the 5 s,
   by its horizon of 2 s, so it judges `lab/beacon` live across the face.
+
+## §8 An owner heartbeat (§2.4, §2.5, §2.9; link.v2 §2.9)
+
+**Setup.** The owner is `lab/w2`. It implements `beacon.v2` as the
+conventions say, and two contracts of one collection each, W2's shape:
+
+```toml
+[interface]
+name  = "dial"
+major = 1
+minor = 0
+uses  = ["freshness.v2"]
+
+[resources.config]                         # one member
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 2 }
+```
+
+```toml
+[interface]
+name  = "pulse"
+major = 1
+minor = 0
+uses  = ["freshness.v2"]
+
+[resources.status]                         # one member
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 2 }
+```
+
+- **The catalog.** The owner is given a catalog of three entries:
+  `beacon.v2` at index 0, `dial.v1` at 1 and `pulse.v1` at 2. Every
+  reader below holds it.
+- **The owner heartbeats.** The owner covers the three interfaces by
+  owner heartbeats. Its keys are
+  `zk2/lab/w2/freshness.v2/stream/heartbeats/host` and
+  `zk2/lab/w2/freshness.v2/stream/heartbeats/link`.
+- **The classes.** `beacon.v2`'s `status` is `link`. Its `peer/{peer}`
+  and `route`, `dial.v1`'s `config` and `pulse.v1`'s `status` are `host`.
+  So each key's shortest horizon is 2 s, and its owner heartbeats are at
+  most 1 s apart.
+- **H** subscribes to both owner heartbeat keys and to
+  `zk2/lab/w2/freshness.v2/stream/heartbeat/*`. It holds the three
+  revisions.
+- **S** subscribes to every collection of the three interfaces and to
+  both owner heartbeat keys. Its session is a client of R2, a router
+  linked to R1 by a link the test can cut, as in §4.
+- **P** is bound to `pulse.v1` alone. It holds that revision and the
+  catalog, and no other contract. It subscribes to `pulse.v1`'s `status`
+  and to the `host` key.
+
+**Steps.**
+1. The owner puts `beacon.v2`'s `status` = `up` and `peer/a`, `peer/b`
+   and `peer/c` = `1`, `dial.v1`'s `config` = `x` and `pulse.v1`'s
+   `status` = `ok`. Then it puts nothing for 5 s. H, S and P listen.
+2. The link is cut. The owner puts `peer/a` = `2`, which S never hears.
+   2.5 s later the link heals, and S listens 6 s.
+3. A `link.v2` face policy names one face, `rf`, of R1, toward the far
+   principal F: `expose = "link"`, `interval_s = 2`, and a `[transport]`
+   its linter accepts. The deployment lists `lab/w2` implementing the
+   three interfaces and `freshness.v2`. A generator derives the plan,
+   and R1 runs it. F is a client of R1 over the face's link protocol. It
+   holds the catalog and `beacon.v2`. It subscribes to both owner
+   heartbeat keys, and listens 5 s.
+4. Step 3 again under §7's `link.v1` policy, with `lab/w2` listed.
+
+**Expected.**
+- **The descriptor** lists `beacon.v2`, `dial.v1`, `pulse.v1` and
+  `freshness.v2`, and states the catalog's id.
+- **One form** (step 1). H hears no put on any `heartbeat/<iface>` key.
+- **The `host` key.** H hears an owner heartbeat at least every 1 s plus
+  jitter, from the owner's tokens on. Each is form 6 with CH's tag 0, and
+  their seqs are consecutive within one run.
+  - It holds three groups, of indices 0, 1 and 2, each with its
+    revision's tag.
+  - `beacon.v2`'s group has the map `1 0 0`. Its `peer/{peer}` section
+    holds 3 live members, all vouched for, its digest over their stamps.
+    `status` is another class's, and `route` is not exposed.
+  - `dial.v1`'s and `pulse.v1`'s groups each vouch for their one member.
+  - Its payload is 34 bytes on a 16-bit run, and 36 on a 32-bit one:
+    223 bits of body.
+- **The `link` key.** H hears an owner heartbeat at least every 1 s plus
+  jitter, its seqs its own. It holds one group, `beacon.v2`'s, with the
+  map `0 0 1`: `status`, vouched for. Its payload is 19 bytes on a
+  16-bit run.
+- **Confirmed.** S hears each put once. 5 s after the puts it judges
+  every member of the three interfaces fresh, past each horizon.
+- **One interface's reader.** P judges `pulse.v1`'s `status` fresh 5 s
+  after its put. It read its group behind two groups whose revisions it
+  does not hold.
+- **A lost owner heartbeat** (step 2). The first owner heartbeat S hears
+  on each key after the heal follows a gap in that key's seqs. S reads
+  it as one lost for every group: its reading names all four `host`
+  collections it follows as having lost a delivery, and `status` on the
+  `link` key. The next owner heartbeat on each key arrives in sequence,
+  and ends that.
+- **A divergence in one group.** S's view holds `peer/a`'s old stamp. So
+  `beacon.v2`'s group diverges on `peer/{peer}`, on the `host` key.
+  - `dial.v1`'s and `pulse.v1`'s groups confirm their members in the
+    same owner heartbeats, and so does `status` on the `link` key.
+  - After two in a row, S re-reads `peer/{peer}` once. The next `host`
+    owner heartbeat confirms its three members.
+- **The plan** (step 3). Its stream deny of `freshness.v2` holds
+  `zk2/*/*/freshness.v2/stream/heartbeats/host/**`, and the heartbeat
+  keys of `dial.v1` and `pulse.v1`. It holds nothing of
+  `heartbeats/link`. Its liveness evidence for `lab/w2` lists
+  `freshness.v2/stream/heartbeats/link`.
+- **The `host` class stays home.** F hears no put on the `host` key in
+  5 s. It hears an owner heartbeat on the `link` key at least every 1 s
+  plus jitter, never downsampled. Each holds `beacon.v2`'s group alone,
+  with the map `0 0 1`: no bit of `peer/{peer}` crosses.
+- **Liveness.** F judges the `link` key fresh at the end of the 5 s, by
+  its horizon of 2 s. So it judges `lab/w2` live across the face.
+- **Under `link.v1`** (step 4). The plan's stream deny of `freshness.v2`
+  holds `zk2/*/*/freshness.v2/stream/heartbeats/**`. F hears no owner
+  heartbeat on either key.
