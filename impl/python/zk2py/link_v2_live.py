@@ -1,6 +1,24 @@
-"""``link.v2``'s ``scenarios-v2.md`` §4 and §5, live, on in-process
-zenoh-python routers (zenoh 1.10.1; #609, round 110): ``python -m
-zk2py.link_v2_live [--only s4|s5]``. §3 is :mod:`zk2py.stamp_live`'s.
+"""``link.v2``'s ``scenarios-v2.md`` §1, §4 and §5, live, on in-process
+zenoh-python routers (zenoh 1.10.1; #609, rounds 110 and 111): ``python -m
+zk2py.link_v2_live [--only s1|s1ref|s4|s4ref|s5]``. §3 is
+:mod:`zk2py.stamp_live`'s.
+
+- **s1**, "The router runs the block" (§2.16, §2.18, §2.19; round 111, the
+  carry of round 110). N from zk2py's generated configuration, F a client
+  session as ``ground`` from zk2py's far side's configuration
+  (:meth:`zk2py.far_side.FarSide.config`), through :class:`HoldRelay`, the
+  Conventions' R: it forwards both directions, keeps each direction's
+  batches with the time it read them, holds both for a time, and sees an
+  end close its socket at once. The tool of steps 2 and 6 is
+  :func:`zk2py.link_v2.check_transport`, and ``zenctl check face
+  --peer-config`` beside it (a black box, run).
+- **s1ref**: §1 again on the reference's generated pair: N from ``zenctl
+  acl gen --json5``'s fragment and F from ``zenctl acl gen --far-config``'s,
+  each loaded by zenoh as the tool wrote it, with only what the fragment
+  leaves to the deployment inserted (the mode, the endpoints, the
+  credentials).
+- **s4ref**: §4's steps 1 to 3 and 5 on the reference's generated pair, a
+  far router from ``--far-config``'s block with its placeholders filled in.
 
 - **s4**, "The far end opens a face bound by a user name" (§2.5, §2.18;
   link.v2 0.15, #1107). N is run from zk2py's generated configuration, as
@@ -40,8 +58,11 @@ import threading
 import time
 from typing import Any
 
+import socket
+
 from .blackbox import BLACKBOX, workdir
-from .stamp_live import ENROLLMENT, OPER, RADIO, Heard, Relay, _close_all, conventions_policy, near_config, open_router
+from .stamp_live import (ENROLLMENT, OPER, RADIO, Heard, Relay, _close_all, _codes, conventions_policy, near_config,
+                         open_router)
 
 Result = tuple[str, bool, str]
 
@@ -450,11 +471,448 @@ def _s5(work: str) -> list[Result]:
     return out
 
 
+# -- §1, and the reference's generated pair (round 111) ---------------------------------------------------
+
+class HoldRelay:
+    """The Conventions' R: a ``unixsock-stream`` relay between F and N's
+    face. "It forwards both directions, and counts each direction's
+    keep-alives: a batch holding one KeepAlive message, the 1-byte batch
+    after the stream link's 2-byte length. On request, R holds both
+    directions for a time, a silence, and delivers what it held when the
+    time is up. It reads both sockets throughout, so it sees an end close
+    its socket at once."
+
+    Each direction has a reader, which keeps every batch with the time it
+    was read and the end that sent it (``"F"`` or ``"N"``), and a writer,
+    which delivers, after the hold where one stands. An end's close is
+    recorded when it is read, and passed on to the other end only once no
+    hold stands: under a hold, each end expires its transport by its own
+    lease, never by the other's close."""
+
+    def __init__(self, path: str, upstream: str) -> None:
+        self.path, self.upstream = path, upstream
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.bind(path)
+        self.sock.listen(4)
+        self.lock = threading.Lock()
+        #: (time read, the end that sent it, the batch)
+        self.seen: list[tuple[float, str, bytes]] = []
+        #: (time read, the end that closed its socket)
+        self.closed: list[tuple[float, str]] = []
+        self.hold_until = 0.0
+        self.conns: list[socket.socket] = []
+        threading.Thread(target=self._accept, daemon=True).start()
+
+    def _accept(self) -> None:
+        import queue
+
+        while True:
+            try:
+                c, _ = self.sock.accept()
+            except OSError:
+                return
+            u = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                u.connect(self.upstream)
+            except OSError:
+                c.close()
+                continue
+            with self.lock:
+                self.conns += [c, u]
+            for src, dst, sender in ((c, u, "F"), (u, c, "N")):
+                q: queue.Queue = queue.Queue()
+                threading.Thread(target=self._read, args=(src, sender, q), daemon=True).start()
+                threading.Thread(target=self._write, args=(dst, q), daemon=True).start()
+
+    def _read(self, src: socket.socket, sender: str, q: Any) -> None:
+        buf = bytearray()
+        while True:
+            try:
+                data = src.recv(65536)
+            except OSError:
+                data = b""
+            now = time.monotonic()
+            if not data:
+                with self.lock:
+                    self.closed.append((now, sender))
+                q.put(None)
+                return
+            buf += data
+            while len(buf) >= 2 and len(buf) >= 2 + int.from_bytes(buf[:2], "little"):
+                n = int.from_bytes(buf[:2], "little")
+                with self.lock:
+                    self.seen.append((now, sender, bytes(buf[2:2 + n])))
+                del buf[:2 + n]
+            q.put(data)
+
+    def _write(self, dst: socket.socket, q: Any) -> None:
+        while True:
+            data = q.get()
+            while True:
+                with self.lock:
+                    wait = self.hold_until - time.monotonic()
+                if wait <= 0:
+                    break
+                time.sleep(min(wait, 0.02))
+            if data is None:
+                try:
+                    dst.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                return
+            try:
+                dst.sendall(data)
+            except OSError:
+                return
+
+    def hold(self, seconds: float) -> float:
+        """Hold both directions for ``seconds`` from now: the time the
+        silence began."""
+        now = time.monotonic()
+        with self.lock:
+            self.hold_until = now + seconds
+        return now
+
+    def keep_alives(self, since: float, until: float) -> dict[str, int]:
+        """Each end's keep-alives R read in the window."""
+        with self.lock:
+            return {end: sum(1 for t, who, b in self.seen if who == end and len(b) == 1 and since <= t < until)
+                    for end in ("F", "N")}
+
+    def closes(self, since: float) -> dict[str, float | None]:
+        """Each end's first close of its socket after ``since``, in seconds
+        after it."""
+        with self.lock:
+            return {end: next((round(t - since, 2) for t, who in self.closed if who == end and t >= since), None)
+                    for end in ("F", "N")}
+
+    def close(self) -> None:
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+        with self.lock:
+            for c in self.conns:
+                try:
+                    c.close()
+                except OSError:
+                    pass
+
+
+#: §1 Expected 1: "a lease of 2,000 ms, 4 keep-alives, 16bit, a batch of
+#: 1,000 B, a wait_before_close of 2,000,000 µs, and 10,000 ms for each
+#: timeout", at zenoh's keys.
+EIGHT = {"transport/link/tx/lease": 2000, "transport/link/tx/keep_alive": 4,
+         "transport/link/tx/sequence_number_resolution": "16bit", "transport/link/tx/batch_size": 1000,
+         "transport/link/tx/queue/congestion_control/block/wait_before_close": 2_000_000,
+         "transport/unicast/open_timeout": 10_000, "transport/unicast/accept_timeout": 10_000,
+         "routing/interests/timeout": 10_000}
+
+
+def _config(conf: dict[str, Any] | str, inserts: dict[str, Any] | None = None) -> Any:
+    """A zenoh configuration: a document's members inserted one by one, or a
+    generated JSON5 fragment loaded as zenoh reads it, then ``inserts``, each
+    a zenoh key and its value."""
+    import zenoh
+
+    if isinstance(conf, str):
+        c = zenoh.Config.from_json5("{" + conf + "}")
+    else:
+        c = zenoh.Config()
+        for k, v in conf.items():
+            c.insert_json5(k, json.dumps(v))
+    for k, v in (inserts or {}).items():
+        c.insert_json5(k, json.dumps(v))
+    return c
+
+
+def _eight(c: Any) -> dict[str, Any]:
+    """The eight keys as zenoh holds them in a configuration it loaded."""
+    return {k: json.loads(c.get_json(k)) for k in EIGHT}
+
+
+def _zenctl_check_files(work: str, name: str, policy_text: str, router_text: str, peer_text: str | None,
+                        ) -> tuple[int, list[str], str]:
+    """``zenctl check face`` over a router's configuration file, with the far
+    end's (``--peer-config``): its exit, the codes its output names, and its
+    output's end."""
+    files = {}
+    for what, text in (("policy.face.toml", policy_text), ("router.json5", router_text),
+                       ("peer.json5", peer_text)):
+        if text is not None:
+            files[what] = os.path.join(work, f"{name}-{what}")
+            with open(files[what], "w") as f:
+                f.write(text)
+    p = subprocess.run([str(BLACKBOX / "zenctl"), "check", "face", "--face-policy", files["policy.face.toml"],
+                        "--enrollment", str(ENROLLMENT), "--contracts", str(RADIO),
+                        *(["--peer-config", files["peer.json5"]] if peer_text is not None else []),
+                        files["router.json5"]], capture_output=True, text=True, timeout=120)
+    both = p.stdout + p.stderr
+    return p.returncode, _codes(both), both.strip()[-300:]
+
+
+def run_s1(reference: bool = False) -> list[Result]:
+    with workdir("zk2py-block-") as work:
+        try:
+            return _s1(work, reference)
+        except Exception as e:  # noqa: BLE001 - a run that could not finish is a failure
+            return [(f"§1{' (the reference pair)' if reference else ''}: the run finished", False,
+                     f"{type(e).__name__}: {e}")]
+
+
+def _s1(work: str, reference: bool) -> list[Result]:
+    from . import far_side, link_v2, live
+    from .owner import free_loopback_port
+
+    out: list[Result] = []
+    who = "zenctl acl gen's" if reference else "zk2py's"
+    tag = f"§1, {who} pair"
+    policy_text = conventions_policy()
+    face = os.path.join(work, "face.sock")
+    near = f"tcp/127.0.0.1:{free_loopback_port()}"
+    rsock = os.path.join(work, "relay.sock")
+    # Step 1: the generator compiles N's block and writes the far end's.
+    conf, principals = near_config(policy_text, work, near, f"unixsock-stream/{face}")
+    fdict = far_side.far_side(policy_text, "radio").config()
+    if reference:
+        code, n_text, se = _zenctl_gen(work, "s1", policy_text, "--json5")
+        code_f, f_text, se_f = _zenctl_gen(work, "s1", policy_text, "--far-config")
+        if code != 0 or code_f != 0:
+            return [(f"{tag}: zenctl acl gen writes both blocks", False,
+                     f"exit {code}, {code_f}; {se.strip()[-200:]} {se_f.strip()[-200:]}")]
+        nc = _config(n_text, {"mode": "router", "listen/endpoints": [near, f"unixsock-stream/{face}"],
+                              "scouting/multicast/enabled": False,
+                              "transport/auth/usrpwd/dictionary_file": os.path.join(work, "users.txt")})
+        # F is a client: it presents the far principal's user and holds no
+        # dictionary of its own.
+        fc = _config(f_text, {"mode": "client", "connect/endpoints": [f"unixsock-stream/{rsock}"],
+                              "scouting/multicast/enabled": False,
+                              "transport/auth/usrpwd/password": "ground-pw",
+                              "transport/auth/usrpwd/dictionary_file": None})
+        named = json.loads(fc.get_json("transport/auth/usrpwd/user"))
+        out.append((f"{tag}: the far end's block names ground, the face's far principal, as the user F opens "
+                    "the face with (§2.5)", named == "ground", f"{named!r}"))
+        router_text, peer_text = "{" + n_text + "}", "{" + f_text + "}"
+    else:
+        nc = _config(conf)
+        fc = _config({"mode": "client", "connect": {"endpoints": [f"unixsock-stream/{rsock}"]},
+                      "scouting": {"multicast": {"enabled": False}},
+                      "transport": {"auth": {"usrpwd": {"user": "ground", "password": "ground-pw"}}}}, fdict)
+        router_text = json.dumps(conf, indent=1)
+        peer_text = json.dumps({"transport": {"link": {"tx": {"lease": fdict["transport/link/tx/lease"],
+                                                              "keep_alive": fdict["transport/link/tx/keep_alive"]}}}})
+    out.append((f"{tag}, Expected 1: N's configuration states the policy's eight keys, a lease of 2,000 ms, 4 "
+                "keep-alives, 16bit, a batch of 1,000 B, a wait_before_close of 2,000,000 µs and 10,000 ms for "
+                "each timeout, as zenoh holds them once it has loaded it; F's states the same",
+                _eight(nc) == EIGHT and _eight(fc) == EIGHT,
+                f"N {[k.rsplit('/', 1)[1] for k, v in _eight(nc).items() if v != EIGHT[k]] or 'as the policy'}; "
+                f"F {[k.rsplit('/', 1)[1] for k, v in _eight(fc).items() if v != EIGHT[k]] or 'as the policy'}"))
+    # Step 2: a tool checks N's configuration against the policy, with F's.
+    mine = link_v2.check_transport(policy_text, link_v2.read_config(conf), peer=fdict)["findings"]
+    if not reference:
+        out.append((f"{tag}, Expected 2: the tool, zk2py's, reports no finding of N's configuration with F's as "
+                    "the far end's", mine == [], f"{mine}"))
+    code, codes, tail = _zenctl_check_files(work, "s1", policy_text, router_text, peer_text)
+    transport = [c for c in codes if c in ("transport_differs", "wait_under_lease", "peer_differs",
+                                           "face_timestamping")]
+    out.append((f"{tag}, Expected 2, the Rust tool: zenctl check face --peer-config reports no finding of the "
+                "transport"
+                + (" and exits 0" if reference else " (its exit and its other codes are of the access-control "
+                                                    "block, which this section does not read)"),
+                transport == [] and (code == 0 or not reference), f"exit {code}; codes {codes}; {tail[-160:]}"))
+    import zenoh
+
+    closers: list[Any] = []
+    n = zenoh.open(nc)
+    relay = HoldRelay(rsock, face)
+    try:
+        f = zenoh.open(fc)
+        closers.append(f)
+        time.sleep(1.5)
+        # Step 3: nothing is published for 4 s, two leases.
+        t0 = time.monotonic()
+        time.sleep(4.0)
+        idle = relay.keep_alives(t0, t0 + 4.0)
+        out.append((f"{tag}, Expected 3: F is attached through R, and over 4 s with nothing published R counts 7 "
+                    "to 9 keep-alives each way (4 s × 4 / 2 s)",
+                    all(7 <= v <= 9 for v in idle.values()) and not relay.closes(t0)["F"]
+                    and not relay.closes(t0)["N"], f"{idle}"))
+        # Step 4: R holds both directions for 1 s, half the lease, then
+        # delivers; nothing is published for 1 s more.
+        t1 = relay.hold(1.0)
+        time.sleep(2.1)
+        after = relay.keep_alives(t1 + 1.0, t1 + 2.0)
+        closed = relay.closes(t1)
+        out.append((f"{tag}, Expected 4: after a silence of 1 s, half the lease, the transport stays: neither end "
+                    "closes its socket, and R counts keep-alives each way in the second after",
+                    closed == {"F": None, "N": None} and all(v >= 1 for v in after.values()),
+                    f"closes {closed}; keep-alives in the second after {after}"))
+        # Step 5: R holds both directions for 4 s, twice the lease.
+        t2 = relay.hold(4.0)
+        time.sleep(4.5)
+        closed = relay.closes(t2)
+        out.append((f"{tag}, Expected 5: under a silence of 4 s, twice the lease, each end closes the transport "
+                    "between 1.5 s and 2.5 s after the silence began",
+                    all(v is not None and 1.5 <= v <= 2.5 for v in closed.values()), f"{closed} s"))
+    finally:
+        _close_all(closers)
+        relay.close()
+        n.close()
+    # Step 6 (control): N's configuration with its wait_before_close edited
+    # to 1,000,000 µs, half the lease.
+    want = [("transport_differs", "transport.wait_before_close_ms"),
+            ("wait_under_lease", "transport.wait_before_close_ms")]
+    if reference:
+        edited_text = router_text.replace("wait_before_close: 2000000", "wait_before_close: 1000000")
+        edited_ok = edited_text != router_text
+    else:
+        edited = link_v2.merge(conf, {"transport": {"link": {"tx": {"queue": {"congestion_control": {"block": {
+            "wait_before_close": 1_000_000}}}}}}})
+        got = sorted((x["code"], x["at"]) for x in link_v2.check_transport(
+            policy_text, link_v2.read_config(edited), peer=fdict)["findings"])
+        out.append((f"{tag}, Expected 6: the tool, zk2py's, reports wait_under_lease and transport_differs, both "
+                    "at transport.wait_before_close_ms", got == want, f"{got}"))
+        edited_text, edited_ok = json.dumps(edited, indent=1), True
+    code, codes, tail = _zenctl_check_files(work, "s1-edited", policy_text, edited_text, peer_text)
+    out.append((f"{tag}, Expected 6, the Rust tool: zenctl check face reports wait_under_lease and "
+                "transport_differs of the edited configuration, and exits 1",
+                edited_ok and code == 1 and {"wait_under_lease", "transport_differs"} <= set(codes),
+                f"exit {code}; codes {codes}; {tail[-200:]}"))
+    return out
+
+
+def run_s4_ref() -> list[Result]:
+    with workdir("zk2py-opens-ref-") as work:
+        try:
+            return _s4_ref(work)
+        except Exception as e:  # noqa: BLE001 - a run that could not finish is a failure
+            return [("§4 (the reference pair): the run finished", False, f"{type(e).__name__}: {e}")]
+
+
+def _s4_ref(work: str) -> list[Result]:
+    """§4's steps 1 to 3 and 5 on the pair ``zenctl acl gen`` writes: N from
+    ``--json5``'s fragment and F, a far router, from ``--far-config``'s, its
+    placeholders filled in as §2.18 asks. The carry of round 110, which ran
+    §4 on zk2py's blocks and read the reference's far block."""
+    import zenoh
+
+    from . import live
+    from .link_scenarios import _contract
+    from .owner import Owner, free_loopback_port
+
+    out: list[Result] = []
+    tag = "§4, zenctl acl gen's pair"
+    policy_text = s4_policy()
+    face = os.path.join(work, "face.sock")
+    fsock = os.path.join(work, "far.sock")
+    near = f"tcp/127.0.0.1:{free_loopback_port()}"
+    far = f"tcp/127.0.0.1:{free_loopback_port()}"
+    # the near dictionary, every principal of the enrollment, as §3 writes it
+    near_config(policy_text, work, near, f"unixsock-stream/{face}")
+    users = os.path.join(work, "users.txt")
+    fusers = os.path.join(work, "far-users.txt")
+    with open(fusers, "w") as f:
+        f.write("ground:ground-pw\nrouter:router-pw\n")
+    code, n_text, se = _zenctl_gen(work, "s4ref", policy_text, "--json5")
+    code_f, f_text, se_f = _zenctl_gen(work, "s4ref", policy_text, "--far-config")
+    if code != 0 or code_f != 0:
+        return [(f"{tag}: zenctl acl gen writes both blocks", False,
+                 f"exit {code}, {code_f}; {se.strip()[-200:]} {se_f.strip()[-200:]}")]
+    n_ins = {"mode": "router", "listen/endpoints": [near, f"unixsock-stream/{face}"],
+             "scouting/multicast/enabled": False, "transport/auth/usrpwd/dictionary_file": users}
+    f_ins = {"mode": "router", "listen/endpoints": [far, f"unixsock-stream/{fsock}"],
+             "scouting/multicast/enabled": False, "region_name": "ground",
+             "transport/auth/usrpwd/password": "ground-router-pw",
+             "transport/auth/usrpwd/dictionary_file": fusers}
+    nc = _config(n_text, n_ins)
+    gw = json.loads(nc.get_json("gateway")).get("south")
+    out.append((f"{tag}, step 1: N's fragment loads in zenoh, access control enabled under deny, a south gateway "
+                "for the region ground, and its far block names ground-router as the usrpwd user",
+                json.loads(nc.get_json("access_control/enabled")) is True
+                and json.loads(nc.get_json("access_control/default_permission")) == "deny"
+                and any("ground" in ((flt or {}).get("region_names") or [])
+                        for g in gw or [] for flt in g.get("filters") or [])
+                and json.loads(_config(f_text).get_json("transport/auth/usrpwd/user")) == "ground-router",
+                f"gateway.south {json.dumps(gw)[:200]}"))
+    closers: list[Any] = []
+    try:
+        n = zenoh.open(nc)
+        closers.append(n)
+        time.sleep(0.3)
+        fr = zenoh.open(_config(f_text, {**f_ins, "connect/endpoints": [f"unixsock-stream/{face}"]}))
+        closers.append(fr)
+        time.sleep(0.5)
+        g = live.open_client(far, ("ground", "ground-pw"))
+        closers.append(g)
+        h = Heard(g, OPER)
+        closers.append(h)
+        o = Owner("lab", "radio-a", [_contract()], connect=near, auth=("radio-a", "radio-a-pw"))
+        o.start()
+        closers.append(o)
+        time.sleep(1.0)
+        with h.lock:
+            at_start = len(h.got)
+            h.got.clear()
+        h.event.clear()
+        puts = _put_until(o, h, "s4ref", 15.0)
+        with h.lock:
+            got = list(h.got)
+        f_zid = str(fr.zid())
+        out.append((f"{tag}, Expected 2: G, a client of F as ground, receives oper: F opened the face presenting "
+                    "ground-router, and N, under deny, bound F's link to it",
+                    bool(got) and all(b"s4ref oper" in p for p, _ in got)
+                    and f_zid in [str(z) for z in n.info.routers_zid()],
+                    f"{len(got)} received of {puts} put ({at_start} at the owner's start); N holds routers "
+                    f"{[str(z) for z in n.info.routers_zid()]}, F is {f_zid}"))
+        anon = _refusal(lambda: live.open_client(far, None))
+        if anon[0] == "opened":
+            closers.append(anon[1])
+        out.append((f"{tag}, Expected 3: F refuses a session that presents no user, at its handshake",
+                    anon[0] == "refused", f"{anon[0]}: {str(anon[1])[:200]}"))
+    finally:
+        _close_all(closers)
+    # Step 5 (control): N presents `router` and connects to F's unix socket;
+    # F connects to nothing.
+    closers = []
+    try:
+        fr = zenoh.open(_config(f_text, f_ins))
+        closers.append(fr)
+        time.sleep(0.3)
+        n = zenoh.open(_config(n_text, {**n_ins, "transport/auth/usrpwd/user": "router",
+                                        "transport/auth/usrpwd/password": "router-pw",
+                                        "connect/endpoints": [f"unixsock-stream/{fsock}"]}))
+        closers.append(n)
+        time.sleep(1.0)
+        g = live.open_client(far, ("ground", "ground-pw"))
+        closers.append(g)
+        h = Heard(g, OPER)
+        closers.append(h)
+        o = Owner("lab", "radio-a", [_contract()], connect=near, auth=("radio-a", "radio-a-pw"))
+        o.start()
+        closers.append(o)
+        ell = live.open_client(near, ("local", "local-pw"))
+        closers.append(ell)
+        hl = Heard(ell, OPER)
+        closers.append(hl)
+        time.sleep(1.0)
+        puts = _put_until(o, h, "s4ref control", 6.0)
+        with h.lock, hl.lock:
+            got, got_l = list(h.got), list(hl.got)
+        held = [str(z) for z in fr.info.routers_zid()]
+        out.append((f"{tag}, Expected 5: F lets N in, N presenting router, and G receives nothing for 6 s of puts "
+                    "that L, on the near side, receives: N bound the link it opened to no subject",
+                    str(n.zid()) in held and not got and bool(got_l) and puts >= 10,
+                    f"F holds N: {str(n.zid()) in held}; G {len(got)}, L {len(got_l)} of {puts} put"))
+    finally:
+        _close_all(closers)
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.link_v2_live", description=__doc__.split("\n")[0])
-    ap.add_argument("--only", action="append", choices=("s4", "s5"))
+    ap.add_argument("--only", action="append", choices=("s1", "s1ref", "s4", "s4ref", "s5"))
     args = ap.parse_args(argv)
-    runs = {"s4": run_s4, "s5": run_s5}
+    runs = {"s1": run_s1, "s1ref": lambda: run_s1(True), "s4": run_s4, "s4ref": run_s4_ref, "s5": run_s5}
     failed = 0
     for name in args.only or list(runs):
         for what, ok, detail in runs[name]():

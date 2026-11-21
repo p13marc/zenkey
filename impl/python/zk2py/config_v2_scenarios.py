@@ -465,7 +465,11 @@ class Bus:
     def events(self, address: str = "lab/rf0", since: int = 0) -> list[tuple[int, Any, dict[str, Any]]]:
         out = []
         for d in self.s.of(f"zk2/{address}/{IFACE}/events/change/", since):
-            env = zk2c.parse(d.payload, "put")
+            # core 0.101: an event's parse reads its stamp from its key's
+            # occurrence chunk. Until round 111 this parsed with no key, as
+            # before core 0.103's keys, and every section that reads an
+            # event stopped here.
+            env = zk2c.parse(d.payload, "put", zk2c.key_token(d.key), zk2c.last_chunk(d.key))
             out.append((d.at_ns, env.stamp, json.loads(env.record or b"{}")))
         return out
 
