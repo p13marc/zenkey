@@ -58,7 +58,7 @@ says what it will be.
 | A face router stamps nothing | Landed, PR #1114 | `link.v2` 0.13 §2.18 and §2.19: `acl gen` writes the near router's and the far end's `timestamping` off, and `check face` warns `face_timestamping` where a router stamps what it routes (#1106, §3.2) |
 | The far side across a face | Landed | `Consumer::across`, `Client::across`, `FacePolicy::far_side`, and zenctl's `--face-policy F --face NAME`: the face's timeout, transport and re-declaration (#988's L4). A re-declare holds no lock across the network, and a failed one is retried at every check and warned of once a horizon (#1047, PR #1056) |
 | `check face` on the fork's binding | Landed | `check face` with its `--peer-config`, and `acl gen --check`, read a `zm-1.10.2-r1` router config as data, in zenoh 1.10.1's shapes and the binding's link protocols. zenoh-modem's five router blocks pass unedited (#1044, PR #1056) |
-| The readers' `wait_before_close` per binding | Landed | `zenctl check conform`, `alarms`, `telemetry`, `timing` and `arbitration` take `--binding zm-1.10.2-r1`, whose 10 s stands where no flag and no `--face-policy` states one; with a policy, its `[transport]` and its `keep_alive` are read. zenwatch's top-level `binding` and zengui's `--binding` name it too; neither reads a routers' face policy, so each reads by the binding's defaults (#1011, item 3) |
+| The readers' `wait_before_close` per binding | Landed | `zenctl check conform`, `alarms`, `telemetry`, `timing` and `arbitration` take `--binding zm-1.10.2-r1`, whose 10 s stands where no flag and no `--face-policy` states one; with a policy, its `[transport]` and its `keep_alive` are read. `watchdog` and `record --on` take `--binding` for their `alert-firing` readers. zenwatch's top-level `binding` and zengui's `--binding` name it too; neither reads a routers' face policy, so each reads by the binding's defaults (#1011, item 3) |
 | **Presence:** a tokenless provider found | Landed | A consumer reads absence only from a complete read (#1018, for #982) |
 | A first hop holds its instance token alone | Landed, PRs #1068 and #1073 | Core 0.96, and `link.v2` 0.7's device face (H1). `ServiceConfig::first_hop` declares the instance token alone, and no interface token or contract queryable (H2). `zenctl service list`, `service show` and `doctor` take `--face-policy`: a device on a device face reads `link_closed`, never down, and the doctor asks `first-hop-token` (#982's H3) |
 | A new epoch on a running service | Landed | `Service::new_epoch`; on a service that implements `config.v1` or `config.v2`, a restart of its configuration (#1055, #1064) |
@@ -66,7 +66,7 @@ says what it will be.
 | **The ground's tools across a face** | Landed, PR #1088; #990 closed | Observer 0.29 §7.5: a tool's scope is the face's plan, with each crossing heartbeat, and a key's revision among several held is chosen by the catalog and CH's tag. A packed record whose type is not held is never sniffed (§7.3; #990's V1 and V2) |
 | Dated values and `.zrec` version 4 | Landed (PR #1092) | The tooling guide's O8: a time dated in UTC under its epoch, named, and a field's bound beside its value. §5's version 4 carries the catalog, the revisions and their bundles, and `zenctl echo --from FILE` reads a capture with nothing beside it (#990's V3 and V4) |
 | The doctor's `packed-refused` and `state-unconfirmed`; `watch`'s lost and diverged heartbeats, and zengui's Inspector per collection; zengui and zenwatch across a face; `--face-policy` on `get state`, `watch`, `call` and `telemetry`; `field` over a frame's records | Landed, PRs #1097, #1102, #1105 and #1112 | #990's V5 to V8, and V2's `field`: a field a frame's record carries absent, or its reader cannot tell, is counted apart and never vanished |
-| **The measurement** of W1 and W2 on zk2c | Landed on RF and LoRa SF7, PR #1111 | On RF, W2 measured 669 KB a day, 2.6 % of the channel, where today's wire takes 64 %; W1-73's frames 207 KB. At LoRa SF7, W1-73 takes 474 s of uplink, 55 % of the duty. LoRa SF9 and SF12, W2 on LoRa and SBD are still to run (#989). The runs filed #1106, landed, and #1107 to #1110 (§6) |
+| **The measurement** of W1 and W2 on zk2c | Landed on RF and LoRa SF7, PR #1111 | On RF, W2 measured 669 KB a day, 2.6 % of the channel, where today's wire takes 64 %; W1-73's frames 207 KB. At LoRa SF7, W1-73 takes 474 s of uplink, 55 % of the duty. LoRa SF9 and SF12, W2 on LoRa and SBD are still to run (#989). The runs filed #1106 to #1108, landed, and #1109 and #1110 (§6) |
 
 ## 2. The order to migrate in
 
@@ -224,7 +224,8 @@ move together.
   On LoRa, with all 73 present, 3.3 spends 376 s, 534 s and 785 s of the 864 s daily duty at
   SF7, SF9 and SF12. lora0's own readings spend 248 s, 281 s and 434 s. 3.2's nine frames would
   spend 736 s, 1,420 s and 2,081 s. On SBD, 3.3 sends one frame a paid message, 48 a day, each
-  229 B with all 73 present.
+  229 B with all 73 present. Each figure is at the fewest uplink keep-alives `link.v2` §2.16
+  allows: at the most they add 74 s, 119 s and 142 s, and 48 paid messages on SBD (§3.3).
 
 ### Step 6. States and events, confirmed by the heartbeat
 
@@ -400,10 +401,11 @@ plan.
 Each plan denies `@zk`, every plain stream, every state and every event. RF and LoRa draw
 `no_arq`, since the radio repairs no lost frame. Every face draws `frame_unlisted` for the frames
 it leaves out. The other warnings differ:
-- on 3.2, `keep_alive_not_suppressed` at SF7 and SF12, and at SF12 `interval_over_horizon` and
-  `horizon_under_face` on `frames/link`;
-- on 3.3, `keep_alive_not_suppressed` at SF7, and `frame_over_batch` at SF9, whose largest
-  frame, 216 B, a delta of all 73 readings, is above its 117 B batch.
+- on 3.2, as `link.v2` read before 0.17, `keep_alive_not_suppressed` at SF7 and SF12, and at
+  SF12 `interval_over_horizon` and `horizon_under_face` on `frames/link`;
+- on 3.3, `keep_alive_not_suppressed` on every face, since `link.v2` 0.17 warns at the
+  keep-alive interval too (§3.3), and `frame_over_batch` at SF9, whose largest frame, 216 B, a
+  delta of all 73 readings, is above its 117 B batch.
 
 ### 3.2 Generating and checking
 
@@ -452,8 +454,8 @@ it leaves out. The other warnings differ:
 
 ### 3.3 The transport per medium
 
-Keep-alives a day are 2 × `keep_alive` × 86,400 / lease, both ways (#988's design, §1.4). Every
-policy runs `sequence = "16bit"`, and `wait_before_close` equals the lease.
+Keep-alives a day on an idle link are 2 × `keep_alive` × 86,400 / lease, both ways (#988's
+design, §1.4). Every policy runs `sequence = "16bit"`, and `wait_before_close` equals the lease.
 
 | Router | bit/s | Shipped today | #988's policy | Since 3.3 (#991) | Keep-alives a day | Reply timeout | Batch |
 |---|---:|---|---|---|---:|---:|---:|
@@ -466,8 +468,21 @@ policy runs `sequence = "16bit"`, and `wait_before_close` equals the lease.
 - **Why 4 keep-alives.** At 5 % loss, a keep-alive count of 2 closed the link at every lost
   keep-alive, 9 of 9 LoRa runs, and each reopen cost more air than it saved (#988's design,
   §1.4).
-- **Why #991 moved SF9 and SF12.** At four frame intervals a lease, the frames replace
-  every uplink keep-alive. SF12's 288 uplink keep-alives a day cost 427 s of air, half its duty.
+- **Why #991 moved SF9 and SF12.** At four frame intervals a lease, the keep-alive interval is
+  the frame's cadence. Before, SF12's 270 s interval sent three uplink keep-alives between two
+  frames, 288 a day and 427 s of air, half its duty.
+- **Beside the frames** (`link.v2` 0.17 §2.16). An end sends a keep-alive one interval after
+  the later of its last batch and its last keep-alive.
+  - RF, SF9, SF12 and SBD run an interval equal to their frame's cadence. A frame replaces a
+    keep-alive unless it is later on its schedule than the one before: none to one uplink
+    keep-alive a gap. That is at most 1,440 a day on RF, 720 and 119 s of air at SF9, 96 and
+    142 s at SF12, and 48 paid messages on SBD.
+  - SF7's interval is half its cadence: one to two a gap, 1,440 to 2,880 a day, 74 s to 148 s.
+  - Measured (#989's zk2c runs): 2,160 a day and 111 s at SF7; on RF none bare, and 336 a day
+    under the lean stack. SF9, SF12 and SBD have not run.
+  - At the most, SF12's frames and keep-alives take 927 s of its 864 s, and SBD 144 messages of
+    its 96. A face that is to spare every keep-alive runs an interval above its cadence by
+    more than its frames' lateness. These leases are zenoh-modem's to move.
 
 ### 3.4 What the policies assume
 
@@ -605,6 +620,4 @@ A migration started today would hit each of these.
 | **No text in packed records,** so four backends cannot move to `config.v2` | Text stays in the JSON states, and those backends on `config.v1`. Across RF, a GET of the status by grant; the view is never pushed | #979 (B3) |
 | **The link that never comes back** (W2, finding 5). After a reopen over RF, router A sent nothing A→B for a whole lease, at 0 % loss too, so both of W2's `config set` calls drew silence, `no_token_visible` | zenoh-modem's tracker holds the cause, in its driver or its fork: zenkey's reference crosses a reopen (#1114). Keep nothing `block` larger than a batch on a crossing key | zenoh-modem#210; #1109 |
 | **`freshness.v2`'s heartbeat is one put per interface:** on W2 it cost 238 KB a day, where the model folded it into 52 KB | Count a heartbeat for each crossing interface that uses `freshness.v2`, at its own horizon, until the maintainer picks one per owner, one riding a frame, or longer horizons per face | #1110 |
-| **A face's subjects by user name bind only when the far side opens the lane,** and credentials on the far router make the ground's own tools present one too | Let the far side open the lane, as `attach = "client"` plans, and give the ground's tools a user of their own: neither the policy nor `--far-config`'s block says so yet | #1107 |
-| **Frames spare fewer keep-alives at LoRa SF7** than `link.v2` §2.16 expects: one uplink keep-alive in four, 2,160 a day, where §2.16 counts 1,440 | Budget SF7's uplink at the measured count | #1108 |
 | **The bytes off RF and LoRa SF7 are modelled.** W1-73 at SF9 and SF12, W2 on LoRa and SBD have not run on zk2c | Read every unmarked figure for those media as a model | #989 |

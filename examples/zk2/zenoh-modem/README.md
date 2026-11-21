@@ -349,24 +349,33 @@ run, the face's 16-bit sequence and batch, the lean stack (16 B a SDU), Semtech'
 SF12's 51 B tiles. **All 73** is every reading present, 16 counters and 8 gauges moving every frame
 (the report's W1). **Its own** is the face's device, its readings as zenoh-modem's code fills them.
 
-| Face | Frame, cadence | All 73 | Its own | Against |
-|---|---|---:|---:|---|
-| RF, rf0 | `fast`, 60 s | 177 KB a day | 92 KB (18 readings) | 25.9 MB a day: 0.7 %. The report's model: 200 KB, with its 203 B keyframe |
-| LoRa SF7, lora0 | `fast`, 60 s | 302 s + 74 s of keep-alives = 376 s | 174 s + 74 s = 248 s (22 readings) | 864 s of air a day: 43 % and 29 % |
-| LoRa SF9 | `fast`, 120 s, full every 15 min | 534 s | 281 s | 62 % and 33 % |
-| LoRa SF12 | `slow`, 900 s, full hourly | 785 s | 434 s (28, the fragment layer's among them) | 91 % and 50 % |
-| SBD, sat0 | `paid`, 1,800 s | 48 messages up, each one frame of 229 B, and 48 keep-alives down | the same, each 94 B | 96 messages a day: as idle |
+| Face | Frame, cadence | All 73 | Its own | The uplink's keep-alives beside them | Against |
+|---|---|---:|---:|---|---|
+| RF, rf0 | `fast`, 60 s | 177 KB a day | 92 KB (18 readings) | none to 1,440 a day, at most 24 KB; 336 measured under the lean stack | 25.9 MB a day: 0.7 % to 0.8 %. The report's model: 200 KB, with its 203 B keyframe |
+| LoRa SF7, lora0 | `fast`, 60 s | 302 s | 174 s (22 readings) | 1,440 to 2,880 a day, 74 s to 148 s; 2,160 and 111 s measured | 864 s of air a day: 376 s to 450 s, 43 % to 52 %, and 248 s to 322 s, 29 % to 37 % |
+| LoRa SF9 | `fast`, 120 s, full every 15 min | 534 s | 281 s | none to 720 a day, at most 119 s | 534 s to 653 s, 62 % to 76 %, and 281 s to 400 s, 33 % to 46 % |
+| LoRa SF12 | `slow`, 900 s, full hourly | 785 s | 434 s (28, the fragment layer's among them) | none to 96 a day, at most 142 s | 785 s to 927 s, 91 % to 107 %, and 434 s to 576 s, 50 % to 67 % |
+| SBD, sat0 | `paid`, 1,800 s | 48 messages up, each one frame of 229 B | the same, each 94 B | none to 48 a day, each a paid message, beside the 48 down | 96 messages a day: 96 to 144 |
 
 The downlink's keep-alives are the ground's air: 148 s, 119 s and 142 s at SF7, SF9 and SF12. Under
 3.2's nine frames the same readings cost 401 KB a day on RF, and 736 s, 1,420 s and 2,081 s of air at
-SF7, SF9 and SF12. SF9's and SF12's faces now run a lease of four frame intervals, 480 s and 3,600 s,
-so their frames replace every uplink keep-alive ([link](link.md), the note at its top).
+SF7, SF9 and SF12.
+
+**The uplink's keep-alives** are priced by `link.v2` 0.17 §2.16 ([link](link.md), the note at its
+top). SF9's and SF12's faces run a lease of four frame intervals, 480 s and 3,600 s, so their
+keep-alive interval is their frame's cadence, as RF's and SBD's is. There a frame replaces a
+keep-alive unless it is later on its schedule than the one before: none to one a gap. SF7's interval
+is half its cadence: one to two a gap. At the most, SF12's 927 s is over its duty and SBD's 144
+messages over its 96. A face that is to spare every keep-alive runs an interval above its cadence
+by more than its frames' lateness, and these leases are zenoh-modem's to move.
 
 **With revision 3.4's events** (#991), each face adds the `face/` events its policy lists (`link.v2`
 0.12 §2.7, #1098), at their rate's worst case, beside the frames' **All 73**: RF 594 KB a day (2.3 %), the
 three; LoRa SF7 381 s (44 %) and SF9 550 s (64 %), the two `rare` ones; SF12 785 s and SBD 96
-messages, none. [link.md](link.md)'s "Events" has the arithmetic, and
-`zenkey-fleet/tests/acl_plans.rs`'s `zenoh_modem_events_fit_each_face_budget` checks it.
+messages, none. Each is at the fewest uplink keep-alives; at the most they are 619 KB (2.4 %),
+455 s (53 %), 669 s (77 %), 927 s (107 %) and 144 messages. [link.md](link.md)'s "Events" has the
+arithmetic, and `zenkey-fleet/tests/acl_plans.rs`'s `zenoh_modem_events_fit_each_face_budget`
+checks it at the fewest.
 
 The 73 JSON streams stay, at 5 s on the host bus, for host tools: one reading, two series, which
 a tool labels apart ("`sdu/dropped_total` (`frames/fast`)").

@@ -557,6 +557,22 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   case 44 the 45-s side); Appendix B's "Keep-alives beside
   frames" holds the file and lines and the SF7 and RF measurements, and
   `scenarios-v2.md` §5 runs it at a 250-ms interval.
+  Text 0.18 (zk2py round 110's F-529 to F-534) changed no keyword: §2.19
+  reads a `null` as zenoh 1.10.1 does, left out at
+  `routing/interests/timeout` (an `Option` zenoh fills, in the fork too)
+  as at `timestamping/enabled`, a mode of it and `mode`, and no value
+  zenoh runs at the seven other keys (`transport_differs`;
+  `v2/transport.json`'s cases 24 to 26, the reference reading it through
+  `StatedTransport::null_left_out`, so the key is not stated and runs the
+  binding's default); §2.18 says only an unreadable dictionary stops the
+  far end, as `acl gen --far-config`'s comment does; `v2/plan.json`'s
+  case 44 holds its plan (45 s, `keyframe_s` 675) and case 45 pins the
+  inequality one millisecond below the lease, both written by hand; its
+  description names `users`; Appendix B names cases 14 to 18.
+  zenoh-modem's notes price each face's uplink keep-alives at the fewest
+  and the most (SF12 927 s and SBD 144 messages at the most, over their
+  budgets), and the fleet's `zenoh_modem_events_fit_each_face_budget`
+  asserts both ends.
   `conformance/contracts/probe.v1.toml` (with `probe.json`) is the
   contract of `v2/plan.json`'s cases and `scenarios-v2.md` §2. A code
   keeps one severity, so the memo's one `not_packed` is two codes.

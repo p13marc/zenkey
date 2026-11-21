@@ -525,6 +525,122 @@ fn zenoh_modem_faces_pass_their_own_checks() {
     }
 }
 
+/// A `null` among the eight keys, read from a router's file (link.v2 §2.19,
+/// 0.18), on both reading paths: zenoh's own loader under stock zenoh (the
+/// media), as data under the fork (zenoh-modem's faces).
+/// - `routing/interests/timeout: null` is left out: zenoh loads it and
+///   runs its default, 10,000 ms. Under a policy at 10,000 ms the block
+///   passes whole, its row at the default and not stated. Under any other
+///   it is `transport_differs`, and the comparison names the `null`.
+/// - `lease: null` is no value zenoh runs. Stock zenoh refuses the file,
+///   so there is no block to judge. Read as data it is `transport_differs`
+///   at the lease, and `wait_under_lease` has no lease to read.
+#[test]
+fn link_v2_check_face_reads_a_null_as_zenoh_does() {
+    let blocks = MEDIA
+        .into_iter()
+        .map(|m| (m, media_policy(m), media_plan(m, AclPermission::Deny)))
+        .chain(
+            MODEM_FACES
+                .into_iter()
+                .map(|f| (f, modem_policy(f), modem_plan(f, AclPermission::Deny))),
+        );
+    let (mut at_default, mut elsewhere) = (0, 0);
+    for (name, policy_text, plan) in blocks {
+        let parsed = link::parse(&policy_text);
+        let policy = parsed.policy.as_ref().unwrap();
+        let t = plan.transport.unwrap();
+        let default_ms = policy.binding.defaults().interests_timeout_ms;
+        let block = acl_plan_json5(&plan);
+        let read = |block: &str| {
+            RouterConfig::from_json5_for(&format!("{{\n{block}}}"), policy.binding).map(|config| {
+                zenkey_fleet::check_face(&plan, policy, &config, &Default::default(), "self")
+            })
+        };
+
+        // The interests timeout written `null`.
+        let stated = format!("interests: {{ timeout: {} }}", t.interests_timeout_ms);
+        let null = block.replace(&stated, "interests: { timeout: null }");
+        assert_ne!(null, block, "{name}: the edit applies");
+        let report = read(&null).unwrap_or_else(|e| panic!("{name}: a `null` there loads: {e}"));
+        let row = report
+            .transport
+            .iter()
+            .find(|k| k.key == "transport.interests_timeout_ms")
+            .expect("the key's row");
+        assert!(!row.stated, "{name}: a `null` states none");
+        assert_eq!(row.observed, serde_json::json!(default_ms), "{name}");
+        let codes: Vec<(&str, &str)> = report
+            .findings
+            .iter()
+            .map(|f| (f.code.as_str(), f.at.as_str()))
+            .collect();
+        if t.interests_timeout_ms == default_ms {
+            at_default += 1;
+            assert_eq!(codes, [], "{name}: the default is the policy's");
+            assert!(report.comparison.findings.is_empty(), "{name}");
+        } else {
+            elsewhere += 1;
+            assert_eq!(
+                codes,
+                [("transport_differs", "transport.interests_timeout_ms")],
+                "{name}"
+            );
+            let [differs] = report.comparison.findings.as_slice() else {
+                panic!("{name}: one difference, {:?}", report.comparison.findings);
+            };
+            assert_eq!(differs.id, "routing/interests/timeout", "{name}");
+            assert_eq!(
+                differs.observed.as_deref(),
+                Some(
+                    format!(
+                        "{default_ms}, {}'s default: the file states `null`, which zenoh reads \
+                         as left out",
+                        policy.binding
+                    )
+                    .as_str()
+                ),
+                "{name}"
+            );
+        }
+
+        // The lease written `null`.
+        let stated = format!("lease: {},", t.lease_ms);
+        let null = block.replace(&stated, "lease: null,");
+        assert_ne!(null, block, "{name}: the edit applies");
+        match (policy.binding, read(&null)) {
+            (link::Binding::Zenoh1_10_1, Err(_)) => {}
+            (link::Binding::Zenoh1_10_1, Ok(_)) => {
+                panic!("{name}: zenoh 1.10.1 refuses a `null` lease at load")
+            }
+            (link::Binding::Zm1_10_2R1, read) => {
+                let report = read.unwrap_or_else(|e| panic!("{name}: read as data: {e}"));
+                let codes: Vec<(&str, &str)> = report
+                    .findings
+                    .iter()
+                    .map(|f| (f.code.as_str(), f.at.as_str()))
+                    .collect();
+                assert_eq!(
+                    codes,
+                    [("transport_differs", "transport.lease_ms")],
+                    "{name}"
+                );
+                let row = report
+                    .transport
+                    .iter()
+                    .find(|k| k.key == "transport.lease_ms")
+                    .expect("the key's row");
+                assert!(row.stated, "{name}: a `null` lease is a value stated");
+                assert_eq!(row.observed, serde_json::Value::Null, "{name}");
+            }
+        }
+    }
+    assert!(
+        at_default > 0 && elsewhere > 0,
+        "both sides are read: {at_default} at the default, {elsewhere} elsewhere"
+    );
+}
+
 /// The wire model of `docs/zk2/constrained-overhead-review.md`'s Appendix A,
 /// as much of it as an event's put needs (#991's cadence check): a varint's
 /// bytes, a put on a declared scope, the SDUs zenoh's batches become under
@@ -609,6 +725,19 @@ mod wire {
 /// frames' figure for all 73 readings (README, "What each face spends"),
 /// fits the medium's budget, and each exposed one the face leaves out
 /// would not.
+///
+/// Both ends of the uplink's keep-alives are stated (link.v2 §2.16 as 0.17
+/// reads it; zk2py round 110's F-533). An end sends between C/I − 1 and
+/// C/I keep-alives a gap where the cadence C is a whole multiple of the
+/// interval I, and every face here is one.
+/// - **The fewest** is what the frames' figures hold, and what "fits"
+///   means above: every face fits.
+/// - **The most** is one more a gap. RF, SF7 and SF9 still fit. SF12
+///   (927 s of 864 s) and SBD (144 messages of 96) are over, with no event
+///   at all. The test asserts that they are, by the notes' figures: the
+///   cure is an interval above the cadence, a lease that is zenoh-modem's
+///   to move. The day one moves, the count a day or the verdict here
+///   fails and says which way.
 #[test]
 fn zenoh_modem_events_fit_each_face_budget() {
     use zenkey_model::contract::{Body, Rate};
@@ -663,24 +792,116 @@ fn zenoh_modem_events_fit_each_face_budget() {
     // Each face: its medium, its SDU, 3.3's frames' figure and the budget,
     // in bytes a day on RF, seconds of air a day on LoRa (1 % of every
     // hour), messages a day on SBD; and the events its owner publishes.
+    // The frames' figure is the notes' at the fewest uplink keep-alives
+    // (link.md, "Events": SF7's 376 s holds its 1,440 a day, 74 s; SBD's 96
+    // the 48 the downlink sends).
+    //
+    // Then the notes' two ends: the uplink's keep-alives a day, fewest and
+    // most; what the face carries with its events at each, rounded as the
+    // notes round it; and whether the most is over the budget.
     enum Medium {
         Rf,
         Lora(u32),
         Sbd,
     }
+    struct Ends {
+        keep_alives: (u64, u64),
+        carried: (f64, f64),
+        most_is_over: bool,
+    }
+    let ends = |keep_alives, carried, most_is_over| Ends {
+        keep_alives,
+        carried,
+        most_is_over,
+    };
     let faces = [
-        ("rf0", Medium::Rf, 220, 177_000.0, 25_920_000.0),
-        ("lora0-sf7", Medium::Lora(7), 222, 376.0, 864.0),
-        ("lora0-sf9", Medium::Lora(9), 115, 534.0, 864.0),
-        ("lora0-sf12", Medium::Lora(12), 222, 785.0, 864.0),
-        ("sat0", Medium::Sbd, 270, 96.0, 96.0),
+        (
+            "rf0",
+            Medium::Rf,
+            220,
+            177_000.0,
+            25_920_000.0,
+            ends((0, 1_440), (594_288.0, 618_768.0), false),
+        ),
+        (
+            "lora0-sf7",
+            Medium::Lora(7),
+            222,
+            376.0,
+            864.0,
+            ends((1_440, 2_880), (381.0, 455.0), false),
+        ),
+        (
+            "lora0-sf9",
+            Medium::Lora(9),
+            115,
+            534.0,
+            864.0,
+            ends((0, 720), (550.0, 669.0), false),
+        ),
+        (
+            "lora0-sf12",
+            Medium::Lora(12),
+            222,
+            785.0,
+            864.0,
+            ends((0, 96), (785.0, 927.0), true),
+        ),
+        (
+            "sat0",
+            Medium::Sbd,
+            270,
+            96.0,
+            96.0,
+            ends((0, 48), (96.0, 144.0), true),
+        ),
     ];
-    for (face, medium, mtu, frames, budget) in faces {
+    // A keep-alive alone in its SDU: its one byte under the lean stack.
+    const KEEP_ALIVE_SDU: usize = wire::LEAN + 1;
+    const DAY_MS: u64 = 86_400_000;
+    for (face, medium, mtu, frames, budget, noted) in faces {
         // What the face carries is what its policy lists (link.v2 §2.7),
         // and its plan lets exactly those events cross.
         let policy = link::parse(&modem_policy(face))
             .policy
             .expect("a face policy");
+        // The uplink's keep-alives a day, from the face's own lease and its
+        // frame's cadence (link.v2 §2.16): ⌈C/I⌉ − 1 a gap, and where C is
+        // a whole multiple of I the last races the next frame, so C/I − 1
+        // to C/I.
+        let t = policy.transport.as_ref().expect("a link.v2 transport");
+        let interval_ms = t.keep_alive_interval_ms();
+        let cadences: Vec<u64> = policy
+            .faces
+            .values()
+            .flat_map(|f| f.frames.iter().flatten())
+            .map(|(_, cadence)| cadence.every_s * 1_000)
+            .collect();
+        let &[cadence_ms] = cadences.as_slice() else {
+            panic!("{face}: one listed frame, {cadences:?}");
+        };
+        let gaps = DAY_MS / cadence_ms;
+        let a_gap = if cadence_ms.is_multiple_of(interval_ms) {
+            (cadence_ms / interval_ms - 1, cadence_ms / interval_ms)
+        } else {
+            let n = cadence_ms.div_ceil(interval_ms) - 1;
+            (n, n)
+        };
+        assert_eq!(
+            (gaps * a_gap.0, gaps * a_gap.1),
+            noted.keep_alives,
+            "{face}: the uplink's keep-alives a day, fewest and most, at a cadence of \
+             {cadence_ms} ms and an interval of {interval_ms} ms: the lease, keep_alive or \
+             cadence moved, so examples/zk2/zenoh-modem's notes and this table are to re-price"
+        );
+        // What the most costs beyond the fewest, each keep-alive an SDU of
+        // its own: bytes, air, or a paid message.
+        let beyond = (gaps * (a_gap.1 - a_gap.0)) as f64
+            * match medium {
+                Medium::Rf => KEEP_ALIVE_SDU as f64,
+                Medium::Lora(sf) => wire::lora_air_s(KEEP_ALIVE_SDU, sf),
+                Medium::Sbd => 1.0,
+            };
         let listed: std::collections::BTreeSet<String> = policy
             .faces
             .values()
@@ -720,7 +941,38 @@ fn zenoh_modem_events_fit_each_face_budget() {
                 .filter(|e| carried.contains(&e.0))
                 .map(|e| cost(e.1, e.2))
                 .sum::<f64>();
-        assert!(spent <= budget, "{face}: {spent} of {budget}");
+        // The best case: at the fewest keep-alives every face fits.
+        assert!(
+            spent <= budget,
+            "{face}: at the fewest keep-alives, {spent} of {budget}"
+        );
+        assert_eq!(
+            spent.round(),
+            noted.carried.0,
+            "{face}: carried at the fewest, as the notes round it"
+        );
+        // The worst case: at the most, SF12 and SBD are over, and with no
+        // event at all. Asserted as the notes state it, either way.
+        let worst = spent + beyond;
+        assert_eq!(
+            worst.round(),
+            noted.carried.1,
+            "{face}: carried at the most keep-alives, as the notes round it"
+        );
+        if noted.most_is_over {
+            assert!(
+                frames + beyond > budget,
+                "{face}: at the most keep-alives its frames alone now fit, {} of {budget}, \
+                 where the notes say they are over: say so there and here",
+                frames + beyond
+            );
+        } else {
+            assert!(
+                worst <= budget,
+                "{face}: at the most keep-alives it is now over, {worst} of {budget}, where \
+                 the notes say it fits: say so there and here"
+            );
+        }
         for (name, put, per_day) in &events {
             if !carried.contains(name) {
                 assert!(

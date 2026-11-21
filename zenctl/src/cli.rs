@@ -594,30 +594,22 @@ fn check_id(s: &str) -> Result<zenkey_fleet::report::CheckId, String> {
     })
 }
 
-/// A zenoh binding by its `link.v2` name (§2.4), for `--binding`.
-fn binding_arg(s: &str) -> Result<zenkey_model::link::Binding, String> {
-    use zenkey_model::link::Binding;
-    Binding::parse(s).ok_or_else(|| {
-        format!(
-            "not a binding; one of: {}",
-            Binding::ALL.map(Binding::as_str).join(", ")
-        )
-    })
-}
-
 /// The zenoh the deployment's routers run (#1011's item 3): flattened into
 /// every verb that takes `--lease` or `--wait-before-close`, each of which
-/// resolves the three through `cmd::zk2::routers`.
+/// resolves the three through `cmd::zk2::routers`. `watchdog` and `record
+/// --on` take neither flag and state `--binding` in their own words, for
+/// their `alert-firing` readers, through the same rule
+/// (`cmd::watchdog::rule_routers`).
 #[derive(clap::Args, Clone, Copy, Default)]
 pub(crate) struct BindingArgs {
+    // Parsed by `Binding`'s `FromStr`, the model's one list of names.
     /// The zenoh the deployment's routers run, by its `link.v2` name
     /// (§2.4): zenoh-1.10.1 or zm-1.10.2-r1. Its defaults are those of
     /// --lease and --wait-before-close, and its keep-alives the stall
     /// bound's, where no flag and no --face-policy states them (`link.v2`
     /// §2.19): zm-1.10.2-r1 waits 10 s before it closes, zenoh 1.10.1 5 s.
     /// Omitted, zenoh 1.10.1's.
-    #[arg(long, value_name = "NAME", value_parser = binding_arg,
-          add = ArgValueCandidates::new(completion::bindings))]
+    #[arg(long, value_name = "NAME", add = ArgValueCandidates::new(completion::bindings))]
     pub(crate) binding: Option<zenkey_model::link::Binding>,
 }
 
@@ -1740,7 +1732,8 @@ pub(crate) enum CheckCmd {
     ///
     /// For a link.v2 policy (#988), the router's transport too (link.v2
     /// §2.19), each key read at the binding's default where the FILE omits
-    /// it:
+    /// it, or writes routing/interests/timeout as `null`, which zenoh fills
+    /// with its default (link.v2 0.18):
     ///
     ///   transport_differs          a key the router runs at another value
     ///                              than the policy's
@@ -2903,6 +2896,13 @@ pub(crate) struct RecordArgs {
     /// --clocks-synced`. Without it, those rules read unobservable.
     #[arg(long, requires = "on")]
     pub(crate) clocks_synced: bool,
+    /// With --on: the zenoh the deployment's routers run, by its `link.v2`
+    /// name (§2.4), zenoh-1.10.1 or zm-1.10.2-r1, for an `alert-firing`
+    /// rule's reader, as `watchdog --binding`. Omitted, zenoh 1.10.1's
+    /// (#1011).
+    #[arg(long, value_name = "NAME", requires = "on",
+          add = ArgValueCandidates::new(completion::bindings))]
+    pub(crate) binding: Option<zenkey_model::link::Binding>,
     /// Leave the revisions' bundles out of the header (`.zrec` version 4):
     /// a reader of the file then needs --contracts to decode it.
     #[arg(long)]
@@ -3264,6 +3264,14 @@ pub(crate) struct WatchdogArgs {
     /// listens to no status, so without it those rules read unobservable.
     #[arg(long)]
     pub(crate) clocks_synced: bool,
+    /// The zenoh the deployment's routers run, by its `link.v2` name
+    /// (§2.4): zenoh-1.10.1 or zm-1.10.2-r1. An `alert-firing` rule's
+    /// reader reads its window and its own stall by that zenoh's lease,
+    /// keep-alives and wait_before_close (`link.v2` §2.19): zm-1.10.2-r1
+    /// waits 10 s before it closes, zenoh 1.10.1 5 s. No other rule reads
+    /// them. Omitted, zenoh 1.10.1's (#1011).
+    #[arg(long, value_name = "NAME", add = ArgValueCandidates::new(completion::bindings))]
+    pub(crate) binding: Option<zenkey_model::link::Binding>,
     #[command(flatten)]
     pub(crate) contracts: ContractArgs,
     #[command(flatten)]
@@ -3979,13 +3987,16 @@ pub(crate) struct TelemetryArgs {
     /// The deployment's link lease, seconds: with --wait-before-close, the
     /// longest this reader may stall before it counts a loss, which leaves
     /// every pair across it without presence (spec §2.7, 0.27). Default:
-    /// --face-policy's, else --binding's, else zenoh 1.10.1's 10 s.
+    /// across a face, the `[transport]` of --face-policy, which here is
+    /// given only with --across-face and --face; else --binding's; else
+    /// zenoh 1.10.1's 10 s.
     #[arg(long, value_name = "SECS")]
     pub(crate) lease: Option<f64>,
     /// The routers' wait_before_close, seconds (spec §2.7, 0.27): this
     /// reader may stall no longer than it, nor than --lease less one of the
-    /// routers' keep-alive intervals. Default: --face-policy's, else
-    /// --binding's, else zenoh 1.10.1's 5 s.
+    /// routers' keep-alive intervals. Default: across a face, the
+    /// `[transport]` of --face-policy, which here is given only with
+    /// --across-face and --face; else --binding's; else zenoh 1.10.1's 5 s.
     #[arg(long, value_name = "SECS")]
     pub(crate) wait_before_close: Option<f64>,
     #[command(flatten)]
@@ -4012,8 +4023,11 @@ pub(crate) struct TelemetryArgs {
     /// default --timeout is the face's `reply_timeout_ms` (core §8.1), and
     /// that transport's lease and wait_before_close are the defaults of
     /// --lease and --wait-before-close, its keep_alive the stall bound's
-    /// (#1011). A `link.v1` policy states none of that and is refused,
-    /// exit 2.
+    /// (#1011). The file is read once, before any session opens, and only
+    /// with --across-face and --face: without them the flag is refused, so
+    /// a reader on the routers' own side names their zenoh with --binding,
+    /// or states --lease and --wait-before-close. A `link.v1` policy
+    /// states none of that and is refused, exit 2.
     #[arg(long = "face-policy", value_name = "FILE", requires_all = ["across_face", "face"])]
     pub(crate) face_policy: Option<PathBuf>,
     /// The face of --face-policy, by its name (`[face.<name>]`).

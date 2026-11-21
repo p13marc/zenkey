@@ -7,6 +7,118 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.18 — 2026-11-21: §2.19, a `null` among the eight keys; §2.18, the far end's block unfilled; `keep_alive_not_suppressed` pinned below the interval, no keyword changed (#609)
+
+zk2py round 110 read 0.15 to 0.17 cold, beside core 0.106. It filed
+F-529 to F-534 against this text, its fixtures and zenoh-modem's
+mapping: five minor errors and an ambiguity. This version answers the
+six.
+
+**Changed: §2.19, a `null` among the eight keys (F-532, an ambiguity).**
+- **Before:** "A `null` reads as left out: as the value, at a mode, or as
+  the `mode`." The three places are `timestamping/enabled`'s and the
+  `mode`'s. The text said nothing of a `null` at one of the eight keys.
+- **Read: zenoh 1.10.1's configuration.** `routing/interests/timeout` is
+  an `Option<u64>` (`zenoh-config`'s `lib.rs`, line 626), which the
+  router fills with its default, 10,000
+  (`net/routing/dispatcher/tables.rs`, line 186; `defaults.rs`, line
+  160). The seven other keys are not optional: `lease`, `open_timeout`
+  and `accept_timeout` are `u64`, `keep_alive` a `usize`, `batch_size` a
+  `BatchSize`, `sequence_number_resolution` a `Bits` and
+  `wait_before_close` an `i64`. zenoh refuses a `null` at each when it
+  loads the file. zk2py measured the same on zenoh-python.
+- **Now:** a `null` reads as zenoh reads it. At
+  `routing/interests/timeout` it is left out, read at the binding's
+  default, as the three places were. At each of the seven other keys it
+  is no value zenoh runs: `transport_differs`, as a string is, and
+  `wait_under_lease` skips it.
+- **Why not the letter,** a `null` there a value stated and so
+  `transport_differs`: a router given `timeout: null` runs 10,000. Under
+  a policy whose `interests_timeout_ms` is 10,000 it runs the policy's
+  transport, and the error would be false.
+- **The reference** reported `transport_differs` there
+  (`zenctl check face`, observed), since `StatedTransport` kept that
+  `null` as a value stated. It changes with this version: the key reads
+  as not stated, at the binding's default, and `check face` shows it so.
+- **The fork types the key alike.** `zm-1.10.2-r1` (`marcpardo/zenoh`,
+  2454b10c) declares it an `Option<u64>` (`zenoh-config`'s `lib.rs`,
+  line 630) and fills it the same way (`tables.rs`, line 186;
+  `defaults.rs`, line 160). Its seven other keys are not optional
+  either.
+
+**Changed: §2.18, the far end's block unfilled (F-531, minor).**
+- **Before:** "zenoh loads no user without a password, and opens no
+  dictionary it cannot read, so the far end runs none of it unfilled."
+- **Read: zenoh 1.10.1's usrpwd**
+  (`unicast/establishment/ext/auth/usrpwd.rs`). An unreadable
+  `dictionary_file` is an error, "Invalid user-password dictionary file"
+  (lines 73 to 76). A user with no password is no error: the end holds
+  no credentials (lines 105 to 111). An acceptor refuses a wrong
+  password, "Invalid password" (line 424).
+- **Now:** only the dictionary stops the far end, which does not start
+  from the block as written. With its dictionary filled in and its
+  password not, it starts, and presents the placeholder, or no user
+  where the password is removed. The near router refuses its link either
+  way, and a far router runs attached to nothing.
+- **Measured by zk2py** on a zenoh-python router. zenohd itself was not
+  run.
+
+**Changed: Appendix B, zenoh-modem's plans by number (F-534, minor).**
+"Their plans are `plan.json`'s last five cases" was written at 0.5, and
+true then. They are cases 14 to 18, counted from 0, of 46. The text
+names them, and no longer counts from the end.
+
+**The evidence.**
+- **`v2/plan.json`, case 44 (F-529, minor).** It kept case 5's
+  `keyframe_s`, 900, at a cadence of 45 s. `probe.v1`'s `frames/link`
+  reaches a full record every 15 × 45 s, 675 s, so the case was refused
+  `keyframe_unreachable` and showed no plan. It now asks 675 s. Its plan
+  is case 5's with the frame at 45 s: no `keep_alive_not_suppressed`,
+  and `frame_over_interval`, since 45 s is below the face's `interval_s`
+  too.
+- **`v2/plan.json` gains case 45:** case 5's face whole, under a lease
+  of 240,001 ms. The frame's 60 s × 4 is 240,000 ms, one below the
+  lease, so the plan warns no `keep_alive_not_suppressed`. Case 5, at
+  240,000 ms, warns. The two pin §2.16's inequality on both sides.
+- **Both were written by hand** from case 5's plan and §2.7, §2.8 and
+  §2.16, then compared with the reference's `zenctl acl gen`: equal.
+- **`v2/plan.json`'s description (F-530, minor)** says what a case's
+  `users` is, as the 0.15 entry did.
+- **Case 15's note,** zenoh-modem's SF7 face, said the uplink pays a
+  keep-alive between two frames. At twice the interval it pays one, and
+  a second before each frame later than the one before (§2.16).
+- **`v2/transport.json` gains cases 24 to 26.** Case 24 is a `null`
+  lease: `transport_differs`, and no `wait_under_lease`. Case 25 is a
+  `null` `routing/interests/timeout` under a policy at 40,000 ms: left
+  out, at 10,000, so `transport_differs`. Case 26 is the same `null`
+  under a policy at 10,000 ms: left out, at the policy's value, and no
+  finding. The reference passes the three.
+
+**zenoh-modem's mapping (F-533, minor)**, `examples/zk2/zenoh-modem/`.
+Its notes priced each face's keep-alives by the rule 0.17 replaced.
+- **Re-priced by §2.16.** RF, SF9, SF12 and SBD run a cadence equal to
+  the interval: none to one uplink keep-alive a gap, where the notes
+  said none. SF7 runs twice the interval: one to two, where they said
+  one.
+- **The figures.** At SF7, 1,440 to 2,880 a day, 74 s to 148 s of air,
+  2,160 and 111 s measured. At SF9, up to 720 and 119 s. At SF12, up to
+  96 and 142 s. On SBD, up to 48 paid messages. On RF, up to 1,440, 336
+  measured under the lean stack.
+- **Two worst cases exceed their budgets.** SF12's frames with every
+  reading present take 785 s to 927 s of the duty's 864 s. SBD takes 96
+  to 144 messages of about 96. The notes say so. The intervals are the
+  adopter's to move (§2.16).
+- **The plans' warnings** are listed as cases 14 to 18 draw them, and
+  `MIGRATION.md` §6 drops #1107 and #1108, which landed.
+
+**Deliberately not changed.**
+- **No keyword.** §2.19's MUST reads the fixture, as it did. One answer
+  moves: a `null` `routing/interests/timeout` at the binding's default.
+- **§2.16.** F-529 was the fixture's error. The text stands.
+- **zenoh-modem's policies.** Only their comments move. Each face keeps
+  its lease and its cadence.
+- **The header** is still written against core 0.100.
+
 ## link.v2 0.17 — 2026-11-08: §2.16, what a face's keep-alives cost beside its frames, as zenoh's timer counts them, and `keep_alive_not_suppressed` at the interval (#1108)
 
 The zk2c runs of #989 measured a face's keep-alives beside its frames.

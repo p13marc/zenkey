@@ -1003,7 +1003,9 @@ alarms under zk2/*/*/alarms.v1/state/alarms/* in namespace "acme" — anything a
 The same question is the watchdog's `alert-firing <SEL> [info|warning|critical]`
 rule (and `record --on`'s), read by a subscription seeded by S4's GET and
 re-read each tick: firing on yes, ok on no, unobservable otherwise — never
-ok. `check conform` asks an owner's keys and documents as `alarm-key` and
+ok. Its reader reads by the routers' zenoh too: `watchdog --binding` and
+`record --on … --binding` name it (`zm-1.10.2-r1`, zenoh 1.10.1's when
+omitted); neither verb takes `--lease` or `--wait-before-close`. `check conform` asks an owner's keys and documents as `alarm-key` and
 `alarm-document`; `get state` reads one alarm's raw value, and
 `--last-known` an archive's.
 

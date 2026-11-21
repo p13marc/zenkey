@@ -62,7 +62,10 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   `timestamping/enabled`, `stamps()` reads them at the mode, `router`
   where none is stated, a `null` read as left out (0.15), and
   `face_timestamping` is its warning; `TIMESTAMPING_OFF` is what a
-  generator writes); since 0.15 (#1107) `Face::opens` (`Opens::{Far,
+  generator writes; since 0.18 `null_left_out(key)` is a `null`
+  `routing/interests/timeout`, an `Option` zenoh fills, which `states`
+  and `runs` read as left out, at the binding's default, a `null` at each
+  of the seven other keys staying a value stated, `transport_differs`); since 0.15 (#1107) `Face::opens` (`Opens::{Far,
   Near}`, `"near"` only on `south-region`, else `bad_value`) and
   `Deployment::users` (the principals bound by a user name, a plan
   case's `users`): `plan` refuses `near_opens_user` at `opens` before the
@@ -417,9 +420,11 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   configuration, which states only its own pushes' wait. #988 L4 (core
   0.91): `budget::Routers` (lease, keep-alives, `wait_before_close`;
   `of(&link::Transport)`, `of_binding(Binding)` for a reader told its
-  binding and no policy (`Binding` is `Hash` and deserializes by its
-  policy name, for a tool's own configuration, any other string refused
-  with the names it could have been), `stall_bound`, `presence_tail`,
+  binding and no policy (`Binding` is `Hash`, deserializes by its
+  policy name, for a tool's own configuration, and parses by it
+  (`FromStr`, `UnknownBinding`), for a tool's `--binding`, any other
+  string refused with the names it could have been, `Binding::NAMES` the
+  one list), `stall_bound`, `presence_tail`,
   zenoh 1.10.1's by default) is a window reader's word from the routers' face policy
   (#1011's item 3); `link::FacePolicy::far_side(face)` → `FarSide`
   (`reply_timeout`, `at_least`, `redeclares` = `!arq`, `session_keys`,

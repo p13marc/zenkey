@@ -132,7 +132,11 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   `zenkey_fleet::RouterConfig`; under a fork binding, as data, #1044,
   `load_against(path, binding)`, `load_peer` alike), with `--peer-config
   <FAR-CONFIG>` and `--catalog <FILE>` (both refused, exit 2, beside a
-  `link.v1` policy); `check-face.trycmd` runs the RF router of
+  `link.v1` policy); since link.v2 0.18 a `null`
+  `routing/interests/timeout` reads as left out, `stated: false` at the
+  binding's default (`router-rf-null-interests.json5`, exit 0), and
+  `--far-config`'s comment says what follows from each placeholder left
+  unfilled; `check-face.trycmd` runs the RF router of
   `examples/zk2/link/media/` and a hand-edited `wait_before_close`, and
   zenoh-modem's rf0 router on the fork's binding, read as data, with a
   hand edit that does not read (exit 2).
@@ -235,7 +239,23 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   an assumed 4; `timing` and `arbitration` take the routers'
   `--face-policy`, `telemetry`'s stays the face's it reads across;
   `tests/cmd/routers-binding.trycmd`, and `live_zk2.rs`'s
-  `alarms_told_the_forks_binding_watch_its_wait_before_close`); #990 V8: `get state`, `watch` and `call`
+  `alarms_told_the_forks_binding_watch_its_wait_before_close`; and
+  `watchdog` and `record --on`, whose `alert-firing` rule builds the same
+  reader, take `--binding` too, a flag of their own words since neither
+  takes `--lease` or `--wait-before-close`, through
+  `cmd::watchdog::rule_routers` → `zk2::routers_of` into
+  `WatchdogSpec::routers` and `TriggerSpec::routers`; their `--face-policy`
+  stays `AcrossFaceArgs`', the face read across, where no `alert-firing`
+  rule is asked, so the routers' sense of it is not offered there;
+  `zk2::routers_of` is the rule over a `[transport]` in hand, which a verb
+  reading across a face takes from the far side it read for its session
+  (`telemetry`, `watchdog`, `record --on`), so its policy is read once and
+  refused in one place, and `zk2::routers` reads the routers' policy from
+  its file; `--binding` parses by `Binding`'s `FromStr`, the model's one
+  list of names; `record --on` opens its namespaced session for an
+  `alert-firing` rule too, `cmd::watchdog::reads_deployment`, without
+  which the rule alone had no reader and read unobservable, `live_zk2.rs`'s
+  `record_on_an_alert_firing_rule_alone_reads_the_owners_alarms`); #990 V8: `get state`, `watch` and `call`
   take `cli::OwnerFaceArgs` (`--across-face`, the revision `--contracts`
   holds, never presence, `zk2::held_across` refusing one it does not
   name, exit 2; `--face-policy F --face N`, `zk2::across` →

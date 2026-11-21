@@ -3160,8 +3160,12 @@ fn transport_json5(
              // face's links as {user:?}. Fill in its password, the one the near router's dictionary\n  \
              // holds for it, and {end}'s own dictionary_file: with credentials, {end} asks a user of\n  \
              // every session that opens to it, and refuses one the file does not hold. Give each\n  \
-             // session of the far side a user of its own there, its local tools among them. zenoh\n  \
-             // loads no user without a password, and opens no dictionary it cannot read.\n  \
+             // session of the far side a user of its own there, its local tools among them.\n  \
+             // Unfilled, each part fails its own way (link.v2 §2.18). zenoh opens no dictionary it\n  \
+             // cannot read, so {end} does not start from this block as written. With the\n  \
+             // dictionary filled in and the password not, it starts, and the near router refuses its\n  \
+             // link: it presents the placeholder as its password, or no user at all once the password\n  \
+             // is removed, since zenoh loads no user without one.\n  \
              auth: {{ usrpwd: {{ user: {user:?}, password: {password:?}, dictionary_file: {dictionary:?} }} }},",
             // Quoted whole, so a name holding `"` or `\` keeps the line JSON5
             // (review-bot on #1122).
@@ -3381,7 +3385,9 @@ pub struct RouterConfig {
     pub downsampling: Vec<DownsamplingDoc>,
     pub gateway: Option<serde_json::Value>,
     /// The keys it states (`link::StatedTransport::read` over the file's
-    /// own JSON tree): a key it omits runs at the binding's default.
+    /// own JSON tree): a key it omits runs at the binding's default, and so
+    /// does a `null` `routing/interests/timeout`, which zenoh fills with
+    /// its default (`link.v2` §2.19, `StatedTransport::null_left_out`).
     pub transport: link::StatedTransport,
     /// How it was read (#1044).
     pub read: ConfigRead,
@@ -3393,8 +3399,10 @@ impl RouterConfig {
     /// own JSON tree ([`RouterConfig::stated_tree`]), states. A stated key's
     /// value is the one zenoh's loader read, typed as zenoh types it (a
     /// fraction cast to an integer, as its deserializer does): what the
-    /// router runs. A block that does not parse as zenoh 1.10's shape is
-    /// named in the error.
+    /// router runs. A `null` `routing/interests/timeout` comes back from
+    /// the loader as `null`, an `Option` it left unset: the key reads as
+    /// left out, at the binding's default (`link.v2` §2.19). A block that
+    /// does not parse as zenoh 1.10's shape is named in the error.
     pub fn read(
         config: &zenoh::Config,
         stated: &serde_json::Value,
@@ -3884,6 +3892,13 @@ pub fn check_acl(plan: &AclPlan, config: &RouterConfig, against: &str) -> AclChe
                     Some(planned.to_string()),
                     Some(if config.transport.states(k) {
                         runs.to_string()
+                    } else if config.transport.null_left_out(k) {
+                        // link.v2 §2.19: zenoh fills this `null` with its
+                        // default, so the router runs that.
+                        format!(
+                            "{runs}, {b}'s default: the file states `null`, which zenoh reads \
+                             as left out"
+                        )
                     } else {
                         format!("{runs}, {b}'s default: the file states none")
                     }),

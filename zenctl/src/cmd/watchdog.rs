@@ -32,8 +32,11 @@ use crate::bus::Deployment;
 use crate::cmd::zk2;
 
 /// Whether a rule reads the deployment — its doctor, an address's instance
-/// tokens, a key's contract or declared QoS — and so needs a session in
-/// its namespace beside the raw one.
+/// tokens, a key's contract or declared QoS, the owners' alarms — and so
+/// needs a session in its namespace beside the raw one. `record --on` opens
+/// that session only for such a rule: an `alert-firing` rule left out of
+/// here had no reader, and read unobservable for as long as the capture
+/// was armed (#1011).
 pub(crate) fn reads_deployment(rule: &Condition) -> bool {
     matches!(
         rule,
@@ -41,6 +44,7 @@ pub(crate) fn reads_deployment(rule: &Condition) -> bool {
             | Condition::InstanceGone { .. }
             | Condition::InvalidPayload { .. }
             | Condition::QosMismatch { .. }
+            | Condition::AlertFiring { .. }
     )
 }
 
@@ -52,6 +56,26 @@ pub(crate) fn follows_presence(rule: &Condition) -> bool {
         rule,
         Condition::InstanceGone { .. } | Condition::AlertFiring { .. }
     )
+}
+
+/// The routers an `alert-firing` rule's reader reads its window and its own
+/// stall by (#1011), for `watchdog` and `record --on`, through the window
+/// verbs' one rule, [`zk2::routers_of`]: the `[transport]` of the face the
+/// verb reads across, where it reads across one, else `--binding`'s
+/// defaults, else zenoh 1.10.1's. Neither verb takes `--lease` or
+/// `--wait-before-close`.
+///
+/// The face's transport is the one its scope read already ([`zk2::FaceScope`],
+/// which refuses a `link.v1` policy): the file is not read again. Across a
+/// face no `alert-firing` rule is asked ([`refuse_across_face`]), so today
+/// that transport reaches no reader: it is handed over all the same, so
+/// that a policy outranks a binding here as it does in every window verb.
+pub(crate) fn rule_routers(
+    face: Option<&zk2::FaceScope>,
+    binding: Option<zenkey_model::link::Binding>,
+) -> Result<zenkey_model::budget::Routers> {
+    let transport = face.and_then(zk2::FaceScope::far).map(|far| &far.transport);
+    zk2::routers_of(transport, binding, None, None)
 }
 
 /// Refuses, exit 2, what a rule cannot read across a constrained face
@@ -115,6 +139,7 @@ pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
         every,
         count,
         clocks_synced,
+        binding,
         contracts: _,
         ns: _,
     } = cli;
@@ -138,6 +163,9 @@ pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
         Some(f) => f.deployment(dep),
         None => dep,
     };
+    // The routers an `alert-firing` rule's reader reads by (#1011), from
+    // the face's own reading of its policy, before any session opens.
+    let routers = rule_routers(face.as_ref(), binding)?;
     let across = match &face {
         Some(face) => {
             // The rules' selectors are wire keys, as the face's are: both
@@ -191,9 +219,9 @@ pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
         // #1087: an `alert-firing` rule's confirmations dated under the
         // catalog each owner's descriptor names, read through `--catalog`.
         catalogs,
-        // `watchdog` takes no `--lease`, `--wait-before-close` or
-        // `--binding`: its `alert-firing` readers read by zenoh 1.10.1's.
-        routers: zenkey_model::budget::Routers::default(),
+        // An `alert-firing` rule's reader reads its window and its own
+        // stall by them: `--binding`'s, else zenoh 1.10.1's (#1011).
+        routers,
     };
 
     eprintln!(
@@ -262,4 +290,108 @@ pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
         eprintln!("watchdog: {reason} — exit 2, the reserved non-verdict");
     }
     crate::exit::verdict(&judgement)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use clap::Parser as _;
+    use zenkey_model::budget::Routers;
+    use zenkey_model::link::Binding;
+
+    use super::rule_routers;
+    use crate::cli::{Cli, Command};
+    use crate::cmd::zk2;
+
+    /// The routers `zenctl <args>` hands its `alert-firing` readers:
+    /// `watchdog`'s `WatchdogSpec::routers`, `record --on`'s
+    /// `TriggerSpec::routers`, resolved as each verb resolves them, from
+    /// the face's scope where it reads across one.
+    fn routers_of(args: &[&str]) -> Routers {
+        let cli = Cli::try_parse_from(std::iter::once("zenctl").chain(args.iter().copied()))
+            .unwrap_or_else(|e| panic!("{args:?}: {e}"));
+        let (face, contracts, binding) = match cli.command {
+            Command::Watchdog(a) => (a.face, a.contracts, a.binding),
+            Command::Record(a) => (a.face, a.contracts, a.binding),
+            _ => panic!("{args:?}: neither watchdog nor record"),
+        };
+        let contracts = zk2::load_contracts(&contracts).expect("the contracts load");
+        let face = zk2::FaceScope::of(&face, &contracts, "", zk2::Reads::Samples)
+            .unwrap_or_else(|e| panic!("{args:?}: {e}"));
+        rule_routers(face.as_ref(), binding).unwrap_or_else(|e| panic!("{args:?}: {e}"))
+    }
+
+    /// #1011's last readers: `watchdog` and `record --on` told the fork's
+    /// binding hand their `alert-firing` readers the fork's routers, whose
+    /// `wait_before_close` is 10 s where zenoh 1.10.1's is 5 s, so the
+    /// reader may stall 7.5 s, the lease less a keep-alive, where it was
+    /// bounded at 5 s. Told nothing, or zenoh 1.10.1 by name, zenoh
+    /// 1.10.1's. (The fleet's `an_alert_firing_reader_reads_by_the_
+    /// watchdogs_routers` is the other half: the spec's routers are the
+    /// reader's.)
+    #[test]
+    fn watchdog_and_record_on_hand_their_alarm_readers_the_bindings_routers() {
+        let rule = "alert-firing zk2/** warning";
+        let watchdog = ["watchdog", "--rule", rule];
+        let record = ["record", "-o", "x.zrec", "--on", rule, "--pre", "5"];
+        for verb in [&watchdog[..], &record[..]] {
+            let with = |more: &[&str]| routers_of(&[verb, more].concat());
+            let fork = with(&["--binding", "zm-1.10.2-r1"]);
+            assert_eq!(fork, Routers::of_binding(Binding::Zm1_10_2R1), "{verb:?}");
+            assert_eq!(fork.wait_before_close, Duration::from_secs(10));
+            assert_eq!(fork.stall_bound(), Duration::from_millis(7_500));
+            let untold = with(&[]);
+            assert_eq!(untold, Routers::default(), "{verb:?}");
+            assert_eq!(untold.stall_bound(), Duration::from_secs(5));
+            assert_eq!(with(&["--binding", "zenoh-1.10.1"]), untold, "{verb:?}");
+            // A name that is no binding is clap's refusal, exit 2.
+            let unknown = Cli::try_parse_from(
+                std::iter::once("zenctl")
+                    .chain(verb.iter().copied())
+                    .chain(["--binding", "zenoh-9"]),
+            );
+            assert!(unknown.is_err(), "{verb:?}");
+        }
+        // `record --binding` is the triggered form's: refused without --on.
+        assert!(
+            Cli::try_parse_from([
+                "zenctl",
+                "record",
+                "-o",
+                "x.zrec",
+                "--binding",
+                "zm-1.10.2-r1"
+            ])
+            .is_err()
+        );
+    }
+
+    /// Reading across a face, the policy's `[transport]` outranks the
+    /// binding, as in every window verb (`zk2::routers`): the RF medium's
+    /// 240 s lease and `wait_before_close`.
+    #[test]
+    fn a_face_policys_transport_outranks_the_binding() {
+        let link = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2/link");
+        let rf = link.join("media/rf.face.toml");
+        let rf = rf.to_str().expect("a UTF-8 path");
+        let radio = link.join("radio.v1.toml");
+        let routers = routers_of(&[
+            "watchdog",
+            "--rule",
+            "silent-for zk2/lab/radio-a/** 5",
+            "--across-face",
+            "lab/radio-a",
+            "--contracts",
+            radio.to_str().expect("a UTF-8 path"),
+            "--face-policy",
+            rf,
+            "--face",
+            "radio",
+            "--binding",
+            "zm-1.10.2-r1",
+        ]);
+        let s = Duration::from_secs;
+        assert_eq!((routers.lease, routers.wait_before_close), (s(240), s(240)));
+    }
 }

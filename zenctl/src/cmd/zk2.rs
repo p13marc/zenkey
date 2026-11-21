@@ -747,14 +747,19 @@ impl FaceScope {
 /// binding's. Refused, exit 2: a flag that is not a positive number of
 /// seconds, what [`face_policy`] refuses, and a `link.v1` policy, which
 /// states no transport.
+///
+/// `policy` is the routers' face policy, a file this reads: the sense
+/// `check conform`, `alarms`, `timing` and `arbitration` take
+/// `--face-policy` in. A verb that reads across a face has read its policy
+/// already, for its session, and hands that reading to [`routers_of`].
 pub fn routers(
     policy: Option<&std::path::Path>,
     binding: Option<zenkey_model::link::Binding>,
     lease: Option<f64>,
     wait_before_close: Option<f64>,
 ) -> Result<zenkey_model::budget::Routers> {
-    let mut routers = match policy {
-        None => zenkey_model::budget::Routers::of_binding(binding.unwrap_or_default()),
+    let transport = match policy {
+        None => None,
         Some(path) => {
             let Some(t) = face_policy(path)?.transport else {
                 return Err(unaskable!(
@@ -764,8 +769,27 @@ pub fn routers(
                     path.display()
                 ));
             };
-            zenkey_model::budget::Routers::of(&t)
+            Some(t)
         }
+    };
+    routers_of(transport.as_ref(), binding, lease, wait_before_close)
+}
+
+/// [`routers`] over a `[transport]` in hand, the same four steps: the one
+/// the far side of `--face-policy F --face NAME` carries ([`far_side`],
+/// `FaceScope::far`), for a verb that reads across a face. That policy is
+/// read once, where the verb's session is set up, which is where a
+/// `link.v1` policy or an unknown face is refused: nothing reads the file
+/// a second time here, so nothing can refuse it in other words.
+pub fn routers_of(
+    transport: Option<&zenkey_model::link::Transport>,
+    binding: Option<zenkey_model::link::Binding>,
+    lease: Option<f64>,
+    wait_before_close: Option<f64>,
+) -> Result<zenkey_model::budget::Routers> {
+    let mut routers = match transport {
+        None => zenkey_model::budget::Routers::of_binding(binding.unwrap_or_default()),
+        Some(t) => zenkey_model::budget::Routers::of(t),
     };
     if let Some(l) = lease {
         routers.lease = super::positive_secs("--lease", l)?;

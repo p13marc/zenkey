@@ -6,6 +6,15 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a `null` among a router's transport keys (zk2py round 110)
+
+`link.v2` 0.18 §2.18, §2.19.
+
+| Before | Now | Notes |
+|---|---|---|
+| `check face`: a router config with `routing: { interests: { timeout: null } }` is `transport_differs` at `transport.interests_timeout_ms`, `observed: null`, `stated: true`, exit 1 under a policy at 10,000 ms; `acl gen --check`'s comparison differs there too | the key reads as left out: `observed` the binding's default, `stated: false`, `runs 10000 (the default)`, and no finding where that is the policy's | zenoh 1.10.1 loads that `null` and runs its default, as `zm-1.10.2-r1` does. Under a policy at another value it is still `transport_differs`, the comparison saying "the file states `null`, which zenoh reads as left out". A `null` at any of the seven other keys is unchanged: stock zenoh refuses the file, and read as data it is `transport_differs` |
+| `acl gen --far-config`: the credentials' comment ends "zenoh loads no user without a password, and opens no dictionary it cannot read" | it says what follows unfilled: the far end does not start for its dictionary alone; with the dictionary filled in and the password not, it starts and the near router refuses its link | wording only: the block's keys are unchanged |
+
 ## Unreleased (`main`, zk2) — a reader's lease and `wait_before_close` by its binding (#1011)
 
 Observer §5.2; `link.v2` §2.19. No rule moved.
@@ -16,6 +25,8 @@ Observer §5.2; `link.v2` §2.19. No rule moved.
 | `timing`, `arbitration`: no `--face-policy`; `--lease` and `--wait-before-close` with `[default: 10]` and `[default: 5]` | `--face-policy <FILE>`, the routers' `link.v2` policy, as `check conform` and `alarms` take it; the two flags have no clap default, and their help states the ladder | a `link.v1` policy is refused, exit 2. Omitting everything reads as before |
 | `telemetry --face-policy F --face N`: the session and the timeout from the face, the stall bound from zenoh 1.10.1's defaults | also the defaults of `--lease` and `--wait-before-close` | `--face-policy` still requires `--across-face` and `--face` here |
 | the stall bound: `--wait-before-close`, or `--lease` less a quarter of it, whatever the policy's `keep_alive` | `--lease` less one of the routers' keep-alive intervals: the policy's `keep_alive`, else the binding's | every binding's default is 4, so only a policy stating another moves the bound: SBD's 2 bounds a stall at half its lease |
+| `watchdog`, `record --on`: an `alert-firing` rule's reader by zenoh 1.10.1's 10 s lease and 5 s `wait_before_close`, whatever zenoh the routers run | `--binding <NAME>` on both, through the same rule (`record`'s only with `--on`) | neither takes `--lease` or `--wait-before-close`; their `--face-policy` stays the face read across (`--across-face`), where no `alert-firing` rule is asked. On `zm-1.10.2-r1` the reader may stall 7.5 s, where 5 s bounded it |
+| `record --on 'alert-firing …'` with no other rule that reads the deployment: the rule read unobservable, "no session in the deployment's namespace was given to read alarms", for as long as the capture was armed, and nothing was written | `record --on` opens the session in the namespace, and the watch session, for an `alert-firing` rule as for the doctor's, presence's, payload's and QoS's | `watchdog` always opened them; `live_zk2.rs`'s `record_on_an_alert_firing_rule_alone_reads_the_owners_alarms` |
 
 ## Unreleased (`main`, zk2) — a face whose cadence is its keep-alive interval (#1108)
 

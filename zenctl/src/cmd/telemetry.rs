@@ -116,7 +116,17 @@ pub async fn run(cli: TelemetryArgs) -> Result<()> {
     } = cli;
     let dep = ASKING.ask(Deployment::resolve(&ns));
     // #990 V8: across a face's policy, the face's transport and timeout.
-    let dep = ASKING.ask(zk2::across(dep, face_policy.as_deref(), face.as_deref()));
+    // The policy is read here, once: a `link.v1` policy or a face it does
+    // not name is refused here, and the routers below read this far side's
+    // `[transport]`, never the file again.
+    let far = match (face_policy.as_deref(), face.as_deref()) {
+        (Some(p), Some(f)) => Some(ASKING.ask(zk2::far_side(p, f))),
+        _ => None,
+    };
+    let dep = match &far {
+        Some(far) => dep.across(far.clone()),
+        None => dep,
+    };
     let offline = ASKING.ask(zk2::load_contracts(&contracts));
     let scope = match &selector {
         Some(s) => ASKING.ask(TelemetryScope::parse(s).map_err(|why| unaskable!("{why}"))),
@@ -137,10 +147,10 @@ pub async fn run(cli: TelemetryArgs) -> Result<()> {
     let window = ASKING.ask(super::positive_secs("--for", for_secs));
     let mut spec = TelemetrySpec::new(dep.timeout(), window);
     // The routers' lease, keep-alives and wait_before_close: the flags,
-    // else the face policy's, else the binding's, else zenoh 1.10.1's
-    // (#1011).
-    spec.routers = ASKING.ask(zk2::routers(
-        face_policy.as_deref(),
+    // else the `[transport]` of the face read across, else the binding's,
+    // else zenoh 1.10.1's (#1011).
+    spec.routers = ASKING.ask(zk2::routers_of(
+        far.as_ref().map(|far| &far.transport),
         binding.binding,
         lease,
         wait_before_close,

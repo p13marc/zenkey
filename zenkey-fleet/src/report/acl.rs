@@ -940,7 +940,9 @@ pub struct FaceTransportKey {
     pub planned: serde_json::Value,
     /// What the configuration runs: its value, or the binding's default.
     pub observed: serde_json::Value,
-    /// Whether the configuration states the key.
+    /// Whether the configuration states the key. A `null`
+    /// `routing/interests/timeout` states none: zenoh fills it with its
+    /// default, so it reads as left out (`link.v2` §2.19).
     pub stated: bool,
     /// What the far end's configuration runs, read alike, when it was read.
     #[serde(default, skip_serializing_if = "Option::is_none")]

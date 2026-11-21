@@ -239,6 +239,18 @@ impl Binding {
     /// Every binding, in the order v2 §2.4 lists them.
     pub const ALL: [Binding; 2] = [Binding::Zenoh1_10_1, Binding::Zm1_10_2R1];
 
+    /// Every binding's name, in [`Binding::ALL`]'s order: the one list a
+    /// refusal offers ([`UnknownBinding`], and `Deserialize`'s).
+    pub const NAMES: [&'static str; Binding::ALL.len()] = {
+        let mut names = [""; Binding::ALL.len()];
+        let mut i = 0;
+        while i < names.len() {
+            names[i] = Binding::ALL[i].as_str();
+            i += 1;
+        }
+        names
+    };
+
     /// Its name in a policy.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -297,23 +309,37 @@ impl Serialize for Binding {
     }
 }
 
+/// A name that is no binding (v2 §2.4): what [`Binding`]'s `FromStr`
+/// refuses, said with the names it could have been.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnknownBinding(pub String);
+
+impl fmt::Display for UnknownBinding {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "not a binding; one of: {}", Binding::NAMES.join(", "))
+    }
+}
+
+impl std::error::Error for UnknownBinding {}
+
+/// A binding by its name in a policy, for a tool's flag (`--binding`): any
+/// other string is refused with the names it could have been.
+impl std::str::FromStr for Binding {
+    type Err = UnknownBinding;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Binding::parse(s).ok_or_else(|| UnknownBinding(s.to_owned()))
+    }
+}
+
 /// A binding by its name in a policy, for a tool's own configuration (a
 /// policy's `binding` is read by [`parse`], with its findings): any other
 /// string is refused with the names it could have been.
 impl<'de> serde::Deserialize<'de> for Binding {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        // Every binding's name, so a new one is offered without a second list.
-        const NAMES: [&str; Binding::ALL.len()] = {
-            let mut names = [""; Binding::ALL.len()];
-            let mut i = 0;
-            while i < names.len() {
-                names[i] = Binding::ALL[i].as_str();
-                i += 1;
-            }
-            names
-        };
         let name = String::deserialize(d)?;
-        Binding::parse(&name).ok_or_else(|| serde::de::Error::unknown_variant(&name, &NAMES))
+        Binding::parse(&name)
+            .ok_or_else(|| serde::de::Error::unknown_variant(&name, &Binding::NAMES))
     }
 }
 
@@ -522,14 +548,20 @@ pub const POSTURE_PATHS: [&str; 2] = ["mode", "timestamping/enabled"];
 /// the file writes them (v2 §2.19): a key it omits is absent, and read at
 /// the binding's default. Its mode and `timestamping/enabled`
 /// ([`POSTURE_PATHS`]) beside them, where it states them.
+///
+/// The map holds what the file writes, a `null` included. What a `null`
+/// means is read where the key is: [`StatedTransport::states`] and
+/// [`StatedTransport::runs`] for the eight keys, [`StatedTransport::stamps`]
+/// for the mode and the timestamping. So a value built from a map, as a
+/// fixture's is, reads as one [`StatedTransport::read`] made.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StatedTransport(pub BTreeMap<String, Value>);
 
 impl StatedTransport {
-    /// The keys `config`, a router's configuration as a JSON tree, states:
+    /// The keys `config`, a router's configuration as a JSON tree, writes:
     /// each of [`TransportKey::ALL`]'s and [`POSTURE_PATHS`]' whose path it
-    /// holds, `null` included, since a key written down is the file's
-    /// choice.
+    /// holds, a `null` kept as written. Whether a `null` is a value stated
+    /// is its key's to say ([`StatedTransport::states`]).
     #[must_use]
     pub fn read(config: &Value) -> StatedTransport {
         let mut out = BTreeMap::new();
@@ -580,18 +612,38 @@ impl StatedTransport {
         }
     }
 
-    /// Whether the configuration states `key`.
+    /// Whether the configuration writes a `null` at `key` that zenoh
+    /// 1.10.1 reads as left out (v2 §2.19): only at
+    /// [`TransportKey::InterestsTimeout`], `routing/interests/timeout`, an
+    /// `Option<u64>` the router fills with its default
+    /// (`unwrap_or_default!`), as `zm-1.10.2-r1` types it too. Each of the
+    /// seven other keys is no `Option`: zenoh refuses a `null` there at
+    /// load, so it stays a value stated, and no value zenoh runs.
     #[must_use]
-    pub fn states(&self, key: TransportKey) -> bool {
-        self.0.contains_key(key.path())
+    pub fn null_left_out(&self, key: TransportKey) -> bool {
+        key == TransportKey::InterestsTimeout && matches!(self.0.get(key.path()), Some(Value::Null))
     }
 
-    /// What the configuration runs for `key`: its value, or `defaults`'s
-    /// (a binding's, [`Binding::defaults`]).
+    /// The value the configuration states for `key`: what it writes there,
+    /// but for a `null` zenoh reads as left out
+    /// ([`StatedTransport::null_left_out`]).
+    fn stated(&self, key: TransportKey) -> Option<&Value> {
+        self.0.get(key.path()).filter(|_| !self.null_left_out(key))
+    }
+
+    /// Whether the configuration states `key`: it writes it, and not as a
+    /// `null` zenoh reads as left out.
+    #[must_use]
+    pub fn states(&self, key: TransportKey) -> bool {
+        self.stated(key).is_some()
+    }
+
+    /// What the configuration runs for `key`: the value it states, or
+    /// `defaults`'s (a binding's, [`Binding::defaults`]) where it states
+    /// none ([`StatedTransport::states`]).
     #[must_use]
     pub fn runs(&self, key: TransportKey, defaults: &Transport) -> Value {
-        self.0
-            .get(key.path())
+        self.stated(key)
             .cloned()
             .unwrap_or_else(|| defaults.value(key))
     }
@@ -2640,7 +2692,8 @@ pub fn same_value(a: &Value, b: &Value) -> bool {
 /// Checks a router's configuration against a link.v2 policy's transport,
 /// and the far end's against it (v2 §2.19): `router` and `peer` are the
 /// keys each configuration states, a key it omits read at the binding's
-/// default.
+/// default, and a `null` as zenoh reads one
+/// ([`StatedTransport::null_left_out`]).
 /// - `transport_differs`, each key whose router value is not the policy's;
 /// - `wait_under_lease`, the router's `wait_before_close` below its lease,
 ///   whatever the policy says;
@@ -4586,6 +4639,29 @@ mod tests {
         assert!(serde_json::from_value::<Binding>(Value::from(1)).is_err());
     }
 
+    /// A binding parses from a tool's flag by its policy name, and any
+    /// other string is refused with the names it could have been, from the
+    /// one list, [`Binding::NAMES`], in [`Binding::ALL`]'s order.
+    #[test]
+    fn a_binding_parses_by_its_name() {
+        assert_eq!(Binding::NAMES, Binding::ALL.map(Binding::as_str));
+        for b in Binding::ALL {
+            assert_eq!(b.as_str().parse::<Binding>(), Ok(b));
+            assert_eq!(b.to_string().parse::<Binding>(), Ok(b));
+        }
+        let e = "zenoh-1.10.2".parse::<Binding>().unwrap_err();
+        assert_eq!(e, UnknownBinding("zenoh-1.10.2".to_owned()));
+        assert_eq!(
+            e.to_string(),
+            "not a binding; one of: zenoh-1.10.1, zm-1.10.2-r1"
+        );
+        assert!("".parse::<Binding>().is_err());
+        assert!(
+            "Zenoh-1.10.1".parse::<Binding>().is_err(),
+            "names are exact"
+        );
+    }
+
     /// The zenoh facts the plan rests on (§0, §2.6, §2.7).
     #[test]
     fn key_expression_facts() {
@@ -4933,6 +5009,105 @@ mod tests {
                 (wbc, Value::from(10_000_000u64))
             ]),
             [("transport_differs", "transport.lease_ms".to_owned())]
+        );
+    }
+
+    /// A `null` among the eight keys (v2 §2.19, 0.18): left out at
+    /// `routing/interests/timeout`, which zenoh fills with its default, so
+    /// the key is not stated and reads at the binding's; a value stated,
+    /// and none zenoh runs, at each of the seven other keys.
+    #[test]
+    fn a_null_reads_as_left_out_at_the_interests_timeout_alone() {
+        let policy = |interests_ms: u64| {
+            parse(&format!(
+                "profile = \"link.v2\"\nsystem = \"lab\"\nservices = []\n\
+                 binding = \"zenoh-1.10.1\"\n[transport]\nlease_ms = 10000\nkeep_alive = 4\n\
+                 wait_before_close_ms = 10000\nsequence = \"32bit\"\n\
+                 interests_timeout_ms = {interests_ms}\n[face.rf]\n\
+                 far = \"ground\"\nattach = \"client\"\n\
+                 select = {{ link_protocols = [\"unixsock-stream\"] }}\nclass = \"constrained\"\n\
+                 expose = \"none\"\nmax_outage_s = 3600\nlink_bps = 1000000\nloss_ppm = 0\n\
+                 arq = true\nreply_timeout_ms = 15000\n"
+            ))
+            .policy
+            .expect("a policy")
+        };
+        // The router's file, read from its tree: every key the policy's but
+        // the one written `null`, and no stamp.
+        let router = |null_at: TransportKey| {
+            let mut tree = serde_json::json!({
+                "transport": {
+                    "link": {"tx": {
+                        "lease": 10_000, "keep_alive": 4, "batch_size": 65_535,
+                        "sequence_number_resolution": "32bit",
+                        "queue": {"congestion_control": {"block": {
+                            "wait_before_close": 10_000_000,
+                        }}},
+                    }},
+                    "unicast": {"open_timeout": 10_000, "accept_timeout": 10_000},
+                },
+                "routing": {"interests": {"timeout": 10_000}},
+                "timestamping": {"enabled": false},
+            });
+            let mut node = &mut tree;
+            for part in null_at.path().split('/') {
+                node = node.get_mut(part).expect("the path");
+            }
+            *node = Value::Null;
+            StatedTransport::read(&tree)
+        };
+        let found = |p: &FacePolicy, r: &StatedTransport| -> Vec<(&'static str, String)> {
+            check_transport(p, r, None)
+                .into_iter()
+                .map(|f| (f.code.as_str(), f.at))
+                .collect()
+        };
+        let defaults = Binding::Zenoh1_10_1.defaults();
+        let interests = TransportKey::InterestsTimeout;
+
+        // At the interests timeout: kept as written, not stated, the default.
+        let r = router(interests);
+        assert_eq!(r.0.get(interests.path()), Some(&Value::Null));
+        assert!(r.null_left_out(interests));
+        assert!(!r.states(interests));
+        assert_eq!(r.runs(interests, &defaults), Value::from(10_000u64));
+        // Under a policy at the default it is the policy's: no finding.
+        assert_eq!(found(&policy(10_000), &r), []);
+        // Under another it is the default, not the policy's.
+        assert_eq!(
+            found(&policy(40_000), &r),
+            [("transport_differs", interests.at())]
+        );
+        // The fork's default there is the same, so it reads alike.
+        assert_eq!(
+            r.runs(interests, &Binding::Zm1_10_2R1.defaults()),
+            Value::from(10_000u64)
+        );
+
+        // At each other key: a value stated, which is no value zenoh runs.
+        for key in TransportKey::ALL {
+            if key == interests {
+                continue;
+            }
+            let r = router(key);
+            assert!(!r.null_left_out(key), "{}", key.key());
+            assert!(r.states(key), "{}", key.key());
+            assert_eq!(r.runs(key, &defaults), Value::Null, "{}", key.key());
+            // `wait_under_lease` has no integer to read, and skips it.
+            assert_eq!(
+                found(&policy(10_000), &r),
+                [("transport_differs", key.at())],
+                "{}",
+                key.key()
+            );
+        }
+
+        // Left out and `null` read alike, as a file that omits the key.
+        let omitted = StatedTransport::default();
+        assert!(!omitted.states(interests) && !omitted.null_left_out(interests));
+        assert_eq!(
+            omitted.runs(interests, &defaults),
+            r.runs(interests, &defaults)
         );
     }
 

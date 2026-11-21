@@ -6,16 +6,20 @@
 #
 # The transport: at 540 s with 2, each reopen cost more air than the duty
 # allows. 3,600 s with 4 puts the keep-alive interval at 900 s, the frame's
-# cadence, so the frame replaces every uplink keep-alive: 192 a day idle,
-# 0.02 false closes a day at 5 % loss. (#988 L5 ran 1,080 s, whose 270 s
-# interval left three keep-alives between two frames, 288 a day and 427 s
-# of air, half the duty; #991.) The handshake's 384 bytes take 10.5 s here,
+# cadence: 192 a day idle, 0.02 false closes a day at 5 % loss. A frame
+# then replaces a keep-alive unless it is later on its schedule than the
+# one before (v2 §2.16), so the plan warns `keep_alive_not_suppressed`:
+# none to 96 uplink keep-alives a day, at most 142 s of air, not measured
+# at SF12. (#988 L5 ran 1,080 s, whose 270 s interval left three
+# keep-alives between two frames, 288 a day and 427 s of air, half the
+# duty; #991.) The handshake's 384 bytes take 10.5 s here,
 # so the open, accept and interests timeouts are 40 s, and a reply may take
 # 16 full batches' air, 98 s.
 #
 # Across the face: frames/slow every 15 minutes, a full record hourly
 # (modem.v3 3.3, #991): all 73 readings in 785 s of air a day, 91 % of the
-# duty, lora0's own in 434 s. Its 1,800 s horizon is the face's
+# duty, lora0's own in 434 s. With every uplink keep-alive paid they take
+# 927 s, over the duty, and 576 s. Its 1,800 s horizon is the face's
 # `horizon_s`, so it is liveness evidence here, as 3.2's frames/link was
 # not. frames/fast and frames/paid are the faster media's and SBD's
 # (`frame_unlisted`), and the chip has no ARQ (`no_arq`).
