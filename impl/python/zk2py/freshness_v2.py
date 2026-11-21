@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -312,11 +312,7 @@ class KeySequence:
 
     last: zk2c.InBand | None = None
     gap: bool = False
-    named: set[str] | None = None
-
-    def __post_init__(self) -> None:
-        if self.named is None:
-            self.named = set()
+    named: set[str] = field(default_factory=set)
 
 
 class Reader:
@@ -424,12 +420,14 @@ class Reader:
             entry = cat.resolve(self.held, self.named, g.index).entry
         except cat.Refused as e:
             return {**out, "refused": e.token}
-        assert entry is not None
+        if entry is None:
+            # resolve gives an entry for every index it does not refuse; one
+            # that gave none is read as an index it refused, never guessed
+            return {**out, "refused": "unknown_index"}
         iface, contract = entry
         # "A group names an interface once the subscriber has read its
         # index: any group of a read owner heartbeat that "No index" did not
         # stop."
-        assert self.keys[cls].named is not None
         self.keys[cls].named.add(iface)
         out["iface"] = iface
         # Not followed.
@@ -469,7 +467,6 @@ class Reader:
         k = self.keys[cls]
         if not k.gap:
             return []
-        assert k.named is not None
         return [(iface, c.resource) for iface in sorted(k.named) if iface in self.views
                 for c in self.views[iface].layout.collections
                 if c.resource in self.views[iface].follows and self.classes[iface][c.resource] == cls]

@@ -633,8 +633,11 @@ def _contract_side(r: Resource, rows: list[dict[str, Any]]) -> Resource:
     puts = [p for p in puts if p is not None]
     r.longest_put = max(puts) if puts else None
     r.timed = any("timing.deadline_ms" in (row.get("annotations") or {}) for row in rows)
+    # No row states none: the largest stated; with no row at all, none, as
+    # ``longest_put`` above (review-bot on #1141). Both callers pass at least
+    # one row, a resource being read from the revisions that declare it.
     cards = [row.get("cardinality") for row in rows]
-    r.cardinality = None if any(c is None for c in cards) else max(cards)
+    r.cardinality = None if any(c is None for c in cards) else max(cards, default=None)
     return r
 
 
