@@ -7,13 +7,14 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
-## link.v2 0.20 — 2026-11-21: editorial: Appendix B holds the LoRa SF9 and SF12 runs, and the batch a driver leaves zenoh, no rule changed (#988, #989)
+## link.v2 0.20 — 2026-11-21: editorial: Appendix B holds the LoRa SF9 and SF12 runs, and the batch a driver leaves zenoh; §2.19, a file zenoh refuses, no rule changed (#609, #988, #989)
 
 #989's zk2c runs crossed zenoh-modem's SF9 and SF12 faces
 (`docs/zk2/measurements/wire-baseline/README.md`, "W1-73 at LoRa SF9
 and SF12"). Appendix B's "Keep-alives beside frames" held the SF7 and RF
 runs alone. This version adds the two, and what the runs showed of the
-batch. 0.19 is #1110's, on another branch.
+batch. It also answers zk2py round 112's F-546, in §2.19. 0.19 is
+#1110's, on another branch.
 
 **Added: Appendix B, "Keep-alives beside frames", SF9 and SF12.**
 - **SF9:** 624 uplink keep-alives a day beside the frames, 103 s of air,
@@ -41,6 +42,33 @@ batch. 0.19 is #1110's, on another branch.
   A payload fewer than 10 B under the batch would fragment unwarned.
   The appendix says so, and that no run wrote such a frame.
 
+**Added: §2.19, "A file zenoh refuses" (zk2py round 112's F-546, an
+ambiguity).**
+- **Before:** a value zenoh refuses at load "is `transport_differs`".
+  Round 112 (PR #1138) measured `zenctl check face` of fc16a564 under
+  `zenoh-1.10.1`: exit 2, "zenoh refused the config", for a `null` at
+  each of the seven keys and for a string lease. So the reference's
+  tool never reported `v2/transport.json`'s case 24 of a file, under
+  that case's own binding.
+- **Two layers, each named now.**
+  - The codes are findings over the keys a configuration states. The
+    fixture's `router` is those keys, however a tool read them.
+  - Reading the file comes first. A tool that reads it through zenoh's
+    own loader names zenoh's refusal and asks no question. A tool that
+    reads it as data reports `transport_differs` at the key.
+- **§5's first row** lists the refused file under "Not asked", for
+  each row that reads the file, as its catalog row lists a catalog core
+  §8.6 refuses.
+- **The reference does both, by binding.** `check_transport` is the
+  findings, and the fixture runs it. `zenctl check face` loads through
+  zenoh under `zenoh-1.10.1`, and reads as data under `zm-1.10.2-r1`.
+  Nothing in it changes.
+- **No keyword.** "It MUST report what the fixture reports" stands, of
+  the configuration a tool read.
+- **Not asked of every tool:** to read a file as data. A tool that
+  loads through zenoh learns what a data reading cannot: that zenoh
+  refuses the file whole.
+
 **Deliberately not changed.**
 - **`frame_over_batch`** (`link.v1` §2.8) still compares a frame's
   payload with `batch_bytes`. Whether it should count the put's and the
@@ -53,8 +81,8 @@ batch. 0.19 is #1110's, on another branch.
 - **No policy's `batch_bytes`.** zenoh-modem's faces state their bare
   drivers' batches still. The batch under the lean stack is
   zenoh-modem's to state.
-- **§2.16** and every other section. No keyword, fixture, section
-  number or label moves.
+- **§2.16** and every section but §2.19 and §5's first row. No
+  keyword, fixture, section number or label moves.
 - **SBD** has not run.
 
 ## link.v2 0.18 — 2026-11-21: §2.19, a `null` among the eight keys; §2.18, the far end's block unfilled; `keep_alive_not_suppressed` pinned below the interval, no keyword changed (#609)
