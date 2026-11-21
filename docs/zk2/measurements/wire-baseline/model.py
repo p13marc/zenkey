@@ -7,7 +7,8 @@ model's W1 and idle figures per direction, for the lean stack the report
 assumes and for no layers at all. Standard library only.
 
 Usage: model.py [path/to/constrained-overhead-review.md] [--zk2c]
-(--zk2c: only the zk2c figures, results/model-zk2c.json)
+(--zk2c: only the zk2c figures, results/model-zk2c.json; W2's owner heartbeat among them,
+the layout's, asserted against zk2c-w2-lean-2 and zk2c-w2-bare-2, #1110)
 """
 import contextlib
 import io
@@ -294,6 +295,80 @@ out["w1_73_rf_zk2c"].update({
         "measured": rf_measured},
     "corrected_a_to_b_bytes": [round(ns["w1_73"] + k * (KEEPALIVE + LEAN)) for k in (rf_fewest, rf_most)],
 })
+# W2 with owner heartbeats (#1110's H4): section 10's layout of W2's one owner heartbeat, a
+# put per class of exposure every 28.5 s in place of the three heartbeats, and W2's day with
+# it. The row follows the layout (core §7.5) and the reference's period, and no constant
+# here is fitted to a run. Each tolerance is asserted against the runs, where results/ holds
+# them:
+# - the sizes, exact: the payload and the SDU of every put the lean run's far side received
+#   alone in its SDU (zk2c-w2-lean-2, a 16-bit run), and the payload, the put and the SDU
+#   the bare run decodes (zk2c-w2-bare-2, a 32-bit run, 2 B more);
+# - the element a day, lean: within one put of the window, OHB_TOL (a 2,100-s window holds
+#   73 or 74 puts where the day's rate gives 73.7);
+# - W2's day under the lean stack: within W2_OHB_TOL of the corrected model's.
+ohb_bits, ohb, ohb_sdu, ohb_day = ns["OHB_BITS"], ns["ohb"], ns["ohb_sdu"], ns["ohb_day"]
+OHB_TOL, W2_OHB_TOL = ns["OHB_TOL"], ns["W2_OHB_TOL"]
+ohb32 = ns["ENV32"] + B(ohb_bits)
+owner_dir = {d: dict(els) for d, els in zdir.items()}
+owner_dir["a_to_b"]["heartbeat"] = ohb_day
+owner = {
+    "layout": {"bits": ohb_bits, "payload_bytes": ohb, "put_bytes": put(ohb), "sdu_bytes": ohb_sdu,
+               "period_s": 28.5,
+               "bare_32bit_run": {"payload_bytes": ohb32, "put_bytes": put(ohb32),
+                                  "sdu_bytes": put(ohb32) + ns["FRAME16"]}},
+    "heartbeat": {"puts": round(DAY / 28.5), **row(DAY / 28.5, ohb_day)},
+    "three_heartbeats_alone_bytes": round(ns["hb3_alone"]),
+    # Section 6's zk2c column per direction, its heartbeat row the layout's.
+    "per_direction": {
+        d: {**{el: {"zk2c_bytes": round(v), "airtime_s": round(v * 8 / RF_BPS, 1)} for el, v in els.items()},
+            "total": {"zk2c_bytes": round(sum(els.values())),
+                      "airtime_s": round(sum(els.values()) * 8 / RF_BPS, 1)}}
+        for d, els in owner_dir.items()},
+    # Section 10's corrected W2 (the desired re-read as today's GET, a reconnect's
+    # subscriptions), the layout's owner heartbeat in place of the three heartbeats measured.
+    "corrected_total_bytes": round(ns["w2_zk2c_ohb"]),
+    "corrected_total_three_heartbeats_bytes": round(ns["w2_zk2c"]),
+    "tolerance": {"sizes": "exact", "heartbeat_bytes": round(OHB_TOL, 4), "w2_day_bytes": W2_OHB_TOL},
+}
+owner_measured = {}
+for run in ("zk2c-w2-lean-2", "zk2c-w2-bare-2"):
+    path = os.path.join(RESULTS, run, "analysis.json")
+    if not os.path.exists(path):
+        continue
+    a = json.load(open(path))
+    steady = next(w for w in a["windows"] if w["window"] == "steady")
+    hb = steady["heartbeats"]
+    assert list(hb["placed"]["keys"]) == ["stream/heartbeats/host"], (run, hb)   # one class, no other key
+    k = hb["placed"]["keys"]["stream/heartbeats/host"]
+    scale = DAY / steady["seconds"]
+    # Under the lean stack a put is counted alone when the far side received it alone in
+    # its SDU; one lost on the air is placed by its SDU's size and slot (analyze.py).
+    got = {"window_s": steady["seconds"], "puts": k["received"] + k["lost"], "lost": k["lost"],
+           "alone": k["alone"], "shared": k["shared"], "payload_bytes": k["payload_bytes"],
+           "sdu_bytes": k["sdu_bytes"]}
+    if a["stack"] == "lean":
+        assert set(k["payload_bytes"]) == {str(ohb)}, (run, k)
+        assert set(k["sdu_bytes"]) == {str(ohb_sdu)} and k["shared"] == 0, (run, k)
+        got["per_day"] = hb["placed"]["per_day"]
+        assert within(ohb_day, got["per_day"]["bytes"], OHB_TOL), (run, got)
+    else:
+        d = hb["decoded"]["stream/heartbeats/host"]
+        lay = owner["layout"]["bare_32bit_run"]
+        assert set(d["payload_bytes"]) == {str(lay["payload_bytes"])}, (run, d)
+        assert set(d["put_bytes"]) == {str(lay["put_bytes"])}, (run, d)
+        assert set(d["sdu_bytes"]) == {str(lay["sdu_bytes"])} and d["shared"] == 0, (run, d)
+        got.update(puts=d["puts"], lost=d["lost"], alone=d["alone"], shared=d["shared"],
+                   payload_bytes=d["payload_bytes"], put_bytes=d["put_bytes"],
+                   sdu_bytes=d["sdu_bytes"])
+        e = steady["elements_per_day"]["ab"]["heartbeat"]
+        got["per_day"] = {"sdus": round(e["sdus"]), "bytes": e["bytes"],
+                          "lean_derived_bytes": round(e["bytes"] + LEAN * e["sdus"])}
+        # Derived to the lean stack and a 16-bit run (2 B a put less), it is the layout's too.
+        derived16 = e["bytes"] + (LEAN - 2) * e["sdus"]
+        assert within(ohb_day, derived16, OHB_TOL), (run, derived16)
+    owner_measured[run] = got
+owner["measured"] = owner_measured
+out["w2_rf_zk2c_owner_heartbeat"] = owner
 if "--zk2c" in sys.argv:
     # results/model-zk2c.json: the zk2c figures alone, so results/model.json
     # stays the record phases 1 and 2 were tabled against.
