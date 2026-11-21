@@ -80,17 +80,22 @@ HEADINGS = {"Owner": "owner", "Consumer": "consumer", "Caller": "caller", "Deplo
 PROFILES = {
     "hostid.v1": ("owner (a minted system), tool (the duplicate check)", ""),
     "freshness.v1": ("owner (re-puts), consumer and tool (the judgements)", ""),
-    "freshness.v2": ("owner (heartbeats), consumer and tool (§2.5's rule, the re-read, the judgements)", ""),
+    "freshness.v2": ("owner (heartbeats; owner heartbeats per class under a catalog, 0.9, round 113), consumer and "
+                     "tool (§2.5's rule over both forms, the re-read, the judgements)",
+                     "both forms are read by freshness_v2.Provider alone: zk2py's health.v1, alarms.v1 and config "
+                     "readers and its echo tool subscribe to no owner heartbeat key, so a covered interface's members "
+                     "go stale to them (§2.4 \"Readers first\")"),
     "health.v1": ("owner, tool (§2.11's reader and roll-ups)", ""),
     "config.v1": ("owner (the simulated device), caller, tool (§5's reader)", ""),
     "config.v2": ("owner (the simulated device), caller, tool (§5's reader), and the linter of §2.2 (round 102)",
                   "§12's document reaches the owner directly, not through desired.v1's binding; no text, enum or "
                   "fixed-point parameter (none at 0.1)"),
-    "link.v1": ("tool (the generator and the checks)", ""),
+    "link.v1": ("tool (the generator and the checks; no owner heartbeat key crosses, 0.20, round 113)", ""),
     "link.v2": ("tool (the linter, the plan with 0.3's contract side and frames per face, the transport block and "
-                "its checks); a far side's caller, consumer and tool (0.4's §2.20, §2.21)",
-                "its scenarios' §1, a router over a relay counting keep-alives, and §2, a face's frames on routers, "
-                "are not run"),
+                "its checks; the owner heartbeat's class keys in the plan, 0.19, round 113); a far side's caller, "
+                "consumer and tool (0.4's §2.20, §2.21)",
+                "no owner heartbeat of a listed service is measured against the batch on a router: §2.16's longest "
+                "put is computed, never sent"),
     "alarms.v1": ("owner, tool (the reader and §5)", ""),
     "telemetry.v1": ("owner, tool (§5's reader)", ""),
     "telemetry.v2": ("owner (frames metered: §2.19's refusal, §2.20's reduction, a new run at a restart), "

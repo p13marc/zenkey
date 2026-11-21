@@ -239,6 +239,30 @@ def alone(session: Any, endpoint: str, held: cat.Catalog, check: Any) -> None:
         o.close()
 
 
+def reference(session: Any, endpoint: str) -> None:
+    """The reference's owner example, a black box, on the same bus: which
+    revision of the standard contract it implements. A note, never a check:
+    it is the reference's choice (F-549)."""
+    from .blackbox import BLACKBOX
+    from .live_interop import Owner as Exe
+
+    try:
+        p = Exe(BLACKBOX / "owner", "lab/ref", [FILES[1]], connect=endpoint)
+    except Exception as e:  # noqa: BLE001 - no black box, no note
+        print(f"NOTE the reference's owner was not run: {type(e).__name__}: {e}", flush=True)
+        return
+    try:
+        if p.wait_for("ready ", 120) is None:
+            print("NOTE the reference's owner did not start", flush=True)
+            return
+        entry = _entry(session, "lab/ref")
+        std = fv2.standard_contract()
+        which = "1.1" if entry and entry.get("contract") == std.fingerprint else "another revision than 1.1"
+        print(f"NOTE the reference's owner implements freshness.v2 at {which}: {json.dumps(entry)}", flush=True)
+    finally:
+        p.close()
+
+
 def run() -> int:
     from . import live
     from .blackbox import workdir
@@ -404,6 +428,7 @@ def run() -> int:
                   == [h.stamp.seq for h in s.answers("link") if h.stamp is not None],
                   f"{len(sent)} sent, {len(s.answers('link'))} heard")
             alone(sessions[1], endpoint, held, check)
+            reference(sessions[1], endpoint)
             sizes = sorted({len(h.payload) for h in s.answers("link")})
             check("the link put's size is core §7.5's: 6 bytes over its body under a 16-bit run, or 8",
                   all(len(h.payload) == owner_heartbeat.size_of(

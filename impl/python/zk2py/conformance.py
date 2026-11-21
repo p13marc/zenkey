@@ -5291,6 +5291,7 @@ def _round104_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out += _round110_readings(root)
     out += _round111_readings(root)
     out += _round112_readings(root)
+    out += _round113_readings(root)
     return out
 
 
@@ -6264,6 +6265,387 @@ def _round111_readings(root: Path) -> list[tuple[str, Any, Any]]:
     return out
 
 
+def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """``freshness.v2`` 0.9, ``link.v2`` 0.19 and ``link.v1`` 0.20 (#1110's
+    H2a, main c4e1065a), read cold (#609, round 113): each version and its
+    entry, what the changelogs claim of their fixtures, the standard
+    contract's revision 1.1, zk2py's reader beyond ``apply.json`` (what no
+    case pins, each a sentence of §2.5), the plans' class keys beyond
+    ``plan.json``, an owner's choice of what it covers, and the texts round
+    113's findings quote. The fixtures are the freshness family's
+    ``apply.json`` and the link family's ``plan.json`` and ``v2/plan.json``;
+    the live half is ``owner_heartbeat_live`` and ``link_v2_frames_live``."""
+    import json
+    import re
+    import tempfile
+
+    from . import bundle, catalog as cat, freshness_v2 as f2, heartbeat, link, link_v2, owner_heartbeat as oh, zk2c
+    from .compat import classify_pair
+    from .contract import load_contract
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log_ = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log_)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    def header(rel: str) -> tuple[str | None, str | None]:
+        t = flat(rel)
+        v = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+)", t)
+        w = re.search(r"\| \*\*Written against\*\* \| core (\d+\.\d+)", t)
+        return (v.group(1) if v else None, w.group(1) if w else None)
+
+    fv, flog = flat("profiles/freshness/v2.md"), flat("profiles/freshness/CHANGELOG.md")
+    l1, l2, llog = flat("profiles/link/v1.md"), flat("profiles/link/v2.md"), flat("profiles/link/CHANGELOG.md")
+    core = flat("core.md")
+    rules = (spec / "RULES.md").read_text(encoding="utf-8")
+    once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
+    out: list[tuple[str, Any, Any]] = [
+        ("freshness.v2 0.9 or later, written against core 0.108, link.v2 0.19 or later, against 0.108, and link.v1 "
+         "0.20 or later, still against 0.32, each with its entry; RULES.md lists 283 rules as before: core's three "
+         "adopted places are no keyword rule",
+         [_at_least(header("profiles/freshness/v2.md")[0], "0.9"), header("profiles/freshness/v2.md")[1],
+          _at_least(header("profiles/link/v2.md")[0], "0.19"), header("profiles/link/v2.md")[1],
+          _at_least(header("profiles/link/v1.md")[0], "0.20"), header("profiles/link/v1.md")[1],
+          int(once.group(1)) if once else None]
+         + entry("profiles/freshness/CHANGELOG.md", "`v2.md` 0.9", "the owner heartbeat")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 0.19", "an owner heartbeat crosses by its class")
+         + entry("profiles/link/CHANGELOG.md", "0.20", "no owner heartbeat crosses a face")
+         + missing(flat("CHANGELOG.md"), "**Adopted, with `freshness.v2` 0.9: three places that name a heartbeat.** "
+                                         "None is a keyword rule."),
+         [True, "0.108", True, "0.108", True, "0.32", 283]),
+    ]
+
+    # -- the fixtures the entries name ---------------------------------------------------
+    apply_doc = _load_json(spec / "profiles" / "freshness" / "conformance" / "apply.json")
+    cases = apply_doc["cases"]
+    owned = [i for i, c in enumerate(cases) if "catalog" in c]
+    lay = _load_json(root / "heartbeat" / "layouts.json")
+    contracts: dict[str, Any] = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, text in lay["contracts"].items():
+            contracts[name] = load_contract(Path(tmp) / f"{name}.toml", text=text)
+    layouts = {n: heartbeat.layout_of(c.canonical, c.fingerprint) for n, c in contracts.items()}
+    classes = {n: f2.classes_of(c.canonical) for n, c in contracts.items()}
+    out.append(("freshness.v2 0.9's entry, its evidence: apply.json holds 32 cases, 17 of them with a catalog, cases "
+                "15 to 31, one of them an owner that names none",
+                [len(cases), owned, [i for i in owned if cases[i]["catalog"] is None]]
+                + missing(flog, "`conformance/apply.json` gains 17 cases over owner heartbeats, beside its 15."),
+                [32, list(range(15, 32)), [20]]))
+
+    # F-548: which checks of the 17 would tell "named within the run" from
+    # "every interface it follows". A gap check tells them apart when some
+    # followed collection of the gapped key's class is not in its `lost`.
+    telling = []
+    for i in owned:
+        c = cases[i]
+        for step in c["steps"]:
+            chk = step.get("check")
+            if chk is None:
+                continue
+            for key, gap in chk["gap"].items():
+                if key not in f2.CLASSES or not gap:
+                    continue
+                every = {n: [r for r in rs if classes[n][r] == key] for n, rs in c["follows"].items()}
+                every = {n: rs for n, rs in every.items() if rs}
+                named = {n: rs for n, rs in chk["lost"].items() if n in every}
+                if named != every:
+                    telling.append(i)
+    gaps = sorted({i for i in owned for st in cases[i]["steps"]
+                   if any(g for k, g in st.get("check", {}).get("gap", {}).items() if k in f2.CLASSES)})
+    out.append(("F-548: apply.json's checks after a gap on a class key are in cases 16, 23, 24 and 29, and in each the "
+                "collections read lost are every followed collection of that class: no check leaves out an "
+                "interface no group has named, so none tells §2.5's \"named within the run\" from every interface "
+                "the reader follows, which case 29's note says it pins",
+                [gaps, sorted(set(telling))]
+                + missing(fv, "They are those of each interface it follows that a group on that key has named "
+                              "within the run. The owner heartbeat that follows the gap counts among them.")
+                + missing(cases[29]["note"], "the collections a key covers are those of each interface a group on it "
+                                             "has named within the run"),
+                [[16, 23, 24, 29], []]))
+
+    # -- zk2py's reader where no case goes, each a sentence of §2.5 ----------------------
+    order = ["alert.v1", "hb.v1", "knob.v1", "mixed.v1", "vital.v1", "bare.v1"]
+    held = cat.Catalog(epoch=0, entries=[(contracts[n].interface, contracts[n].fingerprint) for n in order]
+                       + [("vital.v1", "sha256:" + "0" * 63 + f"{layouts['vital.v1'].tag:x}")], id="0badcafe")
+    index = {n: i for i, n in enumerate(order)}
+
+    def ib(seq: int, run: int = 9) -> zk2c.InBand:
+        return zk2c.InBand(16, run, seq)
+
+    def reader(follows: dict[str, list[str] | None]) -> f2.Reader:
+        r = f2.Reader([held], held.id)
+        for n, rs in follows.items():
+            r.follow(contracts[n].canonical, contracts[n].fingerprint, rs)
+        return r
+
+    def group(name: str, sections: dict[str, Any], at: int | None = None) -> oh.Group:
+        return oh.group_of(index[name] if at is None else at, layouts[name], sections)
+
+    def put(r: f2.Reader, cls: str, seq: int, groups: list[oh.Group], run: int = 9, at: int = 0) -> Any:
+        return r.owner_heartbeat(cls, 0, ib(seq, run), oh.write_body(None, groups), at)
+
+    def digest(*members: tuple[str, int]) -> str:
+        return f"{heartbeat.digest((k, 16, 1, s_) for k, s_ in members):08x}"
+
+    KNOB, VITAL = "zk2/lab/n1/knob.v1/state/config", "zk2/lab/n1/vital.v1/state/status"
+    g_knob = group("knob.v1", {"state/config": {"digest": digest((KNOB, 1)), "vouched": True}})
+    g_vital = group("vital.v1", {"state/status": {"digest": digest((VITAL, 1)), "vouched": True}})
+    g_knob_off = group("knob.v1", {"state/config": {"digest": "0badf00d", "vouched": True}})
+    both = {"knob.v1": None, "vital.v1": None}
+
+    def fresh() -> f2.Reader:
+        r = reader(both)
+        r.views["knob.v1"].mutate(KNOB, ib(1, 1), 0, True)
+        r.views["vital.v1"].mutate(VITAL, ib(1, 1), 0, True)
+        return r
+
+    # a. a gap, and an interface no group has named within the run
+    r = fresh()
+    put(r, "host", 0, [g_knob])
+    a1 = put(r, "host", 2, [g_knob])["read"]
+    a_lost = list(a1["lost"])
+    a_vital = r.lost_delivery("vital.v1", "state/status")
+    put(r, "host", 4, [g_knob, g_vital])
+    a_both = r.lost("host")
+    # b. another run starts the key's covered collections again
+    put(r, "host", 0, [g_knob], run=10)
+    put(r, "host", 2, [g_knob], run=10)
+    b_lost = r.lost("host")
+    out.append(("freshness.v2 0.9 §2.5 \"A lost owner heartbeat\", where no case of apply.json goes (F-548): after a "
+                "gap, vital.v1, which the reader follows and no group on the key has named within the run, is not "
+                "read as a lost delivery, and knob.v1 is; once a group names it after a later gap, both are; "
+                "another run \"starts its sequence again, and its covered collections with it\": a gap in the new "
+                "run loses knob.v1 alone, vital.v1 not named in it",
+                [a1["gap"], a_lost, a_vital, a_both, b_lost],
+                [True, [("knob.v1", "state/config")], False,
+                 [("knob.v1", "state/config"), ("vital.v1", "state/status")], [("knob.v1", "state/config")]]))
+    # c. a group stopped at "Another revision" has named its interface
+    r = fresh()
+    put(r, "host", 0, [g_knob])
+    other_rev = group("vital.v1", {"state/status": {"digest": digest((VITAL, 1)), "vouched": True}}, at=6)
+    c1 = put(r, "host", 2, [g_knob, other_rev])["read"]
+    out.append(("freshness.v2 0.9 §2.5 \"A group names an interface once the subscriber has read its index: any "
+                "group of a read owner heartbeat that \"No index\" did not stop\": a group stopped at another "
+                "revision, read after a gap, names vital.v1, whose collection reads lost though the group "
+                "confirmed nothing; no case of apply.json has one",
+                [[g.get("answer") or sorted(g)[-1] for g in c1["groups"]], c1["lost"], r.views["vital.v1"].confirmed(VITAL)],
+                [["sections", "revision"], [("knob.v1", "state/config"), ("vital.v1", "state/status")], None]))
+    # d. other_class moves no count; e. a collection not followed, of either class
+    r = reader({"mixed.v1": ["state/status", "state/peer/{peer}"]})
+    off = {"state/status": {"digest": "0badf00d", "vouched": True}}
+    d1 = put(r, "link", 0, [group("mixed.v1", off)])["read"]["groups"][0]["sections"]
+    host_marks = {"state/peer/{peer}": {"digest": "00000000", "live": 0, "vouched": [], "form": "bitmap"}}
+    put(r, "host", 0, [group("mixed.v1", host_marks)])
+    put(r, "link", 1, [group("mixed.v1", off)])
+    d_due = r.reread_due()
+    r2 = reader({"mixed.v1": ["state/status"]})
+    e1 = put(r2, "link", 0, [group("mixed.v1", off)])["read"]["groups"][0]["sections"]
+    e2 = put(r2, "host", 0, [group("mixed.v1", host_marks)])["read"]["groups"][0]["sections"]
+    out.append(("freshness.v2 0.9 §2.5, \"A collection's divergences in a row count the groups whose sections were "
+                "read for its interface, on its own class's key\": status diverges on the link key, a host put "
+                "between reads it other_class and ends no row, and the next link divergence makes it due; a "
+                "collection the subscriber does not follow is not_followed on either key, the other class's too "
+                "(\"A followed collection of the other class is not read\"): no case of apply.json holds a "
+                "not_followed collection in a read group",
+                [d1, d_due, e1, e2,
+                 sorted({v for i in owned for st in cases[i]["steps"] if "owner_heartbeat" in st
+                         for g in st["expect"].get("read", {}).get("groups", []) for v in (g.get("sections") or {}).values()
+                         if v == "not_followed"})],
+                [{"state/peer/{peer}": "other_class", "state/status": "diverged", "state/uplink": "not_followed"},
+                 [("mixed.v1", "state/status")],
+                 {"state/peer/{peer}": "not_followed", "state/status": "diverged", "state/uplink": "not_followed"},
+                 {"state/peer/{peer}": "not_followed", "state/status": "other_class", "state/uplink": "not_followed"},
+                 []]))
+    # f. one count, across runs and across forms
+    r = fresh()
+    put(r, "host", 0, [g_knob_off])
+    f1 = r.reread_due()
+    put(r, "host", 0, [g_knob_off], run=10)
+    f2_due = r.reread_due()
+    r = fresh()
+    put(r, "host", 0, [g_knob_off])
+    lo = layouts["knob.v1"]
+    r.heartbeat("knob.v1", lo.tag, ib(0, 3), heartbeat.write(lo, {"time": None, "sections": {
+        "state/config": {"digest": "0badf00d", "vouched": True}}}), 0)
+    out.append(("freshness.v2 0.9 §2.5 \"A collection has one count. Another run does not start it again.\": a "
+                "divergence in one run and one in the next are two in a row; and, zk2py's reading where the text "
+                "names the key's runs alone, one in a group and one in the interface's own heartbeat are two in a "
+                "row too",
+                [f1, f2_due, r.reread_due()], [[], [("knob.v1", "state/config")], [("knob.v1", "state/config")]]))
+
+    # -- the standard contract's revision 1.1 --------------------------------------------
+    std = f2.standard_contract()
+    hist = spec / "profiles" / ".history" / "freshness.v2"
+    fp10 = "sha256:8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890"
+    fp11 = "sha256:9e07704d114d5124a0d177a003c125ec01b80da0f3f1bad594ab300e0ae1e5d1"
+    verified = {fp: bundle.verify((hist / f"{fp.removeprefix('sha256:')}.bundle.json").read_bytes(), fp)
+                for fp in (fp10, fp11)}
+    b = {fp: v.contract for fp, v in verified.items()}
+    new = next(x for x in std.canonical["resources"] if x["template"] == "heartbeats/{class}")
+    old = next(x for x in std.canonical["resources"] if x["template"] == "heartbeat/{iface}")
+    qos = ("reliability", "congestion", "priority", "express")
+    out.append(("freshness.v2 0.9 §3, the standard contract's revision 1.1: zk2py's fingerprint of the file is the "
+                "entry's, its canonical form the published bundle's; the history holds 1.0 and 1.1, which differ "
+                "by the one resource heartbeats/{class}, a stream, optional, of cardinality 2 and the heartbeat's "
+                "QoS; 1.0 to 1.1 classifies compatible; its tag is 1, and 1.0's 0",
+                [std.fingerprint, std.minor, b[fp11] == std.canonical, sorted(f.name[:8] for f in hist.iterdir()),
+                 [x["template"] for x in b[fp10]["resources"]], [x["template"] for x in b[fp11]["resources"]],
+                 [new["kind"], new["optional"], new["cardinality"]], [new[k] for k in qos] == [old[k] for k in qos],
+                 classify_pair(bundle.revision(verified[fp10]), bundle.revision(verified[fp11]), 0, 1)[0],
+                 heartbeat.tag_of(fp11), heartbeat.tag_of(fp10)]
+                + missing(flog, f"`{fp11}`", "`heartbeats/{class}`, a stream, `optional`, with the heartbeat's QoS "
+                                             "and a cardinality of 2."),
+                [fp11, 1, True, ["8756e6a6", "9e07704d"], ["heartbeat/{iface}"],
+                 ["heartbeat/{iface}", "heartbeats/{class}"], ["stream", True, 2], True, "compatible", 1, 0]))
+    out.append(("F-542, resolved (freshness.v2 0.9): §3 names both keys, the heartbeat's and the owner heartbeat's, "
+                "and says a reader tells them apart by the key",
+                missing(fv, "`zk2/<system>/<service>/freshness.v2/stream/heartbeat/<iface>`",
+                        "`zk2/<system>/<service>/freshness.v2/stream/heartbeats/<class>`",
+                        "A reader tells an owner heartbeat from a heartbeat by its key, never by its bytes (core "
+                        "§7.5)."), []))
+
+    # -- an owner's choice of what it covers (§2.4) --------------------------------------
+    from .owner import Owner
+
+    def cover(names: list[str], listed: list[str] | None, want: Any) -> tuple[dict[str, int], Any]:
+        o = Owner("lab", "n1", [contracts[n] for n in names])
+        if listed is not None:
+            o.catalog = cat.Catalog(epoch=0, entries=[(contracts[n].interface, contracts[n].fingerprint)
+                                                      for n in listed], id="0badcafe")
+        o.owner_heartbeats = want
+        o._cover()
+        return o.ohb_index, o.unavailable.get("stream/heartbeats/{class}")
+
+    three = ["alert.v1", "knob.v1", "vital.v1"]
+    member = ',"unavailable":[{"resource":"stream/heartbeats/{class}","cause":"config"}]'
+    out.append(("freshness.v2 0.9 §2.4 \"Which interfaces\", zk2py's owner: given the catalog and asked, it covers "
+                "the three by their indices and exposes heartbeats/{class}; an interface its catalog does not list "
+                "keeps its heartbeat; given no catalog it covers none, whatever it is asked; and an owner that "
+                "sends heartbeats alone lists heartbeats/{class} unavailable, cause config, zk2py's choice (§3, "
+                "F-549), 74 bytes of its freshness.v2 entry",
+                [cover(three, order, True), cover(three, ["alert.v1", "hb.v1", "vital.v1"], True),
+                 cover(three, order, ["knob.v1"]), cover(three, None, True), cover(three, order, None), len(member)]
+                + missing(fv, "The resource is `optional`: an owner that sends heartbeats alone does not expose it "
+                              "(core §3.3)."),
+                [({"alert.v1": 0, "knob.v1": 2, "vital.v1": 4}, None), ({"alert.v1": 0, "vital.v1": 2}, None),
+                 ({"knob.v1": 2}, None), ({}, "config"), ({}, "config"), 74]))
+
+    # -- the plans ------------------------------------------------------------------------
+    v2dir = spec / "profiles" / "link" / "conformance"
+    plan1, plan2 = _load_json(v2dir / "plan.json")["cases"], _load_json(v2dir / "v2" / "plan.json")["cases"]
+    HB, LINK_AT = "freshness.v2/stream/heartbeat/", "freshness.v2/stream/heartbeats/link"
+
+    def faces(c: dict[str, Any]) -> list[dict[str, Any]]:
+        return c["expect"].get("faces", [])
+
+    def fresh_denies(f: dict[str, Any]) -> list[str]:
+        return sorted(k for d in f["deny"] for k in d["key_exprs"] if "freshness.v2/stream/heartbeats" in k)
+
+    def evidence(f: dict[str, Any]) -> list[str]:
+        return [e for x in f["liveness"] for e in x["evidence"]]
+
+    crossing = [(i, f) for i, c in enumerate(plan2) for f in faces(c) if any(e.startswith(HB) for e in evidence(f))]
+    v1_cases = sorted({i for i, _ in crossing if plan2[i]["expect"]["transport"] is None})
+    out.append(("link.v2 0.19's entry, its evidence: v2/plan.json holds 48 cases; fourteen faces let a heartbeat "
+                "cross, in the twelve cases the entry names and in cases 46 and 47; each under a link.v2 policy "
+                "denies the host key by name, nothing under heartbeats/link, and lists the link key as evidence; "
+                "case 10, a link.v1 policy, denies both classes' and lists none; case 6 draws horizon_under_face at "
+                "the link key",
+                [len(plan2), sorted({i for i, _ in crossing}), len([1 for i, _ in crossing if i < 46]), v1_cases,
+                 sorted({(tuple(fresh_denies(f)), LINK_AT in evidence(f)) for i, f in crossing if i not in v1_cases}),
+                 sorted({(tuple(fresh_denies(f)), LINK_AT in evidence(f)) for i, f in crossing if i in v1_cases}),
+                 [i for i, f in crossing if any(x["at"] == LINK_AT and x["code"] == "horizon_under_face"
+                                                for x in f["findings"])]]
+                + missing(llog, "**Fourteen faces let `probe.v1`'s heartbeat cross**, in cases 5, 6, 8, 9, 10, 12, 19, "
+                                "20, 22, 23, 44 and 45."),
+                [48, [5, 6, 8, 9, 10, 12, 19, 20, 22, 23, 44, 45, 46, 47], 14, [10],
+                 [(("zk2/*/*/freshness.v2/stream/heartbeats/host/**",), True)],
+                 [(("zk2/*/*/freshness.v2/stream/heartbeats/**",), False)], [6]]))
+    c46 = plan2[46]
+    res46 = {i: link.merge_revisions(i, link.revisions_of(v)) for i, v in c46["interfaces"].items()}
+    node = [res46[i] for i in c46["implements"]["node-a"]]
+    batch = lambda c: int(re.search(r"batch_bytes\s*=\s*(\d+)", c["policy"]).group(1))  # noqa: E731
+    warns = lambda c: [x["at"] for f in faces(c) for x in f["findings"] if x["code"] == "block_over_batch"]  # noqa: E731
+    out.append(("link.v2 0.19 §2.16 \"Its longest put\", computed on case 46's interfaces: 1,211 bits of body, 152 "
+                "bytes, a put of 160 with the envelope; census.v1's group 1,109 bits and vital.v1's 56, quiet.v1, "
+                "whose one collection is host, none; above case 46's 159-byte batch and not above case 47's 160; the "
+                "size 8 bits below 128, 16 below 16,384",
+                [link_v2.owner_heartbeat_longest_bits(node), link_v2.owner_heartbeat_longest(node),
+                 [link_v2.owner_heartbeat_longest_bits([res46[i]]) - 46 if link_v2.owner_heartbeat_longest_bits(
+                     [res46[i]]) else None for i in sorted(c46["implements"]["node-a"])],
+                 batch(c46), warns(c46), batch(plan2[47]), warns(plan2[47]),
+                 [link_v2.leb128_bits(n) for n in (0, 127, 128, 16_383, 16_384)]]
+                + missing(l2, "The body is 46 bits, then a group for each listed interface of the service that has a "
+                              "`link` collection.", "A templated one of cardinality c is 33 + ⌈log₂(c + 1)⌉ + c bits"),
+                [1211, 160, [1109, None, 56], 159, [LINK_AT], 160, [], [8, 8, 16, 16, 24]]))
+    # link.v1 0.20's evidence, and the carve where the standard contract is
+    # given at its revision 1.0 alone.
+    with_class = [i for i, c in enumerate(plan1) for f in faces(c)
+                  if any("freshness.v2/stream/heartbeats" in k for d in f["deny"] for k in d["key_exprs"])]
+    policy_v1 = ('system = "lab"\nservices = ["n"]\n\n[face.rf]\nfar = "ground"\nattach = "client"\n'
+                 'select = { link_protocols = ["unixsock-stream"] }\nclass = "constrained"\nexpose = "link"\n'
+                 'interval_s = 60\nmax_outage_s = 3600\nbatch_bytes = 222\nlink_bps = 2400\nlease_ms = 240000\n')
+    status = {"token": "state", "template": "status",
+              "annotations": {"freshness.ttl_s": 60, "link.exposure": "link"}}
+    given_10 = {"a.v1": {"revisions": [{"uses": ["freshness.v2"], "resources": [status]}]},
+                "freshness.v2": {"revisions": [{"uses": [], "resources": [
+                    {"token": "stream", "template": "heartbeat/{iface}", "annotations": {}}]}]}}
+    got_10 = link.plan(policy_v1, {"n": ["a.v1", "freshness.v2"]}, given_10)
+    out.append(("link.v1 0.20's entry, its evidence: plan.json holds 18 cases, and cases 12, 14 and 17 deny the owner "
+                "heartbeat keys by zk2/*/*/freshness.v2/stream/heartbeats/**, case 17's stream deny of freshness.v2 "
+                "holding it alone; and §2.7's \"It holds it whichever revision of that contract is given\", on "
+                "zk2py's plan with the standard contract given inline at its revision 1.0, which declares no "
+                "heartbeats/{class}: the deny is there, where no case of plan.json gives that revision",
+                [len(plan1), with_class,
+                 [d["key_exprs"] for f in faces(plan1[17]) for d in f["deny"] if d["id"] == "stream:freshness.v2"],
+                 [d["key_exprs"] for f in got_10.get("faces", []) for d in f["deny"] if d["id"] == "stream:freshness.v2"]]
+                + missing(l1, "It holds it whichever revision of that contract is given, and where none is."),
+                [18, [12, 14, 17], [["zk2/*/*/freshness.v2/stream/heartbeats/**"]],
+                 [["zk2/*/*/freshness.v2/stream/heartbeats/**"]]]))
+    # -- the texts round 113's findings quote ---------------------------------------------
+    sc = (spec / "profiles" / "freshness" / "scenarios-v2.md").read_text(encoding="utf-8")
+    out.append(("F-547: freshness.v2 0.9 cites `[Sc: §8]` six times, three of them the owner's MUSTs' one evidence, "
+                "and its entry says scenarios-v2.md §8 runs an owner heartbeat on a bus; the file holds §1 to §7",
+                [fv.count("`[Sc: §8]`"), re.findall(r"^## §(\d+) ", sc, re.M)]
+                + missing(flog, "`scenarios-v2.md` §8 runs an owner heartbeat on a bus."),
+                [6, ["1", "2", "3", "4", "5", "6", "7"]]))
+    out.append(("F-550 and F-551: link.v2 0.19's entry says what its text does not, that a group is counted for an "
+                "interface that has a heartbeat, and that no case pins it; §2.9 calls a collection the revisions "
+                "disagree on a link collection, where link.v1 §2.3 reads it host",
+                missing(llog, "**Read where the text does not say.** A group is counted, for the horizon and for the "
+                              "longest put, for an interface that has a heartbeat", "§2.9 and §2.16 say \"listed "
+                              "interface\" alone. No case pins the difference.")
+                + missing(l2, "Its horizon is the shortest among the `link` collections of the service's listed "
+                              "interfaces, each read as `link.v1` §2.3 reads it.",
+                          "A `link` collection that does not cross a face, overlapped or disagreed on")
+                + missing(l1, "it is read as `host`"), []))
+    out.append(("F-552 to F-555, the sentences they quote: link's scenarios-v2.md §2 Expected 1 names the heartbeat "
+                "alone; freshness.v2 §1 says the standard contract has one resource; link.v1 0.20's entry says "
+                "link.v2 0.18 lets the link class's key cross, which is 0.19's; freshness.v2 §2.9 says the host "
+                "class's crosses no face, where link.v1 §2.9 lets it cross a face on which freshness.v2 is not "
+                "listed",
+                missing(flat("profiles/link/scenarios-v2.md"), "The plan lets `frames/link`, `status`, `level` and "
+                                                               "the heartbeat cross. It denies `frames/detail` and "
+                                                               "`setpoint` by name.")
+                + missing(fv, "one resource, the heartbeat (§3)", "The `host` class's crosses no face.")
+                + missing(llog, "`link.v2` 0.18 lets the `link` class's key cross where a heartbeat does.")
+                + missing(l1, "**Where `freshness.v2` is not listed**, no listed interface has a heartbeat. Where the "
+                              "face lets streams cross, an owner heartbeat then crosses as any key no contract "
+                              "declares does (§2.7)."), []))
+    out.append(("core §8.5 as freshness.v2 0.9 adopts it: an owner heartbeat that crosses is evidence for each "
+                "interface it holds a group of, and its horizon the shortest of the collections its groups cover",
+                missing(core, "**An owner heartbeat that crosses** is evidence for each interface it holds a group "
+                              "of: one put per owner each period",
+                        "An owner heartbeat's is the shortest of the collections its groups cover."), []))
+    return out
+
+
 def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
     """Core 0.108 (#1110, the owner heartbeat) and link.v2 0.18 (round 110
     answered), read cold (#609, round 112): each version and its entry, the
@@ -6353,7 +6735,9 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
                           "- **Six rules**, all static"),
                 [12, 45, 32, 1, ["first", "other", "second"],
                  ["alert.v1", "bare.v1", "hb.v1", "knob.v1", "mixed.v1", "vital.v1"], 283, 73, 6]))
-    w2 = own["writes"][0]
+    # A file with no write holds nothing here: the row then disagrees, and
+    # the family goes on (review-bot on #1138; the mend, round 113).
+    w2 = own["writes"][0] if own["writes"] else {"value": {"groups": []}}
     w2_sizes = [len(g["sections"]) for g in w2["value"]["groups"]]
     a_day = lambda sdu, every_s: round(86_400 / every_s * sdu / 1000)  # noqa: E731
     out.append(("core 0.108's entry, \"What it costs\", computed from §7.5's Sizes: W2's three groups, 46, 34 and 34 "
@@ -6429,9 +6813,18 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 [["group"], 1]))
     # "MUST NOT choose the layout by a payload's bytes", and F-541: CH's tag
     # does tell most payloads apart.
-    either = own["either"][0]
+    # Guarded as w2 is: a file with no such body gives one that reads
+    # nothing, and the row disagrees.
+    either = own["either"][0] if own["either"] else {"body": "", "heartbeat": {"layout": "hb.v1", "expect": None}}
     e_body = bytes.fromhex(either["body"])
     e_layout = layouts[either["heartbeat"]["layout"]]
+
+    def e_read() -> Any:
+        try:
+            return heartbeat.read(e_layout, e_body)
+        except heartbeat.Refused as e:
+            return f"refused {e.token}"
+
     as_owner = zk2c.write("heartbeat", 16, 7, 1, 0, e_body)
     as_heartbeat = zk2c.heartbeat(zk2c.InBand(16, 7, 1), e_body, e_layout.tag)
     zero_tag = [name for name, lo in layouts.items() if lo.tag == 0]
@@ -6441,7 +6834,7 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "tag; none of layouts.json's six revisions has tag 0, so no payload of the fixtures reads both "
                 "ways; the body alone does, which the rule's own MUST rests on",
                 [as_owner[:1].hex(), as_heartbeat[:1].hex(), e_layout.tag, token(as_owner), token(as_heartbeat),
-                 zero_tag, heartbeat.read(e_layout, e_body) == either["heartbeat"]["expect"]],
+                 zero_tag, e_read() == either["heartbeat"]["expect"]],
                 ["c0", "ce", 14, "read", "tag", [], True]))
     # The second reading: a refused group leaves the others read, and a
     # revision the reader does not hold is skipped, never refused.
