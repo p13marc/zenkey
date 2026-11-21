@@ -26,7 +26,9 @@
 # Environment: wire.sh's (WORK, INST, BASE, LOSS_START, CORES, FACE_POLICY),
 # W1 (4 or 73), RUN_FILE=1 (W1=73: gen takes 16-bit runs from a run file, as a
 # constrained owner does, core §4.3; else each instance draws a 32-bit run),
-# DEVICE, FACE and PRINCIPAL (W1=73: rf0's, below), and the windows:
+# DEVICE, FACE and PRINCIPAL (W1=73: rf0's, below), PERIOD_S (60: gen's
+# rate, one tick a period; #989's LoRa runs give the face's every_s, 120 at
+# SF9 and 900 at SF12, written to marks.json for analyze.py), and the windows:
 # SETTLE_S (30) after the link opens, IDLE_S (600), W1_LEAD_S (90: gen's
 # first tick is at once, so 90 starts the window half a period after its
 # second) and W1_S (600; 0 ends the run after the idle window). With
@@ -39,13 +41,15 @@ REPO=${REPO:-$(cd "$HERE/../../../.." && pwd)}
 export WORK=${WORK:-/srv/dev/targets/zenkey-989}
 export INST=${INST:-rf}
 export BASE=${BASE:-17400}
-MEDIUM=${1:?medium: rf, rf-zk2c, sf7, sf7-zk2c, sf9 or sf12}
+MEDIUM=${1:?medium: rf, rf-zk2c, sf7, sf7-zk2c, sf9, sf9-zk2c, sf12 or sf12-zk2c}
 STACK=${2:?stack: bare or lean}
 NAME=${3:?run name}
 SETTLE_S=${SETTLE_S:-30}
 IDLE_S=${IDLE_S:-600}
 W1_LEAD_S=${W1_LEAD_S:-90}
 W1_S=${W1_S:-600}
+PERIOD_S=${PERIOD_S:-60}
+RATE=$(python3 -I -c 'import sys; print(1 / float(sys.argv[1]))' "$PERIOD_S")
 # W1=73's device, the face it sits behind and the principal it runs as: rf0's by
 # default; lora0's is h-c2a95e41d7f0/lora0, lora and lora-node.
 DEVICE=${DEVICE:-h-3fa9c2d41b7e/rf0}
@@ -94,7 +98,7 @@ if [[ ${W1:-4} == 73 ]]; then
   $W start gen "$ZENCTL" gen --namespace '' "$DEVICE" modem.v3 --contracts "$MODEM" \
     --catalog "$MODEM/catalog.json" --zenoh-config "$WORK/cfg/auth/$PRINCIPAL.json5" \
     ${RUN_FILE:+--run-file "$LOGS/gen.run"} \
-    --rate 0.016666666666666666 --duration $((W1_LEAD_S + W1_S + 90)) \
+    --rate "$RATE" --duration $((W1_LEAD_S + W1_S + 90)) \
     -c tcp/127.0.0.1:$((BASE + 1)) --format ndjson
 else
   for r in "${LINK[@]}"; do
@@ -115,6 +119,6 @@ mark w1_start
 sleep "$W1_S"
 mark w1_end
 
-{ echo "{"; cat "$LOGS/marks.part"; echo "\"medium\": \"$MEDIUM\", \"stack\": \"$STACK\", \"w1\": ${W1:-4}}"; } >"$LOGS/marks.json"
+{ echo "{"; cat "$LOGS/marks.part"; echo "\"medium\": \"$MEDIUM\", \"stack\": \"$STACK\", \"w1\": ${W1:-4}, \"period_s\": $PERIOD_S}"; } >"$LOGS/marks.json"
 rm "$LOGS/marks.part"
 echo "done: $LOGS"

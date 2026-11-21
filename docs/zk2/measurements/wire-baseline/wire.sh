@@ -4,7 +4,7 @@
 #   zk2 owner (client) -> zenohd A -> driver A ~udp~ relay ~udp~ driver B -> zenohd B -> readers (clients)
 #
 # Usage: wire.sh up <medium> <stack> | down | status | cut | restore | loss <p> | start <name> <cmd...>
-#   <medium>: rf, rf-zk2c, sf7, sf7-zk2c, sf9 or sf12 (render.py's MEDIA)
+#   <medium>: rf, rf-zk2c, sf7, sf7-zk2c, sf9, sf9-zk2c, sf12 or sf12-zk2c (render.py's MEDIA)
 #   <stack>:  bare (no layers) or lean (compress with a 1 KB dictionary, aead
 #             aes-128-ccm with an 8-byte tag, a 2-byte overhead for address;
 #             the fragment layer under it at SF12)
@@ -29,6 +29,9 @@
 #         (users.txt; rf-node.json5, the owner's session config; local.json5,
 #         the session config of every client of router B). The far side
 #         then opens the lane, and router A authenticates it as `ground`.
+#         Since #989's LoRa runs, both routers run the generator's
+#         `timestamping` blocks, and router B the user `--far-config` names
+#         (link.v2 0.13, 0.15): render.py --far.
 #
 # Every process runs on CORES under `timeout`, and its PID (timeout's)
 # goes to WORK/run/INST/pids, which `down` signals and nothing else.
@@ -96,7 +99,7 @@ render() { # medium, stack
   local extra=()
   if [[ -n ${FACE_POLICY:-} ]]; then
     face
-    extra=(--face "$CFG/face-router.json5" --auth "$WORK/cfg/auth")
+    extra=(--face "$CFG/face-router.json5" --auth "$WORK/cfg/auth" --far "$CFG/face-far.json5")
   fi
   python3 -I "$HERE/render.py" --medium "$1" --stack "$2" --work "$WORK" --inst "$INST" \
     --base "$BASE" --out "$CFG" "${extra[@]}" >/dev/null
@@ -180,7 +183,7 @@ control() { # cut | restore | "loss <p>": the relay drops every datagram both wa
 }
 
 case ${1:-} in
-  up) up "${2:?medium: rf, rf-zk2c, sf7, sf9 or sf12}" "${3:?stack: bare or lean}" ;;
+  up) up "${2:?medium: rf, rf-zk2c, sf7, sf7-zk2c, sf9, sf9-zk2c, sf12 or sf12-zk2c}" "${3:?stack: bare or lean}" ;;
   down) down ;;
   status) status ;;
   cut | restore) control "$1" ;;

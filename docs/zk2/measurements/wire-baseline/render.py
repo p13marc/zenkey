@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Render one run's two driver and two router configs (#989).
 
-Usage: render.py --medium rf|rf-zk2c|sf7|sf7-zk2c|sf9|sf12 --stack bare|lean --work DIR --inst NAME
-                 --base PORT --out DIR [--face ROUTER.json5 --auth DIR]
+Usage: render.py --medium rf|rf-zk2c|sf7|sf7-zk2c|sf9|sf9-zk2c|sf12|sf12-zk2c --stack bare|lean
+                 --work DIR --inst NAME --base PORT --out DIR [--face ROUTER.json5 --auth DIR
+                 [--far FAR.json5]]
 
 Each medium's numbers are in MEDIA, each from the source it names. The
 rendered files and params.json go to --out; wire.sh copies them into the
@@ -15,7 +16,14 @@ credentials from --auth (`users.txt`, the routers' dictionary; `ground.pw`,
 router B's password), since the plan's subjects are user names (core §11.3).
 The far side then opens the lane: zenoh's acceptor authenticates its opener.
 The generated transport block is checked against the medium's numbers, and
-the medium's are written. Standard library only.
+the medium's are written.
+
+--far (#989's LoRa runs, link.v2 0.13 and 0.15): the generator's blocks are
+the record. Router A runs the `timestamping` block `acl gen --json5` wrote,
+router B the far end's (`--far-config`), and router B presents the user the
+far block names in its `transport.auth.usrpwd`, with its test password and
+the dictionary filled in. Without --far, router A's timestamping is written
+here, as the zk2c runs on RF and SF7 set it by hand. Standard library only.
 """
 import argparse
 import json
@@ -59,6 +67,19 @@ MEDIA = {
                      latency_ms=10, jitter_ms=5, loss=0.05, lease=120_000, keep_alive=4,
                      open=10_000, interests=10_000, sequence="16bit",
                      timers="zenohd-lora0-sf7.face.toml's [transport] (link.v2 §2.16)"),
+    # SF9 and SF12 at link.v2's transport (#989's LoRa runs): zenoh-modem's face
+    # policies zenohd-lora0-sf9.face.toml (lease 480 s, keep_alive 4) and
+    # zenohd-lora0-sf12.face.toml (lease 3,600 s, keep_alive 4, open, accept and
+    # interests 40 s), wait_before_close the lease, 16-bit sequence numbers.
+    "sf9-zk2c": dict(words="LoRa SF9, EU868, link.v2's transport", max_sdu=115, rate=1758,
+                     latency_ms=10, jitter_ms=5, loss=0.05, lease=480_000, keep_alive=4,
+                     open=10_000, interests=10_000, sequence="16bit",
+                     timers="zenohd-lora0-sf9.face.toml's [transport] (link.v2 §2.16)"),
+    "sf12-zk2c": dict(words="LoRa SF12, EU868, 51-byte tiles, link.v2's transport", max_sdu=51,
+                      rate=293, latency_ms=10, jitter_ms=5, loss=0.05, lease=3_600_000,
+                      keep_alive=4, open=40_000, interests=40_000, sequence="16bit",
+                      fragment=dict(mtu=222, timeout_ms=13_000),
+                      timers="zenohd-lora0-sf12.face.toml's [transport] (link.v2 §2.16)"),
     "sf9": dict(words="LoRa SF9, EU868", max_sdu=115, rate=1758, latency_ms=10,
                 jitter_ms=5, loss=0.05, lease=60_000, keep_alive=2, open=10_000,
                 timers="deploy/README.md's for LoRa (60 s, 2)"),
@@ -128,6 +149,25 @@ def block(text, name):
     return out
 
 
+OFF = "timestamping: { enabled: { router: false, peer: false } }"
+
+
+def generated_timestamping(path):
+    """The `timestamping` member a generated file writes (link.v2 §2.18), checked off."""
+    ts = block(open(path).read(), "timestamping")
+    assert re.sub(r"\s+", " ", ts) == OFF, f"{path}: {ts}"
+    return ts
+
+
+def far_user(path):
+    """The usrpwd user the far end's block names (link.v2 0.15 §2.18), whose password is a
+    placeholder: the deployment's, here the test's."""
+    tr = block(open(path).read(), "transport")
+    got = re.search(r'usrpwd: \{ user: "([^"]+)", password: "<[^"]*>", dictionary_file: "<[^"]*>" \}', tr)
+    assert got, f"{path}: no far credentials"
+    return got.group(1)
+
+
 def face_blocks(path, m):
     """Router A's access control from the generated file, its transport checked against m."""
     text = open(path).read()
@@ -164,6 +204,7 @@ def main():
     p.add_argument("--out", required=True)
     p.add_argument("--face", help="router A's generated face block (acl gen --json5)")
     p.add_argument("--auth", help="the directory of users.txt and ground.pw, with --face")
+    p.add_argument("--far", help="the far end's generated block (acl gen --far-config), with --face")
     a = p.parse_args()
     m = MEDIA[a.medium]
     b, why = batch(m, a.stack)
@@ -239,6 +280,11 @@ def main():
         routing = f"\n  routing: {{ interests: {{ timeout: {m['interests']} }} }},\n"
     seq = f'sequence_number_resolution: "{m["sequence"]}",' if "sequence" in m else ""
     acl = face_blocks(a.face, m) if a.face else None
+    # With --far, both routers' timestamping is the generator's, and router B's user the
+    # far block's (link.v2 0.13, 0.15).
+    near_ts = generated_timestamping(a.face) if a.face and a.far else None
+    far_ts = generated_timestamping(a.far) if a.far else None
+    user = far_user(a.far) if a.far else "ground"
     for side in "ab":
         text = (tpl.replace("@ENDPOINTS@", endpoints[side]).replace("@ROUTING@", routing)
                 .replace("@ACL@", "__ACL__"))
@@ -252,6 +298,8 @@ def main():
             # transport and routing alone), so the deployment does.
             stamps = ("// core §8.2: a router forwarding onto a constrained face stamps nothing\n"
                       "  timestamping: { enabled: { router: false } },")
+            if near_ts:
+                stamps = "// The generator's (link.v2 §2.18, acl gen --json5).\n  " + near_ts + ","
             auth = (f'auth: {{ usrpwd: {{ dictionary_file: "{a.auth}/users.txt" }} }},')
             why = ("a link.v2 face (its plan, acl gen --face-policy): a router, the far "
                    "side attached to it, the plan's subjects by user name")
@@ -259,9 +307,12 @@ def main():
             # B presents `ground` when it opens the lane. Credentials configured
             # make zenoh ask them of every opener, so B's own clients, the
             # ground's tools, present `local` from the same dictionary.
-            pw = open(f"{a.auth}/ground.pw").read().strip()
-            auth = (f'auth: {{ usrpwd: {{ user: "ground", password: "{pw}", '
+            pw = open(f"{a.auth}/{user}.pw").read().strip()
+            auth = (f'auth: {{ usrpwd: {{ user: "{user}", password: "{pw}", '
                     f'dictionary_file: "{a.auth}/users.txt" }} }},')
+            if far_ts:
+                stamps = ("// The far end's, as the generator wrote it (link.v2 §2.18, "
+                          "acl gen --far-config).\n  " + far_ts + ",")
             why = ("the far end of the face: a peer that opens the lane to router A as the "
                    "principal `ground`; its own clients present `local`")
         # A placeholder with nothing to say takes its line with it.
@@ -281,7 +332,7 @@ def main():
         assert not left, f"zenohd-{side}.json5: unfilled placeholders {left}"
         open(f"{a.out}/zenohd-{side}.json5", "w").write(text)
     params = {"medium": a.medium, "stack": a.stack, "inst": a.inst, "batch_size": b,
-              "ports": ports, "run": run, "face": bool(a.face),
+              "ports": ports, "run": run, "face": bool(a.face), "generated": bool(a.far),
               **{k: v for k, v in m.items() if k != "words"}}
     json.dump(params, open(f"{a.out}/params.json", "w"), indent=1)
     print(json.dumps(params))
