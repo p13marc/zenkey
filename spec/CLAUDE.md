@@ -575,6 +575,20 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   the rest differing by those keys alone), and cases 46 and 47, written
   by hand, pin the longest put at 160 bytes on both sides of the batch;
   an inline resource may state `cardinality`.
+  Observer 0.34 (#1110's H2b) is a tool's half. §7.5's scope: a tool
+  given a catalog also declares each owner heartbeat key, for each class
+  a collection in hand has. With a face policy it is the `link` class's
+  alone, where the plan lets it cross. It is never the `host` class's,
+  and neither under a `link.v1` policy. Given no catalog it has none.
+  §7.5's revision of a key: a tool MUST read a group with the revision
+  its index names in the catalog it was given, the group's tag its check.
+  A group it cannot read is shown by its index, tag and size (§7.3).
+  `scope/faces.json` holds 29 cases, ten stating `catalog`, computed
+  twice and never blessed; the reference passes all 29 as written
+  (`zenkey-fleet/tests/face_scope.rs`). 284 rules (observer 84).
+  `apply.json`'s unknown-index case had its note reworded (review of
+  #1137): the catalog holds five entries and index 7 is past it. No
+  vector moved.
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`
