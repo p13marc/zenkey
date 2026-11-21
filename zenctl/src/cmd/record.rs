@@ -81,7 +81,13 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
         } else {
             zk2::load_contracts(&contracts)?
         };
-    let face = zk2::FaceScope::of(&across, &contracts, dep.namespace(), zk2::Reads::Samples)?;
+    let face = zk2::FaceScope::of_given(
+        &across,
+        &contracts,
+        dep.namespace(),
+        zk2::Reads::Samples,
+        catalog.is_some(),
+    )?;
     let dep = match &face {
         Some(f) => f.deployment(dep),
         None => dep,

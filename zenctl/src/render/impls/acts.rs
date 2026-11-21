@@ -46,9 +46,17 @@ pub fn rendered_text(r: &Rendered, size: usize) -> String {
         } => {
             // A frame's reading, as observer §7.6 says a person reads it:
             // each record at its seq and time, every field in its state.
+            // An owner heartbeat's (observer §7.3): its groups, each by
+            // its index, tag and size, then what it vouches for or why it
+            // is unread.
             let frame = zenkey_fleet::model::frame::is_frame_declared(declared)
                 .then(|| zenkey_fleet::model::frame::reading_lines(value))
-                .flatten();
+                .flatten()
+                .or_else(|| {
+                    zenkey_fleet::model::inband::is_owner_heartbeat_declared(declared)
+                        .then(|| zenkey_fleet::model::inband::owner_heartbeat_lines(value))
+                        .flatten()
+                });
             let is_frame = frame.is_some();
             let line = match frame {
                 Some(lines) => format!("{declared}: {}", lines.join(" | ")),
@@ -523,16 +531,25 @@ impl Render for StateReport {
 /// A heartbeat the watch read, for a person (#978's F2; #990 V6): which
 /// members it confirmed, by which heartbeat, and whether one was lost
 /// before it or its section diverged, each the reader's word
-/// (`freshness.v2` §5).
+/// (`freshness.v2` §5). A group of an owner heartbeat (#1110) is one too:
+/// its head line names its class key and its index in the owner's
+/// catalog, and a loss is its key's, with every group it held.
 pub fn confirmation_lines(c: &zenkey_fleet::report::WatchConfirmation) -> Vec<String> {
-    let mut lines = vec![format!(
-        "{}  [{}]  in band {}",
-        c.key, c.provider, c.heartbeat
-    )];
+    let mut lines = vec![match c.group {
+        Some(index) => format!(
+            "{}  [{}]  in band {}  group {index} of its owner's catalog",
+            c.key, c.provider, c.heartbeat
+        ),
+        None => format!("{}  [{}]  in band {}", c.key, c.provider, c.heartbeat),
+    }];
     if c.lost {
-        lines.push(
-            "  <a heartbeat lost before it: its key's seqs skipped (freshness.v2 §2.5)>".to_owned(),
-        );
+        lines.push(match c.group {
+            Some(_) => "  <an owner heartbeat lost before it, with every group it held: its \
+                        key's seqs skipped (freshness.v2 §2.5)>"
+                .to_owned(),
+            None => "  <a heartbeat lost before it: its key's seqs skipped (freshness.v2 §2.5)>"
+                .to_owned(),
+        });
     }
     if c.diverged {
         lines.push(

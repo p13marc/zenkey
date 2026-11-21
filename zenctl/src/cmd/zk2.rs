@@ -516,11 +516,30 @@ impl FaceScope {
     /// plain chunk, no contract in hand, a `--face-policy` [`far_side`]
     /// refuses, a face whose plan the profile refuses (observer §7.5: no
     /// scope, its errors named), and nothing to read.
+    #[cfg(test)]
     pub fn of(
         face: &crate::cli::AcrossFaceArgs,
         contracts: &ContractSet,
         namespace: &str,
         reads: Reads,
+    ) -> Result<Option<FaceScope>> {
+        Self::of_given(face, contracts, namespace, reads, false)
+    }
+
+    /// [`FaceScope::of`], for a verb that says whether it was given a
+    /// deployment catalog (`--catalog`, core §8.6): given one, a
+    /// subscription's scope also holds each owner heartbeat key,
+    /// `…/freshness.v2/stream/heartbeats/<class>`, for each class a
+    /// collection in hand has, and with `--face-policy` the `link`
+    /// class's alone, where the face's plan lets it cross (observer 0.34
+    /// §7.5; #1110). Given none it has no such scope: it could read no
+    /// group.
+    pub fn of_given(
+        face: &crate::cli::AcrossFaceArgs,
+        contracts: &ContractSet,
+        namespace: &str,
+        reads: Reads,
+        catalog: bool,
     ) -> Result<Option<FaceScope>> {
         let across = &face.across_face;
         if across.is_empty() {
@@ -548,27 +567,33 @@ impl FaceScope {
                     policy,
                     name: name.as_str(),
                 });
-        let scope =
-            zenkey_fleet::FaceScope::of(&addresses, contracts, namespace, reads.face(), given)
-                .map_err(|e| {
-                    let at = || match &policy {
-                        Some((path, name, _)) => {
-                            format!("--face-policy {} --face {name}", path.display())
-                        }
-                        None => "--across-face".to_owned(),
-                    };
-                    use zenkey_fleet::model::face_scope::Refusal;
-                    match e {
-                        Refusal::NoContracts => unaskable!(
-                            "--across-face builds its scope from the contracts in hand, since no \
+        let scope = zenkey_fleet::FaceScope::of_given(
+            &addresses,
+            contracts,
+            namespace,
+            reads.face(),
+            given,
+            catalog,
+        )
+        .map_err(|e| {
+            let at = || match &policy {
+                Some((path, name, _)) => {
+                    format!("--face-policy {} --face {name}", path.display())
+                }
+                None => "--across-face".to_owned(),
+            };
+            use zenkey_fleet::model::face_scope::Refusal;
+            match e {
+                Refusal::NoContracts => unaskable!(
+                    "--across-face builds its scope from the contracts in hand, since no \
                          descriptor crosses a face (observer §7.5): give --contracts"
-                        ),
-                        Refusal::FarSide(_) | Refusal::Plan(_) => unaskable!("{}: {e}", at()),
-                        Refusal::Empty { .. } | Refusal::NoAddress | Refusal::Key { .. } => {
-                            unaskable!("--across-face: {e}")
-                        }
-                    }
-                })?;
+                ),
+                Refusal::FarSide(_) | Refusal::Plan(_) => unaskable!("{}: {e}", at()),
+                Refusal::Empty { .. } | Refusal::NoAddress | Refusal::Key { .. } => {
+                    unaskable!("--across-face: {e}")
+                }
+            }
+        })?;
         Ok(Some(FaceScope { scope }))
     }
 
