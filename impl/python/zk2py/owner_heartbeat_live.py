@@ -1,9 +1,13 @@
 """``freshness.v2`` 0.9's owner heartbeat on a bus, between two zk2py
 processes (#609, round 113): ``python -m zk2py.owner_heartbeat_live``.
 
-No section of ``scenarios-v2.md`` runs one on this main (the text cites a
-§8 the file does not hold, F-547), and the reference's owner sends none, so
-the steps are zk2py's own, each a sentence of ``v2.md`` §2.4, §2.5 or §3.
+The steps are zk2py's own, each a sentence of ``v2.md`` §2.4, §2.5 or §3:
+round 113 wrote them when ``scenarios-v2.md`` held no §8 (F-547) and the
+reference's owner sent none. Since text 0.10 the file holds §8, which
+:mod:`zk2py.freshness_v2_s8_live` runs as worded, with the reference's
+owner too; these steps stay, for what §8 does not hold: a link key of three
+groups, a reader with no catalog, an owner given none. ``--forms`` (round
+115) puts another form on a heartbeat's own key beside each owner's.
 
 **The parties.** The parent holds R1, a zenoh-python router on a free
 loopback port, and the readers, each a client of it. The owner is a child
@@ -270,7 +274,8 @@ def alone(session: Any, endpoint: str, held: cat.Catalog, check: Any) -> None:
                   and s2.judge(key).verdict == "fresh" and s2.reader.named is None,
                   f"{len(beats)} heartbeats, {len(heard)} puts on a class key")
             check("step 5: it does not expose heartbeats/{class}: its freshness.v2 entry, revision 1.1, lists the "
-                  "resource unavailable, the cause config zk2py's choice (§3, core §3.3; F-549)",
+                  "resource unavailable, the cause config, \"the owner was given no catalog\" (§3, text 0.10; "
+                  "core §3.3)",
                   entry is not None and entry.get("unavailable") == [{"resource": "stream/heartbeats/{class}",
                                                                      "cause": "config"}], json.dumps(entry))
         finally:
@@ -282,8 +287,9 @@ def alone(session: Any, endpoint: str, held: cat.Catalog, check: Any) -> None:
 
 def reference(session: Any, endpoint: str) -> None:
     """The reference's owner example, a black box, on the same bus: which
-    revision of the standard contract it implements. A note, never a check:
-    it is the reference's choice (F-549)."""
+    revision of the standard contract it implements, and the cause it lists.
+    A note here; :mod:`zk2py.freshness_v2_s8_live` ``--only cause`` checks
+    it against §3 (text 0.10, F-549's answer)."""
     from .blackbox import BLACKBOX
     from .live_interop import Owner as Exe
 
@@ -856,8 +862,116 @@ def run_reference() -> int:
     return 1 if failed else 0
 
 
+def run_forms() -> int:
+    """Core 0.109 §7.5, "Another form on a heartbeat's key", on a heartbeat's
+    own key, on a bus (round 115, the carry of round 114, whose step put on
+    the ``link`` class key alone). For each owner, zk2py's and the
+    reference's example (a black box), sending heartbeats alone for
+    ``beacon.v2`` at ``lab/beacon``: beside its puts on
+    ``…/freshness.v2/stream/heartbeat/beacon.v2``, from the runner's own
+    session, a mutation whose record is a heartbeat's body, then a
+    heartbeat's own bytes under an Encoding that carries no envelope, each
+    stamped as the owner's next. The readers are zk2py's
+    :class:`zk2py.freshness_v2.Subscriber` and ``zenctl watch`` on
+    ``status``."""
+    from . import freshness_v2_scenarios as sc, live
+    from .blackbox import BLACKBOX
+    from .live_interop import _r1
+
+    rows: list[tuple[str, bool, str]] = []
+
+    def check(name: str, ok: bool, detail: str = "") -> bool:
+        rows.append((name, bool(ok), detail))
+        print(f"{'PASS' if ok else 'FAIL'} {name}" + (f": {detail}" if detail else ""), flush=True)
+        return bool(ok)
+
+    c = sc._contract()
+    layout = heartbeat.layout_of(c.canonical, c.fingerprint)
+    key = heartbeat.heartbeat_key("lab", "beacon", sc.IFACE)
+    impls = ["py"] + (["rust"] if (BLACKBOX / "owner").is_file() else [])
+    for impl in impls:
+        who = "the reference's owner" if impl == "rust" else "zk2py's owner"
+        router, endpoint, _ = _r1()
+        session = live.open_client(endpoint)
+        o = s = w = None
+        try:
+            o = sc.make_owner(impl, endpoint)
+            o.put("status", b"up")
+            time.sleep(0.3)
+            s = sc.subscriber(session, ["state/status"], seed=True)
+            w = sc.ZWatch(endpoint, "lab/beacon", sc.IFACE, "state/status", 9.0) \
+                if (BLACKBOX / "zenctl").is_file() else None
+            time.sleep(2.5)
+            quiet = heartbeat.write(layout, {"time": None, "sections": {}})
+
+            def after_next() -> Any:
+                n = len([h for h in s.answers() if "read" in h.answer])
+                end = time.monotonic() + 5.0
+                while time.monotonic() < end:
+                    hs = [h for h in s.answers() if "read" in h.answer]
+                    if len(hs) > n:
+                        return hs[-1]
+                    time.sleep(0.01)
+                return None
+
+            injected: dict[str, tuple[int, bytes] | None] = {"mutation": None, "bare": None}
+            h1 = after_next()
+            if h1 is not None and h1.stamp is not None:
+                st = zk2c.InBand(h1.stamp.width, h1.stamp.run, h1.stamp.seq + 1)
+                injected["mutation"] = (st.seq, zk2c.mutation(st, quiet))
+                session.put(key, injected["mutation"][1])
+            h2 = after_next()
+            if h2 is not None and h2.stamp is not None:
+                st = zk2c.InBand(h2.stamp.width, h2.stamp.run, h2.stamp.seq + 1)
+                injected["bare"] = (st.seq, zk2c.heartbeat(st, quiet, layout.tag))
+                session.put(key, injected["bare"][1], encoding="application/octet-stream")
+            after_next()
+            time.sleep(1.5)
+            if w is not None:
+                w.wait()
+            answers = s.answers()
+            by_seq = {h.stamp.seq: h.answer for h in answers if h.stamp is not None and "read" in h.answer}
+            refused = [h.refusal for h in answers if h.refusal is not None]
+            for what, words in (("mutation", "a mutation whose record is a heartbeat's body"),
+                                ("bare", "a heartbeat's own bytes under application/octet-stream")):
+                inj = injected[what]
+                if inj is None:
+                    check(f"{who}, another form on the heartbeat's own key, {what}: the put was made", False,
+                          "no heartbeat was heard to stamp it after")
+                    continue
+                q = inj[0]
+                mine = by_seq.get(q, {}).get("read", {})
+                zrows = [] if w is None else [r for _, r in w.rows if r.get("row") == "confirmation"
+                                              and (r.get("heartbeat") or {}).get("seq") == q]
+                check(f"{who}, another form on the heartbeat's own key: {words}, stamped as the owner's next. "
+                      "zk2py's reader refuses it `form` and reads the owner's own heartbeat of that seq in "
+                      "sequence, confirming status" + ("" if w is None else "; zenctl watch prints one "
+                                                       "confirmation row at that seq, by the owner's put, not lost")
+                      + " (core §7.5)",
+                      refused.count("form") == 2 and mine.get("gap") is False
+                      and isinstance(mine.get("sections", {}).get("state/status"), dict)
+                      and (w is None or (len(zrows) == 1 and zrows[0].get("confirmed") == [sc.STATUS]
+                                         and not zrows[0].get("lost"))),
+                      f"seq {q}: zk2py's refusals {refused}, then gap {mine.get('gap')}; zenctl rows at that seq "
+                      + json.dumps([(r.get("confirmed"), r.get("lost")) for r in zrows]))
+        finally:
+            if s is not None:
+                s.close()
+            if w is not None and w.proc.poll() is None:
+                w.proc.kill()  # the process this runner started, by its own handle
+            if o is not None:
+                o.close()
+            session.close()
+            router.close()
+    failed = [r for r in rows if not r[1]]
+    print(f"owner_heartbeat_live --forms: {len(rows) - len(failed)}/{len(rows)}", flush=True)
+    return 1 if failed else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.owner_heartbeat_live", description=__doc__.split("\n")[0])
+    ap.add_argument("--forms", action="store_true",
+                    help="another form on a heartbeat's own key, beside each owner's heartbeats (core §7.5)")
     ap.add_argument("--owner", nargs=2, metavar=("ENDPOINT", "CATALOG"), help="run the owner process")
     ap.add_argument("--reference", action="store_true",
                     help="zk2py's owner with the reference's readers, zenctl watch and zenctl echo (black boxes)")
@@ -866,6 +980,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_owner(*args.owner)
     if args.reference:
         return run_reference()
+    if args.forms:
+        return run_forms()
     return run()
 
 
