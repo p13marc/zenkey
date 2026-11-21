@@ -51,13 +51,13 @@ The owner, consumer and caller sections each point to them.
 
 | Role | Rules |
 |---|---|
-| [Owner](#owner) | 88 |
-| [Consumer](#consumer) | 32 |
+| [Owner](#owner) | 90 |
+| [Consumer](#consumer) | 35 |
 | [Caller](#caller) | 17 |
 | [Deployment](#deployment) | 18 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 84, 27 of them a reader's |
-| [Implementation: the static rules](#implementation-the-static-rules) | 75 |
-| Every rule, once | 286 |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 87, 27 of them a reader's |
+| [Implementation: the static rules](#implementation-the-static-rules) | 79 |
+| Every rule, once | 295 |
 | [Rule ids](#rule-ids) | 85 |
 
 ## Owner
@@ -151,6 +151,8 @@ The owner, consumer and caller sections each point to them.
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | An owner MUST write as asof a seq of its run at or below which it has recorded every state mutation it minted. | `[Sc: state.md §14]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | An owner MUST give each live entry of a collection with a horizon its confirmation. | `[Sc: profiles/freshness/scenarios-v2.md §3]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | An owner MUST cut each snapshot into pages by §7.5's paging rule, under its page size, and send each page as a reply to the one GET. | `[Sc: state.md §14]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | An owner SHOULD answer a conditional read with the held stamp alone when the member's last mutation carries exactly that stamp: the same run, in width and value, and the same seq. | `[F: envelope/held.json]` `[Sc: state.md §16]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | An owner MUST NOT answer a GET with a held stamp in any other case. | `[F: envelope/held.json]` `[Sc: state.md §16]` |
 
 ### [core §4.3 Runs and sequence numbers (S7)](core.md#43-runs-and-sequence-numbers-s7)
 
@@ -309,6 +311,9 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A consumer or a tool MUST NOT merge a snapshot heard on a subscription, nor count it toward a complete snapshot. | `[F: seed/snapshot.json]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A consumer or a tool MUST NOT merge a stray `reply_del` as a deletion. | `[Sc: state.md §15]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST map a snapshot's collection index with the revision of the interface that the owner's descriptor names (§3.3), never with another revision it holds. | `[F: seed/snapshot.json]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | A consumer or a tool MUST NOT send a held stamp other than the in-band stamp of the mutation it holds for that member, as the owner wrote it. | `[F: seed/held.json]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | **A held stamp in answer.** … A consumer or a tool MUST NOT read any other held stamp as unchanged. | `[F: seed/held.json]` `[Sc: state.md §16]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | A consumer or a tool that sent a held stamp MUST accept a snapshot in answer, and merge it as any member read's (above). | `[F: seed/held.json]` `[Sc: state.md §16]` |
 
 ### [core §4.3 Runs and sequence numbers (S7)](core.md#43-runs-and-sequence-numbers-s7)
 
@@ -499,6 +504,9 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A consumer or a tool MUST NOT merge a snapshot heard on a subscription, nor count it toward a complete snapshot. | `[F: seed/snapshot.json]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A consumer or a tool MUST NOT merge a stray `reply_del` as a deletion. | `[Sc: state.md §15]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A late joiner MUST map a snapshot's collection index with the revision of the interface that the owner's descriptor names (§3.3), never with another revision it holds. | `[F: seed/snapshot.json]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | A consumer or a tool MUST NOT send a held stamp other than the in-band stamp of the mutation it holds for that member, as the owner wrote it. | `[F: seed/held.json]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | **A held stamp in answer.** … A consumer or a tool MUST NOT read any other held stamp as unchanged. | `[F: seed/held.json]` `[Sc: state.md §16]` |
+| [§4.2](core.md#42-rules-for-owners-and-consumers) | A consumer or a tool that sent a held stamp MUST accept a snapshot in answer, and merge it as any member read's (above). | `[F: seed/held.json]` `[Sc: state.md §16]` |
 
 ### [core §5.1 Rules](core.md#51-rules)
 
@@ -820,6 +828,10 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§7.5](core.md#75-the-zk2c-envelope) | An implementation MUST NOT write a page that this reading refuses. | `[F: snapshot/bodies.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | Every page an implementation accepts MUST write back to the same bytes. | `[F: snapshot/bodies.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | An implementation that cuts a snapshot into pages MUST cut it so. | `[F: snapshot/bodies.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | An implementation that writes a held stamp MUST write it so: CH with form 7 and tag 0, the run and the seq, and no byte after. | `[F: envelope/held.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | An implementation MUST refuse a state GET's payload at step 3 for the first of these that applies, in this order, naming the refusal: (4 items) | `[F: envelope/held.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | **A held stamp on a reply.** … An implementation MUST refuse a held stamp on a reply whose tag is not 0 (`tag`). | `[F: envelope/held.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | Every held stamp an implementation accepts MUST write back to the same bytes. | `[F: envelope/held.json]` |
 
 ### [core §7.6 Packed records](core.md#76-packed-records)
 

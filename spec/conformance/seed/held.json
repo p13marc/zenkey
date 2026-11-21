@@ -1,0 +1,2496 @@
+{
+  "description": "core §4.2, a conditional read's reader: which held stamp it sends, and what it holds after its GET's answer. Computed twice, by two readings of the text that shared no code, never blessed. A stamp is `{width, run, seq}`, as `inband.json` writes one, and a page is as `snapshot/bodies.json` reads one. `asks`: what a reader holds for one member → the held stamp it may send, `expect.held` with its bytes in `expect.hex`, or `{\"held\": null}` where it sends none. `holds` is `null`, or `{key, sample, stamp, record}` as a `view` entry below; a value with no envelope has `stamp` `null` and its Zenoh timestamp in `zenoh`. A case may give instead `page`, a snapshot's page the reader read on `key`, with its bytes in `hex`, and `member`, an id: what it holds is that id's entry, live or tombstone, or nothing where the page lists none. The held stamp is the in-band stamp of the mutation held: the entry's own run or the header's, and the entry's seq, never the asof. `cases`: `collections`, `view`, `arrivals`, `expect.view` and `expect.snapshots` are `snapshot.json`'s, with its merge and its omission rule. `asked` is the GET: its `key`, the selector, and `held`, the held stamp it carried, or `null` for a GET with no payload. An arrival may be a held stamp, `held` with its bytes in `hex`. It is the owner's answer when it arrives by the GET, the GET carried a held stamp on one concrete key (a selector with no `*`), the arrival's key is that key, and its stamp is the one the GET carried, in width, run and seq. Any other is refused as `held`: it merges nothing, and counts as nothing heard. An answer merges nothing either, and the reader keeps what it holds. Where the reader holds the mutation the stamp names when the answer arrives, that mutation counts as heard after the GET was asked, for the omission rule's guard. Where it holds another value by then, that value stands. Where it holds nothing for the member by then, `expect.read_again` is true: the GET gave it no value. `expect.held`: each held stamp among the arrivals, in order: `unchanged` for the owner's answer, or `held`, the refusal's token.",
+  "asks": [
+    {
+      "note": "a put held with its envelope's stamp",
+      "holds": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "sample": "put",
+        "stamp": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        },
+        "record": "7631"
+      },
+      "expect": {
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        },
+        "hex": "e00005000007"
+      }
+    },
+    {
+      "note": "a put under a 32-bit run",
+      "holds": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "sample": "put",
+        "stamp": {
+          "width": 32,
+          "run": 74565,
+          "seq": 7
+        },
+        "record": "7631"
+      },
+      "expect": {
+        "held": {
+          "width": 32,
+          "run": 74565,
+          "seq": 7
+        },
+        "hex": "f000012345000007"
+      }
+    },
+    {
+      "note": "a deletion held: its delete's attachment's stamp",
+      "holds": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "sample": "delete",
+        "stamp": {
+          "width": 16,
+          "run": 5,
+          "seq": 9
+        }
+      },
+      "expect": {
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 9
+        },
+        "hex": "e00005000009"
+      }
+    },
+    {
+      "note": "nothing held for the member: no held stamp",
+      "holds": null,
+      "expect": {
+        "held": null
+      }
+    },
+    {
+      "note": "a value with no envelope, ordered by its Zenoh timestamp alone: no held stamp, and never one made of the timestamp",
+      "holds": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "sample": "put",
+        "stamp": null,
+        "zenoh": {
+          "time": 104,
+          "id": "a1"
+        },
+        "record": "7631"
+      },
+      "expect": {
+        "held": null
+      }
+    },
+    {
+      "note": "a member read by a snapshot: the entry's seq under the header's run, never the asof, 9",
+      "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 5,
+        "asof": 9,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "",
+            "run_width": null,
+            "run": null,
+            "seq": 7,
+            "confirmation": "none",
+            "record": "7631"
+          }
+        ],
+        "tombs": []
+      },
+      "hex": "e0000500000900000e1000fa000001000000000702763100",
+      "member": "",
+      "expect": {
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        },
+        "hex": "e00005000007"
+      }
+    },
+    {
+      "note": "an entry with its own run: the entry's run, never the header's",
+      "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 6,
+        "asof": 9,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "",
+            "run_width": 16,
+            "run": 5,
+            "seq": 7,
+            "confirmation": "none",
+            "record": "7631"
+          }
+        ],
+        "tombs": []
+      },
+      "hex": "e0000600000900000e1000fa0000010080000500000702763100",
+      "member": "",
+      "expect": {
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        },
+        "hex": "e00005000007"
+      }
+    },
+    {
+      "note": "an entry with its own 32-bit run under a 16-bit header",
+      "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 6,
+        "asof": 9,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "",
+            "run_width": 32,
+            "run": 5,
+            "seq": 7,
+            "confirmation": "none",
+            "record": "7631"
+          }
+        ],
+        "tombs": []
+      },
+      "hex": "e0000600000900000e1000fa00000100900000000500000702763100",
+      "member": "",
+      "expect": {
+        "held": {
+          "width": 32,
+          "run": 5,
+          "seq": 7
+        },
+        "hex": "f000000005000007"
+      }
+    },
+    {
+      "note": "a tombstone read by a snapshot: the delete's stamp",
+      "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 5,
+        "asof": 12,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [],
+        "tombs": [
+          {
+            "id": "",
+            "run_width": null,
+            "run": null,
+            "seq": 9
+          }
+        ]
+      },
+      "hex": "e0000500000c00000e1000fa000000010000000009",
+      "member": "",
+      "expect": {
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 9
+        },
+        "hex": "e00005000009"
+      }
+    },
+    {
+      "note": "a snapshot of no entry: nothing held, no held stamp, and never its asof",
+      "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 5,
+        "asof": 12,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [],
+        "tombs": []
+      },
+      "hex": "e0000500000c00000e1000fa00000000",
+      "member": "",
+      "expect": {
+        "held": null
+      }
+    },
+    {
+      "note": "a collection's snapshot: each member's own entry's stamp",
+      "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 5,
+        "asof": 9,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "v07",
+            "run_width": null,
+            "run": null,
+            "seq": 3,
+            "confirmation": "none",
+            "record": "7631"
+          },
+          {
+            "id": "vehicle-01",
+            "run_width": null,
+            "run": null,
+            "seq": 7,
+            "confirmation": "none",
+            "record": "7631"
+          }
+        ],
+        "tombs": []
+      },
+      "hex": "e0000500000900000e1000fa00000203763037000000030276310a76656869636c652d30310000000702763100",
+      "member": "vehicle-01",
+      "expect": {
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        },
+        "hex": "e00005000007"
+      }
+    },
+    {
+      "note": "the same page, another member",
+      "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans",
+      "page": {
+        "tag": 0,
+        "run_width": 16,
+        "run": 5,
+        "asof": 9,
+        "time": {
+          "s": 3600,
+          "ms": 250
+        },
+        "index": 0,
+        "more": false,
+        "coll": 0,
+        "live": [
+          {
+            "id": "v07",
+            "run_width": null,
+            "run": null,
+            "seq": 3,
+            "confirmation": "none",
+            "record": "7631"
+          },
+          {
+            "id": "vehicle-01",
+            "run_width": null,
+            "run": null,
+            "seq": 7,
+            "confirmation": "none",
+            "record": "7631"
+          }
+        ],
+        "tombs": []
+      },
+      "hex": "e0000500000900000e1000fa00000203763037000000030276310a76656869636c652d30310000000702763100",
+      "member": "v07",
+      "expect": {
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 3
+        },
+        "hex": "e00005000003"
+      }
+    }
+  ],
+  "cases": [
+    {
+      "note": "unchanged: the owner answers the held stamp the GET carried. The reader keeps what it holds, and merges nothing",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "held": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "hex": "e00005000007"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 7
+            },
+            "record": "7631"
+          }
+        ],
+        "snapshots": [],
+        "held": [
+          "unchanged"
+        ],
+        "read_again": false
+      }
+    },
+    {
+      "note": "unchanged, a 32-bit run",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 32,
+            "run": 74565,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 32,
+          "run": 74565,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "held": {
+            "width": 32,
+            "run": 74565,
+            "seq": 7
+          },
+          "hex": "f000012345000007"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "put",
+            "stamp": {
+              "width": 32,
+              "run": 74565,
+              "seq": 7
+            },
+            "record": "7631"
+          }
+        ],
+        "snapshots": [],
+        "held": [
+          "unchanged"
+        ],
+        "read_again": false
+      }
+    },
+    {
+      "note": "unchanged, a deletion held: the member is still deleted, within its owner's window",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "delete",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 9
+          }
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 9
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "held": {
+            "width": 16,
+            "run": 5,
+            "seq": 9
+          },
+          "hex": "e00005000009"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "delete",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 9
+            }
+          }
+        ],
+        "snapshots": [],
+        "held": [
+          "unchanged"
+        ],
+        "read_again": false
+      }
+    },
+    {
+      "note": "unchanged, a template with no parameter: its one member's key is a concrete key",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "mode",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/mode"
+        },
+        {
+          "coll": 1,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/mode",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/mode",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/mode",
+          "held": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "hex": "e00005000007"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/mode",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 7
+            },
+            "record": "7631"
+          }
+        ],
+        "snapshots": [],
+        "held": [
+          "unchanged"
+        ],
+        "read_again": false
+      }
+    },
+    {
+      "note": "changed: a snapshot in answer, the member put again at seq 9. It merges as any member read's",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "page": {
+            "tag": 0,
+            "run_width": 16,
+            "run": 5,
+            "asof": 9,
+            "time": {
+              "s": 3600,
+              "ms": 250
+            },
+            "index": 0,
+            "more": false,
+            "coll": 0,
+            "live": [
+              {
+                "id": "",
+                "run_width": null,
+                "run": null,
+                "seq": 9,
+                "confirmation": "none",
+                "record": "7632"
+              }
+            ],
+            "tombs": []
+          },
+          "hex": "e0000500000900000e1000fa000001000000000902763200"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 9
+            },
+            "record": "7632"
+          }
+        ],
+        "snapshots": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "coll": 0,
+            "run": {
+              "width": 16,
+              "run": 5
+            },
+            "asof": 9,
+            "pages": [
+              0
+            ],
+            "complete": true,
+            "omitted": []
+          }
+        ],
+        "held": [],
+        "read_again": false
+      }
+    },
+    {
+      "note": "changed: the member deleted within the window. The snapshot's tombstone merges as a delete",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "page": {
+            "tag": 0,
+            "run_width": 16,
+            "run": 5,
+            "asof": 9,
+            "time": {
+              "s": 3600,
+              "ms": 250
+            },
+            "index": 0,
+            "more": false,
+            "coll": 0,
+            "live": [],
+            "tombs": [
+              {
+                "id": "",
+                "run_width": null,
+                "run": null,
+                "seq": 9
+              }
+            ]
+          },
+          "hex": "e0000500000900000e1000fa000000010000000009"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "delete",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 9
+            }
+          }
+        ],
+        "snapshots": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "coll": 0,
+            "run": {
+              "width": 16,
+              "run": 5
+            },
+            "asof": 9,
+            "pages": [
+              0
+            ],
+            "complete": true,
+            "omitted": []
+          }
+        ],
+        "held": [],
+        "read_again": false
+      }
+    },
+    {
+      "note": "a delete beyond the window: a snapshot of no entry, the owner's word, drops the held put",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "page": {
+            "tag": 0,
+            "run_width": 16,
+            "run": 5,
+            "asof": 12,
+            "time": {
+              "s": 3600,
+              "ms": 250
+            },
+            "index": 0,
+            "more": false,
+            "coll": 0,
+            "live": [],
+            "tombs": []
+          },
+          "hex": "e0000500000c00000e1000fa00000000"
+        }
+      ],
+      "expect": {
+        "view": [],
+        "snapshots": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "coll": 0,
+            "run": {
+              "width": 16,
+              "run": 5
+            },
+            "asof": 12,
+            "pages": [
+              0
+            ],
+            "complete": true,
+            "omitted": [
+              "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01"
+            ]
+          }
+        ],
+        "held": [],
+        "read_again": false
+      }
+    },
+    {
+      "note": "a held deletion past its window: a snapshot of no entry drops it too, and the member holds nothing",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "delete",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 9
+          }
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 9
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "page": {
+            "tag": 0,
+            "run_width": 16,
+            "run": 5,
+            "asof": 12,
+            "time": {
+              "s": 3600,
+              "ms": 250
+            },
+            "index": 0,
+            "more": false,
+            "coll": 0,
+            "live": [],
+            "tombs": []
+          },
+          "hex": "e0000500000c00000e1000fa00000000"
+        }
+      ],
+      "expect": {
+        "view": [],
+        "snapshots": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "coll": 0,
+            "run": {
+              "width": 16,
+              "run": 5
+            },
+            "asof": 12,
+            "pages": [
+              0
+            ],
+            "complete": true,
+            "omitted": [
+              "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01"
+            ]
+          }
+        ],
+        "held": [],
+        "read_again": false
+      }
+    },
+    {
+      "note": "an owner that reads no payload answers whole: the entry is the mutation the reader holds, kept once",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "page": {
+            "tag": 0,
+            "run_width": 16,
+            "run": 5,
+            "asof": 7,
+            "time": {
+              "s": 3600,
+              "ms": 250
+            },
+            "index": 0,
+            "more": false,
+            "coll": 0,
+            "live": [
+              {
+                "id": "",
+                "run_width": null,
+                "run": null,
+                "seq": 7,
+                "confirmation": "none",
+                "record": "7631"
+              }
+            ],
+            "tombs": []
+          },
+          "hex": "e0000500000700000e1000fa000001000000000702763100"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 7
+            },
+            "record": "7631"
+          }
+        ],
+        "snapshots": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "coll": 0,
+            "run": {
+              "width": 16,
+              "run": 5
+            },
+            "asof": 7,
+            "pages": [
+              0
+            ],
+            "complete": true,
+            "omitted": []
+          }
+        ],
+        "held": [],
+        "read_again": false
+      }
+    },
+    {
+      "note": "another run: the owner restarted and put the member again. Its snapshot is another run's value, kept as the later arrival",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "page": {
+            "tag": 0,
+            "run_width": 16,
+            "run": 6,
+            "asof": 0,
+            "time": {
+              "s": 3600,
+              "ms": 250
+            },
+            "index": 0,
+            "more": false,
+            "coll": 0,
+            "live": [
+              {
+                "id": "",
+                "run_width": null,
+                "run": null,
+                "seq": 0,
+                "confirmation": "none",
+                "record": "7631"
+              }
+            ],
+            "tombs": []
+          },
+          "hex": "e0000600000000000e1000fa000001000000000002763100"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 6,
+              "seq": 0
+            },
+            "record": "7631"
+          }
+        ],
+        "snapshots": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "coll": 0,
+            "run": {
+              "width": 16,
+              "run": 6
+            },
+            "asof": 0,
+            "pages": [
+              0
+            ],
+            "complete": true,
+            "omitted": []
+          }
+        ],
+        "held": [],
+        "read_again": false
+      }
+    },
+    {
+      "note": "another run, and the new instance holds no member: its snapshot of no entry drops a value held from before the GET",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "page": {
+            "tag": 0,
+            "run_width": 16,
+            "run": 6,
+            "asof": 0,
+            "time": {
+              "s": 3600,
+              "ms": 250
+            },
+            "index": 0,
+            "more": false,
+            "coll": 0,
+            "live": [],
+            "tombs": []
+          },
+          "hex": "e0000600000000000e1000fa00000000"
+        }
+      ],
+      "expect": {
+        "view": [],
+        "snapshots": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "coll": 0,
+            "run": {
+              "width": 16,
+              "run": 6
+            },
+            "asof": 0,
+            "pages": [
+              0
+            ],
+            "complete": true,
+            "omitted": [
+              "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01"
+            ]
+          }
+        ],
+        "held": [],
+        "read_again": false
+      }
+    },
+    {
+      "note": "a stray held stamp: the GET carried none. No answer, though it names the mutation the reader holds",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": null
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "held": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "hex": "e00005000007"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 7
+            },
+            "record": "7631"
+          }
+        ],
+        "snapshots": [],
+        "held": [
+          "held"
+        ],
+        "read_again": false
+      }
+    },
+    {
+      "note": "a stray held stamp for a member the reader holds nothing for: it merges nothing",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": null
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "held": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "hex": "e00005000007"
+        }
+      ],
+      "expect": {
+        "view": [],
+        "snapshots": [],
+        "held": [
+          "held"
+        ],
+        "read_again": false
+      }
+    },
+    {
+      "note": "a held stamp at another seq than the GET carried",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "held": {
+            "width": 16,
+            "run": 5,
+            "seq": 9
+          },
+          "hex": "e00005000009"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 7
+            },
+            "record": "7631"
+          }
+        ],
+        "snapshots": [],
+        "held": [
+          "held"
+        ],
+        "read_again": false
+      }
+    },
+    {
+      "note": "a held stamp under another run than the GET carried",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "held": {
+            "width": 16,
+            "run": 6,
+            "seq": 7
+          },
+          "hex": "e00006000007"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 7
+            },
+            "record": "7631"
+          }
+        ],
+        "snapshots": [],
+        "held": [
+          "held"
+        ],
+        "read_again": false
+      }
+    },
+    {
+      "note": "the run's value at the other width is another run: no answer",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "held": {
+            "width": 32,
+            "run": 5,
+            "seq": 7
+          },
+          "hex": "f000000005000007"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 7
+            },
+            "record": "7631"
+          }
+        ],
+        "snapshots": [],
+        "held": [
+          "held"
+        ],
+        "read_again": false
+      }
+    },
+    {
+      "note": "a held stamp heard on a subscription is no owner's answer, though it is the one the GET carried",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "subscription",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "held": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "hex": "e00005000007"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 7
+            },
+            "record": "7631"
+          }
+        ],
+        "snapshots": [],
+        "held": [
+          "held"
+        ],
+        "read_again": false
+      }
+    },
+    {
+      "note": "a GET over a wildcard carried a held stamp: a held stamp in reply answers no one concrete key",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/*",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "held": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "hex": "e00005000007"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 7
+            },
+            "record": "7631"
+          }
+        ],
+        "snapshots": [],
+        "held": [
+          "held"
+        ],
+        "read_again": false
+      }
+    },
+    {
+      "note": "a held stamp on another key than the GET's",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        },
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/v07",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/v07",
+          "held": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "hex": "e00005000007"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/v07",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 7
+            },
+            "record": "7631"
+          },
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 7
+            },
+            "record": "7631"
+          }
+        ],
+        "snapshots": [],
+        "held": [
+          "held"
+        ],
+        "read_again": false
+      }
+    },
+    {
+      "note": "a later value stands: a put heard while the GET was out, then the answer. Unchanged was true when the owner answered, and steps nothing back",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "subscription",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 9
+          },
+          "record": "7632"
+        },
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "held": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "hex": "e00005000007"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 9
+            },
+            "record": "7632"
+          }
+        ],
+        "snapshots": [],
+        "held": [
+          "unchanged"
+        ],
+        "read_again": false
+      }
+    },
+    {
+      "note": "a read is one instant: the owner answers unchanged, then puts. The put arrives by the subscription",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "held": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "hex": "e00005000007"
+        },
+        {
+          "via": "subscription",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 9
+          },
+          "record": "7632"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 9
+            },
+            "record": "7632"
+          }
+        ],
+        "snapshots": [],
+        "held": [
+          "unchanged"
+        ],
+        "read_again": false
+      }
+    },
+    {
+      "note": "another run's value heard while the GET was out, then the answer: the reader keeps the later value, where a snapshot of the old run would have replaced it",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "subscription",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 6,
+            "seq": 0
+          },
+          "record": "7632"
+        },
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "held": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "hex": "e00005000007"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 6,
+              "seq": 0
+            },
+            "record": "7632"
+          }
+        ],
+        "snapshots": [],
+        "held": [
+          "unchanged"
+        ],
+        "read_again": false
+      }
+    },
+    {
+      "note": "a delete heard while the GET was out, then the answer: the deletion stands",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "subscription",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "delete",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 9
+          }
+        },
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "held": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "hex": "e00005000007"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "delete",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 9
+            }
+          }
+        ],
+        "snapshots": [],
+        "held": [
+          "unchanged"
+        ],
+        "read_again": false
+      }
+    },
+    {
+      "note": "two instances answer, unchanged first: the mutation counts as heard again by the GET, so the other run's snapshot of no entry spares it",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "held": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "hex": "e00005000007"
+        },
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "page": {
+            "tag": 0,
+            "run_width": 16,
+            "run": 6,
+            "asof": 3,
+            "time": {
+              "s": 3600,
+              "ms": 250
+            },
+            "index": 0,
+            "more": false,
+            "coll": 0,
+            "live": [],
+            "tombs": []
+          },
+          "hex": "e0000600000300000e1000fa00000000"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 7
+            },
+            "record": "7631"
+          }
+        ],
+        "snapshots": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "coll": 0,
+            "run": {
+              "width": 16,
+              "run": 6
+            },
+            "asof": 3,
+            "pages": [
+              0
+            ],
+            "complete": true,
+            "omitted": []
+          }
+        ],
+        "held": [
+          "unchanged"
+        ],
+        "read_again": false
+      }
+    },
+    {
+      "note": "the same two answers in the other order: the snapshot of no entry drops a value held from before the GET, and the answer then finds nothing held. The reader reads again, with no held stamp",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "page": {
+            "tag": 0,
+            "run_width": 16,
+            "run": 6,
+            "asof": 3,
+            "time": {
+              "s": 3600,
+              "ms": 250
+            },
+            "index": 0,
+            "more": false,
+            "coll": 0,
+            "live": [],
+            "tombs": []
+          },
+          "hex": "e0000600000300000e1000fa00000000"
+        },
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "held": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "hex": "e00005000007"
+        }
+      ],
+      "expect": {
+        "view": [],
+        "snapshots": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "coll": 0,
+            "run": {
+              "width": 16,
+              "run": 6
+            },
+            "asof": 3,
+            "pages": [
+              0
+            ],
+            "complete": true,
+            "omitted": [
+              "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01"
+            ]
+          }
+        ],
+        "held": [
+          "unchanged"
+        ],
+        "read_again": true
+      }
+    },
+    {
+      "note": "two instances answer, and the second lists the member under its own run: the later arrival is kept",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "held": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "hex": "e00005000007"
+        },
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "page": {
+            "tag": 0,
+            "run_width": 16,
+            "run": 6,
+            "asof": 3,
+            "time": {
+              "s": 3600,
+              "ms": 250
+            },
+            "index": 0,
+            "more": false,
+            "coll": 0,
+            "live": [
+              {
+                "id": "",
+                "run_width": null,
+                "run": null,
+                "seq": 2,
+                "confirmation": "none",
+                "record": "7633"
+              }
+            ],
+            "tombs": []
+          },
+          "hex": "e0000600000300000e1000fa000001000000000202763300"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 6,
+              "seq": 2
+            },
+            "record": "7633"
+          }
+        ],
+        "snapshots": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "coll": 0,
+            "run": {
+              "width": 16,
+              "run": 6
+            },
+            "asof": 3,
+            "pages": [
+              0
+            ],
+            "complete": true,
+            "omitted": []
+          }
+        ],
+        "held": [
+          "unchanged"
+        ],
+        "read_again": false
+      }
+    },
+    {
+      "note": "unchanged, then a stray held stamp at another seq in the same GET: one answer and one refusal",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "held": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "hex": "e00005000007"
+        },
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "held": {
+            "width": 16,
+            "run": 5,
+            "seq": 8
+          },
+          "hex": "e00005000008"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 7
+            },
+            "record": "7631"
+          }
+        ],
+        "snapshots": [],
+        "held": [
+          "unchanged",
+          "held"
+        ],
+        "read_again": false
+      }
+    },
+    {
+      "note": "a snapshot in answer whose entry carries its own run: the member was last put under the run the reader holds, and the header's run is the owner's now. The same mutation, kept once",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "page": {
+            "tag": 0,
+            "run_width": 16,
+            "run": 6,
+            "asof": 3,
+            "time": {
+              "s": 3600,
+              "ms": 250
+            },
+            "index": 0,
+            "more": false,
+            "coll": 0,
+            "live": [
+              {
+                "id": "",
+                "run_width": 16,
+                "run": 5,
+                "seq": 7,
+                "confirmation": "none",
+                "record": "7631"
+              }
+            ],
+            "tombs": []
+          },
+          "hex": "e0000600000300000e1000fa0000010080000500000702763100"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 7
+            },
+            "record": "7631"
+          }
+        ],
+        "snapshots": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "coll": 0,
+            "run": {
+              "width": 16,
+              "run": 6
+            },
+            "asof": 3,
+            "pages": [
+              0
+            ],
+            "complete": true,
+            "omitted": []
+          }
+        ],
+        "held": [],
+        "read_again": false
+      }
+    },
+    {
+      "note": "a held stamp answers its member alone: another member the reader holds is untouched",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        },
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/v07",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 3
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "held": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "hex": "e00005000007"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/v07",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 3
+            },
+            "record": "7631"
+          },
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 5,
+              "seq": 7
+            },
+            "record": "7631"
+          }
+        ],
+        "snapshots": [],
+        "held": [
+          "unchanged"
+        ],
+        "read_again": false
+      }
+    }
+  ]
+}

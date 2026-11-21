@@ -3,6 +3,105 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.110 — 2026-11-21: a conditional read: §7.5's held stamp, and §4.2's owner and reader (#986)
+
+A reader that holds a member's value and reads it again is answered the
+whole value, changed or not. `desired.v1`'s target does so every 300 s.
+This version lets the reader name the mutation it holds, and lets an
+owner whose member is unchanged answer in 6 bytes. No profile adopts it
+yet: `desired.v2` will (#986). `observer.md` stays 0.34.
+
+**Added: §7.5, "The held stamp".**
+- **The bytes.** `CH · run · seq`: a snapshot's header with no body, form
+  7 with tag 0. It is 6 bytes, or 8 with a 32-bit run. It is the same on
+  a state GET and on its reply, under `zenoh/bytes`.
+- **On a state GET**, the payload is read in three steps. No payload, or
+  one of no byte, carries no held stamp. A payload under another
+  Encoding is none (`encoding`). Any other is parsed, and refused in
+  order: `sample_kind`, `tag`, `short`, `trailing`.
+- **On a reply**, a snapshot's envelope with no byte after its seq is a
+  held stamp, never a page. One whose tag is not 0 is refused `tag`.
+- **The bytes decide which.** A page's body is 10 bytes or more, so the
+  length alone tells a held stamp from a page.
+- **Four rules**, all static: the writer's, the GET's parse, the reply's
+  tag, and the round trip.
+
+**Added: §4.2, "A conditional read".**
+- **The owner.** It SHOULD answer a member read of one concrete key with
+  the held stamp alone, when the member's last mutation carries exactly
+  that stamp. It MUST NOT answer with a held stamp in any other case.
+- **Whole otherwise.** Another seq, another run, the other width, no
+  member held, a refused payload and every other kind of GET are
+  answered as a GET with no payload is.
+- **The reader.** A consumer or a tool MUST NOT send any stamp but the
+  in-band stamp of the mutation it holds for the member. It MUST NOT
+  read a held stamp as unchanged unless it answers the GET that carried
+  the same one. It MUST accept a snapshot in answer.
+- **What unchanged says.** The member's last mutation was the one named
+  when the owner answered. The reader keeps what it holds. A held stamp
+  carries no value, no time and no confirmation.
+
+**Changed: S2 and the member read's answer.** Each now names the
+conditional read as its one exception. An owner that answers every GET
+whole breaks no MUST.
+
+**Why a refused payload is answered whole.** A state GET has no error
+form, and silence is no verdict (O5). A refusal would cost the reader
+its read. The whole answer is always right, and it is what an owner
+built before this version sends.
+- **Measured:** the reference built from main answered a GET that
+  carried its member's own held stamp with the member's 43-byte
+  snapshot. It answered another stamp, and two bytes that are no held
+  stamp, the same way.
+
+**Why the reply's stamp must be the one sent.** One stamp names one
+mutation, since a run is never reused and a seq never wraps (S7). So
+"unchanged" is about the value a reader holds only when the reader
+holds that mutation. A held stamp that answers no such GET establishes
+nothing, and is counted undecodable as `held`.
+
+**What the design memo had, and what this text has instead.**
+- **The memo:** a state GET's query "carries a held stamp or no
+  payload". **Here:** a payload of no byte is also none, and a payload
+  under another Encoding is refused `encoding`. Both are answered whole.
+- **The memo** did not say what an answer does to the omission rule.
+  **Here:** it counts as its mutation heard again by the GET, where the
+  reader still holds it. So another instance's snapshot of no entry
+  spares the value, as it spares one a snapshot lists.
+- **The memo** did not say what an answer does where the reader's value
+  moved while its GET was out. **Here:** the later value stands, and an
+  answer never steps a member back.
+
+**What it costs across a face** (Appendix B, "A conditional read's
+bytes"). Computed through the wire baseline's model, none measured. The
+request grows from 12 to 21 bytes. An unchanged reply on a 59-byte key
+is 94 bytes, of which 61 are its key and 20 its replier's id. On the
+simulated radio a re-read is 159 bytes in SDUs, where `desired.v1`'s is
+222 today.
+
+**Evidence.**
+- `conformance/envelope/held.json` is new: 9 writes, 34 GET payloads,
+  22 replies and 23 answers of an owner.
+- `conformance/seed/held.json` is new: 12 stamps a reader sends or does
+  not, and 29 merges.
+- `conformance/envelope/carries.json` gains 9 reads: a held stamp on a
+  put's key reads as a snapshot's envelope.
+- `scenarios/state.md` §16 is new, written ahead of the reference.
+- The three files' cases were computed twice, by two readings of this
+  text that shared no code. The two agreed on every case. The second
+  also merges the 41 cases of `seed/snapshot.json` that give
+  `collections`, to their expectations.
+
+**Deliberately not changed.**
+- **The envelope's parse.** A held stamp on a put's payload still reads
+  as a snapshot's envelope with no body. `vectors.json` is as it was.
+- **A page's reading.** Read as a page, a held stamp is still a body cut
+  `short`. A reader built before this version refuses it so.
+- **A collection read.** A collection has no single stamp, so none is
+  conditional.
+- **`observer.md`.** A tool's GET merges as §4.2 says, and §4.2 names a
+  tool beside a consumer.
+
 ## 0.109 — 2026-11-21: what §3.3's size counts, an owner's `minor` from its file, a group's size never allocated from, and on a heartbeat's key another form refused and the catalog a reader needs (#609, #1110, #1126, #1127)
 
 zk2py round 111 read 0.107 cold and filed F-535 to F-539, none a
