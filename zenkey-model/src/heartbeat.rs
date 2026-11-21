@@ -54,10 +54,17 @@
 //! whole put ([`OwnerRefusal`]). [`Group::entry`] then reads a group's
 //! index through the catalog its owner names (core §8.6) and
 //! [`Group::read`] its sections with that revision's [`Layout`], each
-//! refusing that group alone ([`GroupRefusal`]). Nothing in the bytes
-//! tells the two layouts apart: the caller says which one a key carries,
-//! and calls [`Heartbeat::parse`] or [`OwnerHeartbeat::parse`]. The
-//! tokens are `spec/conformance/heartbeat/owner.json`'s.
+//! refusing that group alone ([`GroupRefusal`]). Nothing in a body tells
+//! the two layouts apart, and CH's tag does only 15 times in 16 (an owner
+//! heartbeat's is 0, a heartbeat's its covered revision's): the key
+//! chooses. So the caller says which one a key carries, and calls
+//! [`Heartbeat::parse`] or [`OwnerHeartbeat::parse`]. The tokens are
+//! `spec/conformance/heartbeat/owner.json`'s.
+//!
+//! **Another form on either key** is refused `form` before a tag or a
+//! body is read (core §7.5): both are `stream` keys, so the envelope's
+//! parse accepts a mutation or a frame there. [`body_of`] is that gate,
+//! and [`OwnerHeartbeat::of`] reads an owner heartbeat's put through it.
 
 use std::time::Duration;
 
@@ -72,7 +79,7 @@ use crate::freshness::{Horizon, horizon_of};
 use crate::grammar::{IfaceId, KindToken, ZkKey, parse};
 use crate::packed::{BitReader, BitWriter, ReadRefusal, Record};
 use crate::template::Template;
-use crate::wire::{self, Run, Stamp, Tag};
+use crate::wire::{self, Envelope, Form, Run, Stamp, Tag};
 
 /// The profile that adopts the heartbeat (#978's F3), as its key's
 /// interface chunk spells it.
@@ -605,6 +612,40 @@ pub struct Heartbeat {
     pub sections: Vec<Option<Section>>,
 }
 
+/// A put on a heartbeat's key or an owner heartbeat's that is not form 6
+/// (core §7.5, "Another form on a heartbeat's key"): a mutation's or a
+/// frame's envelope, which the parse accepts on a `stream` key. It is no
+/// heartbeat and no owner heartbeat, and it confirms nothing. A put with
+/// no envelope on either key is refused the same way, which is its
+/// caller's to say: there is no [`Envelope`] to give [`body_of`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Error)]
+#[error("form: a {0} on a heartbeat's key, which carries form 6 and no other")]
+pub struct FormRefusal(pub Form);
+
+impl FormRefusal {
+    /// The token `spec/conformance/heartbeat/owner.json`'s `forms` pins.
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        "form"
+    }
+}
+
+/// CH's tag and the body of a put on a heartbeat's key or an owner
+/// heartbeat's, or the refusal of a put of another form (core §7.5): the
+/// first step of both readings, before the tag is compared and before a
+/// bit of the body is read. A mutation whose tag is 0 would otherwise
+/// pass an owner heartbeat's checks, its record read as a body.
+///
+/// # Errors
+/// The [`FormRefusal`], naming the form the envelope carries.
+pub fn body_of<'a>(env: &Envelope<'a>) -> Result<(Tag, &'a [u8]), FormRefusal> {
+    if env.form == Form::Heartbeat {
+        Ok((env.tag, env.record))
+    } else {
+        Err(FormRefusal(env.form))
+    }
+}
+
 /// Why a body is not a heartbeat of its layout, in core §7.5's order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Error)]
 pub enum BodyRefusal {
@@ -1083,6 +1124,10 @@ pub struct OwnerHeartbeat {
 /// core §7.5's order. It refuses the whole put, every group with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Error)]
 pub enum OwnerRefusal {
+    /// The put is another form's than 6, a mutation's or a frame's
+    /// ([`FormRefusal`]): refused before its tag or its body is read.
+    #[error("form: a put of another form than a heartbeat's")]
+    Form,
     /// CH's tag is not 0.
     #[error("tag: CH's tag is not 0")]
     Tag,
@@ -1114,6 +1159,7 @@ impl OwnerRefusal {
     #[must_use]
     pub const fn token(self) -> &'static str {
         match self {
+            OwnerRefusal::Form => "form",
             OwnerRefusal::Tag => "tag",
             OwnerRefusal::Short => "short",
             OwnerRefusal::Code => "code",
@@ -1133,6 +1179,12 @@ impl From<BodyRefusal> for OwnerRefusal {
             BodyRefusal::Trailing => OwnerRefusal::Trailing,
             BodyRefusal::Pad => OwnerRefusal::Pad,
         }
+    }
+}
+
+impl From<FormRefusal> for OwnerRefusal {
+    fn from(_: FormRefusal) -> Self {
+        OwnerRefusal::Form
     }
 }
 
@@ -1156,19 +1208,35 @@ pub enum OwnerWriteError {
 }
 
 impl OwnerHeartbeat {
-    /// A put's body on an owner heartbeat's key, after the envelope's
-    /// parse gave CH's `tag` and the stamp: the groups read with no
-    /// contract and no catalog, each one's sections taken unread, or the
-    /// first refusal that applies (core §7.5): CH's tag not 0 (`tag`),
-    /// then the fields in order, each read whole and then judged (`short`,
-    /// `code`, `order`, `leb128`), then a byte after the pad (`trailing`),
-    /// then a pad bit set (`pad`).
-    ///
-    /// The caller knows the key carries this layout: a heartbeat's body
-    /// can read as an owner heartbeat's, and the reverse.
+    /// A put on an owner heartbeat's key, after the envelope's parse
+    /// accepted it: refused `form` where the envelope is another form's
+    /// than 6, before its tag or its body is read (core §7.5), and
+    /// otherwise [`OwnerHeartbeat::parse`]'s reading of its tag and body.
     ///
     /// # Errors
-    /// The [`OwnerRefusal`].
+    /// The [`OwnerRefusal`], [`OwnerRefusal::Form`] first.
+    pub fn of(env: &Envelope<'_>) -> Result<OwnerHeartbeat, OwnerRefusal> {
+        let (tag, body) = body_of(env)?;
+        OwnerHeartbeat::parse(tag, body)
+    }
+
+    /// A form 6 put's body on an owner heartbeat's key, after the
+    /// envelope's parse gave CH's `tag` and the stamp
+    /// ([`OwnerHeartbeat::of`] takes the envelope, and refuses another
+    /// form first): the groups read with no contract and no catalog, each
+    /// one's sections taken unread, or the first refusal that applies
+    /// (core §7.5): CH's tag not 0 (`tag`), then the fields in order, each
+    /// read whole and then judged (`short`, `code`, `order`, `leb128`),
+    /// then a byte after the pad (`trailing`), then a pad bit set (`pad`).
+    ///
+    /// The caller knows the key carries this layout. Nothing in a body
+    /// tells the two apart: a heartbeat's can read as an owner heartbeat's,
+    /// and the reverse. CH's tag does 15 times in 16, a heartbeat's being
+    /// its covered revision's, and under tag 0 the body is read as its
+    /// bits fall.
+    ///
+    /// # Errors
+    /// The [`OwnerRefusal`], never [`OwnerRefusal::Form`].
     pub fn parse(tag: Tag, body: &[u8]) -> Result<OwnerHeartbeat, OwnerRefusal> {
         if tag != Tag::NONE {
             return Err(OwnerRefusal::Tag);
@@ -1677,8 +1745,48 @@ annotations = { "freshness.ttl_s" = 60 }
             let env = wire::Envelope::parse(&payload).unwrap();
             assert!(env.is_heartbeat());
             assert_eq!((env.tag, env.stamp), (Tag::NONE, stamp(7, round)));
-            assert_eq!(OwnerHeartbeat::parse(env.tag, env.record), Ok(hb));
+            assert_eq!(OwnerHeartbeat::parse(env.tag, env.record), Ok(hb.clone()));
+            assert_eq!(OwnerHeartbeat::of(&env), Ok(hb));
         }
+    }
+
+    /// Core §7.5, "Another form on a heartbeat's key": a mutation or a
+    /// frame under tag 0 whose record is an owner heartbeat's body would
+    /// read as one, so its form refuses it first, on either key.
+    #[test]
+    fn another_form_on_a_heartbeats_key_is_refused_before_its_tag_and_body() {
+        let hb = OwnerHeartbeat {
+            time: Time::Unknown,
+            groups: vec![Group {
+                index: 3,
+                tag: Tag::new(9).unwrap(),
+                sections: BitWriter::new().finish(),
+            }],
+        };
+        let body = hb.write().unwrap();
+        let at = stamp(7, 1);
+        for (env, form) in [
+            (Envelope::mutation(Tag::NONE, at, &body), Form::Mutation),
+            (Envelope::frame(Tag::NONE, at, &body), Form::Frame),
+            // Before `tag`, and before `short`.
+            (
+                Envelope::mutation(Tag::new(8).unwrap(), at, &body),
+                Form::Mutation,
+            ),
+            (Envelope::mutation(Tag::NONE, at, &[]), Form::Mutation),
+        ] {
+            assert_eq!(body_of(&env), Err(FormRefusal(form)));
+            assert_eq!(FormRefusal(form).token(), "form");
+            assert_eq!(OwnerHeartbeat::of(&env), Err(OwnerRefusal::Form));
+            assert_eq!(OwnerRefusal::Form.token(), "form");
+        }
+        // Read past its form, the first would have been an owner heartbeat.
+        assert_eq!(OwnerHeartbeat::parse(Tag::NONE, &body), Ok(hb.clone()));
+        // Form 6 passes the gate with its tag and body, in either layout.
+        let payload = hb.envelope(at).unwrap();
+        let env = Envelope::parse(&payload).unwrap();
+        assert_eq!(body_of(&env), Ok((Tag::NONE, &body[..])));
+        assert_eq!(OwnerHeartbeat::of(&env), Ok(hb));
     }
 
     #[test]
