@@ -586,7 +586,12 @@ def run_reference() -> int:
     same puts.
 
     1. The owner puts its six members. Every reader starts after, a late
-       joiner. Five seconds.
+       joiner. Five seconds. Then, from the runner's own session, two puts
+       on the ``link`` class key that are no owner heartbeat (core 0.109
+       §7.5, "Another form on a heartbeat's key"; round 114): a mutation
+       whose record is an owner heartbeat's body, and an owner heartbeat's
+       own bytes under an Encoding that carries no envelope, each stamped
+       as the owner's next.
     2. The owner makes a put of b's config that no reader hears. 3.5 s.
     3. The owner loses one ``link`` owner heartbeat. Three seconds."""
     from concurrent.futures import ThreadPoolExecutor
@@ -623,7 +628,7 @@ def run_reference() -> int:
             for k in [STATUS, CONFIG, *PEERS, *ALARMS]:
                 child.command(f"put {k} v1")
             # Step 1: every reader a late joiner.
-            for_s = 13.0
+            for_s = 17.0
             on_key = Watch(endpoint, "freshness.v2", "heartbeats/{class}", path, 4.0)
             watches = {"a": Watch(endpoint, A, "status", path, for_s), "b": Watch(endpoint, B, "config", path, for_s),
                        "c": Watch(endpoint, C, "alarms/{alarm}", path, for_s),
@@ -641,6 +646,40 @@ def run_reference() -> int:
             py_none = pool.submit(_pyecho, endpoint, [sel], 4.0)
             time.sleep(5.0)
             settled = max((h.stamp.seq for h in s.answers("link") if h.stamp is not None), default=-1)
+            # Step 1b (core 0.109 §7.5, "Another form on a heartbeat's key";
+            # round 114): two puts on the link class key that are no owner
+            # heartbeat, from this runner's own session, each stamped as the
+            # owner's next would be. Its body is a valid one of one group,
+            # a's, that marks no collection. A reader that took either would
+            # read it at that seq, and then find the owner's own put "older".
+            a_layout = heartbeat.layout_of(contracts[0].canonical, contracts[0].fingerprint)
+            quiet = owner_heartbeat.write_body(None, [owner_heartbeat.group_of(0, a_layout, {})])
+            link_key = f"zk2/{ADDRESS}/freshness.v2/stream/heartbeats/link"
+
+            def after_next() -> Any:
+                """The next link owner heartbeat this reader reads, just heard."""
+                n = len([h for h in s.answers("link") if "read" in h.answer])
+                end = time.monotonic() + 5.0
+                while time.monotonic() < end:
+                    hs = [h for h in s.answers("link") if "read" in h.answer]
+                    if len(hs) > n:
+                        return hs[-1]
+                    time.sleep(0.01)
+                return None
+
+            injected: dict[str, tuple[int, bytes] | None] = {"mutation": None, "bare": None}
+            h1 = after_next()
+            if h1 is not None and h1.stamp is not None:
+                st1 = zk2c.InBand(h1.stamp.width, h1.stamp.run, h1.stamp.seq + 1)
+                injected["mutation"] = (st1.seq, zk2c.mutation(st1, quiet))
+                session.put(link_key, injected["mutation"][1])
+            h2 = after_next()
+            if h2 is not None and h2.stamp is not None:
+                st2 = zk2c.InBand(h2.stamp.width, h2.stamp.run, h2.stamp.seq + 1)
+                injected["bare"] = (st2.seq, zk2c.write("heartbeat", st2.width, st2.run, st2.seq, 0, quiet))
+                # form 6's own bytes, under an Encoding that carries no envelope
+                session.put(link_key, injected["bare"][1], encoding="application/octet-stream")
+            after_next()
             # Step 2: a put no reader hears.
             child.command(f"miss {CONFIG} v3")
             time.sleep(3.5)
@@ -716,6 +755,32 @@ def run_reference() -> int:
                   and [watches[n].summary().get("heartbeats_lost") for n in ("a", "b", "c", "peer")] == [1, 1, 1, 0]
                   and za.get(lost_seq + 1, {}).get("confirmed") == [STATUS],
                   f"the owner lost seq {lost_seq}; zenctl lost at {lost_rows}; zk2py's gap at {my_gaps}")
+            # -- another form on the owner heartbeat's key (core 0.109) ----------------------
+            heard = {h.payload: h.answer for h in s.answers("link")}
+            for what, words in (("mutation", "a mutation whose record is an owner heartbeat's body, stamped as the "
+                                             "owner's next"),
+                                ("bare", "an owner heartbeat's own bytes under an Encoding that carries no envelope "
+                                         "(\"A put with no envelope on either key is refused the same way\")")):
+                inj = injected[what]
+                if inj is None:
+                    check(f"another form on the owner heartbeat's key, {what}: the put was made", False, "no owner "
+                          "heartbeat was heard to stamp it after")
+                    continue
+                q, payload = inj
+                rows_at = {n: [r for r in watches[n].rows if r.get("row") == "confirmation"
+                               and r.get("key", "").endswith("/heartbeats/link") and r["heartbeat"]["seq"] == q]
+                           for n in "abc"}
+                mine_q = mine.get(q, {}).get("read", {})
+                check(f"another form on the owner heartbeat's key: {words}. zk2py's reader refuses it `form`, and "
+                      "reads the owner's own put of that seq in sequence, no gap and not older; each of the three "
+                      "zenctl watchers prints one confirmation row at that seq, confirming its members by the "
+                      "owner's put, not lost: neither side took the put as an owner heartbeat (core §7.5)",
+                      heard.get(payload) == {"refused": "form"} and mine_q.get("gap") is False
+                      and all(len(rows_at[n]) == 1 and rows_at[n][0]["confirmed"] == res[n][2]
+                              and not rows_at[n][0]["lost"] for n in "abc"),
+                      f"seq {q}: zk2py {heard.get(payload)}, then gap {mine_q.get('gap')}; zenctl rows "
+                      + json.dumps({n: [(r['confirmed'], r['lost'], r.get('diverged')) for r in rows_at[n]]
+                                    for n in 'abc'}))
             # -- a reader given no catalog ---------------------------------------------------
             wn = watches["none"]
             kinds = sorted({r.get("row", "?") for r in wn.rows})

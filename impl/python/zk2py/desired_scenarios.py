@@ -1200,13 +1200,18 @@ class Fake:
 
 
 #: Two reports on one key that differ (F-212, and F-545 since round 112):
-#: bare, as round 59 wrote the shape; in envelopes of one run, where §4.2's
+#: bare, as round 59 wrote the shape; in envelopes of one run, where the
 #: merge keeps the higher seq; and of two runs, two instances', where a tool
-#: keeps the later arrival. desired.v1 §2.10: "Two instances' reports on one
-#: key are not two". The reference's ``zenctl desired`` reads each as two
-#: that differ, ``report_invalid`` (observed since round 110; round 105's
-#: read the later). Each is a known divergence, pinned to that answer and
-#: named F-545 (:meth:`DesiredReport.diverges`): never a pass.
+#: keeps the later arrival. desired.v1 §2.10 (0.14, F-545's answer): "Two
+#: instances' reports on one key are not two. S4's GET answers both, under
+#: consolidation `None` (core S4), and a tool merges its replies per key, as
+#: observer §4.1 says. So one reply is left on a key".
+#:
+#: Rounds 110 to 113 pinned the reference's ``zenctl desired`` as a known
+#: divergence here: it read each as two that differ, ``report_invalid``.
+#: desired.v1 0.14's entry says it merges now, so since round 114 each is a
+#: plain check against the text, as every other shape is: the old answer
+#: fails the run.
 TWO_ON_ONE_KEY = (
     "two readable reports on one key, differing, with no envelope: the merge keeps the later by its Zenoh "
     "timestamp, which reads as the report (F-212, core §4.2)",
@@ -1215,8 +1220,28 @@ TWO_ON_ONE_KEY = (
     "two instances' reports on one key, differing, in envelopes of two runs: a tool keeps the later arrival, which "
     "reads as the report (desired.v1 §2.10, core §4.2)",
 )
-#: What the reference answers of each, observed on fc16a564.
-TWO_OBSERVED = {q: ("unobservable", "report_invalid") for q in ("converged", "refused", "last_known", "in_force")}
+
+def kept_shapes(conv: bytes, refd: bytes, env: Any, kept_conv: Any, kept_refd: Any) -> list[tuple[str, list[Any], Any]]:
+    """Two differing reports on one key, one converged and one refused, in
+    each order of arrival: the replies, and the `refused` answer of the one
+    a tool's merge keeps. "within one run the higher seq, and across two
+    runs, which nothing orders, the later arrival" (desired.v1 §2.10);
+    "A sample with no envelope is ordered by its Zenoh timestamp" (observer
+    §4.1), each reply stamped as it is sent, so the later one."""
+    return [
+        ("two with no envelope, the refused one later: the later by its Zenoh timestamp", [(conv, True), (refd, True)],
+         kept_refd),
+        ("two with no envelope, the converged one later: the later by its Zenoh timestamp",
+         [(refd, True), (conv, True)], kept_conv),
+        ("one run, seq 1 then seq 2: the higher seq", [env(7, 1, conv), env(7, 2, refd)], kept_refd),
+        ("one run, seq 2 arriving before seq 1: the higher seq, not the later arrival",
+         [env(7, 2, refd), env(7, 1, conv)], kept_refd),
+        ("one run, the converged one at the higher seq, arriving first: the higher seq",
+         [env(7, 2, conv), env(7, 1, refd)], kept_conv),
+        ("two runs, the refused one arriving later: the later arrival", [env(7, 5, conv), env(9, 1, refd)], kept_refd),
+        ("two runs, the converged one arriving later: the later arrival, whatever its run and seq",
+         [env(9, 1, refd), env(7, 5, conv)], kept_conv),
+    ]
 
 
 def section_tool_shapes(ctx: Ctx) -> None:
@@ -1502,18 +1527,6 @@ def section_tool_shapes(ctx: Ctx) -> None:
                 cargs = [x for q in paths for x in ("--contracts", q)] + (["--role", role] if role != "task" else [])
                 rc, zdoc, err = zenctl(["desired", TARGET, "-c", bus.ep1, "--timeout", "1", *cargs])
                 z = _z_answers(_z_row(zdoc, role))
-                if name in TWO_ON_ONE_KEY:
-                    # A known divergence (F-545), pinned: the reference
-                    # answers report_invalid of all four questions, and its
-                    # row calls the report unreadable. Counted apart from
-                    # the passes; the text's answer, or any third, fails.
-                    zrep = _row_of_zenctl(_z_row(zdoc, role)).get("report")
-                    rp.diverges(sec, f"zenctl desired: {name}", "F-545",
-                                pinned=z == TWO_OBSERVED and zrep == "unreadable", as_text=z == want,
-                                detail=f"zenctl {z}, its row's report {zrep!r}, exit {rc}; the text's answer {want}")
-                    if z != m:
-                        disagree.append(f"{name} (F-545): zk2py {m}, zenctl {z}")
-                    continue
                 rp.check(sec, f"zenctl desired: {name}", z == want, f"{z}, exit {rc}{(' ' + err[-200:]) if z is None else ''}")
                 if z != m:
                     disagree.append(f"{name}: zk2py {m}, zenctl {z}")
@@ -1539,6 +1552,37 @@ def section_tool_shapes(ctx: Ctx) -> None:
     if row_notes:
         rp.note(sec, f"their rows differ only where two reports claim the slice and differ ({len(row_notes)} "
                      "shapes): zenctl's row carries no report, zk2py's says unreadable, as §2.10 does")
+    # Which of the two the merge keeps (desired.v1 0.14 §2.10, observer
+    # §4.1; round 114). The three shapes above answer the same whichever
+    # report is read: here one report is converged and the other refused, so
+    # the `refused` answer tells which one a tool kept.
+    ver1, ver2 = {"stamp": "100/a1", "revision": 1}, {"stamp": "200/a1", "revision": 2}
+    refd = json.dumps({"key": D, "source": "desired", "in_force": ver1, "observed": ver2, "outcome": "refused",
+                       "refusal": {"code": "invalid", "pointer": "/x"}}).encode()
+
+    def env(run: int, seq: int, payload: bytes) -> tuple[bytes, bool, str]:
+        return zk2c.mutation(zk2c.InBand(16, run, seq), payload), False, zk2c.ENCODING
+
+    kept_conv, kept_refd = ("no", "converged"), ("yes", "refused")
+    for name, replies, want_kept in kept_shapes(conv, refd, env, kept_conv, kept_refd):
+        bus = Bus()
+        fakes = []
+        try:
+            fakes.append(Fake(bus.ep1, TARGET, target_doc([AUTHOR]), {rp_prefix: replies}))
+            fakes.append(Fake(bus.ep1, AUTHOR, author_doc(), {d_prefix: [(doc, True)]}))
+            time.sleep(0.5)
+            mine = dt.read(bus.g1, TARGET, "task", contracts=[worker, tasking, two])
+            m = mine[0].pairs() if mine else None
+            rp.check(sec, f"zk2py's tool keeps: {name}", m is not None and m.get("refused") == want_kept, str(m))
+            if use_z:
+                rc, zdoc, err = zenctl(["desired", TARGET, "-c", bus.ep1, "--timeout", "1", "--contracts", offline])
+                z = _z_answers(_z_row(zdoc, "task"))
+                rp.check(sec, f"zenctl desired keeps: {name}", z is not None and z.get("refused") == want_kept
+                         and z == m, f"{z}, exit {rc}; zk2py {m}")
+        finally:
+            for f in fakes:
+                f.close()
+            bus.close()
 
 
 #: zk2py's own, beyond scenarios.md: a document text each target reads as

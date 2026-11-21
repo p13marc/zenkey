@@ -2501,6 +2501,13 @@ def run_python_health(report: Report, exe: Path, consume: Path) -> None:
     beat = "zk2py/health/heartbeat"
     r1, ep, r1_zid = _r1()
     t_sess, s_sess, g_sess = live.open_client(ep), live.open_client(ep), live.open_client(ep)
+    # The token watch has a session of its own (round 114). It was declared
+    # on T's, raw, so that T's presence reads ran beside a liveliness
+    # subscriber, which core Appendix B says can answer a liveliness GET
+    # complete and empty: on 1374e566's black boxes T read `absent` of a
+    # present owner in 4 checks of one whole run and 1 of the next, and in
+    # none of the section run alone.
+    w_sess = live.open_client(ep)
     rusts: list[Owner] = []
     stop = threading.Event()
     subs: list[Any] = []
@@ -2523,7 +2530,7 @@ def run_python_health(report: Report, exe: Path, consume: Path) -> None:
                 at_token.append(live.get_state(t_sess, "zk2/lab/svc/health.v1/state/status"))
 
         threading.Thread(target=get_at_token, daemon=True).start()
-        lv = t_sess.liveliness().declare_subscriber("zk2/lab/svc/@zk/instance/*", zenoh.handlers.Callback(
+        lv = w_sess.liveliness().declare_subscriber("zk2/lab/svc/@zk/instance/*", zenoh.handlers.Callback(
             lambda smp: appeared.put(str(smp.key_expr)) if smp.kind == zenoh.SampleKind.PUT else None),
             history=True)
         subs.append(lv)
@@ -2861,7 +2868,7 @@ def run_python_health(report: Report, exe: Path, consume: Path) -> None:
                     x.undeclare()
                 except Exception:  # noqa: BLE001
                     pass
-        for x in (t_sess, s_sess, g_sess):
+        for x in (t_sess, s_sess, g_sess, w_sess):
             x.close()
         r1.close()
 

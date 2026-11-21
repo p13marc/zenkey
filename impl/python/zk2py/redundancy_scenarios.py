@@ -1128,8 +1128,18 @@ def section9(rp: Report, runs: int) -> None:
         rp.check(sec, "1. K's value moves to A's only, and K discards every sample stamped with B's meta.zid",
                  k is not None and acc and set(acc) == {za} and disc and set(disc) == {zb},
                  f"accepted {len(acc)} ({set(acc) == {za}}), discarded {len(disc)}")
-        rp.check(sec, "2. K's seed holds A's reply, or, where Latest kept B's, nothing: never B's",
-                 k is not None and seeded in ("accepted", "discarded"), f"seed {seeded}")
+        # redundancy.v1 0.11, Expected 2: "K's seed takes A's reply and
+        # discards B's: under S4's None both arrive (core S4). Where A's
+        # reply did not arrive, K holds no value for balance until A's next
+        # put: never B's (§2.10)."
+        ids = [None if z is None else zid_value(z) for z in (k.seed_ids if k else [])]
+        a_arrived = za in ids
+        rp.check(sec, "2. K's seed takes A's reply and discards B's, both arriving under S4's None; where A's did "
+                      "not arrive it holds none: never B's",
+                 k is not None and ((a_arrived and seeded == "accepted") or (not a_arrived and seeded != "accepted")),
+                 f"seed {seeded}; replies' ids A {ids.count(za)}, B {ids.count(zb)}, other {len(ids) - ids.count(za) - ids.count(zb)}")
+        rp.check(sec, "2. both incumbents' replies arrived on the one key (consolidation None), and K took A's",
+                 k is not None and a_arrived and zb in ids and seeded == "accepted", f"seed {seeded}; ids {len(ids)}")
         b.release_heal()
         # the owner example names no why after a step-down; the role is enough
         down = _wait(lambda: b.standing().get("role") == "standby", 12.0, 0.05)
