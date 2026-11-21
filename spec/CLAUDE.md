@@ -507,6 +507,17 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   §7.5's refusal where the parse refuses its envelope, else `form`
   (`inband::admit_event`); 0.104's note on the reference corrected (its
   code landed with it). 274 rules (consumer 32).
+  Core 0.107 (#1126, #1127) changed §3.3. An entry's `minor` is its
+  revision's, as the authoring file states it: an owner holding only the
+  bundle leaves it out, and MUST NOT state one its revision does not have
+  (`descriptors/ok-no-minor`, `d000-minor-null`, `presence.md` §2 step 8;
+  `descriptor.schema.json` no longer requires it). An owner MAY leave out
+  a member whose default is empty, and MAY exceed 1 KB with `interfaces`,
+  `capabilities`, `requires` and `profiles`; over 1 KB it SHOULD leave out
+  every empty member and keep the other members within 512 B together
+  (the 1 KB SHOULD's entry shows the MAY, `EXCEPTED_BY`). zenoh-modem's
+  node as `zenctl gen` runs it: 1,344 B before, 1,184 B now. 277 rules
+  (owner 88).
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`

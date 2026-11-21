@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.106** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.107** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -668,7 +668,7 @@ from every bound provider.
     runs, and checks it against a control: the same owner, configured to
     start, shows its token there within the wait (§8.1).
 - **An unbound optional role** is listed in the descriptor all the same,
-  with `"bindings": []` and `"params": {}` (R3): the graph keeps every edge
+  with `"bindings": []` and no parameter bound (R3): the graph keeps every edge
   a contract declares, bound or not. `[Sc: bindings.md §3]`
 
 ### 3.3 The descriptor record
@@ -730,6 +730,15 @@ gate does not name.
   A listed resource that is not an optional resource of the contract is an
   error (D005). One that a missing capability already implies is a warning
   (D006). `[F: descriptors/d005-*, d006-implied]`
+- **`minor`** is the minor of the contract revision the entry names, as
+  its authoring file states it (§9.1).
+  - A bundle keeps no minor (§9.5), so an owner that holds only the
+    revision's bundle leaves the member out. An owner MUST NOT state a
+    minor its revision does not have.
+    `[F: descriptors/ok-no-minor]` `[Sc: presence.md §2]`
+  - A checker reads `minor` as optional, so a descriptor that states
+    none is not D000, and `null` is D000.
+    `[F: descriptors/ok-no-minor, d000-minor-null]`
 - **`token`** is `false` for an interface in the owner's tokenless set
   (§8.1), and `true` otherwise, which is the default. It states the
   configuration, not what is held now: a standby's entry states `true`,
@@ -823,6 +832,19 @@ gate does not name.
 - **Size.** An owner's descriptor SHOULD stay within 1 KB. At the
   constrained level (§12), it MUST fit one fragment.
   `[Sc: constrained.md §5]`
+  - **Empty members.** A member whose schema default is an empty list or
+    object reads as that default when absent. So an owner MAY leave it out
+    when it holds nothing, as the reference does.
+    `[F: descriptors/ok-minimal, ok-no-minor]` `[Sc: presence.md §2]`
+  - **What an owner cannot shorten.** Four members state what the
+    instance implements, holds, requires and follows. An entry is at
+    least 100 B, 71 of them its fingerprint, and each capability held is
+    named. So an owner MAY exceed 1 KB with `interfaces`, `capabilities`,
+    `requires` and `profiles`.
+  - **Over 1 KB.** An owner whose descriptor exceeds 1 KB SHOULD leave out
+    every empty member. That owner SHOULD also keep every member but
+    `interfaces`, `capabilities`, `requires` and `profiles` within 512 B
+    together, each counted with its name.
 - **Updates.** The owner MUST put the descriptor on its instance key whenever
   it changes, and MUST answer a GET there with the current one.
   `[Sc: presence.md §2]`
@@ -901,8 +923,9 @@ and reports these codes. `[F: descriptors/]`
    - that a `self.system` provider was resolved: `self.system` is a
      plain chunk, so an unresolved one reads as a system of that name.
      `bindings.md §5` checks the runtime instead;
-   - `minor`, an integer from 0 to 2^64−1 that no check reads (a tool MAY
-     read it to order two revisions, §9.8), and `token` except on
+   - `minor`, an integer from 0 to 2^64−1 that no check reads, nor whether
+     it is stated (a tool MAY read it to order two revisions, §9.8), and
+     `token` except on
      `archive.v1` (D011, cascade 6) and beside `standby` (D012, cascade
      7);
    - that a standby's interface is one a profile governs, and that a
@@ -4184,7 +4207,8 @@ and a new reader of an old writer: that is what "both directions" means.
 - **On the bus, revisions carry no order.** A bundle keeps no
   `minor` (§9.5), and two providers can serve two revisions side by side.
   A tool that classifies them against each other MAY take the order from
-  the `minor` their descriptors state, when the two differ. Otherwise it
+  the `minor` their descriptors state, when both state one and the two
+  differ. Otherwise it
   classifies both ways: the pair is clean only when both directions are
   compatible, a finding when neither is, and undecided when they disagree.
 
