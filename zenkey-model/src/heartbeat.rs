@@ -196,6 +196,17 @@ pub fn covered(key: &str) -> Option<(crate::grammar::Addr, IfaceId)> {
     Some((addr, IfaceId::new(name, major.parse().ok()?).ok()?))
 }
 
+/// Whether `key` is a heartbeat's key or an owner heartbeat's, with a
+/// namespace in front or none: the two keys that carry form 6 and no
+/// other (core §7.5, "Another form on a heartbeat's key"). A reader of
+/// either refuses any other put on it `form` ([`body_of`]), and one that
+/// holds a put with no envelope, so no [`Envelope`], refuses it the same
+/// way.
+#[must_use]
+pub fn is_key(key: &str) -> bool {
+    covered(key).is_some() || owner_class(key).is_some()
+}
+
 /// The class an owner heartbeat key names, read from a key with a
 /// namespace in front or none: `None` for any other key, one whose last
 /// chunk is no class among them. A reader tells an owner heartbeat from a
@@ -623,10 +634,14 @@ pub struct Heartbeat {
 pub struct FormRefusal(pub Form);
 
 impl FormRefusal {
-    /// The token `spec/conformance/heartbeat/owner.json`'s `forms` pins.
+    /// The token `spec/conformance/heartbeat/owner.json`'s `forms` pins:
+    /// what every reader names such a put by, one with no envelope too.
+    pub const TOKEN: &'static str = "form";
+
+    /// [`FormRefusal::TOKEN`].
     #[must_use]
     pub const fn token(self) -> &'static str {
-        "form"
+        Self::TOKEN
     }
 }
 
@@ -1159,7 +1174,7 @@ impl OwnerRefusal {
     #[must_use]
     pub const fn token(self) -> &'static str {
         match self {
-            OwnerRefusal::Form => "form",
+            OwnerRefusal::Form => FormRefusal::TOKEN,
             OwnerRefusal::Tag => "tag",
             OwnerRefusal::Short => "short",
             OwnerRefusal::Code => "code",
@@ -1782,6 +1797,23 @@ annotations = { "freshness.ttl_s" = 60 }
         }
         // Read past its form, the first would have been an owner heartbeat.
         assert_eq!(OwnerHeartbeat::parse(Tag::NONE, &body), Ok(hb.clone()));
+        // The two keys that carry form 6 alone, a namespace in front or
+        // none, and no other key of the profile or of any other.
+        let alpha: IfaceId = "alpha.v1".parse().unwrap();
+        for k in [
+            key("lab", "trio", &alpha),
+            owner_key("lab", "trio", Class::Host),
+            format!("ns/{}", owner_key("lab", "trio", Class::Link)),
+        ] {
+            assert!(is_key(&k), "{k}");
+        }
+        for k in [
+            "zk2/lab/trio/freshness.v2/stream/heartbeats/other",
+            "zk2/lab/trio/alpha.v1/state/status",
+            "zk2/lab/trio/freshness.v2/state/heartbeat/alpha.v1",
+        ] {
+            assert!(!is_key(k), "{k}");
+        }
         // Form 6 passes the gate with its tag and body, in either layout.
         let payload = hb.envelope(at).unwrap();
         let env = Envelope::parse(&payload).unwrap();
