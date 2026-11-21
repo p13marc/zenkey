@@ -4,6 +4,37 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.11 — 2026-11-21: editorial: a split's seed under consolidation `None`, no rule changed (#609)
+
+Core 0.100 moved S4's GET to consolidation `None`, and its entry left
+this text's sentence on `Latest` to this profile. `desired.v1` 0.14
+repairs the same stale consolidation, for zk2py round 112's F-545, and
+this version repairs this one beside it.
+
+**Changed: §2.10, "A seed", which states no rule.**
+- **Before:** "`Latest` keeps the later stamp per key, whichever wrote
+  it". So a consumer following the lower incumbent could find the
+  higher's reply alone, discard it, and hold no value.
+- **Now:** under `None` each incumbent's reply arrives, two on one key.
+  The follower discards the higher's and keeps the lower's. It holds no
+  value only where the lower's reply did not arrive.
+
+**Changed: `scenarios.md` §9, expected 2.** K's seed takes A's reply and
+discards B's. It said "or, where `Latest` kept B's later stamp, no
+value". The case with no value is now a reply of A's that did not
+arrive. "Never B's" stands.
+
+**The reference** already seeds under `None`
+(`zenkey/tests/profile_redundancy.rs`,
+`s9_a_consumer_following_the_incumbent_during_a_split`): each holder's
+reply arrives, A's is taken and B's never.
+
+**Deliberately not changed.**
+- **No rule, no fixture, no step, no section number or label.** A
+  consumer still follows the incumbent by its stamps' id.
+- **Written against core 0.73**, still.
+- **`redundancy.v2`** (#987) is not started here.
+
 ## 0.10 — 2026-11-07: editorial: the scenarios' §8 says "error", no rule changed (#985)
 
 Core 0.94 moved every call onto core §7.5's forms, and its entry left a

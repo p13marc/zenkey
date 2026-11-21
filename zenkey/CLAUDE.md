@@ -24,7 +24,11 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   through `Implementation::new` or `with_bundle`; `from_bundle`, what
   generated code embeds, has none), leaves out every empty member, and
   warns over 1 KB only where `Descriptor::size` does not meet §3.3
-  (`tests/presence.rs`' §2 step 8). `presence`
+  (`tests/presence.rs`' §2 step 8). Since core 0.109 `encode_checked`
+  serializes once and counts the bytes it serves (`Descriptor::size_of`),
+  with no panicking path: a descriptor that does not serialize is
+  `Error::Descriptor`. Its warning names the rest, over the 512 B that
+  lets a descriptor exceed 1 KB. `presence`
   reads liveliness on an unbounded flume handler (zenoh#2678), and
   `retrieval` is §8.4. `writer` puts with the contract's QoS, every
   `stream`, `state` and `@state` sample sealed in §7.5's envelope under

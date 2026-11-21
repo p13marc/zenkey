@@ -491,29 +491,29 @@ fn check_exposure(
     }
 }
 
-/// The bytes an owner's descriptor SHOULD stay within (core §3.3).
+/// The bytes an owner's descriptor SHOULD stay within (core §3.3): 1 KB.
 pub const SIZE_BYTES: usize = 1024;
 
-/// What a descriptor over [`SIZE_BYTES`] SHOULD keep its other members
-/// within, together: every member but `interfaces`, `capabilities`,
-/// `requires` and `profiles`, which an owner cannot shorten (core §3.3).
+/// What the rest of a descriptor stays within where the descriptor MAY
+/// exceed [`SIZE_BYTES`] (core §3.3): the rest is [`Size::other`].
 pub const OTHER_BYTES: usize = 512;
 
 /// A descriptor's bytes against core §3.3's size rule, as
-/// [`Descriptor::size`] counts them.
+/// [`Descriptor::size_of`] counts them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Size {
-    /// The whole descriptor's.
+    /// The whole document's, as its owner wrote it.
     pub bytes: usize,
-    /// Its members' beside `interfaces`, `capabilities`, `requires` and
-    /// `profiles`, each counted with its name, and the braces.
+    /// The rest (core §3.3): the size of the same document with
+    /// `interfaces`, `capabilities`, `requires` and `profiles` taken out.
+    /// That is its two braces, every other member and the commas between
+    /// those.
     pub other: usize,
 }
 
 impl Size {
     /// Whether the descriptor meets the rule: within [`SIZE_BYTES`], or
-    /// over it with the four members an owner cannot shorten, its other
-    /// members within [`OTHER_BYTES`].
+    /// over it with a rest within [`OTHER_BYTES`].
     #[must_use]
     pub fn meets(&self) -> bool {
         self.bytes <= SIZE_BYTES || self.other <= OTHER_BYTES
@@ -521,23 +521,32 @@ impl Size {
 }
 
 impl Descriptor {
-    /// This descriptor's size as it serializes here: compact JSON, every
-    /// empty member left out (core §3.3). Each of `interfaces`,
-    /// `capabilities`, `requires` and `profiles` it writes counts its
-    /// name, its value and one separator; the rest is `other`.
+    /// The size of `served`, the document this descriptor's owner put and
+    /// answers, as the owner wrote it (core §3.3): its count of bytes, and
+    /// the rest, which is that count less each of `interfaces`,
+    /// `capabilities`, `requires` and `profiles` the descriptor states.
+    ///
+    /// A member is counted from the opening quote of its name to the last
+    /// byte of its value, and one comma with it. A member taken out of an
+    /// object that keeps another takes exactly one comma with it, wherever
+    /// it stands, and `format`, `service` and `instance` are always
+    /// written. So the rest is exact for the compact form the reference
+    /// writes, every empty member left out. A member's value is counted
+    /// as it serializes here, so the rest of a document its owner spaced
+    /// otherwise counts that member's spacing too.
+    ///
+    /// Nothing here can fail: a value that does not serialize counts for
+    /// nothing, and the rest never falls below 0.
     #[must_use]
-    pub fn size(&self) -> Size {
+    pub fn size_of(&self, served: &[u8]) -> Size {
         fn member<T: Serialize>(name: &str, value: &T, written: bool) -> usize {
             if !written {
                 return 0;
             }
-            let value = serde_json::to_vec(value).expect("a descriptor serializes");
             // `"name":` + the value + `,`.
-            name.len() + 3 + value.len() + 1
+            serde_json::to_vec(value).map_or(0, |value| name.len() + 3 + value.len() + 1)
         }
-        let bytes = serde_json::to_vec(self)
-            .expect("a descriptor serializes")
-            .len();
+        let bytes = served.len();
         let lists = member("interfaces", &self.interfaces, true)
             + member(
                 "capabilities",
@@ -548,8 +557,18 @@ impl Descriptor {
             + member("profiles", &self.profiles, !self.profiles.is_empty());
         Size {
             bytes,
-            other: bytes - lists,
+            other: bytes.saturating_sub(lists),
         }
+    }
+
+    /// This descriptor's size as it serializes here ([`Descriptor::size_of`]
+    /// over its compact JSON, every empty member left out): what an owner
+    /// that has not written it yet would serve.
+    ///
+    /// # Errors
+    /// The descriptor does not serialize.
+    pub fn size(&self) -> Result<Size, serde_json::Error> {
+        Ok(self.size_of(&serde_json::to_vec(self)?))
     }
 
     /// The run the descriptor states (core §3.3), `None` when it states
@@ -708,8 +727,9 @@ mod tests {
         assert_eq!(report.codes(), ["D000"], "{report}");
     }
 
-    /// §3.3's size rule: within 1 KB, or over it with the four members an
-    /// owner cannot shorten, the others within 512 B together.
+    /// §3.3's size rule: within 1 KB, or over it with a rest within
+    /// 512 B, the rest being the document with `interfaces`,
+    /// `capabilities`, `requires` and `profiles` taken out.
     #[test]
     fn a_descriptor_over_1_kb_is_judged_by_its_other_members() {
         let fp = format!("sha256:{}", "0".repeat(64));
@@ -720,12 +740,12 @@ mod tests {
         ))
         .unwrap();
         let text = serde_json::to_string(&d).unwrap();
-        let small = d.size();
+        let small = d.size().unwrap();
+        assert_eq!(small, d.size_of(text.as_bytes()), "as it serializes here");
         assert_eq!(small.bytes, text.len());
-        // `{"format":…,"service":…,"instance":…,"meta":{"zid":"1"}}`.
-        let other = text.len()
-            - format!(r#""interfaces":[{{"iface":"t.v1","contract":"{fp}","token":true}}],"#).len();
-        assert_eq!(small.other, other);
+        // The rest, where a member follows the four.
+        let other = r#"{"format":"zk2-descriptor/0.1","service":"s/t","instance":"000000000000000a","meta":{"zid":"1"}}"#;
+        assert_eq!(small.other, other.len());
         assert!(small.bytes <= super::SIZE_BYTES && small.meets());
 
         // Many interfaces and capabilities: over 1 KB by what it must state.
@@ -737,15 +757,38 @@ mod tests {
         }
         d.capabilities = (0..30).map(|n| format!("capability_{n}")).collect();
         d.profiles = vec!["freshness.v2".into()];
-        let many = d.size();
+        let many = d.size().unwrap();
         assert_eq!(many.bytes, serde_json::to_string(&d).unwrap().len());
         assert!(many.bytes > super::SIZE_BYTES, "{many:?}");
-        assert_eq!(many.other, other, "the four lists count for nothing");
+        assert_eq!(many.other, other.len(), "the four count for nothing");
         assert!(many.meets());
+
+        // The four come last, `profiles` the last member written: a member
+        // takes one comma with it wherever it stands, so the rest is the
+        // three members left and their braces, to the byte.
+        let mut last = d.clone();
+        last.meta.clear();
+        let text = serde_json::to_string(&last).unwrap();
+        assert!(text.ends_with(r#""profiles":["freshness.v2"]}"#), "{text}");
+        let rest =
+            r#"{"format":"zk2-descriptor/0.1","service":"s/t","instance":"000000000000000a"}"#;
+        assert_eq!(
+            last.size().unwrap(),
+            super::Size {
+                bytes: text.len(),
+                other: rest.len()
+            }
+        );
+        // `interfaces` alone of the four, and the last member written.
+        last.capabilities.clear();
+        last.profiles.clear();
+        let text = serde_json::to_string(&last).unwrap();
+        assert!(text.ends_with("]}") && !text.contains("profiles"), "{text}");
+        assert_eq!(last.size().unwrap().other, rest.len());
 
         // The same lists beside a `meta` of its own 600 B: not met.
         d.meta.insert("build".into(), "x".repeat(600).into());
-        let padded = d.size();
+        let padded = d.size().unwrap();
         assert!(
             padded.other > super::OTHER_BYTES && !padded.meets(),
             "{padded:?}"
@@ -754,8 +797,16 @@ mod tests {
         d.interfaces.truncate(1);
         d.capabilities.clear();
         d.profiles.clear();
-        let lone = d.size();
+        let lone = d.size().unwrap();
         assert!(lone.other > super::OTHER_BYTES && lone.bytes <= super::SIZE_BYTES);
         assert!(lone.meets());
+
+        // The size is the served document's, and the rest never falls
+        // below 0: fewer bytes than the four members take leave none.
+        assert_eq!(
+            d.size_of(b"{}"),
+            super::Size { bytes: 2, other: 0 },
+            "saturating"
+        );
     }
 }

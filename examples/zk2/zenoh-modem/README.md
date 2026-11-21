@@ -354,8 +354,8 @@ SF12's 51 B tiles. **All 73** is every reading present, 16 counters and 8 gauges
 |---|---|---:|---:|---|---|
 | RF, rf0 | `fast`, 60 s | 177 KB a day | 92 KB (18 readings) | none to 1,440 a day, at most 24 KB; 336 measured under the lean stack | 25.9 MB a day: 0.7 % to 0.8 %. The report's model: 200 KB, with its 203 B keyframe |
 | LoRa SF7, lora0 | `fast`, 60 s | 302 s | 174 s (22 readings) | 1,440 to 2,880 a day, 74 s to 148 s; 2,160 and 111 s measured | 864 s of air a day: 376 s to 450 s, 43 % to 52 %, and 248 s to 322 s, 29 % to 37 % |
-| LoRa SF9 | `fast`, 120 s, full every 15 min | 534 s | 281 s | none to 720 a day, at most 119 s | 534 s to 653 s, 62 % to 76 %, and 281 s to 400 s, 33 % to 46 % |
-| LoRa SF12 | `slow`, 900 s, full hourly | 785 s | 434 s (28, the fragment layer's among them) | none to 96 a day, at most 142 s | 785 s to 927 s, 91 % to 107 %, and 434 s to 576 s, 50 % to 67 % |
+| LoRa SF9 | `fast`, 120 s, full every 15 min | 534 s | 281 s | none to 720 a day, at most 119 s; 624 and 103 s measured | 534 s to 653 s, 62 % to 76 %, and 281 s to 400 s, 33 % to 46 % |
+| LoRa SF12 | `slow`, 900 s, full hourly | 785 s | 434 s (28, the fragment layer's among them) | none to 96 a day, at most 142 s; 72 and 107 s measured | 785 s to 927 s, 91 % to 107 %, and 434 s to 576 s, 50 % to 67 % |
 | SBD, sat0 | `paid`, 1,800 s | 48 messages up, each one frame of 229 B | the same, each 94 B | none to 48 a day, each a paid message, beside the 48 down | 96 messages a day: 96 to 144 |
 
 The downlink's keep-alives are the ground's air: 148 s, 119 s and 142 s at SF7, SF9 and SF12. Under
@@ -369,6 +369,16 @@ keep-alive unless it is later on its schedule than the one before: none to one a
 is half its cadence: one to two a gap. At the most, SF12's 927 s is over its duty and SBD's 144
 messages over its 96. A face that is to spare every keep-alive runs an interval above its cadence
 by more than its frames' lateness, and these leases are zenoh-modem's to move.
+
+**SF9 and SF12, measured** (#989; `docs/zk2/measurements/wire-baseline/README.md`, "W1-73 at LoRa
+SF9 and SF12"). The mock owner wrote a full record on every other frame and a record of no
+reading between, where **All 73** has a full record every 15 minutes or every hour and 24 readings
+moving between. Its frames took 643 s a day at SF9 and 758 s at SF12. With the keep-alives measured
+beside them, the SF9 uplink took 746 s, 86 % of the duty, and the SF12 uplink 864.5 s, the whole of
+it. An idle link sent 720 keep-alives a day
+each way at SF9 and 96 at SF12, as computed. Under the lean stack zenoh ran a batch of 101 B at
+SF9 and 210 B at SF12, below the policies' 117 B and 224 B, so each full record fragmented (that
+README's finding 10).
 
 **With revision 3.4's events** (#991), each face adds the `face/` events its policy lists (`link.v2`
 0.12 §2.7, #1098), at their rate's worst case, beside the frames' **All 73**: RF 594 KB a day (2.3 %), the

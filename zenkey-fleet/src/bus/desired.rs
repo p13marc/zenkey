@@ -18,8 +18,10 @@
 //!    its report resources by type identity (§2.10) and the requirement
 //!    that declares each role, and the author's, for its declaration
 //!    (§2.2), which with the binding gives the slice (§2.3);
-//! 4. S4's GET of each target's report resources, every reply read as a
-//!    `desired.v1.Report` (§2.10's reading, `zenkey_model::desired::decode`);
+//! 4. S4's GET of each target's report resources, its replies merged per
+//!    key (observer §4.1; two instances' reports on one key are one
+//!    reply) and each key's read as a `desired.v1.Report` (§2.10's
+//!    reading, `zenkey_model::desired::decode`);
 //! 5. S4's GET of each slice from its author, present or across a face
 //!    (§2.17 step 6); and, for an author absent by a complete read, each
 //!    archive's last-known of the slice, shown and never current (core
@@ -774,8 +776,50 @@ fn report_selectors(
     Ok(out)
 }
 
-/// S4's GET of each report resource (core §4.2), every reply read as a
-/// `desired.v1.Report` (§2.10). A reply on a wildcard key is no member (R6).
+/// One report resource's replies as §2.10 reads them (desired.v1 0.14;
+/// observer §4.1's MUST): merged per key first (`bus::query::merged`), so
+/// two instances' reports on one key are one reply, within one run the
+/// higher seq and across two runs the later arrival, never two that
+/// differ. Then the reply each key kept is read as a `desired.v1.Report`,
+/// and a key whose kept reply is a delete holds no report.
+fn report_replies(
+    samples: Vec<zenoh::sample::Sample>,
+    horizon: &zenkey_model::freshness::Horizon,
+) -> Vec<ReportReply> {
+    let mut out = Vec::new();
+    for sample in crate::bus::query::merged(samples) {
+        // After the merge, never before it: a delete newer than a put
+        // leaves no report on the key.
+        if sample.kind() == SampleKind::Delete {
+            continue;
+        }
+        let key = sample.key_expr().as_str().to_owned();
+        let stamp = sample.timestamp().map(|ts| Stamped {
+            time: ts.get_time().to_system_time(),
+            clock: ts.get_id().to_string(),
+        });
+        // The envelope first (core §7.5): a report is its record, a
+        // refused envelope unreadable, its stamp still the Zenoh one, the
+        // report's time.
+        let read = match crate::model::inband::read(sample) {
+            crate::model::inband::Read::Refused { refusal, .. } => {
+                Err(dm::Unreadable::Json(refusal.reason()))
+            }
+            r => dm::decode(&r.sample().payload().to_bytes()),
+        };
+        out.push(ReportReply {
+            key,
+            read,
+            stamp,
+            horizon: horizon.clone(),
+        });
+    }
+    out
+}
+
+/// S4's GET of each report resource (core §4.2), its replies merged per
+/// key and each key's read as a `desired.v1.Report` (§2.10,
+/// [`report_replies`]). A reply on a wildcard key is no member (R6).
 async fn reports_get(
     session: &Session,
     selectors: Vec<(String, zenkey_model::freshness::Horizon)>,
@@ -819,30 +863,7 @@ async fn reports_get(
                         // #977's E3).
                         samples.extend(crate::bus::query::reply_samples(sample));
                     }
-                    for sample in &samples {
-                        let key = sample.key_expr().as_str();
-                        if sample.kind() == SampleKind::Delete {
-                            continue;
-                        }
-                        // The envelope first (core §7.5): a report is its
-                        // record, a refused envelope unreadable, its stamp
-                        // still the Zenoh one, the report's time.
-                        let read = match crate::model::inband::read(sample.clone()) {
-                            crate::model::inband::Read::Refused { refusal, .. } => {
-                                Err(dm::Unreadable::Json(refusal.reason()))
-                            }
-                            r => dm::decode(&r.sample().payload().to_bytes()),
-                        };
-                        replies_out.push(ReportReply {
-                            key: key.to_owned(),
-                            read,
-                            stamp: sample.timestamp().map(|ts| Stamped {
-                                time: ts.get_time().to_system_time(),
-                                clock: ts.get_id().to_string(),
-                            }),
-                            horizon: horizon.clone(),
-                        });
-                    }
+                    replies_out.extend(report_replies(samples, &horizon));
                     (complete, replies_out)
                 }) as BoxFuture<'static, _>
             })
@@ -974,6 +995,110 @@ mod tests {
             ));
         }
         s
+    }
+
+    /// desired.v1 0.14 §2.10 and observer §4.1 (zk2py round 112's F-545):
+    /// two instances' reports on one key are one reply after the merge,
+    /// in each shape and in both orders, where every reply used to reach
+    /// §2.10's rule on two report resources and answer `two_differ`.
+    /// Within one run the higher seq is kept, across two runs the later
+    /// arrival, of two with no stamp the later arrival; a newer delete
+    /// leaves no report on its key, and another key keeps its own.
+    #[test]
+    fn two_reports_on_one_key_are_merged_before_they_are_read() {
+        use zenkey_model::desired::Source;
+        use zenkey_model::freshness::Horizon;
+        use zenkey_model::wire::{DeleteStamp, Envelope, Run, Seq, Stamp, Tag};
+        use zenoh::bytes::Encoding;
+        use zenoh::sample::{Sample, SampleBuilder};
+
+        const RP: &str = "zk2/lab/worker/worker.v1/state/desired/task";
+        const OTHER: &str = "zk2/lab/worker/worker2.v1/state/desired/task";
+        const SLICE: &str = "zk2/lab/author/tasking.v1/state/tasks/lab/worker";
+        let stamp = |run: u16, seq: u32| Stamp {
+            run: Run::U16(run),
+            seq: Seq::new(seq).unwrap(),
+        };
+        let ke = |k: &str| zenoh::key_expr::KeyExpr::try_from(k.to_owned()).unwrap();
+        let doc = |source: &str| format!(r#"{{"key":"{SLICE}","source":"{source}"}}"#).into_bytes();
+        // A report as its target puts it: its record under its run and seq.
+        let put = |key: &str, at: Stamp, source: &str| -> Sample {
+            let payload = Envelope::mutation(Tag::NONE, at, &doc(source)).write();
+            SampleBuilder::put(ke(key), payload)
+                .encoding(Encoding::ZENOH_BYTES)
+                .into()
+        };
+        // One with no envelope and no Zenoh timestamp.
+        let bare = |source: &str| -> Sample {
+            SampleBuilder::put(ke(RP), doc(source))
+                .encoding(Encoding::APPLICATION_JSON)
+                .into()
+        };
+        let delete = |at: Stamp| -> Sample {
+            SampleBuilder::delete(ke(RP))
+                .attachment(DeleteStamp { stamp: at }.write())
+                .into()
+        };
+        let sources = |samples: Vec<Sample>| -> Vec<(String, Source)> {
+            report_replies(samples, &Horizon::Undeclared)
+                .into_iter()
+                .map(|r| (r.key, r.read.expect("a report").source))
+                .collect()
+        };
+        let one = |source: Source| vec![(RP.to_owned(), source)];
+
+        // One run, seqs 1 and 2, differing: seq 2's, in both orders.
+        let (first, second) = (
+            put(RP, stamp(7, 1), "baseline"),
+            put(RP, stamp(7, 2), "call"),
+        );
+        assert_eq!(
+            sources(vec![first.clone(), second.clone()]),
+            one(Source::Call)
+        );
+        assert_eq!(sources(vec![second, first.clone()]), one(Source::Call));
+        // Two runs, which nothing orders: the later arrival, in both orders.
+        let other_run = put(RP, stamp(8, 1), "call");
+        assert_eq!(
+            sources(vec![first.clone(), other_run.clone()]),
+            one(Source::Call)
+        );
+        assert_eq!(
+            sources(vec![other_run, first.clone()]),
+            one(Source::Baseline)
+        );
+        // No envelope and no stamp: the later arrival, in both orders.
+        assert_eq!(
+            sources(vec![bare("baseline"), bare("call")]),
+            one(Source::Call)
+        );
+        assert_eq!(
+            sources(vec![bare("call"), bare("baseline")]),
+            one(Source::Baseline)
+        );
+        // A delete is skipped after the merge: a newer one leaves no
+        // report on the key, an older one the report.
+        assert_eq!(
+            sources(vec![first.clone(), delete(stamp(7, 2))]),
+            Vec::new()
+        );
+        assert_eq!(
+            sources(vec![delete(stamp(7, 2)), first.clone()]),
+            Vec::new()
+        );
+        assert_eq!(
+            sources(vec![put(RP, stamp(7, 3), "call"), delete(stamp(7, 2))]),
+            one(Source::Call)
+        );
+        // Two report resources keep a reply each: §2.10's rule on two that
+        // differ is theirs to meet.
+        assert_eq!(
+            sources(vec![first, put(OTHER, stamp(7, 2), "call")]),
+            [
+                (RP.to_owned(), Source::Baseline),
+                (OTHER.to_owned(), Source::Call)
+            ]
+        );
     }
 
     fn word(bound: bool) -> FaceWord {
