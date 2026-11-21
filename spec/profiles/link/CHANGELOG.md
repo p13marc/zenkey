@@ -7,6 +7,36 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.21 — 2026-11-21: editorial: Appendix B, what a horizon costs a medium, no rule changed (#1110)
+
+#1110 chose one heartbeat per owner and class of exposure
+(`freshness.v2` 0.9, this text's 0.19), with a longer horizon as
+guidance, never a mechanism. This version is that guidance.
+
+**Added: Appendix B, "What a horizon costs a medium".** Guidance, no
+rule.
+- **A table** prices a day of three heartbeats and of one owner
+  heartbeat, at horizons from 60 s to 3,600 s, on RF and on LoRa at SF7,
+  SF9 and SF12. It is computed from core §7.5's layouts on the model of
+  `docs/zk2/constrained-overhead-review.md`'s Appendix A: each put alone
+  in its SDU, the lean stack and the face's 3-byte frame.
+- **What it says.** At a 60-s horizon LoRa does not carry heartbeats in
+  either form. The owner heartbeat about halves the bill, and only a
+  longer horizon divides it. A deployment states that horizon in its own
+  contracts. The standard profiles' horizons cannot move, and nothing of
+  theirs crosses a face.
+- **The figures** were computed twice, by two scripts that shared no
+  code.
+
+**Deliberately not changed.**
+- **No rule, keyword, fixture, section number or label.** A face's
+  `horizon_s` still warns of a shorter horizon and overrides none
+  (§2.12).
+- **No per-face horizon.** A reader ages a member against its contract's
+  horizon alone.
+- **Not measured.** The table rests on the report's model. W2 has not
+  run again with an owner heartbeat.
+
 ## link.v2 0.20 — 2026-11-21: editorial: Appendix B holds the LoRa SF9 and SF12 runs, and the batch a driver leaves zenoh; §2.19, a file zenoh refuses, no rule changed (#609, #988, #989)
 
 #989's zk2c runs crossed zenoh-modem's SF9 and SF12 faces
