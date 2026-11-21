@@ -525,6 +525,122 @@ fn zenoh_modem_faces_pass_their_own_checks() {
     }
 }
 
+/// A `null` among the eight keys, read from a router's file (link.v2 §2.19,
+/// 0.18), on both reading paths: zenoh's own loader under stock zenoh (the
+/// media), as data under the fork (zenoh-modem's faces).
+/// - `routing/interests/timeout: null` is left out: zenoh loads it and
+///   runs its default, 10,000 ms. Under a policy at 10,000 ms the block
+///   passes whole, its row at the default and not stated. Under any other
+///   it is `transport_differs`, and the comparison names the `null`.
+/// - `lease: null` is no value zenoh runs. Stock zenoh refuses the file,
+///   so there is no block to judge. Read as data it is `transport_differs`
+///   at the lease, and `wait_under_lease` has no lease to read.
+#[test]
+fn link_v2_check_face_reads_a_null_as_zenoh_does() {
+    let blocks = MEDIA
+        .into_iter()
+        .map(|m| (m, media_policy(m), media_plan(m, AclPermission::Deny)))
+        .chain(
+            MODEM_FACES
+                .into_iter()
+                .map(|f| (f, modem_policy(f), modem_plan(f, AclPermission::Deny))),
+        );
+    let (mut at_default, mut elsewhere) = (0, 0);
+    for (name, policy_text, plan) in blocks {
+        let parsed = link::parse(&policy_text);
+        let policy = parsed.policy.as_ref().unwrap();
+        let t = plan.transport.unwrap();
+        let default_ms = policy.binding.defaults().interests_timeout_ms;
+        let block = acl_plan_json5(&plan);
+        let read = |block: &str| {
+            RouterConfig::from_json5_for(&format!("{{\n{block}}}"), policy.binding).map(|config| {
+                zenkey_fleet::check_face(&plan, policy, &config, &Default::default(), "self")
+            })
+        };
+
+        // The interests timeout written `null`.
+        let stated = format!("interests: {{ timeout: {} }}", t.interests_timeout_ms);
+        let null = block.replace(&stated, "interests: { timeout: null }");
+        assert_ne!(null, block, "{name}: the edit applies");
+        let report = read(&null).unwrap_or_else(|e| panic!("{name}: a `null` there loads: {e}"));
+        let row = report
+            .transport
+            .iter()
+            .find(|k| k.key == "transport.interests_timeout_ms")
+            .expect("the key's row");
+        assert!(!row.stated, "{name}: a `null` states none");
+        assert_eq!(row.observed, serde_json::json!(default_ms), "{name}");
+        let codes: Vec<(&str, &str)> = report
+            .findings
+            .iter()
+            .map(|f| (f.code.as_str(), f.at.as_str()))
+            .collect();
+        if t.interests_timeout_ms == default_ms {
+            at_default += 1;
+            assert_eq!(codes, [], "{name}: the default is the policy's");
+            assert!(report.comparison.findings.is_empty(), "{name}");
+        } else {
+            elsewhere += 1;
+            assert_eq!(
+                codes,
+                [("transport_differs", "transport.interests_timeout_ms")],
+                "{name}"
+            );
+            let [differs] = report.comparison.findings.as_slice() else {
+                panic!("{name}: one difference, {:?}", report.comparison.findings);
+            };
+            assert_eq!(differs.id, "routing/interests/timeout", "{name}");
+            assert_eq!(
+                differs.observed.as_deref(),
+                Some(
+                    format!(
+                        "{default_ms}, {}'s default: the file states `null`, which zenoh reads \
+                         as left out",
+                        policy.binding
+                    )
+                    .as_str()
+                ),
+                "{name}"
+            );
+        }
+
+        // The lease written `null`.
+        let stated = format!("lease: {},", t.lease_ms);
+        let null = block.replace(&stated, "lease: null,");
+        assert_ne!(null, block, "{name}: the edit applies");
+        match (policy.binding, read(&null)) {
+            (link::Binding::Zenoh1_10_1, Err(_)) => {}
+            (link::Binding::Zenoh1_10_1, Ok(_)) => {
+                panic!("{name}: zenoh 1.10.1 refuses a `null` lease at load")
+            }
+            (link::Binding::Zm1_10_2R1, read) => {
+                let report = read.unwrap_or_else(|e| panic!("{name}: read as data: {e}"));
+                let codes: Vec<(&str, &str)> = report
+                    .findings
+                    .iter()
+                    .map(|f| (f.code.as_str(), f.at.as_str()))
+                    .collect();
+                assert_eq!(
+                    codes,
+                    [("transport_differs", "transport.lease_ms")],
+                    "{name}"
+                );
+                let row = report
+                    .transport
+                    .iter()
+                    .find(|k| k.key == "transport.lease_ms")
+                    .expect("the key's row");
+                assert!(row.stated, "{name}: a `null` lease is a value stated");
+                assert_eq!(row.observed, serde_json::Value::Null, "{name}");
+            }
+        }
+    }
+    assert!(
+        at_default > 0 && elsewhere > 0,
+        "both sides are read: {at_default} at the default, {elsewhere} elsewhere"
+    );
+}
+
 /// The wire model of `docs/zk2/constrained-overhead-review.md`'s Appendix A,
 /// as much of it as an event's put needs (#991's cadence check): a varint's
 /// bytes, a put on a declared scope, the SDUs zenoh's batches become under

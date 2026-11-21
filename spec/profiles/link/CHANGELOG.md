@@ -36,13 +36,15 @@ six.
   `transport_differs`: a router given `timeout: null` runs 10,000. Under
   a policy whose `interests_timeout_ms` is 10,000 it runs the policy's
   transport, and the error would be false.
-- **The reference** reports `transport_differs` there today
-  (`zenctl check face`, observed). `StatedTransport` keeps a `null` as a
-  value stated. Its change is listed for a Rust lane, with the case that
-  pins it.
-- **Not checked:** the fork's own configuration types. `zm-1.10.2-r1`'s
-  source is not in this repository. `zenoh-config` 1.10.2 declares the
-  key as 1.10.1 does.
+- **The reference** reported `transport_differs` there
+  (`zenctl check face`, observed), since `StatedTransport` kept that
+  `null` as a value stated. It changes with this version: the key reads
+  as not stated, at the binding's default, and `check face` shows it so.
+- **The fork types the key alike.** `zm-1.10.2-r1` (`marcpardo/zenoh`,
+  2454b10c) declares it an `Option<u64>` (`zenoh-config`'s `lib.rs`,
+  line 630) and fills it the same way (`tables.rs`, line 186;
+  `defaults.rs`, line 160). Its seven other keys are not optional
+  either.
 
 **Changed: §2.18, the far end's block unfilled (F-531, minor).**
 - **Before:** "zenoh loads no user without a password, and opens no
@@ -85,11 +87,12 @@ names them, and no longer counts from the end.
 - **Case 15's note,** zenoh-modem's SF7 face, said the uplink pays a
   keep-alive between two frames. At twice the interval it pays one, and
   a second before each frame later than the one before (§2.16).
-- **`v2/transport.json` gains cases 24 and 25.** Case 24 is a `null`
+- **`v2/transport.json` gains cases 24 to 26.** Case 24 is a `null`
   lease: `transport_differs`, and no `wait_under_lease`. Case 25 is a
   `null` `routing/interests/timeout` under a policy at 40,000 ms: left
-  out, at 10,000, so `transport_differs`. The reference passes both. The
-  case at 10,000 ms, which draws no finding, waits for its change.
+  out, at 10,000, so `transport_differs`. Case 26 is the same `null`
+  under a policy at 10,000 ms: left out, at the policy's value, and no
+  finding. The reference passes the three.
 
 **zenoh-modem's mapping (F-533, minor)**, `examples/zk2/zenoh-modem/`.
 Its notes priced each face's keep-alives by the rule 0.17 replaced.

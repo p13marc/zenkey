@@ -62,7 +62,10 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   `timestamping/enabled`, `stamps()` reads them at the mode, `router`
   where none is stated, a `null` read as left out (0.15), and
   `face_timestamping` is its warning; `TIMESTAMPING_OFF` is what a
-  generator writes); since 0.15 (#1107) `Face::opens` (`Opens::{Far,
+  generator writes; since 0.18 `null_left_out(key)` is a `null`
+  `routing/interests/timeout`, an `Option` zenoh fills, which `states`
+  and `runs` read as left out, at the binding's default, a `null` at each
+  of the seven other keys staying a value stated, `transport_differs`); since 0.15 (#1107) `Face::opens` (`Opens::{Far,
   Near}`, `"near"` only on `south-region`, else `bad_value`) and
   `Deployment::users` (the principals bound by a user name, a plan
   case's `users`): `plan` refuses `near_opens_user` at `opens` before the

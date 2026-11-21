@@ -1740,7 +1740,8 @@ pub(crate) enum CheckCmd {
     ///
     /// For a link.v2 policy (#988), the router's transport too (link.v2
     /// §2.19), each key read at the binding's default where the FILE omits
-    /// it:
+    /// it, or writes routing/interests/timeout as `null`, which zenoh fills
+    /// with its default (link.v2 0.18):
     ///
     ///   transport_differs          a key the router runs at another value
     ///                              than the policy's
