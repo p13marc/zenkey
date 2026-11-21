@@ -1192,6 +1192,11 @@ The SF9 and SF12 runs take the generator's blocks as they are: `wire.sh`
 passes `acl gen --far-config`'s file to `render.py --far`, which checks
 both `timestamping` blocks and reads router B's user from it.
 
+That is now `wire.sh`'s default wherever `FACE_POLICY` is set. So the RF and
+SF7 commands above, run again, take the generator's blocks too, where the
+recorded runs (2026-11-08) set router A's `timestamping` by hand and gave
+router B no user of the generator's. `FAR=0` renders them as recorded.
+
 The first `honesty.sh` run's watch probe inside the cut asked `--format json`
 of a stream and was refused; the script asks ndjson since, and the whole-run
 `watch` it rests on printed nothing in the cut. Its reset step had a window

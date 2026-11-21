@@ -222,9 +222,11 @@ def zk2c_tables(model):
             # The uplink's keep-alives beside its frames: a range (link.v2 §2.16).
             got = "; ".join(f"{stack} {v['sdus']:,} a day, {kb(v['bytes'])}"
                             for stack, v in ka["measured"].items())
+            # With no RF run's analysis in results/, there is nothing measured to print.
+            measured = f" Measured: {got}." if got else ""
             print(f"\nA->B keep-alives beside the frames, the model: {ka['sdus'][0]:,} to "
                   f"{ka['sdus'][1]:,} a day, {kb(ka['bytes']['lean'][0])} to "
-                  f"{kb(ka['bytes']['lean'][1])} lean (link.v2 §2.16). Measured: {got}.")
+                  f"{kb(ka['bytes']['lean'][1])} lean (link.v2 §2.16).{measured}")
     if w2:
         zk2c_window(w2, "steady", model["w2_rf_zk2c_per_direction"], "W2 zk2c, the steady window", w2l)
         w2_day(w2, model["w2_rf_zk2c_per_direction"])

@@ -31,7 +31,10 @@
 #         then opens the lane, and router A authenticates it as `ground`.
 #         Since #989's LoRa runs, both routers run the generator's
 #         `timestamping` blocks, and router B the user `--far-config` names
-#         (link.v2 0.13, 0.15): render.py --far.
+#         (link.v2 0.13, 0.15): render.py --far;
+#   FAR   (default 1) 0 leaves --far out, as the RF and SF7 zk2c runs of
+#         2026-11-08 were rendered: router A's `timestamping` written by
+#         render.py, and no generated user on router B.
 #
 # Every process runs on CORES under `timeout`, and its PID (timeout's)
 # goes to WORK/run/INST/pids, which `down` signals and nothing else.
@@ -99,7 +102,8 @@ render() { # medium, stack
   local extra=()
   if [[ -n ${FACE_POLICY:-} ]]; then
     face
-    extra=(--face "$CFG/face-router.json5" --auth "$WORK/cfg/auth" --far "$CFG/face-far.json5")
+    extra=(--face "$CFG/face-router.json5" --auth "$WORK/cfg/auth")
+    [[ ${FAR:-1} == 0 ]] || extra+=(--far "$CFG/face-far.json5")
   fi
   python3 -I "$HERE/render.py" --medium "$1" --stack "$2" --work "$WORK" --inst "$INST" \
     --base "$BASE" --out "$CFG" "${extra[@]}" >/dev/null
