@@ -7,6 +7,56 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.20 — 2026-11-21: editorial: Appendix B holds the LoRa SF9 and SF12 runs, and the batch a driver leaves zenoh, no rule changed (#988, #989)
+
+#989's zk2c runs crossed zenoh-modem's SF9 and SF12 faces
+(`docs/zk2/measurements/wire-baseline/README.md`, "W1-73 at LoRa SF9
+and SF12"). Appendix B's "Keep-alives beside frames" held the SF7 and RF
+runs alone. This version adds the two, and what the runs showed of the
+batch. 0.19 is #1110's, the entry below.
+
+**Added: Appendix B, "Keep-alives beside frames", SF9 and SF12.**
+- **SF9:** 624 uplink keep-alives a day beside the frames, 103 s of air,
+  of §2.16's none to 720. A keep-alive went before 26 frames of 30.
+- **SF12:** 72 a day, 107 s of air, of none to 96. One went before 6
+  frames of 8.
+- **Idle:** 720 a day each way at SF9 and 96 at SF12, as §2.16 counts
+  them. Neither link opened again.
+- **The uplinks:** 746 s of the duty's 864 s at SF9, and 864.5 s at
+  SF12, with the mock owner's frames, a full record on every other one.
+  Nothing in the runs' path enforces the duty.
+- **§2.16 holds as written.** Both faces run an interval equal to their
+  cadence, where it says none to one keep-alive a gap, and both counts
+  are inside that range. The rule gives the range, never the share.
+
+**Added: Appendix B, "The batch a driver leaves zenoh".**
+- **Measured:** under zenoh-modem's lean stack zenoh ran a batch of
+  206 B on RF, 208 B at SF7, 101 B at SF9 and 210 B at SF12. The
+  policies state 222, 224, 117 and 224, each its bare driver's.
+- **So a full record fragmented on every face,** and the plans of RF,
+  SF7 and SF12 warn of none. The plan is right by its rule:
+  `frame_over_batch` judges the batch a policy states.
+- **The warning reads the payload.** By the anatomy the runs measured,
+  zenoh's message is 8 B longer, and 2 B of the batch are its length.
+  A payload fewer than 10 B under the batch would fragment unwarned.
+  The appendix says so, and that no run wrote such a frame.
+
+**Deliberately not changed.**
+- **`frame_over_batch`** (`link.v1` §2.8) still compares a frame's
+  payload with `batch_bytes`. Whether it should count the put's and the
+  frame's bytes is an open question, written up for an issue.
+  - The 8 B are one anatomy's: a 16-bit sequence number, a key its far
+    reader declared, priority `data`. Another face's message is longer.
+  - No frame at the bound was measured.
+  - A changed rule moves the plans of `v2/plan.json`'s cases 14, 15 and
+    17, which the reference must derive first.
+- **No policy's `batch_bytes`.** zenoh-modem's faces state their bare
+  drivers' batches still. The batch under the lean stack is
+  zenoh-modem's to state.
+- **§2.16** and every other section. No keyword, fixture, section
+  number or label moves.
+- **SBD** has not run.
+
 ## link.v2 0.19 — 2026-11-21: §2.9, an owner heartbeat crosses by its class; §2.16, its put weighed against the batch (#1110)
 
 `freshness.v2` 0.9 lets an owner confirm several interfaces in one put,

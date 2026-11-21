@@ -47,7 +47,16 @@
 >     frames, and a second before each frame later than the one before: 1,440 to 2,880 a day,
 >     74 s to 148 s of air.
 >   - **Measured** (`link.v2` Appendix B): 2,160 a day at SF7, 111 s of air; on RF none bare, and
->     336 a day under the lean stack. SF9, SF12 and SBD have not run (#989).
+>     336 a day under the lean stack; 624 a day at SF9, 103 s, and 72 at SF12, 107 s. An idle
+>     link sent 720 a day each way at SF9 and 96 at SF12, as computed. SBD has not run (#989).
+>   - **The SF9 and SF12 uplinks, measured** with `zenctl gen`'s frames, a full record on every
+>     other one: 746 s a day at SF9, 86 % of the duty, and 864.5 s at SF12, the whole of it
+>     (the measurement README's "W1-73 at LoRa SF9 and SF12",
+>     `docs/zk2/measurements/wire-baseline/README.md`). Nothing in that path enforces the duty.
+>   - **The batch under the lean stack** is below each policy's: zenoh ran 206 B on RF, 208 B at
+>     SF7, 101 B at SF9 and 210 B at SF12, so a 205 B full record fragmented on every face (the
+>     same README's finding 10). The policies state their bare drivers' batches, and the plans
+>     judge those.
 >   - **Why the leases.** #991 moved SF9's from 240 s to 480 s and SF12's from 1,080 s to
 >     3,600 s, each four frame intervals. SF12's 270 s interval had sent three keep-alives a gap,
 >     288 a day and 427 s of air, half its duty.
