@@ -1,0 +1,258 @@
+{
+ "run": "zk2c-sf12-lean-1",
+ "medium": "sf12-zk2c",
+ "stack": "lean",
+ "loss": 0.05,
+ "windows": [
+  {
+   "window": "idle",
+   "seconds": 3600.016,
+   "ab": {
+    "tx_sdus": 4,
+    "tx_bytes": 92,
+    "rx_sdus_far": 4,
+    "rx_bytes_far": 92,
+    "relay_sdus": 4,
+    "relay_bytes": 92,
+    "relay_dropped": 0,
+    "kinds": {
+     "keep-alive": 4
+    },
+    "kind_bytes": {
+     "keep-alive": 92
+    },
+    "kind_airtime_s": {
+     "keep-alive": 5.931
+    },
+    "other_sizes": {},
+    "tx_layers": {
+     "compress/compressed_total": 0,
+     "compress/stored_total": 4,
+     "compress/bytes_saved_total": 0,
+     "fragment/fragments_total": 4,
+     "aead/auth_failures_total": 0,
+     "aead/replays_total": 0
+    },
+    "airtime_s": 5.931,
+    "keepalives_lost": 0,
+    "keepalives_lost_at": [],
+    "per_day": {
+     "sdus": 96,
+     "bytes": 2208,
+     "airtime_s": 142.3,
+     "airtime_pct": 0.165,
+     "keepalives": 96,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 96,
+       "bytes": 2208,
+       "airtime_s": 142.3
+      }
+     }
+    },
+    "duty_s_per_hour": 5.93,
+    "duty_pct_of_eu868": 16.5
+   },
+   "ba": {
+    "tx_sdus": 4,
+    "tx_bytes": 92,
+    "rx_sdus_far": 3,
+    "rx_bytes_far": 69,
+    "relay_sdus": 4,
+    "relay_bytes": 92,
+    "relay_dropped": 1,
+    "kinds": {
+     "keep-alive": 4
+    },
+    "kind_bytes": {
+     "keep-alive": 92
+    },
+    "kind_airtime_s": {
+     "keep-alive": 5.931
+    },
+    "other_sizes": {},
+    "tx_layers": {
+     "compress/compressed_total": 0,
+     "compress/stored_total": 4,
+     "compress/bytes_saved_total": 0,
+     "fragment/fragments_total": 4,
+     "aead/auth_failures_total": 0,
+     "aead/replays_total": 0
+    },
+    "airtime_s": 5.931,
+    "links_opened": 0,
+    "keepalives_lost": 1,
+    "keepalives_lost_at": [
+     790.1
+    ],
+    "links_opened_at": [],
+    "per_day": {
+     "sdus": 96,
+     "bytes": 2208,
+     "airtime_s": 142.3,
+     "airtime_pct": 0.165,
+     "keepalives": 96,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 96,
+       "bytes": 2208,
+       "airtime_s": 142.3
+      }
+     }
+    },
+    "duty_s_per_hour": 5.93,
+    "duty_pct_of_eu868": 16.5
+   }
+  },
+  {
+   "window": "w1",
+   "seconds": 7200.014,
+   "ab": {
+    "tx_sdus": 34,
+    "tx_bytes": 1410,
+    "rx_sdus_far": 32,
+    "rx_bytes_far": 1328,
+    "relay_sdus": 34,
+    "relay_bytes": 1410,
+    "relay_dropped": 2,
+    "kinds": {
+     "keep-alive": 6,
+     "data": 28
+    },
+    "kind_bytes": {
+     "keep-alive": 138,
+     "data": 1272
+    },
+    "kind_airtime_s": {
+     "keep-alive": 8.897,
+     "data": 63.144
+    },
+    "other_sizes": {
+     "31": 4,
+     "32": 1,
+     "33": 2,
+     "34": 1,
+     "50": 4,
+     "51": 16
+    },
+    "tx_layers": {
+     "compress/compressed_total": 4,
+     "compress/stored_total": 14,
+     "compress/bytes_saved_total": 32,
+     "fragment/fragments_total": 34,
+     "aead/auth_failures_total": 0,
+     "aead/replays_total": 0
+    },
+    "airtime_s": 72.04,
+    "keepalives_at": [
+     450.75,
+     1350.76,
+     3150.81,
+     4050.82,
+     4950.83,
+     6750.84
+    ],
+    "frames_at": [
+     452.18,
+     1352.15,
+     2251.58,
+     3152.21,
+     4052.24,
+     4952.23,
+     5851.61,
+     6752.24
+    ],
+    "keepalives_lost": 0,
+    "keepalives_lost_at": [],
+    "per_day": {
+     "sdus": 408,
+     "bytes": 16920,
+     "airtime_s": 864.5,
+     "airtime_pct": 1.001,
+     "keepalives": 72,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 72,
+       "bytes": 1656,
+       "airtime_s": 106.8
+      },
+      "data": {
+       "sdus": 336,
+       "bytes": 15264,
+       "airtime_s": 757.7
+      }
+     }
+    },
+    "duty_s_per_hour": 36.02,
+    "duty_pct_of_eu868": 100.1
+   },
+   "ba": {
+    "tx_sdus": 8,
+    "tx_bytes": 184,
+    "rx_sdus_far": 8,
+    "rx_bytes_far": 184,
+    "relay_sdus": 8,
+    "relay_bytes": 184,
+    "relay_dropped": 0,
+    "kinds": {
+     "keep-alive": 8
+    },
+    "kind_bytes": {
+     "keep-alive": 184
+    },
+    "kind_airtime_s": {
+     "keep-alive": 11.862
+    },
+    "other_sizes": {},
+    "tx_layers": {
+     "compress/compressed_total": 0,
+     "compress/stored_total": 8,
+     "compress/bytes_saved_total": 0,
+     "fragment/fragments_total": 8,
+     "aead/auth_failures_total": 0,
+     "aead/replays_total": 0
+    },
+    "airtime_s": 11.862,
+    "keepalives_at": [
+     445.73,
+     1345.76,
+     2245.75,
+     3145.73,
+     4045.75,
+     4945.74,
+     5845.73,
+     6745.75
+    ],
+    "links_opened": 0,
+    "keepalives_lost": 0,
+    "keepalives_lost_at": [],
+    "links_opened_at": [],
+    "per_day": {
+     "sdus": 96,
+     "bytes": 2208,
+     "airtime_s": 142.3,
+     "airtime_pct": 0.165,
+     "keepalives": 96,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 96,
+       "bytes": 2208,
+       "airtime_s": 142.3
+      }
+     }
+    },
+    "duty_s_per_hour": 5.93,
+    "duty_pct_of_eu868": 16.5
+   },
+   "far_samples": {
+    "stream/frames/slow": 6
+   },
+   "far_payload_bytes": {
+    "stream/frames/slow": {
+     "21": 4,
+     "205": 2
+    }
+   }
+  }
+ ]
+}

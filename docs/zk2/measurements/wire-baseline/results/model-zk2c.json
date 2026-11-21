@@ -63,7 +63,46 @@
   "keyframes_a_day": 96,
   "deltas_a_day": 1344,
   "a_to_b_bytes": 200256,
-  "note": "Appendix A section 8: a keyframe every 15 minutes and a delta each minute, each a data_low put in its own SDU, under the lean stack"
+  "note": "Appendix A section 8: a keyframe every 15 minutes and a delta each minute, each a data_low put in its own SDU, under the lean stack",
+  "corrected_frames_bytes": 167712,
+  "uplink_keepalive": {
+   "rule": "link.v2 \u00a72.16: the cadence a whole multiple of the interval, C / I - 1 to C / I a gap",
+   "a_gap": [
+    0,
+    1
+   ],
+   "sdus": [
+    0,
+    1440
+   ],
+   "bytes": {
+    "lean": [
+     0,
+     24480
+    ],
+    "bare": [
+     0,
+     1440
+    ]
+   },
+   "tolerance": "inside the rule's range",
+   "measured": {
+    "bare": {
+     "run": "zk2c-w1-bare-1",
+     "sdus": 0,
+     "bytes": 0
+    },
+    "lean": {
+     "run": "zk2c-w1-lean-1",
+     "sdus": 336,
+     "bytes": 5712
+    }
+   }
+  },
+  "corrected_a_to_b_bytes": [
+   167712,
+   192192
+  ]
  },
  "idle_rf_zk2c": {
   "lean": {
@@ -82,16 +121,241 @@
   }
  },
  "w1_73_sf7_zk2c": {
-  "frames_airtime_s": 287.9,
+  "period_s": 60,
+  "lease_s": 120,
+  "keep_alive": 4,
+  "keepalive_interval_s": 30,
+  "gen_frames_a_day": {
+   "full": 720,
+   "none": 720
+  },
   "gen_frames_airtime_s": 365.5,
+  "frames_airtime_s": 287.9,
+  "frames_case": "a keyframe every 15 min, a delta every minute",
   "uplink_keepalive": {
-   "sdus": 1440,
-   "airtime_s": 74.1
+   "rule": "link.v2 \u00a72.16: the cadence a whole multiple of the interval, C / I - 1 to C / I a gap",
+   "a_gap": [
+    1,
+    2
+   ],
+   "sdus": [
+    1440,
+    2880
+   ],
+   "airtime_s": [
+    74.1,
+    148.2
+   ]
+  },
+  "w1_uplink_airtime_s": {
+   "gen_frames": [
+    439.6,
+    513.7
+   ],
+   "frames": [
+    362.0,
+    436.1
+   ]
   },
   "idle_keepalive_per_direction": {
    "sdus": 2880,
    "airtime_s": 148.2
   },
-  "duty_budget_s_per_day": 864
+  "keepalive_bytes": 17,
+  "duty_budget_s_per_day": 864,
+  "tolerance": {
+   "frames_airtime": 0.01,
+   "uplink_keepalive": "inside the rule's range",
+   "uplink_airtime": "inside the range, each end widened by 0.01",
+   "idle_keepalive": "the count exact, its air within 0.1 s"
+  },
+  "measured": {
+   "run": "zk2c-sf7-lean-1",
+   "frames_airtime_s": 363.0,
+   "uplink_keepalive": {
+    "sdus": 2160,
+    "airtime_s": 111.1
+   },
+   "uplink_airtime_s": 474.2,
+   "idle_keepalive": {
+    "idle_ab": {
+     "sdus": 2880,
+     "airtime_s": 148.2
+    },
+    "idle_ba": {
+     "sdus": 2880,
+     "airtime_s": 148.2
+    },
+    "w1_ba": {
+     "sdus": 2880,
+     "airtime_s": 148.2
+    }
+   }
+  }
+ },
+ "w1_73_sf9_zk2c": {
+  "period_s": 120,
+  "lease_s": 480,
+  "keep_alive": 4,
+  "keepalive_interval_s": 120,
+  "gen_frames_a_day": {
+   "full": 360,
+   "none": 360
+  },
+  "gen_frame_sdus": {
+   "full": [
+    115,
+    115,
+    38
+   ],
+   "none": [
+    44
+   ]
+  },
+  "gen_frames_airtime_s": 642.9,
+  "frames_airtime_s": 502.3,
+  "frames_case": "a keyframe every 15 min, a delta every 2 min",
+  "uplink_keepalive": {
+   "rule": "link.v2 \u00a72.16: the cadence a whole multiple of the interval, C / I - 1 to C / I a gap",
+   "a_gap": [
+    0,
+    1
+   ],
+   "sdus": [
+    0,
+    720
+   ],
+   "airtime_s": [
+    0.0,
+    118.7
+   ]
+  },
+  "w1_uplink_airtime_s": {
+   "gen_frames": [
+    642.9,
+    761.6
+   ],
+   "frames": [
+    502.3,
+    621.0
+   ]
+  },
+  "idle_keepalive_per_direction": {
+   "sdus": 720,
+   "airtime_s": 118.7
+  },
+  "keepalive_bytes": 17,
+  "duty_budget_s_per_day": 864,
+  "tolerance": {
+   "frames_airtime": 0.01,
+   "uplink_keepalive": "inside the rule's range",
+   "uplink_airtime": "inside the range, each end widened by 0.01",
+   "idle_keepalive": "the count exact, its air within 0.1 s"
+  },
+  "measured": {
+   "run": "zk2c-sf9-lean-1",
+   "frames_airtime_s": 642.9,
+   "uplink_keepalive": {
+    "sdus": 624,
+    "airtime_s": 102.9
+   },
+   "uplink_airtime_s": 745.8,
+   "idle_keepalive": {
+    "idle_ab": {
+     "sdus": 720,
+     "airtime_s": 118.7
+    },
+    "idle_ba": {
+     "sdus": 720,
+     "airtime_s": 118.7
+    },
+    "w1_ba": {
+     "sdus": 720,
+     "airtime_s": 118.7
+    }
+   }
+  }
+ },
+ "w1_73_sf12_zk2c": {
+  "period_s": 900,
+  "lease_s": 3600,
+  "keep_alive": 4,
+  "keepalive_interval_s": 900,
+  "gen_frames_a_day": {
+   "full": 48,
+   "none": 48
+  },
+  "gen_frame_sdus": {
+   "full": [
+    222,
+    27
+   ],
+   "none": [
+    44
+   ]
+  },
+  "gen_frames_airtime_s": 757.7,
+  "frames_airtime_s": 761.9,
+  "frames_case": "an hourly keyframe, a delta every 15 min",
+  "uplink_keepalive": {
+   "rule": "link.v2 \u00a72.16: the cadence a whole multiple of the interval, C / I - 1 to C / I a gap",
+   "a_gap": [
+    0,
+    1
+   ],
+   "sdus": [
+    0,
+    96
+   ],
+   "airtime_s": [
+    0.0,
+    142.3
+   ]
+  },
+  "w1_uplink_airtime_s": {
+   "gen_frames": [
+    757.7,
+    900.1
+   ],
+   "frames": [
+    761.9,
+    904.2
+   ]
+  },
+  "idle_keepalive_per_direction": {
+   "sdus": 96,
+   "airtime_s": 142.3
+  },
+  "keepalive_bytes": 23,
+  "duty_budget_s_per_day": 864,
+  "tolerance": {
+   "frames_airtime": 0.01,
+   "uplink_keepalive": "inside the rule's range",
+   "uplink_airtime": "inside the range, each end widened by 0.01",
+   "idle_keepalive": "the count exact, its air within 0.1 s"
+  },
+  "measured": {
+   "run": "zk2c-sf12-lean-1",
+   "frames_airtime_s": 757.7,
+   "uplink_keepalive": {
+    "sdus": 72,
+    "airtime_s": 106.8
+   },
+   "uplink_airtime_s": 864.5,
+   "idle_keepalive": {
+    "idle_ab": {
+     "sdus": 96,
+     "airtime_s": 142.3
+    },
+    "idle_ba": {
+     "sdus": 96,
+     "airtime_s": 142.3
+    },
+    "w1_ba": {
+     "sdus": 96,
+     "airtime_s": 142.3
+    }
+   }
+  }
  }
 }

@@ -47,7 +47,8 @@ Today's column is what the owner sends. Measured, 16.5 MB of it reached the air,
   - No LoRa face ships today, so "today" is what the current wire would cost. On today's wire the 4 link readings at one per minute exceed the duty budget at every spreading factor. Measured, the uplink took 999 s a day at SF7, 2,494 s at SF9 and 14,032 s at SF12; the model gives 909, 3,100 and 21,527 s.
   - Keep-alives and reopens are part of it. At zenoh-modem's keep_alive of 2, every lost keep-alive closed the link, and each reopen re-sends the handshake and every declaration (§6.2).
   - zk2c fits the 4 link readings at SF9 in 473 s. At SF7, all 73 readings fit at one per minute: 288 s a day with 24 moving. Measured across lora0's face with every reading moving every other minute, the uplink took 474 s, 55 % of the budget, its keep-alives included.
-  - At SF12, all 73 fit only as an hourly keyframe plus 15-minute deltas, at 88 % of the budget.
+  - At SF9, all 73 every 2 minutes take 502 s with 24 moving. Measured across lora0's SF9 face with every reading moving in every other frame, the uplink took 746 s, 86 % of the budget, its keep-alives included.
+  - At SF12, the frames of all 73 fit only as an hourly keyframe plus 15-minute deltas: 762 s, 88 % of the budget, frames alone. Measured across lora0's SF12 face, a frame every 900 s with every reading moving in every other one, the frames took 757.7 s and the uplink 864.5 s, the whole budget: it sent 72 keep-alives a day beside them. That face's keep-alive interval is its frame's cadence, so a keep-alive can go before each frame (§5.11). It fits only if its lease or its cadence moves.
 - **Iridium SBD, 270 bytes each way per message.** A message is the bill, so bits buy *records per message*. A full keyframe of all 73 readings fits in one message (230 bytes) if its counters wrap at 24 bits, a declared loss (§5.11). Each data message refreshes the lease, so it can replace a keep-alive the tuned link sends anyway (§6.7).
 
 **What cannot shrink:**
@@ -383,12 +384,13 @@ Each element is given as today's wire, what must be kept, the compact layout, th
   | 4 link readings at 1/min, zk2c | 71 KB/day | 140 s | 473 s | 4,978 s ✗ (fits every 6 min) |
   | All 73 at 1/min, today | 6.52 MB/day | ✗ | ✗ | ✗ |
   | All 73, zk2c: deltas each minute, keyframe every 15 min | **168 KB/day** | 288 s | 916 s ✗ (502 s every 2 min) | hourly keyframe + 15-min deltas: 762 s |
-  | All 73, zk2c, measured: a full frame of every reading, then one of none | 207 KB/day | 363 s (474 s with the uplink's keep-alives) | — | — |
+  | The same, with the uplink's keep-alives, fewest to most (link.v2 §2.16) | 168 to 192 KB/day | 362 to 436 s | every 2 min: 502 to 621 s | 762 to 904 s: ✗ from 69 keep-alives a day, and 72 measured |
+  | All 73, zk2c, measured: a full frame of every reading, then one of none | 207 KB/day | 363 s (474 s with the uplink's keep-alives) | every 2 min: 643 s (746 s with the uplink's keep-alives) | every 15 min: 758 s (864.5 s ✗ with the uplink's keep-alives) |
 
   ✗ marks a case that exceeds the 864 s of air the 1 % duty cycle allows in a day. modem.v3's streams are `data_low`, so every put and frame carries the 2-byte QoS extension. Its frame resource `frames/fast` is `data`, which carries none, on a face's 3-byte frame of 16-bit sequence numbers. The first model's all-73 row was 200 KB, 325 s, 1,043 s (556 s) and 833 s. No LoRa face ships today, so the LoRa "today" rows are what the current wire would cost.
   - The readings' rows send each reading in its own SDU, the upper bound. zenoh batched some of them on the paced links. The measured readings fell between that bound and all four in one SDU, on every medium (§9).
   - The uplink row adds the keep-alives and, at LoRa's keep_alive of 2, the reopens. Each keep-alive lost on the downlink closes the link (§6.2).
-  - zk2c's rows count the readings alone, except the measured row, whose SF7 cell also gives, in parentheses, the uplink with its keep-alives.
+  - zk2c's rows count the readings alone, except two. The keep-alive row adds what the uplink sends beside its frames: none to one between two frames where the cadence is the keep-alive interval (RF, SF9, SF12), one to two at SF7. The measured row's LoRa cells give, in parentheses, the uplink with the keep-alives its run sent: 2,160 a day at SF7, 624 at SF9 and 72 at SF12; on RF the run sent 336 under the lean stack, 6 KB (the baseline's "W1-73 at LoRa SF9 and SF12").
 - **Deadband.** A declared δ and maximum interval let the owner omit members that moved less than δ. The reader then knows the value to ±δ until the interval runs out, and nothing after. That is a declared loss, allowed by the brief. It is forbidden on timed and arbitrated streams (§5.17, §5.18).
 - **Risk.** One key per group means ACLs apply per group; split groups by audience.
 
@@ -576,13 +578,14 @@ On SBD the message is the unit:
 
 ## 9. Measurement plan
 
-**Today's half is done, and zk2c's on RF.** The wire baseline, [`measurements/wire-baseline/`](measurements/wire-baseline/README.md), measured today's wire end to end, in both directions, under the lean stack:
+**Today's half is done, and zk2c's on RF and LoRa.** The wire baseline, [`measurements/wire-baseline/`](measurements/wire-baseline/README.md), measured today's wire end to end, in both directions, under the lean stack:
 - W1 and the idle link on RF, and on LoRa at SF7, SF9 and SF12;
 - W2 on RF.
 
 It then measured zk2c the same way (its "zk2c on RF, and W1-73 at LoRa SF7"), with zenkey's reference as the owners, at link.v2's transport:
 - the idle link: 1,440 keep-alives a day each way, the model's figure exactly;
-- W1 with all 73 modem readings, across rf0's face and across lora0's SF7 face, `zenctl gen` as modem.v3's owner;
+- W1 with all 73 modem readings, across rf0's face and across lora0's SF7, SF9 and SF12 faces (its "W1-73 at LoRa SF9 and SF12"), each LoRa face at its own cadence, `zenctl gen` as modem.v3's owner;
+- at SF9 the uplink took 746 s a day, 86 % of the duty, and at SF12 864.5 s, all of it, with the keep-alives each sent beside its frames;
 - W2 on RF: **669 KB a day, 2.6 % of the channel, 25 times less than today's 16.5 MB**;
 - the four guarantees, through the tools across rf0's face.
 
@@ -599,7 +602,7 @@ Where the model meets the measurements, Appendix A asserts the tolerance:
 - **W1.** Keep-alives are exact wherever the link held. The model sends each reading in its own SDU, since batching depends on when the owner puts; gen put them 140 ms apart. The measured readings fall between that bound and all four in one SDU, on every medium. On RF the measured batching, 3.1 SDUs a tick, and compression account for all but 1 %.
 - **LoRa's reopens.** Each window's count is within one of the model's rate. Each reopen's air is within 45 % of the model's: below it where the trained dictionary compressed the declarations, above it where an open was retried.
 
-- **zk2c.** Appendix A's section 10 asserts the measured anatomy byte for byte: the face's 3-byte frame, the envelope, the put, each SDU. W2's telemetry is the model's exactly. W2 as a whole is within 1 % of the lean run, once the model takes each heartbeat as its own put, the desired re-read as today's GET and a reconnect's subscriptions as the far side's. W1-73's frames are within 2 % on RF and 1 % of air at SF7. The first zk2c model said 443 KB for W2 and 200 KB for W1-73.
+- **zk2c.** Appendix A's section 10 asserts the measured anatomy byte for byte: the face's 3-byte frame, the envelope, the put, each SDU. W2's telemetry is the model's exactly. W2 as a whole is within 1 % of the lean run, once the model takes each heartbeat as its own put, the desired re-read as today's GET and a reconnect's subscriptions as the far side's. W1-73's frames are within 2 % on RF, 1 % of air at SF7 and 0.1 s a day at SF9 and SF12. The keep-alives an uplink sends beside its frames are a range by link.v2 §2.16, and each run's count is asserted inside it: 336 a day of 0 to 1,440 on RF under the lean stack and none bare, 2,160 of 1,440 to 2,880 at SF7, 624 of 0 to 720 at SF9 and 72 of 0 to 96 at SF12. An idle direction's keep-alives are exact on every medium. The first zk2c model said 443 KB for W2 and 200 KB for W1-73.
 
 The baseline README's model column is Appendix A before these corrections. Its LoRa W1 figures add the uplink's keep-alives to the readings: 754 s at SF7 and 2,485 s at SF9. This report then quoted the readings alone, 680 s and 2,247 s. A duty budget pays for the uplink's whole air, so the README's were the right ones. The corrected Appendix A counts the reopens too.
 
@@ -609,11 +612,14 @@ The baseline README's model column is Appendix A before these corrections. Its L
 - **A declaration lost while the link comes up.** It is never repaired [Z20]. The far router then drops every put on that scope, or no GET reaches the queryable. The costing runs set up with no loss.
 - **Replies after their timeout.** Every desired re-read on RF timed out at the target's 1-s default, and its reply still crossed, 3.3–7.4 s later. Under zk2c's lighter load, 4 of 12 still did. The model counts bytes that buy nothing there.
 - **A value of several SDUs.** It crosses only when every SDU does, since zenoh resends no fragment.
+- **Which goes first, a keep-alive or the frame due with it.** Where a face's cadence is a whole multiple of its keep-alive interval, the model gives the uplink's keep-alives as a range. The runs sent one before 26 frames of 30 at SF9 and 6 of 8 at SF12, a share no rule gives.
+- **A duty cycle that is enforced.** The simulated medium enforces none. At SF12 the uplink reached the budget and no frame waited, where a radio would hold frames back.
 
 **What remains:**
 - SBD, which needs an in-process harness in zenoh-modem;
-- W2 on LoRa, and across a face;
-- zk2c at LoRa SF9 and SF12, and with zenoh-modem's own owner, modem-mgmt, once it is ported;
+- W2 on LoRa, and across a face. The lean W2 run's steady uplink SDUs, each charged SF7's time on air, are 1,273 s a day, 147 % of the duty, so W2 as RF carries it does not fit there;
+- zk2c with zenoh-modem's own owner, modem-mgmt, once it is ported: every W1-73 run had `zenctl gen` as its owner, so a device's keyframes and deltas are computed, not measured;
+- lora0's SF12 face inside its duty with all 73 readings, once its lease or its cadence moves;
 - a "stale" or "unconfirmed" from the tools across a face, where today they fall silent or unobservable once a horizon passes (#990).
 
 For each remaining run:
@@ -634,7 +640,7 @@ For each remaining run:
 
 ## Appendix A. Reproduce every figure
 
-Run with Python 3 (`python3 -I`); it needs no third-party package and asserts the figures the text quotes. Today's wire is the model corrected to the wire baseline ([`measurements/wire-baseline/`](measurements/wire-baseline/README.md)). Each correction cites the finding and the run it rests on. The measured figures are constants in the code, and each tolerance is an assertion against them. The rest of the Zenoh model follows the 1.10.1 codec layouts read for this review, the layer sizes follow zenoh-modem's READMEs, and the airtime follows the Semtech formula with zenoh-modem's simulator parameters. Gauge widths for W1 and the per-minute change counts are illustrative assumptions, marked in the code. The baseline's `model.py` runs this script; its committed `results/model.json` is from before the correction. Section 10 checks the zk2c column against the baseline's zk2c runs (its "zk2c on RF, and W1-73 at LoRa SF7") and corrects it where the model, not the wire, missed: W1's 73 readings at zenoh-modem's ranges, and W2's heartbeats, desired re-reads and reconnects. The text quotes the corrected figures and the measured ones; section 6's zk2c rows stay the first model, and `model.py --zk2c` writes `results/model-zk2c.json` from them.
+Run with Python 3 (`python3 -I`); it needs no third-party package and asserts the figures the text quotes. Today's wire is the model corrected to the wire baseline ([`measurements/wire-baseline/`](measurements/wire-baseline/README.md)). Each correction cites the finding and the run it rests on. The measured figures are constants in the code, and each tolerance is an assertion against them. The rest of the Zenoh model follows the 1.10.1 codec layouts read for this review, the layer sizes follow zenoh-modem's READMEs, and the airtime follows the Semtech formula with zenoh-modem's simulator parameters. Gauge widths for W1 and the per-minute change counts are illustrative assumptions, marked in the code. The baseline's `model.py` runs this script; its committed `results/model.json` is from before the correction. Section 10 checks the zk2c column against the baseline's zk2c runs (its "zk2c on RF, and W1-73 at LoRa SF7") and corrects it where the model, not the wire, missed: W1's 73 readings at zenoh-modem's ranges, W2's heartbeats, desired re-reads and reconnects, and, since the LoRa SF9 and SF12 runs, the keep-alives an uplink sends beside its frames, a range by link.v2 §2.16. The text quotes the corrected figures and the measured ones; section 6's zk2c rows stay the first model, and `model.py --zk2c` writes `results/model-zk2c.json` from them.
 
 ```python
 """Reproduce every figure of the bandwidth-first redesign report. Standard library only.
@@ -1286,6 +1292,75 @@ print("W1-73 zk2c on LoRa, corrected: SF7 {:.0f} s every minute; SF9 {:.0f} s ({
           w1_73_air[7][0], w1_73_air[9][0], w1_73_air[9][1], w1_73_air[12][2]))
 assert [round(x) for x in (w1_73_air[7][0], w1_73_air[9][0], w1_73_air[9][1], w1_73_air[12][2])] \
     == [288, 916, 502, 762]
+
+
+# Those are the frames alone. The uplink pays keep-alives beside them (link.v2 0.17 §2.16,
+# zenoh's timer as #1108 read it): an end sends one an interval I = lease / keep_alive after
+# the later of its last batch and its last keep-alive. Between two frames a cadence C apart
+# that is ceil(C / I) - 1 keep-alives. Where C is a whole multiple of I the last falls due
+# when the next frame does, and goes first when that frame is the later on its schedule:
+# C / I - 1 to C / I a gap, a range the rule does not narrow.
+def keepalives_beside(cadence_s, lease_s, keep_alive=4):
+    """(fewest, most) keep-alives an end sends between two frames a cadence apart."""
+    whole, rest = divmod(cadence_s * keep_alive, lease_s)
+    return (whole - 1, whole) if rest == 0 else (whole, whole)
+
+
+# link.v2's scenarios §5, at a 60-s interval: half of it, one, one and a half, two.
+assert [keepalives_beside(c, 240) for c in (30, 60, 90, 120)] == [(0, 0), (0, 1), (1, 1), (1, 2)]
+# Baseline, "W1-73 at LoRa SF7" and "W1-73 at LoRa SF9 and SF12" (zk2c-sf7-lean-1,
+# zk2c-sf9-lean-1, zk2c-sf12-lean-1): gen's frames at each face's cadence, a full record of
+# every reading then one of none. Per face: its cadence and lease (keep_alive 4), the case
+# of w1_73_air it runs, and what the run measured, a day: the frames' air, the uplink's
+# keep-alives beside them, the uplink's whole air, and an idle direction's keep-alives.
+W1_73_FACES = {7: (60, 120, 0, 363.0, 2_160, 474.2, 2_880),
+               9: (120, 480, 1, 642.9, 624, 745.8, 720),
+               12: (900, 3_600, 2, 757.7, 72, 864.5, 96)}
+w1_73_uplink = {}
+for sf, (cadence, lease, case, m_frames, m_beside, m_uplink, m_idle) in W1_73_FACES.items():
+    gaps = DAY // cadence
+    gen = gaps // 2 * sum(face_air(put(ENV16 + b), sf) for b in (full_body, none_body))
+    ka_air = lora_air_s(KEEPALIVE + LEAN, sf)
+    fewest, most = (k * gaps for k in keepalives_beside(cadence, lease))
+    # Tolerances. gen's frames: within 1 % (0.1 s at SF9, whose SDUs are the model's byte
+    # for byte, and at SF12, whose tiles are within 2 B of it, on the same symbol step). The
+    # keep-alives beside them: inside §2.16's range. The uplink's whole air: the model's
+    # frames and the keep-alives counted, within 1 %. An idle direction: exact.
+    assert within(gen, m_frames, 0.01)
+    assert fewest <= m_beside <= most
+    assert within(gen + m_beside * ka_air, m_uplink, 0.01)
+    assert DAY * 4 // lease == m_idle
+    w1_73_uplink[sf] = {
+        "cadence_s": cadence, "lease_s": lease, "gaps": gaps, "keepalive_air_s": ka_air,
+        "keepalives": (fewest, most), "gen_frames_s": gen, "frames_s": w1_73_air[sf][case],
+        "measured": {"frames_s": m_frames, "keepalives": m_beside, "uplink_s": m_uplink,
+                     "idle_keepalives": m_idle}}
+assert [round(w1_73_uplink[sf]["gen_frames_s"], 1) for sf in (9, 12)] == [642.9, 757.7]
+# The corrected frames with the uplink's keep-alives, fewest to most, a day.
+with_ka = {sf: tuple(u["frames_s"] + k * u["keepalive_air_s"] for k in u["keepalives"])
+           for sf, u in w1_73_uplink.items()}
+print("W1-73 zk2c on LoRa with the uplink's keep-alives (link.v2 §2.16): " + "; ".join(
+    f"SF{sf} {lo:.0f} to {hi:.0f} s" for sf, (lo, hi) in with_ka.items()) + " (of 864)")
+assert [round(x) for sf in (7, 9, 12) for x in with_ka[sf]] == [362, 436, 502, 621, 762, 904]
+# SF12's cadence is its interval, and the budget has room for few keep-alives: 71 a day
+# beside gen's frames and 68 beside the corrected ones, of 96 gaps. The run sent 72, in 6
+# gaps of its 8: 864.5 s beside gen's frames, and 869 s beside the corrected ones.
+u12 = w1_73_uplink[12]
+assert [int((LORA_DUTY_S - u12[f]) / u12["keepalive_air_s"]) for f in ("gen_frames_s", "frames_s")] \
+    == [71, 68]
+assert round(u12["frames_s"] + 72 * u12["keepalive_air_s"]) == 869 > LORA_DUTY_S
+# SF9 fits at the most: 621 s, 72 %, and 762 s, 88 %, with gen's frames.
+assert round(w1_73_uplink[9]["gen_frames_s"] + 720 * w1_73_uplink[9]["keepalive_air_s"]) == 762
+# RF, rf0's face: a frame every 60 s at lease 240 s, keep_alive 4, so the cadence is the
+# interval and the uplink sends none to one keep-alive a gap, 0 to 1,440 a day, at most
+# 24.5 KB under the lean stack. Measured (zk2c-w1-bare-1, zk2c-w1-lean-1): none bare, 336 a
+# day lean. Tolerance: inside the range. Corrected W1-73 with them: 168 to 192 KB a day.
+W1_73_RF_BESIDE = {"cadence_s": 60, "lease_s": 240, "measured": {"bare": 0, "lean": 336}}
+rf_gaps = DAY // W1_73_RF_BESIDE["cadence_s"]
+rf_beside = tuple(k * rf_gaps for k in keepalives_beside(60, 240))
+assert rf_beside == (0, 1_440)
+assert all(rf_beside[0] <= m <= rf_beside[1] for m in W1_73_RF_BESIDE["measured"].values())
+assert [round((w1_73 + k * (KEEPALIVE + LEAN)) / 1e3) for k in rf_beside] == [168, 192]
 
 # W2. Telemetry is the model's exactly: frames/sample's three records crossed in 93 B (91 B
 # and a 32-bit run) and a 100-B SDU, where the model's 5-byte frame and 16-bit run give 100 B

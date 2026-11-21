@@ -180,12 +180,21 @@ def split_w1(run, d, rows):
     tiles) before a reading reached the far side, or a period of 60 s from
     one (a reading lost on the air reaches nothing)."""
     span = 5 if "fragment" in run["params"] else 2
+    # #989's LoRa runs: a frame of 3 SDUs at SF9, or a 222-B SDU in 51-B tiles at SF12,
+    # takes longer to cross, and gen ticks once a face's period (marks' period_s).
+    medium = run["params"].get("medium", "")
+    span = {"sf9-zk2c": 6, "sf12-zk2c": 40}.get(medium, span)
+    # A frame lost on the air has no arrival: its tick is a neighbour's, a period away, and
+    # the neighbour may be a frame of one SDU that arrived at once, where the lost one's
+    # SDUs took the span to leave. So at these two media the span counts after a tick too.
+    after = span if medium in ("sf9-zk2c", "sf12-zk2c") else 0.5
+    period = run["marks"].get("period_s", 60)
     if "_ticks" not in run:
         far = sorted(r["t"] for r in run["far"] if r.get("key"))
-        run["_ticks"] = sorted({round(f + 60 * k, 3) for f in far for k in (-1, 0, 1)})
+        run["_ticks"] = sorted({round(f + period * k, 3) for f in far for k in (-1, 0, 1)})
     data, rest = [], []
     for r in rows:
-        hit = d == "ab" and any(f - span <= r["t"] <= f + 0.5 for f in run["_ticks"])
+        hit = d == "ab" and any(f - span <= r["t"] <= f + after for f in run["_ticks"])
         (data if hit else rest).append(r)
     return data, rest
 
@@ -226,6 +235,21 @@ def window(run, name, t0, t1):
         opener = "ba" if params.get("face") else "ab"
         reopened = sum(1 for r in air if r["n"] == initsyn_size(params)
                        and classify(params, r) == "other") if d == opener else None
+        if name == "w1" and params.get("medium", "").endswith("-zk2c") and lora(params):
+            # For #1108 (#989's LoRa runs): when each keep-alive left, and each frame's first
+            # SDU, seconds into the window, so the spacing between them can be read.
+            rel_ka = [round(r["t"] - t0, 2) for r in air if classify(params, r) == "keep-alive"]
+            rel_at = {"keepalives_at": rel_ka}
+            if d == "ab":
+                data_rows, _ = split_w1(run, d, [r for r in air if classify(params, r) == "other"])
+                firsts, last = [], None
+                for r in sorted(data_rows, key=lambda r: r["t"]):
+                    if last is None or r["t"] - last > 20:
+                        firsts.append(round(r["t"] - t0, 2))
+                    last = r["t"]
+                rel_at["frames_at"] = firsts
+        else:
+            rel_at = {}
         if name == "w1":
             data, rest = split_w1(run, d, [r for r in air if classify(params, r) == "other"])
             kinds.pop("other", None), kbytes.pop("other", None), kair.pop("other", None)
@@ -244,6 +268,7 @@ def window(run, name, t0, t1):
             "tx_layers": layer,
             "airtime_s": round(airtime, 3),
         }
+        rel.update(rel_at)
         if reopened is not None:
             rel["links_opened"] = reopened
         rel["keepalives_lost"] = sum(1 for r in air if r["drop"] and classify(params, r) == "keep-alive")
