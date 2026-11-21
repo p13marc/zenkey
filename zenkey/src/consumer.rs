@@ -1365,11 +1365,17 @@ impl Consumer {
                     unread();
                     return;
                 }
-                let crate::inband::Read::Heartbeat { sample, stamp, tag } =
-                    crate::inband::read(sample)
-                else {
-                    unread();
-                    return;
+                // Core §7.5: another form on a heartbeat's key is refused
+                // `form`, before its tag or its body is read.
+                let (sample, stamp, tag) = match crate::inband::admit_heartbeat(
+                    crate::inband::read(sample),
+                ) {
+                    Ok(heartbeat) => heartbeat,
+                    Err(why) => {
+                        tracing::debug!(provider = %addr, covered = %covered, refused = why.token(), "a sample on a heartbeat's key is no heartbeat");
+                        unread();
+                        return;
+                    }
                 };
                 let body = sample.payload().to_bytes();
                 let (applied, owner_time, due) = {
@@ -1517,11 +1523,18 @@ impl Consumer {
                     unread();
                     return;
                 }
-                let crate::inband::Read::Heartbeat { sample, stamp, tag } =
-                    crate::inband::read(sample)
-                else {
-                    unread();
-                    return;
+                // Core §7.5: another form on an owner heartbeat's key is
+                // refused `form`, before its tag or its body is read, and
+                // before its owner's catalog is asked for.
+                let (sample, stamp, tag) = match crate::inband::admit_heartbeat(
+                    crate::inband::read(sample),
+                ) {
+                    Ok(heartbeat) => heartbeat,
+                    Err(why) => {
+                        tracing::debug!(provider = %addr, class = %class, refused = why.token(), "a sample on an owner heartbeat's key is no owner heartbeat");
+                        unread();
+                        return;
+                    }
                 };
                 let beat = OwnerBeat {
                     addr,
