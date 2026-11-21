@@ -7857,8 +7857,8 @@ first run: no case wrong, and no line of `across` changed after.**
 - **The walk:** 294 rows of 294, `RULES.md` 284 rules. The one new row
   is met by `echo_tool.owner_heartbeat_of`.
 
-**`just py-conformance`: 6936 of 6936** on fcc2f65b. Of them, `scope` 29
-and `readings` 1069: five more.
+**`just py-conformance`: 6937 of 6937** on fcc2f65b. Of them, `scope` 29
+and `readings` 1070: five more, and review-bot's one on #1141.
 
 ### Live
 

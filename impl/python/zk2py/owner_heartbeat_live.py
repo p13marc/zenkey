@@ -658,8 +658,11 @@ def run_reference() -> int:
             mine = {h.stamp.seq: h.answer for h in s.answers("link") if h.stamp is not None and "read" in h.answer}
 
             def py(seq: int, n: int, resource: str) -> Any:
-                g = mine[seq]["read"]["groups"][n]
-                return g.get("sections", {}).get(resource, g.get("answer") or g.get("refused"))
+                groups = mine.get(seq, {}).get("read", {}).get("groups", [])
+                if n >= len(groups):
+                    return None  # no such group read: the check fails, and the run goes on
+                g = groups[n]
+                return (g.get("sections") or {}).get(resource, g.get("answer") or g.get("refused"))
 
             res = {"a": (0, "state/status", [STATUS]), "b": (1, "state/config", [CONFIG]),
                    "c": (2, "state/alarms/{alarm}", ALARMS)}
@@ -684,7 +687,7 @@ def run_reference() -> int:
                     if q < settled or q not in mine:
                         continue
                     theirs = ("diverged" if z[q]["diverged"] else {"confirmed": z[q]["confirmed"]}, z[q]["lost"])
-                    ours = (py(q, *res[n][:2]), mine[q]["read"]["gap"])
+                    ours = (py(q, *res[n][:2]), mine[q].get("read", {}).get("gap"))
                     if theirs != ours:
                         differ.append(f"seq {q}, {n}: zenctl {json.dumps(theirs)}, zk2py {json.dumps(ours)}")
             compared = sum(1 for z in (za, zb, zc) for q in z if q >= settled and q in mine)
@@ -711,7 +714,7 @@ def run_reference() -> int:
                   and my_gaps == [lost_seq + 1] and all(lost_seq + 2 in z for z in (za, zb, zc))
                   and not any(r["lost"] for r in zp.values())
                   and [watches[n].summary().get("heartbeats_lost") for n in ("a", "b", "c", "peer")] == [1, 1, 1, 0]
-                  and za[lost_seq + 1]["confirmed"] == [STATUS],
+                  and za.get(lost_seq + 1, {}).get("confirmed") == [STATUS],
                   f"the owner lost seq {lost_seq}; zenctl lost at {lost_rows}; zk2py's gap at {my_gaps}")
             # -- a reader given no catalog ---------------------------------------------------
             wn = watches["none"]
