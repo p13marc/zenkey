@@ -11,11 +11,15 @@ end, in both directions, on zenoh-modem's media as a lab simulates them:
   on LoRa at SF7, SF9 and SF12, and SF7 idle at keep_alive 4;
 - **zk2c** (2026-11-08): W1 with all 73 modem readings across rf0's face, W2
   and the idle link, on RF at link.v2's transport; W1-73 at LoRa SF7; and the
-  honesty checks across the face ([below](#zk2c-on-rf-and-w1-73-at-lora-sf7-989s-zk2c-half)).
+  honesty checks across the face ([below](#zk2c-on-rf-and-w1-73-at-lora-sf7-989s-zk2c-half));
+- **zk2c on LoRa SF9 and SF12** (2026-11-21): W1-73 and the idle link across
+  lora0's SF9 and SF12 faces, each at its face's cadence
+  ([below](#w1-73-at-lora-sf9-and-sf12)).
 
 SBD is not measured. Every figure is a day, extrapolated from a window of 10
-to 45 minutes, and every one is per direction: A->B is the owner's router
-toward the reader's, B->A the way back.
+to 45 minutes, or of one and two hours at SF9 and SF12 under zk2c, and every
+one is per direction: A->B is the owner's router toward the reader's, B->A
+the way back.
 
 ## The path
 
@@ -572,7 +576,9 @@ three changes: zk2c's owners, link.v2's transport, and, for W1-73, rf0's face.
 The face policies were #1098's, which list each face's events: the rendered
 access control in `results/zk2c-*/configs/` denies the unlisted ones by name.
 Before #1098 a face lists none, and every exposed `face/` event crosses it,
-`face/device_fault` across lora0's SF7 face among them.
+`face/device_fault` across lora0's SF7 face among them. The SF9 and SF12
+runs came later, 2026-11-21, from main at link.v2 0.17: their section says
+what moved.
 
 - **The owners are zenkey's reference, not a device's.**
   - modem.v3's owner is **`zenctl gen`**, zenkey's generator, under
@@ -620,6 +626,8 @@ Before #1098 a face lists none, and every exposed `face/` event crosses it,
 | `zk2c-w1-bare-1` | RF, rf0's face, no layers | idle 1,200 s, W1-73 1,800 s | 32-bit |
 | `zk2c-w1-lean-1` | RF, rf0's face, lean (`rf.zdict`) | idle 600 s, W1-73 1,800 s | 16-bit (`--run-file`) |
 | `zk2c-sf7-lean-1` | LoRa SF7, lora0's face, lean (`rf.zdict`) | idle 600 s, W1-73 1,800 s | 16-bit |
+| `zk2c-sf9-lean-1` (2026-11-21) | LoRa SF9, lora0's SF9 face, lean (`rf.zdict`) | idle 1,920 s, W1-73 3,600 s, a frame every 120 s | 16-bit |
+| `zk2c-sf12-lean-1` (2026-11-21) | LoRa SF12, lora0's SF12 face, lean (`rf.zdict`), 51-B tiles | idle 3,600 s, W1-73 7,200 s, a frame every 900 s | 16-bit |
 | `zk2c-w2-bare-1` | RF, no face, no layers | steady 2,100 s, the acts, a 245-s cut, two config sets | 32-bit |
 | `zk2c-w2-lean-1` | RF, no face, lean (`w2.zdict`) | as `-bare-1` | 16-bit |
 | `zk2c-honesty-1`, `zk2c-honesty-reset-1` | RF, rf0's face, no layers | 75 % loss for 240 s, a 392-s cut, a restart | 32-bit |
@@ -647,11 +655,18 @@ crosses either: modem.v3's collections are `host`, and the plan denies
 |---|---:|---:|---:|
 | frames/fast, gen's (a full frame of every reading, then one of none) | 176.4 KB, 1,440 SDUs | 207.3 KB, 2,160 SDUs | 211.0 KB on the same frames (Appendix A §10) |
 | `face/device_fault`, one a minute | 172.9 KB, 1,440 SDUs | 162.9 KB, 1,440 SDUs | not modelled |
-| uplink keep-alives | none | 336 | none: a frame a minute replaces them |
+| uplink keep-alives | none | 336, 5.7 KB | 0 to 1,440, at most 24.5 KB (link.v2 §2.16) |
 | **total** | **349.3 KB, 1,164 s of air (1.3 %)** | **377.2 KB, 1,257 s (1.5 %)** | |
-| W1-73 as the report prices it: a full frame every 15 minutes, a delta each minute with 24 readings moving | | | **168 KB**, corrected (Appendix A §8 said 200 KB) |
+| W1-73 as the report prices it: a full frame every 15 minutes, a delta each minute with 24 readings moving | | | **168 KB**, corrected (Appendix A §8 said 200 KB); 168 to 192 KB with the uplink's keep-alives |
 
 B->A, a day: the 1,440 keep-alives, 24.5 KB lean, the model's figure.
+
+The uplink's keep-alives are a range in the model since link.v2 0.17. rf0's
+frame goes every 60 s and its keep-alive interval is 60 s, so a keep-alive
+falls due with each frame: none to one a gap (§2.16). The first model said
+none. Both runs are asserted inside the range, in Appendix A §10 and in
+`model.py` against each `analysis.json`: none bare, and 336 a day lean, 7
+gaps of the window's 30.
 
 - **The frame's anatomy is the model's, byte for byte.** A full record of all
   73 readings is 199 B (core §7.7: the time, `full`, then a presence bit and
@@ -769,14 +784,15 @@ window, `face/device_fault` denied.
 |---|---:|---:|---:|
 | idle, each way | 2,880 keep-alives, 148.2 s | 17 % | 148.2 s |
 | W1-73 uplink, gen's frames | 2,160 SDUs, 363.0 s | 42 % | 365.5 s (Appendix A §10) |
-| W1-73 uplink keep-alives | 2,160, 111.1 s | 13 % | 1,440, 74.1 s |
-| **W1-73 uplink** | **474.2 s** | **55 %** | 439.6 s |
+| W1-73 uplink keep-alives | 2,160, 111.1 s | 13 % | 1,440 to 2,880, 74.1 s to 148.2 s (link.v2 §2.16) |
+| **W1-73 uplink** | **474.2 s** | **55 %** | 439.6 s to 513.7 s |
 | W1-73 downlink | 2,880 keep-alives, 148.2 s | 17 % | 148.2 s |
 
 - **W1-73 fits EU868's duty at SF7 under zk2c.** All 73 readings a minute
   took 55 % of the uplink's 864 s, where today's 4 link readings took 116 %
   (`sf7-lean-2`). With 24 readings moving, the corrected frames take 288 s,
-  and the uplink 362 s to 399 s with its keep-alives (42–46 %).
+  and the uplink 362 s to 436 s with its keep-alives (42–50 %), 399 s at the
+  share this run sent.
 - **The link never reopened.** Five keep-alives were lost in 40 minutes,
   never two in a row; at keep_alive 2 each would have closed it (phase 2's
   LoRa finding 1).
@@ -784,8 +800,8 @@ window, `face/device_fault` denied.
   should leave one keep-alive between two (link.v2 §2.16, "Data spares the
   keep-alives"). The uplink kept its 30-s cadence (keep-alives at +0.13 s,
   +60.13 s, +90.13 s with frames at +30.4 s and +90.2 s), 37 s of air a day
-  more than the model. On RF, at a 60-s interval, the frames spared every
-  one.
+  more than one a gap, and inside the one to two a gap that §2.16 states
+  since 0.17. On RF, at a 60-s interval, the frames spared every one.
   - **Why (#1108).** zenoh 1.10.1's transmit task, and the fork's, counts
     each keep-alive interval from the last batch it sent or its last
     keep-alive. Nothing received counts. Between frames a minute apart at a
@@ -795,6 +811,149 @@ window, `face/device_fault` denied.
   - **RF's 60-s interval** is the same race with one keep-alive a gap: none
     went first bare, 336 a day under the lean stack.
   - link.v2 0.17 §2.16 states it, and its scenarios' §5 runs it in process.
+
+### W1-73 at LoRa SF9 and SF12
+
+Run 2026-11-21, from zenkey at 5265cc52 (main: link.v2 0.17, modem.v3 3.4,
+catalog 29bf7d47), with the same drivers, fork and path. The same W1-73
+across lora0's SF9 face and its SF12 face, lean, each at its face's cadence
+and transport:
+
+| | SF9 (`zk2c-sf9-lean-1`) | SF12 (`zk2c-sf12-lean-1`) |
+|---|---|---|
+| The frame the face carries | `frames/fast` every 120 s | `frames/slow` every 900 s |
+| Lease / keep_alive | 480 s / 4: a keep-alive every 120 s | 3,600 s / 4: every 900 s; open, accept and interests 40 s |
+| Medium | 115-B frames, paced at 1,758 bit/s | 51-B tiles of a 222-B fragment layer, paced at 293 bit/s |
+| zenoh's batch, the driver's under the lean stack | 101 B | 210 B |
+| Events the face lists | the two `rare` ones | none |
+| Windows | idle 1,920 s, 16 intervals; W1-73 3,600 s, 30 frames | idle 3,600 s, 4 intervals; W1-73 7,200 s, 8 frames |
+
+The model is [`model.py --zk2c`](model.py): Appendix A §10's frames, and
+the uplink's keep-alives beside them as a range, fewest to most, by link.v2
+§2.16.
+
+| A day, SF9 | Measured | Duty (864 s) | Model |
+|---|---:|---:|---:|
+| idle, each way | 720 keep-alives, 12.2 KB, 118.7 s | 14 % | 720, 118.7 s |
+| W1-73 uplink, gen's frames | 1,440 SDUs, 112.3 KB, 642.9 s | 74 % | 642.9 s |
+| W1-73 uplink keep-alives | 624, 10.6 KB, 102.9 s | 12 % | 0 to 720, 0 s to 118.7 s |
+| **W1-73 uplink** | **2,064 SDUs, 122.9 KB, 745.8 s** | **86 %** | 642.9 s to 761.6 s |
+| W1-73 downlink | 720 keep-alives, 12.2 KB, 118.7 s | 14 % | 720, 118.7 s |
+
+| A day, SF12 | Measured | Duty (864 s) | Model |
+|---|---:|---:|---:|
+| idle, each way | 96 keep-alives, 2.2 KB, 142.3 s | 16 % | 96, 142.3 s |
+| W1-73 uplink, gen's frames | 336 tiles, 15.3 KB, 757.7 s | 88 % | 757.7 s |
+| W1-73 uplink keep-alives | 72, 1.7 KB, 106.8 s | 12 % | 0 to 96, 0 s to 142.3 s |
+| **W1-73 uplink** | **408 tiles, 16.9 KB, 864.5 s** | **100 %** | 757.7 s to 900.1 s |
+| W1-73 downlink | 96 keep-alives, 2.2 KB, 142.3 s | 16 % | 96, 142.3 s |
+
+Each tolerance is asserted, in Appendix A §10 and in `model.py` against
+each run's `analysis.json`: gen's frames' air within 1 % (met to 0.1 s), the
+uplink's keep-alives inside §2.16's range, the uplink's air inside the
+range's ends, and an idle direction's keep-alives exact.
+
+- **The frames are the model's.**
+  - At SF9 a full record of all 73 readings, 205 B in a 210-B put, crossed
+    in three SDUs of 115, 115 and 38 B, and a record of none, 21 B, in one
+    of 44 B: the model's, byte for byte.
+  - At SF12 the driver leaves zenoh a 210-B batch under the lean stack,
+    where the face policy states 224 B (finding 10). So zenoh cut a full
+    record in two fragments. They crossed as four 51-B tiles and one of 32
+    to 34 B, then a 31-B tile. A record of none took one 50-B tile. The
+    model's tiles are within 2 B of these, on the same step of LoRa's time
+    on air.
+  - The far reader got payloads of 205 B and 21 B, every record valid, its
+    73 fields all known or all absent. The sizes leave no room for a
+    router's stamp: no put carried one.
+  - Compression stored every uplink SDU at SF9, and saved 32 B in two hours
+    at SF12.
+- **The cadence is the face's, the frames are gen's.** gen wrote a full
+  record on every other tick, every 240 s at SF9 and every 1,800 s at SF12.
+  The faces state a full record every 900 s and 3,600 s (`keyframe_s`),
+  with deltas between. The corrected frames of that case, 24 readings
+  moving, are computed and not measured: 502 s a day at SF9 and 762 s at
+  SF12 (Appendix A §10). The mapping's notes price them at 534 s and 785 s
+  (`examples/zk2/zenoh-modem/README.md`, "All 73").
+- **A keep-alive went before most frames** (link.v2 §2.16). Both faces run
+  a keep-alive interval equal to the frame's cadence, so each keep-alive
+  falls due when the next frame does: none to one a gap.
+  - At SF9, 26 of the window's 30 gaps held one: all 15 before a full
+    record, and 11 of the 15 before a record of none.
+  - At SF12, 6 of 8: the four before a record of none, and two of the four
+    before a full record.
+  - gen's frames left 120.003 s and 900.015 s apart, 3 ms and 15 ms more
+    than the interval. A frame that is later on its schedule than the one
+    before lets the keep-alive go first, which is §2.16's race.
+  - The rule gives the range and not the share. The relay sees an SDU after
+    its pacing, so it shows which went first in a gap, not by how little.
+    One keep-alive more or fewer in SF12's window moves its day by 12
+    keep-alives and 17.8 s.
+- **SF9 fits its duty.** The uplink took 86 %, and at the most keep-alives
+  it takes 762 s, 88 %. With the corrected frames it is 502 s to 621 s,
+  58 % to 72 %. Today's 4 link readings took 289 % (`sf9-lean-2`).
+- **SF12 takes the whole duty.** The uplink took 864.5 s of the 864 s, and
+  36.02 s in every hour of the window against EU868's 36 s.
+  - gen's frames leave room for 71 keep-alives a day, and the run sent 72.
+  - With the corrected frames, 762 s, the room is 68. At the run's 72 the
+    uplink takes 869 s, and at the most, 96, it takes 904 s.
+  - The mapping's notes price this face by §2.16 at 785 s to 927 s, none
+    to 96 keep-alives beside 785 s of frames (`link.md`, since zk2py round
+    110's answers). The run's 72 put it at 892 s on that scale.
+  - So at its stated cadence and lease this face does not carry all 73
+    readings inside EU868's duty, unless its frames spare most keep-alives,
+    and here they spared one in four. An interval above the cadence by more
+    than the frames' lateness spares them all (§2.16): the frames alone are
+    88 %. That is zenoh-modem's lease or cadence to move.
+- **The 100 % is no ceiling.** Nothing in this path enforces a duty cycle.
+  - The drivers' readings hold no `air/duty_cycle_wait_ms` and no airtime
+    counter: on the udp medium `air/rx_errors_total` is their one `air/`
+    reading.
+  - `sched/queue_depth` never passed 2, a frame's SDUs waiting on the
+    pacing. `sched/dropped_total`, `sdu/dropped_total` and
+    `sdu/tx_failed_total` stayed 0, and every frame left on its tick.
+  - So the figure is 757.7 s of frames and 72 keep-alives of 1.48 s, a
+    coincidence of this window. A real SX1262 at its limit would hold
+    frames back, which this run does not show.
+- **The idle link is the model's exactly:** 720 keep-alives a day each way
+  at SF9 and 96 at SF12, 14 % and 16 % of each end's duty. At a keep_alive
+  of 2, phase 2's idle link took 109–114 % and 177–201 % with its reopens.
+- **No link opened again.** In the tables, "lost +t" is a keep-alive the
+  relay dropped t seconds into the window, and "reopened never" says no
+  InitSyn crossed in it. The far side opens, so that column is B->A's.
+  - SF9 lost three keep-alives in 92 minutes, and SF12 one in three hours,
+    never two in a row. At keep_alive 4 a close takes three in a row.
+  - The one lost on SF9's uplink was followed by its frame 0.5 s later.
+    None changed a byte count.
+- **Lost frames were named.** At 5 % loss a full record crosses whole in
+  86 % of cases at SF9, three SDUs, and in 74 % at SF12, six tiles.
+  - SF9 lost 2 of its 15 full records, one SDU of each.
+  - SF12 lost 2 of its 4, one tile of each. One failed the fragment
+    layer's check, and driver B raised a device fault on its own management
+    plane and cleared it a second later. The other lacked zenoh's second
+    fragment.
+  - The far reader read each next frame as `follows: gap, lost: 1`. Every
+    record of none crossed.
+- **What moved since the SF7 run.**
+  - **Timestamping is the generator's** (link.v2 0.13 §2.18). Both routers
+    run the `timestamping` block `zenctl acl gen` wrote, which `render.py
+    --far` checks, where the RF and SF7 runs set router A's by hand
+    (finding 3).
+  - **The far end's block names its user** (link.v2 0.15 §2.5, §2.18).
+    Router B opens the lane as the user `--far-config` wrote, `ground`,
+    with the test's password and dictionary filled in (finding 4).
+  - **The faces list their events** (link.v2 0.12 §2.7). SF9's two `rare`
+    events crossed once each as gen started, before the window, and
+    `face/device_fault` is denied by name. SF12's face lists none: its plan
+    denies every event, and its reader's scope is `frames/slow` alone.
+  - **Each plan warns `keep_alive_not_suppressed`** (link.v2 0.17), which
+    these runs measure.
+  - **gen ticks at the face's `every_s`** (`PERIOD_S`), where it ticked
+    every 60 s.
+- **W2 on LoRa SF7 was not run.** `zk2c-w2-lean-1`'s steady window, each of
+  its 245 uplink SDUs charged SF7's time on air, is 1,273 s a day A->B,
+  147 % of the 864 s, before any act or reconnect. W2 as RF carries it does
+  not fit SF7's duty, and nothing here would have held it back.
 
 ### The honesty checks, across the face
 
@@ -844,28 +1003,35 @@ router B opened a new transport 3.9 s after the restore. Its reopen cost
    day each way to 1,440. W2 measured 669 KB a day, 25 times less than
    today's wire derived the same way, where the report's first model said
    443 KB and 41 times (W2's findings above). W1-73 fits RF in 1.5 % with gen's frames and
-   LoRa SF7's duty in 55 %.
+   LoRa SF7's duty in 55 %. At each face's own cadence it took 86 % of SF9's
+   duty and the whole of SF12's (finding 9).
 2. **Appendix A is corrected where the model missed** (§10): W1-73's frames
    at zenoh-modem's ranges (168 KB a day, not 200 KB, and at LoRa 288 s at
    SF7, 916 s at SF9, 762 s at SF12's hourly keyframe), W2's heartbeats per
    interface, its desired GET unconditional and a reconnect's subscriptions
    (674 KB, not 443 KB). Each correction asserts the run it rests on; the
    measured anatomy (frame, envelope, put, SDU) is asserted byte for byte.
-   The report's text quotes the corrected and measured figures.
+   The report's text quotes the corrected and measured figures. Since the
+   SF9 and SF12 runs, a LoRa uplink's keep-alives beside its frames are a
+   range, fewest to most, by link.v2 §2.16, where the model had one a gap
+   at SF7 and none at SF9 and SF12.
 3. **`zenctl acl gen` does not write a face router's timestamping.** A
    router stamps every unstamped put it routes unless told not to (core
    §4.1), and core §8.2 says a deployment SHOULD turn it off on a router that
    forwards onto a constrained face. The generated block (link.v2 §2.18) has
    no `timestamping` key, so a router run from it alone stamps every frame
    (seen in a loopback check: every put through a default router carried
-   the router's 26-B HLC). These runs set it by hand.
+   the router's 26-B HLC). These runs set it by hand. Since link.v2 0.13
+   (#1106) the generator writes it, and the SF9 and SF12 runs took its
+   blocks as written.
 4. **A face's subjects by user name need the far side to open the lane.**
    zenoh's usrpwd authenticates an opener to its acceptor only, so router A
    binds router B to `ground` only when router B opens; with phase 1's
    direction the handshake was refused ("Recv InitSyn. Expected extension").
    And credentials configured on router B make it ask them of every opener,
    so the ground's own tools present one too (`local`). Neither is in the
-   face policy, link.v2 or the generated far block.
+   face policy, link.v2 or the generated far block. Since link.v2 0.15
+   (#1107) §2.5 says which end opens, and the far block names its user.
 5. **Across a face no tool says "unconfirmed" yet.** The honesty checks
    hold (none read stale readings as current, every loss and reset was
    named), but `watch` and the doctor only fall silent or unobservable past a
@@ -875,14 +1041,53 @@ router B opened a new transport 3.9 s after the restore. Its reopen cost
    60-s interval they spared all bare. zenoh counts each interval from the
    last batch sent, so where the cadence is a whole multiple of the
    interval the last keep-alive races the next frame (#1108, link.v2
-   0.17).
+   0.17). At SF9 and SF12, whose interval is the cadence, a keep-alive went
+   before 26 frames of 30 and 6 of 8.
 7. **After W2's reconnect, A->B carried nothing but the reopen's
    declarations** until the lease closed the transport, as in phase 2
    (#1109 reproduced it at 0 % loss); the rf0-face honesty run's link came
    back after its cut.
 8. **Not measured:** W2's config changes (they drew silence), the `rare`
-   modem.v3 events (none in a window), W2 across a face, LoRa SF9 and SF12,
-   SBD.
+   modem.v3 events (none in a window), W2 across a face, W2 on LoRa (its
+   RF traffic re-aired at SF7 is 147 % of the duty), SBD, and any face
+   with zenoh-modem's own owner: its keyframes and deltas are computed.
+9. **lora0's SF12 face takes the whole duty with all 73 readings.** A frame
+   every 900 s at a 900-s keep-alive interval sent 72 keep-alives a day
+   beside the frames: 864.5 s of the 864 s with gen's frames, and 869 s
+   with the corrected ones, whose room is 68. Nothing here enforces the
+   duty, so no frame waited. The SF9 face fits, in 86 % as measured and
+   88 % at the most. The idle link is exact at both, 14 % and 16 % each
+   way, and no link opened again.
+10. **A face policy states the bare driver's batch, and the lean stack
+    leaves zenoh less.** This is the policy against the driver, not the
+    reference's plan against its rule.
+    - **The policy.** lora0's SF12 policy states `batch_bytes = 224`: the
+      fragment layer's 222-B SDU and zenoh's 2-B length. `acl gen` wrote
+      `batch_size: 224` into both blocks (`configs/face-router.json5`,
+      `face-far.json5`).
+    - **The driver.** Under the lean stack, compress and aead sit above
+      the fragment layer and take 14 B. Driver A logged `layer="fragment"
+      tx_max_sdu=222`, `layer="aead" tx_max_sdu=209`, `layer="compress"
+      tx_max_sdu=208` and `lanes up … max_batch_size=210`. Both routers ran
+      `batch_size: 210` (`configs/zenohd-a.json5`, `driver-a.toml`'s
+      `zenoh_batch_size`).
+    - **What it cost.** A full record, 205 B in a 213-B frame, fits 224 and
+      not 210, so zenoh cut each in two fragments. In SF12's window 18 SDUs
+      entered the stack (compress stored 14 and compressed 4): 6
+      keep-alives, 4 records of none, and 2 for each of the 4 full records.
+      Each full record left as five tiles, then a 31-B tile of its own. One
+      of the two lost full records lacked that 31-B tile alone.
+    - **The plan is right by its rule.** It warns no `frame_over_batch` at
+      SF12. link.v1 §2.8 compares the largest frame's payload, 216 B, with
+      `batch_bytes`, 224, and the policy cannot know the driver's layers. A
+      policy that stated the 210 its driver logs would draw the warning.
+    - **The other faces.** SF7 states 224 and ran 208, RF 222 and 206 under
+      the lean stack, and a full record took two SDUs at both. SF9 states
+      117 and ran 101, and its plan warns already.
+    - **Not measured:** a 216-B frame at a 224-B batch. gen wrote none. By
+      the anatomy measured here, a put's 5 B and the frame's 3 B, it would
+      be a 224-B message for the 222 B that batch carries: the rule counts
+      the payload alone.
 
 ## Reproduce
 
@@ -934,10 +1139,11 @@ python3 -I model.py > results/model.json                # Appendix A, per direct
 python3 -I summary.py                                    # the tables above
 ```
 
-zk2c (2026-11-08): the routers at link.v2's transport (`rf-zk2c`, `sf7-zk2c`),
-a face's plan on router A where `FACE_POLICY` names one, each process on cores
-4–5, each run from a frozen copy whose `REPO` is the checkout (gendev.v1's
-schemas are named relative to it, hence `CONTRACTS`):
+zk2c (2026-11-08, and 2026-11-21 for SF9 and SF12): the routers at link.v2's
+transport (`rf-zk2c`, `sf7-zk2c`, `sf9-zk2c`, `sf12-zk2c`), a face's plan on
+router A where `FACE_POLICY` names one, each process on cores 4–5, each run
+from a frozen copy whose `REPO` is the checkout (gendev.v1's schemas are
+named relative to it, hence `CONTRACTS`):
 
 ```bash
 R=$PWD/../../../..; F=$R/examples/zk2/zenoh-modem/faces
@@ -951,6 +1157,16 @@ INST=rf BASE=17400 LOSSLESS_SETUP=1 W1=73 RUN_FILE=1 FACE_POLICY=$F/zenohd-rf0.f
 INST=lora BASE=17600 LOSSLESS_SETUP=1 W1=73 RUN_FILE=1 FACE_POLICY=$F/zenohd-lora0-sf7.face.toml \
   DEVICE=h-c2a95e41d7f0/lora0 FACE=lora PRINCIPAL=lora-node W1_S=1800 \
   timeout 2h taskset -c 4-5 ./measure.sh sf7-zk2c lean zk2c-sf7-lean-1
+# W1-73 across lora0's SF9 and SF12 faces, lean (2026-11-21; about 1.6 h and 3.4 h): gen
+# ticks at the face's every_s (PERIOD_S), the windows hold 16 and 30, 4 and 8 of them
+INST=lora9 BASE=17600 LOSSLESS_SETUP=1 W1=73 RUN_FILE=1 FACE_POLICY=$F/zenohd-lora0-sf9.face.toml \
+  DEVICE=h-c2a95e41d7f0/lora0 FACE=lora PRINCIPAL=lora-node \
+  PERIOD_S=120 SETTLE_S=40 IDLE_S=1920 W1_LEAD_S=180 W1_S=3600 \
+  timeout 3h taskset -c 4-5 ./measure.sh sf9-zk2c lean zk2c-sf9-lean-1
+INST=lora12 BASE=17700 LOSSLESS_SETUP=1 W1=73 RUN_FILE=1 FACE_POLICY=$F/zenohd-lora0-sf12.face.toml \
+  DEVICE=h-c2a95e41d7f0/lora0 FACE=lora PRINCIPAL=lora-node LIFE=5h \
+  PERIOD_S=900 SETTLE_S=120 IDLE_S=3600 W1_LEAD_S=1350 W1_S=7200 \
+  timeout 5h taskset -c 4-5 ./measure.sh sf12-zk2c lean zk2c-sf12-lean-1
 # W2 zk2c (about 50 minutes), bare, then lean with 16-bit runs and w2.zdict
 INST=w2 BASE=17500 LOSS_AT_STEADY=0.05 ZK2C=1 CONTRACTS=$PWD/contracts \
   timeout 3h taskset -c 4-5 ./measure-w2.sh rf-zk2c bare zk2c-w2-bare-1
@@ -969,6 +1185,12 @@ python3 -I honesty.py $WORK/logs/{zk2c-honesty-1,zk2c-honesty-reset-1,zk2c-w2-ba
 python3 -I model.py --zk2c > results/model-zk2c.json   # Appendix A's zk2c column, per direction
 python3 -I summary.py                                   # the zk2c tables
 ```
+
+`model.py --zk2c` reads `results/zk2c-sf{7,9,12}-lean-1/analysis.json` and
+fails where a LoRa row misses its tolerance, so run it after `analyze.py`.
+The SF9 and SF12 runs take the generator's blocks as they are: `wire.sh`
+passes `acl gen --far-config`'s file to `render.py --far`, which checks
+both `timestamping` blocks and reads router B's user from it.
 
 The first `honesty.sh` run's watch probe inside the cut asked `--format json`
 of a stream and was refused; the script asks ndjson since, and the whole-run
@@ -989,16 +1211,16 @@ lossy-setup runs (`w2-smoke-1`, `w2-smoke-2`, `w2-rf-bare-1`,
 | `configs/` | the driver and router templates, which `render.py` fills per medium, stack and path |
 | `render.py` | each medium's numbers (`MEDIA`), the layer stacks, the ports and directories of a path |
 | `wire.sh` | brings a path up (`up <medium> <stack>`), lists it (`status`), stops it (`down`), and tells the relay to `cut`, `restore` or take a `loss` |
-| `measure.sh` | one W1 run: the idle window, W1's setup, the W1 window, `marks.json` |
+| `measure.sh` | one W1 run: the idle window, W1's setup, the W1 window, `marks.json`; `PERIOD_S` is gen's tick, a face's `every_s` |
 | `measure-w2.sh`, `w2-drive.py` | one W2 run: the device and the author through the owner example, the steady window, the acts, the reconnect, the config changes |
 | `contracts/gendev.v1.toml`, `gendev.json`, `gendev-frames.json` | W2's device: 8 gauges, 4 counters, `oper_change` (lint clean); since revision 1.1, `frames/sample`, the twelve readings as one packed record, three a frame, for #989's zk2c run (telemetry.v2, #983 T4) |
 | `relay.py` | the userspace netem between the two drivers, and a JSON line per datagram |
 | `stamp.py` | stamps each `zenctl echo` row with the wall clock |
 | `zdecode.py` | decodes a bare run's SDUs as the fork's codec writes them, and gives each zk2 element its bytes |
-| `analyze.py` | the drivers' counters and the relay's capture, per direction and window; W2's elements, acts and reconnect; zk2c's frame and event sizes, and the transports opened |
+| `analyze.py` | the drivers' counters and the relay's capture, per direction and window; W2's elements, acts and reconnect; zk2c's frame and event sizes, and the transports opened; on LoRa under zk2c, when each keep-alive and each frame left |
 | `honesty.sh`, `honesty.py` | #989's honesty checks across rf0's face (zk2c), and what each tool said in them |
 | `setup-loss.py` | what a declaration lost in the setup cost a bare W2 run |
-| `model.py` | runs the report's Appendix A and states its figures per direction; `--zk2c` its zk2c column |
+| `model.py` | runs the report's Appendix A and states its figures per direction; `--zk2c` its zk2c column, each LoRa face's uplink a range by link.v2 §2.16, asserted against its run |
 | `summary.py` | the README's W2, LoRa and zk2c tables, from `results/` |
 | `train-dictionary.sh`, `rf.zdict`, `w2.zdict` | the compress layer's dictionaries: `rf.zdict` from `bare-1` (W1), `w2.zdict` from `w2-rf-bare-2` (W2) |
 | `results/` | each run's `analysis.json`, `marks.json`, relay summary and rendered `configs/` (a face's generated blocks among them, router B's test password redacted); the dictionaries' inputs (`bare-1/air.jsonl`, `w2-rf-bare-2/air.jsonl`); `setup-loss.json`; `model.json`, and `model-zk2c.json` and `zk2c-honesty.json` for the zk2c runs |
@@ -1015,4 +1237,10 @@ Versions:
 - zk2c (2026-11-08): `zenctl` and the owner example from zenkey at 2fa3e6ab
   (`git describe` 0.14.0-2019-g2fa3e6ab, #1098's branch), release builds,
   zenoh 1.10.1; the fork at `zm-1.10.2-r1` and `modem-driver` at d8c62df,
-  rebuilt the same way.
+  rebuilt the same way;
+- zk2c on LoRa SF9 and SF12 (2026-11-21): `zenctl`, the runs' owner (`gen`),
+  reader and generator, from zenkey at 5265cc52 (main, `git describe` 0.14.0-2096-g5265cc52,
+  built from this branch's harness commit, which changes this directory
+  alone), release builds, zenoh 1.10.1; the fork at `zm-1.10.2-r1`;
+  `modem-driver` at d8c62df, a debug build with every feature. The runs
+  shared cores 4–5 while zk2py's suites ran on the host.

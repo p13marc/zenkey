@@ -15,6 +15,10 @@ Usage: summary.py [results-dir]
   the bare runs decoded, the lean stack derived from them, the lean runs'
   counters, and the model's zk2c column (model.json's w2_rf_zk2c_per_direction,
   w1_73_rf_zk2c and idle_rf_zk2c).
+- W1-73 across lora0's SF7, SF9 and SF12 faces, per window and direction, a
+  day: the lean runs' counters and airtime, the duty used, the keep-alives
+  sent and lost and the links opened again, and the model (model-zk2c.json's
+  w1_73_sf*_zk2c), its uplink a range by link.v2 §2.16.
 Standard library only.
 """
 import json
@@ -213,31 +217,48 @@ def zk2c_tables(model):
         zk2c_window(w1, "w1", {"a_to_b": {"telemetry": {"zk2c_bytes": m["a_to_b_bytes"]}},
                                "b_to_a": {"keep-alive": {"zk2c_bytes": idle}}},
                     "W1-73 across rf0's face", w1l)
+        ka = m.get("uplink_keepalive")
+        if ka:
+            # The uplink's keep-alives beside its frames: a range (link.v2 §2.16).
+            got = "; ".join(f"{stack} {v['sdus']:,} a day, {kb(v['bytes'])}"
+                            for stack, v in ka["measured"].items())
+            print(f"\nA->B keep-alives beside the frames, the model: {ka['sdus'][0]:,} to "
+                  f"{ka['sdus'][1]:,} a day, {kb(ka['bytes']['lean'][0])} to "
+                  f"{kb(ka['bytes']['lean'][1])} lean (link.v2 §2.16). Measured: {got}.")
     if w2:
         zk2c_window(w2, "steady", model["w2_rf_zk2c_per_direction"], "W2 zk2c, the steady window", w2l)
         w2_day(w2, model["w2_rf_zk2c_per_direction"])
-    sf7 = load("zk2c-sf7-lean-1")
-    if sf7:
-        m = model["w1_73_sf7_zk2c"]
-        print("\n#### W1-73 across lora0's SF7 face, lean, a day\n")
-        print("| Window | Direction | SDUs | Bytes | Airtime | Duty used | Keep-alives lost; "
-              "links reopened | Model: airtime |")
+    for run, key, sf in (("zk2c-sf7-lean-1", "w1_73_sf7_zk2c", "SF7"),
+                         ("zk2c-sf9-lean-1", "w1_73_sf9_zk2c", "SF9"),
+                         ("zk2c-sf12-lean-1", "w1_73_sf12_zk2c", "SF12")):
+        a = load(run)
+        if not a or key not in model:
+            continue
+        m = model[key]
+        print(f"\n#### W1-73 across lora0's {sf} face, lean, a day\n")
+        print("| Window | Direction | SDUs | Bytes | Airtime | Duty used | Keep-alives (lost; "
+              "links reopened) | Model: airtime |")
         print("|---|---|---:|---:|---:|---:|---|---|")
-        for w in sf7["windows"]:
+        for w in a["windows"]:
             for d in ("ab", "ba"):
                 x, p = w[d], w[d]["per_day"]
                 if w["window"] == "w1" and d == "ab":
-                    mod = (f"frames {m['gen_frames_airtime_s']:,} s (gen's), "
-                           f"keep-alives {m['uplink_keepalive']['airtime_s']} s")
+                    # The uplink's keep-alives beside its frames are a range (link.v2 §2.16).
+                    ka, up = m["uplink_keepalive"], m["w1_uplink_airtime_s"]
+                    mod = (f"frames {m['gen_frames_airtime_s']:,} s (gen's), keep-alives "
+                           f"{ka['sdus'][0]:,} to {ka['sdus'][1]:,}, {ka['airtime_s'][0]} to "
+                           f"{ka['airtime_s'][1]} s: {up['gen_frames'][0]:,} to "
+                           f"{up['gen_frames'][1]:,} s; corrected frames "
+                           f"{m['frames_airtime_s']:,} s: {up['frames'][0]:,} to {up['frames'][1]:,} s")
                 else:
-                    mod = f"{m['idle_keepalive_per_direction']['airtime_s']} s of keep-alives"
+                    mod = (f"{m['idle_keepalive_per_direction']['sdus']:,} keep-alives, "
+                           f"{m['idle_keepalive_per_direction']['airtime_s']} s")
                 lost = ", ".join(f"+{t}" for t in x.get("keepalives_lost_at", [])) or "none"
                 # Under a face the far side opens: its InitSyns go B->A.
                 opened = ", ".join(f"+{t}" for t in episodes(w["ba"].get("links_opened_at", []))) or "never"
-                ev = f"lost {lost}" + (f"; reopened {opened}" if d == "ba" else "")
+                ev = f"{p['keepalives']:,} (lost {lost}" + (f"; reopened {opened})" if d == "ba" else ")")
                 print(f"| {w['window']} ({w['seconds']:.0f} s) | {NAMES[d]} | {p['sdus']:,} | {kb(p['bytes'])} | "
                       f"{p['airtime_s']:,} s | {p['airtime_s'] / 864 * 100:,.0f} % | {ev} | {mod} |")
-
 
 W2_EVENTS = 15
 
