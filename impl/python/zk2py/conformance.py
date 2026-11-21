@@ -5078,11 +5078,11 @@ def _round103_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "(round 105); 267 since observer 0.29's five (round 106); 268 since core 0.102's one, and 273 and the "
                 "owner 85 since core 0.103's five (round 107); 274 since core 0.104's one, the consumer's (round "
                 "108); 277 and the owner 88 since core 0.107's three owner rules (round 111); 283 and the static rules 73 "
-                "since core 0.108's six, the owner heartbeat's (round 112)",
+                "since core 0.108's six, the owner heartbeat's (round 112); 284 since observer 0.34's one (round 113)",
                 missing(log, "`RULES.md` lists 250 rules, 4 more", "The owner class counts 76 where it counted 78",
                         "[`RULES.md`](RULES.md) lists 249 rules, 1 fewer", "`RULES.md` lists 262 rules, 13 more")
                 + [int(once.group(1)) if once else None, counted.get("Implementation: the static rules"),
-                   counted.get("Owner")], [283, 73, 88]))
+                   counted.get("Owner")], [284, 73, 88]))
     # §7.5's "Sizes", by zk2py's own writer.
     base = {"tag": 0, "run_width": 16, "run": 1, "asof": 9, "time": {"s": 3600, "ms": 250}, "index": 0,
             "more": False, "coll": 0, "live": [], "tombs": []}
@@ -5624,12 +5624,12 @@ def _round108_readings(root: Path) -> list[tuple[str, Any, Any]]:
     faces = _load_json(root / "scope" / "faces.json")["cases"]
     out.append(("link.v2 0.12's evidence as zk2py counts it: v2/plan.json's first 41 cases, 4 of them a face with "
                 "events over an inline probe.v1 (37 to 40, from 0), the last, an event listed and not exposed, added "
-                "after the entry, which says 40; v2/lints.json's first 69, 6 with events; scope/faces.json 19 "
+                "after the entry, which says 40; v2/lints.json's first 69, 6 with events; scope/faces.json 19 then, 29 since observer 0.34 (round 113) "
                 "(link.v2 0.15 and 0.17 add cases after them, round 110)",
                 [len(plan) >= 41, [i for i, c in enumerate(plan[:41]) if "events  " in c["policy"]
                                    and "interfaces" in c],
                  len(lints) >= 69, sum("events" in c["policy"] for c in lints[:69]), len(faces)],
-                [True, [37, 38, 39, 40], True, 6, 19]))
+                [True, [37, 38, 39, 40], True, 6, 29]))
     # core 0.104 §2.6 and state.md §8
     out.append(("core 0.104 §2.6: a consumer MUST NOT deliver a put on an events key that carries no event, heard "
                 "or replayed, counted undecodable, form; why, and where one comes from; state.md §8 step 4 and "
@@ -5764,13 +5764,13 @@ def _round109_readings(root: Path) -> list[tuple[str, Any, Any]]:
     core_v = f"{m.group(1)}.{m.group(2)}" if m else None
     out: list[tuple[str, Any, Any]] = [
         ("core 0.105 or later and link.v2 0.14 or later, each with its entry, link.v2 0.13's too; observer stays "
-         "0.33; link.v2 written against core 0.100 then, 0.108 since its 0.19 (round 113)",
+         "0.33 then, 0.34 since round 113; link.v2 written against core 0.100 then, 0.108 since its 0.19 (round 113)",
          [_at_least(core_v, "0.105"), _at_least(header("profiles/link/v2.md")[0], "0.14"),
           header("observer.md")[0], header("profiles/link/v2.md")[1]]
          + entry("CHANGELOG.md", "0.105", "a delete on an events key")
          + entry("profiles/link/CHANGELOG.md", "link.v2 0.14", "editorial")
          + entry("profiles/link/CHANGELOG.md", "link.v2 0.13", "the near router's timestamping off"),
-         [True, True, "0.33", "0.108"]),
+         [True, True, "0.34", "0.108"]),
     ]
     # link.v2 0.13: §2.18's MUST, §2.19's reading and code, §5's row
     out.append(("link.v2 0.13 §2.18, §2.19 and §5: a generator writes the near router's timestamping off for a "
@@ -5882,10 +5882,10 @@ def _round109_readings(root: Path) -> list[tuple[str, Any, Any]]:
     every = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
     out.append(("core 0.105's figures: RULES.md lists 274 rules, as 0.104 did, the consumer's MUST NOT widened in "
                 "place (consumer 32); the row names a delete; 277 since core 0.107 (round 111); 283 since core 0.108 "
-                "(round 112)",
+                "(round 112); 284 since observer 0.34 (round 113)",
                 [int(every.group(1)) if every else None, counts.get("Consumer"),
                  "or a delete on an events key, whether a subscription heard it" in rules],
-                [283, "32", True]))
+                [284, "32", True]))
     # Round 109's findings, each text as it quotes it, so an answer moves it
     from .contract import load_contract
     from .owner import keeps_timestamp
@@ -5990,10 +5990,12 @@ def _round111_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out: list[tuple[str, Any, Any]] = []
     m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
     lines = (spec / "CHANGELOG.md").read_text(encoding="utf-8").splitlines()
-    out.append(("core 0.107 or later, with its entry (#1126, #1127); observer.md stays 0.33, as the entry says",
+    out.append(("core 0.107 or later, with its entry (#1126, #1127); observer.md stayed 0.33, as the entry says, "
+                "and is 0.34 or later since #1110's H2c (round 113)",
                 [m is not None and (int(m.group(1)), int(m.group(2))) >= (0, 107),
                  any(ln.startswith("## 0.107 ") and "`minor` where its revision has one" in ln for ln in lines),
-                 bool(re.search(r"\| \*\*Text version\*\* \| 0\.33 ", obs)), "`observer.md` stays 0.33." in log],
+                 bool(re.search(r"\| \*\*Text version\*\* \| 0\.(3[4-9]|[4-9]\d) ", obs)),
+                 "`observer.md` stays 0.33." in log],
                 [True, True, True, True]))
     out.append(("core 0.107 §3.3, §3.2 and §9.8: the rules as their texts state them",
                 missing(core,
@@ -6054,7 +6056,8 @@ def _round111_readings(root: Path) -> list[tuple[str, Any, Any]]:
     owner33 = [r[3] for r in rows if r[0] == "owner" and r[1] == "core §3.3"]
     rules = (spec / "RULES.md").read_text(encoding="utf-8")
     once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
-    out.append(("core 0.107's figures: RULES.md listed 277 rules, 274 in 0.106 (283 since core 0.108, round 112), "
+    out.append(("core 0.107's figures: RULES.md listed 277 rules, 274 in 0.106 (283 since core 0.108, round 112; 284 "
+                "since observer 0.34, round 113), "
                 "the owner's the MUST NOT on `minor` and the two SHOULDs of a descriptor over 1 KB; the 1 KB "
                 "SHOULD's row shows the MAY that excepts it",
                 missing(log, "`RULES.md` lists 277 rules, 274 in 0.106 (owner 88, 85 before)")
@@ -6063,7 +6066,7 @@ def _round111_readings(root: Path) -> list[tuple[str, Any, Any]]:
                    sum(1 for t in owner33 if "exceeds 1 KB SHOULD leave out every empty member" in t),
                    sum(1 for t in owner33 if "That owner SHOULD also keep every member but" in t),
                    sum(1 for t in owner33 if "SHOULD stay within 1 KB" in t and "So an owner MAY exceed 1 KB with" in t)],
-                [283, 1, 1, 1, 1]))
+                [284, 1, 1, 1, 1]))
     # The checker, by §3.3's sentences and the schema: `minor` optional, an
     # integer of the record's uint64 where stated.
     nav = load_contract(dd / "contracts" / "nav.v2.toml", spec_dir=spec)
@@ -6307,8 +6310,8 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
     once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
     out: list[tuple[str, Any, Any]] = [
         ("freshness.v2 0.9 or later, written against core 0.108, link.v2 0.19 or later, against 0.108, and link.v1 "
-         "0.20 or later, still against 0.32, each with its entry; RULES.md lists 283 rules as before: core's three "
-         "adopted places are no keyword rule",
+         "0.20 or later, still against 0.32, each with its entry; RULES.md listed 283 rules as before, core's three "
+         "adopted places being no keyword rule, and 284 since observer 0.34's one",
          [_at_least(header("profiles/freshness/v2.md")[0], "0.9"), header("profiles/freshness/v2.md")[1],
           _at_least(header("profiles/link/v2.md")[0], "0.19"), header("profiles/link/v2.md")[1],
           _at_least(header("profiles/link/v1.md")[0], "0.20"), header("profiles/link/v1.md")[1],
@@ -6318,7 +6321,7 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
          + entry("profiles/link/CHANGELOG.md", "0.20", "no owner heartbeat crosses a face")
          + missing(flat("CHANGELOG.md"), "**Adopted, with `freshness.v2` 0.9: three places that name a heartbeat.** "
                                          "None is a keyword rule."),
-         [True, "0.108", True, "0.108", True, "0.32", 283]),
+         [True, "0.108", True, "0.108", True, "0.32", 284]),
     ]
 
     # -- the fixtures the entries name ---------------------------------------------------
@@ -6638,11 +6641,140 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 + missing(l1, "**Where `freshness.v2` is not listed**, no listed interface has a heartbeat. Where the "
                               "face lets streams cross, an owner heartbeat then crosses as any key no contract "
                               "declares does (§2.7)."), []))
+    out += _observer034_readings(root, contracts)
     out.append(("core §8.5 as freshness.v2 0.9 adopts it: an owner heartbeat that crosses is evidence for each "
                 "interface it holds a group of, and its horizon the shortest of the collections its groups cover",
                 missing(core, "**An owner heartbeat that crosses** is evidence for each interface it holds a group "
                               "of: one put per owner each period",
                         "An owner heartbeat's is the shortest of the collections its groups cover."), []))
+    return out
+
+
+def _observer034_readings(root: Path, layouts_contracts: dict[str, Any]) -> list[tuple[str, Any, Any]]:
+    """``observer.md`` 0.34 (#1110's H2c, main fcc2f65b), read cold in round
+    113's second part: its entry and its one rule, ``scope/faces.json``'s ten
+    new cases, zk2py's scope where no case goes, an owner heartbeat's row in
+    zk2py's echo tool, and the texts F-556 to F-559 quote."""
+    import json
+    import re
+
+    from . import across, catalog as cat, echo_tool, heartbeat, owner_heartbeat as oh, zk2c
+    from .contract import load_contract
+
+    spec = root.parent
+    repo = spec.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    obs, olog, fv = flat("observer.md"), flat("observer-CHANGELOG.md"), flat("profiles/freshness/v2.md")
+    core, flog = flat("core.md"), flat("profiles/freshness/CHANGELOG.md")
+    rules = (spec / "RULES.md").read_text(encoding="utf-8")
+    once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
+    v = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+)", obs)
+    w = re.search(r"\| \*\*Written against\*\* \| core (\d+\.\d+)", obs)
+    faces = _load_json(root / "scope" / "faces.json")["cases"]
+    stated = [i for i, c in enumerate(faces) if "catalog" in c]
+    out: list[tuple[str, Any, Any]] = [
+        ("observer 0.34 or later, written against core 0.108, with its entry; RULES.md lists 284 rules, its one new "
+         "row §7.5's, citing heartbeat/owner.json; scope/faces.json holds 29 cases, the last ten stating `catalog`, "
+         "two of them false, none under a link.v1 policy and none a GET",
+         [_at_least(v.group(1) if v else None, "0.34"), w.group(1) if w else None,
+          int(once.group(1)) if once else None,
+          sum(1 for ln in rules.splitlines() if "A tool MUST read an owner heartbeat's group with the revision its "
+              "index names" in ln and "`[F: heartbeat/owner.json]`" in ln),
+          len(faces), stated, [i for i in stated if faces[i]["catalog"] is False],
+          sorted({faces[i]["policy"].rsplit("/", 1)[-1] for i in stated if faces[i]["policy"]}),
+          [i for i in stated if faces[i]["reads"] != "samples"]]
+         + missing(olog, "## 0.34 — 2026-11-21: an owner heartbeat's scope across a face, and its groups' revisions",
+                   "`conformance/scope/faces.json` gains ten cases, each stating whether the tool was given a "
+                   "catalog. Its 19 cases state none and stand as they were."),
+         [True, "0.108", 284, 1, 29, list(range(19, 29)), [23, 25], ["rf.face.toml", "zenohd-rf0.face.toml"], []]),
+    ]
+    # zk2py's scope where no case of faces.json goes.
+    probe = load_contract(spec / "profiles" / "link" / "conformance" / "contracts" / "probe.v1.toml", spec_dir=spec)
+    plan2 = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "plan.json")["cases"]
+    both = [load_contract(repo / "impl" / "python" / "interop" / "freshness" / f"zk2py_ohb_{n}.v1.toml")
+            for n in "abc"]
+    v2_text = plan2[5]["policy"].replace('"probe.v1/frames/link" = { every_s = 60, keyframe_s = 900 }', "")
+
+    def keys(cs: list[Any], addr: str, **kw: Any) -> Any:
+        sc = across.scopes(cs, [addr], **kw)
+        return sc.plan_refused if sc.plan_refused is not None else \
+            sorted(x.split("/freshness.v2/stream/")[1] for x in sc.scopes if "/freshness.v2/stream/heartbeats" in x)
+
+    out.append(("observer 0.34 §7.5 \"The scope\", where no case of faces.json goes: under a link.v1 policy a tool "
+                "given a catalog declares neither class's key, though probe.v1's heartbeat crosses (v2/plan.json's "
+                "case 10); with a collection of each class in hand and a link one crossing a link.v2 face, the link "
+                "key and never the host key; with no policy, both; to GET, none, with a face or without; and given "
+                "no catalog, none",
+                [keys([probe], "lab/probe-a", policy_text=plan2[10]["policy"], face_name="radio", catalog_given=True),
+                 keys([probe], "lab/probe-a", policy_text=plan2[5]["policy"], face_name="radio", catalog_given=True),
+                 keys(both, "lab/probe-a", policy_text=v2_text, face_name="radio", catalog_given=True),
+                 keys(both, "lab/node", catalog_given=True),
+                 keys(both, "lab/node", reads="state", catalog_given=True),
+                 keys(both, "lab/probe-a", reads="state", policy_text=v2_text, face_name="radio", catalog_given=True),
+                 keys(both, "lab/node"), across.owner_heartbeat_classes(both), across.owner_heartbeat_classes([probe])]
+                + missing(obs, "It is never the `host` class's, and neither under a `link.v1` policy (`link.v1` "
+                               "§2.9)", "- **The catalog adds that scope alone.** A plan is derived as it is without "
+                               "one (below)."),
+                [[], ["heartbeats/link"], ["heartbeats/link"], ["heartbeats/host", "heartbeats/link"], [], [], [],
+                 ["link", "host"], ["link"]]))
+    # An owner heartbeat's row in zk2py's echo tool.
+    held = cat.Catalog(epoch=0, entries=[(c.interface, c.fingerprint) for c in both], id="0badcafe")
+    lo = [heartbeat.layout_of(c.canonical, c.fingerprint) for c in both]
+    groups = [oh.group_of(0, lo[0], {"state/status": {"digest": "00000001", "vouched": True}}),
+              oh.Group(1, (lo[1].tag + 1) % 16, "0"), oh.Group(9, 3, "101")]
+    payload = oh.write(zk2c.InBand(16, 7, 3), {"s": 5, "ms": 1}, groups)
+    key = "zk2/lab/node/freshness.v2/stream/heartbeats/link"
+
+    def shown(h: Any) -> list[Any]:
+        r = echo_tool.row_of(key, False, len(payload), zk2c.ENCODING, payload, held=h)
+        return [r["heartbeat"]["form"], [(g["index"], g["tag"], g["bits"], g.get("iface"), g["vouches"])
+                                         for g in r["heartbeat"]["groups"]],
+                (r.get("declared_type") or {}).get("revision"), r.get("sniffed")]
+
+    envelopes = [(0, lo[0].tag, 35, None, None), (1, (lo[1].tag + 1) % 16, 1, None, None), (9, 3, 3, None, None)]
+    out.append(("observer 0.34 §7.3 and §7.5, an owner heartbeat's row in zk2py's echo tool: told by its key, kept "
+                "from the three steps (no revision chosen for the key), never sniffed; given a catalog, group 0 "
+                "read with the revision its index names, group 1, whose tag is not that revision's, and group 9, "
+                "whose index §8.6 refuses, by their envelopes, the put's other groups read all the same; a "
+                "revision not held, and no catalog, by the envelope: index, tag and size",
+                [shown(echo_tool.Held(both, held)), shown(echo_tool.Held(both[1:], held))[1],
+                 shown(echo_tool.Held(both, None))[1], shown(None)[1],
+                 echo_tool.is_owner_heartbeat_key("zk2/lab/node/freshness.v2/stream/heartbeat/a.v1")]
+                + missing(obs, "A tool MUST read an owner heartbeat's group with the revision its index names in the "
+                               "catalog the tool was given, as core §8.6 reads an index, and never with one these "
+                               "steps would choose.",
+                          "**By its envelope** is by its index, its tag and its size."),
+                [["owner_heartbeat",
+                  [(0, lo[0].tag, 35, both[0].interface, {"state/status": {"digest": "00000001", "vouched": True}}),
+                   (1, (lo[1].tag + 1) % 16, 1, both[1].interface, None), (9, 3, 3, None, None)], None, None],
+                 [(0, lo[0].tag, 35, both[0].interface, None), (1, (lo[1].tag + 1) % 16, 1, both[1].interface, None),
+                  (9, 3, 3, None, None)], envelopes, envelopes, False]))
+    apply_cases = _load_json(spec / "profiles" / "freshness" / "conformance" / "apply.json")["cases"]
+    out.append(("apply.json at fcc2f65b: 32 cases still; case 18's note reworded, the catalog holding five entries, "
+                "indices 0 to 4, and 7 past it",
+                [len(apply_cases), "the catalog holds five entries, indices 0 to 4, and 7 is past it"
+                 in apply_cases[18]["note"]], [32, True]))
+    out.append(("F-556 to F-559, the sentences they quote: a reader with no catalog in freshness.v2's entry alone; "
+                "how a reader learns the catalog an owner names in core §8.6 alone; observer §7.5's scope given no "
+                "catalog beside its envelope for every group where it was given none",
+                missing(flog, "**The catalog is needed to confirm.** A reader that does not hold the catalog its "
+                              "owner names reads no group, and its members go stale.")
+                + missing(fv, "- **No index.** Core §8.6 refuses its index (`unknown_catalog`, `unknown_index`): the "
+                              "group confirms nothing.",
+                          "So it subscribes to the provider's owner heartbeat keys too (§3): one for each class that "
+                          "the collections it follows have.")
+                + missing(core, "and states its id in its descriptor (§3.3)",
+                          "Across a constrained face no descriptor crosses (§8.5). There, which catalog an owner "
+                          "writes under is the deployment's word, as its bindings are (R7).",
+                          "**Reading an index.** A reader reads an index, or a time counted from the epoch, through "
+                          "the catalog the owner names.")
+                + missing(obs, "- **Given no catalog** a tool could read no group (core §8.6). It has no such scope.",
+                          "every group where it was given no catalog")
+                + [("descriptor" in fv.split("### 2.5 A subscriber's age")[1].split("### 2.6")[0])], [False]))
     return out
 
 
@@ -6683,12 +6815,13 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
     fv2 = flat("profiles/freshness/v2.md")
     m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
     out: list[tuple[str, Any, Any]] = [
-        ("core 0.108 or later and link.v2 0.18 or later, each with its entry; observer stays 0.33",
+        ("core 0.108 or later and link.v2 0.18 or later, each with its entry; observer stayed 0.33 then, 0.34 since "
+         "#1110's H2c (round 113)",
          [m is not None and _at_least(f"{m.group(1)}.{m.group(2)}", "0.108"),
           _at_least(version_of("profiles/link/v2.md"), "0.18"), version_of("observer.md")]
          + entry("CHANGELOG.md", "0.108", "the owner heartbeat: form 6 with a group per interface")
          + entry("profiles/link/CHANGELOG.md", "link.v2 0.18", "a `null` among the eight keys"),
-         [True, True, "0.33"]),
+         [True, True, "0.34"]),
     ]
     # -- core 0.108 §7.5: the rules as the text states them ----------------------------
     out.append(("core 0.108 §7.5, the owner heartbeat: its six rules and its layout as the text states them",
@@ -6724,8 +6857,8 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
     static = re.search(r"^\| \[Implementation: the static rules\]\([^)]*\) \| (\d+) \|", rules, re.M)
     out.append(("core 0.108's entry, its evidence: owner.json holds 12 writes, 45 reads, 32 groups read through three "
                 "catalogs and one body read both ways, 90 cases; layouts.json holds six revisions, alert.v1, knob.v1, "
-                "vital.v1 and mixed.v1 beside hb.v1 and bare.v1; RULES.md lists 283 rules, the static rules 73, six "
-                "of them citing owner.json",
+                "vital.v1 and mixed.v1 beside hb.v1 and bare.v1; RULES.md listed 283 rules, the static rules 73, six "
+                "of them citing owner.json; 284 since observer 0.34, whose one rule cites owner.json too, seven rows",
                 [len(own["writes"]), len(own["reads"]), len(own["groups"]), len(own["either"]),
                  sorted(own["catalogs"]), sorted(c["contract"] for c in lay["layouts"]),
                  int(once.group(1)) if once else None, int(static.group(1)) if static else None,
@@ -6734,7 +6867,7 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
                                "three catalogs, and one body that reads both ways.",
                           "- **Six rules**, all static"),
                 [12, 45, 32, 1, ["first", "other", "second"],
-                 ["alert.v1", "bare.v1", "hb.v1", "knob.v1", "mixed.v1", "vital.v1"], 283, 73, 6]))
+                 ["alert.v1", "bare.v1", "hb.v1", "knob.v1", "mixed.v1", "vital.v1"], 284, 73, 7]))
     # A file with no write holds nothing here: the row then disagrees, and
     # the family goes on (review-bot on #1138; the mend, round 113).
     w2 = own["writes"][0] if own["writes"] else {"value": {"groups": []}}
@@ -7124,14 +7257,14 @@ def _round110_readings(root: Path) -> list[tuple[str, Any, Any]]:
     core_v = f"{m.group(1)}.{m.group(2)}" if m else None
     out: list[tuple[str, Any, Any]] = [
         ("core 0.106 or later and link.v2 0.17 or later, each with its entry, link.v2 0.15's and 0.16's too; observer "
-         "stays 0.33; link.v2 written against core 0.100 then, 0.108 since its 0.19 (round 113)",
+         "stays 0.33 then, 0.34 since round 113; link.v2 written against core 0.100 then, 0.108 since its 0.19",
          [_at_least(core_v, "0.106"), _at_least(header("profiles/link/v2.md")[0], "0.17"), header("observer.md")[0],
           header("profiles/link/v2.md")[1]]
          + entry("CHANGELOG.md", "0.106", "a delete with no attachment on an events key")
          + entry("profiles/link/CHANGELOG.md", "link.v2 0.17", "`keep_alive_not_suppressed` at the interval")
          + entry("profiles/link/CHANGELOG.md", "link.v2 0.16", "editorial")
          + entry("profiles/link/CHANGELOG.md", "link.v2 0.15", "the end that opens"),
-         [True, True, "0.33", "0.108"]),
+         [True, True, "0.34", "0.108"]),
     ]
     # link.v2 0.15: `opens` as §2.1, §2.3, §2.5, §2.18, §2.19 and §5 state it
     out.append(("link.v2 0.15 §2.1, §2.3, §2.5, §2.18, §2.19 and §5: a face's opens, far where none is stated, near "
@@ -8217,12 +8350,12 @@ def _core096_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "250 since core 0.97's four, and core 0.98's still; 249 since core 0.99 (round 104); 262 since core "
                 "0.100's 13 (round 105); 267 since observer 0.29 (round 106); 273 since core 0.102's one and 0.103's "
                 "five (round 107); 274 since core 0.104's one (round 108); 277 since core 0.107's three (round 111); 283 "
-                "since core 0.108's six (round 112)",
+                "since core 0.108's six (round 112); 284 since observer 0.34's one (round 113)",
                 missing(flat("CHANGELOG.md"), "lists 246 rules: 0.95's 239, these four and observer 0.26's three",
                         "`RULES.md` lists 250 rules, 4 more", "the index still lists 250 rules",
                         "lists 249 rules, 1 fewer", "`RULES.md` lists 262 rules, 13 more than 0.99's")
                 + missing(flat("observer-CHANGELOG.md"), "**`RULES.md`** counts 267 rules, 82 of them the observer's.")
-                + [int(once.group(1)) if once else None], [283]))
+                + [int(once.group(1)) if once else None], [284]))
     out.append(("core 0.96 §8.1, §8.4, §8.5 and observer 0.26 §3.6, §3.11: the rules as their texts state them",
                 missing(core, "Such an owner SHOULD put every interface it implements in its tokenless set.",
                         "Such an owner MUST NOT implement `archive.v1`, nor an interface whose contract uses "
@@ -12971,8 +13104,11 @@ def family_scope(root: Path) -> list[Result]:
             cs = [load_contract(repo / x) for x in c["contracts"]]
             pol = None if c["policy"] is None else (repo / c["policy"]).read_text(encoding="utf-8")
             # "The tool derives the plan from the policy and the contracts in
-            # hand": no catalog is given
-            sc = across.scopes(cs, c["across"], c["reads"], pol, c["face"], None)
+            # hand": no catalog is given the plan. Observer 0.34: "A case's
+            # `catalog`, where it states one, says whether the tool was given
+            # a catalog (core §8.6); a case that states none was given none."
+            sc = across.scopes(cs, c["across"], c["reads"], pol, c["face"], None,
+                               catalog_given=bool(c.get("catalog", False)))
             if sc.plan_refused is not None:
                 got: Any = {"plan_refused": sc.plan_refused}
             else:

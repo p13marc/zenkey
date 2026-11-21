@@ -83,8 +83,8 @@ PROFILES = {
     "freshness.v2": ("owner (heartbeats; owner heartbeats per class under a catalog, 0.9, round 113), consumer and "
                      "tool (§2.5's rule over both forms, the re-read, the judgements)",
                      "both forms are read by freshness_v2.Provider alone: zk2py's health.v1, alarms.v1 and config "
-                     "readers and its echo tool subscribe to no owner heartbeat key, so a covered interface's members "
-                     "go stale to them (§2.4 \"Readers first\")"),
+                     "readers subscribe to no owner heartbeat key, so a covered interface's members go stale to them "
+                     "(§2.4 \"Readers first\"); its echo tool shows one (observer 0.34)"),
     "health.v1": ("owner, tool (§2.11's reader and roll-ups)", ""),
     "config.v1": ("owner (the simulated device), caller, tool (§5's reader)", ""),
     "config.v2": ("owner (the simulated device), caller, tool (§5's reader), and the linter of §2.2 (round 102)",
@@ -679,11 +679,21 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "it reads that have one, declared again after two of them of silence, said on stderr and in the notes; given no "
      "policy, the medium taken for one that repairs, as the text says (far_side_live: constrained.md §9 step 2) "
      "(round 99, observer 0.23)"),
+    # observer 0.34 (#1110; round 113): an owner heartbeat's groups, each by
+    # its index in the catalog the tool was given.
+    ("observer", "observer §7.5", "A tool MUST read an owner heartbeat's group with the revision its index names in",
+     MET, "echo_tool.owner_heartbeat_of: a put on …/freshness.v2/stream/heartbeats/<class> is told by its key and "
+          "kept from §7.5's three steps; each group read with the revision catalog.resolve gives its index in the "
+          "catalog given, its tag checked; by its index, tag and size with no catalog, a refused index, a revision "
+          "not held or another tag (heartbeat family: owner.json's groups; readings; owner_heartbeat_live with "
+          "zenctl echo beside it) (round 113, observer 0.34)"),
     # observer 0.29 (#990 V1, V2; round 106): the scope by the face's plan, a
     # selector given, the revision of a key, and CH's tag.
     ("observer", "observer §7.5", "A tool given the face SHOULD NOT declare a scope for a resource the plan keeps off it",
      MET, "echo_tool --across-face with --face-policy and --face: across.scopes, the plan's crossing resources and "
-          "heartbeats by link_v2.plan, nothing it denies a put (scope family, faces.json 17/17) (round 106)"),
+          "heartbeats by link_v2.plan, nothing it denies a put (scope family, faces.json 17/17) (round 106); given "
+          "a catalog, the link class's owner heartbeat key where the plan lets it cross, never the host class's "
+          "(observer 0.34, faces.json 29/29, round 113)"),
     ("observer", "observer §7.5", "A tool MUST NOT drop silently a selector it was given that meets none of its scopes",
      MET, "echo_tool --across-face with a SELECTOR: across.declared, the scopes it includes and itself where it meets "
           "one; one that meets none refused, exit 2, named (scope family) (round 106)"),
