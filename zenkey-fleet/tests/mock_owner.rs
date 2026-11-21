@@ -88,6 +88,7 @@ async fn gen_brings_up_a_visible_owner_publishing_through_its_contract() {
         elect: None,
         run_store: None,
         catalog: None,
+        owner_heartbeat: false,
     };
     let plan = gen_plan(&spec).unwrap();
     let (up, came_up) = tokio::sync::oneshot::channel();
@@ -180,8 +181,10 @@ async fn gen_brings_up_a_visible_owner_publishing_through_its_contract() {
 /// - **The size rule.** Its descriptor is over 1 KB with the four members
 ///   an owner cannot shorten, so it leaves out every empty member and keeps
 ///   its rest within 512 B (core §3.3). This test asserts the rule and
-///   no figure: `descriptors/ok-over-1kb` is this node as it was recorded
-///   before #1110's H2b, and the changelog holds the counts.
+///   no figure: `descriptors/ok-over-1kb` records the 0.107 owner, before
+///   #1110's H2b, and the changelog holds its counts. With
+///   `owner_heartbeat` the same node serves `stream/heartbeats/{class}`,
+///   lists nothing unavailable there, and is the shorter for it.
 /// - **The minor.** Each entry states the minor its revision has: the
 ///   authoring file's for a revision loaded from one, and none for one read
 ///   from a bundle, never a 0 the revision does not have.
@@ -222,6 +225,7 @@ async fn gen_of_zenoh_modems_node_meets_the_size_rule_and_states_true_minors() {
         elect: None,
         run_store: Some(Arc::new(zenkey::run::FileRunStore::new(&runs))),
         catalog: Some(zenkey_model::catalog::Catalog::parse_bytes(&catalog).unwrap()),
+        owner_heartbeat: false,
     };
     let plan = gen_plan(&spec).unwrap();
     let (up, came_up) = tokio::sync::oneshot::channel();
@@ -269,11 +273,14 @@ async fn gen_of_zenoh_modems_node_meets_the_size_rule_and_states_true_minors() {
     );
 
     // The size rule. 1,344 B before core 0.107, which wrote every empty
-    // member and a `minor` of 0 for each revision. Since #1110's H2b the
-    // runtime embeds `freshness.v2`'s revision 1.1, whose optional
+    // member and a `minor` of 0 for each revision. `descriptors/ok-over-1kb`
+    // records the 0.107 owner, 1,184 B. Since #1110's H2b the runtime
+    // embeds `freshness.v2`'s revision 1.1, whose optional
     // `stream/heartbeats/{class}` an owner that sends heartbeats alone
-    // lists `unavailable` (core §3.3), so the node is longer than the
-    // fixture's record of it. The rule is asserted, and no figure.
+    // lists `unavailable` (core §3.3): this node, `health.v1` read from its
+    // bundle, is 1,262 B so, a rest of 237 B, and 1,174 B once its owner
+    // heartbeats cover its interfaces (below; measured at #1110's H3). The
+    // rule is asserted, and no figure.
     let size = d.size_of(&bytes);
     assert_eq!(
         serde_json::to_string(&d).unwrap(),
@@ -315,9 +322,112 @@ async fn gen_of_zenoh_modems_node_meets_the_size_rule_and_states_true_minors() {
     let mut found = Vec::new();
     empties("", &serde_json::from_str(text).unwrap(), &mut found);
     assert!(found.is_empty(), "empty members written: {found:?}");
+    let unavailable = |d: &zenkey_model::descriptor::Descriptor| -> Vec<(String, String)> {
+        d.interfaces
+            .iter()
+            .find(|e| e.iface == "freshness.v2")
+            .expect("freshness.v2 listed")
+            .unavailable
+            .iter()
+            .map(|u| {
+                (
+                    u.resource.clone(),
+                    serde_json::to_value(u.cause)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                )
+            })
+            .collect()
+    };
+    assert_eq!(
+        unavailable(&d),
+        [("stream/heartbeats/{class}".to_owned(), "config".to_owned())],
+        "heartbeats alone: the owner heartbeat's key left out by configuration (core §3.3)"
+    );
+    let off = bytes.len();
 
     let report = run.await.unwrap().unwrap();
     assert_eq!(report.failed, 0, "{report:?}");
+
+    // The same node with `owner_heartbeat` (#1110's H3, `zenctl gen
+    // --owner-heartbeat`): it serves `stream/heartbeats/{class}`, so its
+    // descriptor lists nothing unavailable there and is the shorter for
+    // it; it puts one owner heartbeat on the `host` key, a group at each
+    // interface's index in the catalog, and none on a heartbeat/<iface>
+    // key.
+    let cat = spec.catalog.clone().unwrap();
+    // Each put heard under freshness.v2's stream: its key, and its groups'
+    // indices where it reads as an owner heartbeat.
+    type Heard = Vec<(String, Vec<u16>)>;
+    let heard: Arc<std::sync::Mutex<Heard>> = Arc::default();
+    let h = Arc::clone(&heard);
+    let _beats = tool
+        .declare_subscriber("zk2/h-3fa9c2d41b7e/rf0/freshness.v2/stream/**")
+        .callback(move |sample| {
+            let payload = sample.payload().to_bytes();
+            let indices = zenkey_model::wire::Envelope::parse(&payload)
+                .ok()
+                .and_then(|e| zenkey_model::heartbeat::OwnerHeartbeat::of(&e).ok())
+                .map(|hb| hb.groups.iter().map(|g| g.index).collect())
+                .unwrap_or_default();
+            h.lock()
+                .unwrap()
+                .push((sample.key_expr().to_string(), indices));
+        })
+        .await
+        .unwrap();
+    let on = GenSpec {
+        owner_heartbeat: true,
+        ..spec.clone()
+    };
+    let plan = gen_plan(&on).unwrap();
+    let owners = client(&ep).await;
+    let (up, came_up) = tokio::sync::oneshot::channel();
+    let run = tokio::spawn(async move {
+        run_gen(&owners, &on, &plan, |i| {
+            let _ = up.send(i.to_owned());
+        })
+        .await
+    });
+    let instance = came_up.await.expect("the mock came up");
+    let zenkey::presence::Found::Descriptor(_, bytes) =
+        zenkey::presence::descriptor(&tool, &address, &instance.parse().unwrap(), T)
+            .await
+            .unwrap()
+    else {
+        panic!("no descriptor")
+    };
+    let text = std::str::from_utf8(&bytes).unwrap();
+    let (d, report) = zenkey_model::descriptor::check(text, &contracts);
+    assert!(!report.has_errors(), "{report}");
+    let d = d.unwrap();
+    assert_eq!(unavailable(&d), [], "it serves the owner heartbeat's key");
+    let size = d.size_of(&bytes);
+    assert!(size.bytes > SIZE_BYTES && size.meets(), "{size:?}");
+    assert!(
+        bytes.len() < off,
+        "shorter by the entry it no longer lists: {} against {off}",
+        bytes.len()
+    );
+    let report = run.await.unwrap().unwrap();
+    assert_eq!(report.failed, 0, "{report:?}");
+    let mut indices: Vec<u16> = [&modem, &config, &health]
+        .iter()
+        .map(|r| cat.index_of(r.iface(), r.fingerprint()).expect("listed"))
+        .collect();
+    indices.sort_unstable();
+    let heard = heard.lock().unwrap().clone();
+    assert!(!heard.is_empty(), "an owner heartbeat within the run");
+    for (key, groups) in &heard {
+        assert_eq!(
+            key, "zk2/h-3fa9c2d41b7e/rf0/freshness.v2/stream/heartbeats/host",
+            "the `host` key alone: every collection of the node is `host`, and no \
+             heartbeat/<iface> key is put on"
+        );
+        assert_eq!(groups, &indices, "a group at each interface's index");
+    }
     let _ = std::fs::remove_file(&runs);
 }
 
@@ -342,6 +452,7 @@ async fn gen_holds_an_event_to_its_declared_rate_and_says_so() {
         elect: None,
         run_store: None,
         catalog: None,
+        owner_heartbeat: false,
     };
     let plan = gen_plan(&spec).unwrap();
     let applied = plan
@@ -649,6 +760,7 @@ async fn gen_of_a_governed_contract_elects_and_a_second_stands_by() {
                 elect: Some(startup),
                 run_store: None,
                 catalog: None,
+                owner_heartbeat: false,
             };
             let plan = gen_plan(&spec).unwrap();
             let (up, came_up) = tokio::sync::oneshot::channel();
@@ -929,6 +1041,7 @@ async fn gen_declares_a_governed_member_again_after_a_step_down() {
         elect: Some(startup),
         run_store: None,
         catalog: None,
+        owner_heartbeat: false,
     };
     let plan = gen_plan(&spec).unwrap();
     let owner = stamping(&ep).await;

@@ -241,9 +241,12 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   group on the class key, `host` index 2 for `pulse.v1` and `link` index
   0 for `beacon.v2`'s status, the table's head line, and with no
   `--catalog` no row at all and `heartbeats` 0, the regression
-  `freshness.v2` §2.4's "Readers first" names; `gen` and `serve` take no
-  flag for the option, so their owners list `stream/heartbeats/{class}`
-  unavailable, cause `config` (`build` before H3); #988 L4: `--face-policy F
+  `freshness.v2` §2.4's "Readers first" names; `gen --owner-heartbeat`
+  sets the option on its mock owner (`GenSpec::owner_heartbeat`), refused
+  without `--catalog` before any session, exit 2
+  (`tests/cmd/mock-owner.trycmd`); `serve` takes no such flag, and an owner with
+  the option off lists `stream/heartbeats/{class}` unavailable, cause
+  `config` (`build` before H3); #988 L4: `--face-policy F
   --face NAME` in `AcrossFaceArgs` (`zk2::far_side`, a `link.v2` face, exit
   2 otherwise), `FaceScope::deployment` → `Deployment::across` (the face's
   `reply_timeout_ms` the default `--timeout` below a flag or context, every

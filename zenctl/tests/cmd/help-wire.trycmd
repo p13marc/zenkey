@@ -313,7 +313,7 @@ Options:
 $ zenctl watch --help
 Subscribe to a zk2 resource and print every sample, decoded.
 
-A stream, state or event resource of one address or a pattern (`*/tc`), subscribed through the runtime's consumer (spec §3.2: at once, without presence), every sample rendered through the contract (§7.2). A sample put on a wildcard key is discarded by rule (R6) and counted apart from what this tool lagged behind. Ends at `--count` samples, after `--for` seconds, or on ctrl-c, with a summary. Exit 0 when a sample arrived, 2 when none did: silence is never a verdict.
+A stream, state or event resource of one address or a pattern (`*/tc`), subscribed through the runtime's consumer (spec §3.2: at once, without presence), every sample rendered through the contract (§7.2). A sample put on a wildcard key is discarded by rule (R6) and counted apart from what this tool lagged behind. Ends at `--count` samples, after `--for` seconds, or on ctrl-c, with a summary. Exit 0 when a sample arrived, 2 when none did: silence is never a verdict. A heartbeat's `confirmation` row is no sample: a collection nothing was put on exits 2, however often its members were confirmed.
 
 Usage: zenctl watch [OPTIONS] <SYSTEM/SERVICE> <IFACE[@FP]> <RESOURCE>
 
@@ -1454,6 +1454,9 @@ Options:
 
       --run-file <PATH>
           Take the mock owner's runs from this record (core §4.3): 2 bytes, the last 16-bit run issued, each instance's next run made durable there before anything is written under it. A file that does not exist yet starts at run 0. Keep it with the service wherever it runs. Without it, each instance draws a random 32-bit run. Refused (exit 2) beside an interface redundancy.v1 governs, whose candidates draw 32-bit runs
+
+      --owner-heartbeat
+          Confirm the mock owner's interfaces by owner heartbeats (freshness.v2 §2.4): one put per class of exposure, on `…/freshness.v2/stream/heartbeats/link` and `…/host`, in place of the heartbeat of each interface --catalog lists. Needs --catalog, and is refused without it (exit 2): a group names its interface by its index there. Off unless given: a reader with no catalog, or one that reads heartbeats alone, reads a covered interface's members stale
 
       --i-know
           Start beside an instance already running at the address: a second writer of its keys (P3) and a split-brain on every exclusive resource (spec §6)

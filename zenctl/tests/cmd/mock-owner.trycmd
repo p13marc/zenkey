@@ -78,6 +78,19 @@ Error: detections.v1 role input: is required (camera.v1), and a service whose co
 
 ```
 
+`--owner-heartbeat` has the mock owner confirm its interfaces by owner
+heartbeats (`freshness.v2` §2.4), one put per class in place of the heartbeat
+of each interface the catalog lists. A group names its interface by its index
+in the catalog, so the flag is refused without `--catalog`, before any
+session.
+
+```console
+$ zenctl gen host-a/tc tc.netif.v1 --contracts ../examples/zk2/tcgui/tc.netif.v1.toml --owner-heartbeat --dry-run
+? 2
+Error: --owner-heartbeat needs --catalog <PATH>: an owner heartbeat names each interface it covers by its index in the deployment catalog (freshness.v2 §2.4)
+
+```
+
 `serve` answers one operation with a fixed reply, encoded as the contract's
 response type, or refuses it with an envelope code — `unavailable` with its
 cause, and a cause with no other code (spec §5.2). A resource that is not an

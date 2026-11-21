@@ -314,6 +314,16 @@ pub(crate) struct GenArgs {
     /// candidates draw 32-bit runs.
     #[arg(long = "run-file", value_name = "PATH")]
     pub(crate) run_file: Option<PathBuf>,
+    /// Confirm the mock owner's interfaces by owner heartbeats
+    /// (freshness.v2 §2.4): one put per class of exposure, on
+    /// `…/freshness.v2/stream/heartbeats/link` and `…/host`, in place of
+    /// the heartbeat of each interface --catalog lists. Needs --catalog,
+    /// and is refused without it (exit 2): a group names its interface by
+    /// its index there. Off unless given: a reader with no catalog, or one
+    /// that reads heartbeats alone, reads a covered interface's members
+    /// stale.
+    #[arg(long = "owner-heartbeat")]
+    pub(crate) owner_heartbeat: bool,
     /// Start beside an instance already running at the address: a second
     /// writer of its keys (P3) and a split-brain on every exclusive
     /// resource (spec §6).
@@ -778,6 +788,8 @@ pub(crate) enum Command {
     /// counted apart from what this tool lagged behind. Ends at `--count`
     /// samples, after `--for` seconds, or on ctrl-c, with a summary. Exit 0
     /// when a sample arrived, 2 when none did: silence is never a verdict.
+    /// A heartbeat's `confirmation` row is no sample: a collection nothing
+    /// was put on exits 2, however often its members were confirmed.
     Watch(WatchArgs),
     /// Subscribe to wire keys and print every sample, decoded where it can be.
     ///

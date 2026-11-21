@@ -20,7 +20,8 @@
 //! the nonconforming: never dropped silently (observer §7.3).
 //! It ends at `--count` samples, after `--for` seconds, or on ctrl-c, and
 //! exits 0 when a sample arrived, a refused one included, 2 when none did:
-//! silence is never a verdict (O5).
+//! silence is never a verdict (O5). A heartbeat's confirmation is no
+//! sample, so a quiet collection exits 2 however often it was confirmed.
 
 use std::time::Instant;
 

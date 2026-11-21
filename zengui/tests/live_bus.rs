@@ -626,6 +626,7 @@ async fn the_tree_shows_rungs_and_a_budget_badge_on_real_traffic() {
         elect: None,
         run_store: None,
         catalog: None,
+        owner_heartbeat: false,
     };
     let plan = zenkey_fleet::gen_plan(&spec).expect("the probe plans");
     let (up_tx, up_rx) = tokio::sync::oneshot::channel();

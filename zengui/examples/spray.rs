@@ -511,6 +511,7 @@ impl Spray {
                 elect: None,
                 run_store: None,
                 catalog: None,
+                owner_heartbeat: false,
             };
             zenkey_fleet::gen_plan(&spec).map_err(|e| anyhow::anyhow!("{}: {e}", o.address))?;
             specs.push(spec);
