@@ -86,11 +86,19 @@ simulated radio a re-read is 159 bytes in SDUs, where `desired.v1`'s is
   not, and 29 merges.
 - `conformance/envelope/carries.json` gains 9 reads: a held stamp on a
   put's key reads as a snapshot's envelope.
-- `scenarios/state.md` §16 is new, written ahead of the reference.
+- `scenarios/state.md` §16 is new. The reference runs it on real
+  sessions: steps 1 to 8 against its own owner, and steps 9 and 10
+  against a played one.
 - The three files' cases were computed twice, by two readings of this
   text that shared no code. The two agreed on every case. The second
   also merges the 41 cases of `seed/snapshot.json` that give
   `collections`, to their expectations.
+- The reference then ran every case as written, and none was changed:
+  88 in `envelope/held.json`, 41 in `seed/held.json`, and the 46 reads
+  of `carries.json`.
+- An owner built before this version answers the reference's conditional
+  read whole, and the reference accepts it. That was run against a black
+  box built from 0.109.
 
 **Deliberately not changed.**
 - **The envelope's parse.** A held stamp on a put's payload still reads

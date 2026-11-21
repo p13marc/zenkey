@@ -652,6 +652,10 @@ consumer reads its plan.
 10. The consumer counts each held stamp undecodable, refused as `held`.
     It merges nothing for either, and holds v2 at (R, 9).
 
-*Written ahead of the reference. `conformance/envelope/held.json` states
-the held stamp's bytes and the owner's answer as a pure fixture, and
+*The reference runs steps 1 to 8 as
+`s16_a_conditional_read_is_answered_by_the_held_stamp_alone`, against its
+own owner, and steps 9 and 10 as
+`s16_a_consumer_reads_a_held_stamp_as_unchanged_only_in_answer`, both in
+`zenkey/tests/state.rs`. `conformance/envelope/held.json` states the held
+stamp's bytes and the owner's answer as a pure fixture, and
 `conformance/seed/held.json` the reader's merge.*
