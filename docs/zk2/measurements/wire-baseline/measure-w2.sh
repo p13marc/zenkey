@@ -28,6 +28,21 @@
 # `link`, so a face would carry none of health, alarms or config; the routers
 # run link.v2's transport (the medium's) as peers, as phase 2's did. With
 # RUN_FILE=1 the device and gen take 16-bit runs from run files (core §4.3).
+#
+# OWNER_HEARTBEAT=1 (#1110's H4, with ZK2C=1; off by default, so the recorded
+# runs reproduce): the device sends owner heartbeats (freshness.v2 §2.4), one
+# put per class of exposure in place of each listed interface's heartbeat.
+# - The catalog, LOGS/catalog.json, is `zk2 catalog new` over the device's
+#   three revisions that have a collection: health.v1, alarms.v1, rfcfg.v1
+#   (BIN/zk2, zenkey-model's).
+# - Every far reader gets `--catalog`. A reader's scope then also holds the
+#   class key of each collection in hand, here
+#   `…/freshness.v2/stream/heartbeats/host`. Without it the reader declares
+#   no class key, nothing asks router A for one, and no owner heartbeat
+#   crosses.
+# WATCH=1 (the honesty run of the same): w2-drive.py's --watch, the host's
+# `zenctl watch` on health.v1's status, with the catalog and with none, and
+# `zenctl health --across-face crosses` before and inside the cut.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -58,6 +73,13 @@ REPO=${REPO:-$(cd "$HERE/../../../.." && pwd)}
 CONTRACTS=${CONTRACTS:-$HERE/contracts}
 DEV=h-3fa9c2d41b7e/rf0
 ZK2C_ARGS=()
+CATALOG=()
+if [[ ${ZK2C:-0} == 1 && ${OWNER_HEARTBEAT:-0} == 1 ]]; then
+  "$BIN/zk2" catalog new "$REPO/spec/profiles/health/health.v1.toml" \
+    "$REPO/spec/profiles/alarms/alarms.v1.toml" \
+    "$REPO/spec/profiles/config/conformance/contracts/rfcfg.v1.toml" >"$LOGS/catalog.json"
+  CATALOG=(--catalog "$LOGS/catalog.json")
+fi
 if [[ ${ZK2C:-0} == 1 ]]; then
   # name, contract, selector (empty: the interface's whole scope)
   for spec in "frames|$CONTRACTS/gendev.v1.toml|zk2/$DEV/gendev.v1/stream/frames/sample" \
@@ -68,11 +90,13 @@ if [[ ${ZK2C:-0} == 1 ]]; then
               "worker|$REPO/zenkey/tests/contracts/worker.v1.toml|"; do
     IFS='|' read -r name contract sel <<<"$spec"
     $W start "far-$name" bash -c "$BIN/zenctl echo $sel --namespace '' --across-face $DEV \
-      --contracts $contract --no-decode --format ndjson -c tcp/127.0.0.1:$((BASE + 2)) \
+      --contracts $contract ${CATALOG[*]} --no-decode --format ndjson -c tcp/127.0.0.1:$((BASE + 2)) \
       | python3 -I -u $HERE/stamp.py $LOGS/far.jsonl"
   done
   ZK2C_ARGS=(--zk2c --rfcfg "$REPO/spec/profiles/config/conformance/contracts/rfcfg.v1.toml")
   [[ ${RUN_FILE:-0} == 1 ]] && ZK2C_ARGS+=(--run-files)
+  [[ ${OWNER_HEARTBEAT:-0} == 1 ]] && ZK2C_ARGS+=("${CATALOG[@]}" --owner-heartbeat)
+  [[ ${WATCH:-0} == 1 ]] && ZK2C_ARGS+=(--watch --health-contract "$REPO/spec/profiles/health/health.v1.toml")
 else
   $W start far bash -c "$BIN/zenctl echo 'zk2/**' --no-decode --format ndjson -c tcp/127.0.0.1:$((BASE + 2)) \
     | python3 -I -u $HERE/stamp.py $LOGS/far.jsonl"
