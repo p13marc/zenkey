@@ -5,6 +5,61 @@ entry naming its text. Each entry records what changed, what deliberately
 did not, and why. A breaking change is a new major, a new file, never an
 entry here ([`../README.md`](../README.md)).
 
+## `v2.md` 0.10 — 2026-11-21: editorial: §3 says which cause an owner that sends heartbeats alone lists, and the reference runs scenarios §8, no rule changed (#1110, #609)
+
+Text 0.9 let an owner send owner heartbeats, and no owner did.
+`scenarios-v2.md` §8 was written before one existed. The reference's
+owner sends them now, behind an option, and runs §8 as written. zk2py
+round 113 read 0.9 cold: its F-547 found `[Sc: §8]` cited and the
+scenario not merged, and its F-549 asked which cause the resource takes
+in the descriptor of an owner that sends heartbeats alone.
+
+**Answered: zk2py round 113's F-549, an ambiguity.**
+- **§3** said such an owner "does not expose" `heartbeats/{class}`. It
+  now says the owner lists it `unavailable`, and with which cause.
+  - `config` where the deployment's configuration leaves the owner
+    heartbeat out: it is not turned on, or the owner was given no
+    catalog.
+  - `build` where the owner's implementation sends none.
+- **What decides it** is core §3.3's own sentence: each entry gives a
+  cause "saying why the resource is absent here". No rule is new.
+- **An owner whose owner heartbeats cover an interface** exposes the
+  resource. §3 says so.
+- **The reference** listed `build` while it could send none. It lists
+  `config` now, since what leaves the resource out is its option or its
+  catalog.
+
+**Answered: F-547, a gap.** `scenarios-v2.md` §8 is in the text, and
+its intro names the reference's two tests.
+
+**Scenarios §8, run.** Every step and every Expected holds as written.
+Nothing in §8 changed but the intro's sentence that it was not run.
+- **Steps 1 and 2** run on one bus: 34 bytes on a 16-bit run and 19 on
+  the `link` key, no put on any `heartbeat/<iface>` key, one gap lost
+  for every group on its key, and one re-read of `peer/{peer}` after
+  two divergences in a row.
+- **Steps 3 and 4** run R1 with each plan's denies on the sessions the
+  face selects, and its downsampling block. The `host` key's 36 bytes on
+  a 32-bit run are read on the near side there.
+
+**The reference's owner.**
+- **`ServiceConfig::owner_heartbeat`**, off unless the deployment sets
+  it. §2.4's "Readers first" is why: a reader given no catalog declares
+  no owner heartbeat key, and reads a covered interface's members stale.
+- **It needs a catalog.** A service with the option and no catalog does
+  not start, nothing declared.
+- **What it covers:** each interface it implements with a collection,
+  whose revision the catalog lists, up to 15 groups a key. Any other
+  keeps its heartbeat.
+- **A standby's group is left out,** and a put that would hold no group
+  is not sent.
+
+**Deliberately not changed.**
+- **No rule, keyword, fixture or section number.**
+- **§2.4's MAY.** Which interfaces an owner covers stays its choice.
+- **The header** is still written against core 0.108.
+- **Not run:** W2 measured again with an owner heartbeat (#1110's H4).
+
 ## `v2.md` 0.9 — 2026-11-21: the owner heartbeat, one put per owner and class in place of one per interface (#1110)
 
 Text 0.8 sends one heartbeat per interface. W2's device has three. On

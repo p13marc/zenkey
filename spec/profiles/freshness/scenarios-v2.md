@@ -3,10 +3,10 @@
 The rules of [`v2.md`](v2.md) that a fixture cannot check, in the form of
 the core's scenarios ([`../../scenarios/README.md`](../../scenarios/README.md)):
 a setup, steps, and expected observations. The reference runtime runs §1
-to §7 (`zenkey/tests/profile_freshness_v2.rs`, one test per section,
+to §8 (`zenkey/tests/profile_freshness_v2.rs`, one test per section,
 named after it). §2's step 6 has a test of its own,
-`s2_a_candidates_held_put_clears_its_bit`. §8 is not run yet: the
-reference's owner sends no owner heartbeat.
+`s2_a_candidates_held_put_clears_its_bit`. So have §8's steps 3 and 4,
+`s8_an_owner_heartbeat_across_a_face`.
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.4) are v2.md's rules; core

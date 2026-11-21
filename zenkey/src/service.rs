@@ -995,15 +995,65 @@ impl ServiceBuilder {
                 self.implement(crate::heartbeat::implementation())?;
             }
             self.expose(&fv2, crate::heartbeat::HEARTBEAT)?;
-            // Revision 1.1's owner heartbeat key is optional, and this
-            // owner sends heartbeats alone (v2 §3; #1110's H3 sends one).
-            let owner = crate::heartbeat::OWNER_HEARTBEATS;
-            let hb = find(&self.impls, &fv2)?;
-            if !hb.exposed.contains(owner) && !hb.unavailable.contains_key(owner) {
-                self.unavailable(&fv2, owner, Cause::Build, None)?;
-            }
+            // Revision 1.1's owner heartbeat key is optional (v2 §3):
+            // `start` exposes it or lists it unavailable, once every
+            // interface is implemented (`settle_owner_heartbeats`).
         }
         Ok(self)
+    }
+
+    /// `freshness.v2` §2.4's owner heartbeat at step 2 (#1110's H3): which
+    /// interfaces the service's owner heartbeats cover, and with it the
+    /// standard contract's `stream/heartbeats/{class}` in the descriptor.
+    ///
+    /// - With [`ServiceConfig::owner_heartbeat()`] set and no catalog given,
+    ///   the start is refused, nothing declared: a group names its
+    ///   interface by its index in the catalog.
+    /// - Covered: each implemented interface with a collection whose
+    ///   revision the catalog lists, up to 15 groups a key
+    ///   ([`crate::heartbeat::cover`]). The resource is then exposed.
+    /// - Covering none, the option off or the catalog listing none of
+    ///   them, the resource is listed unavailable, cause `config` (core
+    ///   §3.3: the cause says why it is absent here, and it is the
+    ///   deployment's configuration that leaves it out). An application
+    ///   that listed it itself is taken at its word, and covers none.
+    fn settle_owner_heartbeats(&mut self) -> Result<Vec<(IfaceId, u16)>> {
+        if self.config.owner_heartbeat && self.catalog.is_none() {
+            return Err(Error::NotExposed(
+                "`owner_heartbeat` is set and the service was given no catalog: an owner \
+                 heartbeat names each interface it covers by its index in the deployment \
+                 catalog (freshness.v2 §2.4, core §8.6). Give the service its catalog, or \
+                 leave the option off"
+                    .to_owned(),
+            ));
+        }
+        let fv2 = crate::heartbeat::iface();
+        let owner = crate::heartbeat::OWNER_HEARTBEATS;
+        let Ok(hb) = find(&self.impls, &fv2) else {
+            return Ok(Vec::new());
+        };
+        let listed = hb.unavailable.contains_key(owner);
+        let covered = match &self.catalog {
+            Some(catalog) if self.config.owner_heartbeat && !listed => crate::heartbeat::cover(
+                self.impls
+                    .iter()
+                    .filter_map(|s| {
+                        let layout = s.heartbeat.as_ref()?;
+                        let index = catalog.index_of(s.imp.iface(), s.imp.fingerprint())?;
+                        Some((index, s.imp.iface().clone(), layout.classes()))
+                    })
+                    .collect(),
+            ),
+            _ => Vec::new(),
+        };
+        let hb = find_mut(&mut self.impls, &fv2)?;
+        if !covered.is_empty() {
+            hb.exposed.insert(owner.to_owned());
+        } else if !listed && !hb.exposed.contains(owner) {
+            hb.unavailable
+                .insert(owner.to_owned(), (Cause::Config, None));
+        }
+        Ok(covered)
     }
 
     /// Whether this service implements `iface` already.
@@ -1305,6 +1355,9 @@ impl ServiceBuilder {
         if let Some(why) = self.refused.first() {
             return Err(Error::NotExposed(why.clone()));
         }
+        // freshness.v2 §2.4 (#1110): the interfaces its owner heartbeats
+        // cover, refused without a catalog, and the resource's row.
+        let owner_cover = self.settle_owner_heartbeats()?;
         // Exposure.
         check_exposure(&self.impls, &self.config)?;
         // timing.v1 §2.6 (#908): an owner of a stream declaring a lifespan
@@ -1450,6 +1503,7 @@ impl ServiceBuilder {
             store: self.store,
             closed: self.closed,
             catalog: self.catalog,
+            owner_cover,
         };
         // 1. (continued) The state queryables, with the other resources.
         for iface in &self.state_ifaces {
@@ -1757,6 +1811,10 @@ pub struct Service {
     closed: tokio::sync::watch::Sender<bool>,
     /// The deployment catalog it writes under (core §8.6).
     catalog: Option<Arc<Catalog>>,
+    /// The interfaces its owner heartbeats cover, each with its index in
+    /// the catalog, in ascending order of the indices (`freshness.v2`
+    /// §2.4, #1110): none unless [`ServiceConfig::owner_heartbeat()`].
+    owner_cover: Vec<(IfaceId, u16)>,
 }
 
 impl Service {
@@ -2479,10 +2537,23 @@ impl Service {
         Ok(())
     }
 
-    /// Starts one heartbeat task per covered interface (`freshness.v2`
-    /// §2.4): its writer declared through the interface's gate, so a
-    /// standby sends none; its map bits the collections this instance
-    /// exposes.
+    /// The interfaces its owner heartbeats cover (`freshness.v2` §2.4,
+    /// #1110), each with its index in the catalog the service was given,
+    /// in ascending order of the indices: one group each on the owner
+    /// heartbeat key of every class its collections have, and no heartbeat
+    /// of its own. Empty unless [`ServiceConfig::owner_heartbeat()`] is set.
+    #[must_use]
+    pub fn owner_heartbeat_cover(&self) -> &[(IfaceId, u16)] {
+        &self.owner_cover
+    }
+
+    /// Starts the heartbeat tasks (`freshness.v2` §2.4). One per interface
+    /// with a collection that no owner heartbeat covers: its writer
+    /// declared through the interface's gate, so a standby sends none; its
+    /// map bits the collections this instance exposes. And one per class
+    /// of the covered interfaces' collections (#1110's H3): its groups the
+    /// covered interfaces with a collection of the class, each one's map
+    /// bits the exposed collections of that class alone.
     async fn start_heartbeats(&mut self) -> Result<()> {
         let fv2 = crate::heartbeat::iface();
         let Ok(hb) = find(&self.impls, &fv2) else {
@@ -2493,14 +2564,14 @@ impl Service {
         // (v2 §2.4, #1080).
         let epoch = self.deployment_epoch();
         let mut tasks = Vec::new();
+        // Each covered interface, as a group: its index, its layout, the
+        // collections this instance exposes, and its gate.
+        let mut covered = Vec::new();
         for s in &self.impls {
             let Some(layout) = &s.heartbeat else {
                 continue;
             };
-            let Some(period) = crate::heartbeat::period(layout) else {
-                continue;
-            };
-            let exposed = layout
+            let exposed: Vec<bool> = layout
                 .collections
                 .iter()
                 .map(|c| {
@@ -2512,6 +2583,15 @@ impl Service {
                         })
                 })
                 .collect();
+            // One form per interface (v2 §2.4): a covered interface sends
+            // no heartbeat of its own.
+            if let Some((_, index)) = self.owner_cover.iter().find(|(i, _)| i == s.imp.iface()) {
+                covered.push((*index, Arc::clone(layout), exposed, s.gate.clone()));
+                continue;
+            }
+            let Some(period) = crate::heartbeat::period(layout) else {
+                continue;
+            };
             let values: Bindings = [(
                 crate::heartbeat::PARAM.to_owned(),
                 vec![s.imp.iface().to_string()],
@@ -2537,6 +2617,65 @@ impl Service {
                 writer,
                 layout: Arc::clone(layout),
                 exposed,
+                store: Arc::clone(&self.store),
+                minter: Arc::clone(&self.minter),
+                period,
+                epoch,
+            };
+            tasks.push(tokio::spawn(beat.run(self.closed.subscribe())));
+        }
+        covered.sort_by_key(|(index, ..)| *index);
+        let owner = hb.imp.resource(crate::heartbeat::OWNER_HEARTBEATS)?.clone();
+        for class in zenkey_model::heartbeat::Class::ALL {
+            let groups: Vec<crate::heartbeat::Covered> = covered
+                .iter()
+                .filter(|(_, layout, ..)| layout.collections.iter().any(|c| c.class == class))
+                .map(|(index, layout, exposed, gate)| crate::heartbeat::Covered {
+                    index: *index,
+                    layout: Arc::clone(layout),
+                    // Only its class (v2 §2.4): no map bit of a collection
+                    // of the other class on this key.
+                    exposed: layout
+                        .collections
+                        .iter()
+                        .zip(exposed)
+                        .map(|(c, on)| *on && c.class == class)
+                        .collect(),
+                    gate: gate.clone(),
+                })
+                .collect();
+            let Some(period) =
+                crate::heartbeat::owner_period(groups.iter().map(|g| &*g.layout), class)
+            else {
+                continue;
+            };
+            let values: Bindings = [(
+                crate::heartbeat::OWNER_PARAM.to_owned(),
+                vec![class.as_str().to_owned()],
+            )]
+            .into();
+            let key = resource_key(
+                &self.addr,
+                &self.impls,
+                &fv2,
+                crate::heartbeat::OWNER_HEARTBEATS,
+                &values,
+            )?;
+            // freshness.v2 is no governed interface: the key's writer is
+            // declared at once, and each group asks its interface's gate.
+            let writer = Writer::declare_gated(
+                &self.session,
+                &self.minter,
+                key.into_keyexpr(),
+                &owner,
+                &values,
+                None,
+            )
+            .await?;
+            let beat = crate::heartbeat::OwnerBeat {
+                writer,
+                class,
+                groups,
                 store: Arc::clone(&self.store),
                 minter: Arc::clone(&self.minter),
                 period,
