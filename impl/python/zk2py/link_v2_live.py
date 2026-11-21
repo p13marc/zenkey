@@ -1,6 +1,6 @@
 """``link.v2``'s ``scenarios-v2.md`` §1, §4 and §5, live, on in-process
 zenoh-python routers (zenoh 1.10.1; #609, rounds 110 and 111): ``python -m
-zk2py.link_v2_live [--only s1|s1ref|s4|s4ref|s5]``. §3 is
+zk2py.link_v2_live [--only s1|s1ref|s4|s4ref|s5|null]``. §3 is
 :mod:`zk2py.stamp_live`'s.
 
 - **s1**, "The router runs the block" (§2.16, §2.18, §2.19; round 111, the
@@ -908,11 +908,162 @@ def _s4_ref(work: str) -> list[Result]:
     return out
 
 
+#: What link.v2 0.18's §2.19 reads of a ``null`` at each of the eight keys,
+#: by the policy's key: ``routing/interests/timeout`` is left out, and each
+#: other is no value zenoh runs.
+NULL_KEYS = {"transport/link/tx/lease": "lease_ms", "transport/link/tx/keep_alive": "keep_alive",
+             "transport/link/tx/sequence_number_resolution": "sequence",
+             "transport/link/tx/batch_size": "batch_bytes",
+             "transport/link/tx/queue/congestion_control/block/wait_before_close": "wait_before_close_ms",
+             "transport/unicast/open_timeout": "open_timeout_ms",
+             "transport/unicast/accept_timeout": "accept_timeout_ms",
+             "routing/interests/timeout": "interests_timeout_ms"}
+
+
+def _nulled(conf: dict[str, Any], path: str) -> dict[str, Any]:
+    """``conf`` with the value at ``path`` a ``null``."""
+    out = json.loads(json.dumps(conf))
+    node = out
+    parts = path.split("/")
+    for part in parts[:-1]:
+        node = node.setdefault(part, {})
+    node[parts[-1]] = None
+    return out
+
+
+def _zenctl_transport(work: str, name: str, policy_text: str, conf: dict[str, Any]) -> tuple[int, list[str], str]:
+    """``zenctl check face`` over a router's configuration file: its exit,
+    its transport rows as ``<kind> <zenoh's key>`` (its stdout's JSON rows
+    whose kind is one of §2.19's codes), and its stderr's first line."""
+    files = {}
+    for what, text in (("policy.face.toml", policy_text), ("router.json5", json.dumps(conf, indent=1))):
+        files[what] = os.path.join(work, f"{name}-{what}")
+        with open(files[what], "w") as f:
+            f.write(text)
+    p = subprocess.run([str(BLACKBOX / "zenctl"), "check", "face", "--face-policy", files["policy.face.toml"],
+                        "--enrollment", str(ENROLLMENT), "--contracts", str(RADIO), files["router.json5"]],
+                       capture_output=True, text=True, timeout=120)
+    rows = []
+    for line in p.stdout.splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("kind") in ("transport_differs", "wait_under_lease",
+                                                         "face_timestamping", "peer_differs"):
+            rows.append(f"{row['kind']} {row.get('id')}")
+    return p.returncode, sorted(rows), (p.stderr.strip().splitlines() or [""])[0][:200]
+
+
+def run_null() -> list[Result]:
+    with workdir("zk2py-null-") as work:
+        try:
+            return _null(work)
+        except Exception as e:  # noqa: BLE001 - a run that could not finish is a failure
+            return [("a null among the eight keys: the run finished", False, f"{type(e).__name__}: {e}")]
+
+
+def _null(work: str) -> list[Result]:
+    """link.v2 0.18 §2.19, "A null reads as zenoh 1.10.1 reads it" (round
+    112): N's configuration as zk2py's generator writes it for the
+    Conventions' policy, with a ``null`` at each of the eight keys in turn.
+    For each: whether zenoh-python 1.10.1 loads the file, what
+    :func:`zk2py.link_v2.check_transport` reports, and what the Rust
+    ``zenctl check face`` reports (a black box), under both bindings: it
+    reads a ``zenoh-1.10.1`` router's file "through zenoh's own loader", and
+    a ``zm-1.10.2-r1`` one's "as data in zenoh's shapes" (its help). Then
+    the same ``null`` ``routing/interests/timeout`` under a policy at 40,000
+    ms, a string lease as the control of "as a string is", and a router
+    opened from the file with the ``null``, on port 0."""
+    import zenoh
+
+    from . import link_v2
+
+    out: list[Result] = []
+    stock = conventions_policy()
+    fork = stock.replace('"zenoh-1.10.1"', '"zm-1.10.2-r1"')
+    if fork == stock:
+        return [("the Conventions' policy names the binding zenoh-1.10.1", False, stock[:120])]
+    face = f"unixsock-stream/{os.path.join(work, 'face.sock')}"
+    conf, _ = near_config(stock, work, "tcp/127.0.0.1:0", face)
+    conf_fork, _ = near_config(fork, work, "tcp/127.0.0.1:0", face)
+    for path, key in NULL_KEYS.items():
+        nulled = _nulled(conf, path)
+        try:
+            c = zenoh.Config.from_json5(json.dumps(nulled, indent=1))
+            loaded, held = True, c.get_json(path)
+        except Exception as e:  # noqa: BLE001 - zenoh's refusal, whatever its type
+            loaded, held = False, str(e).strip().splitlines()[0][:120]
+        left_out = key == link_v2.NULL_LEFT_OUT
+        out.append((f"a null {path}: zenoh-python 1.10.1 {'loads the file' if left_out else 'refuses the file'}",
+                    loaded == left_out, f"loaded {loaded}: {held}"))
+        mine = [f["code"] + " " + f["at"] for f in link_v2.check_transport(
+            stock, link_v2.read_config(nulled))["findings"]]
+        want = [] if left_out else [f"transport_differs transport.{key}"]
+        out.append((f"a null {path}: zk2py's check reports {want or 'no finding'} (§2.19)", mine == want, f"{mine}"))
+        # The fork's binding: the reference reads the file as data, so it can
+        # see the null. Its row names zenoh's key, zk2py's the policy's.
+        code, rows, err = _zenctl_transport(work, f"fork-{key}", fork, _nulled(conf_fork, path))
+        out.append((f"a null {path}, binding zm-1.10.2-r1: zenctl check face reports "
+                    f"{'no transport finding' if left_out else 'transport_differs at the key, and no wait_under_lease'}"
+                    ", as zk2py's check does", rows == ([] if left_out else [f"transport_differs {path}"]),
+                    f"exit {code}; {rows}"))
+        # zenoh-1.10.1: the reference loads the file through zenoh, which
+        # refuses a null at each of the seven. Observed, not a rule: exit 2.
+        code, rows, err = _zenctl_transport(work, f"stock-{key}", stock, nulled)
+        if left_out:
+            out.append((f"a null {path}, binding zenoh-1.10.1: zenctl check face reports no transport finding",
+                        rows == [] and code != 2, f"exit {code}; {rows}"))
+        else:
+            out.append((f"a null {path}, binding zenoh-1.10.1: zenctl check face reports transport_differs, or "
+                        "names zenoh's refusal of the file and asks nothing (exit 2)",
+                        rows == [f"transport_differs {path}"] or (code == 2 and "zenoh refused the config" in err),
+                        f"exit {code}; {rows}; {err}"))
+    # "as a string is": the control, a string lease under each binding.
+    stringed = json.loads(json.dumps(conf))
+    stringed["transport"]["link"]["tx"]["lease"] = "2000"
+    code, rows, err = _zenctl_transport(work, "stock-string", stock, stringed)
+    stringed_fork = json.loads(json.dumps(conf_fork))
+    stringed_fork["transport"]["link"]["tx"]["lease"] = "2000"
+    code_f, rows_f, _ = _zenctl_transport(work, "fork-string", fork, stringed_fork)
+    out.append(("the control, a string lease: zenctl check face answers it as it answers a null lease under each "
+                "binding", (rows == ["transport_differs transport/link/tx/lease"] or code == 2)
+                and rows_f == ["transport_differs transport/link/tx/lease"],
+                f"zenoh-1.10.1: exit {code}; {rows}; {err}; zm-1.10.2-r1: exit {code_f}; {rows_f}"))
+    # Case 25's shape: the same null under a policy whose interests timeout is 40,000 ms.
+    at_40 = stock.replace("[transport]\n", "[transport]\ninterests_timeout_ms = 40000\n", 1)
+    pol40, f40 = link_v2.parse_policy(at_40)
+    if pol40 is None or at_40 == stock:
+        return out + [("the Conventions' policy at an interests timeout of 40,000 ms parses", False, f"{f40}")]
+    conf40, _ = near_config(at_40, work, "tcp/127.0.0.1:0", face)
+    nulled40 = _nulled(conf40, "routing/interests/timeout")
+    mine40 = [f["code"] + " " + f["at"] for f in link_v2.check_transport(at_40, link_v2.read_config(nulled40))["findings"]]
+    code, rows, err = _zenctl_transport(work, "null-40", at_40, nulled40)
+    out.append(("a null routing/interests/timeout under a policy at 40,000 ms: left out, at 10,000, so "
+                "transport_differs at the interests timeout, by zk2py's check and by zenctl check face",
+                mine40 == ["transport_differs transport.interests_timeout_ms"]
+                and rows == ["transport_differs routing/interests/timeout"], f"zk2py {mine40}; zenctl exit {code}, {rows}"))
+    code, rows, err = _zenctl_transport(work, "stated-40", at_40, conf40)
+    out.append(("the control: the same router with the 40,000 ms stated draws no transport finding from zenctl "
+                "check face", rows == [], f"exit {code}, {rows}"))
+    # zenoh runs the file with the null: a router opens from it and closes.
+    try:
+        r = open_router(_nulled(conf, "routing/interests/timeout"))
+        zid = str(r.zid())
+        r.close()
+        out.append(("a router opens from the file with a null routing/interests/timeout (zenoh-python 1.10.1, "
+                    "port 0)", True, f"zid {zid}"))
+    except Exception as e:  # noqa: BLE001
+        out.append(("a router opens from the file with a null routing/interests/timeout", False, str(e)[:200]))
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.link_v2_live", description=__doc__.split("\n")[0])
-    ap.add_argument("--only", action="append", choices=("s1", "s1ref", "s4", "s4ref", "s5"))
+    ap.add_argument("--only", action="append", choices=("s1", "s1ref", "s4", "s4ref", "s5", "null"))
     args = ap.parse_args(argv)
-    runs = {"s1": run_s1, "s1ref": lambda: run_s1(True), "s4": run_s4, "s4ref": run_s4_ref, "s5": run_s5}
+    runs = {"s1": run_s1, "s1ref": lambda: run_s1(True), "s4": run_s4, "s4ref": run_s4_ref, "s5": run_s5,
+            "null": run_null}
     failed = 0
     for name in args.only or list(runs):
         for what, ok, detail in runs[name]():
