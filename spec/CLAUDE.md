@@ -619,8 +619,12 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   reads a tag or a body (`owner.json`'s `forms`, a mutation or a frame;
   the model's gate is `heartbeat::body_of(&Envelope)`, `FormRefusal`, and
   `OwnerHeartbeat::of(&Envelope)` reads through it, `OwnerRefusal::Form`
-  first; the reference's live readers take only `Read::Heartbeat`, as
-  before, and read no body from another form); nothing
+  first; every reader refuses so: the runtime's two heartbeat readers
+  and the alarm feed through `zenkey::inband::admit_heartbeat`
+  (`NoHeartbeat::Form`, counted unread), and the tools' lens, renderer
+  and structural sniff through `model::inband::no_heartbeat`, which shows
+  such a put undecodable, `form`, where it showed a raw record's bytes;
+  a put with no envelope is refused the same way, as the text says); nothing
   in a body tells the two layouts apart, CH's tag only 15 times in 16,
   so the key chooses; a reader of an owner heartbeat holds the catalog
   its owner names or a successor beside its revision (§8.6 lists it

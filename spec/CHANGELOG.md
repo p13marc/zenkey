@@ -129,6 +129,9 @@ ambiguity).**
   Its model names the refusal: `heartbeat::body_of` is the gate of both
   readings, and `OwnerHeartbeat::of` reads an owner heartbeat's put
   through it (`OwnerRefusal::Form`).
+- **The reference's tools did show such a put,** as bytes of the key's
+  raw type. They now show it undecodable, `form`, a put with no envelope
+  too.
 
 **Changed: §7.5, what tells the two layouts apart (F-541, minor).**
 - **Before:** "Nothing in the bytes tells the two apart." That is true

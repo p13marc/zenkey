@@ -583,3 +583,13 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   keep-alive (stream-link framing), for `constrained.rs`'s §9; §8 is a 1.5 s raw queryable against
   `tests/contracts/faced.v1.toml`'s 1 s `timeout_ms`. v1's `zenkey` 0.11.x stays
   on crates.io, from the `v1` branch; no member of `main` links it.
+  Core 0.109 §7.5, "Another form on a heartbeat's key" (review-bot on
+  #1143): `inband::admit_heartbeat(Read)` is the gate of the consumer's
+  heartbeat reader and of its owner heartbeat reader: form 6 alone gives
+  its sample, stamp and tag; an envelope the parse refused keeps its
+  refusal (`NoHeartbeat::Envelope`); any other sample is
+  `NoHeartbeat::Form`, `form`: a mutation, a frame, a put with no
+  envelope, a delete. Both readers count it in `heartbeats_unread`, as
+  they did, before a tag or a body is read and before the owner's
+  catalog is asked for (`tests/owner_heartbeat.rs`'
+  `another_form_on_a_heartbeats_key_is_refused_and_never_read`).
