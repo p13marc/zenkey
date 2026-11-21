@@ -556,7 +556,15 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `modem.v3` 3.4 `face/` events at their rate's worst case against its
   medium's budget beside 3.3's frames' figures (#991,
   `zenoh_modem_events_fit_each_face_budget`, the overhead review's
-  Appendix A model in a `wire` module), and its tcgui and walkthrough plans grant each bound
+  Appendix A model in a `wire` module; since link.v2 0.18 at both ends of
+  the uplink's keep-alives, counted from each face's own lease and
+  cadence by §2.16: the fewest, where every face fits, and the most,
+  where SF12 and SBD are asserted over their budgets by the notes'
+  figures), reads a `null` among the eight keys as zenoh does on both
+  reading paths (`link_v2_check_face_reads_a_null_as_zenoh_does`: a `null`
+  `routing/interests/timeout` not stated, at the binding's default, the
+  comparison naming it; a `null` lease refused by stock zenoh's loader and
+  `transport_differs` read as data), and its tcgui and walkthrough plans grant each bound
   `freshness.v2` heartbeat since #978 F5 moved those contracts (bless with
   `ACL_BLESS=1`). Since F5 no tcgui state is on core §4.3's table: a test
   that needs row 1 reads `zenkey/tests/contracts/beacon.v1.toml` or runs
