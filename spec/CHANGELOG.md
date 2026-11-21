@@ -54,8 +54,8 @@ ambiguity).**
 - **Why the comma.** A member taken out of an object takes one comma
   with it, since `format`, `service` and `instance` are always there.
   The rest is then a document's size, and needs no count of its own for
-  braces and commas. The reference counts so already
-  (`Descriptor::size`).
+  braces and commas. The reference counted so already. It now counts
+  the bytes it serves (`Descriptor::size_of`).
 - **Two counts of one node, explained.** 0.107's entry says 1,184 B, and
   round 111 measured 1,167 B. Both are right, of two runs of `zenctl
   gen` over the same three files.
@@ -125,8 +125,10 @@ ambiguity).**
   says the reverse of an owner heartbeat on a heartbeat's key.
 - **The reference reads no body from such a put.** Its readers take a
   put on a heartbeat's key only where it reads as form 6
-  (`zenkey::inband::Read::Heartbeat`), and count any other unread. It
-  gives that refusal no token yet, which is the code half's.
+  (`zenkey::inband::Read::Heartbeat`), and count any other unread.
+  Its model names the refusal: `heartbeat::body_of` is the gate of both
+  readings, and `OwnerHeartbeat::of` reads an owner heartbeat's put
+  through it (`OwnerRefusal::Form`).
 
 **Changed: §7.5, what tells the two layouts apart (F-541, minor).**
 - **Before:** "Nothing in the bytes tells the two apart." That is true
@@ -195,10 +197,10 @@ minor, and F-540).**
   round 112, which read §7.5 cold, then read the 14 new cases, and the
   two agree on each. Each group's expectation in `beside` is the one
   its `groups` case gives it alone. Never blessed.
-- **The reference's runner reads neither list yet**
-  (`heartbeat_owner_vectors`). By its code it reads each group from its
-  own bits (`Group::entry`, `Group::read`), so `beside` holds as
-  written. `forms` waits for the token above. Both are the code half's.
+- **The reference's runner reads both lists as written**
+  (`heartbeat_owner_vectors`), and all 14 cases pass. It reads each
+  group of `beside` from its own bits (`Group::entry`, `Group::read`).
+  It runs each `forms` case on both keys, through the gate above.
 
 **The evidence.**
 - **`descriptors/ok-over-1kb`** is new: zenoh-modem's node as `zenctl

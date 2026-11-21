@@ -35,12 +35,12 @@ that core 0.100 removed.
   description reads "as a tool's merge leaves them, one a key", and its
   case 13's note names the merge where it named `Latest`'s later reply.
   No case's reading and no expectation moved.
-- **The reference's tool does not merge yet.** `zenctl desired` of
-  fc16a564 reads every reply, so two differing reports on one key
-  answer `report_invalid`, `two_differ`, in each shape round 112 ran.
-  Its `reports_get` is to merge first, as its read of the author's
-  version does. Its target is unchanged: a report is a put of its own
-  state, under its run and seq.
+- **The reference's tool did not merge.** `zenctl desired` of fc16a564
+  read every reply, so two differing reports on one key answered
+  `report_invalid`, `two_differ`, in each shape round 112 ran. Its
+  `reports_get` now merges first, as its read of the author's version
+  does, and skips a delete after the merge. Its target is unchanged: a
+  report is a put of its own state, under its run and seq.
 - **Not added:** a `slices.json` case that gives a tool two replies on
   one key. The fixture states no stamp, and the merge is not this
   profile's to pin.
